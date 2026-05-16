@@ -44,6 +44,15 @@ DEFAULT_CONFIG = {
 
 _START_TIME = time.time()
 
+# ── Security Constants ─────────────────────────────────────
+
+MAX_BODY_SIZE = 10 * 1024 * 1024  # 10 MB — reject bodies larger than this
+RATE_LIMIT_WINDOW = 60  # seconds
+RATE_LIMIT_MAX_REQUESTS = 1000  # per window per IP
+
+# Simple in-memory rate limiter: {ip: [(timestamp, ...)]}
+_rate_limit_store: dict[str, list[float]] = {}
+
 
 def load_config(config_path: Optional[str] = None) -> dict:
     """Load configuration from file or defaults."""
@@ -164,11 +173,33 @@ class OhmHandler(BaseHTTPRequestHandler):
         self._response_code = code
         super().send_response(code, message)
 
+    def _check_rate_limit(self) -> bool:
+        """Check if the requesting IP is within rate limits. Returns True if allowed."""
+        client_ip = self.client_address[0]
+        now = time.time()
+        if client_ip not in _rate_limit_store:
+            _rate_limit_store[client_ip] = [now]
+            return True
+
+        # Prune old entries
+        window_start = now - RATE_LIMIT_WINDOW
+        _rate_limit_store[client_ip] = [
+            ts for ts in _rate_limit_store[client_ip] if ts > window_start
+        ]
+
+        if len(_rate_limit_store[client_ip]) >= RATE_LIMIT_MAX_REQUESTS:
+            return False
+
+        _rate_limit_store[client_ip].append(now)
+        return True
+
     def _read_body(self):
-        """Read and parse JSON request body."""
+        """Read and parse JSON request body. Enforces size limit."""
         length = int(self.headers.get("Content-Length", 0))
         if length == 0:
             return {}
+        if length > MAX_BODY_SIZE:
+            raise ValidationError(f"Request body too large: {length} bytes (max {MAX_BODY_SIZE})")
         body = self.rfile.read(length)
         return json.loads(body)
 
@@ -177,6 +208,13 @@ class OhmHandler(BaseHTTPRequestHandler):
         self._correlation_id = str(uuid.uuid4())
         start = time.time()
         try:
+            if not self._check_rate_limit():
+                self._json_response(429, {
+                    "error": "rate_limited",
+                    "message": "Too many requests. Try again later.",
+                    "correlation_id": self._correlation_id,
+                })
+                return
             self._do_GET()
         except OHMError as e:
             self._error_response(e)
@@ -194,6 +232,13 @@ class OhmHandler(BaseHTTPRequestHandler):
         self._correlation_id = str(uuid.uuid4())
         start = time.time()
         try:
+            if not self._check_rate_limit():
+                self._json_response(429, {
+                    "error": "rate_limited",
+                    "message": "Too many requests. Try again later.",
+                    "correlation_id": self._correlation_id,
+                })
+                return
             self._do_POST()
         except OHMError as e:
             self._error_response(e)
@@ -240,6 +285,10 @@ class OhmHandler(BaseHTTPRequestHandler):
             return
 
         # Auth for all other GET endpoints
+        # Fail-closed design:
+        #   - --no-auth: all requests allowed (dev mode)
+        #   - tokens configured: all requests require valid Bearer token
+        #   - no tokens, no --no-auth: GET allowed (transition mode for fresh installs)
         agent = self._authenticate()
         if agent is None:
             if self.no_auth or not self.tokens:
