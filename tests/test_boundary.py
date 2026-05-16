@@ -172,19 +172,22 @@ class TestMutationOperations:
     """Tests for create_node, create_edge, create_challenge, create_support."""
 
     def test_create_node(self, test_db):
-        """create_node inserts a node and returns its ID."""
+        """create_node inserts a node and returns its full record."""
         from ohm.queries import create_node
 
-        node_id = create_node(test_db, label="Test Node", created_by="agent_x")
-        assert node_id.startswith("test_node_")
+        result = create_node(test_db, label="Test Node", created_by="agent_x")
+        assert isinstance(result, dict)
+        assert result["label"] == "Test Node"
+        assert result["created_by"] == "agent_x"
+        assert result["id"].startswith("test_node_")
 
         # Verify it exists
-        result = test_db.execute(
+        node_result = test_db.execute(
             "SELECT label, created_by FROM ohm_nodes WHERE id = ?",
-            [node_id],
+            [result["id"]],
         ).fetchone()
-        assert result[0] == "Test Node"
-        assert result[1] == "agent_x"
+        assert node_result[0] == "Test Node"
+        assert node_result[1] == "agent_x"
 
     def test_create_node_invalid_type(self, test_db):
         """create_node rejects invalid node types."""
@@ -194,28 +197,22 @@ class TestMutationOperations:
             create_node(test_db, label="Bad", node_type="invalid_type", created_by="agent_x")
 
     def test_create_edge(self, test_db):
-        """create_edge inserts an edge with validation."""
+        """create_edge inserts an edge and returns its full record."""
         from ohm.queries import create_edge, create_node
 
         a = create_node(test_db, label="A", created_by="agent_x")
         b = create_node(test_db, label="B", created_by="agent_x")
 
-        edge_id = create_edge(
-            test_db, from_node=a, to_node=b, layer="L3",
+        result = create_edge(
+            test_db, from_node=a["id"], to_node=b["id"], layer="L3",
             edge_type="CAUSES", created_by="agent_x", confidence=0.9,
         )
-        assert edge_id  # non-empty UUID
-
-        # Verify
-        result = test_db.execute(
-            "SELECT from_node, to_node, layer, edge_type, confidence FROM ohm_edges WHERE id = ?",
-            [edge_id],
-        ).fetchone()
-        assert result[0] == a
-        assert result[1] == b
-        assert result[2] == "L3"
-        assert result[3] == "CAUSES"
-        assert result[4] == pytest.approx(0.9)
+        assert isinstance(result, dict)
+        assert result["from_node"] == a["id"]
+        assert result["to_node"] == b["id"]
+        assert result["layer"] == "L3"
+        assert result["edge_type"] == "CAUSES"
+        assert result["confidence"] == pytest.approx(0.9)
 
     def test_create_edge_invalid_type_for_layer(self, test_db):
         """create_edge rejects edge types not valid for the layer."""
@@ -231,28 +228,21 @@ class TestMutationOperations:
             )
 
     def test_create_challenge(self, test_db, sample_graph_small):
-        """create_challenge creates a CHALLENGED_BY edge."""
+        """create_challenge creates a CHALLENGED_BY edge and returns its full record."""
         from ohm.queries import create_challenge
 
         edge_ab = sample_graph_small["edges"]["ab"]
-        challenge_id = create_challenge(
+        result = create_challenge(
             test_db, edge_id=edge_ab, reason="weak evidence",
             created_by="critic", confidence=0.3,
         )
-        assert challenge_id
-
-        # Verify
-        result = test_db.execute(
-            "SELECT edge_type, challenge_of, challenge_type, condition, created_by, confidence "
-            "FROM ohm_edges WHERE id = ?",
-            [challenge_id],
-        ).fetchone()
-        assert result[0] == "CHALLENGED_BY"
-        assert result[1] == edge_ab
-        assert result[2] == "CHALLENGED_BY"
-        assert result[3] == "weak evidence"
-        assert result[4] == "critic"
-        assert result[5] == pytest.approx(0.3)
+        assert isinstance(result, dict)
+        assert result["edge_type"] == "CHALLENGED_BY"
+        assert result["challenge_of"] == edge_ab
+        assert result["challenge_type"] == "CHALLENGED_BY"
+        assert result["condition"] == "weak evidence"
+        assert result["created_by"] == "critic"
+        assert result["confidence"] == pytest.approx(0.3)
 
     def test_create_challenge_on_l2_raises(self, test_db, sample_graph_small):
         """Cannot challenge L2 edges."""

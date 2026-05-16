@@ -456,8 +456,8 @@ def create_node(
     visibility: str = "team",
     provenance: str | None = None,
     confidence: float = 1.0,
-) -> str:
-    """Create a new node and return its ID."""
+) -> dict[str, Any]:
+    """Create a new node and return its full record."""
     from ohm.schema import generate_node_id, validate_node_type
     from ohm.validation import validate_confidence
 
@@ -474,7 +474,10 @@ def create_node(
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
         [node_id, label, node_type, content, created_by, visibility, provenance, confidence],
     )
-    return node_id
+    # Return full node record
+    return _rows_to_dicts(
+        conn.execute("SELECT * FROM ohm_nodes WHERE id = ?", [node_id])
+    )[0]
 
 
 def create_edge(
@@ -488,8 +491,8 @@ def create_edge(
     confidence: float = 0.7,
     condition: str | None = None,
     provenance: str | None = None,
-) -> str:
-    """Create a new edge and return its ID. Validates layer/type compatibility."""
+) -> dict[str, Any]:
+    """Create a new edge and return its full record. Validates layer/type compatibility."""
     import uuid
 
     from ohm.schema import validate_edge_type
@@ -508,7 +511,10 @@ def create_edge(
         [edge_id, from_node, to_node, layer, edge_type, created_by,
          confidence, condition, provenance],
     )
-    return edge_id
+    # Return full edge record
+    return _rows_to_dicts(
+        conn.execute("SELECT * FROM ohm_edges WHERE id = ?", [edge_id])
+    )[0]
 
 
 def create_challenge(
@@ -548,7 +554,10 @@ def create_challenge(
         [challenge_id, target[1], target[2], target[3],
          created_by, confidence, reason, edge_id],
     )
-    return challenge_id
+    # Return full edge record
+    return _rows_to_dicts(
+        conn.execute("SELECT * FROM ohm_edges WHERE id = ?", [challenge_id])
+    )[0]
 
 
 def create_support(
@@ -588,7 +597,10 @@ def create_support(
         [support_id, target[1], target[2], target[3],
          created_by, confidence, reason, edge_id],
     )
-    return support_id
+    # Return full edge record
+    return _rows_to_dicts(
+        conn.execute("SELECT * FROM ohm_edges WHERE id = ?", [support_id])
+    )[0]
 
 
 def set_agent_state(
@@ -636,8 +648,8 @@ def create_observation(
     sigma: float | None = None,
     source: str | None = None,
     edge_id: str | None = None,
-) -> str:
-    """Create an observation on a node or edge and return its ID."""
+) -> dict[str, Any]:
+    """Create an observation on a node or edge and return its full record."""
     import uuid
 
     obs_id = str(uuid.uuid4())
@@ -647,7 +659,10 @@ def create_observation(
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [obs_id, node_id, edge_id, obs_type, value, baseline, sigma, source, created_by],
     )
-    return obs_id
+    # Return full observation record
+    return _rows_to_dicts(
+        conn.execute("SELECT * FROM ohm_observations WHERE id = ?", [obs_id])
+    )[0]
 
 
 def node_exists(conn: DuckDBPyConnection, node_id: str) -> bool:

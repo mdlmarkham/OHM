@@ -332,10 +332,26 @@ def validate_node_type(node_type: str) -> bool:
 def generate_node_id(label: str) -> str:
     """Generate a human-readable node ID from a label.
 
-    Converts to lowercase, replaces spaces with underscores,
-    and appends a short suffix for uniqueness.
+    Converts to lowercase, replaces spaces and special characters with
+    underscores, transliterates unicode to ASCII, and appends a short
+    suffix for uniqueness.
+
+    Examples:
+        'AND→OR conversion' → 'and-or-conversion_a1b2c3'
+        'Métis Pattern'     → 'metis-pattern_d4e5f6'
     """
-    base = label.lower().replace(" ", "_").replace("-", "_")
+    import unicodedata
+    import re
+
+    # Normalize unicode: decompose accented chars, then strip diacritics
+    normalized = unicodedata.normalize('NFKD', label)
+    ascii_label = normalized.encode('ascii', 'ignore').decode('ascii')
+
+    # Replace any remaining non-alphanumeric chars with underscores
+    base = re.sub(r'[^a-zA-Z0-9]+', '_', ascii_label).strip('_').lower()
+    if not base:
+        base = "node"
+
     suffix = uuid.uuid4().hex[:6]
     return f"{base}_{suffix}"
 

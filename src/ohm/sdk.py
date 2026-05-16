@@ -46,11 +46,12 @@ class Graph:
         visibility: str = "team",
         provenance: str | None = None,
         confidence: float = 1.0,
-    ) -> str:
-        """Create a node and return its ID.
+    ) -> dict[str, Any]:
+        """Create a node and return its full record.
 
         The node ID is auto-generated from the label (lowercased, spaces→underscores,
-        with a short unique suffix). Use get_node() to retrieve the full record.
+        with a short unique suffix). Returns the complete node record including
+        all fields (id, label, type, content, created_by, created_at, etc.).
         """
         from ohm.queries import create_node
 
@@ -75,10 +76,11 @@ class Graph:
         confidence: float = 0.7,
         condition: str | None = None,
         provenance: str | None = None,
-    ) -> str:
-        """Create an edge and return its ID.
+    ) -> dict[str, Any]:
+        """Create an edge and return its full record.
 
-        Use get_edge() to retrieve the full record including timestamps.
+        Returns the complete edge record including all fields
+        (id, from_node, to_node, layer, edge_type, created_at, etc.).
         """
         from ohm.queries import create_edge
 
@@ -94,8 +96,8 @@ class Graph:
             provenance=provenance,
         )
 
-    def challenge(self, edge_id: str, *, reason: str, confidence: float = 0.5) -> str:
-        """Challenge an existing edge. Returns the challenge edge ID."""
+    def challenge(self, edge_id: str, *, reason: str, confidence: float = 0.5) -> dict[str, Any]:
+        """Challenge an existing edge. Returns the full challenge edge record."""
         from ohm.queries import create_challenge
 
         return create_challenge(
@@ -106,8 +108,8 @@ class Graph:
             confidence=confidence,
         )
 
-    def support(self, edge_id: str, *, reason: str, confidence: float = 0.7) -> str:
-        """Support an existing edge. Returns the support edge ID."""
+    def support(self, edge_id: str, *, reason: str, confidence: float = 0.7) -> dict[str, Any]:
+        """Support an existing edge. Returns the full support edge record."""
         from ohm.queries import create_support
 
         return create_support(
@@ -162,8 +164,8 @@ class Graph:
         baseline: float | None = None,
         sigma: float | None = None,
         source: str = "analysis",
-    ) -> str:
-        """Record an observation on a node. Returns the observation ID."""
+    ) -> dict[str, Any]:
+        """Record an observation on a node. Returns the full observation record."""
         from ohm.queries import create_observation
 
         return create_observation(
