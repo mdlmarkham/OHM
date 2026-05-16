@@ -6,7 +6,7 @@ knowledge graph without calling the CLI or writing raw SQL.
 Usage:
     import ohm.sdk as ohm
 
-    with ohm.connect(":memory:", actor="metis") as graph:
+    with ohm.connect(":memory:", actor="agent-alpha") as graph:
         a = graph.create_node(label="Pattern A")
         b = graph.create_node(label="Pattern B")
         graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
@@ -343,6 +343,39 @@ class Graph:
         from ohm.queries import query_stats
 
         return query_stats(self._conn)
+
+    # ── Substrate Methods ────────────────────────────────────────────────
+
+    def aggregate(
+        self, node_id: str, *, method: str = "weighted"
+    ) -> dict[str, Any]:
+        """Combine multiple observations on a node into a single value.
+
+        Strategies: weighted (inverse-variance), mean, max_confidence, consensus.
+        """
+        from ohm.methods import aggregate_observations
+
+        return aggregate_observations(self._conn, node_id, method=method)
+
+    def anomalies(
+        self,
+        *,
+        sigma_threshold: float = 2.0,
+        layer: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Detect anomalous observations using sigma-based flagging."""
+        from ohm.methods import detect_anomalies
+
+        return detect_anomalies(
+            self._conn, sigma_threshold=sigma_threshold, layer=layer, limit=limit,
+        )
+
+    def health(self) -> dict[str, Any]:
+        """Compute structural health metrics for the graph."""
+        from ohm.methods import graph_health
+
+        return graph_health(self._conn)
 
     def get_agent_config(self, agent_name: str) -> dict[str, Any] | None:
         """Get an agent's configuration (optimization target, services, etc.).

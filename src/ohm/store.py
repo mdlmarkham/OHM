@@ -149,7 +149,8 @@ class OhmStore:
         )
 
         edge = self.execute_one(
-            "SELECT * FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = ? AND created_by = ? ORDER BY created_at DESC LIMIT 1",
+            "SELECT * FROM ohm_edges WHERE from_node = ? AND to_node = ? "
+            "AND edge_type = ? AND created_by = ? ORDER BY created_at DESC LIMIT 1",
             [from_node, to_node, edge_type, self.agent_name],
         )
 
@@ -169,7 +170,6 @@ class OhmStore:
         Boundary rule: cannot modify the original edge — only create a challenge.
         Enforces that only L3/L4 edges can be challenged (via enforce_challenge_boundary).
         """
-        from .exceptions import EdgeNotFoundError
         from .boundary import enforce_challenge_boundary
 
         original = self.get_edge(edge_id)
@@ -234,7 +234,8 @@ class OhmStore:
         now = self._now()
         self.conn.execute(
             """
-            INSERT INTO ohm_observations (node_id, edge_id, type, value, baseline, sigma, source, created_by, created_at)
+            INSERT INTO ohm_observations
+                (node_id, edge_id, type, value, baseline, sigma, source, created_by, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [node_id, edge_id, type, value, baseline, sigma, source, self.agent_name, now],
@@ -300,8 +301,8 @@ class OhmStore:
     def who_is_working_on(self, topic: str) -> list[dict[str, Any]]:
         """Find agents working on a topic."""
         return self.execute(
-            """SELECT * FROM ohm_agent_state 
-               WHERE current_focus ILIKE ? 
+            """SELECT * FROM ohm_agent_state
+               WHERE current_focus ILIKE ?
                OR active_patterns::VARCHAR ILIKE ?""",
             [f"%{topic}%", f"%{topic}%"],
         )

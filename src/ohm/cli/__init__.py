@@ -179,6 +179,30 @@ def build_parser() -> argparse.ArgumentParser:
         default="analysis", help="Observation source",
     )
 
+    # graph aggregate
+    aggregate_parser = graph_sub.add_parser("aggregate", help="Combine observations on a node")
+    aggregate_parser.add_argument("node_id", help="Node ID to aggregate observations for")
+    aggregate_parser.add_argument(
+        "--method", choices=["weighted", "mean", "max_confidence", "consensus"],
+        default="weighted", help="Aggregation strategy",
+    )
+
+    # graph anomalies
+    anomalies_parser = graph_sub.add_parser("anomalies", help="Detect anomalous observations")
+    anomalies_parser.add_argument(
+        "--sigma", type=float, default=2.0, dest="sigma_threshold",
+        help="Sigma threshold for flagging (default: 2.0)",
+    )
+    anomalies_parser.add_argument(
+        "--layer", choices=["L1", "L2", "L3", "L4"], help="Filter by layer",
+    )
+    anomalies_parser.add_argument(
+        "--limit", type=int, default=50, help="Maximum results (default: 50)",
+    )
+
+    # graph health
+    graph_sub.add_parser("health", help="Graph structural health metrics")
+
     # ── state ────────────────────────────────────────────────────────────
     state_parser = subparsers.add_parser("state", help="Hive mind awareness")
     state_sub = state_parser.add_subparsers(dest="state_command", help="State commands")
@@ -349,6 +373,12 @@ def _handle_graph(args: argparse.Namespace) -> None:
         _handle_update(args)
     elif cmd == "observe":
         _handle_observe(args)
+    elif cmd == "aggregate":
+        _handle_aggregate(args)
+    elif cmd == "anomalies":
+        _handle_anomalies(args)
+    elif cmd == "health":
+        _handle_health(args)
     else:
         print(f"Unknown graph command: {cmd}")
 
@@ -420,10 +450,10 @@ def _handle_agents(args: argparse.Namespace) -> None:
 
             if args.format == "json":
                 import json
-                result = []
+                agent_list: list[dict[str, str]] = []
                 for row in agents:
-                    result.append({"id": row[0], "label": row[1]})
-                print(json.dumps(result, indent=2))
+                    agent_list.append({"id": row[0], "label": row[1]})
+                print(json.dumps(agent_list, indent=2))
             else:
                 if not agents:
                     print("No agents registered. Use graph.register_agent() in the SDK.")
@@ -497,7 +527,7 @@ def _handle_upgrade(args: argparse.Namespace) -> None:
             else:
                 print(f"Current schema: v{current_version}")
                 print(f"Target schema:  v{SCHEMA_VERSION}")
-                print(f"\nPending migrations:")
+                print("\nPending migrations:")
                 for version, description in pending:
                     print(f"  v{version}: {description}")
         else:
@@ -882,7 +912,7 @@ def _handle_observe(args: argparse.Namespace) -> None:
             print(f"Node not found: {args.node_id}")
             return
 
-        obs_id = create_observation(
+        obs = create_observation(
             conn,
             node_id=args.node_id,
             obs_type=args.obs_type,
@@ -894,14 +924,96 @@ def _handle_observe(args: argparse.Namespace) -> None:
         )
         if args.format == "json":
             import json
-            print(json.dumps({"observation_id": obs_id, "status": "created"}))
+            print(json.dumps({"observation_id": obs["id"], "status": "created"}))
         else:
             print(f"Recorded {args.obs_type} observation on {args.node_id}")
-            print(f"  ID: {obs_id}")
+            print(f"  ID: {obs['id']}")
             if args.value is not None:
                 print(f"  Value: {args.value}")
             if args.sigma is not None:
                 print(f"  Sigma: {args.sigma}")
+    finally:
+        conn.close()
+
+
+def _handle_aggregate(args: argparse.Namespace) -> None:
+    """Handle observation aggregation."""
+    from ohm.methods import aggregate_observations
+
+    conn = _get_db(args)
+    try:
+        result = aggregate_observations(conn, args.node_id, method=args.method)
+        if args.format == "json":
+            import json
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            if result["observation_count"] == 0:
+                print(f"No observations found for node {args.node_id}")
+                return
+            print(f"Aggregating {result['observation_count']} observations "
+                  f"on {args.node_id} ({result['method_used']})")
+            if result.get("disagreement"):
+                print(f"  ⚠ No consensus — CV={result['coefficient_of_variation']}")
+            else:
+                print(f"  Combined value: {result['combined_value']}")
+                print(f"  Combined confidence: {result['combined_confidence']}")
+    finally:
+        conn.close()
+
+
+def _handle_anomalies(args: argparse.Namespace) -> None:
+    """Handle anomaly detection."""
+    from ohm.methods import detect_anomalies
+
+    conn = _get_db(args)
+    try:
+        results = detect_anomalies(
+            conn,
+            sigma_threshold=args.sigma_threshold,
+            layer=args.layer,
+            limit=args.limit,
+        )
+        if args.format == "json":
+            import json
+            print(json.dumps(results, indent=2, default=str))
+        else:
+            if not results:
+                print("No anomalies detected.")
+                return
+            print(f"Found {len(results)} anomalies:")
+            for a in results:
+                if a["anomaly_type"] == "observation":
+                    print(f"  [{a['node_label']}] value={a['value']}, "
+                          f"baseline={a['baseline']}, σ={a['sigma']}, "
+                          f"distance={a['sigma_distance']}σ")
+                elif a["anomaly_type"] == "high_variance":
+                    print(f"  [{a['node_label']}] {a['observation_count']} obs, "
+                          f"σ={a['stddev']}, mean={a['mean_value']}")
+                elif a["anomaly_type"] == "low_confidence":
+                    print(f"  Edge {a['edge_id']}: confidence={a['confidence']} "
+                          f"({a['layer']}/{a['edge_type']})")
+    finally:
+        conn.close()
+
+
+def _handle_health(args: argparse.Namespace) -> None:
+    """Handle graph health check."""
+    from ohm.methods import graph_health
+
+    conn = _get_db(args)
+    try:
+        result = graph_health(conn)
+        if args.format == "json":
+            import json
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            print(f"Graph Health: {result['health_score']}/100")
+            print(f"  Nodes: {result['total_nodes']} "
+                  f"(orphans: {result['orphan_nodes']})")
+            print(f"  Edges: {result['total_edges']} "
+                  f"(unchallenged low-confidence: {result['unchallenged_low_confidence']})")
+            print(f"  Dense clusters: {result['dense_cluster_nodes']}")
+            print(f"  Stale observations: {result['stale_observations']}")
     finally:
         conn.close()
 
@@ -1000,10 +1112,10 @@ def _show_layers(args: argparse.Namespace) -> None:
          '"This idea derives from that source"'),
         ("L3: Knowledge", "Agent-owned, challengeable", "Creating agent",
          "CAUSES, CORRELATES_WITH, PREDICTS, EXPLAINS, CHALLENGED_BY, SUPPORTS",
-         '"AND→OR conversion conf: 0.94 (Métis)"'),
+         '"Pattern X causes outcome Y conf: 0.94 (agent-alpha)"'),
         ("L4: Prospect", "Agent-owned, visible", "Forecasting agent",
          "EXPECTS, PLANS, RISKS, DEPENDS_ON",
-         '"Democratic institutions will hold conf: 0.65 (Clio)"'),
+         '"Outcome Z expected conf: 0.65 (agent-beta)"'),
     ]
     lines: list[str] = []
     for name, sharing, owner, types, example in layers:
