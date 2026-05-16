@@ -269,17 +269,21 @@ class Graph:
         Returns:
             List of matching node records.
         """
-        conditions = ["(label ILIKE ? OR content ILIKE ?)"]
+        # Build WHERE clause from hardcoded column names + parameterized values.
+        # Column names (label, content, type) are not user-provided — only values use ?.
+        conditions: list[str] = ["(label ILIKE ? OR content ILIKE ?)"]
         params: list[Any] = [f"%{query}%", f"%{query}%"]
         if node_type:
             conditions.append("type = ?")
             params.append(node_type)
 
-        where = " AND ".join(conditions)
-        result = self._conn.execute(
-            f"SELECT * FROM ohm_nodes WHERE {where} ORDER BY created_at DESC LIMIT ?",
-            [*params, limit],
+        sql = (
+            "SELECT * FROM ohm_nodes WHERE "
+            + " AND ".join(conditions)
+            + " ORDER BY created_at DESC LIMIT ?"
         )
+        params.append(limit)
+        result = self._conn.execute(sql, params)
         columns = [desc[0] for desc in result.description]
         return [dict(zip(columns, row)) for row in result.fetchall()]
 
