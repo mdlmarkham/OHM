@@ -111,6 +111,18 @@ class TestCLIParsing:
         args = parser.parse_args(["graph", "stats"])
         assert args.graph_command == "stats"
 
+    def test_graph_upgrade(self):
+        parser = build_parser()
+        args = parser.parse_args(["graph", "upgrade"])
+        assert args.graph_command == "upgrade"
+        assert args.dry_run is False
+
+    def test_graph_upgrade_dry_run(self):
+        parser = build_parser()
+        args = parser.parse_args(["graph", "upgrade", "--dry-run"])
+        assert args.graph_command == "upgrade"
+        assert args.dry_run is True
+
     def test_state_set(self):
         parser = build_parser()
         args = parser.parse_args(["state", "set", "researching", "AND→OR", "patterns"])

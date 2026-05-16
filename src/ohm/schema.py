@@ -357,12 +357,17 @@ def get_schema_version(conn: "DuckDBPyConnection") -> str:
         conn: An active DuckDB connection.
 
     Returns:
-        The schema version string (e.g., '0.3.0').
+        The schema version string (e.g., '0.3.0'), or '0.0.0' if
+        the ohm_meta table doesn't exist yet.
     """
-    result = conn.execute(
-        "SELECT value FROM ohm_meta WHERE key = 'schema_version'"
-    ).fetchone()
-    return result[0] if result else "0.0.0"
+    try:
+        result = conn.execute(
+            "SELECT value FROM ohm_meta WHERE key = 'schema_version'"
+        ).fetchone()
+        return result[0] if result else "0.0.0"
+    except Exception:
+        # Table doesn't exist yet — database hasn't been initialized
+        return "0.0.0"
 
 
 def validate_edge_type(layer: str, edge_type: str) -> bool:
