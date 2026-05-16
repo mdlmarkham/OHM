@@ -11,10 +11,14 @@
 - [x] Agent state: set, show, who-is-working-on
 - [x] Boundary enforcement: no agent can overwrite another agent's edges
 - [x] Challenge edges: create separate, don't modify
-- [x] 33 tests passing (unit + integration + layer model)
-- [x] `ohmd` HTTP server scaffold (GET/POST endpoints, token auth)
+- [x] Python SDK (`ohm.sdk`) for programmatic agent access
+- [x] Input validation module (SQL injection prevention for CTE identifiers)
+- [x] Exception hierarchy with exit codes (0-5) and correlation IDs
+- [x] CLI integration tests against real database
+- [x] 144 tests passing across all modules
+- [x] `ohmd` HTTP server scaffold (GET/POST endpoints, token auth stub)
 
-**Deliverable:** `ohm graph status` returns node/edge counts. Boundary rules enforced. Challenge edges work.
+**Deliverable:** `ohm graph status` returns node/edge counts. Boundary rules enforced. Challenge edges work. SDK works end-to-end.
 
 ## Phase 1: Daemon + Multi-Agent (Week 1-2)
 
@@ -28,8 +32,12 @@
 - [ ] Test concurrent access with multiple agent tokens
 - [ ] Verify recursive CTE queries work through HTTP API
 - [ ] `ohm serve status` properly detects running daemon
+- [ ] Server test coverage (17 HTTP endpoints)
+- [ ] SDK test coverage (Graph class methods)
+- [ ] Remove dead code (queries.py top-level, query.py NLP parser)
+- [ ] Document module boundaries (store.py vs queries/)
 
-**Deliverable:** `ohm serve start` runs daemon. Multiple agents connect via tokens. All CLI commands work through daemon.
+**Deliverable:** `ohm serve start` runs daemon. Multiple agents connect via tokens. All CLI commands work through daemon. 17 HTTP endpoints tested.
 
 ## Phase 2: DuckLake + Time Travel (Week 3-4)
 

@@ -29,15 +29,48 @@ src/ohm/
 ├── exceptions.py        # Exception hierarchy with exit codes (0-5)
 ├── schema.py            # DDL, validation, edge-type/layer constraints
 ├── db.py                # DuckDB connection lifecycle, schema init
-├── cli/__init__.py      # Full argparse command tree (serve, graph, state, snapshot, diff)
-└── queries/__init__.py  # 7 parameterized CTE query functions
+├── validation.py        # Input validation (SQL injection prevention for CTE identifiers)
+├── boundary.py          # Layer ownership enforcement (ADR-003)
+├── graph.py             # CTE query builder (neighborhood, path, impact)
+├── store.py             # OhmStore ORM wrapper — used by ohmd ONLY
+├── sdk.py               # Python SDK for agent programmatic access
+├── server.py            # ohmd HTTP daemon — uses OhmStore, not queries/
+├── cli/
+│   ├── __init__.py      # Full argparse command tree (serve, graph, state, snapshot, diff)
+│   └── __main__.py      # `python -m ohm.cli` entry point
+├── queries/
+│   └── __init__.py      # 7 parameterized CTE query functions (direct-connection API)
 tests/
 ├── conftest.py          # Fixtures: test_db, sample_graph_small/medium/large
 ├── test_schema.py       # Schema validation + DDL execution tests
+├── test_exceptions.py   # Error type + exit code tests
+├── test_boundary.py     # Layer ownership enforcement tests
+├── test_queries.py      # CTE query correctness tests
 ├── test_cli.py          # CLI argument parsing tests (23 commands)
-├── test_queries.py      # CTE query correctness tests (18 scenarios)
-└── test_exceptions.py   # Error type + exit code tests
+├── test_cli_integration.py  # End-to-end CLI tests against real DB
+├── test_ohm.py          # OhmStore integration tests
+└── test_integration.py  # Full workflow integration tests
 ```
+
+### Module Boundaries
+
+Two codepaths exist for the same operations. This is intentional:
+
+| Module | Role | Used by | Direct dependency |
+|--------|------|---------|-----------------|
+| `queries/__init__.py` | Direct-connection API — functions take a DuckDBPyConnection | CLI, SDK, tests | `graph.py`, `boundary.py`, `validation.py` |
+| `store.py` (OhmStore) | ORM wrapper — manages its own connection and schema init | `server.py` (ohmd) only | DuckDB directly |
+| `sdk.py` (Graph) | Agent-facing Python API — wraps `queries/` with context manager | Agents | `queries/`, `db.py` |
+| `server.py` (ohmd) | HTTP daemon — uses OhmStore | External HTTP clients | `store.py` |
+
+**When adding a new operation:**
+- If agents call it: add to `queries/` first, then wrap in `sdk.py`
+- If the daemon calls it: add to both `queries/` and `store.py` (or refactor server.py to use queries/)
+- **Never** add to `store.py` without also adding to `queries/`
+
+**Dead code (to be removed):**
+- `src/ohm/queries.py` (top-level) — unreachable, shadows the `queries/` package
+- `src/ohm/query.py` (NLP parser) — never used by any production code
 
 **Key design decisions** (see [docs/adr/](docs/adr/README.md)):
 - **ADR-001**: Recursive CTEs over DuckPGQ for graph traversal (zero-dependency, survives DuckDB upgrades)
@@ -107,9 +140,8 @@ Issues tagged with **PM input needed** are blocked on product decisions. Issues 
 2. **Run quality gates** (if code changed):
    ```bash
    python -m pytest tests/ -v
-   python -m ruff check src/ tests/
-   python -m mypy src/
    ```
+   Linting/type-checking tools (ruff, mypy) are not yet in the project. Skip them for now.
 3. **Update issue status** — Close finished work, update in-progress items
 4. **PUSH TO REMOTE** — This is MANDATORY:
    ```bash

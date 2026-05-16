@@ -31,7 +31,11 @@ OHM-y2i    P0: Production Daemon — ohmd with Quack, auth, error handling
 ├── OHM-y2i.2  Token auth (Bearer tokens, per-agent roles)
 ├── OHM-y2i.3  Health check + status endpoints
 ├── OHM-y2i.4  Quack protocol integration
-└── OHM-y2i.5  Systemd unit file + daemon lifecycle
+├── OHM-y2i.5  Systemd unit file + daemon lifecycle
+├── OHM-654     Server tests — 17 HTTP endpoints, zero coverage
+├── OHM-4w7     Remove dead queries.py top-level module
+├── OHM-n16     Document store.py vs queries/ boundaries
+└── OHM-ad3     Update AGENTS.md with module boundaries
 
 OHM-xgm    P1: DuckLake + Time Travel
 ├── OHM-xgm.1  DuckLake shared backend (WAL, snapshots, change feed)
@@ -52,6 +56,12 @@ OHM-3w1     P2: TOPO — Industrial Knowledge Graph
 └── OHM-3w1.3  Shared ohmd/topod daemon codebase
 
 Cross-cutting:
+  OHM-654  P0: Server tests (under OHM-y2i)
+  OHM-tjr  P1: SDK tests (under OHM-a35)
+  OHM-4w7  P1: Remove dead queries.py (under OHM-y2i)
+  OHM-n16  P1: Document module boundaries (under OHM-y2i)
+  OHM-ad3  P1: Update AGENTS.md module docs (under OHM-y2i)
+  OHM-hol  P2: Remove dead query.py NLP parser
   OHM-l5k  P1: CI/CD pipeline (GitHub Actions)
   OHM-xj4  P1: marimo-pair integration
   OHM-dy9  P2: Performance benchmarks
@@ -66,9 +76,19 @@ Cross-cutting:
 
 ## Current State
 
-- **130 tests passing** (schema, store, graph, boundary, queries, CLI, integration)
+- **144 tests passing** (schema, store, graph, boundary, queries, CLI, integration, exceptions, validation)
 - **Phase 0 (Foundation):** Schema, CLI, recursive CTEs, boundary enforcement ✅
 - **Phase 1 (Core Operations):** All read/write/challenge/support/observe/listen/state commands ✅
-- **Phase 2 (Daemon + Multi-Agent):** Scaffold exists, needs production hardening
+- **SDK:** Python SDK (`ohm.sdk`) for programmatic agent access ✅
+- **Validation:** Input validation module (SQL injection prevention for CTE identifiers) ✅
+- **Phase 2 (Daemon + Multi-Agent):** Scaffold exists, needs production hardening (P0 in progress)
 - **Phase 3 (DuckLake):** Not started
 - **Phase 4 (Agent Integration):** Not started
+
+## Known Issues
+
+- **Dead code:** `src/ohm/queries.py` (top-level) shadows the `queries/` package and is unreachable — needs removal (OHM-4w7)
+- **Dead code:** `src/ohm/query.py` (NLP parser) is never used by production code — needs removal (OHM-hol)
+- **Module boundary unclear:** `store.py` (daemon ORM) and `queries/` (direct-connection API) both do create_node/create_edge etc. — needs documentation (OHM-n16, OHM-ad3)
+- **No server tests:** `server.py` has zero test coverage (OHM-654)
+- **No SDK tests:** `sdk.py` has no dedicated test file (OHM-tjr)

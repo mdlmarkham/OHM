@@ -254,7 +254,7 @@ def _handle_serve(args: argparse.Namespace) -> None:
     cmd = args.serve_command
     if cmd == "start":
         print(f"Starting ohmd on port {args.port}...")
-        # TODO: Implement ohmd daemon startup (OHM-346.1)
+        # TODO: Implement ohmd daemon startup (OHM-y2i.3)
         print("ohmd started (placeholder)")
     elif cmd == "stop":
         print("Stopping ohmd...")
