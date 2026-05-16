@@ -1,0 +1,2 @@
+[console_scripts]
+ohm = ohm.cli:main

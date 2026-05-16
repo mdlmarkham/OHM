@@ -1,0 +1,14 @@
+Metadata-Version: 2.4
+Name: ohm
+Version: 0.1.0
+Summary: Shared awareness, individual judgment. Multi-agent knowledge graph.
+Author: Matt Markham, Métis
+License: MIT
+Requires-Python: >=3.11
+License-File: LICENSE
+Requires-Dist: duckdb>=1.5.2
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"
+Requires-Dist: ruff>=0.3.0; extra == "dev"
+Requires-Dist: mypy>=1.8.0; extra == "dev"
+Dynamic: license-file

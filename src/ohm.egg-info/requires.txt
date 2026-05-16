@@ -1,0 +1,6 @@
+duckdb>=1.5.2
+
+[dev]
+pytest>=8.0
+ruff>=0.3.0
+mypy>=1.8.0
