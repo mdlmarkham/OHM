@@ -318,7 +318,12 @@ class OhmHandler(BaseHTTPRequestHandler):
 
     def _do_POST(self):
         """Handle POST requests — writes. Requires auth + write access."""
-        agent = self._require_auth()
+        agent = self._authenticate()
+        if agent is None:
+            if not self.tokens:
+                agent = "ohm"  # Dev mode: no tokens configured
+            else:
+                raise AuthenticationError("Authentication required — provide Bearer token")
         self._check_write_access(agent)
 
         from urllib.parse import urlparse

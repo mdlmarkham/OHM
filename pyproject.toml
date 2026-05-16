@@ -27,6 +27,16 @@ dev = [
     "mypy>=1.8.0",
 ]
 
+[tool.ruff]
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+
 [project.scripts]
 ohm = "ohm.cli:main"
 ohmd = "ohm.server:main"
@@ -36,3 +46,6 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "benchmark: Performance benchmark tests (pytest-benchmark)",
+]

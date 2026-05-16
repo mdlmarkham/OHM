@@ -12,6 +12,7 @@ Command structure (from docs/cli.md):
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from typing import TYPE_CHECKING, NoReturn
 
@@ -264,8 +265,44 @@ def _handle_serve(args: argparse.Namespace) -> None:
         print("ohmd status: not running (placeholder)")
     elif cmd == "config":
         print("ohmd config: (placeholder)")
+    elif cmd == "token":
+        _handle_serve_token(args)
     else:
         print(f"Unknown serve command: {cmd}")
+
+
+def _handle_serve_token(args: argparse.Namespace) -> None:
+    """Generate a token for an agent and save to config."""
+    import json
+    import secrets
+    from pathlib import Path
+
+    agent_name = args.agent_name
+    token = secrets.token_urlsafe(32)
+
+    config_path = args.config or os.environ.get(
+        "OHM_CONFIG", str(Path.home() / ".ohm" / "ohmd.json")
+    )
+    config_file = Path(config_path)
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # Load existing config or start fresh
+    if config_file.exists():
+        with open(config_file) as f:
+            config = json.load(f)
+    else:
+        config = {}
+
+    # Add token
+    config.setdefault("tokens", {})[agent_name] = token
+    config.setdefault("roles", {})[agent_name] = args.role
+
+    with open(config_file, "w") as f:
+        json.dump(config, f, indent=2)
+
+    print(f"Token for {agent_name}: {token}")
+    print(f"Role: {args.role}")
+    print(f"Config saved to {config_file}")
 
 
 def _handle_graph(args: argparse.Namespace) -> None:

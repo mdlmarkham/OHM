@@ -33,6 +33,7 @@ class Graph:
     def __init__(self, conn: DuckDBPyConnection, *, actor: str = "unknown"):
         self._conn = conn
         self.actor = actor
+        self.token: str | None = None
 
     # ── Write ────────────────────────────────────────────────────────────
 
@@ -248,17 +249,25 @@ def connect(
     db_path: str = ":memory:",
     *,
     actor: str = "unknown",
+    token: str | None = None,
 ) -> Graph:
     """Open a connection to an OHM graph.
 
     Args:
         db_path: Path to DuckDB file, or ':memory:' for in-memory.
         actor: Agent name for attribution.
+        token: Bearer token for ohmd authentication. If not provided,
+               reads from OHM_TOKEN environment variable.
 
     Returns:
         A Graph instance ready for use.
     """
+    import os
+
     from ohm.db import connect as db_connect
 
+    resolved_token = token or os.environ.get("OHM_TOKEN")
     conn = db_connect(db_path)
-    return Graph(conn, actor=actor)
+    graph = Graph(conn, actor=actor)
+    graph.token = resolved_token
+    return graph

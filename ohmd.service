@@ -1,0 +1,33 @@
+[Unit]
+Description=OHM Daemon — Multi-agent knowledge graph server
+Documentation=https://github.com/mdlmarkham/OHM
+After=network.target
+
+[Service]
+Type=simple
+User=ohm
+Group=ohm
+ExecStart=/usr/local/bin/ohmd --host 127.0.0.1 --port 8710
+Restart=on-failure
+RestartSec=5
+PIDFile=/var/run/ohm/ohmd.pid
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/ohm /var/run/ohm
+ReadOnlyPaths=/etc/ohm
+
+# Environment
+Environment=OHM_CONFIG=/etc/ohm/ohmd.json
+Environment=OHM_DB_PATH=/var/lib/ohm/ohm.duckdb
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ohmd
+
+[Install]
+WantedBy=multi-user.target
