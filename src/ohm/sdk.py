@@ -226,20 +226,20 @@ class Graph:
         visibility: str = "team",
         provenance: str | None = None,
         confidence: float = 1.0,
-    ) -> str:
+    ) -> dict[str, Any]:
         """Find a node by label, or create it if it doesn't exist.
 
         Searches for an existing node with the exact label (case-insensitive).
-        If found, returns its ID. If not found, creates a new node.
+        If found, returns its full record. If not found, creates a new node.
 
-        Returns the node ID.
+        Returns the full node record.
         """
         result = self._conn.execute(
             "SELECT id FROM ohm_nodes WHERE LOWER(label) = LOWER(?) LIMIT 1",
             [label],
         ).fetchone()
         if result:
-            return result[0]
+            return self.get_node(result[0])  # type: ignore[return-value]
         return self.create_node(
             label=label,
             node_type=node_type,
