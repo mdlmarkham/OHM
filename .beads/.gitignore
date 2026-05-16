@@ -37,6 +37,27 @@ beads.right.meta.json
 .sync.lock
 sync_base.jsonl
 
+# Embedded Dolt and export runtime (v1)
+dolt/
+embeddeddolt/
+export-state/
+export-state.json
+ephemeral.sqlite3
+
+# Embedded/server process runtime files
+.env
+bd.sock.startlock
+dolt-server.pid
+dolt-server.log
+dolt-server.lock
+dolt-server.port
+dolt-server.activity
+.beads-credential-key
+
+# Local lock and crash artifacts
+*.lock
+*.corrupt.backup/
+
 # NOTE: Do NOT add negation patterns (e.g., !issues.jsonl) here.
 # They would override fork protection in .git/info/exclude, allowing
 # contributors to accidentally commit upstream issue databases.

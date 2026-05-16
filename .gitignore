@@ -1,0 +1,17 @@
+# Beads runtime artifacts (project-level safety)
+.beads/backup/
+.beads/embeddeddolt/
+.beads/export-state/
+.beads/export-state.json
+.beads/dolt/
+.beads/.env
+.beads/bd.sock.startlock
+.beads/dolt-server.pid
+.beads/dolt-server.log
+.beads/dolt-server.lock
+.beads/dolt-server.port
+.beads/dolt-server.activity
+.beads/.beads-credential-key
+.beads/daemon.*
+.beads/*.lock
+.beads/*.corrupt.backup/
