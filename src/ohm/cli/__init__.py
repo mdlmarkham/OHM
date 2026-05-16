@@ -368,6 +368,73 @@ def _handle_state(args: argparse.Namespace) -> None:
         print(f"Unknown state command: {cmd}")
 
 
+def _handle_agents(args: argparse.Namespace) -> None:
+    """Handle 'ohm agents' command."""
+    conn = _get_db(args)
+    try:
+        if args.agent_name:
+            # Show details for a specific agent
+            agent = conn.execute(
+                "SELECT * FROM ohm_nodes WHERE type = 'agent' AND LOWER(label) = LOWER(?)",
+                [args.agent_name],
+            ).fetchone()
+            if not agent:
+                print(f"Agent not found: {args.agent_name}")
+                return
+
+            agent_id = agent[0]
+            agent_label = agent[1]
+
+            # Get values, goals, capabilities edges
+            edges = conn.execute(
+                """SELECT e.edge_type, n.label AS concept
+                   FROM ohm_edges e
+                   JOIN ohm_nodes n ON n.id = e.to_node
+                   WHERE e.from_node = ? AND e.edge_type IN ('VALUES', 'GOALS', 'CAPABLE_OF')
+                   ORDER BY e.edge_type""",
+                [agent_id],
+            ).fetchall()
+
+            if args.format == "json":
+                import json
+                result = {"agent": agent_label, "id": agent_id, "edges": []}
+                for row in edges:
+                    result["edges"].append({"type": row[0], "concept": row[1]})
+                print(json.dumps(result, indent=2))
+            else:
+                print(f"Agent: {agent_label} ({agent_id})")
+                values = [r[1] for r in edges if r[0] == "VALUES"]
+                goals = [r[1] for r in edges if r[0] == "GOALS"]
+                capabilities = [r[1] for r in edges if r[0] == "CAPABLE_OF"]
+                if values:
+                    print(f"  Values: {', '.join(values)}")
+                if goals:
+                    print(f"  Goals:  {', '.join(goals)}")
+                if capabilities:
+                    print(f"  Capable of: {', '.join(capabilities)}")
+        else:
+            # List all registered agents
+            agents = conn.execute(
+                "SELECT id, label FROM ohm_nodes WHERE type = 'agent' ORDER BY label"
+            ).fetchall()
+
+            if args.format == "json":
+                import json
+                result = []
+                for row in agents:
+                    result.append({"id": row[0], "label": row[1]})
+                print(json.dumps(result, indent=2))
+            else:
+                if not agents:
+                    print("No agents registered. Use graph.register_agent() in the SDK.")
+                    return
+                print(f"Registered agents ({len(agents)}):")
+                for row in agents:
+                    print(f"  {row[1]} ({row[0]})")
+    finally:
+        conn.close()
+
+
 def _handle_snapshot(args: argparse.Namespace) -> None:
     """Handle 'ohm snapshot' command."""
     print(f"Snapshot at {args.timestamp}: (placeholder)")
