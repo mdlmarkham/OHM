@@ -422,7 +422,8 @@ def create_node(
 
     node_id = generate_node_id(label)
     conn.execute(
-        """INSERT INTO ohm_nodes (id, label, type, content, created_by, visibility, provenance, confidence)
+        """INSERT INTO ohm_nodes
+           (id, label, type, content, created_by, visibility, provenance, confidence)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
         [node_id, label, node_type, content, created_by, visibility, provenance, confidence],
     )
@@ -451,9 +452,12 @@ def create_edge(
 
     edge_id = str(uuid.uuid4())
     conn.execute(
-        """INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, created_by, confidence, condition, provenance)
+        """INSERT INTO ohm_edges
+           (id, from_node, to_node, layer, edge_type, created_by,
+            confidence, condition, provenance)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        [edge_id, from_node, to_node, layer, edge_type, created_by, confidence, condition, provenance],
+        [edge_id, from_node, to_node, layer, edge_type, created_by,
+         confidence, condition, provenance],
     )
     return edge_id
 
@@ -477,15 +481,21 @@ def create_challenge(
     # Enforce boundary: only L3/L4 edges can be challenged
     enforce_challenge_boundary(conn, created_by, edge_id)
 
-    target = conn.execute("SELECT id, from_node, to_node, layer FROM ohm_edges WHERE id = ?", [edge_id]).fetchone()
+    target = conn.execute(
+        "SELECT id, from_node, to_node, layer FROM ohm_edges WHERE id = ?",
+        [edge_id],
+    ).fetchone()
     if target is None:
         raise ValueError(f"Edge not found: {edge_id}")
 
     challenge_id = str(uuid.uuid4())
     conn.execute(
-        """INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, created_by, confidence, condition, challenge_of, challenge_type)
+        """INSERT INTO ohm_edges
+           (id, from_node, to_node, layer, edge_type, created_by,
+            confidence, condition, challenge_of, challenge_type)
            VALUES (?, ?, ?, ?, 'CHALLENGED_BY', ?, ?, ?, ?, 'CHALLENGED_BY')""",
-        [challenge_id, target[1], target[2], target[3], created_by, confidence, reason, edge_id],
+        [challenge_id, target[1], target[2], target[3],
+         created_by, confidence, reason, edge_id],
     )
     return challenge_id
 

@@ -1,7 +1,6 @@
 """Tests for the OHM database schema initialization."""
 
 from ohm.schema import (
-    ALL_EDGE_TYPES as VALID_EDGE_TYPES,
     LAYER_EDGE_TYPES,
     VALID_LAYERS,
     VALID_NODE_TYPES,

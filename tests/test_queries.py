@@ -1,6 +1,5 @@
 """Tests for the OHM CTE graph traversal queries."""
 
-import pytest
 
 
 class TestNeighborhoodQuery:

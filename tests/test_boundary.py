@@ -179,7 +179,10 @@ class TestMutationOperations:
         assert node_id.startswith("test_node_")
 
         # Verify it exists
-        result = test_db.execute("SELECT label, created_by FROM ohm_nodes WHERE id = ?", [node_id]).fetchone()
+        result = test_db.execute(
+            "SELECT label, created_by FROM ohm_nodes WHERE id = ?",
+            [node_id],
+        ).fetchone()
         assert result[0] == "Test Node"
         assert result[1] == "agent_x"
 

@@ -108,7 +108,9 @@ def build_parser() -> argparse.ArgumentParser:
     write_parser.add_argument(
         "--layer", choices=["L1", "L2", "L3", "L4"], default="L3", help="Layer",
     )
-    write_parser.add_argument("--confidence", type=float, default=0.7, help="Confidence score (0-1)")
+    write_parser.add_argument(
+        "--confidence", type=float, default=0.7, help="Confidence score (0-1)",
+    )
     write_parser.add_argument("--condition", help="Context condition string")
     write_parser.add_argument("--provenance", help="Source attribution")
 
@@ -116,7 +118,9 @@ def build_parser() -> argparse.ArgumentParser:
     challenge_parser = graph_sub.add_parser("challenge", help="Challenge an existing edge")
     challenge_parser.add_argument("edge_id", help="ID of the edge to challenge")
     challenge_parser.add_argument("--reason", required=True, help="Challenge rationale")
-    challenge_parser.add_argument("--confidence", type=float, default=0.5, help="Challenge confidence")
+    challenge_parser.add_argument(
+        "--confidence", type=float, default=0.5, help="Challenge confidence",
+    )
 
     # graph support
     support_parser = graph_sub.add_parser("support", help="Support an existing edge")
@@ -349,7 +353,7 @@ def _show_stats(args: argparse.Namespace) -> None:
             print("\n── Edges by Type ──")
             for etype, count in sorted(stats["edges_by_type"].items(), key=lambda x: -x[1]):
                 print(f"  {etype}: {count}")
-            print(f"\n── Nodes by Type ──")
+            print("\n── Nodes by Type ──")
             for ntype, count in sorted(stats["nodes_by_type"].items(), key=lambda x: -x[1]):
                 print(f"  {ntype}: {count}")
             print(f"\nTotal: {stats['total_nodes']} nodes, {stats['total_edges']} edges")
@@ -360,8 +364,6 @@ def _show_stats(args: argparse.Namespace) -> None:
 
 def _handle_query(args: argparse.Namespace) -> None:
     """Handle structured graph query."""
-    from ohm.queries import query_neighborhood
-
     conn = _get_db(args)
     try:
         # Structured query: use neighborhood as base, apply filters
@@ -411,7 +413,11 @@ def _handle_query(args: argparse.Namespace) -> None:
                 if "label" in row:
                     print(f"  [{row.get('type', '?')}] {row['label']} ({row['id']})")
                 elif "edge_type" in row:
-                    print(f"  [{row['layer']}] {row['edge_type']}: {row['from_node']} → {row['to_node']} (conf: {row.get('confidence', '?')})")
+                    print(
+                        f"  [{row['layer']}] {row['edge_type']}: "
+                        f"{row['from_node']} → {row['to_node']} "
+                        f"(conf: {row.get('confidence', '?')})"
+                    )
     finally:
         conn.close()
 
@@ -556,11 +562,17 @@ def _handle_confidence(args: argparse.Namespace) -> None:
             if result["challenges"]:
                 print(f"\n  Challenges ({len(result['challenges'])}):")
                 for c in result["challenges"]:
-                    print(f"    • {c['created_by']} (conf: {c['confidence']}): {c.get('condition', '')}")
+                    print(
+                        f"    • {c['created_by']} (conf: {c['confidence']}): "
+                        f"{c.get('condition', '')}"
+                    )
             if result["supports"]:
                 print(f"\n  Support ({len(result['supports'])}):")
                 for s in result["supports"]:
-                    print(f"    • {s['created_by']} (conf: {s['confidence']}): {s.get('condition', '')}")
+                    print(
+                        f"    • {s['created_by']} (conf: {s['confidence']}): "
+                        f"{s.get('condition', '')}"
+                    )
     finally:
         conn.close()
 
@@ -682,7 +694,10 @@ def _handle_state_who(args: argparse.Namespace) -> None:
     conn = _get_db(args)
     try:
         results = query_agent_state(conn)
-        matches = [r for r in results if r.get("current_focus") and topic.lower() in r["current_focus"].lower()]
+        matches = [
+            r for r in results
+            if r.get("current_focus") and topic.lower() in r["current_focus"].lower()
+        ]
         if args.format == "json":
             import json
             print(json.dumps(matches, indent=2, default=str))

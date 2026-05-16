@@ -7,8 +7,9 @@ pre-initialized, plus sample data factories.
 from __future__ import annotations
 
 import uuid
-import pytest
 from typing import TYPE_CHECKING, Any
+
+import pytest
 
 if TYPE_CHECKING:
     import duckdb

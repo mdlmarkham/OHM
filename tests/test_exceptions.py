@@ -1,13 +1,12 @@
 """Tests for OHM exception hierarchy and error handling."""
 
-import pytest
 
 from ohm.exceptions import (
+    EXIT_CODES,
     AuthenticationError,
     ConfigurationError,
     DaemonNotRunningError,
     EdgeNotFoundError,
-    EXIT_CODES,
     GraphNotFoundError,
     NodeNotFoundError,
     OHMError,
