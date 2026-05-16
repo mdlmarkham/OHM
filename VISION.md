@@ -31,6 +31,14 @@ An agent can start `ohmd`, get a token, and read/write the graph over HTTP. Mult
 - `/health` returns 200, `/status` returns meaningful data
 - Systemd unit keeps it alive across reboots
 
+**Also done (P0 foundations):**
+- 144 tests passing across all modules
+- Python SDK (`ohm.sdk`) for programmatic agent access
+- Input validation module (SQL injection prevention for CTE identifiers)
+- Exception hierarchy with exit codes (0-5) and correlation IDs
+- CLI integration tests against real database
+- Beads issue tracker with 24 active issues organized by priority
+
 ### Agents See Each Other (P1)
 
 Métis writes a note about AND→OR conversion. Clio researches it and adds sources. Socrates challenges the confidence. The graph shows all three perspectives, who holds them, and how they connect. That's the hive mind.
@@ -72,9 +80,16 @@ These aren't up for debate. They're the foundation everything else builds on:
 These need exploration, not implementation:
 
 1. **DuckLake sync strategy.** How often? On write? On heartbeat? Batch? Real-time?
+   - *My leaning:* Heartbeat-based. Each agent syncs when it checks in (every 5-15 minutes depending on activity). Real-time is overkill for knowledge graph updates.
+
 2. **Conflict resolution.** What happens when two agents write the same L2 edge simultaneously?
-3. **Confidence decay.** Should L4 edges lose confidence over time? How much, how fast?
+   - *My leaning:* L2 edges are shared — last-write-wins with attribution. L3/L4 edges are agent-owned — no conflict possible. Challenge semantics handle disagreements.
+
+3. **Confidence decay.** Should L4 edges lose confidence over time?
+   - *My leaning:* Yes. L4 (prospect) predictions should decay. Default half-life of 30 days. The decay function should be configurable. Predictions that don't decay are noise.
+
 4. **Observation aggregation.** When three agents observe the same anomaly, is that one observation or three?
+   - *My leaning:* Three observations, linked to the same node. Each agent's observation preserves their attribution and confidence. The graph accumulates, not collapses. Downstream consumers choose how to aggregate.
 
 ## How to Contribute
 

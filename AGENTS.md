@@ -5,21 +5,18 @@
 ## Quick Start
 
 ```bash
-# Install (Python 3.11+)
+# Install (Python 3.12+)
 pip install -e ".[dev]"
 
 # Run tests
 python -m pytest tests/ -v
 
-# Lint
-python -m ruff check src/ tests/
-
-# Type check
-python -m mypy src/
-
 # Run CLI
+ohm graph schema
+ohm graph layers
+
+# Or via module
 python -m ohm.cli graph schema
-python -m ohm.cli graph layers
 ```
 
 ## Project Architecture
@@ -91,14 +88,14 @@ bd create "title" -t feature -p 0 --parent <epic-id>  # Create child issue
 ```
 
 ### Backlog Structure
-7 epics track the implementation phases:
-- **OHM-346**: Phase 0 — Foundation (daemon, schema, CLI, Quack, CTEs)
-- **OHM-cxy**: Phase 1 — Core Operations (write, neighborhood, query, challenge, boundaries)
-- **OHM-5zg**: Phase 2 — Change Feed + Awareness (listen, state, DuckLake, cache, snapshot, diff)
-- **OHM-kjb**: Phase 3 — Agent Integration (Métis, Clio, Hephaestus, Socrates, Kuzu migration, marimo)
-- **OHM-16s**: Phase 4 — Advanced Queries (impact, path, materialized views, stats)
-- **OHM-ikd**: Phase 5 — TOPO Instantiation (TOPO schema, CLI, shared daemon)
-- **OHM-dn1**: Cross-Cutting (testing, CI/CD, error handling, security, docs, benchmarks)
+Active epics (use `bd list` for current state):
+- **OHM-y2i**: P0 — Production Daemon (auth, Quack, error handling, systemd)
+- **OHM-xgm**: P1 — DuckLake + Time Travel (shared backend, snapshot, diff, heartbeat sync)
+- **OHM-a35**: P1 — Agent Integration (Métis, Clio, Hephaestus, Socrates, agent config)
+- **OHM-3w1**: P2 — TOPO Instantiation (industrial schema, CLI, shared daemon)
+- **OHM-l5k**: P1 — CI/CD pipeline
+- **OHM-xj4**: P1 — marimo-pair integration
+- **OHM-dy9**: P2 — Performance benchmarks
 
 Issues tagged with **PM input needed** are blocked on product decisions. Issues without that tag are actionable now.
 
@@ -144,8 +141,8 @@ Issues tagged with **PM input needed** are blocked on product decisions. Issues 
 1. **DuckDB doesn't support `REFERENCES` constraints.** Don't add foreign keys to DDL — enforce in application code
 2. **DuckDB `fetchall()` returns tuples, not dicts.** Always use `_rows_to_dicts()` from queries module
 3. **Recursive CTEs can't reference themselves in subqueries.** Keep CTE logic simple — avoid `NOT EXISTS (SELECT FROM cte)` patterns
-4. **`bd sync` was removed in v1.0.4.** Use `bd export -o .beads/issues.jsonl` to sync state to git
-5. **`bd doctor` is limited in embedded mode.** Use `bd info` and `bd list` for health checks
+4. **`bd sync` works fine** — it exports issues to `.beads/issues.jsonl` and is git-tracked
+5. **Use `bd doctor`** to diagnose daemon issues; `bd list` and `bd show` for status
 6. **The `pyproject.toml` was converted from pixi format to PEP 621.** Don't revert to pixi-style `[package]`/`[dependencies]` sections
 
 
