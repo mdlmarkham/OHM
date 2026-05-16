@@ -15,7 +15,7 @@ from ohm.server import OhmHandler
 from ohm.store import OhmStore
 
 
-def _start_test_server(store, tokens=None, roles=None):
+def _start_test_server(store, tokens=None, roles=None, no_auth=False):
     """Start a test HTTP server on a random port and return (port, thread)."""
     import socketserver
 
@@ -23,6 +23,7 @@ def _start_test_server(store, tokens=None, roles=None):
     OhmHandler.config = {"host": "127.0.0.1", "port": 0}
     OhmHandler.tokens = tokens or {}
     OhmHandler.roles = roles or {}
+    OhmHandler.no_auth = no_auth
 
     # Use TCPServer to get a random port
     server = socketserver.TCPServer(
@@ -60,10 +61,10 @@ def _request(method, port, path, body=None, headers=None):
 
 @pytest.fixture
 def test_server(tmp_path):
-    """Start a test server with a temp database."""
+    """Start a test server with a temp database (no-auth dev mode)."""
     db_path = str(tmp_path / "test_server.duckdb")
     store = OhmStore(db_path=db_path, agent_name="test_agent")
-    port, server, thread = _start_test_server(store)
+    port, server, thread = _start_test_server(store, no_auth=True)
     yield port, store
     server.shutdown()
     thread.join(timeout=2)

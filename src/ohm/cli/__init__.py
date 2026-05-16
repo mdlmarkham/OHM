@@ -451,7 +451,7 @@ def _handle_query(args: argparse.Namespace) -> None:
 
             where = " AND ".join(conditions) if conditions else "1=1"
             result = conn.execute(
-                f"SELECT * FROM ohm_edges WHERE {where} ORDER BY created_at DESC LIMIT 100",
+                "SELECT * FROM ohm_edges WHERE " + where + " ORDER BY created_at DESC LIMIT 100",
                 params,
             )
             from ohm.queries import _rows_to_dicts
@@ -745,7 +745,7 @@ def _handle_update(args: argparse.Namespace) -> None:
         params.append(args.edge_id)
 
         conn.execute(
-            f"UPDATE ohm_edges SET {', '.join(updates)} WHERE id = ?",
+            "UPDATE ohm_edges SET " + ", ".join(updates) + " WHERE id = ?",
             params,
         )
         if args.format == "json":

@@ -95,6 +95,7 @@ class OhmHandler(BaseHTTPRequestHandler):
     config: dict = {}
     tokens: dict = {}  # token -> agent_name
     roles: dict = {}    # agent_name -> role (read-write, read-only)
+    no_auth: bool = False  # --no-auth flag: bypass all auth (dev mode)
 
     def log_message(self, format, *args):
         """Structured request logging with correlation ID."""
@@ -206,21 +207,24 @@ class OhmHandler(BaseHTTPRequestHandler):
             )
 
     def _do_GET(self):
-        """Handle GET requests — queries."""
+        """Handle GET requests — queries.
+
+        /health and /ready are always open (infrastructure endpoints).
+        Other GET endpoints: open when no tokens or --no-auth; require auth
+        when tokens are configured.
+        """
         from urllib.parse import urlparse, parse_qs
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
         qs = parse_qs(parsed.query)
 
-        agent = self._authenticate()
-        if agent is None and not self.tokens:
-            agent = "ohm"
-
+        # Infrastructure endpoints bypass auth
         if path == "/health":
             self._json_response(200, {
                 "status": "ok",
                 "uptime": round(time.time() - _START_TIME, 1),
             })
+            return
         elif path == "/ready":
             try:
                 self.store.execute("SELECT 1")
@@ -233,7 +237,17 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "status": "not_ready",
                     "database": str(self.store.db_path),
                 })
-        elif path == "/status":
+            return
+
+        # Auth for all other GET endpoints
+        agent = self._authenticate()
+        if agent is None:
+            if self.no_auth or not self.tokens:
+                agent = "ohm"
+            else:
+                raise AuthenticationError("Authentication required — provide Bearer token")
+
+        if path == "/status":
             status = self.store.status()
             status["uptime"] = round(time.time() - _START_TIME, 1)
             status["version"] = "0.2.0"
@@ -317,12 +331,16 @@ class OhmHandler(BaseHTTPRequestHandler):
             self._json_response(404, {"error": f"Unknown endpoint: {path}"})
 
     def _do_POST(self):
-        """Handle POST requests — writes. Requires auth + write access."""
-        agent = self._authenticate()
-        if agent is None:
-            if not self.tokens:
-                agent = "ohm"  # Dev mode: no tokens configured
-            else:
+        """Handle POST requests — writes. Requires auth + write access.
+
+        Fail-closed by default: writes are denied unless a valid token is
+        provided. Use --no-auth or OHM_NO_AUTH=1 for dev mode.
+        """
+        if self.no_auth:
+            agent = self._authenticate() or "ohm"
+        else:
+            agent = self._authenticate()
+            if agent is None:
                 raise AuthenticationError("Authentication required — provide Bearer token")
         self._check_write_access(agent)
 
@@ -410,6 +428,7 @@ def run_server(config: dict, store: OhmStore):
     OhmHandler.config = config
     OhmHandler.tokens = config.get("tokens", {})
     OhmHandler.roles = config.get("roles", {})
+    OhmHandler.no_auth = config.get("no_auth", False)
 
     server = HTTPServer((config["host"], config["port"]), OhmHandler)
     print(f"OHM daemon listening on {config['host']}:{config['port']}", file=sys.stderr)
@@ -434,6 +453,7 @@ def main():
     parser.add_argument("--db", default=None, help="Path to DuckDB file")
     parser.add_argument("--config", default=None, help="Path to config file")
     parser.add_argument("--init-token", default=None, help="Create a token for an agent (agent_name)")
+    parser.add_argument("--no-auth", action="store_true", help="Disable authentication (dev mode)")
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -445,6 +465,8 @@ def main():
         config["port"] = args.port
     if args.db:
         config["db_path"] = args.db
+    if args.no_auth or os.environ.get("OHM_NO_AUTH", "").lower() in ("1", "true", "yes"):
+        config["no_auth"] = True
 
     # Handle token generation
     if args.init_token:

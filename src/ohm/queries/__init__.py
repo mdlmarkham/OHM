@@ -50,7 +50,6 @@ def query_neighborhood(
     depth = validate_depth(depth)
     if layer:
         layer = validate_layer(layer)
-    layer_where = f"AND e.layer = '{layer}'" if layer else ""
 
     # Build direction join condition
     if direction == "outgoing":
@@ -60,17 +59,24 @@ def query_neighborhood(
     else:
         join_on = "(e.from_node = v.node OR e.to_node = v.node)"
 
+    params: list = [node_id, depth]
+    layer_clause = ""
+    if layer:
+        layer_clause = "AND e.layer = ?"
+        params.append(layer)
+        params.append(layer)  # layer_clause appears twice in the query
+
     query = f"""
         WITH RECURSIVE visited AS (
-            SELECT '{node_id}' AS node, 0 AS hop
+            SELECT ? AS node, 0 AS hop
             UNION
             SELECT DISTINCT
                 CASE WHEN e.from_node = v.node THEN e.to_node ELSE e.from_node END AS node,
                 v.hop + 1 AS hop
             FROM visited v
             JOIN ohm_edges e ON {join_on}
-            WHERE v.hop < {depth}
-              {layer_where}
+            WHERE v.hop < ?
+              {layer_clause}
         )
         SELECT DISTINCT
             e.id AS edge_id,
@@ -86,11 +92,11 @@ def query_neighborhood(
             v.hop
         FROM visited v
         JOIN ohm_edges e ON (e.from_node = v.node OR e.to_node = v.node)
-        {layer_where}
+        {layer_clause}
         ORDER BY v.hop, e.edge_type
     """
 
-    result = conn.execute(query)
+    result = conn.execute(query, params)
     return _rows_to_dicts(result)
 
 
@@ -116,7 +122,13 @@ def query_path(
     max_depth = validate_depth(max_depth, max_depth=50)
     if layer:
         layer = validate_layer(layer)
-    layer_where = f"AND e.layer = '{layer}'" if layer else ""
+
+    params: list = [from_node, from_node, max_depth, to_node, to_node]
+    layer_clause = ""
+    if layer:
+        layer_clause = "AND e.layer = ?"
+        params.insert(2, layer)   # after the two from_node params, before max_depth
+        params.append(layer)      # layer_clause appears twice in the query
 
     query = f"""
         WITH RECURSIVE path_cte AS (
@@ -129,8 +141,8 @@ def query_path(
                 e.confidence,
                 1 AS depth
             FROM ohm_edges e
-            WHERE (e.from_node = '{from_node}' OR e.to_node = '{from_node}')
-              {layer_where}
+            WHERE (e.from_node = ? OR e.to_node = ?)
+              {layer_clause}
 
             UNION ALL
 
@@ -144,18 +156,18 @@ def query_path(
                 p.depth + 1
             FROM path_cte p
             JOIN ohm_edges e ON e.from_node = p.to_node
-            WHERE p.depth < {max_depth}
-              AND p.to_node != '{to_node}'
-              {layer_where}
+            WHERE p.depth < ?
+              AND p.to_node != ?
+              {layer_clause}
         )
         SELECT edge_id, from_node, to_node, layer, edge_type, confidence, depth
         FROM path_cte
-        WHERE to_node = '{to_node}'
+        WHERE to_node = ?
         ORDER BY depth
         LIMIT 1
     """
 
-    result = conn.execute(query)
+    result = conn.execute(query, params)
     return _rows_to_dicts(result)
 
 
@@ -176,7 +188,7 @@ def query_impact(
 
     node_id = validate_identifier(node_id, name="node_id")
     depth = validate_depth(depth)
-    query = f"""
+    query = """
         WITH RECURSIVE impact_cte AS (
             SELECT
                 e.id AS edge_id,
@@ -187,7 +199,7 @@ def query_impact(
                 e.confidence,
                 1 AS depth
             FROM ohm_edges e
-            WHERE e.from_node = '{node_id}'
+            WHERE e.from_node = ?
               AND e.layer IN ('L2', 'L3')
 
             UNION ALL
@@ -202,7 +214,7 @@ def query_impact(
                 i.depth + 1
             FROM impact_cte i
             JOIN ohm_edges e ON e.from_node = i.to_node
-            WHERE i.depth < {depth}
+            WHERE i.depth < ?
               AND e.layer IN ('L2', 'L3')
         )
         SELECT edge_id, from_node, to_node, layer, edge_type, confidence, depth
@@ -210,7 +222,7 @@ def query_impact(
         ORDER BY depth, edge_type
     """
 
-    result = conn.execute(query)
+    result = conn.execute(query, [node_id, depth])
     return _rows_to_dicts(result)
 
 
@@ -228,7 +240,7 @@ def query_confidence(
     from ohm.validation import validate_identifier
 
     edge_id = validate_identifier(edge_id, name="edge_id")
-    query = f"""
+    query = """
         SELECT
             e.id,
             e.from_node,
@@ -243,9 +255,9 @@ def query_confidence(
             e.updated_at,
             e.updated_by
         FROM ohm_edges e
-        WHERE e.id = '{edge_id}'
+        WHERE e.id = ?
     """
-    original = conn.execute(query).fetchone()
+    original = conn.execute(query, [edge_id]).fetchone()
     if original is None:
         return {"original": None, "challenges": [], "supports": [], "refinements": []}
 
@@ -253,14 +265,14 @@ def query_confidence(
     original_dict = dict(zip(columns, original))
 
     # Find all challenge/support/refine edges referencing this edge
-    refs_query = f"""
+    refs_query = """
         SELECT
             id, edge_type, confidence, condition, created_by, created_at
         FROM ohm_edges
-        WHERE challenge_of = '{edge_id}'
+        WHERE challenge_of = ?
         ORDER BY created_at DESC
     """
-    refs_result = conn.execute(refs_query)
+    refs_result = conn.execute(refs_query, [edge_id])
     ref_columns = [desc[0] for desc in conn.description]
     refs = [dict(zip(ref_columns, row)) for row in refs_result.fetchall()]
 
@@ -306,13 +318,16 @@ def query_change_feed(
     """
     from ohm.validation import validate_identifier, validate_timestamp
 
-    conditions = []
+    conditions: list[str] = []
+    params: list = []
     if since and since != "last-check":
         since = validate_timestamp(since)
-        conditions.append(f"occurred_at >= '{since}'::TIMESTAMP")
+        conditions.append("occurred_at >= ?::TIMESTAMP")
+        params.append(since)
     if agent_name:
         agent_name = validate_identifier(agent_name, name="agent_name")
-        conditions.append(f"agent_name = '{agent_name}'")
+        conditions.append("agent_name = ?")
+        params.append(agent_name)
 
     where_clause = ""
     if conditions:
@@ -325,10 +340,11 @@ def query_change_feed(
         FROM ohm_change_feed
         {where_clause}
         ORDER BY occurred_at DESC
-        LIMIT {limit}
+        LIMIT ?
     """
+    params.append(limit)
 
-    result = conn.execute(query)
+    result = conn.execute(query, params)
     return _rows_to_dicts(result)
 
 
@@ -351,11 +367,11 @@ def query_agent_state(
 
     if agent_name:
         agent_name = validate_identifier(agent_name, name="agent_name")
-        query = f"SELECT * FROM ohm_agent_state WHERE agent_name = '{agent_name}'"
+        query = "SELECT * FROM ohm_agent_state WHERE agent_name = ?"
+        result = conn.execute(query, [agent_name])
     else:
         query = "SELECT * FROM ohm_agent_state"
-
-    result = conn.execute(query)
+        result = conn.execute(query)
     return _rows_to_dicts(result)
 
 
@@ -598,7 +614,7 @@ def set_agent_state(
             params.append(goals)
         params.append(agent_name)
         conn.execute(
-            f"UPDATE ohm_agent_state SET {', '.join(set_parts)} WHERE agent_name = ?",
+            "UPDATE ohm_agent_state SET " + ", ".join(set_parts) + " WHERE agent_name = ?",
             params,
         )
     else:
