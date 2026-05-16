@@ -10,27 +10,20 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any
 
 from .schema import (
     LAYER_EDGE_TYPES,
     VALID_LAYERS,
     VALID_NODE_TYPES,
-    VALID_OBSERVATION_TYPES,
-    VALID_VISIBILITIES,
     validate_edge_type,
     validate_node_type,
 )
 from .boundary import (
     enforce_challenge_boundary,
     enforce_support_boundary,
-    enforce_write_boundary,
 )
 from .exceptions import (
     EdgeNotFoundError,
-    NodeNotFoundError,
-    PermissionDeniedError,
-    ValidationError,
 )
 from . import graph as _graph
 

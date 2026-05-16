@@ -10,12 +10,22 @@ import json
 import os
 import signal
 import sys
+import time
+import uuid
 from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Optional
 
-from .schema import EDGE_TYPES, NODE_TYPES, LAYER_DESCRIPTIONS
+from .exceptions import (
+    AuthenticationError,
+    EdgeNotFoundError,
+    NodeNotFoundError,
+    OHMError,
+    PermissionDeniedError,
+    ValidationError,
+)
+from .schema import EDGE_TYPES, LAYER_DESCRIPTIONS, NODE_TYPES
 from .store import OhmStore
 
 
@@ -31,6 +41,8 @@ DEFAULT_CONFIG = {
     },
     "log_level": "INFO",
 }
+
+_START_TIME = time.time()
 
 
 def load_config(config_path: Optional[str] = None) -> dict:
@@ -57,6 +69,23 @@ def load_config(config_path: Optional[str] = None) -> dict:
     return config
 
 
+# ── Error Mapping ──────────────────────────────────────────
+
+def _map_exception_to_http(exc: Exception) -> tuple[int, str]:
+    """Map OHMError subclasses to HTTP status codes."""
+    if isinstance(exc, (NodeNotFoundError, EdgeNotFoundError)):
+        return 404, "not_found"
+    if isinstance(exc, PermissionDeniedError):
+        return 403, "permission_denied"
+    if isinstance(exc, AuthenticationError):
+        return 401, "authentication_error"
+    if isinstance(exc, ValidationError):
+        return 400, "validation_error"
+    if isinstance(exc, OHMError):
+        return 500, "internal_error"
+    return 500, "internal_error"
+
+
 # ── HTTP Handler ───────────────────────────────────────────
 
 class OhmHandler(BaseHTTPRequestHandler):
@@ -67,9 +96,12 @@ class OhmHandler(BaseHTTPRequestHandler):
     tokens: dict = {}  # token -> agent_name
 
     def log_message(self, format, *args):
-        """Override to use stderr for logging."""
+        """Structured request logging with correlation ID."""
+        corr_id = getattr(self, "_correlation_id", "-")
         timestamp = datetime.now(timezone.utc).isoformat()
-        sys.stderr.write(f"[{timestamp}] {format % args}\n")
+        sys.stderr.write(
+            f"[{timestamp}] [{corr_id}] {format % args}\n"
+        )
         sys.stderr.flush()
 
     def _authenticate(self) -> Optional[str]:
@@ -97,6 +129,23 @@ class OhmHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _error_response(self, exc: Exception):
+        """Send a structured error response with correlation ID."""
+        code, error_type = _map_exception_to_http(exc)
+        corr_id = getattr(self, "_correlation_id", str(uuid.uuid4()))
+        body = {
+            "error": error_type,
+            "message": str(exc),
+            "correlation_id": corr_id,
+            "status": code,
+        }
+        self._json_response(code, body)
+
+    def send_response(self, code, message=None):
+        """Track response code for logging."""
+        self._response_code = code
+        super().send_response(code, message)
+
     def _read_body(self):
         """Read and parse JSON request body."""
         length = int(self.headers.get("Content-Length", 0))
@@ -106,6 +155,40 @@ class OhmHandler(BaseHTTPRequestHandler):
         return json.loads(body)
 
     def do_GET(self):
+        """Handle GET requests with error mapping and correlation IDs."""
+        self._correlation_id = str(uuid.uuid4())
+        start = time.time()
+        try:
+            self._do_GET()
+        except OHMError as e:
+            self._error_response(e)
+        except Exception as e:
+            self._error_response(OHMError(str(e)))
+        finally:
+            elapsed = (time.time() - start) * 1000
+            code = getattr(self, "_response_code", 0)
+            self.log_message(
+                "GET %s → %s (%.1fms)", self.path, code, elapsed,
+            )
+
+    def do_POST(self):
+        """Handle POST requests with error mapping and correlation IDs."""
+        self._correlation_id = str(uuid.uuid4())
+        start = time.time()
+        try:
+            self._do_POST()
+        except OHMError as e:
+            self._error_response(e)
+        except Exception as e:
+            self._error_response(OHMError(str(e)))
+        finally:
+            elapsed = (time.time() - start) * 1000
+            code = getattr(self, "_response_code", 0)
+            self.log_message(
+                "POST %s → %s (%.1fms)", self.path, code, elapsed,
+            )
+
+    def _do_GET(self):
         """Handle GET requests — queries."""
         from urllib.parse import urlparse, parse_qs
         parsed = urlparse(self.path)
@@ -113,189 +196,193 @@ class OhmHandler(BaseHTTPRequestHandler):
         qs = parse_qs(parsed.query)
 
         agent = self._authenticate()
-        # Public read endpoints don't require auth in single-agent mode
         if agent is None and not self.tokens:
-            agent = "ohm"  # Default agent for unauthenticated access
+            agent = "ohm"
 
-        try:
-            if path == "/status":
-                self._json_response(200, self.store.status())
-            elif path == "/schema":
+        if path == "/health":
+            self._json_response(200, {
+                "status": "ok",
+                "uptime": round(time.time() - _START_TIME, 1),
+            })
+        elif path == "/ready":
+            try:
+                self.store.execute("SELECT 1")
                 self._json_response(200, {
-                    "node_types": NODE_TYPES,
-                    "edge_types": EDGE_TYPES,
-                    "layers": LAYER_DESCRIPTIONS,
+                    "status": "ready",
+                    "database": str(self.store.db_path),
                 })
-            elif path == "/layers":
-                self._json_response(200, LAYER_DESCRIPTIONS)
-            elif path.startswith("/node/"):
-                node_id = path[6:]
-                node = self.store.get_node(node_id)
-                if node:
-                    self._json_response(200, node)
-                else:
-                    self._json_response(404, {"error": f"Node {node_id} not found"})
-            elif path.startswith("/edge/"):
-                edge_id = path[6:]
-                edge = self.store.get_edge(edge_id)
-                if edge:
-                    self._json_response(200, edge)
-                else:
-                    self._json_response(404, {"error": f"Edge {edge_id} not found"})
-            elif path.startswith("/neighborhood/"):
-                node_id = path[14:]
-                depth = int(qs.get("depth", [3])[0])
-                layer = qs.get("layer", [None])[0]
-                from .graph import build_neighborhood_query
-                sql, params = build_neighborhood_query(node_id, depth, layer)
-                results = self.store.execute(sql, params)
-                self._json_response(200, results)
-            elif path.startswith("/path/"):
-                parts = path[6:].split("/")
-                if len(parts) >= 2:
-                    from .graph import build_path_query
-                    sql, params = build_path_query(parts[0], parts[1])
-                    results = self.store.execute(sql, params)
-                    self._json_response(200, results)
-                else:
-                    self._json_response(400, {"error": "Path requires /path/from/to"})
-            elif path.startswith("/impact/"):
-                node_id = path[8:]
-                depth = int(qs.get("depth", [5])[0])
-                from .graph import build_impact_query
-                sql, params = build_impact_query(node_id, depth)
-                results = self.store.execute(sql, params)
-                self._json_response(200, results)
-            elif path.startswith("/confidence/"):
-                edge_id = path[12:]
-                from .graph import build_confidence_audit_query
-                sql, params = build_confidence_audit_query(edge_id)
-                results = self.store.execute(sql, params)
-                self._json_response(200, results)
-            elif path.startswith("/agent/"):
-                agent_name = path[7:]
-                state = self.store.get_agent_state(agent_name)
-                if state:
-                    self._json_response(200, state)
-                else:
-                    self._json_response(404, {"error": f"Agent {agent_name} not found"})
-            elif path == "/agents":
-                results = self.store.execute("SELECT * FROM ohm_agent_state ORDER BY agent_name")
-                self._json_response(200, results)
-            elif path == "/listen":
-                since = qs.get("since", [None])[0]
-                agent_name = qs.get("agent", [agent or "ohm"])[0]
-                if not since:
-                    state = self.store.get_agent_state(agent_name)
-                    if state and state.get("last_sync"):
-                        since = state["last_sync"]
-                    else:
-                        self._json_response(400, {"error": "No last-check timestamp. Use ?since=ISO_TIMESTAMP"})
-                        return
-                from .graph import build_change_feed_query
-                sql, params = build_change_feed_query(since, agent_name=agent_name)
+            except Exception:
+                self._json_response(503, {
+                    "status": "not_ready",
+                    "database": str(self.store.db_path),
+                })
+        elif path == "/status":
+            status = self.store.status()
+            status["uptime"] = round(time.time() - _START_TIME, 1)
+            status["version"] = "0.2.0"
+            self._json_response(200, status)
+        elif path == "/schema":
+            self._json_response(200, {
+                "node_types": NODE_TYPES,
+                "edge_types": EDGE_TYPES,
+                "layers": LAYER_DESCRIPTIONS,
+            })
+        elif path == "/layers":
+            self._json_response(200, LAYER_DESCRIPTIONS)
+        elif path.startswith("/node/"):
+            node_id = path[6:]
+            node = self.store.get_node(node_id)
+            if node:
+                self._json_response(200, node)
+            else:
+                raise NodeNotFoundError(f"Node {node_id} not found")
+        elif path.startswith("/edge/"):
+            edge_id = path[6:]
+            edge = self.store.get_edge(edge_id)
+            if edge:
+                self._json_response(200, edge)
+            else:
+                raise EdgeNotFoundError(f"Edge {edge_id} not found")
+        elif path.startswith("/neighborhood/"):
+            node_id = path[14:]
+            depth = int(qs.get("depth", [3])[0])
+            layer = qs.get("layer", [None])[0]
+            from .graph import build_neighborhood_query
+            sql, params = build_neighborhood_query(node_id, depth, layer)
+            results = self.store.execute(sql, params)
+            self._json_response(200, results)
+        elif path.startswith("/path/"):
+            parts = path[6:].split("/")
+            if len(parts) >= 2:
+                from .graph import build_path_query
+                sql, params = build_path_query(parts[0], parts[1])
                 results = self.store.execute(sql, params)
                 self._json_response(200, results)
             else:
-                self._json_response(404, {"error": f"Unknown endpoint: {path}"})
+                raise ValidationError("Path requires /path/from/to")
+        elif path.startswith("/impact/"):
+            node_id = path[8:]
+            depth = int(qs.get("depth", [5])[0])
+            from .graph import build_impact_query
+            sql, params = build_impact_query(node_id, depth)
+            results = self.store.execute(sql, params)
+            self._json_response(200, results)
+        elif path.startswith("/confidence/"):
+            edge_id = path[12:]
+            from .graph import build_confidence_audit_query
+            sql, params = build_confidence_audit_query(edge_id)
+            results = self.store.execute(sql, params)
+            self._json_response(200, results)
+        elif path.startswith("/agent/"):
+            agent_name = path[7:]
+            state = self.store.get_agent_state(agent_name)
+            if state:
+                self._json_response(200, state)
+            else:
+                self._json_response(404, {"error": f"Agent {agent_name} not found"})
+        elif path == "/agents":
+            results = self.store.execute("SELECT * FROM ohm_agent_state ORDER BY agent_name")
+            self._json_response(200, results)
+        elif path == "/listen":
+            since = qs.get("since", [None])[0]
+            agent_name = qs.get("agent", [agent or "ohm"])[0]
+            if not since:
+                state = self.store.get_agent_state(agent_name)
+                if state and state.get("last_sync"):
+                    since = state["last_sync"]
+                else:
+                    raise ValidationError("No last-check timestamp. Use ?since=ISO_TIMESTAMP")
+            from .graph import build_change_feed_query
+            sql, params = build_change_feed_query(since, agent_name=agent_name)
+            results = self.store.execute(sql, params)
+            self._json_response(200, results)
+        else:
+            self._json_response(404, {"error": f"Unknown endpoint: {path}"})
 
-        except Exception as e:
-            self._json_response(500, {"error": str(e)})
-
-    def do_POST(self):
+    def _do_POST(self):
         """Handle POST requests — writes."""
         agent = self._authenticate()
         if agent is None and self.tokens:
-            self._json_response(403, {"error": "Authentication required"})
-            return
+            raise AuthenticationError("Authentication required")
         if agent is None:
             agent = "ohm"
 
         from urllib.parse import urlparse
         path = urlparse(self.path).path.rstrip("/")
+        body = self._read_body()
 
-        try:
-            body = self._read_body()
+        if path == "/node":
+            result = self.store.write_node(
+                id=body["id"],
+                label=body["label"],
+                type=body.get("type", "concept"),
+                content=body.get("content"),
+                confidence=body.get("confidence", 1.0),
+                visibility=body.get("visibility", "team"),
+                provenance=body.get("provenance"),
+                tags=body.get("tags"),
+                metadata=body.get("metadata"),
+            )
+            self._json_response(201, result)
 
-            if path == "/node":
-                result = self.store.write_node(
-                    id=body["id"],
-                    label=body["label"],
-                    type=body.get("type", "concept"),
-                    content=body.get("content"),
-                    confidence=body.get("confidence", 1.0),
-                    visibility=body.get("visibility", "team"),
-                    provenance=body.get("provenance"),
-                    tags=body.get("tags"),
-                    metadata=body.get("metadata"),
-                )
+        elif path == "/edge":
+            result = self.store.write_edge(
+                from_node=body["from"],
+                to_node=body["to"],
+                edge_type=body["type"],
+                layer=body.get("layer", "L3"),
+                confidence=body.get("confidence"),
+                condition=body.get("condition"),
+                provenance=body.get("provenance"),
+                challenge_of=body.get("challenge_of"),
+                challenge_type=body.get("challenge_type"),
+            )
+            self._json_response(201, result)
+
+        elif path.startswith("/challenge/"):
+            edge_id = path[11:]
+            reason = body.get("reason", "")
+            confidence = body.get("confidence", 0.5)
+            challenge_type = body.get("challenge_type", "CHALLENGED_BY")
+            result = self.store.challenge_edge(edge_id, reason, confidence, challenge_type)
+            if result:
                 self._json_response(201, result)
-
-            elif path == "/edge":
-                result = self.store.write_edge(
-                    from_node=body["from"],
-                    to_node=body["to"],
-                    edge_type=body["type"],
-                    layer=body.get("layer", "L3"),
-                    confidence=body.get("confidence"),
-                    condition=body.get("condition"),
-                    provenance=body.get("provenance"),
-                    challenge_of=body.get("challenge_of"),
-                    challenge_type=body.get("challenge_type"),
-                )
-                self._json_response(201, result)
-
-            elif path.startswith("/challenge/"):
-                edge_id = path[11:]
-                reason = body.get("reason", "")
-                confidence = body.get("confidence", 0.5)
-                challenge_type = body.get("challenge_type", "CHALLENGED_BY")
-                result = self.store.challenge_edge(edge_id, reason, confidence, challenge_type)
-                if result:
-                    self._json_response(201, result)
-                else:
-                    self._json_response(404, {"error": f"Edge {edge_id} not found"})
-
-            elif path.startswith("/support/"):
-                edge_id = path[9:]
-                reason = body.get("reason", "")
-                confidence = body.get("confidence", 0.8)
-                result = self.store.challenge_edge(edge_id, reason, confidence, "SUPPORTS")
-                if result:
-                    self._json_response(201, result)
-                else:
-                    self._json_response(404, {"error": f"Edge {edge_id} not found"})
-
-            elif path.startswith("/observe/"):
-                node_id = path[9:]
-                result = self.store.write_observation(
-                    node_id=node_id,
-                    type=body.get("type", "measurement"),
-                    value=body.get("value"),
-                    baseline=body.get("baseline"),
-                    sigma=body.get("sigma"),
-                    source=body.get("source"),
-                )
-                self._json_response(201, result)
-
-            elif path == "/state":
-                result = self.store.update_agent_state(
-                    current_focus=body.get("focus"),
-                    active_patterns=body.get("patterns"),
-                    available_services=body.get("services"),
-                    session_id=body.get("session_id"),
-                )
-                self._json_response(200, result)
-
             else:
-                self._json_response(404, {"error": f"Unknown endpoint: {path}"})
+                raise EdgeNotFoundError(f"Edge {edge_id} not found")
 
-        except PermissionError as e:
-            self._json_response(403, {"error": str(e)})
-        except KeyError as e:
-            self._json_response(400, {"error": f"Missing required field: {e}"})
-        except Exception as e:
-            self._json_response(500, {"error": str(e)})
+        elif path.startswith("/support/"):
+            edge_id = path[9:]
+            reason = body.get("reason", "")
+            confidence = body.get("confidence", 0.8)
+            result = self.store.challenge_edge(edge_id, reason, confidence, "SUPPORTS")
+            if result:
+                self._json_response(201, result)
+            else:
+                raise EdgeNotFoundError(f"Edge {edge_id} not found")
+
+        elif path.startswith("/observe/"):
+            node_id = path[9:]
+            result = self.store.write_observation(
+                node_id=node_id,
+                type=body.get("type", "measurement"),
+                value=body.get("value"),
+                baseline=body.get("baseline"),
+                sigma=body.get("sigma"),
+                source=body.get("source"),
+            )
+            self._json_response(201, result)
+
+        elif path == "/state":
+            result = self.store.update_agent_state(
+                current_focus=body.get("focus"),
+                active_patterns=body.get("patterns"),
+                available_services=body.get("services"),
+                session_id=body.get("session_id"),
+            )
+            self._json_response(200, result)
+
+        else:
+            self._json_response(404, {"error": f"Unknown endpoint: {path}"})
 
 
 def run_server(config: dict, store: OhmStore):
