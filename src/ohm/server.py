@@ -262,6 +262,8 @@ class OhmHandler(BaseHTTPRequestHandler):
             self._json_response(200, LAYER_DESCRIPTIONS)
         elif path.startswith("/node/"):
             node_id = path[6:]
+            from .validation import validate_identifier
+            node_id = validate_identifier(node_id, name="node_id")
             node = self.store.get_node(node_id)
             if node:
                 self._json_response(200, node)
@@ -269,6 +271,8 @@ class OhmHandler(BaseHTTPRequestHandler):
                 raise NodeNotFoundError(f"Node {node_id} not found")
         elif path.startswith("/edge/"):
             edge_id = path[6:]
+            from .validation import validate_identifier
+            edge_id = validate_identifier(edge_id, name="edge_id")
             edge = self.store.get_edge(edge_id)
             if edge:
                 self._json_response(200, edge)
@@ -276,6 +280,8 @@ class OhmHandler(BaseHTTPRequestHandler):
                 raise EdgeNotFoundError(f"Edge {edge_id} not found")
         elif path.startswith("/neighborhood/"):
             node_id = path[14:]
+            from .validation import validate_identifier
+            node_id = validate_identifier(node_id, name="node_id")
             depth = int(qs.get("depth", [3])[0])
             layer = qs.get("layer", [None])[0]
             from .graph import build_neighborhood_query
@@ -285,14 +291,19 @@ class OhmHandler(BaseHTTPRequestHandler):
         elif path.startswith("/path/"):
             parts = path[6:].split("/")
             if len(parts) >= 2:
+                from .validation import validate_identifier
+                from_node = validate_identifier(parts[0], name="from_node")
+                to_node = validate_identifier(parts[1], name="to_node")
                 from .graph import build_path_query
-                sql, params = build_path_query(parts[0], parts[1])
+                sql, params = build_path_query(from_node, to_node)
                 results = self.store.execute(sql, params)
                 self._json_response(200, results)
             else:
                 raise ValidationError("Path requires /path/from/to")
         elif path.startswith("/impact/"):
             node_id = path[8:]
+            from .validation import validate_identifier
+            node_id = validate_identifier(node_id, name="node_id")
             depth = int(qs.get("depth", [5])[0])
             from .graph import build_impact_query
             sql, params = build_impact_query(node_id, depth)
@@ -300,12 +311,16 @@ class OhmHandler(BaseHTTPRequestHandler):
             self._json_response(200, results)
         elif path.startswith("/confidence/"):
             edge_id = path[12:]
+            from .validation import validate_identifier
+            edge_id = validate_identifier(edge_id, name="edge_id")
             from .graph import build_confidence_audit_query
             sql, params = build_confidence_audit_query(edge_id)
             results = self.store.execute(sql, params)
             self._json_response(200, results)
         elif path.startswith("/agent/"):
             agent_name = path[7:]
+            from .validation import validate_identifier
+            agent_name = validate_identifier(agent_name, name="agent_name")
             state = self.store.get_agent_state(agent_name)
             if state:
                 self._json_response(200, state)
