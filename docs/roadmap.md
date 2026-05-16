@@ -1,52 +1,50 @@
 # OHM Implementation Roadmap
 
-## Phase 0: Foundation (Week 1-2)
+## Phase 0: Foundation ✅ (Complete)
 
-**Goal:** `ohmd` daemon + Quack server + basic schema
+**Goal:** CLI, schema, store, boundary enforcement, graph queries
 
-- [ ] Create `ohmd` daemon (owns DuckDB file, runs Quack server)
-  - systemd unit file
-  - Health check endpoint
-  - Token auth with role-based access per agent
-  - Graceful shutdown with checkpoint
-- [ ] Create OHM schema (nodes, edges, observations, agent_state)
-- [ ] Create `ohm` CLI scaffold
-  - `ohm serve start/stop/status`
-  - `ohm graph schema`
-  - `ohm graph status`
-- [ ] Test Quack concurrent access with multiple agent tokens
-- [ ] Verify recursive CTE queries work through Quack
+- [x] OHM schema (nodes, edges, observations, agent_state, change_log)
+- [x] DuckDB store with all CRUD operations
+- [x] Recursive CTE queries (neighborhood, path, impact, confidence audit)
+- [x] `ohm` CLI: write, neighborhood, path, impact, confidence, challenge, support, observe, listen
+- [x] Agent state: set, show, who-is-working-on
+- [x] Boundary enforcement: no agent can overwrite another agent's edges
+- [x] Challenge edges: create separate, don't modify
+- [x] 33 tests passing (unit + integration + layer model)
+- [x] `ohmd` HTTP server scaffold (GET/POST endpoints, token auth)
 
-**Deliverable:** `ohm serve` runs. `ohm graph status` returns node/edge counts. Multiple agents can connect concurrently.
+**Deliverable:** `ohm graph status` returns node/edge counts. Boundary rules enforced. Challenge edges work.
 
-## Phase 1: Core Operations (Week 3-4)
+## Phase 1: Daemon + Multi-Agent (Week 1-2)
 
-**Goal:** Read and write the graph via CLI
+**Goal:** `ohmd` daemon running with Quack server, multiple agents connecting
 
-- [ ] `ohm graph write` — create nodes and edges with attribution
-- [ ] `ohm graph neighborhood` — bounded-depth traversal via CTE
-- [ ] `ohm graph query` — natural language query (wrap CTE views)
-- [ ] `ohm graph confidence` — provenance and challenge audit
-- [ ] `ohm graph challenge` — create CHALLENGED_BY edges (not overwrite)
-- [ ] `ohm graph support` — create SUPPORTS edges
-- [ ] Boundary enforcement: no agent can overwrite another agent's edges
+- [ ] Production-ready ohmd with proper error handling
+- [ ] Token auth with role-based access per agent
+- [ ] Health check endpoint (`/health`)
+- [ ] Systemd unit file
+- [ ] Configuration file (`~/.ohm/ohmd.json`)
+- [ ] Test concurrent access with multiple agent tokens
+- [ ] Verify recursive CTE queries work through HTTP API
+- [ ] `ohm serve status` properly detects running daemon
 
-**Deliverable:** Agents can create, read, and challenge edges. Boundary rules enforced.
+**Deliverable:** `ohm serve start` runs daemon. Multiple agents connect via tokens. All CLI commands work through daemon.
 
-## Phase 2: Change Feed + Awareness (Week 5-6)
+## Phase 2: DuckLake + Time Travel (Week 3-4)
 
-**Goal:** Agents see what other agents are thinking
+**Goal:** DuckLake shared backend with change feed and time travel
 
-- [ ] `ohm graph listen` — change feed since last check
-- [ ] `ohm state` — set and query agent focus
-- [ ] `ohm state who-is-working-on` — find collaborators by topic
-- [ ] DuckLake integration for time travel and change feed
-- [ ] Local DuckDB cache per agent (sync on heartbeat)
-- [ ] `ohm snapshot` — query graph state at any historical timestamp
+- [ ] DuckLake integration for shared data storage
+- [ ] `ohm snapshot <timestamp>` — query graph state at any historical point
+- [ ] `ohm diff <date1> <date2>` — what changed between timestamps
+- [ ] Change feed with intent (not just data)
+- [ ] Local DuckDB cache sync on heartbeat
+- [ ] Data versioning and cleanup policies
 
-**Deliverable:** Change feed works. Agent state visible. Local caches sync from DuckLake.
+**Deliverable:** Change feed works across agents. Time travel queries return historical state.
 
-## Phase 3: Agent Integration (Week 7-8)
+## Phase 3: Agent Integration (Week 5-6)
 
 **Goal:** Each Olympus agent uses OHM as its knowledge graph
 
@@ -57,29 +55,17 @@
 - [ ] Promote shared graph from Kuzu → DuckLake migration
 - [ ] marimo-pair integration — OHM queries in notebooks via Quack
 
-**Deliverable:** All agents reading/writing via OHM. Kuzu deprecated.
+**Deliverable:** All agents reading/writing via OHM. Kuzu deprecated for knowledge graph.
 
-## Phase 4: Advanced Queries (Week 9-10)
+## Phase 4: Advanced Queries + TOPO (Week 7+)
 
-**Goal:** The full power of L1-L4 traversal
+**Goal:** Full L1-L4 power + TOPO instantiation
 
-- [ ] `ohm graph impact` — downstream impact analysis (FR-2 pattern)
-- [ ] `ohm graph path` — shortest path between two nodes
-- [ ] `ohm diff` — what changed between two timestamps
-- [ ] Materialized views for hot-path queries (impact radius, confidence audit)
 - [ ] `ohm graph stats` — edge counts by layer, confidence distribution, challenge ratio
-
-**Deliverable:** Full L1-L4 query capability. Impact analysis, path finding, temporal diffing.
-
-## Phase 5: TOPO Instantiation (Ongoing)
-
-**Goal:** Apply the same architecture to TOPO (industrial knowledge graph)
-
-- [ ] Create `topo` as a specialized `ohm` instance
-- [ ] TOPO-specific edge types (FEEDS, CAUSES, PREDICTS, etc.)
-- [ ] TOPO-specific node types (equipment, system, area, site)
-- [ ] `topo` CLI with industrial-specific commands
+- [ ] Materialized views for hot-path queries
+- [ ] Confidence decay for L4 (prospective) edges
+- [ ] TOPO-specific CLI with industrial edge/node types
+- [ ] TOPO-specific commands (failure analysis, compliance mapping)
 - [ ] Shared `ohmd`/`topod` daemon codebase
-- [ ] Same DuckDB + Quack + DuckLake stack, different domain
 
-**Deliverable:** `topo` CLI running on same architecture as `ohm`. One pattern, two instantiations.
+**Deliverable:** Full L1-L4 query capability. TOPO running on same architecture. One pattern, two instantiations.

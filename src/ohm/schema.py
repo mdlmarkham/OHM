@@ -1,209 +1,172 @@
-"""OHM database schema — DDL statements and schema management.
+"""
+OHM Schema — SQL DDL for the knowledge graph.
 
-Tables:
-    - ohm_nodes: Graph nodes (ideas, sources, people, concepts, etc.)
-    - ohm_edges: Directed edges between nodes with layer/type/confidence
-    - ohm_observations: Observations attached to nodes or edges
-    - ohm_agent_state: Per-agent focus and configuration
-    - ohm_change_feed: Append-only log of graph mutations
-
-Layer model (L1-L4):
-    L1: Structure — Fully shared, all agents read/write
-    L2: Flow — Shared with attribution
-    L3: Knowledge — Agent-owned, challengeable
-    L4: Prospect — Agent-owned, visible
-    Private: Agent-only, not shared
+All tables are designed for DuckDB. The schema supports:
+- L1 (Structure): fully shared, authoritative
+- L2 (Flow): shared with attribution
+- L3 (Knowledge): agent-owned, challengeable
+- L4 (Prospect): agent-owned, visible
+- Private: agent-only (local DuckDB, not in DuckLake)
 """
 
-from __future__ import annotations
+SCHEMA_SQL = """
+-- ============================================================
+-- OHM Knowledge Graph Schema
+-- ============================================================
 
-import uuid
-from typing import TYPE_CHECKING
+-- Nodes: the entities in the graph
+CREATE TABLE IF NOT EXISTS ohm_nodes (
+    id VARCHAR PRIMARY KEY,
+    label VARCHAR NOT NULL,
+    type VARCHAR NOT NULL,  -- 'idea','source','person','concept','pattern','event','institution','technology','equipment','system','area','site'
+    content TEXT,
+    created_by VARCHAR NOT NULL,       -- agent name
+    created_at TIMESTAMP DEFAULT now(),
+    updated_at TIMESTAMP DEFAULT now(),
+    updated_by VARCHAR,
+    confidence FLOAT DEFAULT 1.0,
+    visibility VARCHAR DEFAULT 'team',  -- 'private','team','public'
+    provenance VARCHAR,                 -- 'conversation','research','bookmark','observation','feed-ingest'
+    tags JSON,                          -- JSON array of tags for thematic discovery
+    metadata JSON                       -- extensible key-value pairs
+);
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
+-- Edges: the connections between nodes
+CREATE TABLE IF NOT EXISTS ohm_edges (
+    id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+    from_node VARCHAR NOT NULL REFERENCES ohm_nodes(id),
+    to_node VARCHAR NOT NULL REFERENCES ohm_nodes(id),
+    layer VARCHAR NOT NULL,            -- 'L1','L2','L3','L4'
+    edge_type VARCHAR NOT NULL,
+    confidence FLOAT,
+    condition TEXT,                     -- "holds_when: {fuel_mode: 'oil'}"
+    provenance VARCHAR,
+    created_by VARCHAR NOT NULL,       -- owning agent
+    created_at TIMESTAMP DEFAULT now(),
+    updated_at TIMESTAMP DEFAULT now(),
+    updated_by VARCHAR,               -- for owner updates only
+    challenge_of VARCHAR REFERENCES ohm_edges(id),   -- if this is a challenge edge
+    challenge_type VARCHAR,            -- 'CHALLENGED_BY','SUPPORTS','REFINES','CONTRADICTS'
+    metadata JSON
+);
 
-# ── Node Types ──────────────────────────────────────────────────────────────
+-- Observations: timestamped, attributed measurements
+CREATE TABLE IF NOT EXISTS ohm_observations (
+    id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+    node_id VARCHAR NOT NULL REFERENCES ohm_nodes(id),
+    edge_id VARCHAR REFERENCES ohm_edges(id),
+    type VARCHAR NOT NULL,             -- 'anomaly','measurement','pattern','challenge','support'
+    value FLOAT,
+    baseline FLOAT,
+    sigma FLOAT,
+    source VARCHAR,                     -- 'signal','research','conversation','analysis'
+    created_by VARCHAR NOT NULL,
+    created_at TIMESTAMP DEFAULT now(),
+    metadata JSON
+);
 
-VALID_NODE_TYPES = frozenset({
-    "idea", "source", "person", "concept", "pattern",
-    "event", "institution", "technology",
-})
+-- Agent state: the hive mind awareness layer
+CREATE TABLE IF NOT EXISTS ohm_agent_state (
+    agent_name VARCHAR PRIMARY KEY,
+    current_focus TEXT,
+    active_patterns JSON,              -- JSON array of tags/topics
+    last_sync TIMESTAMP,
+    confidence_threshold FLOAT DEFAULT 0.7,
+    available_services JSON,            -- JSON array of service names
+    current_session_id VARCHAR,
+    updated_at TIMESTAMP DEFAULT now()
+);
 
-VALID_VISIBILITIES = frozenset({"private", "team", "public"})
+-- Change log: append-only audit trail (feeds the change feed)
+CREATE TABLE IF NOT EXISTS ohm_change_log (
+    id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+    table_name VARCHAR NOT NULL,        -- 'ohm_nodes','ohm_edges','ohm_observations','ohm_agent_state'
+    row_id VARCHAR NOT NULL,
+    operation VARCHAR NOT NULL,          -- 'INSERT','UPDATE','DELETE'
+    agent_name VARCHAR NOT NULL,
+    layer VARCHAR,                       -- which layer was affected
+    snapshot_id VARCHAR,                 -- for time travel
+    changed_at TIMESTAMP DEFAULT now(),
+    change_data JSON                    -- the row data after change
+);
 
-VALID_PROVENANCES = frozenset({
-    "conversation", "research", "bookmark", "observation",
-})
+-- Snapshots: for time-travel queries
+CREATE TABLE IF NOT EXISTS ohm_snapshots (
+    id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+    description VARCHAR,
+    created_at TIMESTAMP DEFAULT now()
+);
 
-# ── Edge Types by Layer ─────────────────────────────────────────────────────
+-- ============================================================
+-- Indexes for common query patterns
+-- ============================================================
 
-LAYER_EDGE_TYPES: dict[str, frozenset[str]] = {
-    "L1": frozenset({"CONTAINS", "BELONGS_TO", "HAS_COMPONENT"}),
-    "L2": frozenset({"DERIVES_FROM", "INFLUENCES", "REFERENCES", "USES"}),
-    "L3": frozenset({
-        "CAUSES", "CORRELATES_WITH", "PREDICTS", "EXPLAINS",
-        "CHALLENGED_BY", "SUPPORTS", "REFINES", "CONTRADICTS",
-    }),
-    "L4": frozenset({"EXPECTS", "PLANS", "RISKS", "DEPENDS_ON"}),
+CREATE INDEX IF NOT EXISTS idx_nodes_type ON ohm_nodes(type);
+CREATE INDEX IF NOT EXISTS idx_nodes_created_by ON ohm_nodes(created_by);
+CREATE INDEX IF NOT EXISTS idx_nodes_visibility ON ohm_nodes(visibility);
+CREATE INDEX IF NOT EXISTS idx_nodes_provenance ON ohm_nodes(provenance);
+
+CREATE INDEX IF NOT EXISTS idx_edges_from ON ohm_edges(from_node);
+CREATE INDEX IF NOT EXISTS idx_edges_to ON ohm_edges(to_node);
+CREATE INDEX IF NOT EXISTS idx_edges_layer ON ohm_edges(layer);
+CREATE INDEX IF NOT EXISTS idx_edges_type ON ohm_edges(edge_type);
+CREATE INDEX IF NOT EXISTS idx_edges_created_by ON ohm_edges(created_by);
+CREATE INDEX IF NOT EXISTS idx_edges_challenge_of ON ohm_edges(challenge_of);
+
+CREATE INDEX IF NOT EXISTS idx_observations_node ON ohm_observations(node_id);
+CREATE INDEX IF NOT EXISTS idx_observations_type ON ohm_observations(type);
+CREATE INDEX IF NOT EXISTS idx_observations_created_by ON ohm_observations(created_by);
+
+CREATE INDEX IF NOT EXISTS idx_change_log_table ON ohm_change_log(table_name);
+CREATE INDEX IF NOT EXISTS idx_change_log_agent ON ohm_change_log(agent_name);
+CREATE INDEX IF NOT EXISTS idx_change_log_time ON ohm_change_log(changed_at);
+CREATE INDEX IF NOT EXISTS idx_change_log_snapshot ON ohm_change_log(snapshot_id);
+"""
+
+# Edge types by layer
+EDGE_TYPES = {
+    "L1": ["CONTAINS", "BELONGS_TO", "HAS_COMPONENT", "PART_OF"],
+    "L2": ["DERIVES_FROM", "INFLUENCES", "REFERENCES", "USES", "FEEDS", "FLOWS_TO"],
+    "L3": ["CAUSES", "CORRELATES_WITH", "PREDICTS", "EXPLAINS", "CHALLENGED_BY", "SUPPORTS", "REFINES", "CONTRADICTS"],
+    "L4": ["EXPECTS", "PLANS", "RISKS", "DEPENDS_ON", "THREATENS", "ENABLES"],
 }
 
-ALL_EDGE_TYPES: frozenset[str] = frozenset().union(*LAYER_EDGE_TYPES.values())
-
-VALID_LAYERS = frozenset(LAYER_EDGE_TYPES.keys())
-
-# ── Observation Types ───────────────────────────────────────────────────────
-
-VALID_OBSERVATION_TYPES = frozenset({
-    "anomaly", "measurement", "pattern", "challenge", "support",
-})
-
-VALID_OBSERVATION_SOURCES = frozenset({
-    "signal", "research", "conversation", "analysis",
-})
-
-# ── DDL Statements ──────────────────────────────────────────────────────────
-
-DDL_STATEMENTS: list[str] = [
-    # ── Nodes ────────────────────────────────────────────────────────────
-    """
-    CREATE TABLE IF NOT EXISTS ohm_nodes (
-        id            VARCHAR PRIMARY KEY,
-        label         VARCHAR NOT NULL,
-        type          VARCHAR NOT NULL,
-        content       TEXT,
-        created_by    VARCHAR NOT NULL,
-        created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_by    VARCHAR,
-        confidence    FLOAT DEFAULT 1.0,
-        visibility    VARCHAR DEFAULT 'team',
-        provenance    VARCHAR
-    );
-    """,
-    # ── Edges ────────────────────────────────────────────────────────────
-    """
-    CREATE TABLE IF NOT EXISTS ohm_edges (
-        id              VARCHAR PRIMARY KEY,
-        from_node       VARCHAR NOT NULL,
-        to_node         VARCHAR NOT NULL,
-        layer           VARCHAR NOT NULL,
-        edge_type       VARCHAR NOT NULL,
-        confidence      FLOAT,
-        condition       TEXT,
-        provenance      VARCHAR,
-        created_by      VARCHAR NOT NULL,
-        created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_by      VARCHAR,
-        challenge_of    VARCHAR,
-        challenge_type  VARCHAR
-    );
-    """,
-    # ── Observations ─────────────────────────────────────────────────────
-    """
-    CREATE TABLE IF NOT EXISTS ohm_observations (
-        id          VARCHAR PRIMARY KEY,
-        node_id     VARCHAR,
-        edge_id     VARCHAR,
-        type        VARCHAR NOT NULL,
-        value       FLOAT,
-        baseline    FLOAT,
-        sigma       FLOAT,
-        source      VARCHAR,
-        created_by  VARCHAR NOT NULL,
-        created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-    """,
-    # ── Agent State ──────────────────────────────────────────────────────
-    """
-    CREATE TABLE IF NOT EXISTS ohm_agent_state (
-        agent_name           VARCHAR PRIMARY KEY,
-        current_focus        TEXT,
-        active_patterns      TEXT,
-        last_sync            TIMESTAMP,
-        confidence_threshold FLOAT DEFAULT 0.7,
-        available_services   TEXT,
-        current_session_id   VARCHAR,
-        updated_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-    """,
-    # ── Change Feed ──────────────────────────────────────────────────────
-    """
-    CREATE SEQUENCE IF NOT EXISTS seq_change_feed START 1;
-    CREATE TABLE IF NOT EXISTS ohm_change_feed (
-        id          BIGINT PRIMARY KEY DEFAULT nextval('seq_change_feed'),
-        table_name  VARCHAR NOT NULL,
-        row_id      VARCHAR NOT NULL,
-        operation   VARCHAR NOT NULL,
-        agent_name  VARCHAR NOT NULL,
-        old_data    JSON,
-        new_data    JSON,
-        occurred_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-    """,
+# Node types
+NODE_TYPES = [
+    "idea", "source", "person", "concept", "pattern", "event",
+    "institution", "technology",
+    # Industrial (TOPO) types
+    "equipment", "system", "area", "site",
 ]
 
-# ── Indexes ─────────────────────────────────────────────────────────────────
-
-INDEX_DDL: list[str] = [
-    # Edge traversal indexes
-    "CREATE INDEX IF NOT EXISTS idx_edges_from ON ohm_edges(from_node);",
-    "CREATE INDEX IF NOT EXISTS idx_edges_to ON ohm_edges(to_node);",
-    "CREATE INDEX IF NOT EXISTS idx_edges_layer ON ohm_edges(layer);",
-    "CREATE INDEX IF NOT EXISTS idx_edges_type ON ohm_edges(edge_type);",
-    "CREATE INDEX IF NOT EXISTS idx_edges_created_by ON ohm_edges(created_by);",
-    "CREATE INDEX IF NOT EXISTS idx_edges_challenge_of ON ohm_edges(challenge_of);",
-    # Node lookup indexes
-    "CREATE INDEX IF NOT EXISTS idx_nodes_type ON ohm_nodes(type);",
-    "CREATE INDEX IF NOT EXISTS idx_nodes_created_by ON ohm_nodes(created_by);",
-    "CREATE INDEX IF NOT EXISTS idx_nodes_visibility ON ohm_nodes(visibility);",
-    # Observation indexes
-    "CREATE INDEX IF NOT EXISTS idx_obs_node ON ohm_observations(node_id);",
-    "CREATE INDEX IF NOT EXISTS idx_obs_edge ON ohm_observations(edge_id);",
-    "CREATE INDEX IF NOT EXISTS idx_obs_type ON ohm_observations(type);",
-    # Change feed index
-    "CREATE INDEX IF NOT EXISTS idx_feed_agent ON ohm_change_feed(agent_name);",
-    "CREATE INDEX IF NOT EXISTS idx_feed_time ON ohm_change_feed(occurred_at);",
-    # Composite index for CTE traversal (from_node + layer + edge_type)
-    "CREATE INDEX IF NOT EXISTS idx_edges_traversal ON ohm_edges(from_node, layer, edge_type);",
-]
-
-
-def initialize_schema(conn: "DuckDBPyConnection") -> None:
-    """Create all tables and indexes if they don't exist.
-
-    Args:
-        conn: An active DuckDB connection.
-    """
-    for ddl in DDL_STATEMENTS:
-        conn.execute(ddl)
-    for idx in INDEX_DDL:
-        conn.execute(idx)
-
-
-def validate_edge_type(layer: str, edge_type: str) -> bool:
-    """Check that *edge_type* is valid for the given *layer*.
-
-    Returns True if valid, False otherwise.
-    """
-    allowed = LAYER_EDGE_TYPES.get(layer)
-    if allowed is None:
-        return False
-    return edge_type in allowed
-
-
-def validate_node_type(node_type: str) -> bool:
-    """Check that *node_type* is a known type."""
-    return node_type in VALID_NODE_TYPES
-
-
-def generate_node_id(label: str) -> str:
-    """Generate a human-readable node ID from a label.
-
-    Converts to lowercase, replaces spaces with underscores,
-    and appends a short suffix for uniqueness.
-    """
-    base = label.lower().replace(" ", "_").replace("-", "_")
-    suffix = uuid.uuid4().hex[:6]
-    return f"{base}_{suffix}"
+# Layer descriptions
+LAYER_DESCRIPTIONS = {
+    "L1": {
+        "name": "Structure",
+        "question": "Where does this belong?",
+        "ownership": "Shared — all agents read/write",
+        "confidence": "Authoritative (by design)",
+        "example": "'Hungary has a constitution'",
+    },
+    "L2": {
+        "name": "Flow",
+        "question": "What connects what?",
+        "ownership": "Shared with attribution",
+        "confidence": "High (validated)",
+        "example": "'This idea derives from that source'",
+    },
+    "L3": {
+        "name": "Knowledge",
+        "question": "What does it mean?",
+        "ownership": "Agent-owned, challengeable",
+        "confidence": "Popperian (grows through refutation)",
+        "example": "'AND→OR conversion conf: 0.94 (Métis)'",
+    },
+    "L4": {
+        "name": "Prospect",
+        "question": "What's ahead?",
+        "ownership": "Agent-owned, visible",
+        "confidence": "Predictive (decays with time)",
+        "example": "'Democratic institutions will hold conf: 0.65 (Clio)'",
+    },
+}
