@@ -58,6 +58,18 @@ Over time, the graph should get more useful, not just bigger. Connections emerge
 - The change feed enables reactive behavior — agents can subscribe to changes in their domain
 - TOPO proves the architecture generalizes beyond cognitive domains
 
+## Agent Interface
+
+Agents use the **Python SDK** for regular graph operations. The CLI is for human diagnostics and ad-hoc exploration. The HTTP daemon (ohmd) is for shared access.
+
+```
+Agent code  → SDK → queries/ → DuckDB (local cache)
+Human       → CLI → queries/ → DuckDB (one-shot)
+HTTP clients → ohmd → store.py → DuckDB (shared daemon)
+```
+
+All three paths go through the same logic and boundary enforcement. The difference is interface: Python API vs text output vs JSON over HTTP.
+
 ## What I Don't Care About
 
 - **Pretty UI.** This is an agent API, not a dashboard.
