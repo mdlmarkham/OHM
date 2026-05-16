@@ -393,3 +393,136 @@ def query_stats(conn: DuckDBPyConnection) -> dict[str, Any]:
     """).fetchone()[0]
 
     return stats
+
+
+# ── Write Operations ────────────────────────────────────────────────────────
+
+def create_node(
+    conn: DuckDBPyConnection,
+    *,
+    label: str,
+    node_type: str = "concept",
+    content: str | None = None,
+    created_by: str,
+    visibility: str = "team",
+    provenance: str | None = None,
+    confidence: float = 1.0,
+) -> str:
+    """Create a new node and return its ID."""
+    from ohm.schema import generate_node_id, validate_node_type
+
+    if not validate_node_type(node_type):
+        raise ValueError(f"Invalid node type: {node_type}")
+
+    node_id = generate_node_id(label)
+    conn.execute(
+        """INSERT INTO ohm_nodes (id, label, type, content, created_by, visibility, provenance, confidence)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        [node_id, label, node_type, content, created_by, visibility, provenance, confidence],
+    )
+    return node_id
+
+
+def create_edge(
+    conn: DuckDBPyConnection,
+    *,
+    from_node: str,
+    to_node: str,
+    layer: str,
+    edge_type: str,
+    created_by: str,
+    confidence: float = 0.7,
+    condition: str | None = None,
+    provenance: str | None = None,
+) -> str:
+    """Create a new edge and return its ID. Validates layer/type compatibility."""
+    import uuid
+
+    from ohm.schema import validate_edge_type
+
+    if not validate_edge_type(layer, edge_type):
+        raise ValueError(f"Invalid edge type '{edge_type}' for layer '{layer}'")
+
+    edge_id = str(uuid.uuid4())
+    conn.execute(
+        """INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, created_by, confidence, condition, provenance)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [edge_id, from_node, to_node, layer, edge_type, created_by, confidence, condition, provenance],
+    )
+    return edge_id
+
+
+def create_challenge(
+    conn: DuckDBPyConnection,
+    *,
+    edge_id: str,
+    reason: str,
+    created_by: str,
+    confidence: float = 0.5,
+) -> str:
+    """Create a CHALLENGED_BY edge referencing an existing edge."""
+    import uuid
+
+    # Verify target edge exists
+    target = conn.execute("SELECT id, from_node, to_node, layer FROM ohm_edges WHERE id = ?", [edge_id]).fetchone()
+    if target is None:
+        raise ValueError(f"Edge not found: {edge_id}")
+
+    challenge_id = str(uuid.uuid4())
+    conn.execute(
+        """INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, created_by, confidence, condition, challenge_of, challenge_type)
+           VALUES (?, ?, ?, ?, 'CHALLENGED_BY', ?, ?, ?, ?, 'CHALLENGED_BY')""",
+        [challenge_id, target[1], target[2], target[3], created_by, confidence, reason, edge_id],
+    )
+    return challenge_id
+
+
+def create_support(
+    conn: DuckDBPyConnection,
+    *,
+    edge_id: str,
+    reason: str,
+    created_by: str,
+    confidence: float = 0.7,
+) -> str:
+    """Create a SUPPORTS edge referencing an existing edge."""
+    import uuid
+
+    target = conn.execute("SELECT id, from_node, to_node, layer FROM ohm_edges WHERE id = ?", [edge_id]).fetchone()
+    if target is None:
+        raise ValueError(f"Edge not found: {edge_id}")
+
+    support_id = str(uuid.uuid4())
+    conn.execute(
+        """INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, created_by, confidence, condition, challenge_of, challenge_type)
+           VALUES (?, ?, ?, ?, 'SUPPORTS', ?, ?, ?, ?, 'SUPPORTS')""",
+        [support_id, target[1], target[2], target[3], created_by, confidence, reason, edge_id],
+    )
+    return support_id
+
+
+def set_agent_state(
+    conn: DuckDBPyConnection,
+    *,
+    agent_name: str,
+    focus: str | None = None,
+) -> None:
+    """Set or update an agent's current focus."""
+    conn.execute(
+        """INSERT INTO ohm_agent_state (agent_name, current_focus, updated_at)
+           VALUES (?, ?, CURRENT_TIMESTAMP)
+           ON CONFLICT (agent_name) DO UPDATE SET current_focus = ?, updated_at = CURRENT_TIMESTAMP""",
+        [agent_name, focus, focus],
+    )
+
+
+def node_exists(conn: DuckDBPyConnection, node_id: str) -> bool:
+    """Check if a node exists."""
+    result = conn.execute("SELECT 1 FROM ohm_nodes WHERE id = ?", [node_id]).fetchone()
+    return result is not None
+
+
+def edge_exists(conn: DuckDBPyConnection, edge_id: str) -> bool:
+    """Check if an edge exists."""
+    result = conn.execute("SELECT 1 FROM ohm_edges WHERE id = ?", [edge_id]).fetchone()
+    return result is not None

@@ -241,28 +241,27 @@ def _handle_graph(args: argparse.Namespace) -> None:
     elif cmd == "layers":
         _show_layers(args)
     elif cmd == "status":
-        print("Graph status: (placeholder)")
+        _show_status(args)
     elif cmd == "stats":
-        print("Graph stats: (placeholder)")
+        _show_stats(args)
     elif cmd == "query":
-        print(f"Query: {args.query_text or '(all)'} (placeholder)")
+        _handle_query(args)
     elif cmd == "neighborhood":
-        print(f"Neighborhood of {args.node_id} (depth={args.depth}): (placeholder)")
+        _handle_neighborhood(args)
     elif cmd == "write":
-        print(f"Writing edge: {args.from_node} --[{args.edge_type}]--> {args.to_node} (placeholder)")
+        _handle_write(args)
     elif cmd == "challenge":
-        print(f"Challenging edge {args.edge_id}: {args.reason} (placeholder)")
+        _handle_challenge(args)
     elif cmd == "support":
-        print(f"Supporting edge {args.edge_id}: {args.reason} (placeholder)")
+        _handle_support(args)
     elif cmd == "confidence":
-        print(f"Confidence audit for edge {args.edge_id}: (placeholder)")
+        _handle_confidence(args)
     elif cmd == "listen":
-        since = args.since or "last-check"
-        print(f"Change feed since {since}: (placeholder)")
+        _handle_listen(args)
     elif cmd == "impact":
-        print(f"Impact analysis for {args.node_id} (depth={args.depth}): (placeholder)")
+        _handle_impact(args)
     elif cmd == "path":
-        print(f"Path from {args.from_node} to {args.to_node}: (placeholder)")
+        _handle_path(args)
     else:
         print(f"Unknown graph command: {cmd}")
 
@@ -271,14 +270,11 @@ def _handle_state(args: argparse.Namespace) -> None:
     """Handle 'ohm state' subcommands."""
     cmd = args.state_command
     if cmd == "set":
-        focus = " ".join(args.focus)
-        print(f"Setting focus: {focus} (placeholder)")
+        _handle_state_set(args)
     elif cmd == "show":
-        agent = args.agent or "(self)"
-        print(f"State for {agent}: (placeholder)")
+        _handle_state_show(args)
     elif cmd == "who-is-working-on":
-        topic = " ".join(args.topic)
-        print(f"Who is working on '{topic}': (placeholder)")
+        _handle_state_who(args)
     elif cmd == "history":
         print("Focus history: (placeholder)")
     else:
@@ -293,6 +289,405 @@ def _handle_snapshot(args: argparse.Namespace) -> None:
 def _handle_diff(args: argparse.Namespace) -> None:
     """Handle 'ohm diff' command."""
     print(f"Diff from {args.from_ts} to {args.to_ts}: (placeholder)")
+
+
+# ── Graph Command Implementations ───────────────────────────────────────────
+
+def _get_db(args: argparse.Namespace):
+    """Open a database connection using args."""
+    from ohm.db import connect
+    return connect(args.db)
+
+
+def _get_actor(args: argparse.Namespace) -> str:
+    """Resolve the actor name from args or environment."""
+    import os
+    return args.actor or os.environ.get("OHM_ACTOR", "unknown")
+
+
+def _show_status(args: argparse.Namespace) -> None:
+    """Show graph status: node count, edge count, active agents."""
+    from ohm.queries import query_stats
+
+    conn = _get_db(args)
+    try:
+        stats = query_stats(conn)
+        if args.format == "json":
+            import json
+            print(json.dumps(stats, indent=2))
+        else:
+            print(f"Nodes:        {stats['total_nodes']}")
+            print(f"Edges:        {stats['total_edges']}")
+            print(f"Observations: {stats['total_observations']}")
+            print(f"Active agents: {stats['active_agents']}")
+            print(f"Challenge ratio: {stats['challenge_ratio']}")
+    finally:
+        conn.close()
+
+
+def _show_stats(args: argparse.Namespace) -> None:
+    """Show detailed graph statistics."""
+    from ohm.queries import query_stats
+
+    conn = _get_db(args)
+    try:
+        stats = query_stats(conn)
+        if args.format == "json":
+            import json
+            print(json.dumps(stats, indent=2))
+        else:
+            print("── Edges by Layer ──")
+            for layer, count in sorted(stats["edges_by_layer"].items()):
+                print(f"  {layer}: {count}")
+            print("\n── Edges by Type ──")
+            for etype, count in sorted(stats["edges_by_type"].items(), key=lambda x: -x[1]):
+                print(f"  {etype}: {count}")
+            print(f"\n── Nodes by Type ──")
+            for ntype, count in sorted(stats["nodes_by_type"].items(), key=lambda x: -x[1]):
+                print(f"  {ntype}: {count}")
+            print(f"\nTotal: {stats['total_nodes']} nodes, {stats['total_edges']} edges")
+            print(f"Challenge ratio: {stats['challenge_ratio']}")
+    finally:
+        conn.close()
+
+
+def _handle_query(args: argparse.Namespace) -> None:
+    """Handle structured graph query."""
+    from ohm.queries import query_neighborhood
+
+    conn = _get_db(args)
+    try:
+        # Structured query: use neighborhood as base, apply filters
+        if args.filter_type or args.layer or args.owner or args.confidence_min:
+            # For structured queries, scan all edges with filters
+            conditions = []
+            params = []
+            if args.filter_type:
+                conditions.append("edge_type = ?")
+                params.append(args.filter_type)
+            if args.layer:
+                conditions.append("layer = ?")
+                params.append(args.layer)
+            if args.owner:
+                conditions.append("created_by = ?")
+                params.append(args.owner)
+            if args.confidence_min is not None:
+                conditions.append("confidence >= ?")
+                params.append(args.confidence_min)
+
+            where = " AND ".join(conditions) if conditions else "1=1"
+            result = conn.execute(
+                f"SELECT * FROM ohm_edges WHERE {where} ORDER BY created_at DESC LIMIT 100",
+                params,
+            )
+            from ohm.queries import _rows_to_dicts
+            rows = _rows_to_dicts(result)
+        elif args.query_text:
+            # Natural language: search by label/content match
+            result = conn.execute(
+                "SELECT * FROM ohm_nodes WHERE label ILIKE ? OR content ILIKE ? LIMIT 50",
+                [f"%{args.query_text}%", f"%{args.query_text}%"],
+            )
+            from ohm.queries import _rows_to_dicts
+            rows = _rows_to_dicts(result)
+        else:
+            # No filters: show all nodes
+            result = conn.execute("SELECT * FROM ohm_nodes ORDER BY created_at DESC LIMIT 100")
+            from ohm.queries import _rows_to_dicts
+            rows = _rows_to_dicts(result)
+
+        if args.format == "json":
+            import json
+            print(json.dumps(rows, indent=2, default=str))
+        else:
+            for row in rows:
+                if "label" in row:
+                    print(f"  [{row.get('type', '?')}] {row['label']} ({row['id']})")
+                elif "edge_type" in row:
+                    print(f"  [{row['layer']}] {row['edge_type']}: {row['from_node']} → {row['to_node']} (conf: {row.get('confidence', '?')})")
+    finally:
+        conn.close()
+
+
+def _handle_neighborhood(args: argparse.Namespace) -> None:
+    """Handle bounded-depth graph traversal."""
+    from ohm.queries import query_neighborhood
+
+    conn = _get_db(args)
+    try:
+        results = query_neighborhood(
+            conn, args.node_id,
+            depth=args.depth, layer=args.layer, direction=args.direction,
+        )
+        if args.format == "json":
+            import json
+            print(json.dumps(results, indent=2, default=str))
+        else:
+            if not results:
+                print(f"No edges found within {args.depth} hops of '{args.node_id}'")
+                return
+            for r in results:
+                print(f"  [hop {r['hop']}] [{r['layer']}] {r['edge_type']}: "
+                      f"{r['from_node']} → {r['to_node']} "
+                      f"(conf: {r.get('confidence', '?')}, by: {r['created_by']})")
+    finally:
+        conn.close()
+
+
+def _handle_write(args: argparse.Namespace) -> None:
+    """Handle graph write: create nodes and edges."""
+    from ohm.queries import create_edge, create_node, node_exists
+
+    actor = _get_actor(args)
+    conn = _get_db(args)
+    try:
+        # Auto-create nodes if they don't exist
+        for node_id in [args.from_node, args.to_node]:
+            if not node_exists(conn, node_id):
+                create_node(conn, label=node_id, created_by=actor)
+
+        edge_id = create_edge(
+            conn,
+            from_node=args.from_node,
+            to_node=args.to_node,
+            layer=args.layer,
+            edge_type=args.edge_type,
+            created_by=actor,
+            confidence=args.confidence,
+            condition=args.condition,
+            provenance=args.provenance,
+        )
+        if args.format == "json":
+            import json
+            print(json.dumps({"edge_id": edge_id, "status": "created"}))
+        else:
+            print(f"Created edge: {args.from_node} --[{args.edge_type}]--> {args.to_node}")
+            print(f"  ID: {edge_id}")
+            print(f"  Layer: {args.layer}, Confidence: {args.confidence}")
+    finally:
+        conn.close()
+
+
+def _handle_challenge(args: argparse.Namespace) -> None:
+    """Handle edge challenge."""
+    from ohm.queries import create_challenge
+
+    actor = _get_actor(args)
+    conn = _get_db(args)
+    try:
+        challenge_id = create_challenge(
+            conn,
+            edge_id=args.edge_id,
+            reason=args.reason,
+            created_by=actor,
+            confidence=args.confidence,
+        )
+        if args.format == "json":
+            import json
+            print(json.dumps({"challenge_id": challenge_id, "status": "created"}))
+        else:
+            print(f"Challenged edge {args.edge_id}")
+            print(f"  Challenge ID: {challenge_id}")
+            print(f"  Reason: {args.reason}")
+            print(f"  Confidence: {args.confidence}")
+    finally:
+        conn.close()
+
+
+def _handle_support(args: argparse.Namespace) -> None:
+    """Handle edge support."""
+    from ohm.queries import create_support
+
+    actor = _get_actor(args)
+    conn = _get_db(args)
+    try:
+        support_id = create_support(
+            conn,
+            edge_id=args.edge_id,
+            reason=args.reason,
+            created_by=actor,
+            confidence=args.confidence,
+        )
+        if args.format == "json":
+            import json
+            print(json.dumps({"support_id": support_id, "status": "created"}))
+        else:
+            print(f"Supported edge {args.edge_id}")
+            print(f"  Support ID: {support_id}")
+            print(f"  Reason: {args.reason}")
+            print(f"  Confidence: {args.confidence}")
+    finally:
+        conn.close()
+
+
+def _handle_confidence(args: argparse.Namespace) -> None:
+    """Handle confidence audit for an edge."""
+    from ohm.queries import query_confidence
+
+    conn = _get_db(args)
+    try:
+        result = query_confidence(conn, args.edge_id)
+        if args.format == "json":
+            import json
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            if result["original"] is None:
+                print(f"Edge not found: {args.edge_id}")
+                return
+            o = result["original"]
+            print(f"── Edge {args.edge_id} ──")
+            print(f"  Type:       {o['edge_type']}")
+            print(f"  Layer:      {o['layer']}")
+            print(f"  Confidence: {o['confidence']}")
+            print(f"  Owner:      {o['created_by']}")
+            print(f"  Created:    {o['created_at']}")
+            if o.get("provenance"):
+                print(f"  Provenance: {o['provenance']}")
+            if o.get("condition"):
+                print(f"  Condition:  {o['condition']}")
+
+            if result["challenges"]:
+                print(f"\n  Challenges ({len(result['challenges'])}):")
+                for c in result["challenges"]:
+                    print(f"    • {c['created_by']} (conf: {c['confidence']}): {c.get('condition', '')}")
+            if result["supports"]:
+                print(f"\n  Support ({len(result['supports'])}):")
+                for s in result["supports"]:
+                    print(f"    • {s['created_by']} (conf: {s['confidence']}): {s.get('condition', '')}")
+    finally:
+        conn.close()
+
+
+def _handle_listen(args: argparse.Namespace) -> None:
+    """Handle change feed query."""
+    from ohm.queries import query_change_feed
+
+    conn = _get_db(args)
+    try:
+        results = query_change_feed(conn, since=args.since)
+        if args.format == "json":
+            import json
+            print(json.dumps(results, indent=2, default=str))
+        else:
+            if not results:
+                print("No changes found.")
+                return
+            print(f"Changes ({len(results)}):")
+            for r in results:
+                print(f"  [{r['occurred_at']}] {r['agent_name']} {r['operation']} "
+                      f"{r['table_name']}.{r['row_id']}")
+    finally:
+        conn.close()
+
+
+def _handle_impact(args: argparse.Namespace) -> None:
+    """Handle downstream impact analysis."""
+    from ohm.queries import query_impact
+
+    conn = _get_db(args)
+    try:
+        results = query_impact(conn, args.node_id, depth=args.depth)
+        if args.format == "json":
+            import json
+            print(json.dumps(results, indent=2, default=str))
+        else:
+            if not results:
+                print(f"No downstream impact found for '{args.node_id}'")
+                return
+            print(f"Impact analysis for '{args.node_id}' (depth ≤ {args.depth}):")
+            for r in results:
+                print(f"  [depth {r['depth']}] [{r['layer']}] {r['edge_type']}: "
+                      f"{r['from_node']} → {r['to_node']} (conf: {r.get('confidence', '?')})")
+    finally:
+        conn.close()
+
+
+def _handle_path(args: argparse.Namespace) -> None:
+    """Handle shortest path query."""
+    from ohm.queries import query_path
+
+    conn = _get_db(args)
+    try:
+        results = query_path(conn, args.from_node, args.to_node, max_depth=args.max_depth)
+        if args.format == "json":
+            import json
+            print(json.dumps(results, indent=2, default=str))
+        else:
+            if not results:
+                print(f"No path found from '{args.from_node}' to '{args.to_node}' "
+                      f"(max depth: {args.max_depth})")
+                return
+            print(f"Path from '{args.from_node}' to '{args.to_node}':")
+            for r in results:
+                print(f"  [{r['layer']}] {r['edge_type']}: "
+                      f"{r['from_node']} → {r['to_node']} (conf: {r.get('confidence', '?')})")
+    finally:
+        conn.close()
+
+
+# ── State Command Implementations ───────────────────────────────────────────
+
+def _handle_state_set(args: argparse.Namespace) -> None:
+    """Set agent focus."""
+    from ohm.queries import set_agent_state
+
+    actor = _get_actor(args)
+    focus = " ".join(args.focus)
+    conn = _get_db(args)
+    try:
+        set_agent_state(conn, agent_name=actor, focus=focus)
+        print(f"Focus set for {actor}: {focus}")
+    finally:
+        conn.close()
+
+
+def _handle_state_show(args: argparse.Namespace) -> None:
+    """Show agent state."""
+    from ohm.queries import query_agent_state
+
+    actor = _get_actor(args)
+    target = args.agent or actor
+    conn = _get_db(args)
+    try:
+        results = query_agent_state(conn, agent_name=target)
+        if args.format == "json":
+            import json
+            print(json.dumps(results, indent=2, default=str))
+        else:
+            if not results:
+                print(f"No state found for agent '{target}'")
+                return
+            for s in results:
+                print(f"Agent: {s['agent_name']}")
+                print(f"  Focus:       {s.get('current_focus', '(none)')}")
+                print(f"  Confidence:  {s.get('confidence_threshold', 0.7)}")
+                print(f"  Last sync:   {s.get('last_sync', 'never')}")
+                print(f"  Services:    {s.get('available_services', '')}")
+    finally:
+        conn.close()
+
+
+def _handle_state_who(args: argparse.Namespace) -> None:
+    """Find agents working on a topic."""
+    from ohm.queries import query_agent_state
+
+    topic = " ".join(args.topic)
+    conn = _get_db(args)
+    try:
+        results = query_agent_state(conn)
+        matches = [r for r in results if r.get("current_focus") and topic.lower() in r["current_focus"].lower()]
+        if args.format == "json":
+            import json
+            print(json.dumps(matches, indent=2, default=str))
+        else:
+            if not matches:
+                print(f"No agents found working on '{topic}'")
+                return
+            print(f"Agents working on '{topic}':")
+            for m in matches:
+                print(f"  • {m['agent_name']}: {m['current_focus']}")
+    finally:
+        conn.close()
 
 
 def _show_schema(args: argparse.Namespace) -> None:
