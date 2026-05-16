@@ -1,10 +1,10 @@
-# PM Update — May 16, 2026 16:22 EDT
+# PM Update — May 16, 2026 17:52 EDT
 
 This replaces all previous PM updates. Read this first.
 
 ## STOP — Read This Before Starting Work
 
-The backlog was restructured. Old issues (OHM-346, OHM-cxy, OHM-dn1, OHM-5zg, OHM-16s) are ALL CLOSED. Run `git pull && bd list` to see current state.
+Run `git pull && bd list` to see current state. Many issues have been closed since the last update.
 
 ## Completed Issues (DO NOT REBUILD)
 
@@ -12,62 +12,64 @@ These are DONE. Do not start work on them:
 - ✅ OHM-y2i.1: Error handling (commit 89e2848)
 - ✅ OHM-y2i.2: Token auth (commit 2567515)
 - ✅ OHM-y2i.3: Health endpoints (commit 89e2848)
+- ✅ OHM-y2i.5: Systemd unit file (commit d11cf9c)
+- ✅ OHM-y2i.6: Parameterized queries (commit 6e1ba86)
+- ✅ OHM-y2i.7: Auth fail-closed with --no-auth flag (commit 6e1ba86)
+- ✅ OHM-y2i.9: Server parameter ID validation (commit 0dea116)
+- ✅ OHM-evm: Boundary enforcement fix for store.py (commit 010b68b)
+- ✅ OHM-654: Server tests — 17+ HTTP endpoints (commit d11cf9c)
+- ✅ OHM-tjr: SDK tests — all Graph methods (commit d11cf9c)
 - ✅ OHM-l5k: CI/CD (commit 89e2848)
 - ✅ OHM-dw1: CI deps (commit 2567515)
 - ✅ OHM-4w7: Dead queries.py removed (commit 2567515)
-- ✅ OHM-hol: Dead query.py removed (commit 2567515)
+- ✅ OHM-hol: Dead query.py removed (commit 2963d97)
+- ✅ OHM-ad3: Module boundary docs (commit 06f017b)
+- ✅ OHM-n16: store.py vs queries/ docs (commit 06f017b)
+- ✅ OHM-a35.6: Unicode node IDs (commit 6bbda35)
+- ✅ OHM-a35.7: Richer SDK return types (commit 6bbda35)
+- ✅ OHM-a35.9: SDK read methods — get_node, get_edge, find_or_create, search (commit 1c69836)
+- ✅ OHM-8c1: Schema migration framework (commit ef8c123)
+- ✅ OHM-imf: Observation stats in /stats endpoint (commit 5cd151c)
 
-## PM Decisions (ALL RESOLVED — nothing is blocked on PM)
+## Current State
 
-You flagged 20 issues as "blocked on PM decisions." They are not blocked. Here are the answers:
+- **193 tests passing** (up from 134 at start of day)
+- **Core daemon working** — ohmd starts, handles auth, serves all 17+ endpoints
+- **SDK feature-complete for P0** — create, read, challenge, support, observe, search, find_or_create, confidence, neighborhood, path, impact, listen
+- **Security hardening done** — parameterized queries, fail-closed auth, boundary enforcement, ID validation
 
-| Question | Decision | Source |
+## Remaining P0 Issues
+
+1. **OHM-5of** — Security: TLS, rate limiting, request size cap, plaintext token storage. The SQL injection and auth bypass issues are FIXED (y2i.6, y2i.7, evm). Remaining: TLS termination, rate limiting, request size limit, encrypted token storage.
+
+2. **OHM-y2i.4** — Quack protocol integration for concurrent access. ohmd currently uses Python's http.server (single-threaded). Quack gives multi-process concurrent access to DuckDB.
+
+3. **OHM-y2i (epic)** — The P0 epic. All children are done except y2i.4 (Quack) and 5of (security). When those close, close the epic.
+
+## P1 Priority Order (after P0s close)
+
+| Priority | Issue | What to build |
 |---|---|---|
-| Token format | `secrets.token_urlsafe(32)`, Bearer tokens | VISION.md |
-| Auth roles | Two roles: `read-write` (full) and `read-only` (GET only) | OHM-y2i.2 |
-| Auth default | **FAIL CLOSED.** No tokens = deny writes. `--no-auth` flag for dev | OHM-y2i.7 |
-| Quack version | Use current stable, pin in pyproject.toml | ADR-002 |
-| Deployment | systemd (OHM-y2i.5) | VISION.md |
-| DuckLake sync | Heartbeat-based, 5-15 min intervals | VISION.md |
-| DuckLake storage | Local file per agent, shared backend | ADR-004 |
-| Catalog type | DuckLake catalog (not HMS/nessie) | ADR-004 |
-| Heartbeat interval | 5-15 min, configurable per agent | VISION.md |
-| Confidence thresholds | Per-agent, configurable. Default 0.7 | schema.py |
-| Visibility rules | L1/L2 shared, L3/L4 agent-owned, Private never shared | ADR-003 |
-| Agent sync patterns | Push on heartbeat, pull on startup | VISION.md |
-| Agent interface | **SDK is primary. CLI is for diagnostics only.** | VISION.md, AGENTS.md |
-| Conflict resolution | Last-write-wins for L2, agent-owned for L3/L4 | VISION.md |
-| Confidence decay | Yes, 30-day half-life for L4 predictions | VISION.md |
-| Observation aggregation | Accumulate, don't collapse. Three observations, one node | VISION.md |
-| TOPO domain | Deferred (P2). OHM first | VISION.md |
-| TOPO repo | Same repo, different CLI commands | ADR-005 |
-| marimo-pair | Deferred (P1). Package as Python library | VISION.md |
+| 1 | OHM-a35.10 | Agent registration — first-class nodes for identity, values, goals, capabilities |
+| 2 | OHM-a35.8 | SDK documentation — agent-facing guide, not CLI docs |
+| 3 | OHM-a35.5 | Agent values and goals — capture what each agent optimizes for |
+| 4 | OHM-xgm.1 | DuckLake shared backend — WAL, snapshots, change feed |
+| 5 | OHM-xgm.4 | Agent heartbeat sync — local cache → DuckLake propagation |
+| 6 | OHM-xj4 | marimo-pair integration — OHM queries in notebooks |
 
-## Current Priority Order (what to build next)
+Agent integration (a35.1-4) blocked until a35.10 (registration) and a35.8 (docs) are done. Don't wire agents to the SDK until registration and docs exist.
 
-### P0 — Security and tests (blocking team testing)
+## P2 (Design Questions, Not Buildable Yet)
 
-1. **OHM-y2i.6** — Parameterized queries. Replace f-string SQL interpolation with `?` placeholders. Keep validation.py as defense-in-depth. Five locations in queries/__init__.py and cli/__init__.py.
-2. **OHM-y2i.7** — Auth fail-closed. Add `--no-auth` flag and `OHM_NO_AUTH` env var. Default behavior: POST requires auth. GET: auth required if tokens configured, open if no tokens. `--no-auth`: everything open (dev mode).
-3. **OHM-654** — Server tests. 17 HTTP endpoints, zero coverage. Test each endpoint for happy path and error responses.
-4. **OHM-5of** — Security audit (broader: TLS, rate limiting, request size cap, plaintext tokens). After y2i.6 and y2i.7 are done.
+- **OHM-qhq**: Substrate services (memory, connections, attention, decay, provenance, dedup, calibration, synthesis prompts)
+- **OHM-8m3**: Substrate methods (Monte Carlo, Bayesian fusion, anomaly detection)
+- **OHM-uo4**: Change feed consumer with push notifications
+- **OHM-dy9**: Performance benchmarks
+- **OHM-3w1**: TOPO industrial knowledge graph
 
-### P1 — Agent interface improvements (after P0s)
+See `docs/substrate-services.md` and `docs/substrate-methods.md` for design thinking. These are not buildable until P0 and P1 are done.
 
-5. **OHM-a35.6** — Auto-generate node IDs from labels. Allow unicode in labels, sanitize to ascii for IDs. `create_node('AND→OR conversion')` → id=`and-or-conversion_842917`.
-6. **OHM-a35.7** — Richer SDK. `create_node()` returns full dict not just ID. Add `find_or_create()`, `get_node()`, `get_edge()`, `update_confidence()`, `search()`.
-7. **OHM-a35.8** — Document SDK as primary interface (already done in VISION.md and AGENTS.md).
-8. **OHM-tjr** — SDK tests.
-9. **OHM-ad3** — Module boundary docs (already done in AGENTS.md).
-10. **OHM-n16** — Document store.py vs queries/ (already done in AGENTS.md).
-
-## ⚠️ Known Issues
-
-- **CI will fail** until `ruff`, `mypy`, and `pytest-benchmark` are installed in the test environment. They're in pyproject.toml dev deps now (OHM-dw1 closed) but may not be in CI's pip cache yet.
-- **Benchmark tests** (test_benchmarks.py) need `pytest-benchmark` plugin. Run with `pytest tests/ --ignore=tests/test_benchmarks.py` to skip them.
-- **134 tests pass** (down from 144 because query.py and queries.py tests were removed with the dead code).
-
-## Architecture Direction (locked)
+## Architecture Direction (LOCKED)
 
 - **SDK is the primary agent interface.** CLI is for human diagnostics. ohmd is for shared HTTP access.
 - **Challenge edges, not modification.** ADR-002. Locked.
@@ -75,11 +77,26 @@ You flagged 20 issues as "blocked on PM decisions." They are not blocked. Here a
 - **Quack for concurrent access.** Locked.
 - **Attribution on every write.** Locked.
 - **Two codepaths are intentional:** `queries/` for direct-connection (CLI, SDK, tests), `store.py` for daemon (ohmd only). Do not merge them.
+- **Cognition substrate, not just knowledge graph.** OHM provides memory, connections, attention, decay, provenance. Agents provide meaning-making. See docs/substrate-services.md.
+
+## PM Decisions (ALL RESOLVED — nothing is blocked on PM)
+
+All 20 previously flagged decisions are resolved. See the previous PM update for the full table. Key ones:
+
+- Auth: **fail-closed** by default. `--no-auth` for dev mode. `OHM_NO_AUTH=1` env var.
+- SDK is **primary agent interface**. CLI for diagnostics only.
+- Challenge edges, **not modification**. Locked.
+- Observation aggregation: **accumulate, don't collapse**. Three observations stay as three.
+- Confidence decay: **30-day half-life** for L4 predictions.
+- DuckLake sync: **heartbeat-based, 5-15 min intervals**.
+- Conflict resolution: **last-write-wins for L2, agent-owned for L3/L4**.
 
 ## What NOT To Do
 
-- Do NOT rebuild closed issues (y2i.1, y2i.2, y2i.3, l5k, dw1, 4w7, hol)
+- Do NOT rebuild closed issues (see list above — 21 issues closed today)
 - Do NOT add NL query parsing (removed, dead code)
 - Do NOT merge store.py and queries/ (intentional separation)
 - Do NOT wire agents through the CLI for regular operations
-- Do NOT ask for PM decisions — they're all answered above
+- Do NOT ask for PM decisions — they're all answered
+- Do NOT start P2 work until P0 and P1 are done
+- Do NOT implement agent integrations (a35.1-4) until agent registration (a35.10) and SDK docs (a35.8) exist
