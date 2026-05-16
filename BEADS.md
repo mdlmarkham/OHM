@@ -77,11 +77,15 @@ Cross-cutting:
 ## Current State
 
 - **144 tests passing** (schema, store, graph, boundary, queries, CLI, integration, exceptions, validation)
+- **Error handling:** server.py maps all OHMError types to HTTP status codes with correlation IDs ✅
+- **Health endpoints:** /health, /ready, /status with uptime and DB connectivity check ✅
+- **CI/CD:** GitHub Actions for test + release ✅ (but ruff/mypy not in dev deps yet — OHM-dw1)
+- **Performance benchmarks:** Framework exists, needs pytest-benchmark dep
 - **Phase 0 (Foundation):** Schema, CLI, recursive CTEs, boundary enforcement ✅
 - **Phase 1 (Core Operations):** All read/write/challenge/support/observe/listen/state commands ✅
 - **SDK:** Python SDK (`ohm.sdk`) for programmatic agent access ✅
 - **Validation:** Input validation module (SQL injection prevention for CTE identifiers) ✅
-- **Phase 2 (Daemon + Multi-Agent):** Scaffold exists, needs production hardening (P0 in progress)
+- **Phase 2 (Daemon + Multi-Agent):** Scaffold + error handling + health endpoints ✅. Token auth and Quack remaining.
 - **Phase 3 (DuckLake):** Not started
 - **Phase 4 (Agent Integration):** Not started
 
@@ -90,5 +94,7 @@ Cross-cutting:
 - **Dead code:** `src/ohm/queries.py` (top-level) shadows the `queries/` package and is unreachable — needs removal (OHM-4w7)
 - **Dead code:** `src/ohm/query.py` (NLP parser) is never used by production code — needs removal (OHM-hol)
 - **Module boundary unclear:** `store.py` (daemon ORM) and `queries/` (direct-connection API) both do create_node/create_edge etc. — needs documentation (OHM-n16, OHM-ad3)
-- **No server tests:** `server.py` has zero test coverage (OHM-654)
+- **No server tests:** `server.py` has zero test coverage despite error handling being implemented (OHM-654)
 - **No SDK tests:** `sdk.py` has no dedicated test file (OHM-tjr)
+- **CI will fail:** `ruff`, `mypy`, `pytest-benchmark` not in dev dependencies (OHM-dw1)
+- **Benchmark tests broken:** Need `pytest-benchmark` fixture (8 tests error on missing fixture)
