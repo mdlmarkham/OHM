@@ -1,7 +1,8 @@
-"""OHM — Shared awareness, individual judgment.
+"""
+OHM — Shared awareness, individual judgment.
 
-A multi-agent knowledge graph that facilitates sharing, awareness, and memory
-while preserving individual perspective, values, and goals.
+Multi-agent knowledge graph with local DuckDB caches,
+DuckLake shared backend, and change-feed-driven coordination.
 """
 
 __version__ = "0.1.0"
