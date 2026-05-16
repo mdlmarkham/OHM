@@ -167,10 +167,17 @@ class OhmStore:
         """Challenge an existing edge. Creates a new edge referencing the original.
 
         Boundary rule: cannot modify the original edge — only create a challenge.
+        Enforces that only L3/L4 edges can be challenged (via enforce_challenge_boundary).
         """
+        from .exceptions import EdgeNotFoundError
+        from .boundary import enforce_challenge_boundary
+
         original = self.get_edge(edge_id)
         if not original:
             return None
+
+        # Enforce boundary: only L3/L4 edges can be challenged
+        enforce_challenge_boundary(self.conn, self.agent_name, edge_id)
 
         return self.write_edge(
             from_node=original["to_node"],
