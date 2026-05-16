@@ -121,6 +121,10 @@ CREATE INDEX IF NOT EXISTS idx_change_log_table ON ohm_change_log(table_name);
 CREATE INDEX IF NOT EXISTS idx_change_log_agent ON ohm_change_log(agent_name);
 CREATE INDEX IF NOT EXISTS idx_change_log_time ON ohm_change_log(changed_at);
 CREATE INDEX IF NOT EXISTS idx_change_log_snapshot ON ohm_change_log(snapshot_id);
+
+-- Change feed view (alias for backward compatibility)
+CREATE VIEW IF NOT EXISTS ohm_change_feed AS
+    SELECT id, table_name, row_id, operation, agent_name, layer, snapshot_id, changed_at AS occurred_at, change_data AS new_data, NULL AS old_data FROM ohm_change_log;
 """
 
 # Edge types by layer
@@ -131,6 +135,9 @@ EDGE_TYPES = {
     "L4": ["EXPECTS", "PLANS", "RISKS", "DEPENDS_ON", "THREATENS", "ENABLES"],
 }
 
+# Alias for test compatibility
+LAYER_EDGE_TYPES = EDGE_TYPES
+
 # Node types
 NODE_TYPES = [
     "idea", "source", "person", "concept", "pattern", "event",
@@ -138,6 +145,12 @@ NODE_TYPES = [
     # Industrial (TOPO) types
     "equipment", "system", "area", "site",
 ]
+
+# Valid sets for validation
+VALID_NODE_TYPES = set(NODE_TYPES)
+VALID_LAYERS = {"L1", "L2", "L3", "L4"}
+VALID_OBSERVATION_TYPES = {"anomaly", "measurement", "pattern", "challenge", "support"}
+VALID_VISIBILITIES = {"private", "team", "public"}
 
 # Layer descriptions
 LAYER_DESCRIPTIONS = {
@@ -170,3 +183,29 @@ LAYER_DESCRIPTIONS = {
         "example": "'Democratic institutions will hold conf: 0.65 (Clio)'",
     },
 }
+
+
+def initialize_schema(conn) -> None:
+    """Execute the OHM schema DDL against a DuckDB connection."""
+    conn.execute(SCHEMA_SQL)
+
+
+def generate_node_id(label: str) -> str:
+    """Generate a node ID from a label."""
+    import re
+    base = label.lower().replace(' ', '_')
+    base = re.sub(r'[^a-z0-9_]', '', base)
+    short = __import__('uuid').uuid4().hex[:6]
+    return f"{base}_{short}"
+
+
+def validate_node_type(node_type: str) -> bool:
+    """Check if a node type is valid."""
+    return node_type in VALID_NODE_TYPES
+
+
+def validate_edge_type(layer: str, edge_type: str) -> bool:
+    """Check if an edge type is valid for the given layer."""
+    if layer not in VALID_LAYERS:
+        return False
+    return edge_type in LAYER_EDGE_TYPES.get(layer, set())
