@@ -257,12 +257,11 @@ def build_neighborhood_query(
     """Build a parameterized neighborhood query.
 
     Returns (sql, params) for execution.
+    Column names in WHERE are hardcoded — only values use ? placeholders.
     """
     params = [node_id, node_id, min(depth, 5)]
 
-    sql = NEIGHBORHOOD_CTE
-
-    # Wrap with filters
+    # Build filter clause from hardcoded column names + parameterized values
     filter_parts = []
     if layer:
         filter_parts.append("n.layer = ?")
@@ -272,10 +271,13 @@ def build_neighborhood_query(
         params.append(edge_type)
 
     if filter_parts:
-        sql = sql.replace(
+        where = "WHERE " + " AND ".join(filter_parts)
+        sql = NEIGHBORHOOD_CTE.replace(
             "ORDER BY n.depth, n.layer",
-            "WHERE " + " AND ".join(filter_parts) + "\nORDER BY n.depth, n.layer",
+            where + "\nORDER BY n.depth, n.layer",
         )
+    else:
+        sql = NEIGHBORHOOD_CTE
 
     return sql, params
 

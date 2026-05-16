@@ -336,3 +336,113 @@ class TestErrorHandling:
         status, data = _request("GET", port, "/node/nonexistent")
         assert data["status"] == 404
         assert data["error"] == "not_found"
+
+
+class TestSecurity:
+    """Tests for security features: rate limiting, body size limit, auth fail-closed."""
+
+    def test_rate_limit_allows_normal_requests(self, test_server):
+        """Normal request volume should succeed."""
+        port, _ = test_server
+        status, _ = _request("GET", port, "/health")
+        assert status == 200
+
+    def test_rate_limit_blocks_excessive_requests(self, test_server):
+        """Sending many requests rapidly should trigger rate limiting."""
+        import ohm.server as srv
+        # Temporarily lower the limit for testing
+        original_max = srv.RATE_LIMIT_MAX_REQUESTS
+        srv.RATE_LIMIT_MAX_REQUESTS = 5
+        srv._rate_limit_store.clear()
+        try:
+            port, _ = test_server
+            # Send 5 requests — all should succeed
+            for _ in range(5):
+                status, _ = _request("GET", port, "/health")
+                assert status == 200
+            # 6th request should be rate limited
+            status, data = _request("GET", port, "/health")
+            assert status == 429
+            assert data["error"] == "rate_limited"
+        finally:
+            srv.RATE_LIMIT_MAX_REQUESTS = original_max
+            srv._rate_limit_store.clear()
+
+    def test_body_size_limit_rejects_oversized(self, test_server):
+        """Request body exceeding MAX_BODY_SIZE should be rejected."""
+        import ohm.server as srv
+        original_max = srv.MAX_BODY_SIZE
+        srv.MAX_BODY_SIZE = 100  # 100 bytes for testing
+        try:
+            port, _ = test_server
+            large_body = {"id": "x" * 200, "label": "big", "type": "concept"}
+            status, data = _request("POST", port, "/node", body=large_body)
+            assert status == 400
+            assert data["error"] == "validation_error"
+        finally:
+            srv.MAX_BODY_SIZE = original_max
+
+    def test_post_without_token_and_no_auth_configured_denied(self, tmp_path):
+        """POST without token should be denied when tokens are configured."""
+        db_path = str(tmp_path / "test_fail_closed.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test_agent")
+        tokens = {"valid-token": "agent1"}
+        port, server, thread = _start_test_server(store, tokens=tokens)
+        try:
+            # POST without token → 401
+            status, data = _request("POST", port, "/node", body={
+                "id": "unauth", "label": "Unauth", "type": "concept",
+            })
+            assert status == 401
+            assert data["error"] == "authentication_error"
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+            store.close()
+
+    def test_get_without_token_with_tokens_configured_denied(self, tmp_path):
+        """GET without token should be denied when tokens are configured."""
+        db_path = str(tmp_path / "test_get_auth.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test_agent")
+        tokens = {"valid-token": "agent1"}
+        port, server, thread = _start_test_server(store, tokens=tokens)
+        try:
+            # GET /status without token → 401
+            status, data = _request("GET", port, "/status")
+            assert status == 401
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+            store.close()
+
+    def test_get_with_valid_token_succeeds(self, tmp_path):
+        """GET with valid token should succeed when tokens are configured."""
+        db_path = str(tmp_path / "test_get_auth_ok.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test_agent")
+        tokens = {"valid-token": "agent1"}
+        port, server, thread = _start_test_server(store, tokens=tokens)
+        try:
+            # GET /status with valid token → 200
+            status, data = _request("GET", port, "/status",
+                                     headers={"Authorization": "Bearer valid-token"})
+            assert status == 200
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+            store.close()
+
+    def test_no_auth_flag_allows_all(self, tmp_path):
+        """--no-auth flag should allow all requests without token."""
+        db_path = str(tmp_path / "test_no_auth.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test_agent")
+        port, server, thread = _start_test_server(store, no_auth=True)
+        try:
+            # POST without token → allowed
+            status, data = _request("POST", port, "/node", body={
+                "id": "free", "label": "Free", "type": "concept",
+            })
+            assert status == 201
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+            store.close()
