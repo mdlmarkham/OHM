@@ -251,6 +251,8 @@ def _dispatch(args: argparse.Namespace) -> None:
         _handle_graph(args)
     elif args.command == "state":
         _handle_state(args)
+    elif args.command == "agents":
+        _handle_agents(args)
     elif args.command == "snapshot":
         _handle_snapshot(args)
     elif args.command == "diff":
