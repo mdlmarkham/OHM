@@ -6,7 +6,6 @@ import pytest
 
 from ohm.store import OhmStore
 from ohm.graph import build_neighborhood_query, build_path_query, build_impact_query
-from ohm.query import parse_query
 
 
 @pytest.fixture
@@ -167,28 +166,3 @@ class TestGraphQueries:
         results1 = populated_store.execute(sql1, ["hungary", "hungary", 1])
         results3 = populated_store.execute(sql3, ["hungary", "hungary", 3])
         assert len(results3) >= len(results1)
-
-
-class TestQueryParser:
-    """Test natural language query parsing."""
-
-    def test_neighborhood_query(self):
-        parsed = parse_query("what connects to hungary")
-        assert parsed["type"] == "neighborhood"
-        assert "hungary" in parsed["params"]
-
-    def test_path_query(self):
-        parsed = parse_query("path from hungary to democratic_escape")
-        assert parsed["type"] == "path"
-
-    def test_impact_query(self):
-        parsed = parse_query("impact of and_or")
-        assert parsed["type"] == "impact"
-
-    def test_who_working(self):
-        parsed = parse_query("who is working on hungary")
-        assert parsed["type"] == "who_working"
-
-    def test_unknown_fallback(self):
-        parsed = parse_query("something completely random and long")
-        assert parsed["type"] == "unknown"

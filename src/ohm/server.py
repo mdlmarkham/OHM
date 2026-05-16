@@ -94,6 +94,7 @@ class OhmHandler(BaseHTTPRequestHandler):
     store: Optional[OhmStore] = None
     config: dict = {}
     tokens: dict = {}  # token -> agent_name
+    roles: dict = {}    # agent_name -> role (read-write, read-only)
 
     def log_message(self, format, *args):
         """Structured request logging with correlation ID."""
@@ -111,13 +112,29 @@ class OhmHandler(BaseHTTPRequestHandler):
             token = auth[7:]
             if token in self.tokens:
                 return self.tokens[token]
-        # Also accept ?token= query param
-        from urllib.parse import urlparse, parse_qs
+        from urllib.parse import parse_qs, urlparse
+
         qs = parse_qs(urlparse(self.path).query)
         if "token" in qs:
             token = qs["token"][0]
             if token in self.tokens:
                 return self.tokens[token]
+        return None
+
+    def _require_auth(self) -> str:
+        """Authenticate and return agent name, or raise AuthenticationError."""
+        agent = self._authenticate()
+        if agent is None:
+            raise AuthenticationError("Authentication required — provide Bearer token")
+        return agent
+
+    def _check_write_access(self, agent: str) -> None:
+        """Verify agent has write access. Raises PermissionDeniedError if read-only."""
+        role = self.roles.get(agent, "read-write")
+        if role == "read-only":
+            raise PermissionDeniedError(
+                f"Agent '{agent}' has read-only access — writes are not permitted"
+            )
         return None
 
     def _json_response(self, code: int, data):
@@ -300,12 +317,9 @@ class OhmHandler(BaseHTTPRequestHandler):
             self._json_response(404, {"error": f"Unknown endpoint: {path}"})
 
     def _do_POST(self):
-        """Handle POST requests — writes."""
-        agent = self._authenticate()
-        if agent is None and self.tokens:
-            raise AuthenticationError("Authentication required")
-        if agent is None:
-            agent = "ohm"
+        """Handle POST requests — writes. Requires auth + write access."""
+        agent = self._require_auth()
+        self._check_write_access(agent)
 
         from urllib.parse import urlparse
         path = urlparse(self.path).path.rstrip("/")
@@ -390,6 +404,7 @@ def run_server(config: dict, store: OhmStore):
     OhmHandler.store = store
     OhmHandler.config = config
     OhmHandler.tokens = config.get("tokens", {})
+    OhmHandler.roles = config.get("roles", {})
 
     server = HTTPServer((config["host"], config["port"]), OhmHandler)
     print(f"OHM daemon listening on {config['host']}:{config['port']}", file=sys.stderr)

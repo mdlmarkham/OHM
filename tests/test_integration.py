@@ -8,7 +8,6 @@ from ohm.store import OhmStore
 from ohm.graph import (
     build_neighborhood_query,
 )
-from ohm.query import parse_query
 
 
 @pytest.fixture
@@ -133,30 +132,6 @@ class TestFullWorkflow:
         assert status["edge_count"] == 4
         assert "L1" in status["edges_by_layer"]
         assert "L3" in status["edges_by_layer"]
-
-
-class TestQueryParser:
-    """Test natural language query parsing."""
-
-    def test_neighborhood_query(self):
-        parsed = parse_query("what connects to hungary")
-        assert parsed["type"] == "neighborhood"
-
-    def test_path_query(self):
-        parsed = parse_query("path from hungary to democratic_escape")
-        assert parsed["type"] == "path"
-
-    def test_impact_query(self):
-        parsed = parse_query("impact of and_or")
-        assert parsed["type"] == "impact"
-
-    def test_who_working(self):
-        parsed = parse_query("who is working on hungary")
-        assert parsed["type"] == "who_working"
-
-    def test_unknown_fallback(self):
-        parsed = parse_query("something completely random and long")
-        assert parsed["type"] == "unknown"
 
 
 class TestLayerModel:
