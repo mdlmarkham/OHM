@@ -1,10 +1,38 @@
-# PM Update — May 16, 2026 17:52 EDT
+# PM Update — May 16, 2026 17:56 EDT
 
 This replaces all previous PM updates. Read this first.
 
+## BUILD NEXT (in order)
+
+### 1. OHM-5of — Security hardening [P0, bug]
+TLS termination, rate limiting, request size cap, encrypted token storage.
+SQL injection and auth bypass are FIXED. This is the remaining security work.
+Run `bd show OHM-5of` for acceptance criteria.
+
+### 2. OHM-y2i.4 — Quack protocol integration [P0, feature]
+Replace single-threaded http.server with Quack for multi-process concurrent DuckDB access.
+This is the last P0 before team testing can begin.
+Run `bd show OHM-y2i.4` for acceptance criteria.
+
+### 3. OHM-a35.10 — Agent registration [P1, feature]
+First-class AGENT nodes with VALUES, GOALS, CAPABLE_OF edges.
+This unblocks all agent integration (a35.1-4).
+Run `bd show OHM-a35.10` for acceptance criteria.
+
+### 4. OHM-a35.8 — SDK documentation [P1, feature]
+Agent-facing guide: how to connect, register, write edges, read the graph.
+Not CLI docs — agent integration guide.
+
+### 5. OHM-xgm.1 — DuckLake shared backend [P1, feature]
+WAL, snapshots, change feed for multi-agent shared truth.
+
+That's it. Do not start anything else until these five are done.
+
+---
+
 ## STOP — Read This Before Starting Work
 
-Run `git pull && bd list` to see current state. Many issues have been closed since the last update.
+Run `git pull && bd list` to see current state. 21 issues were closed today. Do not rebuild any of them.
 
 ## Completed Issues (DO NOT REBUILD)
 
