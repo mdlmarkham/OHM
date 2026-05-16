@@ -519,15 +519,21 @@ def create_support(
     # Enforce boundary: only L3/L4 edges can be supported
     enforce_support_boundary(conn, created_by, edge_id)
 
-    target = conn.execute("SELECT id, from_node, to_node, layer FROM ohm_edges WHERE id = ?", [edge_id]).fetchone()
+    target = conn.execute(
+        "SELECT id, from_node, to_node, layer FROM ohm_edges WHERE id = ?",
+        [edge_id],
+    ).fetchone()
     if target is None:
         raise ValueError(f"Edge not found: {edge_id}")
 
     support_id = str(uuid.uuid4())
     conn.execute(
-        """INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, created_by, confidence, condition, challenge_of, challenge_type)
+        """INSERT INTO ohm_edges
+           (id, from_node, to_node, layer, edge_type, created_by,
+            confidence, condition, challenge_of, challenge_type)
            VALUES (?, ?, ?, ?, 'SUPPORTS', ?, ?, ?, ?, 'SUPPORTS')""",
-        [support_id, target[1], target[2], target[3], created_by, confidence, reason, edge_id],
+        [support_id, target[1], target[2], target[3],
+         created_by, confidence, reason, edge_id],
     )
     return support_id
 
