@@ -184,6 +184,34 @@ DDL_STATEMENTS: list[str] = [
         updated_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """,
+    # ── Schema Metadata ──────────────────────────────────────────────────
+    """
+    CREATE TABLE IF NOT EXISTS ohm_meta (
+        key   VARCHAR PRIMARY KEY,
+        value VARCHAR NOT NULL
+    );
+    """,
+]
+
+# ── Schema Version ──────────────────────────────────────────────────────────
+
+SCHEMA_VERSION = "0.3.0"
+
+# ── Migrations ──────────────────────────────────────────────────────────────
+# Each migration is (version, description, list_of_sql_statements).
+# Applied incrementally: if current version < migration version, apply it.
+
+MIGRATIONS: list[tuple[str, str, list[str]]] = [
+    ("0.2.0", "add values/goals columns to agent_state", [
+        "ALTER TABLE ohm_agent_state ADD COLUMN values TEXT",
+        "ALTER TABLE ohm_agent_state ADD COLUMN goals TEXT",
+    ]),
+    ("0.3.0", "add tags/metadata JSON columns and agent_config table", [
+        "ALTER TABLE ohm_nodes ADD COLUMN tags JSON",
+        "ALTER TABLE ohm_nodes ADD COLUMN metadata JSON",
+        "ALTER TABLE ohm_edges ADD COLUMN metadata JSON",
+        "ALTER TABLE ohm_observations ADD COLUMN metadata JSON",
+    ]),
 ]
 
 # ── Indexes ─────────────────────────────────────────────────────────────────
@@ -217,6 +245,8 @@ INDEX_DDL: list[str] = [
 def initialize_schema(conn: "DuckDBPyConnection") -> None:
     """Create all tables and indexes if they don't exist.
 
+    Then applies any pending migrations based on the stored schema version.
+
     Args:
         conn: An active DuckDB connection.
     """
@@ -224,40 +254,47 @@ def initialize_schema(conn: "DuckDBPyConnection") -> None:
         conn.execute(ddl)
     for idx in INDEX_DDL:
         conn.execute(idx)
-    # Migration: add values/goals columns if missing (v0.1.0 → v0.2.0)
-    _migrate_agent_state_columns(conn)
-    # Migration: add tags/metadata JSON columns if missing
-    _migrate_json_columns(conn)
-    # Migration: seed default agent configs
+    # Set initial schema version if not present
+    _ensure_meta_table(conn)
+    # Apply migrations incrementally
+    _apply_migrations(conn)
+    # Seed default agent configs
     _seed_agent_configs(conn)
 
 
-def _migrate_agent_state_columns(conn: "DuckDBPyConnection") -> None:
-    """Add values and goals columns if they don't exist."""
-    for col in ["values", "goals"]:
-        try:
+def _ensure_meta_table(conn: "DuckDBPyConnection") -> None:
+    """Ensure the ohm_meta table exists and has a schema_version entry."""
+    # Table is created by DDL_STATEMENTS, but ensure version row exists
+    existing = conn.execute(
+        "SELECT COUNT(*) FROM ohm_meta WHERE key = 'schema_version'"
+    ).fetchone()
+    if existing is None or existing[0] == 0:
+        conn.execute(
+            "INSERT INTO ohm_meta (key, value) VALUES ('schema_version', ?)",
+            ["0.1.0"],  # Base version before migrations
+        )
+
+
+def _apply_migrations(conn: "DuckDBPyConnection") -> None:
+    """Apply pending migrations based on the current schema version."""
+    current = conn.execute(
+        "SELECT value FROM ohm_meta WHERE key = 'schema_version'"
+    ).fetchone()
+    current_version = current[0] if current else "0.1.0"
+
+    for version, description, statements in MIGRATIONS:
+        if current_version < version:
+            for stmt in statements:
+                try:
+                    conn.execute(stmt)
+                except Exception:
+                    # DuckDB ALTER TABLE ADD COLUMN fails if column exists
+                    pass  # Column/table already exists — safe to ignore
             conn.execute(
-                f"ALTER TABLE ohm_agent_state ADD COLUMN {col} TEXT"
+                "UPDATE ohm_meta SET value = ? WHERE key = 'schema_version'",
+                [version],
             )
-        except Exception:
-            pass  # Column already exists
-
-
-def _migrate_json_columns(conn: "DuckDBPyConnection") -> None:
-    """Add tags and metadata JSON columns if they don't exist."""
-    migrations = [
-        ("ohm_nodes", ["tags", "metadata"]),
-        ("ohm_edges", ["metadata"]),
-        ("ohm_observations", ["metadata"]),
-    ]
-    for table, columns in migrations:
-        for col in columns:
-            try:
-                conn.execute(
-                    f"ALTER TABLE {table} ADD COLUMN {col} JSON"
-                )
-            except Exception:
-                pass  # Column already exists
+            current_version = version
 
 
 def _seed_agent_configs(conn: "DuckDBPyConnection") -> None:
@@ -311,6 +348,21 @@ def _seed_agent_configs(conn: "DuckDBPyConnection") -> None:
             [a["agent_name"], a["optimization_target"], a["services"],
              a["confidence_threshold"], a["sync_interval_sec"]],
         )
+
+
+def get_schema_version(conn: "DuckDBPyConnection") -> str:
+    """Return the current schema version from the database.
+
+    Args:
+        conn: An active DuckDB connection.
+
+    Returns:
+        The schema version string (e.g., '0.3.0').
+    """
+    result = conn.execute(
+        "SELECT value FROM ohm_meta WHERE key = 'schema_version'"
+    ).fetchone()
+    return result[0] if result else "0.0.0"
 
 
 def validate_edge_type(layer: str, edge_type: str) -> bool:

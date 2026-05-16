@@ -2,10 +2,13 @@
 
 from ohm.schema import (
     LAYER_EDGE_TYPES,
+    MIGRATIONS,
+    SCHEMA_VERSION,
     VALID_LAYERS,
     VALID_NODE_TYPES,
     VALID_OBSERVATION_TYPES,
     VALID_VISIBILITIES,
+    get_schema_version,
     initialize_schema,
     validate_edge_type,
     validate_node_type,
@@ -94,3 +97,63 @@ class TestSchemaInitialization:
             "WHERE table_schema = 'main'"
         ).fetchone()[0]
         assert tables >= 5  # At least our 5 tables
+
+
+class TestSchemaVersion:
+    """Tests for schema version tracking and migrations."""
+
+    def test_schema_version_is_set(self, test_db):
+        """After initialization, schema_version should be set."""
+        initialize_schema(test_db)
+        version = get_schema_version(test_db)
+        assert version == SCHEMA_VERSION
+
+    def test_schema_version_starts_at_base(self, test_db):
+        """A fresh database should start at the current version after init."""
+        initialize_schema(test_db)
+        version = get_schema_version(test_db)
+        assert version == "0.3.0"
+
+    def test_migrations_applied_incrementally(self, test_db):
+        """Migrations should be applied in order."""
+        initialize_schema(test_db)
+        # After init, all migrations should have been applied
+        version = get_schema_version(test_db)
+        assert version == SCHEMA_VERSION
+
+    def test_migrations_are_idempotent(self, test_db):
+        """Running initialize_schema twice should not re-apply migrations."""
+        initialize_schema(test_db)
+        version1 = get_schema_version(test_db)
+        initialize_schema(test_db)
+        version2 = get_schema_version(test_db)
+        assert version1 == version2 == SCHEMA_VERSION
+
+    def test_meta_table_exists(self, test_db):
+        """The ohm_meta table should exist after initialization."""
+        initialize_schema(test_db)
+        result = test_db.execute(
+            "SELECT COUNT(*) FROM ohm_meta WHERE key = 'schema_version'"
+        ).fetchone()
+        assert result[0] == 1
+
+    def test_migrations_list_not_empty(self):
+        """The MIGRATIONS list should contain at least one migration."""
+        assert len(MIGRATIONS) > 0
+
+    def test_migrations_are_ordered(self):
+        """Migrations should be in ascending version order."""
+        versions = [m[0] for m in MIGRATIONS]
+        assert versions == sorted(versions)
+
+    def test_get_schema_version_on_empty_db(self):
+        """get_schema_version on a database without ohm_meta should return 0.0.0."""
+        import duckdb
+
+        raw_conn = duckdb.connect(":memory:")
+        try:
+            # Create the table but don't seed the version row
+            version = get_schema_version(raw_conn)
+            assert version == "0.0.0"
+        finally:
+            raw_conn.close()

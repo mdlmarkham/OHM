@@ -76,7 +76,14 @@ def build_parser() -> argparse.ArgumentParser:
     graph_sub.add_parser("layers", help="L1-L4 descriptions with examples")
 
     # graph status
-    graph_sub.add_parser("status", help="Node count, edge count, last sync, active agents")
+    graph_sub.add_parser("status", help="Node count, edge count, schema version, active agents")
+
+    # graph upgrade
+    upgrade_parser = graph_sub.add_parser("upgrade", help="Apply pending schema migrations")
+    upgrade_parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Show what would be migrated without applying changes",
+    )
 
     # graph stats
     graph_sub.add_parser("stats", help="Edge counts by layer, confidence distribution")
@@ -316,6 +323,8 @@ def _handle_graph(args: argparse.Namespace) -> None:
         _show_status(args)
     elif cmd == "stats":
         _show_stats(args)
+    elif cmd == "upgrade":
+        _handle_upgrade(args)
     elif cmd == "query":
         _handle_query(args)
     elif cmd == "neighborhood":
@@ -382,21 +391,53 @@ def _get_actor(args: argparse.Namespace) -> str:
 
 
 def _show_status(args: argparse.Namespace) -> None:
-    """Show graph status: node count, edge count, active agents."""
+    """Show graph status: node count, edge count, active agents, schema version."""
     from ohm.queries import query_stats
+    from ohm.schema import get_schema_version
 
     conn = _get_db(args)
     try:
         stats = query_stats(conn)
+        schema_version = get_schema_version(conn)
         if args.format == "json":
             import json
+            stats["schema_version"] = schema_version
             print(json.dumps(stats, indent=2))
         else:
+            print(f"Schema version: {schema_version}")
             print(f"Nodes:        {stats['total_nodes']}")
             print(f"Edges:        {stats['total_edges']}")
             print(f"Observations: {stats['total_observations']}")
             print(f"Active agents: {stats['active_agents']}")
             print(f"Challenge ratio: {stats['challenge_ratio']}")
+    finally:
+        conn.close()
+
+
+def _handle_upgrade(args: argparse.Namespace) -> None:
+    """Apply pending schema migrations."""
+    from ohm.schema import SCHEMA_VERSION, MIGRATIONS, get_schema_version, initialize_schema
+
+    conn = _get_db(args)
+    try:
+        current_version = get_schema_version(conn)
+        if args.dry_run:
+            pending = [(v, d) for v, d, _ in MIGRATIONS if current_version < v]
+            if not pending:
+                print(f"Schema is up to date (v{current_version})")
+            else:
+                print(f"Current schema: v{current_version}")
+                print(f"Target schema:  v{SCHEMA_VERSION}")
+                print(f"\nPending migrations:")
+                for version, description in pending:
+                    print(f"  v{version}: {description}")
+        else:
+            initialize_schema(conn)
+            new_version = get_schema_version(conn)
+            if new_version == current_version:
+                print(f"Schema is up to date (v{current_version})")
+            else:
+                print(f"Schema upgraded: v{current_version} → v{new_version}")
     finally:
         conn.close()
 
