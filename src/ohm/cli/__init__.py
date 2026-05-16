@@ -543,7 +543,9 @@ def _handle_query(args: argparse.Namespace) -> None:
     try:
         # Structured query: use neighborhood as base, apply filters
         if args.filter_type or args.layer or args.owner or args.confidence_min:
-            # For structured queries, scan all edges with filters
+            # Build WHERE clause from hardcoded column names + parameterized values.
+            # Column names (edge_type, layer, created_by, confidence) are not
+            # user-provided — only values use ? placeholders.
             conditions = []
             params = []
             if args.filter_type:
@@ -561,7 +563,9 @@ def _handle_query(args: argparse.Namespace) -> None:
 
             where = " AND ".join(conditions) if conditions else "1=1"
             result = conn.execute(
-                "SELECT * FROM ohm_edges WHERE " + where + " ORDER BY created_at DESC LIMIT 100",
+                "SELECT * FROM ohm_edges WHERE "
+                + where
+                + " ORDER BY created_at DESC LIMIT 100",
                 params,
             )
             from ohm.queries import _rows_to_dicts

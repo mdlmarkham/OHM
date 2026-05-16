@@ -650,11 +650,16 @@ def set_agent_state(
     values: str | None = None,
     goals: str | None = None,
 ) -> None:
-    """Set or update an agent's current focus, values, and goals."""
+    """Set or update an agent's current focus, values, and goals.
+
+    Dynamic SET clause uses hardcoded column names only — all values
+    are parameterized with ? placeholders.
+    """
     existing = conn.execute(
         "SELECT 1 FROM ohm_agent_state WHERE agent_name = ?", [agent_name]
     ).fetchone()
     if existing:
+        # Column names are hardcoded, values use ? — safe from injection
         set_parts = ["current_focus = ?", "updated_at = CURRENT_TIMESTAMP"]
         params: list[str | None] = [focus]
         if values is not None:
