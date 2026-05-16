@@ -524,7 +524,7 @@ def create_challenge(
     reason: str,
     created_by: str,
     confidence: float = 0.5,
-) -> str:
+) -> dict[str, Any]:
     """Create a CHALLENGED_BY edge referencing an existing edge.
 
     Enforces boundary rules: only L3/L4 edges can be challenged.
@@ -567,7 +567,7 @@ def create_support(
     reason: str,
     created_by: str,
     confidence: float = 0.7,
-) -> str:
+) -> dict[str, Any]:
     """Create a SUPPORTS edge referencing an existing edge.
 
     Enforces boundary rules: only L3/L4 edges can be supported.
