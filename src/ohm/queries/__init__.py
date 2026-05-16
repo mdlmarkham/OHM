@@ -23,6 +23,14 @@ if TYPE_CHECKING:
 
 # ── Neighborhood ────────────────────────────────────────────────────────────
 
+def _rows_to_dicts(result: Any) -> list[dict[str, Any]]:
+    """Convert DuckDB query result to list of dicts using column descriptions."""
+    if not result:
+        return []
+    columns = [desc[0] for desc in result.description]
+    return [dict(zip(columns, row)) for row in result.fetchall()]
+
+
 def query_neighborhood(
     conn: DuckDBPyConnection,
     node_id: str,
@@ -77,7 +85,7 @@ def query_neighborhood(
     """
 
     result = conn.execute(query)
-    return [dict(row) for row in result.fetchall()]
+    return _rows_to_dicts(result)
 
 
 # ── Path ────────────────────────────────────────────────────────────────────
@@ -106,8 +114,7 @@ def query_path(
                 e.layer,
                 e.edge_type,
                 e.confidence,
-                1 AS depth,
-                e.from_node || '→' || e.to_node AS visited_nodes
+                1 AS depth
             FROM ohm_edges e
             WHERE (e.from_node = '{from_node}' OR e.to_node = '{from_node}')
               {layer_where}
@@ -121,27 +128,22 @@ def query_path(
                 e.layer,
                 e.edge_type,
                 e.confidence,
-                p.depth + 1,
-                p.visited_nodes || '→' || CASE WHEN e.from_node = p.to_node THEN e.to_node ELSE e.from_node END
+                p.depth + 1
             FROM path_cte p
-            JOIN ohm_edges e ON (e.from_node = p.to_node OR e.to_node = p.to_node)
+            JOIN ohm_edges e ON e.from_node = p.to_node
             WHERE p.depth < {max_depth}
-              AND (p.to_node = '{to_node}' OR p.from_node = '{to_node}')
-              AND NOT regexp_matches(
-                  p.visited_nodes,
-                  CASE WHEN e.from_node = p.to_node THEN e.to_node ELSE e.from_node END
-              )
+              AND p.to_node != '{to_node}'
               {layer_where}
         )
         SELECT edge_id, from_node, to_node, layer, edge_type, confidence, depth
         FROM path_cte
-        WHERE from_node = '{to_node}' OR to_node = '{to_node}'
+        WHERE to_node = '{to_node}'
         ORDER BY depth
         LIMIT 1
     """
 
     result = conn.execute(query)
-    return [dict(row) for row in result.fetchall()]
+    return _rows_to_dicts(result)
 
 
 # ── Impact ──────────────────────────────────────────────────────────────────
@@ -159,7 +161,6 @@ def query_impact(
     """
     query = f"""
         WITH RECURSIVE impact_cte AS (
-            -- Anchor: outgoing edges from the failure node
             SELECT
                 e.id AS edge_id,
                 e.from_node,
@@ -174,7 +175,6 @@ def query_impact(
 
             UNION ALL
 
-            -- Recursive: follow outgoing edges
             SELECT
                 e.id,
                 e.from_node,
@@ -187,25 +187,14 @@ def query_impact(
             JOIN ohm_edges e ON e.from_node = i.to_node
             WHERE i.depth < {depth}
               AND e.layer IN ('L2', 'L3')
-              AND NOT EXISTS (
-                  SELECT 1 FROM impact_cte i2
-                  WHERE i2.to_node = e.to_node AND i2.depth <= i.depth
-              )
         )
-        SELECT
-            edge_id,
-            from_node,
-            to_node,
-            layer,
-            edge_type,
-            confidence,
-            depth
+        SELECT edge_id, from_node, to_node, layer, edge_type, confidence, depth
         FROM impact_cte
         ORDER BY depth, edge_type
     """
 
     result = conn.execute(query)
-    return [dict(row) for row in result.fetchall()]
+    return _rows_to_dicts(result)
 
 
 # ── Confidence Audit ────────────────────────────────────────────────────────
@@ -240,7 +229,8 @@ def query_confidence(
     if original is None:
         return {"original": None, "challenges": [], "supports": [], "refinements": []}
 
-    original_dict = dict(original)
+    columns = [desc[0] for desc in conn.description]
+    original_dict = dict(zip(columns, original))
 
     # Find all challenge/support/refine edges referencing this edge
     refs_query = f"""
@@ -250,7 +240,9 @@ def query_confidence(
         WHERE challenge_of = '{edge_id}'
         ORDER BY created_at DESC
     """
-    refs = conn.execute(refs_query).fetchall()
+    refs_result = conn.execute(refs_query)
+    ref_columns = [desc[0] for desc in conn.description]
+    refs = [dict(zip(ref_columns, row)) for row in refs_result.fetchall()]
 
     challenges = []
     supports = []
@@ -313,7 +305,7 @@ def query_change_feed(
     """
 
     result = conn.execute(query)
-    return [dict(row) for row in result.fetchall()]
+    return _rows_to_dicts(result)
 
 
 # ── Agent State ─────────────────────────────────────────────────────────────
@@ -337,7 +329,7 @@ def query_agent_state(
         query = "SELECT * FROM ohm_agent_state"
 
     result = conn.execute(query)
-    return [dict(row) for row in result.fetchall()]
+    return _rows_to_dicts(result)
 
 
 # ── Stats ───────────────────────────────────────────────────────────────────
