@@ -125,6 +125,8 @@ DDL_STATEMENTS: list[str] = [
         confidence_threshold FLOAT DEFAULT 0.7,
         available_services   TEXT,
         current_session_id   VARCHAR,
+        values               TEXT,
+        goals                TEXT,
         updated_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """,
@@ -180,6 +182,19 @@ def initialize_schema(conn: "DuckDBPyConnection") -> None:
         conn.execute(ddl)
     for idx in INDEX_DDL:
         conn.execute(idx)
+    # Migration: add values/goals columns if missing (v0.1.0 → v0.2.0)
+    _migrate_agent_state_columns(conn)
+
+
+def _migrate_agent_state_columns(conn: "DuckDBPyConnection") -> None:
+    """Add values and goals columns if they don't exist."""
+    for col in ["values", "goals"]:
+        try:
+            conn.execute(
+                f"ALTER TABLE ohm_agent_state ADD COLUMN {col} TEXT"
+            )
+        except Exception:
+            pass  # Column already exists
 
 
 def validate_edge_type(layer: str, edge_type: str) -> bool:

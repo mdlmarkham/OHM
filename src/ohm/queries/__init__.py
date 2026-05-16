@@ -44,6 +44,12 @@ def query_neighborhood(
     Returns all edges (and their nodes) within *depth* hops.
     Uses a recursive CTE with cycle detection via visited-node tracking.
     """
+    from ohm.validation import validate_depth, validate_identifier, validate_layer
+
+    node_id = validate_identifier(node_id, name="node_id")
+    depth = validate_depth(depth)
+    if layer:
+        layer = validate_layer(layer)
     layer_where = f"AND e.layer = '{layer}'" if layer else ""
 
     # Build direction join condition
@@ -103,6 +109,13 @@ def query_path(
     Returns the ordered list of edges forming the path, or empty list if
     no path exists within *max_depth*.
     """
+    from ohm.validation import validate_depth, validate_identifier, validate_layer
+
+    from_node = validate_identifier(from_node, name="from_node")
+    to_node = validate_identifier(to_node, name="to_node")
+    max_depth = validate_depth(max_depth, max_depth=50)
+    if layer:
+        layer = validate_layer(layer)
     layer_where = f"AND e.layer = '{layer}'" if layer else ""
 
     query = f"""
@@ -159,6 +172,10 @@ def query_impact(
     Traverses outgoing L2 and L3 edges from *node_id* to find
     all transitively affected nodes.
     """
+    from ohm.validation import validate_depth, validate_identifier
+
+    node_id = validate_identifier(node_id, name="node_id")
+    depth = validate_depth(depth)
     query = f"""
         WITH RECURSIVE impact_cte AS (
             SELECT
@@ -208,6 +225,9 @@ def query_confidence(
     Returns the original edge details plus all CHALLENGED_BY, SUPPORTS,
     and REFINES edges referencing it.
     """
+    from ohm.validation import validate_identifier
+
+    edge_id = validate_identifier(edge_id, name="edge_id")
     query = f"""
         SELECT
             e.id,
@@ -284,10 +304,14 @@ def query_change_feed(
     Returns:
         List of change feed entries ordered by time descending.
     """
+    from ohm.validation import validate_identifier, validate_timestamp
+
     conditions = []
     if since and since != "last-check":
+        since = validate_timestamp(since)
         conditions.append(f"occurred_at >= '{since}'::TIMESTAMP")
     if agent_name:
+        agent_name = validate_identifier(agent_name, name="agent_name")
         conditions.append(f"agent_name = '{agent_name}'")
 
     where_clause = ""
@@ -323,7 +347,10 @@ def query_agent_state(
     Returns:
         List of agent state records.
     """
+    from ohm.validation import validate_identifier
+
     if agent_name:
+        agent_name = validate_identifier(agent_name, name="agent_name")
         query = f"SELECT * FROM ohm_agent_state WHERE agent_name = '{agent_name}'"
     else:
         query = "SELECT * FROM ohm_agent_state"
@@ -416,9 +443,13 @@ def create_node(
 ) -> str:
     """Create a new node and return its ID."""
     from ohm.schema import generate_node_id, validate_node_type
+    from ohm.validation import validate_confidence
 
+    if not label or len(label) > 500:
+        raise ValueError("Label must be non-empty and ≤ 500 characters")
     if not validate_node_type(node_type):
         raise ValueError(f"Invalid node type: {node_type}")
+    confidence = validate_confidence(confidence)
 
     node_id = generate_node_id(label)
     conn.execute(
@@ -446,9 +477,11 @@ def create_edge(
     import uuid
 
     from ohm.schema import validate_edge_type
+    from ohm.validation import validate_confidence
 
     if not validate_edge_type(layer, edge_type):
         raise ValueError(f"Invalid edge type '{edge_type}' for layer '{layer}'")
+    confidence = validate_confidence(confidence)
 
     edge_id = str(uuid.uuid4())
     conn.execute(
@@ -477,8 +510,10 @@ def create_challenge(
     import uuid
 
     from ohm.boundary import enforce_challenge_boundary
+    from ohm.validation import validate_confidence, validate_identifier
 
-    # Enforce boundary: only L3/L4 edges can be challenged
+    edge_id = validate_identifier(edge_id, name="edge_id")
+    confidence = validate_confidence(confidence)
     enforce_challenge_boundary(conn, created_by, edge_id)
 
     target = conn.execute(
@@ -515,8 +550,10 @@ def create_support(
     import uuid
 
     from ohm.boundary import enforce_support_boundary
+    from ohm.validation import validate_confidence, validate_identifier
 
-    # Enforce boundary: only L3/L4 edges can be supported
+    edge_id = validate_identifier(edge_id, name="edge_id")
+    confidence = validate_confidence(confidence)
     enforce_support_boundary(conn, created_by, edge_id)
 
     target = conn.execute(
@@ -543,23 +580,58 @@ def set_agent_state(
     *,
     agent_name: str,
     focus: str | None = None,
+    values: str | None = None,
+    goals: str | None = None,
 ) -> None:
-    """Set or update an agent's current focus."""
+    """Set or update an agent's current focus, values, and goals."""
     existing = conn.execute(
         "SELECT 1 FROM ohm_agent_state WHERE agent_name = ?", [agent_name]
     ).fetchone()
     if existing:
+        set_parts = ["current_focus = ?", "updated_at = CURRENT_TIMESTAMP"]
+        params: list[str | None] = [focus]
+        if values is not None:
+            set_parts.append("values = ?")
+            params.append(values)
+        if goals is not None:
+            set_parts.append("goals = ?")
+            params.append(goals)
+        params.append(agent_name)
         conn.execute(
-            "UPDATE ohm_agent_state SET current_focus = ?, updated_at = CURRENT_TIMESTAMP "
-            "WHERE agent_name = ?",
-            [focus, agent_name],
+            f"UPDATE ohm_agent_state SET {', '.join(set_parts)} WHERE agent_name = ?",
+            params,
         )
     else:
         conn.execute(
-            "INSERT INTO ohm_agent_state (agent_name, current_focus, updated_at) "
-            "VALUES (?, ?, CURRENT_TIMESTAMP)",
-            [agent_name, focus],
+            "INSERT INTO ohm_agent_state (agent_name, current_focus, values, goals, updated_at) "
+            "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
+            [agent_name, focus, values, goals],
         )
+
+
+def create_observation(
+    conn: DuckDBPyConnection,
+    *,
+    node_id: str,
+    obs_type: str,
+    created_by: str,
+    value: float | None = None,
+    baseline: float | None = None,
+    sigma: float | None = None,
+    source: str | None = None,
+    edge_id: str | None = None,
+) -> str:
+    """Create an observation on a node or edge and return its ID."""
+    import uuid
+
+    obs_id = str(uuid.uuid4())
+    conn.execute(
+        """INSERT INTO ohm_observations
+           (id, node_id, edge_id, type, value, baseline, sigma, source, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [obs_id, node_id, edge_id, obs_type, value, baseline, sigma, source, created_by],
+    )
+    return obs_id
 
 
 def node_exists(conn: DuckDBPyConnection, node_id: str) -> bool:

@@ -147,6 +147,30 @@ def build_parser() -> argparse.ArgumentParser:
     path_parser.add_argument("to_node", help="Target node ID")
     path_parser.add_argument("--max-depth", type=int, default=10, help="Max path length")
 
+    # graph update
+    update_parser = graph_sub.add_parser("update", help="Update your own edge")
+    update_parser.add_argument("edge_id", help="ID of the edge to update")
+    update_parser.add_argument("--confidence", type=float, help="New confidence score (0-1)")
+    update_parser.add_argument("--provenance", help="Updated provenance")
+    update_parser.add_argument("--condition", help="Updated condition")
+
+    # graph observe
+    observe_parser = graph_sub.add_parser("observe", help="Record an observation on a node")
+    observe_parser.add_argument("node_id", help="Node ID to observe")
+    observe_parser.add_argument(
+        "--type", dest="obs_type", required=True,
+        choices=["anomaly", "measurement", "pattern", "challenge", "support"],
+        help="Observation type",
+    )
+    observe_parser.add_argument("--value", type=float, help="Observation value")
+    observe_parser.add_argument("--baseline", type=float, help="Baseline value")
+    observe_parser.add_argument("--sigma", type=float, help="Standard deviation")
+    observe_parser.add_argument(
+        "--source",
+        choices=["signal", "research", "conversation", "analysis"],
+        default="analysis", help="Observation source",
+    )
+
     # ── state ────────────────────────────────────────────────────────────
     state_parser = subparsers.add_parser("state", help="Hive mind awareness")
     state_sub = state_parser.add_subparsers(dest="state_command", help="State commands")
@@ -273,6 +297,10 @@ def _handle_graph(args: argparse.Namespace) -> None:
         _handle_impact(args)
     elif cmd == "path":
         _handle_path(args)
+    elif cmd == "update":
+        _handle_update(args)
+    elif cmd == "observe":
+        _handle_observe(args)
     else:
         print(f"Unknown graph command: {cmd}")
 
@@ -640,6 +668,89 @@ def _handle_path(args: argparse.Namespace) -> None:
             for r in results:
                 print(f"  [{r['layer']}] {r['edge_type']}: "
                       f"{r['from_node']} → {r['to_node']} (conf: {r.get('confidence', '?')})")
+    finally:
+        conn.close()
+
+
+def _handle_update(args: argparse.Namespace) -> None:
+    """Handle edge update — only the owning agent can update their own edges."""
+    from ohm.boundary import enforce_write_boundary
+    from ohm.queries import edge_exists
+
+    actor = _get_actor(args)
+    conn = _get_db(args)
+    try:
+        if not edge_exists(conn, args.edge_id):
+            print(f"Edge not found: {args.edge_id}")
+            return
+
+        enforce_write_boundary(conn, actor, args.edge_id)
+
+        updates = []
+        params = []
+        if args.confidence is not None:
+            updates.append("confidence = ?")
+            params.append(args.confidence)
+        if args.provenance is not None:
+            updates.append("provenance = ?")
+            params.append(args.provenance)
+        if args.condition is not None:
+            updates.append("condition = ?")
+            params.append(args.condition)
+
+        if not updates:
+            print("No updates specified. Use --confidence, --provenance, or --condition.")
+            return
+
+        updates.append("updated_at = CURRENT_TIMESTAMP")
+        updates.append("updated_by = ?")
+        params.append(actor)
+        params.append(args.edge_id)
+
+        conn.execute(
+            f"UPDATE ohm_edges SET {', '.join(updates)} WHERE id = ?",
+            params,
+        )
+        if args.format == "json":
+            import json
+            print(json.dumps({"edge_id": args.edge_id, "status": "updated"}))
+        else:
+            print(f"Updated edge {args.edge_id}")
+    finally:
+        conn.close()
+
+
+def _handle_observe(args: argparse.Namespace) -> None:
+    """Handle observation creation on a node."""
+    from ohm.queries import create_observation, node_exists
+
+    actor = _get_actor(args)
+    conn = _get_db(args)
+    try:
+        if not node_exists(conn, args.node_id):
+            print(f"Node not found: {args.node_id}")
+            return
+
+        obs_id = create_observation(
+            conn,
+            node_id=args.node_id,
+            obs_type=args.obs_type,
+            value=args.value,
+            baseline=args.baseline,
+            sigma=args.sigma,
+            source=args.source,
+            created_by=actor,
+        )
+        if args.format == "json":
+            import json
+            print(json.dumps({"observation_id": obs_id, "status": "created"}))
+        else:
+            print(f"Recorded {args.obs_type} observation on {args.node_id}")
+            print(f"  ID: {obs_id}")
+            if args.value is not None:
+                print(f"  Value: {args.value}")
+            if args.sigma is not None:
+                print(f"  Sigma: {args.sigma}")
     finally:
         conn.close()
 

@@ -41,6 +41,37 @@ Named for the unit of resistance — in electrical circuits, resistance preserve
 └──────────┘        └─────────────┘        └─────────────┘
 ```
 
+## Design Philosophy
+
+Most multi-agent systems collapse into one of two failures:
+
+1. **The committee** — agents vote, average, reach consensus. Individual perspectives get flattened. The result is bland, safe, and wrong in the same way a focus group is wrong.
+
+2. **The silo** — agents work independently, share only final outputs. No awareness of each other's work. Duplication, contradiction, and missed connections.
+
+OHM avoids both by making the boundary a first-class concept, not an afterthought.
+
+### Shared Awareness, Individual Judgment
+
+- **Shared awareness** — I can see what Clio researched, what Hephaestus audited, what Socrates challenged. The change feed delivers this in seconds, not hours.
+- **Individual judgment** — I make my own assessment. My confidence score reflects my judgment, not a committee average. My pattern detection is mine. Clio's research findings are hers.
+
+### Agent Values and Goals
+
+Each agent has distinct values and goals — and these aren't bugs, they're features:
+
+| Agent | Values | Goals |
+|-------|--------|-------|
+| Métis | Wisdom, connections, questioning | Pattern detection, connection density |
+| Clio | Depth, evidence, source quality | Source quality, evidence strength |
+| Hephaestus | Precision, security, correctness | Audit accuracy, anomaly detection |
+| Socrates | Critical thinking, devil's advocacy | Identifying weaknesses in reasoning |
+| Deepthought | Narrative, audience, impact | Communication clarity, insight synthesis |
+
+When Socrates challenges Métis's AND→OR confidence, that's not a conflict to resolve — that's two perspectives enriching the same node. When Clio's research supports it at 0.85 and Socrates challenges at 0.5, the human sees the full picture and makes their own judgment. **The graph preserves the disagreement, not the average.**
+
+OHM's purpose: help each agent be more effective at its own purpose by making other agents' work visible, while never forcing any agent to adopt another's judgment.
+
 ## Core Principle
 
 **Shared awareness, individual judgment.**
