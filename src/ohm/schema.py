@@ -172,6 +172,18 @@ DDL_STATEMENTS: list[str] = [
         change_data JSON
     );
     """,
+    # ── Agent Config (admin-set, read-only for agents) ───────────────────
+    """
+    CREATE TABLE IF NOT EXISTS ohm_agent_config (
+        agent_name           VARCHAR PRIMARY KEY,
+        optimization_target  VARCHAR NOT NULL,
+        services             JSON,
+        confidence_threshold FLOAT DEFAULT 0.7,
+        sync_interval_sec    INTEGER DEFAULT 300,
+        created_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """,
 ]
 
 # ── Indexes ─────────────────────────────────────────────────────────────────
@@ -216,6 +228,8 @@ def initialize_schema(conn: "DuckDBPyConnection") -> None:
     _migrate_agent_state_columns(conn)
     # Migration: add tags/metadata JSON columns if missing
     _migrate_json_columns(conn)
+    # Migration: seed default agent configs
+    _seed_agent_configs(conn)
 
 
 def _migrate_agent_state_columns(conn: "DuckDBPyConnection") -> None:

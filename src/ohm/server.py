@@ -393,6 +393,8 @@ class OhmHandler(BaseHTTPRequestHandler):
 
         elif path.startswith("/challenge/"):
             edge_id = path[11:]
+            from .validation import validate_identifier
+            edge_id = validate_identifier(edge_id, name="edge_id")
             reason = body.get("reason", "")
             confidence = body.get("confidence", 0.5)
             challenge_type = body.get("challenge_type", "CHALLENGED_BY")
@@ -404,6 +406,8 @@ class OhmHandler(BaseHTTPRequestHandler):
 
         elif path.startswith("/support/"):
             edge_id = path[9:]
+            from .validation import validate_identifier
+            edge_id = validate_identifier(edge_id, name="edge_id")
             reason = body.get("reason", "")
             confidence = body.get("confidence", 0.8)
             result = self.store.challenge_edge(edge_id, reason, confidence, "SUPPORTS")
@@ -414,6 +418,8 @@ class OhmHandler(BaseHTTPRequestHandler):
 
         elif path.startswith("/observe/"):
             node_id = path[9:]
+            from .validation import validate_identifier
+            node_id = validate_identifier(node_id, name="node_id")
             result = self.store.write_observation(
                 node_id=node_id,
                 type=body.get("type", "measurement"),

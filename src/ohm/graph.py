@@ -114,7 +114,7 @@ FROM path_search
 WHERE to_node = ?
 GROUP BY edge_path, node_path, depth
 ORDER BY depth, avg_confidence DESC
-LIMIT 5
+LIMIT ?
 """
 
 # Impact analysis: all downstream nodes from a given node
@@ -287,7 +287,8 @@ def build_path_query(
 
     Returns (sql, params) for execution.
     """
-    params = [from_node, min(max_depth, 5), to_node]
+    capped_depth = min(max_depth, 5)
+    params = [from_node, capped_depth, to_node, capped_depth]
     return PATH_CTE, params
 
 

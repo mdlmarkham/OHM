@@ -47,7 +47,11 @@ class Graph:
         provenance: str | None = None,
         confidence: float = 1.0,
     ) -> str:
-        """Create a node and return its ID."""
+        """Create a node and return its ID.
+
+        The node ID is auto-generated from the label (lowercased, spaces→underscores,
+        with a short unique suffix). Use get_node() to retrieve the full record.
+        """
         from ohm.queries import create_node
 
         return create_node(
@@ -72,7 +76,10 @@ class Graph:
         condition: str | None = None,
         provenance: str | None = None,
     ) -> str:
-        """Create an edge and return its ID."""
+        """Create an edge and return its ID.
+
+        Use get_edge() to retrieve the full record including timestamps.
+        """
         from ohm.queries import create_edge
 
         return create_edge(
@@ -124,25 +131,26 @@ class Graph:
 
         enforce_write_boundary(self._conn, self.actor, edge_id)
 
-        updates = []
+        # Build SET clause dynamically — column names are hardcoded, not user-provided
+        set_clauses: list[str] = []
         params: list[Any] = []
         if confidence is not None:
-            updates.append("confidence = ?")
+            set_clauses.append("confidence = ?")
             params.append(confidence)
         if provenance is not None:
-            updates.append("provenance = ?")
+            set_clauses.append("provenance = ?")
             params.append(provenance)
         if condition is not None:
-            updates.append("condition = ?")
+            set_clauses.append("condition = ?")
             params.append(condition)
-        if not updates:
+        if not set_clauses:
             return
-        updates.append("updated_at = CURRENT_TIMESTAMP")
-        updates.append("updated_by = ?")
+        set_clauses.append("updated_at = CURRENT_TIMESTAMP")
+        set_clauses.append("updated_by = ?")
         params.append(self.actor)
         params.append(edge_id)
         self._conn.execute(
-            f"UPDATE ohm_edges SET {', '.join(updates)} WHERE id = ?", params,
+            "UPDATE ohm_edges SET " + ", ".join(set_clauses) + " WHERE id = ?", params,
         )
 
     def observe(
@@ -176,6 +184,102 @@ class Graph:
         set_agent_state(self._conn, agent_name=self.actor, focus=focus)
 
     # ── Read ─────────────────────────────────────────────────────────────
+
+    def get_node(self, node_id: str) -> dict[str, Any] | None:
+        """Retrieve a single node by ID.
+
+        Returns the full node record (id, label, type, content, created_by,
+        created_at, confidence, visibility, provenance, tags, metadata)
+        or None if not found.
+        """
+        result = self._conn.execute(
+            "SELECT * FROM ohm_nodes WHERE id = ?", [node_id]
+        ).fetchone()
+        if result is None:
+            return None
+        columns = [desc[0] for desc in self._conn.description]
+        return dict(zip(columns, result))
+
+    def get_edge(self, edge_id: str) -> dict[str, Any] | None:
+        """Retrieve a single edge by ID.
+
+        Returns the full edge record (id, from_node, to_node, layer, edge_type,
+        confidence, condition, provenance, created_by, created_at, challenge_of,
+        challenge_type) or None if not found.
+        """
+        result = self._conn.execute(
+            "SELECT * FROM ohm_edges WHERE id = ?", [edge_id]
+        ).fetchone()
+        if result is None:
+            return None
+        columns = [desc[0] for desc in self._conn.description]
+        return dict(zip(columns, result))
+
+    def find_or_create_node(
+        self,
+        label: str,
+        *,
+        node_type: str = "concept",
+        content: str | None = None,
+        visibility: str = "team",
+        provenance: str | None = None,
+        confidence: float = 1.0,
+    ) -> str:
+        """Find a node by label, or create it if it doesn't exist.
+
+        Searches for an existing node with the exact label (case-insensitive).
+        If found, returns its ID. If not found, creates a new node.
+
+        Returns the node ID.
+        """
+        result = self._conn.execute(
+            "SELECT id FROM ohm_nodes WHERE LOWER(label) = LOWER(?) LIMIT 1",
+            [label],
+        ).fetchone()
+        if result:
+            return result[0]
+        return self.create_node(
+            label=label,
+            node_type=node_type,
+            content=content,
+            visibility=visibility,
+            provenance=provenance,
+            confidence=confidence,
+        )
+
+    def search_nodes(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        node_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Search nodes by label or content text.
+
+        Performs a case-insensitive ILIKE search on both label and content.
+        Optionally filter by node_type.
+
+        Args:
+            query: Text to search for in labels and content.
+            limit: Maximum results (default 20).
+            node_type: Optional type filter (e.g., 'concept', 'source').
+
+        Returns:
+            List of matching node records.
+        """
+        conditions = ["(label ILIKE ? OR content ILIKE ?)"]
+        params: list[Any] = [f"%{query}%", f"%{query}%"]
+        if node_type:
+            conditions.append("type = ?")
+            params.append(node_type)
+
+        where = " AND ".join(conditions)
+        result = self._conn.execute(
+            f"SELECT * FROM ohm_nodes WHERE {where} ORDER BY created_at DESC LIMIT ?",
+            [*params, limit],
+        )
+        columns = [desc[0] for desc in result.description]
+        return [dict(zip(columns, row)) for row in result.fetchall()]
 
     def neighborhood(
         self,
