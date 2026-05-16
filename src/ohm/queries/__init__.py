@@ -441,6 +441,45 @@ def query_stats(conn: DuckDBPyConnection) -> dict[str, Any]:
     """).fetchone()
     stats["active_agents"] = agents_row[0] if agents_row else 0
 
+    # Observation stats — accumulate, don't collapse (ADR design note)
+    # Observations stay as separate rows; consumers choose aggregation strategy.
+    # These stats help consumers make informed decisions without querying every row.
+    obs_stats = conn.execute("""
+        SELECT
+            COUNT(*) AS total,
+            COUNT(DISTINCT node_id) AS nodes_with_observations,
+            ROUND(AVG(value), 4) AS mean_value,
+            ROUND(MIN(value), 4) AS min_value,
+            ROUND(MAX(value), 4) AS max_value,
+            ROUND(AVG(sigma), 4) AS mean_sigma
+        FROM ohm_observations
+        WHERE value IS NOT NULL
+    """).fetchone()
+    if obs_stats and obs_stats[0] > 0:
+        stats["observation_stats"] = {
+            "total": obs_stats[0],
+            "nodes_with_observations": obs_stats[1],
+            "mean_value": obs_stats[2],
+            "min_value": obs_stats[3],
+            "max_value": obs_stats[4],
+            "mean_sigma": obs_stats[5],
+        }
+
+    # Top nodes by observation count (for discoverability)
+    top_observed = conn.execute("""
+        SELECT n.label, n.id, COUNT(*) AS obs_count
+        FROM ohm_observations o
+        JOIN ohm_nodes n ON n.id = o.node_id
+        GROUP BY n.id, n.label
+        ORDER BY obs_count DESC
+        LIMIT 10
+    """).fetchall()
+    if top_observed:
+        stats["top_observed_nodes"] = [
+            {"label": row[0], "id": row[1], "observation_count": row[2]}
+            for row in top_observed
+        ]
+
     return stats
 
 
