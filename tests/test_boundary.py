@@ -260,16 +260,17 @@ class TestMutationOperations:
         from ohm.queries import create_support
 
         edge_ab = sample_graph_small["edges"]["ab"]
-        support_id = create_support(
+        support = create_support(
             test_db, edge_id=edge_ab, reason="additional evidence",
             created_by="supporter", confidence=0.85,
         )
-        assert support_id
+        assert support["id"]
+        assert support["edge_type"] == "SUPPORTS"
 
         result = test_db.execute(
             "SELECT edge_type, challenge_of, challenge_type, condition, created_by "
             "FROM ohm_edges WHERE id = ?",
-            [support_id],
+            [support["id"]],
         ).fetchone()
         assert result[0] == "SUPPORTS"
         assert result[1] == edge_ab

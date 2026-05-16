@@ -17,39 +17,44 @@ class TestGraphWrite:
     """Tests for SDK write operations."""
 
     def test_create_node(self, graph):
-        node_id = graph.create_node(label="Test Node")
-        assert node_id.startswith("test_node_")
+        node = graph.create_node(label="Test Node")
+        assert node["id"].startswith("test_node_")
+        assert node["label"] == "Test Node"
 
     def test_create_node_with_type(self, graph):
-        node_id = graph.create_node(label="Source A", node_type="source")
-        assert node_id
+        node = graph.create_node(label="Source A", node_type="source")
+        assert node["id"]
+        assert node["type"] == "source"
 
     def test_create_edge(self, graph):
-        a = graph.create_node(label="A")
-        b = graph.create_node(label="B")
-        edge_id = graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
-        assert edge_id
+        a = graph.create_node(label="A")["id"]
+        b = graph.create_node(label="B")["id"]
+        edge = graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
+        assert edge["id"]
+        assert edge["edge_type"] == "CAUSES"
 
     def test_challenge(self, graph):
-        a = graph.create_node(label="A")
-        b = graph.create_node(label="B")
-        edge_id = graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
-        challenge_id = graph.challenge(edge_id, reason="weak evidence", confidence=0.3)
-        assert challenge_id
+        a = graph.create_node(label="A")["id"]
+        b = graph.create_node(label="B")["id"]
+        edge = graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
+        challenge = graph.challenge(edge["id"], reason="weak evidence", confidence=0.3)
+        assert challenge["id"]
+        assert challenge["edge_type"] == "CHALLENGED_BY"
 
     def test_support(self, graph):
-        a = graph.create_node(label="A")
-        b = graph.create_node(label="B")
-        edge_id = graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
-        support_id = graph.support(edge_id, reason="additional evidence", confidence=0.8)
-        assert support_id
+        a = graph.create_node(label="A")["id"]
+        b = graph.create_node(label="B")["id"]
+        edge = graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
+        support = graph.support(edge["id"], reason="additional evidence", confidence=0.8)
+        assert support["id"]
+        assert support["edge_type"] == "SUPPORTS"
 
     def test_update_edge(self, graph):
-        a = graph.create_node(label="A")
-        b = graph.create_node(label="B")
-        edge_id = graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3", confidence=0.5)
-        graph.update_edge(edge_id, confidence=0.95)
-        result = graph.confidence(edge_id)
+        a = graph.create_node(label="A")["id"]
+        b = graph.create_node(label="B")["id"]
+        edge = graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3", confidence=0.5)
+        graph.update_edge(edge["id"], confidence=0.95)
+        result = graph.confidence(edge["id"])
         assert result["original"]["confidence"] == pytest.approx(0.95)
 
     def test_update_edge_permission_denied(self, graph, tmp_path):
@@ -57,9 +62,9 @@ class TestGraphWrite:
         # Use a shared file DB so both connections see the same data
         db_path = str(tmp_path / "shared.duckdb")
         g1 = connect(db_path, actor="owner")
-        a2 = g1.create_node(label="A2")
-        b2 = g1.create_node(label="B2")
-        e2 = g1.create_edge(from_node=a2, to_node=b2, edge_type="CAUSES", layer="L3")
+        a2 = g1.create_node(label="A2")["id"]
+        b2 = g1.create_node(label="B2")["id"]
+        e2 = g1.create_edge(from_node=a2, to_node=b2, edge_type="CAUSES", layer="L3")["id"]
         g1.close()
 
         g2 = connect(db_path, actor="other_agent")
@@ -69,9 +74,10 @@ class TestGraphWrite:
         g2.close()
 
     def test_observe(self, graph):
-        a = graph.create_node(label="A")
-        obs_id = graph.observe(a, obs_type="measurement", value=1.5, sigma=0.3)
-        assert obs_id
+        a = graph.create_node(label="A")["id"]
+        obs = graph.observe(a, obs_type="measurement", value=1.5, sigma=0.3)
+        assert obs["id"]
+        assert obs["type"] == "measurement"
 
     def test_set_focus(self, graph):
         graph.set_focus("researching patterns")
@@ -83,31 +89,31 @@ class TestGraphRead:
     """Tests for SDK read operations."""
 
     def test_neighborhood(self, graph):
-        a = graph.create_node(label="A")
-        b = graph.create_node(label="B")
+        a = graph.create_node(label="A")["id"]
+        b = graph.create_node(label="B")["id"]
         graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
         results = graph.neighborhood(a, depth=2)
         assert len(results) >= 1
 
     def test_path(self, graph):
-        a = graph.create_node(label="A")
-        b = graph.create_node(label="B")
+        a = graph.create_node(label="A")["id"]
+        b = graph.create_node(label="B")["id"]
         graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
         results = graph.path(a, b)
         assert len(results) >= 1
 
     def test_impact(self, graph):
-        a = graph.create_node(label="A")
-        b = graph.create_node(label="B")
+        a = graph.create_node(label="A")["id"]
+        b = graph.create_node(label="B")["id"]
         graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
         results = graph.impact(a, depth=5)
         assert len(results) >= 1
 
     def test_confidence(self, graph):
-        a = graph.create_node(label="A")
-        b = graph.create_node(label="B")
-        edge_id = graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
-        result = graph.confidence(edge_id)
+        a = graph.create_node(label="A")["id"]
+        b = graph.create_node(label="B")["id"]
+        edge = graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
+        result = graph.confidence(edge["id"])
         assert result["original"] is not None
 
     def test_listen(self, graph):
@@ -120,8 +126,8 @@ class TestGraphRead:
         assert isinstance(results, list)
 
     def test_stats(self, graph):
-        a = graph.create_node(label="A")
-        b = graph.create_node(label="B")
+        a = graph.create_node(label="A")["id"]
+        b = graph.create_node(label="B")["id"]
         graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
         stats = graph.stats()
         assert stats["total_nodes"] >= 2
@@ -133,8 +139,8 @@ class TestGraphContextManager:
 
     def test_context_manager(self):
         with connect(":memory:", actor="ctx_test") as g:
-            node_id = g.create_node(label="Context Test")
-            assert node_id
+            node = g.create_node(label="Context Test")
+            assert node["id"]
         # Connection should be closed after exiting context
 
 
