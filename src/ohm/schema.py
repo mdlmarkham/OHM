@@ -260,6 +260,59 @@ def _migrate_json_columns(conn: "DuckDBPyConnection") -> None:
                 pass  # Column already exists
 
 
+def _seed_agent_configs(conn: "DuckDBPyConnection") -> None:
+    """Seed default agent configurations if the table is empty.
+
+    Each agent has distinct optimization targets and services.
+    Config is admin-set (read-only for agents) — this is a governance
+    decision, not a technical constraint.
+    """
+    import json
+
+    existing = conn.execute("SELECT COUNT(*) FROM ohm_agent_config").fetchone()
+    if existing and existing[0] > 0:
+        return  # Already seeded
+
+    agents = [
+        {
+            "agent_name": "metis",
+            "optimization_target": "pattern density and cross-domain connections",
+            "services": json.dumps(["research", "critique", "synthesize", "pattern-detection"]),
+            "confidence_threshold": 0.7,
+            "sync_interval_sec": 300,
+        },
+        {
+            "agent_name": "clio",
+            "optimization_target": "source coverage and confidence",
+            "services": json.dumps(["deep-research", "source-analysis", "citation-tracking"]),
+            "confidence_threshold": 0.8,
+            "sync_interval_sec": 600,
+        },
+        {
+            "agent_name": "hephaestus",
+            "optimization_target": "completeness and reproducibility",
+            "services": json.dumps(["code-audit", "security-review", "correctness-check"]),
+            "confidence_threshold": 0.9,
+            "sync_interval_sec": 120,
+        },
+        {
+            "agent_name": "socrates",
+            "optimization_target": "falsifiability and logical coherence",
+            "services": json.dumps(["critique", "devils-advocate", "logic-check"]),
+            "confidence_threshold": 0.5,
+            "sync_interval_sec": 300,
+        },
+    ]
+    for a in agents:
+        conn.execute(
+            """INSERT OR IGNORE INTO ohm_agent_config
+               (agent_name, optimization_target, services, confidence_threshold, sync_interval_sec)
+               VALUES (?, ?, ?, ?, ?)""",
+            [a["agent_name"], a["optimization_target"], a["services"],
+             a["confidence_threshold"], a["sync_interval_sec"]],
+        )
+
+
 def validate_edge_type(layer: str, edge_type: str) -> bool:
     """Check that *edge_type* is valid for the given *layer*.
 

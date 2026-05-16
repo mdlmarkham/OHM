@@ -338,6 +338,32 @@ class Graph:
 
         return query_stats(self._conn)
 
+    def get_agent_config(self, agent_name: str) -> dict[str, Any] | None:
+        """Get an agent's configuration (optimization target, services, etc.).
+
+        Config is admin-set and read-only for agents. Returns None if
+        the agent has no config entry.
+        """
+        result = self._conn.execute(
+            "SELECT * FROM ohm_agent_config WHERE agent_name = ?", [agent_name]
+        ).fetchone()
+        if result is None:
+            return None
+        columns = [desc[0] for desc in self._conn.description]
+        return dict(zip(columns, result))
+
+    def list_agent_configs(self) -> list[dict[str, Any]]:
+        """List all agent configurations.
+
+        Returns the full config for every registered agent, including
+        optimization targets, available services, and thresholds.
+        """
+        result = self._conn.execute(
+            "SELECT * FROM ohm_agent_config ORDER BY agent_name"
+        )
+        columns = [desc[0] for desc in result.description]
+        return [dict(zip(columns, row)) for row in result.fetchall()]
+
     def close(self) -> None:
         """Close the database connection."""
         self._conn.close()
