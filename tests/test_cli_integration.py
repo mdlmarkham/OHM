@@ -135,3 +135,28 @@ class TestCLIIntegration:
             "--type", "measurement", "--value", "1.0",
         ])
         assert "not found" in (out + err).lower()
+
+    def test_graph_upgrade(self):
+        """Test that ohm graph upgrade runs without error."""
+        code, out, err = _run_cli([
+            "--db", ":memory:", "--actor", "test",
+            "graph", "upgrade",
+        ])
+        assert code == 0
+
+    def test_graph_upgrade_dry_run(self):
+        """Test that ohm graph upgrade --dry-run shows pending migrations."""
+        code, out, err = _run_cli([
+            "--db", ":memory:", "--actor", "test",
+            "graph", "upgrade", "--dry-run",
+        ])
+        assert code == 0
+
+    def test_graph_status_shows_version(self):
+        """Test that ohm graph status includes schema version."""
+        code, out, err = _run_cli([
+            "--db", ":memory:", "--actor", "test",
+            "graph", "status",
+        ])
+        assert code == 0
+        assert "Schema version" in out
