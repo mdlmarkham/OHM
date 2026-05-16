@@ -1,0 +1,11 @@
+package metadata version = "0.1.0"
+
+[package]
+name = "ohm"
+version = "0.1.0"
+description = "Shared awareness, individual judgment. Multi-agent knowledge graph."
+authors = ["Matt Markham", "Métis"]
+license = "MIT"
+
+[dependencies]
+duckdb = ">=1.5.2"
