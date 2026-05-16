@@ -108,6 +108,24 @@ Include `correlation_id` for debugging. CLI dispatcher catches `OHMError` and ex
 - Standard library → third-party → local ordering
 - `from __future__ import annotations` at top of every module
 
+## Primary Agent Interface
+
+**Agents should use the Python SDK (`ohm.sdk`), not the CLI.** The CLI is for human diagnostics and ad-hoc exploration, not agent operations.
+
+```python
+# Correct: SDK for agent operations
+import ohm.sdk as ohm
+with ohm.connect("~/.ohm/ohm.duckdb", actor="metis") as graph:
+    node = graph.create_node("AND→OR conversion", node_type="pattern")
+    graph.create_edge(from_node=node, to_node=target, edge_type="CAUSES", layer="L3")
+
+# Incorrect: shelling out to CLI for every operation
+import subprocess
+subprocess.run(["ohm", "graph", "write", "--from", node, ...])
+```
+
+Why: The SDK runs in-process (no subprocess overhead), returns structured data (no text parsing), and supports batch operations. The CLI spawns a new process per command and returns text that must be parsed.
+
 ## Beads Workflow
 
 This project uses **bd** (beads) for issue tracking. Issues use prefix `ohm-<hash>`.
