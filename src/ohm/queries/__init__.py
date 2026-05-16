@@ -371,26 +371,32 @@ def query_stats(conn: DuckDBPyConnection) -> dict[str, Any]:
     stats["nodes_by_type"] = {row[0]: row[1] for row in result.fetchall()}
 
     # Total counts
-    stats["total_nodes"] = conn.execute("SELECT COUNT(*) FROM ohm_nodes").fetchone()[0]
-    stats["total_edges"] = conn.execute("SELECT COUNT(*) FROM ohm_edges").fetchone()[0]
-    stats["total_observations"] = conn.execute("SELECT COUNT(*) FROM ohm_observations").fetchone()[0]
+    total_nodes_row = conn.execute("SELECT COUNT(*) FROM ohm_nodes").fetchone()
+    stats["total_nodes"] = total_nodes_row[0] if total_nodes_row else 0
+    total_edges_row = conn.execute("SELECT COUNT(*) FROM ohm_edges").fetchone()
+    stats["total_edges"] = total_edges_row[0] if total_edges_row else 0
+    total_obs_row = conn.execute("SELECT COUNT(*) FROM ohm_observations").fetchone()
+    stats["total_observations"] = total_obs_row[0] if total_obs_row else 0
 
     # Challenge ratio
-    total_l3_l4 = conn.execute("""
+    l3_l4_row = conn.execute("""
         SELECT COUNT(*) FROM ohm_edges WHERE layer IN ('L3', 'L4')
-    """).fetchone()[0]
-    challenged = conn.execute("""
+    """).fetchone()
+    total_l3_l4 = l3_l4_row[0] if l3_l4_row else 0
+    challenged_row = conn.execute("""
         SELECT COUNT(DISTINCT challenge_of) FROM ohm_edges
         WHERE challenge_of IS NOT NULL
-    """).fetchone()[0]
+    """).fetchone()
+    challenged = challenged_row[0] if challenged_row else 0
     stats["challenge_ratio"] = round(challenged / total_l3_l4, 4) if total_l3_l4 > 0 else 0.0
 
     # Active agents
-    stats["active_agents"] = conn.execute("""
+    agents_row = conn.execute("""
         SELECT COUNT(*) FROM ohm_agent_state
         WHERE last_sync IS NOT NULL
           AND last_sync > CURRENT_TIMESTAMP - INTERVAL '1 hour'
-    """).fetchone()[0]
+    """).fetchone()
+    stats["active_agents"] = agents_row[0] if agents_row else 0
 
     return stats
 
@@ -460,10 +466,17 @@ def create_challenge(
     created_by: str,
     confidence: float = 0.5,
 ) -> str:
-    """Create a CHALLENGED_BY edge referencing an existing edge."""
+    """Create a CHALLENGED_BY edge referencing an existing edge.
+
+    Enforces boundary rules: only L3/L4 edges can be challenged.
+    """
     import uuid
 
-    # Verify target edge exists
+    from ohm.boundary import enforce_challenge_boundary
+
+    # Enforce boundary: only L3/L4 edges can be challenged
+    enforce_challenge_boundary(conn, created_by, edge_id)
+
     target = conn.execute("SELECT id, from_node, to_node, layer FROM ohm_edges WHERE id = ?", [edge_id]).fetchone()
     if target is None:
         raise ValueError(f"Edge not found: {edge_id}")
@@ -485,8 +498,16 @@ def create_support(
     created_by: str,
     confidence: float = 0.7,
 ) -> str:
-    """Create a SUPPORTS edge referencing an existing edge."""
+    """Create a SUPPORTS edge referencing an existing edge.
+
+    Enforces boundary rules: only L3/L4 edges can be supported.
+    """
     import uuid
+
+    from ohm.boundary import enforce_support_boundary
+
+    # Enforce boundary: only L3/L4 edges can be supported
+    enforce_support_boundary(conn, created_by, edge_id)
 
     target = conn.execute("SELECT id, from_node, to_node, layer FROM ohm_edges WHERE id = ?", [edge_id]).fetchone()
     if target is None:
@@ -508,12 +529,21 @@ def set_agent_state(
     focus: str | None = None,
 ) -> None:
     """Set or update an agent's current focus."""
-    conn.execute(
-        """INSERT INTO ohm_agent_state (agent_name, current_focus, updated_at)
-           VALUES (?, ?, CURRENT_TIMESTAMP)
-           ON CONFLICT (agent_name) DO UPDATE SET current_focus = ?, updated_at = CURRENT_TIMESTAMP""",
-        [agent_name, focus, focus],
-    )
+    existing = conn.execute(
+        "SELECT 1 FROM ohm_agent_state WHERE agent_name = ?", [agent_name]
+    ).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE ohm_agent_state SET current_focus = ?, updated_at = CURRENT_TIMESTAMP "
+            "WHERE agent_name = ?",
+            [focus, agent_name],
+        )
+    else:
+        conn.execute(
+            "INSERT INTO ohm_agent_state (agent_name, current_focus, updated_at) "
+            "VALUES (?, ?, CURRENT_TIMESTAMP)",
+            [agent_name, focus],
+        )
 
 
 def node_exists(conn: DuckDBPyConnection, node_id: str) -> bool:

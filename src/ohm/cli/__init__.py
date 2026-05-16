@@ -13,9 +13,12 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import NoReturn
+from typing import TYPE_CHECKING, NoReturn
 
-from ohm.exceptions import EXIT_CODES, OHMError
+from ohm.exceptions import OHMError
+
+if TYPE_CHECKING:
+    import duckdb
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -90,7 +93,9 @@ def build_parser() -> argparse.ArgumentParser:
     neighborhood_parser = graph_sub.add_parser("neighborhood", help="Bounded-depth traversal")
     neighborhood_parser.add_argument("node_id", help="Starting node ID")
     neighborhood_parser.add_argument("--depth", type=int, default=3, help="Max traversal depth")
-    neighborhood_parser.add_argument("--layer", choices=["L1", "L2", "L3", "L4"], help="Filter by layer")
+    neighborhood_parser.add_argument(
+        "--layer", choices=["L1", "L2", "L3", "L4"], help="Filter by layer",
+    )
     neighborhood_parser.add_argument(
         "--direction", choices=["outgoing", "incoming", "both"], default="both",
     )
@@ -100,7 +105,9 @@ def build_parser() -> argparse.ArgumentParser:
     write_parser.add_argument("--from", dest="from_node", required=True, help="Source node ID")
     write_parser.add_argument("--to", dest="to_node", required=True, help="Target node ID")
     write_parser.add_argument("--type", dest="edge_type", required=True, help="Edge type")
-    write_parser.add_argument("--layer", choices=["L1", "L2", "L3", "L4"], default="L3", help="Layer")
+    write_parser.add_argument(
+        "--layer", choices=["L1", "L2", "L3", "L4"], default="L3", help="Layer",
+    )
     write_parser.add_argument("--confidence", type=float, default=0.7, help="Confidence score (0-1)")
     write_parser.add_argument("--condition", help="Context condition string")
     write_parser.add_argument("--provenance", help="Source attribution")
@@ -293,7 +300,7 @@ def _handle_diff(args: argparse.Namespace) -> None:
 
 # ── Graph Command Implementations ───────────────────────────────────────────
 
-def _get_db(args: argparse.Namespace):
+def _get_db(args: argparse.Namespace) -> "duckdb.DuckDBPyConnection":
     """Open a database connection using args."""
     from ohm.db import connect
     return connect(args.db)
