@@ -2,6 +2,7 @@
 Description=OHM Daemon — Multi-agent knowledge graph server
 Documentation=https://github.com/mdlmarkham/OHM
 After=network.target
+Wants=caddy.service
 
 [Service]
 Type=simple
@@ -28,6 +29,10 @@ Environment=OHM_DB_PATH=/var/lib/ohm/ohm.duckdb
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=ohmd
+
+# Note: TLS is handled by Caddy reverse proxy (see Caddyfile).
+# ohmd binds to 127.0.0.1:8710 (HTTP only, localhost).
+# Caddy terminates TLS and proxies to ohmd.
 
 [Install]
 WantedBy=multi-user.target

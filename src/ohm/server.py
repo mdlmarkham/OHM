@@ -26,7 +26,7 @@ from .exceptions import (
     PermissionDeniedError,
     ValidationError,
 )
-from .schema import EDGE_TYPES, LAYER_DESCRIPTIONS, NODE_TYPES
+from .schema import EDGE_TYPES, LAYER_DESCRIPTIONS, NODE_TYPES, ALL_EDGE_TYPES, VALID_VISIBILITIES
 from .store import OhmStore
 
 
@@ -47,7 +47,7 @@ _START_TIME = time.time()
 
 # ── Security Constants ─────────────────────────────────────
 
-MAX_BODY_SIZE = 10 * 1024 * 1024  # 10 MB — reject bodies larger than this
+MAX_BODY_SIZE = 1 * 1024 * 1024  # 1 MB — reject bodies larger than this
 RATE_LIMIT_WINDOW = 60  # seconds
 RATE_LIMIT_MAX_REQUESTS = 1000  # per window per IP
 
@@ -204,7 +204,158 @@ class OhmHandler(BaseHTTPRequestHandler):
         if length > MAX_BODY_SIZE:
             raise ValidationError(f"Request body too large: {length} bytes (max {MAX_BODY_SIZE})")
         body = self.rfile.read(length)
-        return json.loads(body)
+        try:
+            return json.loads(body)
+        except json.JSONDecodeError as e:
+            raise ValidationError(f"Invalid JSON in request body: {e}")
+
+    # ── Body Validation Schemas ─────────────────────────────
+
+    _REQUIRED_FIELDS = {
+        "/node": ["id", "label"],
+        "/edge": ["from", "to", "type"],
+        "/state": [],
+        "/register": [],
+        "/heartbeat": [],
+        "/challenge": [],
+        "/support": [],
+        "/observe": [],
+    }
+
+    _FIELD_TYPES = {
+        "/node": {
+            "id": str, "label": str,
+            "type": str, "content": (str, type(None)),
+            "confidence": (int, float), "visibility": str,
+            "provenance": (str, type(None)), "tags": (list, type(None)),
+            "metadata": (dict, type(None)),
+        },
+        "/edge": {
+            "from": str, "to": str, "type": str,
+            "layer": str, "confidence": (int, float, type(None)),
+            "condition": (str, type(None)), "provenance": (str, type(None)),
+            "challenge_of": (str, type(None)), "challenge_type": (str, type(None)),
+        },
+        "/state": {
+            "focus": (str, type(None)), "patterns": (list, type(None)),
+            "services": (list, type(None)), "session_id": (str, type(None)),
+        },
+        "/register": {
+            "name": (str, type(None)), "description": (str, type(None)),
+            "values": (list, type(None)), "goals": (list, type(None)),
+            "capabilities": (list, type(None)), "interests": (list, type(None)),
+            "listens_to": (list, type(None)),
+        },
+        "/heartbeat": {
+            "focus": (str, type(None)),
+        },
+        "/challenge": {
+            "reason": (str, type(None)), "confidence": (int, float, type(None)),
+            "challenge_type": (str, type(None)),
+        },
+        "/support": {
+            "reason": (str, type(None)), "confidence": (int, float, type(None)),
+        },
+        "/observe": {
+            "type": (str, type(None)), "value": (int, float, str, type(None)),
+            "baseline": (int, float, type(None)), "sigma": (int, float, type(None)),
+            "source": (str, type(None)),
+        },
+    }
+
+    def _validate_body(self, path: str, body: dict) -> dict:
+        """Validate request body fields for a given endpoint path.
+
+        Checks: body is a dict, required fields present, field types correct,
+        and no unexpected fields for known endpoints.
+
+        Returns the validated body dict.
+        Raises ValidationError on invalid input.
+        """
+        if not isinstance(body, dict):
+            raise ValidationError(f"Request body must be a JSON object, got {type(body).__name__}")
+
+        # Normalize path prefixes for sub-resource endpoints
+        # /challenge/xxx → /challenge, /support/xxx → /support, /observe/xxx → /observe
+        validation_path = path
+        for prefix in ("/challenge/", "/support/", "/observe/"):
+            if path.startswith(prefix):
+                validation_path = prefix.rstrip("/")
+                break
+
+        # Check required fields
+        required = self._REQUIRED_FIELDS.get(validation_path, [])
+        missing = [f for f in required if f not in body]
+        if missing:
+            raise ValidationError(f"Missing required fields: {', '.join(missing)}")
+
+        # Check field types
+        field_types = self._FIELD_TYPES.get(validation_path, {})
+        for field, value in body.items():
+            if field in field_types:
+                expected = field_types[field]
+                if not isinstance(value, expected):
+                    raise ValidationError(
+                        f"Field '{field}' must be {expected.__name__ if isinstance(expected, type) else ' / '.join(t.__name__ for t in expected)}, "
+                        f"got {type(value).__name__}"
+                    )
+
+        # Validate specific field values
+        if validation_path == "/node":
+            from .validation import validate_identifier
+            try:
+                validate_identifier(body["id"], name="id")
+            except ValueError as e:
+                raise ValidationError(str(e))
+            if "type" in body and body["type"] not in NODE_TYPES:
+                raise ValidationError(f"Invalid node type: '{body['type']}' — must be one of: {', '.join(NODE_TYPES)}")
+            if "visibility" in body and body["visibility"] not in VALID_VISIBILITIES:
+                raise ValidationError(f"Invalid visibility: '{body['visibility']}' — must be private, team, or public")
+            if "confidence" in body:
+                from .validation import validate_confidence
+                try:
+                    validate_confidence(float(body["confidence"]))
+                except ValueError as e:
+                    raise ValidationError(str(e))
+
+        elif validation_path == "/edge":
+            from .validation import validate_identifier, validate_layer
+            try:
+                validate_identifier(body["from"], name="from_node")
+                validate_identifier(body["to"], name="to_node")
+            except ValueError as e:
+                raise ValidationError(str(e))
+            if body["type"] not in ALL_EDGE_TYPES:
+                raise ValidationError(f"Invalid edge type: '{body['type']}' — must be one of: {', '.join(sorted(ALL_EDGE_TYPES))}")
+            if "layer" in body:
+                try:
+                    validate_layer(body["layer"])
+                except ValueError as e:
+                    raise ValidationError(str(e))
+            if "confidence" in body and body["confidence"] is not None:
+                from .validation import validate_confidence
+                try:
+                    validate_confidence(float(body["confidence"]))
+                except ValueError as e:
+                    raise ValidationError(str(e))
+
+        elif validation_path == "/register":
+            from .validation import validate_identifier
+            if "name" in body and body["name"]:
+                try:
+                    validate_identifier(body["name"], name="agent_name")
+                except ValueError as e:
+                    raise ValidationError(str(e))
+
+        elif validation_path in ("/challenge", "/support"):
+            if "confidence" in body and body["confidence"] is not None:
+                from .validation import validate_confidence
+                try:
+                    validate_confidence(float(body["confidence"]))
+                except ValueError as e:
+                    raise ValidationError(str(e))
+
+        return body
 
     def do_GET(self):
         """Handle GET requests with error mapping and correlation IDs."""
@@ -496,6 +647,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         from urllib.parse import urlparse
         path = urlparse(self.path).path.rstrip("/")
         body = self._read_body()
+        body = self._validate_body(path, body)
 
         if path == "/node":
             result = self.store.write_node(

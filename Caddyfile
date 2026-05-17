@@ -1,0 +1,57 @@
+# OHM Daemon — Caddy reverse proxy for TLS termination
+#
+# Caddy handles TLS (auto HTTPS via Let's Encrypt) and proxies to ohmd.
+# ohmd stays on HTTP (127.0.0.1:8710) — no TLS code needed in ohmd itself.
+#
+# Usage:
+#   1. Install Caddy: https://caddyserver.com/docs/install
+#   2. Copy this file: cp Caddyfile /etc/caddy/Caddyfile
+#   3. Start Caddy:   sudo systemctl start caddy
+#
+# For local development, use the dev block (self-signed cert, no Let's Encrypt).
+
+# ── Production ──────────────────────────────────────────────
+# Uncomment and replace ohm.example.com with your domain.
+# Caddy auto-obtains Let's Encrypt certificates.
+
+# ohm.example.com {
+#     # Rate limiting at the reverse proxy level
+#     rate_limit {
+#         zone dynamic {
+#             key {remote_host}
+#             events 100
+#             window 1m
+#         }
+#     }
+#
+#     # Security headers
+#     header {
+#         X-Content-Type-Options nosniff
+#         X-Frame-Options DENY
+#         -Server
+#     }
+#
+#     reverse_proxy 127.0.0.1:8710 {
+#         header_up X-Forwarded-For {remote_host}
+#         header_up X-Forwarded-Proto https
+#     }
+# }
+
+# ── Development (localhost) ─────────────────────────────────
+# Uses Caddy's internal CA for local TLS. Trust the root cert:
+#   caddy trust
+
+localhost:8443 {
+    tls internal
+
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        -Server
+    }
+
+    reverse_proxy 127.0.0.1:8710 {
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto https
+    }
+}

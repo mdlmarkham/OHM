@@ -446,3 +446,202 @@ class TestSecurity:
             server.shutdown()
             thread.join(timeout=2)
             store.close()
+
+
+class TestBodyValidation:
+    """Tests for request body validation (OHM-y2i.16)."""
+
+    def test_invalid_json_rejected(self, test_server):
+        """Malformed JSON body should return 400 validation_error."""
+        port, _ = test_server
+        conn = HTTPConnection(f"127.0.0.1:{port}", timeout=5)
+        body = b"this is not json"
+        conn.request("POST", "/node", body=body, headers={"Content-Type": "application/json", "Content-Length": str(len(body))})
+        resp = conn.getresponse()
+        data = json.loads(resp.read().decode())
+        conn.close()
+        assert resp.status == 400
+        assert data["error"] == "validation_error"
+
+    def test_node_missing_required_fields(self, test_server):
+        """POST /node without required fields should return 400."""
+        port, _ = test_server
+        status, data = _request("POST", port, "/node", body={})
+        assert status == 400
+        assert data["error"] == "validation_error"
+        assert "Missing required fields" in data["message"]
+
+    def test_node_missing_label(self, test_server):
+        """POST /node without label should return 400."""
+        port, _ = test_server
+        status, data = _request("POST", port, "/node", body={"id": "x"})
+        assert status == 400
+        assert "Missing required fields" in data["message"]
+
+    def test_edge_missing_required_fields(self, test_server):
+        """POST /edge without required fields should return 400."""
+        port, _ = test_server
+        status, data = _request("POST", port, "/edge", body={})
+        assert status == 400
+        assert "Missing required fields" in data["message"]
+
+    def test_node_invalid_type(self, test_server):
+        """POST /node with invalid node type should return 400."""
+        port, _ = test_server
+        status, data = _request("POST", port, "/node", body={
+            "id": "bad_type", "label": "Bad", "type": "not_a_real_type",
+        })
+        assert status == 400
+        assert data["error"] == "validation_error"
+        assert "Invalid node type" in data["message"]
+
+    def test_node_invalid_visibility(self, test_server):
+        """POST /node with invalid visibility should return 400."""
+        port, _ = test_server
+        status, data = _request("POST", port, "/node", body={
+            "id": "bad_vis", "label": "Bad", "visibility": "secret",
+        })
+        assert status == 400
+        assert data["error"] == "validation_error"
+        assert "Invalid visibility" in data["message"]
+
+    def test_edge_invalid_type(self, test_server):
+        """POST /edge with invalid edge type should return 400."""
+        port, _ = test_server
+        status, data = _request("POST", port, "/edge", body={
+            "from": "a", "to": "b", "type": "NOT_AN_EDGE_TYPE",
+        })
+        assert status == 400
+        assert data["error"] == "validation_error"
+        assert "Invalid edge type" in data["message"]
+
+    def test_edge_invalid_layer(self, test_server):
+        """POST /edge with invalid layer should return 400."""
+        port, _ = test_server
+        status, data = _request("POST", port, "/edge", body={
+            "from": "a", "to": "b", "type": "CAUSES", "layer": "L9",
+        })
+        assert status == 400
+        assert data["error"] == "validation_error"
+        assert "Invalid layer" in data["message"]
+
+    def test_node_confidence_out_of_range(self, test_server):
+        """POST /node with confidence > 1.0 should return 400."""
+        port, _ = test_server
+        status, data = _request("POST", port, "/node", body={
+            "id": "conf_bad", "label": "Conf", "confidence": 2.5,
+        })
+        assert status == 400
+        assert data["error"] == "validation_error"
+        assert "Invalid confidence" in data["message"]
+
+    def test_edge_confidence_out_of_range(self, test_server):
+        """POST /edge with negative confidence should return 400."""
+        port, _ = test_server
+        status, data = _request("POST", port, "/edge", body={
+            "from": "a", "to": "b", "type": "CAUSES", "confidence": -0.5,
+        })
+        assert status == 400
+        assert data["error"] == "validation_error"
+        assert "Invalid confidence" in data["message"]
+
+    def test_node_wrong_field_type(self, test_server):
+        """POST /node with wrong field type should return 400."""
+        port, _ = test_server
+        status, data = _request("POST", port, "/node", body={
+            "id": 123, "label": "WrongType",
+        })
+        assert status == 400
+        assert data["error"] == "validation_error"
+
+    def test_edge_wrong_field_type(self, test_server):
+        """POST /edge with wrong field type should return 400."""
+        port, _ = test_server
+        status, data = _request("POST", port, "/edge", body={
+            "from": 42, "to": "b", "type": "CAUSES",
+        })
+        assert status == 400
+        assert data["error"] == "validation_error"
+
+    def test_body_not_dict_rejected(self, test_server):
+        """POST with a JSON array body should return 400."""
+        port, _ = test_server
+        conn = HTTPConnection(f"127.0.0.1:{port}", timeout=5)
+        body = json.dumps([1, 2, 3]).encode()
+        conn.request("POST", "/node", body=body, headers={"Content-Type": "application/json", "Content-Length": str(len(body))})
+        resp = conn.getresponse()
+        data = json.loads(resp.read().decode())
+        conn.close()
+        assert resp.status == 400
+        assert data["error"] == "validation_error"
+
+    def test_valid_node_still_works(self, test_server):
+        """Valid POST /node should still succeed after validation."""
+        port, _ = test_server
+        status, data = _request("POST", port, "/node", body={
+            "id": "valid_node", "label": "Valid", "type": "concept",
+        })
+        assert status == 201
+        assert data["id"] == "valid_node"
+
+    def test_valid_edge_still_works(self, test_server):
+        """Valid POST /edge should still succeed after validation."""
+        port, _ = test_server
+        _request("POST", port, "/node", body={"id": "e1", "label": "E1", "type": "concept"})
+        _request("POST", port, "/node", body={"id": "e2", "label": "E2", "type": "concept"})
+        status, data = _request("POST", port, "/edge", body={
+            "from": "e1", "to": "e2", "type": "CAUSES", "layer": "L3",
+        })
+        assert status == 201
+
+    def test_challenge_confidence_validated(self, test_server):
+        """POST /challenge with out-of-range confidence should return 400."""
+        port, _ = test_server
+        _request("POST", port, "/node", body={"id": "ch1", "label": "CH1", "type": "concept"})
+        _request("POST", port, "/node", body={"id": "ch2", "label": "CH2", "type": "concept"})
+        resp = _request("POST", port, "/edge", body={"from": "ch1", "to": "ch2", "type": "CAUSES", "layer": "L3"})
+        edge_id = resp[1]["id"]
+
+        status, data = _request("POST", port, f"/challenge/{edge_id}", body={
+            "reason": "test", "confidence": 5.0,
+        })
+        assert status == 400
+        assert data["error"] == "validation_error"
+
+    def test_node_id_validation(self, test_server):
+        """POST /node with unsafe ID should return 400."""
+        port, _ = test_server
+        status, data = _request("POST", port, "/node", body={
+            "id": "'; DROP TABLE ohm_nodes;--", "label": "SQLi", "type": "concept",
+        })
+        assert status == 400
+        assert data["error"] == "validation_error"
+
+    def test_edge_from_validation(self, test_server):
+        """POST /edge with unsafe from_node should return 400."""
+        port, _ = test_server
+        status, data = _request("POST", port, "/edge", body={
+            "from": "../etc/passwd", "to": "b", "type": "CAUSES",
+        })
+        assert status == 400
+        assert data["error"] == "validation_error"
+
+    def test_size_limit_1mb_default(self, test_server):
+        """Default MAX_BODY_SIZE should be 1MB."""
+        import ohm.server as srv
+        assert srv.MAX_BODY_SIZE == 1 * 1024 * 1024
+
+    def test_oversized_body_rejected(self, test_server):
+        """Request body exceeding MAX_BODY_SIZE should be rejected."""
+        import ohm.server as srv
+        original_max = srv.MAX_BODY_SIZE
+        srv.MAX_BODY_SIZE = 100  # 100 bytes for testing
+        try:
+            port, _ = test_server
+            large_body = {"id": "x" * 200, "label": "big", "type": "concept"}
+            status, data = _request("POST", port, "/node", body=large_body)
+            assert status == 400
+            assert data["error"] == "validation_error"
+            assert "too large" in data["message"].lower()
+        finally:
+            srv.MAX_BODY_SIZE = original_max
