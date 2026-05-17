@@ -394,6 +394,52 @@ class Graph:
         columns = [desc[0] for desc in result.description]
         return [dict(zip(columns, row)) for row in result.fetchall()]
 
+    def search_edges(
+        self,
+        *,
+        layer: str | None = None,
+        edge_type: str | None = None,
+        confidence_min: float | None = None,
+        confidence_max: float | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Search edges by layer, type, and confidence range.
+
+        Args:
+            layer: Optional layer filter (L1-L4).
+            edge_type: Optional edge type filter.
+            confidence_min: Minimum confidence threshold.
+            confidence_max: Maximum confidence threshold.
+            limit: Maximum results (default 100).
+
+        Returns:
+            List of matching edge records.
+        """
+        conditions: list[str] = ["1=1"]
+        params: list[Any] = []
+        if layer:
+            conditions.append("layer = ?")
+            params.append(layer)
+        if edge_type:
+            conditions.append("edge_type = ?")
+            params.append(edge_type)
+        if confidence_min is not None:
+            conditions.append("confidence >= ?")
+            params.append(confidence_min)
+        if confidence_max is not None:
+            conditions.append("confidence <= ?")
+            params.append(confidence_max)
+
+        sql = (
+            "SELECT * FROM ohm_edges WHERE "
+            + " AND ".join(conditions)
+            + " ORDER BY created_at DESC LIMIT ?"
+        )
+        params.append(limit)
+        result = self._conn.execute(sql, params)
+        columns = [desc[0] for desc in result.description]
+        return [dict(zip(columns, row)) for row in result.fetchall()]
+
     def neighborhood(
         self,
         node_id: str,
