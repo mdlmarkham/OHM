@@ -778,6 +778,8 @@ def composite_score(
     *,
     observation_weight: float = 0.5,
     evidence_weight: float = 0.5,
+    method: str = "arithmetic",
+    baseline: float = 1.0,
 ) -> dict[str, Any]:
     """Compute a composite decision score for a node.
 
@@ -791,6 +793,15 @@ def composite_score(
     equal weighting (0.5 each). Set observation_weight=0 to use only
     evidence, or evidence_weight=0 to use only observations.
 
+    Two composition methods:
+    - 'arithmetic': weighted arithmetic mean (default, backwards compatible)
+    - 'geometric': geometric mean for multiplicative factors (demand forecasting)
+
+    For geometric mode with baseline:
+    - Values are treated as multipliers from baseline
+    - baseline=1.0 means values are 1.0 = no change, 2.0 = double
+    - Result is expressed as a multiplier from baseline
+
     This is a universal substrate method — works for any domain.
 
     Args:
@@ -798,6 +809,8 @@ def composite_score(
         node_id: The node to score.
         observation_weight: Weight for observation signal (0-1).
         evidence_weight: Weight for evidence signal (0-1).
+        method: 'arithmetic' (default) or 'geometric' (multiplicative).
+        baseline: Baseline for multiplicative mode (default 1.0).
 
     Returns:
         Dict with composite_score, observation_score, evidence_score,
@@ -838,10 +851,27 @@ def composite_score(
     elif evidence_score is None:
         composite = obs_score
     else:
-        total_w = observation_weight + evidence_weight
-        composite = round(
-            (obs_score * observation_weight + evidence_score * evidence_weight) / total_w, 4,
-        )
+        if method == "geometric" and obs_score > 0 and evidence_score > 0:
+            # Geometric mean for multiplicative factors
+            # composite = (obs * evidence)^0.5 expressed as multiplier from baseline
+            product = obs_score * evidence_score
+            # Use weighted geometric mean based on weights
+            total_w = observation_weight + evidence_weight
+            if total_w > 0:
+                # Weighted geometric mean
+                composite = round((obs_score ** (observation_weight / total_w) *
+                                   evidence_score ** (evidence_weight / total_w)), 4)
+            else:
+                composite = round(product ** 0.5, 4)
+            # Apply baseline scaling
+            if baseline != 1.0:
+                composite = round(composite * baseline, 4)
+        else:
+            # Default: weighted arithmetic mean (backwards compatible)
+            total_w = observation_weight + evidence_weight
+            composite = round(
+                (obs_score * observation_weight + evidence_score * evidence_weight) / total_w, 4,
+            )
 
     return {
         "node_id": node_id,
@@ -854,6 +884,8 @@ def composite_score(
             "observation": observation_weight,
             "evidence": evidence_weight,
         },
+        "method": method,
+        "baseline": baseline,
     }
 
 

@@ -829,24 +829,39 @@ class Graph:
         *,
         observation_weight: float = 0.5,
         evidence_weight: float = 0.5,
+        method: str = "arithmetic",
+        baseline: float = 1.0,
     ) -> dict[str, Any]:
         """Compute a composite decision score combining observations and evidence.
 
         Universal substrate method — works for any domain.
 
+        Two composition methods:
+        - 'arithmetic': weighted arithmetic mean (default, backwards compatible)
+        - 'geometric': geometric mean for multiplicative factors (demand forecasting)
+
+        For geometric mode with baseline:
+        - Values are treated as multipliers from baseline
+        - baseline=1.0 means values are 1.0 = no change, 2.0 = double
+        - Result is expressed as a multiplier from baseline
+
         Args:
             node_id: The node to score.
             observation_weight: Weight for observation signal (0-1).
             evidence_weight: Weight for evidence signal (0-1).
+            method: 'arithmetic' (default) or 'geometric' (multiplicative).
+            baseline: Baseline for multiplicative mode (default 1.0).
 
         Returns:
-            Dict with composite_score, observation_score, evidence_score.
+            Dict with composite_score, observation_score, evidence_score,
+            observation_count, evidence_count, method, and baseline.
         """
         from ohm.methods import composite_score as _composite_score
 
         return _composite_score(
             self._conn, node_id,
             observation_weight=observation_weight, evidence_weight=evidence_weight,
+            method=method, baseline=baseline,
         )
 
     def detect_trend(

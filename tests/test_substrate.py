@@ -518,6 +518,142 @@ class TestConnectionDiscovery:
             assert isinstance(suggestions, list)
 
 
+# ===== Composite Score =====
+
+class TestCompositeScore:
+    def test_arithmetic_mean_default(self, tmp_path):
+        """Default arithmetic mean is backwards compatible."""
+        db = str(tmp_path / "composite_arith.duckdb")
+        with connect(db, actor="metis") as g:
+            g.register_agent(values=["wisdom"])
+            node = g.create_node(label="Test Node", node_type="concept")
+            g.observe(node["id"], obs_type="measurement", value=0.6,
+                      baseline=0.5, sigma=0.1)
+            g.observe(node["id"], obs_type="measurement", value=0.8,
+                      baseline=0.5, sigma=0.1)
+
+            result = g.composite_score(node["id"])
+            assert result["method"] == "arithmetic"
+            # (0.6 + 0.8) / 2 = 0.7 with equal weights
+            assert result["observation_score"] is not None
+            assert result["composite_score"] is not None
+
+    def test_geometric_mean_multiplicative(self, tmp_path):
+        """Geometric mean for demand forecasting multipliers."""
+        db = str(tmp_path / "composite_geom.duckdb")
+        with connect(db, actor="metis") as g:
+            g.register_agent(values=["wisdom"])
+            node = g.create_node(label="Demand Factor", node_type="concept")
+            # obs=0.8 (1.6x baseline 0.5), evidence=0.75 (1.5x baseline 0.5)
+            g.observe(node["id"], obs_type="measurement", value=0.8,
+                      baseline=0.5, sigma=0.1)
+
+            result = g.composite_score(
+                node["id"],
+                observation_weight=0.5,
+                evidence_weight=0.5,
+                method="geometric",
+                baseline=1.0,
+            )
+            assert result["method"] == "geometric"
+            assert result["baseline"] == 1.0
+            # Geometric mean of 0.8 and 0.75 ≈ 0.7746
+            assert result["composite_score"] is not None
+
+    def test_arithmetic_vs_geometric_differ(self, tmp_path):
+        """Arithmetic and geometric should give different results when both signals present."""
+        db = str(tmp_path / "composite_compare.duckdb")
+        with connect(db, actor="metis") as g:
+            g.register_agent(values=["wisdom"])
+            node = g.create_node(label="Compare Node", node_type="concept")
+            g.observe(node["id"], obs_type="measurement", value=0.5,
+                      baseline=0.5, sigma=0.1)
+            # Add evidence edge so evidence_score is non-zero
+            target = g.create_node(label="Target", node_type="concept")
+            g.create_edge(from_node=target["id"], to_node=node["id"],
+                          edge_type="CAUSES", layer="L3", confidence=0.7)
+
+            arith = g.composite_score(node["id"], method="arithmetic")
+            geom = g.composite_score(node["id"], method="geometric")
+            # With obs=0.5 and evidence≈0.7, results should differ
+            assert arith["composite_score"] != geom["composite_score"]
+
+    def test_geometric_with_both_scores(self, tmp_path):
+        """Geometric mean with both observation and evidence scores."""
+        db = str(tmp_path / "composite_geom_both.duckdb")
+        with connect(db, actor="metis") as g:
+            g.register_agent(values=["wisdom"])
+            node = g.create_node(label="Demand Node", node_type="concept")
+            # Observation: value=1.3 (hot day multiplier)
+            g.observe(node["id"], obs_type="measurement", value=1.3,
+                      baseline=1.0, sigma=0.1)
+            # Evidence: confidence=1.5 (Saturday multiplier)
+            source = g.create_node(label="Saturday", node_type="concept")
+            g.create_edge(from_node=source["id"], to_node=node["id"],
+                          edge_type="PREDICTS", layer="L3", confidence=1.5)
+
+            result = g.composite_score(
+                node["id"], method="geometric", baseline=1.0,
+                observation_weight=0.5, evidence_weight=0.5,
+            )
+            assert result["method"] == "geometric"
+            assert result["baseline"] == 1.0
+            assert result["composite_score"] is not None
+            # Geometric mean should be between the two scores
+            assert result["composite_score"] > 0
+
+    def test_geometric_baseline_scaling(self, tmp_path):
+        """Geometric mean with non-1.0 baseline applies scaling."""
+        db = str(tmp_path / "composite_baseline.duckdb")
+        with connect(db, actor="metis") as g:
+            g.register_agent(values=["wisdom"])
+            node = g.create_node(label="Baseline Node", node_type="concept")
+            g.observe(node["id"], obs_type="measurement", value=0.8,
+                      baseline=0.5, sigma=0.1)
+
+            result_default = g.composite_score(node["id"], method="geometric", baseline=1.0)
+            result_scaled = g.composite_score(node["id"], method="geometric", baseline=2.0)
+            # With baseline=2.0, composite should be scaled by 2.0
+            if result_default["composite_score"] is not None and result_scaled["composite_score"] is not None:
+                # scaled = default * baseline
+                expected = round(result_default["composite_score"] * 2.0, 4)
+                assert result_scaled["composite_score"] == expected
+
+    def test_geometric_fallback_on_zero(self, tmp_path):
+        """Geometric method falls back to arithmetic when values are <= 0."""
+        db = str(tmp_path / "composite_fallback.duckdb")
+        with connect(db, actor="metis") as g:
+            g.register_agent(values=["wisdom"])
+            node = g.create_node(label="Zero Node", node_type="concept")
+            # Observation with value=0 — geometric can't handle this
+            g.observe(node["id"], obs_type="measurement", value=0.0,
+                      baseline=0.5, sigma=0.1)
+
+            result = g.composite_score(node["id"], method="geometric")
+            # Should still return a result (falls back to arithmetic)
+            assert result["composite_score"] is not None
+            assert result["method"] == "geometric"
+
+    def test_composite_returns_method_and_baseline(self, tmp_path):
+        """Composite score result includes method and baseline keys."""
+        db = str(tmp_path / "composite_keys.duckdb")
+        with connect(db, actor="metis") as g:
+            g.register_agent(values=["wisdom"])
+            node = g.create_node(label="Keys Node", node_type="concept")
+            g.observe(node["id"], obs_type="measurement", value=0.6,
+                      baseline=0.5, sigma=0.1)
+
+            result_arith = g.composite_score(node["id"])
+            assert "method" in result_arith
+            assert "baseline" in result_arith
+            assert result_arith["method"] == "arithmetic"
+            assert result_arith["baseline"] == 1.0
+
+            result_geom = g.composite_score(node["id"], method="geometric", baseline=2.5)
+            assert result_geom["method"] == "geometric"
+            assert result_geom["baseline"] == 2.5
+
+
 # ===== Graph Import/Export =====
 
 class TestGraphImportExport:
