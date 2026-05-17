@@ -156,3 +156,32 @@ class TestConnect:
         g = connect(actor="metis")
         assert g.actor == "metis"
         g.close()
+
+
+class TestDiscovery:
+    """Tests for ADR-005 self-documenting discovery methods."""
+
+    def test_schema(self, graph):
+        """schema() returns node types, edge types by layer, and version."""
+        result = graph.schema()
+        assert "node_types" in result
+        assert "edge_types_by_layer" in result
+        assert "schema_version" in result
+        assert isinstance(result["node_types"], list)
+        assert "L1" in result["edge_types_by_layer"]
+        assert "L4" in result["edge_types_by_layer"]
+
+    def test_layers(self, graph):
+        """layers() returns L1-L4 layer descriptors."""
+        result = graph.layers()
+        assert isinstance(result, list)
+        assert len(result) == 4
+        # Should have L1, L2, L3, L4
+        names = {r["name"] for r in result}
+        assert names == {"L1", "L2", "L3", "L4"}
+        # Each layer should have sharing, ownership, edge_types, example
+        for r in result:
+            assert "sharing" in r
+            assert "ownership" in r
+            assert "edge_types" in r
+            assert "example" in r

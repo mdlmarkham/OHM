@@ -36,6 +36,71 @@ class Graph:
         self.actor = actor
         self.token: str | None = None
 
+    # ── Discovery (ADR-005) ───────────────────────────────────────────────
+
+    def schema(self) -> dict[str, Any]:
+        """Return the current graph schema for agent introspection.
+
+        Returns node types, edge types by layer, and schema version.
+        ADR-005: Self-documenting interface for agents.
+
+        Returns:
+            Dict with 'node_types', 'edge_types_by_layer', 'schema_version'.
+        """
+        from ohm.schema import VALID_NODE_TYPES, LAYER_EDGE_TYPES, get_schema_version
+
+        return {
+            "node_types": sorted(VALID_NODE_TYPES),
+            "edge_types_by_layer": {
+                layer: sorted(types) for layer, types in LAYER_EDGE_TYPES.items()
+            },
+            "schema_version": get_schema_version(self._conn),
+        }
+
+    def layers(self) -> list[dict[str, Any]]:
+        """Return L1-L4 layer descriptions for agent introspection.
+
+        ADR-005: Self-documenting interface for agents.
+
+        Returns:
+            List of layer descriptors with name, sharing, ownership,
+            edge_types, and example.
+        """
+        from ohm.schema import LAYER_EDGE_TYPES
+
+        # Structured layer data derived from LAYER_EDGE_TYPES and CLI defaults
+        layer_data = [
+            {
+                "name": "L1",
+                "sharing": "Fully shared",
+                "ownership": "Communal",
+                "edge_types": sorted(LAYER_EDGE_TYPES["L1"]),
+                "example": '"Hungary has a constitution"',
+            },
+            {
+                "name": "L2",
+                "sharing": "Shared + attributed",
+                "ownership": "Proposing agent",
+                "edge_types": sorted(LAYER_EDGE_TYPES["L2"]),
+                "example": '"This idea derives from that source"',
+            },
+            {
+                "name": "L3",
+                "sharing": "Agent-owned, challengeable",
+                "ownership": "Creating agent",
+                "edge_types": sorted(LAYER_EDGE_TYPES["L3"]),
+                "example": '"Pattern X causes outcome Y conf: 0.94 (agent-alpha)"',
+            },
+            {
+                "name": "L4",
+                "sharing": "Agent-owned, visible",
+                "ownership": "Forecasting agent",
+                "edge_types": sorted(LAYER_EDGE_TYPES["L4"]),
+                "example": '"Outcome Z expected conf: 0.65 (agent-beta)"',
+            },
+        ]
+        return layer_data
+
     # ── Write ────────────────────────────────────────────────────────────
 
     def create_node(
