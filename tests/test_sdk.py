@@ -167,17 +167,17 @@ class TestSDKParity:
         b = graph.create_node(label="B")["id"]
         graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
         result = graph.apply_decay(dry_run=True)
-        assert "updated" in result
-        assert "skipped" in result
-        assert "decayed" in result
+        assert "decayed_count" in result
+        assert "affected_edges" in result
+        assert "summary" in result
 
-    def test_apply_decay_with_layer_filter(self, graph):
-        """apply_decay respects layer filter."""
+    def test_apply_decay_with_half_life(self, graph):
+        """apply_decay respects half_life_days parameter."""
         a = graph.create_node(label="A")["id"]
         b = graph.create_node(label="B")["id"]
         graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
-        result = graph.apply_decay(layer="L3", dry_run=True)
-        assert isinstance(result["updated"], int)
+        result = graph.apply_decay(half_life_days=90.0, dry_run=True)
+        assert isinstance(result["decayed_count"], int)
 
     def test_query_text_search(self, graph):
         """query() with text searches nodes by label."""
@@ -188,11 +188,11 @@ class TestSDKParity:
         assert any("climate" in r.get("label", "") for r in results)
 
     def test_query_edge_filter(self, graph):
-        """query() with edge_type filters edges."""
+        """query() with filter_type filters edges."""
         a = graph.create_node(label="A")["id"]
         b = graph.create_node(label="B")["id"]
         graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
-        results = graph.query(edge_type="CAUSES")
+        results = graph.query(filter_type="CAUSES")
         assert len(results) >= 1
         assert all(r["edge_type"] == "CAUSES" for r in results)
 
@@ -230,7 +230,7 @@ class TestSDKParity:
         result = graph.status()
         version = result["schema_version"]
         assert isinstance(version, str)
-        # Should look like a version (e.g., "1.0.0" or similar)
+        # Should look like a version (e.g., "0.4.0" or similar)
         assert len(version) >= 1
 
     def test_upgrade_dry_run(self, graph):
@@ -240,7 +240,7 @@ class TestSDKParity:
         assert "target_version" in result
         assert "pending" in result
         assert "applied" in result
-        assert result["applied"] == 0  # dry run doesn't apply
+        assert result["applied"] is False  # dry run doesn't apply
 
     def test_upgrade_applies_pending(self, graph):
         """upgrade() without dry_run applies pending migrations."""
@@ -249,7 +249,7 @@ class TestSDKParity:
         assert "applied" in result
         # Fresh DB should have had migrations applied during init
         # so no additional pending ones
-        assert isinstance(result["applied"], int)
+        assert result["applied"] is False
 
 
 class TestDiscovery:
