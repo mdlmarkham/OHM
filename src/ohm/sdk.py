@@ -169,6 +169,136 @@ class Graph:
             },
         }
 
+    def status(self) -> dict[str, Any]:
+        """Return graph status: node count, edge count, schema version, active agents.
+
+        ADR-005: SDK parity with `ohm graph status`.
+
+        Returns:
+            Dict with total_nodes, total_edges, total_observations,
+            active_agents, challenge_ratio, schema_version.
+        """
+        from ohm.queries import query_stats
+        from ohm.schema import get_schema_version
+
+        stats = query_stats(self._conn)
+        return {
+            "total_nodes": stats["total_nodes"],
+            "total_edges": stats["total_edges"],
+            "total_observations": stats["total_observations"],
+            "active_agents": stats["active_agents"],
+            "challenge_ratio": stats["challenge_ratio"],
+            "schema_version": get_schema_version(self._conn),
+        }
+
+    def upgrade(self, *, dry_run: bool = False) -> dict[str, Any]:
+        """Apply pending schema migrations.
+
+        ADR-005: SDK parity with `ohm graph upgrade`.
+
+        Args:
+            dry_run: If True, show pending migrations without applying.
+
+        Returns:
+            Dict with current_version, target_version, applied, pending.
+        """
+        from ohm.schema import SCHEMA_VERSION, MIGRATIONS, get_schema_version, initialize_schema
+
+        current = get_schema_version(self._conn)
+        pending = [(v, d) for v, d, _ in MIGRATIONS if current < v]
+
+        if dry_run:
+            return {
+                "current_version": current,
+                "target_version": SCHEMA_VERSION,
+                "pending": [{"version": v, "description": d} for v, d in pending],
+                "applied": False,
+            }
+
+        if not pending:
+            return {
+                "current_version": current,
+                "target_version": SCHEMA_VERSION,
+                "pending": [],
+                "applied": False,
+            }
+
+        initialize_schema(self._conn)
+        new_version = get_schema_version(self._conn)
+        return {
+            "current_version": new_version,
+            "target_version": SCHEMA_VERSION,
+            "pending": [],
+            "applied": True,
+        }
+
+    def query(
+        self,
+        text: str | None = None,
+        *,
+        filter_type: str | None = None,
+        layer: str | None = None,
+        owner: str | None = None,
+        confidence_min: float | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Natural language or structured graph query.
+
+        ADR-005: SDK parity with `ohm graph query`.
+
+        Args:
+            text: Freeform text to search in labels and content.
+            filter_type: Edge type filter for structured queries.
+            layer: Layer filter (L1-L4).
+            owner: Filter by creating agent.
+            confidence_min: Minimum confidence threshold.
+            limit: Maximum results (default 100).
+
+        Returns:
+            List of matching node or edge records.
+        """
+        if filter_type or layer or owner or confidence_min is not None:
+            return self.search_edges(
+                layer=layer, edge_type=filter_type,
+                confidence_min=confidence_min, limit=limit,
+            )
+        if text:
+            return self.search_nodes(text, limit=limit)
+        # No filters: return recent nodes
+        result = self._conn.execute(
+            "SELECT * FROM ohm_nodes ORDER BY created_at DESC LIMIT ?", [limit],
+        )
+        columns = [desc[0] for desc in result.description]
+        return [dict(zip(columns, row)) for row in result.fetchall()]
+
+    def apply_decay(
+        self,
+        *,
+        half_life_days: float = 30.0,
+        min_confidence: float = 0.1,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Apply confidence decay to stale edges.
+
+        ADR-005: SDK parity with `ohm graph decay`.
+
+        Args:
+            half_life_days: Days until confidence halves (default 30).
+            min_confidence: Floor for decayed confidence (default 0.1).
+            dry_run: If True, show what would decay without modifying.
+
+        Returns:
+            Dict with decayed_count, affected_edges, summary.
+        """
+        from ohm.methods import apply_confidence_decay
+
+        return apply_confidence_decay(
+            self._conn,
+            half_life_days=half_life_days,
+            min_confidence=min_confidence,
+            dry_run=dry_run,
+        )
+
     # ── Write ────────────────────────────────────────────────────────────
 
     def create_node(
