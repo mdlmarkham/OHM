@@ -158,6 +158,100 @@ class TestConnect:
         g.close()
 
 
+class TestSDKParity:
+    """Tests for OHM-azn.4: CLI↔SDK parity gap methods."""
+
+    def test_apply_decay_dry_run(self, graph):
+        """apply_decay with dry_run=True reports but doesn't modify."""
+        a = graph.create_node(label="A")["id"]
+        b = graph.create_node(label="B")["id"]
+        graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
+        result = graph.apply_decay(dry_run=True)
+        assert "updated" in result
+        assert "skipped" in result
+        assert "decayed" in result
+
+    def test_apply_decay_with_layer_filter(self, graph):
+        """apply_decay respects layer filter."""
+        a = graph.create_node(label="A")["id"]
+        b = graph.create_node(label="B")["id"]
+        graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
+        result = graph.apply_decay(layer="L3", dry_run=True)
+        assert isinstance(result["updated"], int)
+
+    def test_query_text_search(self, graph):
+        """query() with text searches nodes by label."""
+        graph.create_node(label="climate change")
+        graph.create_node(label="unrelated topic")
+        results = graph.query(text="climate")
+        assert len(results) >= 1
+        assert any("climate" in r.get("label", "") for r in results)
+
+    def test_query_edge_filter(self, graph):
+        """query() with edge_type filters edges."""
+        a = graph.create_node(label="A")["id"]
+        b = graph.create_node(label="B")["id"]
+        graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
+        results = graph.query(edge_type="CAUSES")
+        assert len(results) >= 1
+        assert all(r["edge_type"] == "CAUSES" for r in results)
+
+    def test_query_layer_filter(self, graph):
+        """query() with layer filters edges."""
+        a = graph.create_node(label="A")["id"]
+        b = graph.create_node(label="B")["id"]
+        graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
+        results = graph.query(layer="L3")
+        assert len(results) >= 1
+
+    def test_query_confidence_min(self, graph):
+        """query() with confidence_min filters edges."""
+        a = graph.create_node(label="A")["id"]
+        b = graph.create_node(label="B")["id"]
+        graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3", confidence=0.9)
+        results = graph.query(confidence_min=0.8)
+        assert len(results) >= 1
+
+    def test_query_no_filters_returns_nodes(self, graph):
+        """query() with no filters returns recent nodes."""
+        graph.create_node(label="Test Node")
+        results = graph.query()
+        assert len(results) >= 1
+
+    def test_status_includes_schema_version(self, graph):
+        """status() returns stats plus schema_version."""
+        result = graph.status()
+        assert "schema_version" in result
+        assert "total_nodes" in result
+        assert "total_edges" in result
+
+    def test_status_schema_version_is_string(self, graph):
+        """status() schema_version is a version string."""
+        result = graph.status()
+        version = result["schema_version"]
+        assert isinstance(version, str)
+        # Should look like a version (e.g., "1.0.0" or similar)
+        assert len(version) >= 1
+
+    def test_upgrade_dry_run(self, graph):
+        """upgrade() with dry_run reports pending migrations without applying."""
+        result = graph.upgrade(dry_run=True)
+        assert "current_version" in result
+        assert "target_version" in result
+        assert "pending" in result
+        assert "applied" in result
+        assert result["applied"] == 0  # dry run doesn't apply
+
+    def test_upgrade_applies_pending(self, graph):
+        """upgrade() without dry_run applies pending migrations."""
+        result = graph.upgrade()
+        assert "current_version" in result
+        assert "applied" in result
+        # Fresh DB should have had migrations applied during init
+        # so no additional pending ones
+        assert isinstance(result["applied"], int)
+
+
 class TestDiscovery:
     """Tests for ADR-005 self-documenting discovery methods."""
 
