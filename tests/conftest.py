@@ -15,6 +15,14 @@ if TYPE_CHECKING:
     import duckdb
 
 
+@pytest.fixture(autouse=True)
+def _clear_rate_limits():
+    """Clear the rate limit store between tests to prevent flaky failures."""
+    import ohm.server as srv
+
+    srv._rate_limit_store.clear()
+
+
 def create_test_db() -> "duckdb.DuckDBPyConnection":
     """Create an in-memory DuckDB with the OHM schema initialized."""
     import duckdb
