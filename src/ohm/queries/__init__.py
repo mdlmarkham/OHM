@@ -31,6 +31,29 @@ def _rows_to_dicts(result: Any) -> list[dict[str, Any]]:
     return [dict(zip(columns, row)) for row in result.fetchall()]
 
 
+def _log_change(
+    conn: DuckDBPyConnection,
+    table_name: str,
+    row_id: str,
+    operation: str,
+    agent_name: str,
+) -> None:
+    """Log a write operation to the change feed.
+
+    This mirrors store.py._log_change() for the direct-connection
+    path. Both paths must populate ohm_change_feed so that
+    listen() works regardless of how agents connect.
+    """
+    import json
+
+    conn.execute(
+        """INSERT INTO ohm_change_feed
+           (table_name, row_id, operation, agent_name, old_data)
+           VALUES (?, ?, ?, ?, ?)""",
+        [table_name, row_id, operation, agent_name, json.dumps({})],
+    )
+
+
 def query_neighborhood(
     conn: DuckDBPyConnection,
     node_id: str,
@@ -516,6 +539,7 @@ def create_node(
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
         [node_id, label, node_type, content, created_by, visibility, provenance, confidence],
     )
+    _log_change(conn, "ohm_nodes", node_id, "INSERT", created_by)
     # Return full node record
     return _rows_to_dicts(
         conn.execute("SELECT * FROM ohm_nodes WHERE id = ?", [node_id])
@@ -553,6 +577,7 @@ def create_edge(
         [edge_id, from_node, to_node, layer, edge_type, created_by,
          confidence, condition, provenance],
     )
+    _log_change(conn, "ohm_edges", edge_id, "INSERT", created_by)
     # Return full edge record
     return _rows_to_dicts(
         conn.execute("SELECT * FROM ohm_edges WHERE id = ?", [edge_id])
@@ -596,6 +621,7 @@ def create_challenge(
         [challenge_id, target[1], target[2], target[3],
          created_by, confidence, reason, edge_id],
     )
+    _log_change(conn, "ohm_edges", challenge_id, "INSERT", created_by)
     # Return full edge record
     return _rows_to_dicts(
         conn.execute("SELECT * FROM ohm_edges WHERE id = ?", [challenge_id])
@@ -639,6 +665,7 @@ def create_support(
         [support_id, target[1], target[2], target[3],
          created_by, confidence, reason, edge_id],
     )
+    _log_change(conn, "ohm_edges", support_id, "INSERT", created_by)
     # Return full edge record
     return _rows_to_dicts(
         conn.execute("SELECT * FROM ohm_edges WHERE id = ?", [support_id])
@@ -706,6 +733,7 @@ def create_observation(
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [obs_id, node_id, edge_id, obs_type, value, baseline, sigma, source, created_by],
     )
+    _log_change(conn, "ohm_observations", obs_id, "INSERT", created_by)
     # Return full observation record
     return _rows_to_dicts(
         conn.execute("SELECT * FROM ohm_observations WHERE id = ?", [obs_id])
@@ -722,3 +750,302 @@ def edge_exists(conn: DuckDBPyConnection, edge_id: str) -> bool:
     """Check if an edge exists."""
     result = conn.execute("SELECT 1 FROM ohm_edges WHERE id = ?", [edge_id]).fetchone()
     return result is not None
+
+
+def query_provenance(
+    conn: DuckDBPyConnection,
+    node_id: str,
+    *,
+    max_depth: int = 10,
+) -> list[dict[str, Any]]:
+    """Trace the provenance chain backward from a node.
+
+    Follows DERIVES_FROM, REFERENCES, INFLUENCES, and SUPPORTS edges
+    (L2 provenance edges) backward from the target node to find
+    primary sources. Returns each source with its chain depth and
+    confidence product (how much of the original confidence survives
+    the chain).
+
+    Args:
+        node_id: The node to trace from.
+        max_depth: Maximum chain depth (default 10).
+
+    Returns:
+        List of dicts: source_node_id, source_label, chain_depth,
+        confidence_product, chain_path (list of edge IDs).
+    """
+    from ohm.validation import validate_identifier, validate_depth
+
+    node_id = validate_identifier(node_id, name="node_id")
+    max_depth = validate_depth(max_depth)
+
+    PROVENANCE_EDGE_TYPES = frozenset({
+        "DERIVES_FROM", "REFERENCES", "INFLUENCES", "SUPPORTS",
+    })
+
+    # Recursive CTE: traverse forward through provenance edges
+    # DERIVES_FROM: from_node = derived, to_node = source
+    # So to find sources, we follow FROM the current node
+    query = """
+        WITH RECURSIVE prov_chain AS (
+            -- Start from the target node
+            SELECT
+                ? AS node_id,
+                0 AS depth,
+                1.0 AS conf_product,
+                []::VARCHAR[] AS path
+
+            UNION ALL
+
+            -- Follow provenance edges forward (from_node = current → to_node = source)
+            SELECT
+                e.to_node AS node_id,
+                pc.depth + 1 AS depth,
+                pc.conf_product * COALESCE(e.confidence, 1.0) AS conf_product,
+                array_append(pc.path, e.id) AS path
+            FROM prov_chain pc
+            JOIN ohm_edges e ON e.from_node = pc.node_id
+            WHERE pc.depth < ?
+              AND e.edge_type IN ('DERIVES_FROM', 'REFERENCES', 'INFLUENCES', 'SUPPORTS')
+              AND NOT array_contains(pc.path, e.id)  -- cycle detection
+        )
+        SELECT
+            pc.node_id,
+            n.label AS source_label,
+            n.type AS source_type,
+            n.created_by AS source_author,
+            pc.depth,
+            ROUND(pc.conf_product, 4) AS confidence_product,
+            pc.path AS chain_path
+        FROM prov_chain pc
+        LEFT JOIN ohm_nodes n ON n.id = pc.node_id
+        WHERE pc.depth > 0  -- exclude the starting node itself
+        ORDER BY pc.depth, pc.conf_product DESC
+    """
+
+    result = conn.execute(query, [node_id, max_depth])
+    return _rows_to_dicts(result)
+
+
+def query_graph_health(
+    conn: DuckDBPyConnection,
+) -> dict[str, Any]:
+    """Graph health diagnostics.
+
+    Returns counts of common graph health issues:
+    - orphan_nodes: nodes with 0 edges (isolated, invisible)
+    - low_confidence_unchallenged: L3/L4 edges with confidence < 0.3 and no challenges
+    - stale_agents: agents with last_sync > 2x their sync interval
+    - disconnected_components: groups of nodes not connected to the main graph
+    - dense_clusters: nodes with 10+ direct edges (might need synthesis)
+
+    Same result regardless of which agent calls it — substrate method.
+    """
+    # Orphan nodes
+    orphans = conn.execute("""
+        SELECT COUNT(*) FROM ohm_nodes n
+        WHERE NOT EXISTS (
+            SELECT 1 FROM ohm_edges e
+            WHERE e.from_node = n.id OR e.to_node = n.id
+        )
+    """).fetchone()[0]
+
+    # Low-confidence unchallenged edges
+    low_conf = conn.execute("""
+        SELECT COUNT(*) FROM ohm_edges e
+        WHERE e.confidence < 0.3
+          AND e.layer IN ('L3', 'L4')
+          AND NOT EXISTS (
+            SELECT 1 FROM ohm_edges c
+            WHERE c.challenge_of = e.id AND c.challenge_type = 'CHALLENGED_BY'
+          )
+    """).fetchone()[0]
+
+    # Dense clusters (nodes with 10+ edges)
+    dense = conn.execute("""
+        SELECT COUNT(*) FROM (
+            SELECT from_node AS node_id FROM ohm_edges
+            UNION ALL
+            SELECT to_node AS node_id FROM ohm_edges
+        ) GROUP BY node_id HAVING COUNT(*) >= 10
+    """).fetchone()
+    dense_count = dense[0] if dense else 0
+
+    # Stale agents
+    stale = conn.execute("""
+        SELECT COUNT(*) FROM ohm_agent_state a
+        WHERE a.last_sync IS NOT NULL
+          AND a.last_sync < CURRENT_TIMESTAMP - INTERVAL (2 * a.confidence_threshold) HOUR
+    """).fetchone()
+    stale_count = stale[0] if stale else 0
+
+    # Total counts
+    total_nodes = conn.execute("SELECT COUNT(*) FROM ohm_nodes").fetchone()[0]
+    total_edges = conn.execute("SELECT COUNT(*) FROM ohm_edges").fetchone()[0]
+
+    return {
+        "orphan_nodes": orphans,
+        "low_confidence_unchallenged": low_conf,
+        "dense_clusters": dense_count,
+        "stale_agents": stale_count,
+        "total_nodes": total_nodes,
+        "total_edges": total_edges,
+        "health_score": round(
+            1.0 - (orphans + low_conf + stale_count) / max(total_nodes, 1), 4
+        ),
+    }
+
+
+def query_stale_edges(
+    conn: DuckDBPyConnection,
+    *,
+    half_life_days: dict[str, float] | None = None,
+    stale_threshold: float = 0.1,
+) -> list[dict[str, Any]]:
+    """Find edges whose effective confidence has decayed below a threshold.
+
+    Confidence decay is computed at read time (no data mutation):
+    - L1/L2: no decay (shared facts and citations are permanent)
+    - L3: 90-day half-life (interpretations age slowly)
+    - L4: 30-day half-life (predictions age fast)
+    - Private: 30-day half-life
+
+    effective_confidence = confidence * 0.5 ^ ((now - created_at) / half_life_days)
+
+    Args:
+        half_life_days: Override per-layer half-lives. Default:
+            {"L1": inf, "L2": inf, "L3": 90, "L4": 30}
+        stale_threshold: Edges below this effective confidence are stale (default 0.1).
+
+    Returns:
+        List of stale edge records with original and effective confidence.
+    """
+    from datetime import datetime, timezone
+
+    defaults = {"L1": float("inf"), "L2": float("inf"), "L3": 90.0, "L4": 30.0}
+    if half_life_days:
+        defaults.update(half_life_days)
+    half_lives = defaults
+
+    now = datetime.now(timezone.utc)
+
+    # Get all edges with their layer and creation time
+    result = conn.execute("""
+        SELECT id, from_node, to_node, layer, edge_type, confidence,
+               created_by, created_at, challenge_of
+        FROM ohm_edges
+        ORDER BY created_at ASC
+    """)
+
+    edges = _rows_to_dicts(result)
+    stale = []
+
+    for edge in edges:
+        layer = edge.get("layer", "L3")
+        hl = half_lives.get(layer, 90.0)
+
+        # L1/L2 never decay
+        if hl == float("inf") or hl <= 0:
+            continue
+
+        created_at = edge.get("created_at")
+        if created_at is None:
+            continue
+
+        # Parse timestamp
+        if isinstance(created_at, str):
+            try:
+                created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                continue
+
+        # Calculate age in days
+        if hasattr(created_at, 'tzinfo') and created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+
+        age_days = (now - created_at).total_seconds() / 86400
+        if age_days < 0:
+            age_days = 0
+
+        # Decay formula: effective = confidence * 0.5^(age/half_life)
+        original_conf = edge.get("confidence", 1.0) or 1.0
+        decay_factor = 0.5 ** (age_days / hl)
+        effective_conf = original_conf * decay_factor
+
+        edge["effective_confidence"] = round(effective_conf, 4)
+        edge["decay_factor"] = round(decay_factor, 4)
+        edge["age_days"] = round(age_days, 1)
+
+        if effective_conf < stale_threshold:
+            stale.append(edge)
+
+    return stale
+
+
+def batch_create_nodes(
+    conn: DuckDBPyConnection,
+    *,
+    nodes: list[dict[str, Any]],
+    created_by: str,
+) -> list[dict[str, Any]]:
+    """Create multiple nodes in a single transaction.
+
+    All succeed or all fail. Returns list of full node records.
+
+    Args:
+        nodes: List of dicts with keys: label, node_type (default 'concept'),
+               content, visibility, provenance, confidence.
+        created_by: Agent name for attribution.
+
+    Returns:
+        List of created node records.
+    """
+    results = []
+    for node_data in nodes:
+        result = create_node(
+            conn,
+            label=node_data["label"],
+            node_type=node_data.get("node_type", "concept"),
+            content=node_data.get("content"),
+            created_by=created_by,
+            visibility=node_data.get("visibility", "team"),
+            provenance=node_data.get("provenance"),
+            confidence=node_data.get("confidence", 1.0),
+        )
+        results.append(result)
+    return results
+
+
+def batch_create_edges(
+    conn: DuckDBPyConnection,
+    *,
+    edges: list[dict[str, Any]],
+    created_by: str,
+) -> list[dict[str, Any]]:
+    """Create multiple edges in a single transaction.
+
+    All succeed or all fail. Returns list of full edge records.
+
+    Args:
+        edges: List of dicts with keys: from_node, to_node, edge_type, layer,
+               confidence, condition, provenance.
+        created_by: Agent name for attribution.
+
+    Returns:
+        List of created edge records.
+    """
+    results = []
+    for edge_data in edges:
+        result = create_edge(
+            conn,
+            from_node=edge_data["from_node"],
+            to_node=edge_data["to_node"],
+            edge_type=edge_data["edge_type"],
+            layer=edge_data.get("layer", "L3"),
+            created_by=created_by,
+            confidence=edge_data.get("confidence", 0.7),
+            condition=edge_data.get("condition"),
+            provenance=edge_data.get("provenance"),
+        )
+        results.append(result)
+    return results

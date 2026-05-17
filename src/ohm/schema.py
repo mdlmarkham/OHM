@@ -53,7 +53,7 @@ LAYER_EDGE_TYPES: dict[str, frozenset[str]] = {
         "APPLIES_TO", "RELATED_TO",
     }),
     "L4": frozenset({"EXPECTS", "PLANS", "RISKS", "DEPENDS_ON",
-                      "THREATENS", "ENABLES", "EXPECTS_FROM"}),
+                      "THREATENS", "ENABLES", "EXPECTS_FROM", "PREDICTS"}),
 }
 
 ALL_EDGE_TYPES: frozenset[str] = frozenset().union(*LAYER_EDGE_TYPES.values())

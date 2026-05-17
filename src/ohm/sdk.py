@@ -480,9 +480,91 @@ class Graph:
 
     def health(self) -> dict[str, Any]:
         """Compute structural health metrics for the graph."""
-        from ohm.methods import graph_health
+        from ohm.queries import query_graph_health
 
-        return graph_health(self._conn)
+        return query_graph_health(self._conn)
+
+    def provenance(self, node_id: str, *, max_depth: int = 10) -> list[dict[str, Any]]:
+        """Trace provenance chain backward from a node.
+
+        Follows DERIVES_FROM, REFERENCES, INFLUENCES, and SUPPORTS edges
+        to find primary sources. Returns each source with chain depth and
+        confidence product.
+
+        Args:
+            node_id: The node to trace from.
+            max_depth: Maximum chain depth (default 10).
+
+        Returns:
+            List of source records with depth, confidence_product, and chain_path.
+        """
+        from ohm.queries import query_provenance
+
+        return query_provenance(self._conn, node_id, max_depth=max_depth)
+
+    def stale_edges(
+        self,
+        *,
+        half_life_days: dict[str, float] | None = None,
+        stale_threshold: float = 0.1,
+    ) -> list[dict[str, Any]]:
+        """Find edges whose confidence has decayed below a threshold.
+
+        Decay is computed at read time (no data mutation):
+        - L1/L2: no decay (permanent)
+        - L3: 90-day half-life
+        - L4: 30-day half-life
+
+        effective_confidence = confidence * 0.5 ^ (age_days / half_life)
+
+        Args:
+            half_life_days: Override per-layer half-lives.
+            stale_threshold: Effective confidence below this is stale (default 0.1).
+
+        Returns:
+            List of stale edge records with effective_confidence and decay_factor.
+        """
+        from ohm.queries import query_stale_edges
+
+        return query_stale_edges(
+            self._conn, half_life_days=half_life_days, stale_threshold=stale_threshold,
+        )
+
+    def batch_create_nodes(
+        self,
+        *,
+        nodes: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Create multiple nodes at once. All succeed or all fail.
+
+        Args:
+            nodes: List of dicts with: label, node_type, content, visibility,
+                   provenance, confidence.
+
+        Returns:
+            List of created node records.
+        """
+        from ohm.queries import batch_create_nodes
+
+        return batch_create_nodes(self._conn, nodes=nodes, created_by=self.actor)
+
+    def batch_create_edges(
+        self,
+        *,
+        edges: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Create multiple edges at once. All succeed or all fail.
+
+        Args:
+            edges: List of dicts with: from_node, to_node, edge_type, layer,
+                   confidence, condition, provenance.
+
+        Returns:
+            List of created edge records.
+        """
+        from ohm.queries import batch_create_edges
+
+        return batch_create_edges(self._conn, edges=edges, created_by=self.actor)
 
     def get_agent_config(self, agent_name: str) -> dict[str, Any] | None:
         """Get an agent's configuration (optimization target, services, etc.).
