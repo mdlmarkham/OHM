@@ -5,6 +5,7 @@ Command structure (from docs/cli.md):
     ohm graph {schema,layers,status,query,neighborhood,write,challenge,
                support,listen,confidence,impact,path,stats}
     ohm state {show,who-is-working-on,history}
+    ohm topo {schema,failure-analysis,compliance-map,impact-study}
     ohm snapshot
     ohm diff
 """
@@ -231,6 +232,57 @@ def build_parser() -> argparse.ArgumentParser:
     diff_parser.add_argument("--layer", choices=["L1", "L2", "L3", "L4"], help="Filter by layer")
     diff_parser.add_argument("--agent", help="Filter by agent")
 
+    # ── topo ─────────────────────────────────────────────────────────────
+    topo_parser = subparsers.add_parser(
+        "topo",
+        help="Industrial knowledge graph commands (TOPO schema)",
+    )
+    topo_sub = topo_parser.add_subparsers(dest="topo_command", help="TOPO commands")
+
+    # topo schema
+    topo_sub.add_parser("schema", help="Show TOPO schema (industrial node/edge types)")
+
+    # topo failure-analysis
+    topo_fa = topo_sub.add_parser(
+        "failure-analysis",
+        help="Trace failure propagation from a node (industrial impact)",
+    )
+    topo_fa.add_argument("node_id", help="Starting node ID (equipment, system, etc.)")
+    topo_fa.add_argument(
+        "--depth", type=int, default=5,
+        help="Max propagation depth (default: 5)",
+    )
+    topo_fa.add_argument(
+        "--edge-type", dest="edge_types", action="append",
+        help="Filter by edge type (repeatable, default: FEEDS,FLOWS_TO,DEPENDS_ON)",
+    )
+
+    # topo compliance-map
+    topo_cm = topo_sub.add_parser(
+        "compliance-map",
+        help="Map compliance relationships around a node",
+    )
+    topo_cm.add_argument("node_id", help="Node ID to map compliance around")
+    topo_cm.add_argument(
+        "--depth", type=int, default=3,
+        help="Neighborhood depth (default: 3)",
+    )
+    topo_cm.add_argument(
+        "--direction", choices=["outgoing", "incoming", "both"], default="both",
+        help="Edge direction (default: both)",
+    )
+
+    # topo impact-study
+    topo_is = topo_sub.add_parser(
+        "impact-study",
+        help="Comprehensive impact study combining failure analysis and neighborhood",
+    )
+    topo_is.add_argument("node_id", help="Node ID to study")
+    topo_is.add_argument(
+        "--depth", type=int, default=5,
+        help="Max traversal depth (default: 5)",
+    )
+
     return parser
 
 
@@ -281,6 +333,8 @@ def _dispatch(args: argparse.Namespace) -> None:
         _handle_snapshot(args)
     elif args.command == "diff":
         _handle_diff(args)
+    elif args.command == "topo":
+        _handle_topo(args)
 
 
 def _handle_serve(args: argparse.Namespace) -> None:
@@ -1161,5 +1215,277 @@ def _print_error(error: OHMError) -> None:
     print(msg, file=sys.stderr)
 
 
+# ── TOPO Command Implementations ────────────────────────────────────────────
+
+# Default edge types for failure analysis in industrial contexts
+_TOPO_FAILURE_EDGE_TYPES = {"FEEDS", "FLOWS_TO", "DEPENDS_ON"}
+
+
+def _handle_topo(args: argparse.Namespace) -> None:
+    """Handle 'ohm topo' subcommands."""
+    cmd = args.topo_command
+    if cmd == "schema":
+        _handle_topo_schema(args)
+    elif cmd == "failure-analysis":
+        _handle_topo_failure_analysis(args)
+    elif cmd == "compliance-map":
+        _handle_topo_compliance_map(args)
+    elif cmd == "impact-study":
+        _handle_topo_impact_study(args)
+    else:
+        print("Unknown topo command. Use 'ohm topo --help' for available commands.")
+
+
+def _handle_topo_schema(args: argparse.Namespace) -> None:
+    """Show the TOPO schema configuration."""
+    from ohm.schema import TOPO_SCHEMA
+
+    config = TOPO_SCHEMA
+    if args.format == "json":
+        import json
+        print(json.dumps(config.to_dict(), indent=2))
+    else:
+        print(f"── TOPO Schema: {config.name} ──")
+        print("\n── Node Types ──")
+        for nt in sorted(config.node_types):
+            print(f"  • {nt}")
+        print("\n── Edge Types by Layer ──")
+        for layer in sorted(config.layer_edge_types.keys()):
+            types = ", ".join(sorted(config.layer_edge_types[layer]))
+            desc = config.layer_descriptions.get(layer, "")
+            print(f"  {layer}: {types}")
+            print(f"      {desc}")
+        print("\n── Observation Types ──")
+        for ot in sorted(config.observation_types):
+            print(f"  • {ot}")
+        print("\n── Observation Sources ──")
+        for os_ in sorted(config.observation_sources):
+            print(f"  • {os_}")
+        print("\n── Provenances ──")
+        for p in sorted(config.provenances):
+            print(f"  • {p}")
+
+
+def _handle_topo_failure_analysis(args: argparse.Namespace) -> None:
+    """Trace failure propagation from a node using industrial edge types.
+
+    Uses query_impact to find downstream effects, filtered by
+    industrial-relevant edge types (FEEDS, FLOWS_TO, DEPENDS_ON).
+    """
+    from ohm.queries import query_impact
+
+    conn = _get_db(args)
+    try:
+        results = query_impact(conn, args.node_id, depth=args.depth)
+
+        # Filter by edge types if specified, otherwise use TOPO defaults
+        edge_types = set(args.edge_types) if args.edge_types else _TOPO_FAILURE_EDGE_TYPES
+        filtered = [r for r in results if r.get("edge_type", "").upper() in edge_types]
+
+        if args.format == "json":
+            import json
+            output = {
+                "node_id": args.node_id,
+                "depth": args.depth,
+                "edge_types": sorted(edge_types),
+                "total_impacts": len(results),
+                "filtered_impacts": len(filtered),
+                "impacts": filtered,
+            }
+            print(json.dumps(output, indent=2, default=str))
+        else:
+            if not filtered:
+                if results:
+                    print(f"No failure propagation found for '{args.node_id}' "
+                          f"using edge types: {', '.join(sorted(edge_types))}")
+                    print(f"  (Total downstream impacts: {len(results)}, "
+                          f"but none matched the specified edge types)")
+                else:
+                    print(f"No downstream impact found for '{args.node_id}' "
+                          f"(depth ≤ {args.depth})")
+                return
+
+            print(f"Failure analysis for '{args.node_id}' (depth ≤ {args.depth})")
+            print(f"Edge types: {', '.join(sorted(edge_types))}")
+            print(f"Impacts: {len(filtered)} of {len(results)} total downstream")
+            print()
+            for r in filtered:
+                print(f"  [depth {r['depth']}] [{r['layer']}] {r['edge_type']}: "
+                      f"{r['from_node']} → {r['to_node']} "
+                      f"(conf: {r.get('confidence', '?')})")
+    finally:
+        conn.close()
+
+
+def _handle_topo_compliance_map(args: argparse.Namespace) -> None:
+    """Map compliance relationships around a node.
+
+    Uses query_neighborhood to find all edges within depth hops,
+    highlighting compliance-relevant connections (BELONGS_TO, CONTAINS,
+    DEPENDS_ON, RISKS, etc.).
+    """
+    from ohm.queries import query_neighborhood
+
+    conn = _get_db(args)
+    try:
+        results = query_neighborhood(
+            conn, args.node_id,
+            depth=args.depth, direction=args.direction,
+        )
+
+        # Compliance-relevant edge types in industrial contexts
+        compliance_types = {
+            "BELONGS_TO", "CONTAINS", "HAS_COMPONENT", "PART_OF",
+            "DEPENDS_ON", "RISKS", "THREATENS", "ENABLES",
+            "REFERENCES", "NOTIFIES", "SERVES",
+        }
+
+        compliance_edges = [r for r in results if r.get("edge_type", "").upper() in compliance_types]
+        other_edges = [r for r in results if r.get("edge_type", "").upper() not in compliance_types]
+
+        if args.format == "json":
+            import json
+            output = {
+                "node_id": args.node_id,
+                "depth": args.depth,
+                "direction": args.direction,
+                "compliance_edges": compliance_edges,
+                "other_edges": other_edges,
+                "total_edges": len(results),
+            }
+            print(json.dumps(output, indent=2, default=str))
+        else:
+            if not results:
+                print(f"No edges found within {args.depth} hops of '{args.node_id}'")
+                return
+
+            print(f"Compliance map for '{args.node_id}' (depth ≤ {args.depth}, {args.direction})")
+            print(f"Total edges: {len(results)} ({len(compliance_edges)} compliance-relevant)")
+            print()
+
+            if compliance_edges:
+                print("── Compliance-relevant ──")
+                for r in compliance_edges:
+                    print(f"  [hop {r['hop']}] [{r['layer']}] {r['edge_type']}: "
+                          f"{r['from_node']} → {r['to_node']} "
+                          f"(conf: {r.get('confidence', '?')}, by: {r['created_by']})")
+                print()
+
+            if other_edges:
+                print("── Other connections ──")
+                for r in other_edges:
+                    print(f"  [hop {r['hop']}] [{r['layer']}] {r['edge_type']}: "
+                          f"{r['from_node']} → {r['to_node']} "
+                          f"(conf: {r.get('confidence', '?')})")
+    finally:
+        conn.close()
+
+
+def _handle_topo_impact_study(args: argparse.Namespace) -> None:
+    """Comprehensive impact study combining failure analysis and neighborhood.
+
+    Runs both query_impact (downstream failure propagation) and
+    query_neighborhood (local context) to produce a combined report.
+    """
+    from ohm.queries import query_impact, query_neighborhood
+
+    conn = _get_db(args)
+    try:
+        impact_results = query_impact(conn, args.node_id, depth=args.depth)
+        neighborhood_results = query_neighborhood(
+            conn, args.node_id, depth=args.depth, direction="both",
+        )
+
+        # Categorize impact by layer
+        impact_by_layer: dict[str, list] = {}
+        for r in impact_results:
+            layer = r.get("layer", "unknown")
+            impact_by_layer.setdefault(layer, []).append(r)
+
+        # Categorize neighborhood by direction
+        incoming = [r for r in neighborhood_results if r.get("from_node") != args.node_id]
+        outgoing = [r for r in neighborhood_results if r.get("to_node") != args.node_id]
+
+        if args.format == "json":
+            import json
+            output = {
+                "node_id": args.node_id,
+                "depth": args.depth,
+                "impact": {
+                    "total": len(impact_results),
+                    "by_layer": {k: len(v) for k, v in impact_by_layer.items()},
+                    "edges": impact_results,
+                },
+                "neighborhood": {
+                    "total": len(neighborhood_results),
+                    "incoming": len(incoming),
+                    "outgoing": len(outgoing),
+                    "edges": neighborhood_results,
+                },
+            }
+            print(json.dumps(output, indent=2, default=str))
+        else:
+            print(f"── Impact Study: {args.node_id} ──")
+            print(f"Depth: {args.depth}")
+            print()
+
+            # Impact section
+            print(f"── Downstream Impact ({len(impact_results)} edges) ──")
+            if not impact_results:
+                print("  No downstream impact found.")
+            else:
+                for layer, edges in sorted(impact_by_layer.items()):
+                    print(f"\n  {layer} ({len(edges)} edges):")
+                    for r in edges:
+                        print(f"    [depth {r['depth']}] {r['edge_type']}: "
+                              f"{r['from_node']} → {r['to_node']} "
+                              f"(conf: {r.get('confidence', '?')})")
+
+            # Neighborhood section
+            print(f"\n── Local Context ({len(neighborhood_results)} edges) ──")
+            if not neighborhood_results:
+                print("  No local connections found.")
+            else:
+                print(f"  Incoming: {len(incoming)}")
+                print(f"  Outgoing: {len(outgoing)}")
+                for r in neighborhood_results:
+                    print(f"  [hop {r['hop']}] [{r['layer']}] {r['edge_type']}: "
+                          f"{r['from_node']} → {r['to_node']} "
+                          f"(conf: {r.get('confidence', '?')})")
+    finally:
+        conn.close()
+
+
 if __name__ == "__main__":
     main()
+
+
+def topo_main(argv: list[str] | None = None) -> NoReturn:
+    """Entry point for the TOPO CLI.
+
+    Behaves like ``main()`` but defaults the command to ``topo`` so that
+    ``topo failure-analysis <node>`` works as a shorthand for
+    ``ohm topo failure-analysis <node>``.
+
+    Global flags (--format, --actor, --db) must come before the topo
+    subcommand, just like with ``ohm``.
+    """
+    if argv is None:
+        argv = sys.argv[1:]
+    # Find where the topo subcommand starts. Global flags like --db,
+    # --format, --actor, --version take arguments, so we need to skip
+    # past them before inserting 'topo'.
+    global_flags_with_args = {"--db", "--actor", "--format"}
+    i = 0
+    insert_at = 0
+    while i < len(argv):
+        if argv[i] in global_flags_with_args:
+            i += 2  # skip flag + its value
+            insert_at = i
+        elif argv[i] == "--version":
+            i += 1
+            insert_at = i
+        else:
+            break
+    # Insert 'topo' before the subcommand
+    main(argv[:insert_at] + ["topo"] + argv[insert_at:])
