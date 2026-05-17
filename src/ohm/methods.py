@@ -692,3 +692,81 @@ def compute_confidence_calibration(
             else "needs_data"
         ),
     }
+
+
+def apply_confidence_decay(
+    conn: DuckDBPyConnection,
+    *,
+    half_life_days: float = 30.0,
+    min_confidence: float = 0.1,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Auto-decay edge confidence over time using exponential decay.
+
+    Confidence decays toward 0 with a configurable half-life.
+    Only affects L3/L4 edges (knowledge and prospect layers).
+    L1/L2 edges (structure and flow) are not decayed — they represent
+    facts, not beliefs.
+
+    Formula: new_confidence = original_confidence * 0.5^(age_days / half_life_days)
+
+    Args:
+        conn: Database connection.
+        half_life_days: Days until confidence halves (default 30).
+        min_confidence: Floor for decayed confidence (default 0.1).
+        dry_run: If True, return affected edges without modifying.
+
+    Returns:
+        Dict with decayed_count, affected_edges, and summary.
+    """
+    # Find edges eligible for decay: L3/L4, not already at floor, not challenged
+    affected = conn.execute("""
+        SELECT id, edge_type, layer, confidence, created_by,
+               created_at,
+               EXTRACT(DAY FROM CURRENT_TIMESTAMP - created_at) AS age_days
+        FROM ohm_edges
+        WHERE layer IN ('L3', 'L4')
+          AND confidence > ?
+          AND created_at < CURRENT_TIMESTAMP - INTERVAL '1 day'
+        ORDER BY age_days DESC
+    """, [min_confidence]).fetchall()
+
+    if not affected:
+        return {"decayed_count": 0, "affected_edges": [], "summary": "No edges to decay"}
+
+    decayed = []
+    for row in affected:
+        edge_id, etype, layer, conf, created_by, created_at, age_days = row
+        age_days = float(age_days) if age_days else 0
+        decay_factor = 0.5 ** (age_days / half_life_days)
+        new_conf = round(conf * decay_factor, 4)
+        new_conf = max(new_conf, min_confidence)
+
+        if new_conf < conf:
+            decayed.append({
+                "id": edge_id,
+                "edge_type": etype,
+                "layer": layer,
+                "original_confidence": conf,
+                "new_confidence": new_conf,
+                "age_days": round(age_days, 1),
+                "created_by": created_by,
+            })
+
+            if not dry_run:
+                conn.execute(
+                    "UPDATE ohm_edges SET confidence = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    [new_conf, edge_id],
+                )
+
+    return {
+        "decayed_count": len(decayed),
+        "affected_edges": decayed,
+        "half_life_days": half_life_days,
+        "min_confidence": min_confidence,
+        "dry_run": dry_run,
+        "summary": (
+            f"Decayed {len(decayed)} edges "
+            f"(half-life: {half_life_days}d, floor: {min_confidence})"
+        ),
+    }

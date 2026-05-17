@@ -589,6 +589,22 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "database": str(self.store.db_path),
                 })
             return
+        elif path == "/metrics":
+            latencies = _request_latencies
+            sorted_lats = sorted(latencies) if latencies else [0]
+            n = len(sorted_lats)
+            self._json_response(200, {
+                "uptime_seconds": round(time.time() - _START_TIME, 1),
+                "requests": dict(_metrics),
+                "latency_ms": {
+                    "p50": sorted_lats[n // 2] if n > 0 else 0,
+                    "p95": sorted_lats[int(n * 0.95)] if n > 1 else sorted_lats[0] if n > 0 else 0,
+                    "p99": sorted_lats[int(n * 0.99)] if n > 1 else sorted_lats[0] if n > 0 else 0,
+                    "max": sorted_lats[-1] if n > 0 else 0,
+                    "sample_count": n,
+                },
+            })
+            return
 
         # Auth for all other GET endpoints
         # Fail-closed design:
@@ -756,6 +772,18 @@ class OhmHandler(BaseHTTPRequestHandler):
             from .queries import query_stale_edges
             threshold = float(qs.get("threshold", [0.1])[0])
             result = query_stale_edges(self.store.conn, stale_threshold=threshold)
+            self._json_response(200, result)
+        elif path == "/decay":
+            from .queries import apply_confidence_decay
+            threshold = float(qs.get("threshold", [0.1])[0])
+            layer = qs.get("layer", [None])[0]
+            dry_run = qs.get("dry_run", ["false"])[0].lower() == "true"
+            result = apply_confidence_decay(
+                self.store.conn,
+                stale_threshold=threshold,
+                layer=layer,
+                dry_run=dry_run,
+            )
             self._json_response(200, result)
         elif path.startswith("/monte-carlo/"):
             node_id = path[13:]
