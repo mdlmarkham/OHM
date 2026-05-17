@@ -1,5 +1,7 @@
 """Tests for the OHM CTE graph traversal queries."""
 
+import uuid
+from datetime import datetime, timezone
 
 
 class TestNeighborhoodQuery:
@@ -316,3 +318,138 @@ class TestSnapshotQuery:
         ts = "2025-06-15T12:00:00"
         result = query_snapshot(test_db, ts)
         assert result["timestamp"] == ts
+
+
+class TestDecayQuery:
+    """Tests for confidence decay (OHM-9hx.5)."""
+
+    def test_decay_finds_stale_l4_edges(self, test_db, sample_graph_small):
+        """L4 edges with low effective confidence are flagged as stale."""
+        from ohm.queries import query_stale_edges
+
+        # Create an old L4 edge with confidence 0.8
+        node_a = sample_graph_small["nodes"]["a"]
+        node_b = sample_graph_small["nodes"]["b"]
+        test_db.execute(
+            """INSERT INTO ohm_edges
+               (id, from_node, to_node, layer, edge_type, created_by, confidence,
+                created_at)
+               VALUES (?, ?, ?, 'L4', 'CAUSES', 'test_agent', 0.8,
+                       ?::TIMESTAMP - INTERVAL '40 days')""",
+            [f"old_l4_{uuid.uuid4().hex[:6]}", node_a, node_b,
+             datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")],
+        )
+
+        # With 30-day half-life, 0.8 confidence decays to 0.8 * 0.5^(40/30) ≈ 0.4
+        stale = query_stale_edges(test_db, stale_threshold=0.5)
+        assert any(e["layer"] == "L4" for e in stale)
+
+    def test_decay_excludes_l1_l2(self, test_db, sample_graph_small):
+        """L1/L2 edges are never stale (infinite half-life)."""
+        from ohm.queries import query_stale_edges
+
+        node_a = sample_graph_small["nodes"]["a"]
+        node_b = sample_graph_small["nodes"]["b"]
+        test_db.execute(
+            """INSERT INTO ohm_edges
+               (id, from_node, to_node, layer, edge_type, created_by, confidence,
+                created_at)
+               VALUES (?, ?, ?, 'L1', 'CITATION', 'test_agent', 0.8,
+                       ?::TIMESTAMP - INTERVAL '1000 days')""",
+            [f"old_l1_{uuid.uuid4().hex[:6]}", node_a, node_b,
+             datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")],
+        )
+
+        stale = query_stale_edges(test_db, stale_threshold=0.5)
+        assert not any(e["layer"] == "L1" for e in stale)
+
+    def test_apply_decay_dry_run(self, test_db, sample_graph_small):
+        """apply_confidence_decay dry-run does not update database."""
+        from ohm.queries import apply_confidence_decay
+
+        node_a = sample_graph_small["nodes"]["a"]
+        node_b = sample_graph_small["nodes"]["b"]
+        edge_id = f"decay_test_{uuid.uuid4().hex[:6]}"
+        test_db.execute(
+            """INSERT INTO ohm_edges
+               (id, from_node, to_node, layer, edge_type, created_by, confidence,
+                created_at)
+               VALUES (?, ?, ?, 'L4', 'CAUSES', 'test_agent', 0.8,
+                       ?::TIMESTAMP - INTERVAL '40 days')""",
+            [edge_id, node_a, node_b,
+             datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")],
+        )
+
+        result = apply_confidence_decay(test_db, stale_threshold=0.5, dry_run=True)
+
+        # Should have found decayed edges but not updated
+        assert result["updated"] == 0
+        assert len(result["decayed"]) >= 1
+
+        # Verify original confidence unchanged (use approximate comparison)
+        row = test_db.execute(
+            "SELECT confidence FROM ohm_edges WHERE id = ?", [edge_id]
+        ).fetchone()
+        assert abs(row[0] - 0.8) < 0.0001
+
+    def test_apply_decay_updates_confidence(self, test_db, sample_graph_small):
+        """apply_confidence_decay updates stale edge confidence."""
+        from ohm.queries import apply_confidence_decay
+
+        node_a = sample_graph_small["nodes"]["a"]
+        node_b = sample_graph_small["nodes"]["b"]
+        edge_id = f"decay_live_{uuid.uuid4().hex[:6]}"
+        test_db.execute(
+            """INSERT INTO ohm_edges
+               (id, from_node, to_node, layer, edge_type, created_by, confidence,
+                created_at)
+               VALUES (?, ?, ?, 'L4', 'CAUSES', 'test_agent', 0.8,
+                       ?::TIMESTAMP - INTERVAL '40 days')""",
+            [edge_id, node_a, node_b,
+             datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")],
+        )
+
+        result = apply_confidence_decay(test_db, stale_threshold=0.5, dry_run=False)
+
+        assert result["updated"] >= 1
+
+        # Verify confidence was updated
+        row = test_db.execute(
+            "SELECT confidence FROM ohm_edges WHERE id = ?", [edge_id]
+        ).fetchone()
+        assert row[0] < 0.8  # Should be decayed
+
+    def test_apply_decay_layer_filter(self, test_db, sample_graph_small):
+        """apply_confidence_decay with layer filter only decays that layer."""
+        from ohm.queries import apply_confidence_decay
+
+        node_a = sample_graph_small["nodes"]["a"]
+        node_b = sample_graph_small["nodes"]["b"]
+        # Create stale L4 and L3 edges
+        l4_id = f"l4_filter_{uuid.uuid4().hex[:6]}"
+        l3_id = f"l3_filter_{uuid.uuid4().hex[:6]}"
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+        test_db.execute(
+            """INSERT INTO ohm_edges
+               (id, from_node, to_node, layer, edge_type, created_by, confidence,
+                created_at)
+               VALUES (?, ?, ?, 'L4', 'CAUSES', 'test_agent', 0.8, ?::TIMESTAMP - INTERVAL '40 days')""",
+            [l4_id, node_a, node_b, now],
+        )
+        test_db.execute(
+            """INSERT INTO ohm_edges
+               (id, from_node, to_node, layer, edge_type, created_by, confidence,
+                created_at)
+               VALUES (?, ?, ?, 'L3', 'CAUSES', 'test_agent', 0.8, ?::TIMESTAMP - INTERVAL '100 days')""",
+            [l3_id, node_a, node_b, now],
+        )
+
+        # Only decay L4
+        result = apply_confidence_decay(test_db, stale_threshold=0.5, layer="L4", dry_run=False)
+
+        assert result["updated"] >= 1
+        # Verify L4 was updated but L3 was not touched
+        l4_row = test_db.execute("SELECT confidence FROM ohm_edges WHERE id = ?", [l4_id]).fetchone()
+        l3_row = test_db.execute("SELECT confidence FROM ohm_edges WHERE id = ?", [l3_id]).fetchone()
+        assert l4_row[0] < 0.8
+        assert abs(l3_row[0] - 0.8) < 0.0001  # L3 not decayed (100-day half-life still above threshold)

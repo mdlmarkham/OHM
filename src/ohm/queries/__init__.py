@@ -986,6 +986,86 @@ def query_stale_edges(
     return stale
 
 
+def apply_confidence_decay(
+    conn: DuckDBPyConnection,
+    *,
+    stale_threshold: float = 0.1,
+    layer: str | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Apply confidence decay to stale edges.
+
+    Reads effective confidence using the decay formula, then updates the
+    stored confidence for edges whose effective_confidence < stale_threshold.
+
+    L1/L2 edges are never decayed (permanent).
+    L3 edges decay with 90-day half-life.
+    L4 edges decay with 30-day half-life.
+
+    effective_confidence = confidence * 0.5 ^ (age_days / half_life)
+
+    Args:
+        stale_threshold: Effective confidence below this is decayed (default 0.1).
+        layer: If set, only decay edges in this layer.
+        dry_run: If True, compute decay but don't update database.
+
+    Returns:
+        dict with 'updated' (int), 'skipped' (int), and 'decayed' (list of dicts).
+    """
+    # Get stale edges (reuse existing logic)
+    stale = query_stale_edges(conn, stale_threshold=stale_threshold)
+
+    # Filter by layer if specified
+    if layer:
+        stale = [e for e in stale if e.get("layer") == layer]
+
+    decayed = []
+    skipped = 0
+    updated = 0
+
+    for edge in stale:
+        # L1/L2 never decay (but they won't appear in stale due to infinite half-life)
+        if edge.get("layer") in ("L1", "L2"):
+            skipped += 1
+            continue
+
+        original_conf = edge.get("confidence", 1.0) or 1.0
+        effective_conf = edge.get("effective_confidence", original_conf)
+
+        # Compute what the new confidence should be
+        # effective = original * decay_factor, so decay_factor = effective / original
+        if original_conf > 0:
+            decay_factor = effective_conf / original_conf
+            new_confidence = round(effective_conf, 4)
+        else:
+            continue
+
+        decayed.append({
+            "id": edge["id"],
+            "confidence": original_conf,
+            "new_confidence": new_confidence,
+            "decay_factor": round(decay_factor, 4),
+            "age_days": edge.get("age_days", 0),
+            "layer": edge.get("layer"),
+            "edge_type": edge.get("edge_type"),
+        })
+
+        if not dry_run:
+            conn.execute(
+                "UPDATE ohm_edges SET confidence = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = ?",
+                [new_confidence, edge["id"]],
+            )
+            _log_change(conn, "ohm_edges", edge["id"], "UPDATE", "decay")
+            updated += 1
+
+    return {
+        "updated": updated,
+        "skipped": skipped,
+        "decayed": decayed,
+    }
+
+
 def batch_create_nodes(
     conn: DuckDBPyConnection,
     *,

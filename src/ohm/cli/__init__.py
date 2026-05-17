@@ -120,6 +120,7 @@ def build_parser() -> argparse.ArgumentParser:
     neighborhood_parser.add_argument(
         "--direction", choices=["outgoing", "incoming", "both"], default="both",
     )
+    neighborhood_parser.add_argument("--mermaid", action="store_true", help="Output as Mermaid diagram")
 
     # graph write
     write_parser = graph_sub.add_parser("write", help="Create nodes and edges with attribution")
@@ -161,12 +162,14 @@ def build_parser() -> argparse.ArgumentParser:
     impact_parser = graph_sub.add_parser("impact", help="Downstream failure impact analysis")
     impact_parser.add_argument("node_id", help="Node ID to analyze")
     impact_parser.add_argument("--depth", type=int, default=5, help="Max propagation depth")
+    impact_parser.add_argument("--mermaid", action="store_true", help="Output as Mermaid diagram")
 
     # graph path
     path_parser = graph_sub.add_parser("path", help="Shortest path between two nodes")
     path_parser.add_argument("from_node", help="Starting node ID")
     path_parser.add_argument("to_node", help="Target node ID")
     path_parser.add_argument("--max-depth", type=int, default=10, help="Max path length")
+    path_parser.add_argument("--mermaid", action="store_true", help="Output as Mermaid diagram")
 
     # graph update
     update_parser = graph_sub.add_parser("update", help="Update your own edge")
@@ -215,6 +218,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     # graph health
     graph_sub.add_parser("health", help="Graph structural health metrics")
+
+    # graph decay
+    decay_parser = graph_sub.add_parser("decay", help="Apply confidence decay to stale edges")
+    decay_parser.add_argument(
+        "--threshold", type=float, default=0.1,
+        help="Effective confidence below this is stale (default: 0.1)",
+    )
+    decay_parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Show what would decay without updating",
+    )
+    decay_parser.add_argument(
+        "--layer", choices=["L1", "L2", "L3", "L4"],
+        help="Only decay edges in this layer",
+    )
 
     # ── state ────────────────────────────────────────────────────────────
     state_parser = subparsers.add_parser("state", help="Hive mind awareness")
@@ -448,6 +466,8 @@ def _handle_graph(args: argparse.Namespace) -> None:
         _handle_anomalies(args)
     elif cmd == "health":
         _handle_health(args)
+    elif cmd == "decay":
+        _handle_decay(args)
     else:
         print(f"Unknown graph command: {cmd}")
 
@@ -757,6 +777,9 @@ def _handle_neighborhood(args: argparse.Namespace) -> None:
         if args.format == "json":
             import json
             print(json.dumps(results, indent=2, default=str))
+        elif getattr(args, "mermaid", False):
+            from ohm.visualization import to_mermaid
+            print(to_mermaid(results, title=f"Neighborhood of {args.node_id}"))
         else:
             if not results:
                 print(f"No edges found within {args.depth} hops of '{args.node_id}'")
@@ -931,6 +954,9 @@ def _handle_impact(args: argparse.Namespace) -> None:
         if args.format == "json":
             import json
             print(json.dumps(results, indent=2, default=str))
+        elif getattr(args, "mermaid", False):
+            from ohm.visualization import to_mermaid
+            print(to_mermaid(results, title=f"Impact of {args.node_id}"))
         else:
             if not results:
                 print(f"No downstream impact found for '{args.node_id}'")
@@ -953,6 +979,9 @@ def _handle_path(args: argparse.Namespace) -> None:
         if args.format == "json":
             import json
             print(json.dumps(results, indent=2, default=str))
+        elif getattr(args, "mermaid", False):
+            from ohm.visualization import to_mermaid_path
+            print(to_mermaid_path(results, title=f"Path: {args.from_node} → {args.to_node}"))
         else:
             if not results:
                 print(f"No path found from '{args.from_node}' to '{args.to_node}' "
@@ -1127,6 +1156,42 @@ def _handle_health(args: argparse.Namespace) -> None:
                   f"(unchallenged low-confidence: {result['unchallenged_low_confidence']})")
             print(f"  Dense clusters: {result['dense_cluster_nodes']}")
             print(f"  Stale observations: {result['stale_observations']}")
+    finally:
+        conn.close()
+
+
+def _handle_decay(args: argparse.Namespace) -> None:
+    """Apply confidence decay to stale edges.
+
+    Reads effective confidence using decay formula, then updates the stored
+    confidence for edges whose effective_confidence < stale_threshold.
+
+    L1/L2 edges are never decayed (permanent).
+    L3 edges decay with 90-day half-life.
+    L4 edges decay with 30-day half-life.
+    """
+    from ohm.queries import apply_confidence_decay
+
+    conn = _get_db(args)
+    try:
+        result = apply_confidence_decay(
+            conn,
+            stale_threshold=args.threshold,
+            layer=args.layer,
+            dry_run=args.dry_run,
+        )
+        if args.dry_run:
+            if not result["decayed"]:
+                print("No edges would be decayed.")
+            else:
+                print(f"Would decay {len(result['decayed'])} edges:")
+                for e in result["decayed"]:
+                    print(f"  {e['id']}: {e['confidence']} -> {e['new_confidence']} "
+                          f"({e['layer']}/{e['edge_type']})")
+        else:
+            print(f"Decayed {result['updated']} edges")
+            if result.get("skipped"):
+                print(f"Skipped {result['skipped']} L1/L2 edges")
     finally:
         conn.close()
 
