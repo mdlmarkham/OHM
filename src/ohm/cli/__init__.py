@@ -158,6 +158,20 @@ def build_parser() -> argparse.ArgumentParser:
     listen_parser = graph_sub.add_parser("listen", help="Change feed since last check")
     listen_parser.add_argument("--since", help="ISO timestamp or 'last-check'")
 
+    # graph events (SSE client for real-time change feed)
+    events_parser = graph_sub.add_parser(
+        "events", help="Stream change feed events via Server-Sent Events (SSE)"
+    )
+    events_parser.add_argument(
+        "--since", help="ISO timestamp to stream from (default: last sync)"
+    )
+    events_parser.add_argument(
+        "--topics", help="Comma-separated topic labels to filter"
+    )
+    events_parser.add_argument(
+        "--agent", help="Filter to changes by this agent"
+    )
+
     # graph impact
     impact_parser = graph_sub.add_parser("impact", help="Downstream failure impact analysis")
     impact_parser.add_argument("node_id", help="Node ID to analyze")
@@ -452,6 +466,8 @@ def _handle_graph(args: argparse.Namespace) -> None:
         _handle_confidence(args)
     elif cmd == "listen":
         _handle_listen(args)
+    elif cmd == "events":
+        _handle_events(args)
     elif cmd == "impact":
         _handle_impact(args)
     elif cmd == "path":
@@ -944,9 +960,53 @@ def _handle_listen(args: argparse.Namespace) -> None:
         conn.close()
 
 
-def _handle_impact(args: argparse.Namespace) -> None:
-    """Handle downstream impact analysis."""
-    from ohm.queries import query_impact
+def _handle_events(args: argparse.Namespace) -> None:
+    """Handle SSE event streaming — streams change feed via Server-Sent Events.
+
+    This connects to the ohmd server's /events endpoint and streams changes
+    in real-time using SSE (Server-Sent Events). Press Ctrl+C to stop.
+    """
+    import urllib.request
+    import urllib.error
+
+    # Build URL
+    base_url = getattr(args, "url", "http://localhost:8710")
+    token = getattr(args, "token", None) or os.environ.get("OHM_TOKEN", "")
+
+    params = []
+    if getattr(args, "since", None):
+        params.append(f"since={args.since}")
+    if getattr(args, "topics", None):
+        params.append(f"topics={args.topics}")
+    if getattr(args, "agent", None):
+        params.append(f"agent={args.agent}")
+
+    url = f"{base_url}/events"
+    if params:
+        url += "?" + "&".join(params)
+
+    headers = {"Accept": "text/event-stream"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    print(f"Connecting to {url}...")
+    print("Press Ctrl+C to stop streaming.\n")
+
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            for line in resp:
+                line = line.decode("utf-8").rstrip()
+                if line.startswith("data: "):
+                    import json
+                    data = json.loads(line[6:])
+                    print(f"  [{data.get('occurred_at', '?')}] "
+                          f"{data.get('agent_name', '?')} {data.get('operation', '?')} "
+                          f"{data.get('table_name', '?')}.{data.get('row_id', '?')}")
+    except KeyboardInterrupt:
+        print("\nStopped streaming.")
+    except Exception as e:
+        print(f"Error: {e}")
 
     conn = _get_db(args)
     try:

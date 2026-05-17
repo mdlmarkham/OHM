@@ -77,6 +77,14 @@ _MAX_LATENCY_SAMPLES = 1000
 _webhook_registry: dict[str, dict] = {}
 
 
+# ── SSE Subscriber Registry ──────────────────────────────────────────────────
+
+# In-memory registry: {subscription_id: {"agent_name": str, "since": str, "last_event_id": str}}
+# SSE subscribers receive real-time change feed events as they occur.
+_sse_subscribers: dict[str, dict] = {}
+_sse_lock: str = ""  # dummy lock for thread-safety (single-thread HTTPServer)
+
+
 def _deliver_webhook(url: str, event: dict, timeout: float = 5.0) -> bool:
     """Deliver a webhook event to a callback URL.
 
@@ -282,6 +290,105 @@ class OhmHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _handle_sse_events(self, path: str, qs: dict) -> None:
+        """Handle SSE /events endpoint — streams change feed events.
+
+        Query parameters:
+        - since: ISO timestamp to stream from (optional, defaults to last sync)
+        - agent: filter to changes by this agent (optional)
+        - topics: comma-separated topic labels (optional)
+        """
+        from urllib.parse import parse_qs
+
+        # Auth required for SSE
+        agent = self._authenticate()
+        if agent is None:
+            if self.no_auth or not self.tokens:
+                agent = "ohm"
+            else:
+                raise AuthenticationError("Authentication required — provide Bearer token")
+
+        # Parse parameters
+        since = qs.get("since", [None])[0]
+        filter_agent = qs.get("agent", [None])[0]
+        topics_param = qs.get("topics", [None])[0]
+        topics = topics_param.split(",") if topics_param else None
+
+        # Resolve 'since' from agent state if not provided
+        if not since:
+            state = self.store.get_agent_state(agent)
+            if state and state.get("last_sync"):
+                since = state["last_sync"]
+            else:
+                # Default to current time (only stream new events)
+                from datetime import datetime, timezone
+                since = datetime.now(timezone.utc).isoformat()
+
+        # Register subscription
+        import uuid
+        sub_id = str(uuid.uuid4())[:8]
+        _sse_subscribers[sub_id] = {
+            "agent_name": agent,
+            "since": since,
+            "last_event_id": sub_id,
+            "topics": topics,
+            "filter_agent": filter_agent,
+        }
+
+        # Send SSE headers
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.send_header("X-SSE-Subscription-ID", sub_id)
+        self.end_headers()
+
+        # Send initial subscription event
+        self.wfile.write(f"id: {sub_id}\n".encode())
+        self.wfile.write(f"event: subscribed\n".encode())
+        self.wfile.write(f"data: {json.dumps({'subscription_id': sub_id, 'since': since})}\n\n".encode())
+        self.wfile.flush()
+
+        # Stream change feed events
+        from .queries import query_change_feed
+        last_ts = since
+        event_count = 0
+        max_events = 1000  # Safety limit
+
+        try:
+            while event_count < max_events:
+                # Query for new changes since last event
+                changes = query_change_feed(
+                    self.store.conn,
+                    since=last_ts,
+                    agent_name=filter_agent,
+                    limit=50,
+                )
+
+                for change in changes:
+                    event_id = f"{sub_id}-{event_count}"
+                    last_ts = change.get("created_at", last_ts)
+
+                    # Filter by topics if specified
+                    if topics:
+                        node_label = change.get("label", "").lower()
+                        if not any(t.lower() in node_label for t in topics):
+                            continue
+
+                    # Send SSE event
+                    self.wfile.write(f"id: {event_id}\n".encode())
+                    self.wfile.write(f"data: {json.dumps(change, default=str)}\n\n".encode())
+                    self.wfile.flush()
+                    event_count += 1
+
+                # Small delay between polls
+                time.sleep(0.5)
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # Client disconnected
+        finally:
+            # Cleanup subscription
+            _sse_subscribers.pop(sub_id, None)
 
     def _error_response(self, exc: Exception):
         """Send a structured error response with correlation ID."""
@@ -604,6 +711,10 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "sample_count": n,
                 },
             })
+            return
+        elif path == "/events" or path.startswith("/events/"):
+            # SSE endpoint — streams change feed events to connected clients
+            self._handle_sse_events(path, qs)
             return
 
         # Auth for all other GET endpoints
