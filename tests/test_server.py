@@ -12,20 +12,24 @@ from http.client import HTTPConnection
 import pytest
 
 from ohm.server import OhmHandler, _hash_token, _verify_token, _build_token_lookup
+from ohm.schema import DEFAULT_SCHEMA, TOPO_SCHEMA
 from ohm.store import OhmStore
 
 
-def _start_test_server(store, tokens=None, roles=None, no_auth=False):
+def _start_test_server(store, tokens=None, roles=None, no_auth=False, schema_config=None):
     """Start a test HTTP server on a random port and return (port, thread).
 
     tokens can be:
       - dict of {plaintext_token: agent_name} — will be hashed automatically
       - dict of {hash: agent_name} — used directly (for testing hashed mode)
+
+    schema_config: SchemaConfig instance (default: DEFAULT_SCHEMA)
     """
     import socketserver
 
     OhmHandler.store = store
     OhmHandler.config = {"host": "127.0.0.1", "port": 0}
+    OhmHandler.schema_config = schema_config or DEFAULT_SCHEMA
     if tokens:
         # Convert plaintext tokens to hashed lookup
         token_hashes = {}
@@ -133,6 +137,7 @@ class TestSchemaEndpoints:
         assert "node_types" in data
         assert "edge_types" in data
         assert "layers" in data
+        assert data["schema"] == "ohm"
 
     def test_layers_returns_descriptions(self, test_server):
         port, _ = test_server
@@ -797,3 +802,92 @@ class TestTokenSecurity:
         assert "role" in config["tokens"]["test_agent"]
         # Plaintext token should NOT be in config
         assert token not in str(config)
+
+
+class TestTopoSchemaServer:
+    """Tests for the TOPO schema variant of the daemon."""
+
+    @pytest.fixture
+    def topo_server(self, tmp_path):
+        """Start a test server with TOPO schema (no-auth dev mode)."""
+        db_path = str(tmp_path / "test_topo_server.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="topo_test")
+        port, server, thread = _start_test_server(store, no_auth=True, schema_config=TOPO_SCHEMA)
+        yield port, store
+        server.shutdown()
+        thread.join(timeout=2)
+        store.close()
+
+    def test_schema_returns_topo(self, topo_server):
+        port, _ = topo_server
+        status, data = _request("GET", port, "/schema")
+        assert status == 200
+        assert data["schema"] == "topo"
+        assert "process" in data["node_types"]
+        assert "sensor" in data["node_types"]
+        assert "vessel" in data["node_types"]
+
+    def test_layers_returns_topo_descriptions(self, topo_server):
+        port, _ = topo_server
+        status, data = _request("GET", port, "/layers")
+        assert status == 200
+        assert "L1" in data
+        assert "Physical hierarchy" in data["L1"]
+
+    def test_status_includes_schema_name(self, topo_server):
+        port, _ = topo_server
+        status, data = _request("GET", port, "/status")
+        assert status == 200
+        assert data["schema"] == "topo"
+
+    def test_topo_node_types_accepted(self, topo_server):
+        """TOPO-specific node types should be accepted by the server."""
+        port, _ = topo_server
+        status, data = _request("POST", port, "/node", body={
+            "id": "pump_1", "label": "Main Pump", "type": "pump",
+        })
+        assert status == 201
+
+    def test_topo_node_type_rejected_by_default_schema(self, test_server):
+        """TOPO-specific node types should be rejected by the default OHM schema."""
+        port, _ = test_server
+        status, data = _request("POST", port, "/node", body={
+            "id": "pump_1", "label": "Main Pump", "type": "pump",
+        })
+        assert status == 400
+        assert "Invalid node type" in data.get("message", "")
+
+    def test_default_schema_name(self, test_server):
+        """Default server should report 'ohm' schema."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/schema")
+        assert status == 200
+        assert data["schema"] == "ohm"
+
+    def test_topo_edge_types_in_schema(self, topo_server):
+        """TOPO schema should include industrial edge types."""
+        port, _ = topo_server
+        status, data = _request("GET", port, "/schema")
+        assert status == 200
+        # FEEDS and FLOWS_TO are in L2
+        assert "FEEDS" in data["edge_types"]["L2"]
+        assert "FLOWS_TO" in data["edge_types"]["L2"]
+
+
+class TestTopodEntryPoint:
+    """Tests for the topod entry point function."""
+
+    def test_topod_main_exists(self):
+        """topod_main should be importable."""
+        from ohm.server import topod_main
+        assert callable(topod_main)
+
+    def test_topod_main_passes_topo_schema(self):
+        """topod_main should pass TOPO_SCHEMA to main()."""
+        from ohm.server import topod_main
+        from ohm.schema import TOPO_SCHEMA
+        # We can't actually run topod_main (it starts a server),
+        # but we can verify it references TOPO_SCHEMA
+        import inspect
+        source = inspect.getsource(topod_main)
+        assert "TOPO_SCHEMA" in source

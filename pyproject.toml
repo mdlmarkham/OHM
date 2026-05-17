@@ -42,6 +42,7 @@ ignore_missing_imports = true
 ohm = "ohm.cli:main"
 ohmd = "ohm.server:main"
 topo = "ohm.cli:topo_main"
+topod = "ohm.server:topod_main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

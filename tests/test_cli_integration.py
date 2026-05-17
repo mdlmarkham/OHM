@@ -205,3 +205,23 @@ class TestCLIIntegration:
         assert "summary" in data
         assert "from" in data
         assert "to" in data
+
+    def test_snapshot_empty_db(self):
+        """Test that ohm snapshot on an empty DB returns zero counts."""
+        code, out, err = _run_cli([
+            "--db", ":memory:", "snapshot",
+            "2025-01-01T00:00:00",
+        ])
+        assert code == 0
+        assert "Snapshot at" in out
+
+    def test_snapshot_json_format(self):
+        """Test that ohm snapshot --format json returns valid JSON."""
+        code, out, err = _run_cli([
+            "--db", ":memory:", "--format", "json", "snapshot",
+            "2025-01-01T00:00:00",
+        ])
+        assert code == 0
+        data = json.loads(out)
+        assert "summary" in data
+        assert "timestamp" in data

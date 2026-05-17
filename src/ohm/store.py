@@ -366,3 +366,297 @@ class OhmStore:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
+
+    # ── DuckLake Sync ────────────────────────────────────────────────
+
+    def sync_heartbeat(
+        self,
+        ducklake_path: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Push local changes to DuckLake and pull remote changes.
+
+        This is the main sync method called on each agent heartbeat.
+        It:
+        1. Pushes local changes to DuckLake (if path configured)
+        2. Pulls changes from DuckLake (if path configured)
+        3. Updates last_sync timestamp
+
+        Args:
+            ducklake_path: Optional path to DuckLake database.
+                If None, uses OHM_DUCKLAKE_PATH env var.
+                If neither set, sync is a no-op (local-only mode).
+
+        Returns:
+            Dict with sync results: pushed_count, pulled_count, last_sync.
+        """
+        if ducklake_path is None:
+            ducklake_path = os.environ.get("OHM_DUCKLAKE_PATH")
+
+        pushed = 0
+        pulled = 0
+        last_sync = None
+
+        if ducklake_path:
+            # Push local changes to DuckLake
+            pushed = self.push_to_ducklake(ducklake_path)
+            # Pull remote changes from DuckLake
+            pulled = self.pull_from_ducklake(ducklake_path)
+
+        # Update last_sync timestamp
+        self.conn.execute(
+            "UPDATE ohm_agent_state SET last_sync = CURRENT_TIMESTAMP, "
+            "updated_at = CURRENT_TIMESTAMP WHERE agent_name = ?",
+            [self.agent_name],
+        )
+        row = self.conn.execute(
+            "SELECT last_sync FROM ohm_agent_state WHERE agent_name = ?",
+            [self.agent_name],
+        ).fetchone()
+        if row:
+            last_sync = row[0]
+
+        return {
+            "pushed": pushed,
+            "pulled": pulled,
+            "last_sync": last_sync,
+            "agent": self.agent_name,
+        }
+
+    def push_to_ducklake(self, ducklake_path: str) -> int:
+        """Push local changes to DuckLake shared backend.
+
+        Reads changes from local ohm_change_log since last_push,
+        replicates them to DuckLake's ohm_change_feed, and records
+        the push timestamp.
+
+        Args:
+            ducklake_path: Path to DuckLake database.
+
+        Returns:
+            Number of changes pushed.
+        """
+        from datetime import datetime, timezone
+
+        # Get last push timestamp for this agent
+        last_push = self._get_last_push_timestamp()
+        last_push_str = last_push.isoformat() if last_push else "1970-01-01T00:00:00Z"
+
+        # Read local changes since last push
+        changes = self.execute(
+            """
+            SELECT table_name, row_id, operation, layer, change_data, changed_at
+            FROM ohm_change_log
+            WHERE agent_name = ? AND changed_at > ?::TIMESTAMP
+            ORDER BY changed_at ASC
+            """,
+            [self.agent_name, last_push_str],
+        )
+
+        if not changes:
+            return 0
+
+        # Connect to DuckLake and insert changes
+        ducklake = duckdb.connect(ducklake_path, read_only=False)
+
+        try:
+            for change in changes:
+                table_name = change["table_name"]
+                row_id = change["row_id"]
+                operation = change["operation"]
+                layer = change["layer"]
+                change_data = change["change_data"]
+                changed_at = change["changed_at"]
+
+                # Insert into DuckLake's change feed
+                ducklake.execute(
+                    """
+                    INSERT INTO ohm_change_feed
+                    (table_name, row_id, operation, agent_name, old_data, new_data, occurred_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [table_name, row_id, operation, self.agent_name,
+                     None, change_data, changed_at],
+                )
+
+            # Record push timestamp
+            now = datetime.now(timezone.utc)
+            self._set_last_push_timestamp(now)
+
+            return len(changes)
+        finally:
+            ducklake.close()
+
+    def pull_from_ducklake(self, ducklake_path: str) -> int:
+        """Pull remote changes from DuckLake shared backend.
+
+        Reads changes from DuckLake's ohm_change_feed that occurred
+        after the last pull timestamp, and applies them to the local
+        database (if they don't conflict).
+
+        Args:
+            ducklake_path: Path to DuckLake database.
+
+        Returns:
+            Number of changes pulled and applied.
+        """
+        # Get last pull timestamp for this agent
+        last_pull = self._get_last_pull_timestamp()
+        last_pull_str = last_pull.isoformat() if last_pull else "1970-01-01T00:00:00Z"
+
+        # Connect to DuckLake and read changes
+        ducklake = duckdb.connect(ducklake_path, read_only=True)
+
+        try:
+            # Read remote changes since last pull (excluding our own)
+            changes = ducklake.execute(
+                """
+                SELECT table_name, row_id, operation, agent_name, new_data, occurred_at
+                FROM ohm_change_feed
+                WHERE agent_name != ? AND occurred_at > ?::TIMESTAMP
+                ORDER BY occurred_at ASC
+                """,
+                [self.agent_name, last_pull_str],
+            ).fetchall()
+
+            if not changes:
+                return 0
+
+            applied = 0
+            for change in changes:
+                table_name, row_id, operation, remote_agent, new_data, occurred_at = change
+                self._apply_remote_change(
+                    table_name, row_id, operation, remote_agent, new_data
+                )
+                applied += 1
+
+            # Record pull timestamp
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc)
+            self._set_last_pull_timestamp(now)
+
+            return applied
+        finally:
+            ducklake.close()
+
+    def _apply_remote_change(
+        self,
+        table_name: str,
+        row_id: str,
+        operation: str,
+        remote_agent: str,
+        new_data: Any,
+    ) -> None:
+        """Apply a remote change from DuckLake to local database.
+
+        Only applies INSERT and UPDATE. Skips DELETE (not implemented yet).
+        Uses attribution-based conflict resolution: remote agent's data
+        wins if the record was created by a different agent.
+        """
+        import json
+
+        if new_data:
+            data = json.loads(new_data) if isinstance(new_data, str) else new_data
+        else:
+            data = {}
+
+        if table_name == "ohm_nodes":
+            if operation == "INSERT":
+                # Check if already exists
+                existing = self.get_node(row_id)
+                if not existing:
+                    self.conn.execute(
+                        """
+                        INSERT INTO ohm_nodes (id, label, type, content, created_by, confidence,
+                                               visibility, provenance, tags, metadata, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        [row_id, data.get("label", ""), data.get("type", "concept"),
+                         data.get("content"), remote_agent, data.get("confidence", 1.0),
+                         data.get("visibility", "team"), data.get("provenance"),
+                         json.dumps(data.get("tags", [])) if data.get("tags") else None,
+                         json.dumps(data.get("metadata", {})) if data.get("metadata") else None,
+                         occurred_at if 'occurred_at' in locals() else self._now(),
+                         occurred_at if 'occurred_at' in locals() else self._now()],
+                    )
+            elif operation == "UPDATE":
+                self.conn.execute(
+                    """
+                    UPDATE ohm_nodes SET
+                        label = COALESCE(?, label),
+                        type = COALESCE(?, type),
+                        content = COALESCE(?, content),
+                        confidence = COALESCE(?, confidence),
+                        visibility = COALESCE(?, visibility),
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    [data.get("label"), data.get("type"), data.get("content"),
+                     data.get("confidence"), data.get("visibility"), row_id],
+                )
+
+        elif table_name == "ohm_edges":
+            if operation == "INSERT":
+                # Check if already exists
+                existing = self.get_edge(row_id)
+                if not existing:
+                    self.conn.execute(
+                        """
+                        INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, confidence,
+                                               condition, provenance, created_by, challenge_of,
+                                               challenge_type, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        [row_id, data.get("from_node"), data.get("to_node"),
+                         data.get("layer", "L3"), data.get("edge_type"),
+                         data.get("confidence"), data.get("condition"),
+                         data.get("provenance"), remote_agent,
+                         data.get("challenge_of"), data.get("challenge_type"),
+                         occurred_at if 'occurred_at' in locals() else self._now(),
+                         occurred_at if 'occurred_at' in locals() else self._now()],
+                    )
+
+    def _get_last_push_timestamp(self) -> Optional[str]:
+        """Get the last push timestamp for this agent."""
+        row = self.conn.execute(
+            """
+            SELECT value FROM ohm_meta
+            WHERE key = ? || '_last_push'
+            """,
+            [self.agent_name],
+        ).fetchone()
+        return row[0] if row else None
+
+    def _set_last_push_timestamp(self, timestamp: datetime) -> None:
+        """Set the last push timestamp for this agent."""
+        ts_str = timestamp.isoformat()
+        self.conn.execute(
+            """
+            INSERT INTO ohm_meta (key, value)
+            VALUES (?, ?)
+            ON CONFLICT (key) DO UPDATE SET value = excluded.value
+            """,
+            [f"{self.agent_name}_last_push", ts_str],
+        )
+
+    def _get_last_pull_timestamp(self) -> Optional[str]:
+        """Get the last pull timestamp for this agent."""
+        row = self.conn.execute(
+            """
+            SELECT value FROM ohm_meta
+            WHERE key = ? || '_last_pull'
+            """,
+            [self.agent_name],
+        ).fetchone()
+        return row[0] if row else None
+
+    def _set_last_pull_timestamp(self, timestamp: datetime) -> None:
+        """Set the last pull timestamp for this agent."""
+        ts_str = timestamp.isoformat()
+        self.conn.execute(
+            """
+            INSERT INTO ohm_meta (key, value)
+            VALUES (?, ?)
+            ON CONFLICT (key) DO UPDATE SET value = excluded.value
+            """,
+            [f"{self.agent_name}_last_pull", ts_str],
+        )

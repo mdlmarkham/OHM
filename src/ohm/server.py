@@ -28,7 +28,7 @@ from .exceptions import (
     PermissionDeniedError,
     ValidationError,
 )
-from .schema import EDGE_TYPES, LAYER_DESCRIPTIONS, NODE_TYPES, ALL_EDGE_TYPES, VALID_VISIBILITIES
+from .schema import DEFAULT_SCHEMA, SchemaConfig, VALID_VISIBILITIES
 from .store import OhmStore
 
 
@@ -245,6 +245,7 @@ class OhmHandler(BaseHTTPRequestHandler):
     tokens: dict = {}  # token -> agent_name
     roles: dict = {}    # agent_name -> role (read-write, read-only)
     no_auth: bool = False  # --no-auth flag: bypass all auth (dev mode)
+    schema_config: SchemaConfig = DEFAULT_SCHEMA  # configurable schema (OHM or TOPO)
 
     def log_message(self, format, *args):
         """Structured request logging with correlation ID."""
@@ -447,8 +448,8 @@ class OhmHandler(BaseHTTPRequestHandler):
                 validate_identifier(body["id"], name="id")
             except ValueError as e:
                 raise ValidationError(str(e))
-            if "type" in body and body["type"] not in NODE_TYPES:
-                raise ValidationError(f"Invalid node type: '{body['type']}' — must be one of: {', '.join(NODE_TYPES)}")
+            if "type" in body and body["type"] not in self.schema_config.node_types:
+                raise ValidationError(f"Invalid node type: '{body['type']}' — must be one of: {', '.join(sorted(self.schema_config.node_types))}")
             if "visibility" in body and body["visibility"] not in VALID_VISIBILITIES:
                 raise ValidationError(f"Invalid visibility: '{body['visibility']}' — must be private, team, or public")
             if "confidence" in body:
@@ -465,8 +466,8 @@ class OhmHandler(BaseHTTPRequestHandler):
                 validate_identifier(body["to"], name="to_node")
             except ValueError as e:
                 raise ValidationError(str(e))
-            if body["type"] not in ALL_EDGE_TYPES:
-                raise ValidationError(f"Invalid edge type: '{body['type']}' — must be one of: {', '.join(sorted(ALL_EDGE_TYPES))}")
+            if body["type"] not in self.schema_config.all_edge_types:
+                raise ValidationError(f"Invalid edge type: '{body['type']}' — must be one of: {', '.join(sorted(self.schema_config.all_edge_types))}")
             if "layer" in body:
                 try:
                     validate_layer(body["layer"])
@@ -594,15 +595,18 @@ class OhmHandler(BaseHTTPRequestHandler):
             status = self.store.status()
             status["uptime"] = round(time.time() - _START_TIME, 1)
             status["version"] = "0.2.0"
+            status["schema"] = self.schema_config.name
             self._json_response(200, status)
         elif path == "/schema":
+            schema = self.schema_config
             self._json_response(200, {
-                "node_types": NODE_TYPES,
-                "edge_types": EDGE_TYPES,
-                "layers": LAYER_DESCRIPTIONS,
+                "schema": schema.name,
+                "node_types": sorted(schema.node_types),
+                "edge_types": {k: sorted(v) for k, v in schema.layer_edge_types.items()},
+                "layers": schema.layer_descriptions,
             })
         elif path == "/layers":
-            self._json_response(200, LAYER_DESCRIPTIONS)
+            self._json_response(200, self.schema_config.layer_descriptions)
         elif path.startswith("/node/"):
             node_id = path[6:]
             from .validation import validate_identifier
@@ -1015,22 +1019,37 @@ class OhmHandler(BaseHTTPRequestHandler):
                 self.store.conn, agent,
                 focus=body.get("focus"),
             )
+            # Also sync with DuckLake if configured
+            sync_result = self.store.sync_heartbeat()
+            result["ducklake_sync"] = sync_result
             self._json_response(200, result)
 
         else:
             self._json_response(404, {"error": f"Unknown endpoint: {path}"})
 
 
-def run_server(config: dict, store: OhmStore):
-    """Run the HTTP server."""
+def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None = None):
+    """Run the HTTP server.
+
+    Args:
+        config: Server configuration dict.
+        store: OhmStore instance for database access.
+        schema_config: SchemaConfig to use (default: DEFAULT_SCHEMA).
+            Pass TOPO_SCHEMA for the industrial knowledge graph variant.
+    """
+    if schema_config is None:
+        schema_config = DEFAULT_SCHEMA
+
     OhmHandler.store = store
     OhmHandler.config = config
     OhmHandler.tokens = _build_token_lookup(config.get("tokens", {}))
     OhmHandler.roles = config.get("roles", {})
     OhmHandler.no_auth = config.get("no_auth", False)
+    OhmHandler.schema_config = schema_config
 
     server = HTTPServer((config["host"], config["port"]), OhmHandler)
     print(f"OHM daemon listening on {config['host']}:{config['port']}", file=sys.stderr)
+    print(f"Schema: {schema_config.name}", file=sys.stderr)
 
     # Graceful shutdown
     def shutdown_handler(signum, frame):
@@ -1044,8 +1063,16 @@ def run_server(config: dict, store: OhmStore):
     store.close()
 
 
-def main():
-    """CLI entry point for ohmd."""
+def main(schema_config: SchemaConfig | None = None):
+    """CLI entry point for ohmd.
+
+    Args:
+        schema_config: SchemaConfig to use. Defaults to DEFAULT_SCHEMA.
+            Pass TOPO_SCHEMA for the topod entry point.
+    """
+    if schema_config is None:
+        schema_config = DEFAULT_SCHEMA
+
     parser = argparse.ArgumentParser(description="OHM daemon — multi-agent knowledge graph server")
     parser.add_argument("--host", default=None, help="Bind address (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=None, help="Port (default: 8710)")
@@ -1053,7 +1080,16 @@ def main():
     parser.add_argument("--config", default=None, help="Path to config file")
     parser.add_argument("--init-token", default=None, help="Create a token for an agent (agent_name)")
     parser.add_argument("--no-auth", action="store_true", help="Disable authentication (dev mode)")
+    parser.add_argument(
+        "--schema", choices=["ohm", "topo"], default=None,
+        help="Schema configuration (default: determined by entry point)",
+    )
     args = parser.parse_args()
+
+    # Allow CLI override of schema
+    if args.schema == "topo":
+        from .schema import TOPO_SCHEMA
+        schema_config = TOPO_SCHEMA
 
     config = load_config(args.config)
 
@@ -1092,11 +1128,20 @@ def main():
 
     # Run server
     try:
-        run_server(config, store)
+        run_server(config, store, schema_config=schema_config)
     except KeyboardInterrupt:
         print("\nShutting down...", file=sys.stderr)
     finally:
         store.close()
+
+
+def topod_main():
+    """CLI entry point for topod — TOPO industrial knowledge graph daemon.
+
+    Same as ohmd but defaults to the TOPO schema configuration.
+    """
+    from .schema import TOPO_SCHEMA
+    main(schema_config=TOPO_SCHEMA)
 
 
 if __name__ == "__main__":
