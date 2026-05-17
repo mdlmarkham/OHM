@@ -50,15 +50,34 @@ LAYER_EDGE_TYPES: dict[str, frozenset[str]] = {
     "L1": frozenset({"CONTAINS", "BELONGS_TO", "HAS_COMPONENT", "PART_OF",
                       "CAPABLE_OF", "VALUES", "GOALS", "INTERESTED_IN"}),
     "L2": frozenset({"DERIVES_FROM", "INFLUENCES", "REFERENCES", "USES",
-                      "FEEDS", "FLOWS_TO", "NOTIFIES", "TRUSTS", "SERVES"}),
+                      "FEEDS", "FLOWS_TO", "NOTIFIES", "TRUSTS", "SERVES",
+                      # ── Multi-scenario additions (OHM-af8.6) ──
+                      "BATCH_EXPIRES_BEFORE",   # retail inventory expiry
+                      "TRANSFERRED_TO",          # customer support handoff
+                      "OPENED_BY", "STARTED_BY", "AWAITING",
+                      "RESOLVED_BY", "CLOSED_BY",  # support state machine
+                      "INVESTIGATED_BY", "CONTAINED_BY",
+                      "ERADICATED_BY", "RECOVERED_BY",  # incident state machine
+                      "NEGOTIATES_WITH",         # SLAs, commitments
+                      }),
     "L3": frozenset({
         "CAUSES", "CORRELATES_WITH", "PREDICTS", "EXPLAINS",
         "CHALLENGED_BY", "SUPPORTS", "REFINES", "CONTRADICTS",
         "LISTENS_TO", "DEFERS_TO", "COLLABORATES_WITH",
         "APPLIES_TO", "RELATED_TO",
+        # ── Multi-scenario additions (OHM-af8.6) ──
+        "NEGATES",                # medical: rules-out diagnosis
+        "EXPECTED_LIKELIHOOD",    # supply chain: probability claim
+        "ESCALATED_TO",           # support: escalation path
+        "DELEGATED_TO",           # support: delegation
+        "THREAT_CLUSTER",         # cybersecurity: IOC linkage
     }),
     "L4": frozenset({"EXPECTS", "PLANS", "RISKS", "DEPENDS_ON",
-                      "THREATENS", "ENABLES", "EXPECTS_FROM", "PREDICTS"}),
+                      "THREATENS", "ENABLES", "EXPECTS_FROM", "PREDICTS",
+                      # ── Multi-scenario additions (OHM-af8.6) ──
+                      "ORDERS_TEST",       # medical: trigger diagnostic test
+                      "TRIGGERS_INCIDENT", # cybersecurity: finding triggers incident
+                      }),
 }
 
 ALL_EDGE_TYPES: frozenset[str] = frozenset().union(*LAYER_EDGE_TYPES.values())
