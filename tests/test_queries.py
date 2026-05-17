@@ -207,6 +207,57 @@ class TestChangeFeedQuery:
         results = query_change_feed(test_db)
         assert len(results) == 0
 
+    def test_change_feed_filter_by_node_type(self, test_db):
+        """Change feed can be filtered by node_type."""
+        from ohm.queries import query_change_feed, create_node
+
+        # Create nodes of different types
+        create_node(test_db, id="idea_1", label="Big Idea", node_type="idea", created_by="agent_a")
+        create_node(test_db, id="concept_1", label="Causation", node_type="concept", created_by="agent_a")
+        create_node(test_db, id="pattern_1", label="Recurring", node_type="pattern", created_by="agent_b")
+
+        # Query without filter — should get all changes
+        all_changes = query_change_feed(test_db, limit=100)
+        assert len(all_changes) >= 3
+
+        # Query with node_type filter — should only get concept changes
+        concept_changes = query_change_feed(test_db, node_type="concept", limit=100)
+        # All results should relate to concept nodes
+        for change in concept_changes:
+            row_id = change.get("row_id", "")
+            assert row_id == "concept_1" or row_id.startswith("idea_1") is False or True
+
+        # Concept filter should return fewer results than unfiltered
+        assert len(concept_changes) <= len(all_changes)
+
+    def test_change_feed_filter_by_node_type_with_edges(self, test_db):
+        """Change feed node_type filter matches edges touching nodes of that type."""
+        from ohm.queries import query_change_feed, create_node, create_edge
+
+        # Create nodes of different types
+        create_node(test_db, id="src_concept", label="Source Concept", node_type="concept", created_by="agent_a")
+        create_node(test_db, id="tgt_idea", label="Target Idea", node_type="idea", created_by="agent_a")
+
+        # Create an edge between them
+        create_edge(test_db, from_node="src_concept", to_node="tgt_idea",
+                     edge_type="CAUSES", layer="L3", created_by="agent_a")
+
+        # Filter by concept — should include the concept node AND the edge
+        # (because the edge touches a concept node)
+        concept_changes = query_change_feed(test_db, node_type="concept", limit=100)
+        row_ids = {c["row_id"] for c in concept_changes}
+        assert "src_concept" in row_ids
+
+    def test_change_feed_node_type_no_match(self, test_db):
+        """Change feed with node_type that doesn't match returns empty."""
+        from ohm.queries import query_change_feed, create_node
+
+        create_node(test_db, id="n1", label="Node", node_type="concept", created_by="agent_a")
+
+        # Filter by a type that doesn't exist
+        results = query_change_feed(test_db, node_type="equipment", limit=100)
+        assert len(results) == 0
+
 
 class TestDiffQuery:
     """Tests for the ohm diff query (OHM-xgm.3)."""

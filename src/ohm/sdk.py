@@ -1198,6 +1198,7 @@ class Graph:
         topics: list[str] | None = None,
         agents: list[str] | None = None,
         operations: list[str] | None = None,
+        node_type: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         """Consume the change feed, optionally filtered by topic, agent, or operation.
@@ -1213,6 +1214,7 @@ class Graph:
             topics: Filter to changes affecting these topic labels.
             agents: Filter to changes by these agents.
             operations: Filter to these operations (INSERT, UPDATE, EVOLVE, CHALLENGE).
+            node_type: Filter to changes affecting nodes of this type (e.g., 'concept').
             limit: Maximum changes to return.
 
         Returns:
@@ -1237,6 +1239,7 @@ class Graph:
             self._conn,
             since=since,
             agent_name=agents[0] if agents and len(agents) == 1 else None,
+            node_type=node_type,
             limit=limit * 2,  # Overfetch for filtering
         )
 

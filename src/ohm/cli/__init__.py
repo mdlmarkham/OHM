@@ -166,6 +166,7 @@ def build_parser() -> argparse.ArgumentParser:
     # graph listen
     listen_parser = graph_sub.add_parser("listen", help="Change feed since last check")
     listen_parser.add_argument("--since", help="ISO timestamp or 'last-check'")
+    listen_parser.add_argument("--node-type", help="Filter changes by node type (e.g., concept, pattern)")
 
     # graph events (SSE client for real-time change feed)
     events_parser = graph_sub.add_parser(
@@ -179,6 +180,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     events_parser.add_argument(
         "--agent", help="Filter to changes by this agent"
+    )
+    events_parser.add_argument(
+        "--node-type", help="Filter to changes affecting nodes of this type (e.g., concept)"
     )
 
     # graph impact
@@ -1015,7 +1019,8 @@ def _handle_listen(args: argparse.Namespace) -> None:
 
     conn = _get_db(args)
     try:
-        results = query_change_feed(conn, since=args.since)
+        node_type = getattr(args, "node_type", None)
+        results = query_change_feed(conn, since=args.since, node_type=node_type)
         if args.format == "json":
             import json
             print(json.dumps(results, indent=2, default=str))
@@ -1051,6 +1056,8 @@ def _handle_events(args: argparse.Namespace) -> None:
         params.append(f"topics={args.topics}")
     if getattr(args, "agent", None):
         params.append(f"agent={args.agent}")
+    if getattr(args, "node_type", None):
+        params.append(f"node_type={args.node_type}")
 
     url = f"{base_url}/events"
     if params:

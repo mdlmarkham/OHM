@@ -120,6 +120,13 @@ class TestGraphRead:
         results = graph.listen()
         assert isinstance(results, list)
 
+    def test_listen_with_node_type(self, graph):
+        """listen() accepts node_type filter."""
+        graph.create_node(label="Concept Node", node_type="concept")
+        graph.create_node(label="Pattern Node", node_type="pattern")
+        results = graph.listen(node_type="concept")
+        assert isinstance(results, list)
+
     def test_agent_state(self, graph):
         graph.set_focus("testing")
         results = graph.agent_state()
