@@ -472,7 +472,31 @@ def _handle_snapshot(args: argparse.Namespace) -> None:
 
 def _handle_diff(args: argparse.Namespace) -> None:
     """Handle 'ohm diff' command."""
-    print(f"Diff from {args.from_ts} to {args.to_ts}: (placeholder)")
+    from ohm.queries import query_diff
+
+    conn = _get_db(args)
+    try:
+        result = query_diff(
+            conn,
+            from_ts=args.from_ts,
+            to_ts=args.to_ts,
+            layer=getattr(args, "layer", None),
+            agent_name=getattr(args, "agent", None),
+        )
+        if args.format == "json":
+            import json
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            s = result["summary"]
+            print(f"Diff: {result['from']} → {result['to']}")
+            print(f"  Nodes added:     {s['nodes_added']}")
+            print(f"  Nodes updated:   {s['nodes_updated']}")
+            print(f"  Edges added:     {s['edges_added']}")
+            print(f"  Edges updated:   {s['edges_updated']}")
+            print(f"  Observations:    {s['observations_added']}")
+            print(f"  Total changes:   {s['total_changes']}")
+    finally:
+        conn.close()
 
 
 # ── Graph Command Implementations ───────────────────────────────────────────

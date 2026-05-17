@@ -1049,3 +1049,113 @@ def batch_create_edges(
         )
         results.append(result)
     return results
+
+
+# ── Diff ────────────────────────────────────────────────────────────────────
+
+def query_diff(
+    conn: DuckDBPyConnection,
+    from_ts: str,
+    to_ts: str,
+    *,
+    layer: str | None = None,
+    agent_name: str | None = None,
+) -> dict[str, Any]:
+    """Show what changed between two timestamps.
+
+    Returns nodes, edges, and observations that were created or updated
+    between *from_ts* and *to_ts*. Supports optional --layer and --agent filters.
+
+    Args:
+        conn: Database connection.
+        from_ts: Starting ISO timestamp.
+        to_ts: Ending ISO timestamp.
+        layer: Optional layer filter (L1-L4) for edges.
+        agent_name: Optional agent filter for attribution.
+
+    Returns:
+        Dict with keys: from, to, nodes_added, nodes_updated, edges_added,
+        edges_updated, observations_added, summary.
+    """
+    from ohm.validation import validate_identifier, validate_layer, validate_timestamp
+
+    from_ts = validate_timestamp(from_ts)
+    to_ts = validate_timestamp(to_ts)
+    if layer:
+        layer = validate_layer(layer)
+    if agent_name:
+        agent_name = validate_identifier(agent_name, name="agent_name")
+
+    # ── Nodes ──────────────────────────────────────────────────────────
+    node_params: list = [from_ts, to_ts]
+    node_agent_clause = ""
+    if agent_name:
+        node_agent_clause = "AND created_by = ?"
+        node_params.append(agent_name)
+
+    nodes_added = _rows_to_dicts(conn.execute(
+        f"SELECT * FROM ohm_nodes WHERE created_at >= ? AND created_at <= ? {node_agent_clause} ORDER BY created_at",
+        node_params,
+    ))
+
+    nodes_updated = _rows_to_dicts(conn.execute(
+        f"SELECT * FROM ohm_nodes WHERE updated_at >= ? AND updated_at <= ? AND updated_at != created_at {node_agent_clause} ORDER BY updated_at",
+        node_params,
+    ))
+
+    # ── Edges ──────────────────────────────────────────────────────────
+    edge_params: list = [from_ts, to_ts]
+    edge_clauses = ""
+    if layer:
+        edge_clauses += "AND layer = ?"
+        edge_params.append(layer)
+    if agent_name:
+        edge_clauses += "AND created_by = ?"
+        edge_params.append(agent_name)
+
+    edges_added = _rows_to_dicts(conn.execute(
+        f"SELECT * FROM ohm_edges WHERE created_at >= ? AND created_at <= ? {edge_clauses} ORDER BY created_at",
+        edge_params,
+    ))
+
+    edges_updated = _rows_to_dicts(conn.execute(
+        f"SELECT * FROM ohm_edges WHERE updated_at >= ? AND updated_at <= ? AND updated_at != created_at {edge_clauses} ORDER BY updated_at",
+        edge_params,
+    ))
+
+    # ── Observations ───────────────────────────────────────────────────
+    obs_params: list = [from_ts, to_ts]
+    obs_agent_clause = ""
+    if agent_name:
+        obs_agent_clause = "AND created_by = ?"
+        obs_params.append(agent_name)
+
+    observations_added = _rows_to_dicts(conn.execute(
+        f"SELECT * FROM ohm_observations WHERE created_at >= ? AND created_at <= ? {obs_agent_clause} ORDER BY created_at",
+        obs_params,
+    ))
+
+    # ── Summary ────────────────────────────────────────────────────────
+    summary = {
+        "nodes_added": len(nodes_added),
+        "nodes_updated": len(nodes_updated),
+        "edges_added": len(edges_added),
+        "edges_updated": len(edges_updated),
+        "observations_added": len(observations_added),
+        "total_changes": (
+            len(nodes_added) + len(nodes_updated)
+            + len(edges_added) + len(edges_updated)
+            + len(observations_added)
+        ),
+    }
+
+    return {
+        "from": from_ts,
+        "to": to_ts,
+        "nodes_added": nodes_added,
+        "nodes_updated": nodes_updated,
+        "edges_added": edges_added,
+        "edges_updated": edges_updated,
+        "observations_added": observations_added,
+        "summary": summary,
+    }

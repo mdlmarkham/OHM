@@ -204,3 +204,61 @@ class TestChangeFeedQuery:
 
         results = query_change_feed(test_db)
         assert len(results) == 0
+
+
+class TestDiffQuery:
+    """Tests for the ohm diff query (OHM-xgm.3)."""
+
+    def test_diff_empty_range(self, test_db):
+        """Diff on empty database returns zero changes."""
+        from ohm.queries import query_diff
+
+        result = query_diff(test_db, "2020-01-01T00:00:00", "2020-01-02T00:00:00")
+        assert result["summary"]["total_changes"] == 0
+
+    def test_diff_finds_new_nodes(self, test_db, sample_graph_small):
+        """Diff finds nodes created within the time range."""
+        from ohm.queries import query_diff
+
+        # Use a wide range that covers the sample graph creation
+        result = query_diff(test_db, "2020-01-01T00:00:00", "2030-01-01T00:00:00")
+        assert result["summary"]["nodes_added"] >= 3  # a, b, c
+        assert result["summary"]["edges_added"] >= 2  # a->b, b->c
+
+    def test_diff_layer_filter(self, test_db, sample_graph_medium):
+        """Diff with layer filter only returns edges in that layer."""
+        from ohm.queries import query_diff
+
+        result = query_diff(
+            test_db, "2020-01-01T00:00:00", "2030-01-01T00:00:00", layer="L3",
+        )
+        for edge in result["edges_added"]:
+            assert edge["layer"] == "L3"
+
+    def test_diff_agent_filter(self, test_db, sample_graph_small):
+        """Diff with agent filter only returns changes by that agent."""
+        from ohm.queries import query_diff
+
+        result = query_diff(
+            test_db, "2020-01-01T00:00:00", "2030-01-01T00:00:00",
+            agent_name="test_agent",
+        )
+        for node in result["nodes_added"]:
+            assert node["created_by"] == "test_agent"
+
+    def test_diff_narrow_range_empty(self, test_db, sample_graph_small):
+        """Diff with a narrow range in the past returns no changes."""
+        from ohm.queries import query_diff
+
+        result = query_diff(test_db, "2020-01-01T00:00:00", "2020-01-01T00:00:01")
+        assert result["summary"]["total_changes"] == 0
+
+    def test_diff_has_summary(self, test_db, sample_graph_small):
+        """Diff result includes a summary with counts."""
+        from ohm.queries import query_diff
+
+        result = query_diff(test_db, "2020-01-01T00:00:00", "2030-01-01T00:00:00")
+        assert "summary" in result
+        assert "nodes_added" in result["summary"]
+        assert "edges_added" in result["summary"]
+        assert "total_changes" in result["summary"]
