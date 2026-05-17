@@ -503,3 +503,69 @@ class TestConfidenceCalibration:
             result = g.calibration("unknown")
             assert result["total_l3_l4_edges"] == 0
             assert result["calibration_score"] is None
+
+
+# ===== Connection Discovery =====
+
+class TestConnectionDiscovery:
+    def test_suggest_connections_returns_list(self, tmp_path):
+        db = str(tmp_path / "discover.duckdb")
+        with connect(db, actor="metis") as g:
+            g.create_node(label="A", node_type="concept")
+            g.create_node(label="B", node_type="concept")
+            # No connections yet — returns empty list
+            suggestions = g.suggest_connections()
+            assert isinstance(suggestions, list)
+
+
+# ===== Graph Import/Export =====
+
+class TestGraphImportExport:
+    def test_export_contains_all_tables(self, tmp_path):
+        db = str(tmp_path / "export.duckdb")
+        with connect(db, actor="metis") as g:
+            g.register_agent(values=["wisdom"])
+            a = g.create_node(label="Test", node_type="concept")
+            g.observe(a["id"], obs_type="measurement", value=0.5, baseline=0.5, sigma=0.3)
+
+            exported = g.export_graph()
+            assert "nodes" in exported
+            assert "edges" in exported
+            assert "observations" in exported
+            assert "meta" in exported
+            assert exported["meta"]["node_count"] >= 1
+
+    def test_round_trip_preserves_data(self, tmp_path):
+        db = str(tmp_path / "roundtrip.duckdb")
+        with connect(db, actor="metis") as g:
+            g.register_agent(values=["wisdom"])
+            a = g.create_node(label="Node A", node_type="concept")
+            b = g.create_node(label="Node B", node_type="concept")
+            g.create_edge(from_node=a["id"], to_node=b["id"], edge_type="CAUSES", layer="L3", confidence=0.8)
+            g.observe(a["id"], obs_type="measurement", value=0.7, baseline=0.5, sigma=0.3)
+
+            exported = g.export_graph()
+
+        # Import into fresh DB
+        db2 = str(tmp_path / "roundtrip2.duckdb")
+        with connect(db2, actor="importer") as g2:
+            result = g2.import_graph(exported)
+            assert result["nodes"] >= 2
+            assert result["edges"] >= 1
+            assert result["observations"] >= 1
+
+            stats = g2.stats()
+            assert stats["total_nodes"] >= 2
+            assert stats["total_edges"] >= 1
+
+    def test_merge_mode_skips_duplicates(self, tmp_path):
+        db = str(tmp_path / "merge.duckdb")
+        with connect(db, actor="metis") as g:
+            a = g.create_node(label="Existing", node_type="concept")
+            exported = g.export_graph()
+
+        # Import into same DB (merge mode)
+        with connect(db, actor="importer") as g2:
+            result = g2.import_graph(exported, merge=True)
+            # Existing nodes should be skipped
+            assert result["skipped"] >= 1

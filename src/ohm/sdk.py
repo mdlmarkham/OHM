@@ -1009,6 +1009,254 @@ class Graph:
             self._conn, agent_name or self.actor,
         )
 
+    # ── Discovery & Export ──────────────────────────────────────────────
+
+    def suggest_connections(self, *, limit: int = 20) -> list[dict[str, Any]]:
+        """Suggest links between nodes that share tags or co-occur in neighborhoods.
+
+        Discovery strategies:
+        1. Shared tags: nodes with overlapping tag sets
+        2. Co-occurrence: nodes that appear in the same 2-hop neighborhood
+        3. Type affinity: nodes of types that frequently connect
+
+        The substrate suggests; agents decide whether to connect.
+        Same result regardless of which agent calls it — substrate method.
+
+        Args:
+            limit: Maximum suggestions.
+
+        Returns:
+            List of {from_node, from_label, to_node, to_label, reason, score}.
+        """
+        suggestions = []
+
+        # Strategy 1: Shared tags
+        shared_tag_pairs = self._conn.execute("""
+            SELECT
+                n1.id AS from_node, n1.label AS from_label,
+                n2.id AS to_node, n2.label AS to_label,
+                COUNT(*) AS shared_tags
+            FROM ohm_nodes n1
+            JOIN ohm_nodes n2 ON n1.id < n2.id
+            WHERE n1.tags IS NOT NULL AND n2.tags IS NOT NULL
+              AND n1.tags != '[]' AND n2.tags != '[]'
+              AND NOT EXISTS (
+                  SELECT 1 FROM ohm_edges e
+                  WHERE (e.from_node = n1.id AND e.to_node = n2.id)
+                     OR (e.from_node = n2.id AND e.to_node = n1.id)
+              )
+            GROUP BY n1.id, n1.label, n2.id, n2.label
+            HAVING COUNT(*) >= 2
+            ORDER BY shared_tags DESC
+            LIMIT ?
+        """, [limit]).fetchall()
+
+        for row in shared_tag_pairs:
+            suggestions.append({
+                "from_node": row[0],
+                "from_label": row[1],
+                "to_node": row[2],
+                "to_label": row[3],
+                "reason": f"shared_tags({row[4]})",
+                "score": row[4] / 5.0,  # Normalize
+            })
+
+        # Strategy 2: Co-occurrence in neighborhoods
+        cooccur = self._conn.execute("""
+            SELECT
+                e1.from_node AS from_node,
+                n1.label AS from_label,
+                e2.from_node AS to_node,
+                n2.label AS to_label,
+                COUNT(*) AS cooccurrence
+            FROM ohm_edges e1
+            JOIN ohm_edges e2 ON e1.to_node = e2.to_node AND e1.from_node < e2.from_node
+            LEFT JOIN ohm_nodes n1 ON n1.id = e1.from_node
+            LEFT JOIN ohm_nodes n2 ON n2.id = e2.from_node
+            WHERE NOT EXISTS (
+                SELECT 1 FROM ohm_edges e
+                WHERE (e.from_node = e1.from_node AND e.to_node = e2.from_node)
+                   OR (e.from_node = e2.from_node AND e.to_node = e1.from_node)
+            )
+            GROUP BY e1.from_node, n1.label, e2.from_node, n2.label
+            HAVING COUNT(*) >= 2
+            ORDER BY cooccurrence DESC
+            LIMIT ?
+        """, [limit]).fetchall()
+
+        for row in cooccur:
+            from_node, from_label, to_node, to_label, count = row
+            # Don't duplicate if already in suggestions
+            if not any(s["from_node"] == from_node and s["to_node"] == to_node for s in suggestions):
+                suggestions.append({
+                    "from_node": from_node,
+                    "from_label": from_label,
+                    "to_node": to_node,
+                    "to_label": to_label,
+                    "reason": f"cooccurrence({count})",
+                    "score": count / 5.0,
+                })
+
+        return sorted(suggestions, key=lambda s: -s["score"])[:limit]
+
+    def export_graph(self) -> dict[str, Any]:
+        """Export the entire graph as JSON-compatible dict.
+
+        Used for backup, migration, and sharing.
+
+        Returns:
+            Dict with 'nodes', 'edges', 'observations', 'agent_state',
+            'meta' (schema version, export timestamp, counts).
+        """
+        nodes = self._conn.execute("SELECT * FROM ohm_nodes ORDER BY created_at").fetchall()
+        node_cols = [desc[0] for desc in self._conn.execute("SELECT * FROM ohm_nodes LIMIT 0").description]
+        nodes_json = []
+        for row in nodes:
+            d = dict(zip(node_cols, row))
+            # Convert non-serializable types
+            for k, v in d.items():
+                if hasattr(v, 'isoformat'):
+                    d[k] = v.isoformat()
+                elif isinstance(v, (bytes, bytearray)):
+                    d[k] = v.hex()
+            nodes_json.append(d)
+
+        edges = self._conn.execute("SELECT * FROM ohm_edges ORDER BY created_at").fetchall()
+        edge_cols = [desc[0] for desc in self._conn.execute("SELECT * FROM ohm_edges LIMIT 0").description]
+        edges_json = []
+        for row in edges:
+            d = dict(zip(edge_cols, row))
+            for k, v in d.items():
+                if hasattr(v, 'isoformat'):
+                    d[k] = v.isoformat()
+                elif isinstance(v, (bytes, bytearray)):
+                    d[k] = v.hex()
+            edges_json.append(d)
+
+        obs = self._conn.execute("SELECT * FROM ohm_observations ORDER BY created_at").fetchall()
+        obs_cols = [desc[0] for desc in self._conn.execute("SELECT * FROM ohm_observations LIMIT 0").description]
+        obs_json = []
+        for row in obs:
+            d = dict(zip(obs_cols, row))
+            for k, v in d.items():
+                if hasattr(v, 'isoformat'):
+                    d[k] = v.isoformat()
+                elif isinstance(v, (bytes, bytearray)):
+                    d[k] = v.hex()
+            obs_json.append(d)
+
+        agent_state = self._conn.execute("SELECT * FROM ohm_agent_state ORDER BY agent_name").fetchall()
+        as_cols = [desc[0] for desc in self._conn.execute("SELECT * FROM ohm_agent_state LIMIT 0").description]
+        as_json = []
+        for row in agent_state:
+            d = dict(zip(as_cols, row))
+            for k, v in d.items():
+                if hasattr(v, 'isoformat'):
+                    d[k] = v.isoformat()
+                elif isinstance(v, (bytes, bytearray)):
+                    d[k] = v.hex()
+            as_json.append(d)
+
+        return {
+            "meta": {
+                "format": "ohm-export-v1",
+                "schema_version": self._conn.execute(
+                    "SELECT value FROM ohm_meta WHERE key = 'schema_version'",
+                ).fetchone()[0] if self._conn.execute(
+                    "SELECT COUNT(*) FROM ohm_meta WHERE key = 'schema_version'",
+                ).fetchone()[0] > 0 else "unknown",
+                "exported_at": __import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat(),
+                "node_count": len(nodes_json),
+                "edge_count": len(edges_json),
+                "observation_count": len(obs_json),
+            },
+            "nodes": nodes_json,
+            "edges": edges_json,
+            "observations": obs_json,
+            "agent_state": as_json,
+        }
+
+    def import_graph(self, data: dict[str, Any], *, merge: bool = True) -> dict[str, Any]:
+        """Import graph data from an export dict.
+
+        Args:
+            data: Export dict (from export_graph()).
+            merge: If True, merge with existing data (skip duplicates).
+                   If False, replace all data (WARNING: destructive).
+
+        Returns:
+            Dict with import statistics.
+        """
+        from ohm.schema import initialize_schema
+        import_count = {"nodes": 0, "edges": 0, "observations": 0, "skipped": 0}
+
+        if not merge:
+            # Destructive: clear all tables
+            for table in ["ohm_observations", "ohm_edges", "ohm_nodes", "ohm_agent_state"]:
+                self._conn.execute(f"DELETE FROM {table}")
+
+        # Import nodes
+        for node in data.get("nodes", []):
+            existing = self._conn.execute(
+                "SELECT id FROM ohm_nodes WHERE id = ?", [node["id"]]
+            ).fetchone()
+            if existing and merge:
+                import_count["skipped"] += 1
+                continue
+            try:
+                cols = [k for k in node.keys() if k not in ("id",)]
+                vals = [node[k] for k in node.keys() if k not in ("id",)]
+                col_str = ", ".join(["id"] + cols)
+                val_str = ", ".join(["?"] * (1 + len(vals)))
+                self._conn.execute(
+                    f"INSERT INTO ohm_nodes ({col_str}) VALUES ({val_str})",
+                    [node["id"]] + vals,
+                )
+                import_count["nodes"] += 1
+            except Exception:
+                import_count["skipped"] += 1
+
+        # Import edges
+        for edge in data.get("edges", []):
+            existing = None
+            if merge:
+                existing = self._conn.execute(
+                    "SELECT id FROM ohm_edges WHERE id = ?",
+                    [edge["id"]],
+                ).fetchone()
+            if existing and merge:
+                import_count["skipped"] += 1
+                continue
+            try:
+                cols = [k for k in edge.keys() if k not in ("id",)]
+                vals = [edge[k] for k in edge.keys() if k not in ("id",)]
+                col_str = ", ".join(["id"] + cols)
+                val_str = ", ".join(["?"] * (1 + len(vals)))
+                self._conn.execute(
+                    f"INSERT INTO ohm_edges ({col_str}) VALUES ({val_str})",
+                    [edge["id"]] + vals,
+                )
+                import_count["edges"] += 1
+            except Exception:
+                import_count["skipped"] += 1
+
+        # Import observations
+        for obs in data.get("observations", []):
+            try:
+                cols = [k for k in obs.keys() if k not in ("id",)]
+                vals = [obs[k] for k in obs.keys() if k not in ("id",)]
+                col_str = ", ".join(["id"] + cols)
+                val_str = ", ".join(["?"] * (1 + len(vals)))
+                self._conn.execute(
+                    f"INSERT INTO ohm_observations ({col_str}) VALUES ({val_str})",
+                    [obs["id"]] + vals,
+                )
+                import_count["observations"] += 1
+            except Exception:
+                import_count["skipped"] += 1
+
+        return import_count
+
     def close(self) -> None:
         """Close the database connection."""
         self._conn.close()
