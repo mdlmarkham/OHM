@@ -55,7 +55,7 @@ def _start_test_server(store, tokens=None, roles=None, no_auth=False, schema_con
 
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    time.sleep(0.1)  # Let server start
+    time.sleep(0.3)  # Let server start (longer for xdist parallel mode)
     return port, server, thread
 
 
@@ -760,6 +760,8 @@ class TestTokenSecurity:
 
     def test_auth_with_hashed_tokens(self, tmp_path):
         """Authentication should work with hashed tokens."""
+        import time
+        time.sleep(0.1)  # Ensure previous server cleanup is complete (xdist)
         db_path = str(tmp_path / "test_hashed_auth.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test_agent")
         # Use plaintext tokens — _start_test_server will hash them

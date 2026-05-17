@@ -49,7 +49,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-n auto"
+addopts = ""
 markers = [
     "benchmark: Performance benchmark tests (pytest-benchmark)",
     "slow: Tests that take >1s (excluded from fast CI runs)",

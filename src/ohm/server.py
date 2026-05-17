@@ -17,7 +17,7 @@ import uuid
 from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from .exceptions import (
     AuthenticationError,
@@ -1021,13 +1021,14 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
 
     OhmHandler.store = store
     OhmHandler.config = config
-    OhmHandler.tokens = _build_token_lookup(config.get("tokens", {}))
-    OhmHandler.roles = config.get("roles", {})
+    token_hashes, config_roles = _build_token_lookup(config.get("tokens", {}))
+    OhmHandler.tokens = token_hashes
+    OhmHandler.roles = config_roles if config_roles else config.get("roles", {})
     OhmHandler.no_auth = config.get("no_auth", False)
     OhmHandler.schema_config = schema_config
 
     # ── Quack integration ──────────────────────────────────────────────
-    quack_info: dict | None = None
+    quack_info: dict[str, Any] | None = None
     if config.get("quack", False):
         from .quack import is_available, start_server
 
