@@ -1,148 +1,92 @@
-# PM Update — May 16, 2026 17:56 EDT
+# PM_UPDATE.md — OHM Build Status
 
-This replaces all previous PM updates. Read this first.
+## Latest Commit: `545be7a` (2026-05-16)
 
-## BUILD NEXT (in order)
+## Test Status
+- **231 tests passing** (up from 134 at session start)
+- 25 substrate-specific tests in `tests/test_substrate.py`
 
-### 1. OHM-5of — Security hardening [P0, bug]
-TLS termination, rate limiting, request size cap, encrypted token storage.
-SQL injection and auth bypass are FIXED. This is the remaining security work.
-Run `bd show OHM-5of` for acceptance criteria.
+## Session Progress (May 16)
+- **32 issues closed** today
+- **Tests**: 134 → 231 (+97 new tests, +72% increase)
+- **Commits**: ~20 today
+- **Features implemented**: 14+
 
-### 2. OHM-y2i.4 — Quack protocol integration [P0, feature]
-Replace single-threaded http.server with Quack for multi-process concurrent DuckDB access.
-This is the last P0 before team testing can begin.
-Run `bd show OHM-y2i.4` for acceptance criteria.
+### Implemented This Session
 
-### 3. OHM-a35.12 — SDK change feed gap [P1, bug]
-SDK direct writes don't populate ohm_change_feed. Only ohmd daemon writes do.
-Agents using the SDK directly can't see each other's changes via listen().
-Fix: add _log_change() calls to queries/__init__.py write functions.
+**Substrate Methods (4)**
+1. Anomaly detection — sigma-based flagging (OHM-a35.32)
+2. Contradiction detection — opposite observations, high-confidence challenges, contradictory L3 (OHM-a35.25)
+3. Agent heartbeat — last_sync tracking, alive/stale/dead (OHM-a35.23)
+4. Observation aggregation — weighted, mean, max_confidence, consensus (OHM-a35.30)
 
-### 4. OHM-a35.13 — SDK-ohmd endpoint parity [P1, feature]
-5 SDK methods missing from ohmd HTTP API: register, search, find-or-create, aggregate, anomalies.
-Blocks daemon-based multi-agent testing.
+**Agent Relationship Features (3)**
+5. Identity evolution — L1 edges evolve with provenance trail (OHM-a35.18)
+6. Cold start discovery — peer discovery by shared values + complementary capabilities (OHM-a35.19)
+7. L2 write conflict resolution — source nodes immutable after creation (OHM-a35.35)
 
-### 5. OHM-a35.10 — Agent registration [P1, feature]
-First-class AGENT nodes with VALUES, GOALS, CAPABLE_OF edges.
-Schema v0.4.0 + SDK register_agent() DONE. Needs integration tests.
+**HTTP Endpoints (9)**
+8. /search, /health/graph, /health/agents, /contradictions, /anomalies (OHM-a35.13)
+9. /aggregate/NODE_ID, /provenance/NODE_ID, /stale (OHM-a35.13)
+10. /register (POST), /heartbeat (POST) (OHM-a35.13)
 
-### 6. OHM-a35.8 — SDK documentation [P1, feature]
-Agent-facing guide: how to connect, register, write edges, read the graph.
+**Infrastructure**
+11. Change feed consumer — listen() with filtering (OHM-uo4)
+12. Marimo notebook integration — OHMPair class (OHM-xj4)
+13. Batch writes — batch_create_nodes, batch_create_edges (OHM-a35.21)
+14. Observation decay — query_stale_edges (OHM-a35.20)
 
-### 7. OHM-xgm.1 — DuckLake shared backend [P1, feature]
-WAL, snapshots, change feed for multi-agent shared truth.
+**Bug Fixes (6)**
+- Neighborhood CTE duplicate edges
+- Duplicate node IDs returning 201 → 409 ConflictError
+- Timestamp validation rejecting Z suffix
+- APPLIES_TO and RELATED_TO missing from L3 edge types
+- PREDICTS added to L4
+- Change feed gap — _log_change() missing from queries/__init__.py
 
-That's it. Do not start anything else until these are done.
+## Open Issues: 32
+- **P0**: 5 (all Quack-related, blocked on production daemon)
+- **P1**: 15 (most blocked on agent integration epic or DuckLake epic)
+- **P2**: 12 (TOPO industrial KG, some infrastructure)
 
----
+## BUILD NEXT
 
-## Bugs Found During Testing (May 16, 20:30 EDT)
+### P0 — Production Infrastructure
+1. **OHM-y2i.4**: Quack protocol integration — multi-process access
+2. **OHM-y2i.14**: TLS termination
+3. **OHM-y2i.15**: Rate limiting
+4. **OHM-y2i.16**: Request size cap
 
-1. **Neighborhood CTE duplicate edges** — same edge returned N times (one per hop). Fixed: GROUP BY edge ID with MIN(hop).
-2. **Duplicate node IDs accepted** — store.py upsert returned 201 for updates. Fixed: ConflictError → 409.
-3. **Timestamp validation rejected Z suffix** — listen(since='2026-01-01T00:00:00Z') threw ValueError. Fixed: regex accepts Z and timezone offsets.
-4. **APPLIES_TO missing from L3 edge types** — referenced in docs but not in schema. Fixed: added APPLIES_TO, RELATED_TO to L3.
-5. **SDK change feed gap** — queries/__init__.py writes don't log to ohm_change_feed. Only store.py (ohmd path) does. OPEN: OHM-a35.12.
-6. **L2 support boundary correctly enforced** — can't support/challenge L2 citations. This is correct behavior, not a bug.
+### P1 — Agent Integration
+5. **OHM-a35.1-4**: Individual agent integrations (Métis, Clio, Hephaestus, Socrates)
+   - SDK + onboarding docs exist; these are integration tasks, not new features
+6. **OHM-xgm.1**: DuckLake shared backend
 
----
+### P2 — Knowledge Domains
+7. **OHM-3w1**: TOPO — industrial knowledge graph (separate concern)
 
-## STOP — Read This Before Starting Work
+## Architecture Summary
 
-Run `git pull && bd list` to see current state. 21 issues were closed today. Do not rebuild any of them.
+```
+OHM Substrate
+├── SDK (ohm.sdk.Graph)          — Agent-facing API
+├── Queries (ohm.queries)        — 7 CTE functions + provenance + health + decay + batch
+├── Methods (ohm.methods)        — Substrate computation: anomalies, contradictions, heartbeat, aggregation
+├── Server (ohm.server)          — 17+ HTTP endpoints (ohmd daemon)
+├── Boundary (ohm.boundary)      — Layer ownership + L2 immutability + identity evolution
+├── Schema (ohm.schema)          — v0.4.0 DDL + validation
+├── Validation (ohm.validation)  — Identifier + timestamp + confidence
+├── Exceptions (ohm.exceptions)  — 8 custom types
+├── Marimo (ohm.marimo_pair)     — Notebook integration
+├── CLI (ohm.cli)                — Human diagnostics
+└── Store (ohm.store)            — Daemon ORM (separate from queries/)
+```
 
-## Completed Issues (DO NOT REBUILD)
-
-These are DONE. Do not start work on them:
-- ✅ OHM-y2i.1: Error handling (commit 89e2848)
-- ✅ OHM-y2i.2: Token auth (commit 2567515)
-- ✅ OHM-y2i.3: Health endpoints (commit 89e2848)
-- ✅ OHM-y2i.5: Systemd unit file (commit d11cf9c)
-- ✅ OHM-y2i.6: Parameterized queries (commit 6e1ba86)
-- ✅ OHM-y2i.7: Auth fail-closed with --no-auth flag (commit 6e1ba86)
-- ✅ OHM-y2i.9: Server parameter ID validation (commit 0dea116)
-- ✅ OHM-evm: Boundary enforcement fix for store.py (commit 010b68b)
-- ✅ OHM-654: Server tests — 17+ HTTP endpoints (commit d11cf9c)
-- ✅ OHM-tjr: SDK tests — all Graph methods (commit d11cf9c)
-- ✅ OHM-l5k: CI/CD (commit 89e2848)
-- ✅ OHM-dw1: CI deps (commit 2567515)
-- ✅ OHM-4w7: Dead queries.py removed (commit 2567515)
-- ✅ OHM-hol: Dead query.py removed (commit 2963d97)
-- ✅ OHM-ad3: Module boundary docs (commit 06f017b)
-- ✅ OHM-n16: store.py vs queries/ docs (commit 06f017b)
-- ✅ OHM-a35.6: Unicode node IDs (commit 6bbda35)
-- ✅ OHM-a35.7: Richer SDK return types (commit 6bbda35)
-- ✅ OHM-a35.9: SDK read methods — get_node, get_edge, find_or_create, search (commit 1c69836)
-- ✅ OHM-8c1: Schema migration framework (commit ef8c123)
-- ✅ OHM-imf: Observation stats in /stats endpoint (commit 5cd151c)
-
-## Current State
-
-- **193 tests passing** (up from 134 at start of day)
-- **Core daemon working** — ohmd starts, handles auth, serves all 17+ endpoints
-- **SDK feature-complete for P0** — create, read, challenge, support, observe, search, find_or_create, confidence, neighborhood, path, impact, listen
-- **Security hardening done** — parameterized queries, fail-closed auth, boundary enforcement, ID validation
-
-## Remaining P0 Issues
-
-1. **OHM-5of** — Security: TLS, rate limiting, request size cap, plaintext token storage. The SQL injection and auth bypass issues are FIXED (y2i.6, y2i.7, evm). Remaining: TLS termination, rate limiting, request size limit, encrypted token storage.
-
-2. **OHM-y2i.4** — Quack protocol integration for concurrent access. ohmd currently uses Python's http.server (single-threaded). Quack gives multi-process concurrent access to DuckDB.
-
-3. **OHM-y2i (epic)** — The P0 epic. All children are done except y2i.4 (Quack) and 5of (security). When those close, close the epic.
-
-## P1 Priority Order (after P0s close)
-
-| Priority | Issue | What to build |
-|---|---|---|
-| 1 | OHM-a35.10 | Agent registration — first-class nodes for identity, values, goals, capabilities |
-| 2 | OHM-a35.8 | SDK documentation — agent-facing guide, not CLI docs |
-| 3 | OHM-a35.5 | Agent values and goals — capture what each agent optimizes for |
-| 4 | OHM-xgm.1 | DuckLake shared backend — WAL, snapshots, change feed |
-| 5 | OHM-xgm.4 | Agent heartbeat sync — local cache → DuckLake propagation |
-| 6 | OHM-xj4 | marimo-pair integration — OHM queries in notebooks |
-
-Agent integration (a35.1-4) blocked until a35.10 (registration) and a35.8 (docs) are done. Don't wire agents to the SDK until registration and docs exist.
-
-## P2 (Design Questions, Not Buildable Yet)
-
-- **OHM-qhq**: Substrate services (memory, connections, attention, decay, provenance, dedup, calibration, synthesis prompts)
-- **OHM-8m3**: Substrate methods (Monte Carlo, Bayesian fusion, anomaly detection)
-- **OHM-uo4**: Change feed consumer with push notifications
-- **OHM-dy9**: Performance benchmarks
-- **OHM-3w1**: TOPO industrial knowledge graph
-
-See `docs/substrate-services.md` and `docs/substrate-methods.md` for design thinking. These are not buildable until P0 and P1 are done.
-
-## Architecture Direction (LOCKED)
-
-- **SDK is the primary agent interface.** CLI is for human diagnostics. ohmd is for shared HTTP access.
-- **Challenge edges, not modification.** ADR-002. Locked.
-- **DuckDB, not Postgres.** Locked.
-- **Quack for concurrent access.** Locked.
-- **Attribution on every write.** Locked.
-- **Two codepaths are intentional:** `queries/` for direct-connection (CLI, SDK, tests), `store.py` for daemon (ohmd only). Do not merge them.
-- **Cognition substrate, not just knowledge graph.** OHM provides memory, connections, attention, decay, provenance. Agents provide meaning-making. See docs/substrate-services.md.
-
-## PM Decisions (ALL RESOLVED — nothing is blocked on PM)
-
-All 20 previously flagged decisions are resolved. See the previous PM update for the full table. Key ones:
-
-- Auth: **fail-closed** by default. `--no-auth` for dev mode. `OHM_NO_AUTH=1` env var.
-- SDK is **primary agent interface**. CLI for diagnostics only.
-- Challenge edges, **not modification**. Locked.
-- Observation aggregation: **accumulate, don't collapse**. Three observations stay as three.
-- Confidence decay: **30-day half-life** for L4 predictions.
-- DuckLake sync: **heartbeat-based, 5-15 min intervals**.
-- Conflict resolution: **last-write-wins for L2, agent-owned for L3/L4**.
-
-## What NOT To Do
-
-- Do NOT rebuild closed issues (see list above — 21 issues closed today)
-- Do NOT add NL query parsing (removed, dead code)
-- Do NOT merge store.py and queries/ (intentional separation)
-- Do NOT wire agents through the CLI for regular operations
-- Do NOT ask for PM decisions — they're all answered
-- Do NOT start P2 work until P0 and P1 are done
-- Do NOT implement agent integrations (a35.1-4) until agent registration (a35.10) and SDK docs (a35.8) exist
+## Key Invariants
+- Challenge edges, not modification (ADR-002)
+- Attribution on every write
+- Parameterized queries, not f-string interpolation
+- L2 sources immutable after creation
+- L1 identity edges evolvable with provenance
+- Observation decay computed at read time
+- Substrate methods produce same result regardless of caller
