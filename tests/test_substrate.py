@@ -569,3 +569,55 @@ class TestGraphImportExport:
             result = g2.import_graph(exported, merge=True)
             # Existing nodes should be skipped
             assert result["skipped"] >= 1
+
+
+# ===== Edge Versioning =====
+
+class TestEdgeVersioning:
+    def test_created_event(self, tmp_path):
+        db = str(tmp_path / "version.duckdb")
+        with connect(db, actor="metis") as g:
+            a = g.create_node(label="A", node_type="concept")
+            b = g.create_node(label="B", node_type="concept")
+            edge = g.create_edge(from_node=a["id"], to_node=b["id"], edge_type="CAUSES", layer="L3", confidence=0.8)
+
+            history = g.edge_history(edge["id"])
+            assert len(history) >= 1
+            assert history[0]["type"] == "created"
+            assert history[0]["agent"] == "metis"
+
+    def test_challenge_appears_in_history(self, tmp_path):
+        db = str(tmp_path / "version2.duckdb")
+        with connect(db, actor="metis") as g:
+            a = g.create_node(label="A", node_type="concept")
+            b = g.create_node(label="B", node_type="concept")
+            edge = g.create_edge(from_node=a["id"], to_node=b["id"], edge_type="CAUSES", layer="L3", confidence=0.8)
+
+            from ohm.store import OhmStore
+            store = OhmStore(db_path=db, agent_name="socrates")
+            store.challenge_edge(edge["id"], "test", 0.5, "CHALLENGED_BY")
+            store.close()
+
+            history = g.edge_history(edge["id"])
+            types = [h["type"] for h in history]
+            assert "challenged_by" in types
+
+    def test_evolution_chain(self, tmp_path):
+        db = str(tmp_path / "version3.duckdb")
+        with connect(db, actor="metis") as g:
+            me = g.register_agent(values=["wisdom"])
+            val_edges = g._conn.execute(
+                "SELECT id FROM ohm_edges WHERE from_node = ? AND edge_type = 'VALUES' AND created_by = 'metis' LIMIT 1",
+                [me["id"]],
+            ).fetchall()
+            if val_edges:
+                evolved = g.evolve_identity(val_edges[0][0], new_target="emergence", reason="test")
+                history = g.edge_history(val_edges[0][0])
+                types = [h["type"] for h in history]
+                assert "superseded" in types or "evolved_to" in types
+
+    def test_nonexistent_edge_empty_history(self, tmp_path):
+        db = str(tmp_path / "version4.duckdb")
+        with connect(db, actor="metis") as g:
+            history = g.edge_history("nonexistent_edge_id")
+            assert history == []
