@@ -185,6 +185,113 @@ class Graph:
 
         set_agent_state(self._conn, agent_name=self.actor, focus=focus)
 
+    def register_agent(
+        self,
+        *,
+        description: str | None = None,
+        values: list[str] | None = None,
+        goals: list[str] | None = None,
+        capabilities: list[str] | None = None,
+        interests: list[str] | None = None,
+        listens_to: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Register this agent in the graph with identity, values, and capabilities.
+
+        Creates an agent node and declares VALUES, GOALS, CAPABLE_OF,
+        and INTERESTED_IN edges. Uses find_or_create for idempotency —
+        calling twice won't duplicate the agent node or declared edges.
+
+        Args:
+            description: Agent description (stored as node content).
+            values: What this agent optimizes for (e.g., ["wisdom", "connections"]).
+            goals: What this agent is trying to achieve.
+            capabilities: What this agent can do (e.g., ["research", "critique"]).
+            interests: Topics this agent subscribes to (e.g., ["economics", "cognition"]).
+            listens_to: Other agents whose output this agent follows.
+
+        Returns:
+            The agent node record.
+        """
+        # Create agent node
+        me = self.find_or_create_node(
+            label=self.actor,
+            node_type="agent",
+            content=description,
+        )
+
+        # Declare values (L1 — identity)
+        for v in (values or []):
+            value_node = self.find_or_create_node(label=v, node_type="value")
+            # Check if edge already exists
+            existing = self._conn.execute(
+                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = 'VALUES' AND created_by = ?",
+                [me["id"], value_node["id"], self.actor],
+            ).fetchone()
+            if not existing:
+                self.create_edge(
+                    from_node=me["id"], to_node=value_node["id"],
+                    edge_type="VALUES", layer="L1", confidence=1.0,
+                    provenance="self_declaration",
+                )
+
+        # Declare goals (L1 — identity)
+        for g in (goals or []):
+            goal_node = self.find_or_create_node(label=g, node_type="goal")
+            existing = self._conn.execute(
+                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = 'GOALS' AND created_by = ?",
+                [me["id"], goal_node["id"], self.actor],
+            ).fetchone()
+            if not existing:
+                self.create_edge(
+                    from_node=me["id"], to_node=goal_node["id"],
+                    edge_type="GOALS", layer="L1", confidence=1.0,
+                    provenance="self_declaration",
+                )
+
+        # Declare capabilities (L1 — identity)
+        for c in (capabilities or []):
+            cap_node = self.find_or_create_node(label=c, node_type="skill")
+            existing = self._conn.execute(
+                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = 'CAPABLE_OF' AND created_by = ?",
+                [me["id"], cap_node["id"], self.actor],
+            ).fetchone()
+            if not existing:
+                self.create_edge(
+                    from_node=me["id"], to_node=cap_node["id"],
+                    edge_type="CAPABLE_OF", layer="L1", confidence=1.0,
+                    provenance="self_declaration",
+                )
+
+        # Declare interests / subscriptions (L1 — identity)
+        for i in (interests or []):
+            topic_node = self.find_or_create_node(label=i, node_type="topic")
+            existing = self._conn.execute(
+                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = 'INTERESTED_IN' AND created_by = ?",
+                [me["id"], topic_node["id"], self.actor],
+            ).fetchone()
+            if not existing:
+                self.create_edge(
+                    from_node=me["id"], to_node=topic_node["id"],
+                    edge_type="INTERESTED_IN", layer="L1", confidence=1.0,
+                    provenance="self_declaration",
+                )
+
+        # Declare agent subscriptions (L3 — challengeable preference)
+        for a in (listens_to or []):
+            other_agent = self.find_or_create_node(label=a, node_type="agent")
+            existing = self._conn.execute(
+                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = 'LISTENS_TO' AND created_by = ?",
+                [me["id"], other_agent["id"], self.actor],
+            ).fetchone()
+            if not existing:
+                self.create_edge(
+                    from_node=me["id"], to_node=other_agent["id"],
+                    edge_type="LISTENS_TO", layer="L3", confidence=0.7,
+                    provenance="self_declaration",
+                )
+
+        return me
+
     # ── Read ─────────────────────────────────────────────────────────────
 
     def get_node(self, node_id: str) -> dict[str, Any] | None:

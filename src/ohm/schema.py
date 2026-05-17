@@ -30,6 +30,7 @@ VALID_NODE_TYPES = frozenset({
     "idea", "source", "person", "concept", "pattern",
     "event", "institution", "technology", "equipment",
     "system", "area", "site",
+    "agent", "skill", "value", "goal", "topic",
 })
 
 VALID_VISIBILITIES = frozenset({"private", "team", "public"})
@@ -41,13 +42,17 @@ VALID_PROVENANCES = frozenset({
 # ── Edge Types by Layer ─────────────────────────────────────────────────────
 
 LAYER_EDGE_TYPES: dict[str, frozenset[str]] = {
-    "L1": frozenset({"CONTAINS", "BELONGS_TO", "HAS_COMPONENT", "PART_OF"}),
-    "L2": frozenset({"DERIVES_FROM", "INFLUENCES", "REFERENCES", "USES", "FEEDS", "FLOWS_TO"}),
+    "L1": frozenset({"CONTAINS", "BELONGS_TO", "HAS_COMPONENT", "PART_OF",
+                      "CAPABLE_OF", "VALUES", "GOALS", "INTERESTED_IN"}),
+    "L2": frozenset({"DERIVES_FROM", "INFLUENCES", "REFERENCES", "USES",
+                      "FEEDS", "FLOWS_TO", "NOTIFIES", "TRUSTS", "SERVES"}),
     "L3": frozenset({
         "CAUSES", "CORRELATES_WITH", "PREDICTS", "EXPLAINS",
         "CHALLENGED_BY", "SUPPORTS", "REFINES", "CONTRADICTS",
+        "LISTENS_TO", "DEFERS_TO", "COLLABORATES_WITH",
     }),
-    "L4": frozenset({"EXPECTS", "PLANS", "RISKS", "DEPENDS_ON", "THREATENS", "ENABLES"}),
+    "L4": frozenset({"EXPECTS", "PLANS", "RISKS", "DEPENDS_ON",
+                      "THREATENS", "ENABLES", "EXPECTS_FROM"}),
 }
 
 ALL_EDGE_TYPES: frozenset[str] = frozenset().union(*LAYER_EDGE_TYPES.values())
@@ -195,7 +200,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.3.0"
+SCHEMA_VERSION = "0.4.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -211,6 +216,9 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
         "ALTER TABLE ohm_nodes ADD COLUMN metadata JSON",
         "ALTER TABLE ohm_edges ADD COLUMN metadata JSON",
         "ALTER TABLE ohm_observations ADD COLUMN metadata JSON",
+    ]),
+    ("0.4.0", "add agent relationship node types and edge types", [
+        "",  # Node types and edge types are validated in Python, not DDL
     ]),
 ]
 

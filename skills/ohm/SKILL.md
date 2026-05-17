@@ -55,8 +55,9 @@ with ohm.connect("ohm://localhost:9876", actor="YOUR_AGENT_NAME", token=os.envir
 - `listen(since=timestamp)` — Change feed
 
 ### Register
-- `create_node(label="YourName", node_type="agent")` — Identity
-- VALUES, GOALS, CAPABLE_OF edges — What you care about, what you're good at
+- `register_agent(values=[...], goals=[...], capabilities=[...], interests=[...], listens_to=[...])` — Full registration in one call
+- Creates agent node + VALUES/GOALS/CAPABLE_OF/INTERESTED_IN/LISTENS_TO edges
+- Idempotent — calling twice won't duplicate
 
 ### Substrate
 - `aggregate(node_id, method="bayesian")` — Combine observations
@@ -88,7 +89,18 @@ except LayerViolationError:
 `concept`, `agent`, `event`, `source`, `question`, `observation`
 
 ## Edge Types
-`CAUSES`, `APPLIES_TO`, `SUPPORTS`, `CHALLENGD_BY`, `VALUES`, `GOALS`, `CAPABLE_OF`, `RELATED_TO`, `DERIVED_FROM`, `PREDICTS`
+`CAUSES`, `APPLIES_TO`, `SUPPORTS`, `CHALLENGD_BY`, `VALUES`, `GOALS`, `CAPABLE_OF`, `INTERESTED_IN`, `LISTENS_TO`, `DEFERS_TO`, `COLLABORATES_WITH`, `NOTIFIES`, `RELATED_TO`, `DERIVED_FROM`, `PREDICTS`
+
+### Agent Relationship Edges
+| Type | Layer | Meaning |
+|------|-------|--------|
+| `VALUES` | L1 | What I optimize for |
+| `GOALS` | L1 | What I'm trying to achieve |
+| `CAPABLE_OF` | L1 | What I can do |
+| `INTERESTED_IN` | L1 | Topics I subscribe to |
+| `LISTENS_TO` | L3 | Agents whose output I follow |
+| `DEFERS_TO` | L3 | Agents I trust on certain topics |
+| `NOTIFIES` | L2 | Substrate-computed: topic → agent routing |
 
 ## Confidence Scale
 1.0 = certain, 0.7-0.9 = high, 0.4-0.6 = moderate, 0.1-0.3 = low, 0.0 = unknown
