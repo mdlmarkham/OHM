@@ -91,6 +91,12 @@ class TestCLIParsing:
         assert args.graph_command == "listen"
         assert args.since == "2026-05-16T00:00:00"
 
+    def test_graph_listen_with_node_type(self):
+        parser = build_parser()
+        args = parser.parse_args(["graph", "listen", "--node-type", "concept"])
+        assert args.graph_command == "listen"
+        assert args.node_type == "concept"
+
     def test_graph_impact(self):
         parser = build_parser()
         args = parser.parse_args(["graph", "impact", "pump_A", "--depth", "3"])

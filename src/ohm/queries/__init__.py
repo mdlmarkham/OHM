@@ -329,6 +329,7 @@ def query_change_feed(
     *,
     since: str | None = None,
     agent_name: str | None = None,
+    node_type: str | None = None,
     limit: int = 100,
 ) -> list[dict[str, Any]]:
     """Retrieve the change feed since a given timestamp.
@@ -337,6 +338,9 @@ def query_change_feed(
         conn: Database connection.
         since: ISO timestamp or 'last-check'. If None, returns recent changes.
         agent_name: Filter by agent.
+        node_type: Filter by node type (e.g., 'concept', 'pattern', 'equipment').
+            Matches changes to nodes of this type AND edges that touch nodes
+            of this type (source or target).
         limit: Maximum number of changes to return.
 
     Returns:
@@ -348,12 +352,30 @@ def query_change_feed(
     params: list = []
     if since and since != "last-check":
         since = validate_timestamp(since)
-        conditions.append("occurred_at >= ?::TIMESTAMP")
+        conditions.append("cf.occurred_at >= ?::TIMESTAMP")
         params.append(since)
     if agent_name:
         agent_name = validate_identifier(agent_name, name="agent_name")
-        conditions.append("agent_name = ?")
+        conditions.append("cf.agent_name = ?")
         params.append(agent_name)
+
+    # node_type filter: JOIN with ohm_nodes to filter by type.
+    # Matches both node changes (row_id = node.id) and edge changes
+    # (row_id = edge.id where edge touches a node of the given type).
+    node_join = ""
+    if node_type:
+        node_type = validate_identifier(node_type, name="node_type")
+        conditions.append("n.type = ?")
+        params.append(node_type)
+        node_join = """
+            LEFT JOIN ohm_nodes n ON (
+                cf.row_id = n.id
+                OR cf.row_id IN (
+                    SELECT e.id FROM ohm_edges e
+                    WHERE e.from_node = n.id OR e.to_node = n.id
+                )
+            )
+        """
 
     where_clause = ""
     if conditions:
@@ -361,11 +383,12 @@ def query_change_feed(
 
     query = f"""
         SELECT
-            id, table_name, row_id, operation, agent_name,
-            old_data, new_data, occurred_at
-        FROM ohm_change_feed
+            cf.id, cf.table_name, cf.row_id, cf.operation, cf.agent_name,
+            cf.old_data, cf.new_data, cf.occurred_at
+        FROM ohm_change_feed cf
+        {node_join}
         {where_clause}
-        ORDER BY occurred_at DESC
+        ORDER BY cf.occurred_at DESC
         LIMIT ?
     """
     params.append(limit)

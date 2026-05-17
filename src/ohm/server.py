@@ -298,6 +298,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         - since: ISO timestamp to stream from (optional, defaults to last sync)
         - agent: filter to changes by this agent (optional)
         - layer: filter to changes in this layer (optional, e.g. L3)
+        - node_type: filter to changes for nodes of this type (optional, e.g. pasture_assessment)
         - topics: comma-separated topic labels (optional)
         """
         from urllib.parse import parse_qs
@@ -314,6 +315,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         since = qs.get("since", [None])[0]
         filter_agent = qs.get("agent", [None])[0]
         filter_layer = qs.get("layer", [None])[0]
+        filter_node_type = qs.get("node_type", [None])[0]
         topics_param = qs.get("topics", [None])[0]
         topics = topics_param.split(",") if topics_param else None
 
@@ -337,6 +339,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             "topics": topics,
             "filter_agent": filter_agent,
             "filter_layer": filter_layer,
+            "filter_node_type": filter_node_type,
         }
 
         # Send SSE headers
@@ -366,6 +369,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                     self.store.conn,
                     since=last_ts,
                     agent_name=filter_agent,
+                    node_type=filter_node_type,
                     limit=50,
                 )
 
