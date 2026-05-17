@@ -1477,42 +1477,91 @@ def _show_schema(args: argparse.Namespace) -> None:
     """Display the current graph schema."""
     from ohm.schema import LAYER_EDGE_TYPES, VALID_NODE_TYPES
 
-    lines = ["── Node Types ──"]
-    for nt in sorted(VALID_NODE_TYPES):
-        lines.append(f"  • {nt}")
-    lines.append("")
-    lines.append("── Edge Types by Layer ──")
-    for layer in ["L1", "L2", "L3", "L4"]:
-        types = ", ".join(sorted(LAYER_EDGE_TYPES[layer]))
-        lines.append(f"  {layer}: {types}")
-    print("\n".join(lines))
+    if args.format == "json":
+        import json
+        result = {
+            "node_types": sorted(VALID_NODE_TYPES),
+            "edge_types_by_layer": {
+                layer: sorted(types) for layer, types in LAYER_EDGE_TYPES.items()
+            },
+        }
+        print(json.dumps(result, indent=2))
+    else:
+        lines = ["── Node Types ──"]
+        for nt in sorted(VALID_NODE_TYPES):
+            lines.append(f"  • {nt}")
+        lines.append("")
+        lines.append("── Edge Types by Layer ──")
+        for layer in ["L1", "L2", "L3", "L4"]:
+            types = ", ".join(sorted(LAYER_EDGE_TYPES[layer]))
+            lines.append(f"  {layer}: {types}")
+        print("\n".join(lines))
 
 
 def _show_layers(args: argparse.Namespace) -> None:
     """Display layer descriptions."""
-    layers = [
-        ("L1: Structure", "Fully shared", "Communal",
-         "CONTAINS, BELONGS_TO, HAS_COMPONENT",
-         '"Hungary has a constitution"'),
-        ("L2: Flow", "Shared + attributed", "Proposing agent",
-         "DERIVES_FROM, INFLUENCES, REFERENCES, USES",
-         '"This idea derives from that source"'),
-        ("L3: Knowledge", "Agent-owned, challengeable", "Creating agent",
-         "CAUSES, CORRELATES_WITH, PREDICTS, EXPLAINS, CHALLENGED_BY, SUPPORTS",
-         '"Pattern X causes outcome Y conf: 0.94 (agent-alpha)"'),
-        ("L4: Prospect", "Agent-owned, visible", "Forecasting agent",
-         "EXPECTS, PLANS, RISKS, DEPENDS_ON",
-         '"Outcome Z expected conf: 0.65 (agent-beta)"'),
-    ]
-    lines: list[str] = []
-    for name, sharing, owner, types, example in layers:
-        lines.append(f"── {name} ──")
-        lines.append(f"  Sharing:    {sharing}")
-        lines.append(f"  Ownership:  {owner}")
-        lines.append(f"  Edge types: {types}")
-        lines.append(f"  Example:    {example}")
-        lines.append("")
-    print("\n".join(lines))
+    if args.format == "json":
+        import json
+        from ohm.schema import LAYER_EDGE_TYPES
+        result = [
+            {
+                "name": "L1",
+                "label": "L1: Structure",
+                "sharing": "Fully shared",
+                "ownership": "Communal",
+                "edge_types": sorted(LAYER_EDGE_TYPES["L1"]),
+                "example": '"Hungary has a constitution"',
+            },
+            {
+                "name": "L2",
+                "label": "L2: Flow",
+                "sharing": "Shared + attributed",
+                "ownership": "Proposing agent",
+                "edge_types": sorted(LAYER_EDGE_TYPES["L2"]),
+                "example": '"This idea derives from that source"',
+            },
+            {
+                "name": "L3",
+                "label": "L3: Knowledge",
+                "sharing": "Agent-owned, challengeable",
+                "ownership": "Creating agent",
+                "edge_types": sorted(LAYER_EDGE_TYPES["L3"]),
+                "example": '"Pattern X causes outcome Y conf: 0.94 (agent-alpha)"',
+            },
+            {
+                "name": "L4",
+                "label": "L4: Prospect",
+                "sharing": "Agent-owned, visible",
+                "ownership": "Forecasting agent",
+                "edge_types": sorted(LAYER_EDGE_TYPES["L4"]),
+                "example": '"Outcome Z expected conf: 0.65 (agent-beta)"',
+            },
+        ]
+        print(json.dumps(result, indent=2))
+    else:
+        layers = [
+            ("L1: Structure", "Fully shared", "Communal",
+             "CONTAINS, BELONGS_TO, HAS_COMPONENT",
+             '"Hungary has a constitution"'),
+            ("L2: Flow", "Shared + attributed", "Proposing agent",
+             "DERIVES_FROM, INFLUENCES, REFERENCES, USES",
+             '"This idea derives from that source"'),
+            ("L3: Knowledge", "Agent-owned, challengeable", "Creating agent",
+             "CAUSES, CORRELATES_WITH, PREDICTS, EXPLAINS, CHALLENGED_BY, SUPPORTS",
+             '"Pattern X causes outcome Y conf: 0.94 (agent-alpha)"'),
+            ("L4: Prospect", "Agent-owned, visible", "Forecasting agent",
+             "EXPECTS, PLANS, RISKS, DEPENDS_ON",
+             '"Outcome Z expected conf: 0.65 (agent-beta)"'),
+        ]
+        lines: list[str] = []
+        for name, sharing, owner, types, example in layers:
+            lines.append(f"── {name} ──")
+            lines.append(f"  Sharing:    {sharing}")
+            lines.append(f"  Ownership:  {owner}")
+            lines.append(f"  Edge types: {types}")
+            lines.append(f"  Example:    {example}")
+            lines.append("")
+        print("\n".join(lines))
 
 
 def _print_error(error: OHMError) -> None:

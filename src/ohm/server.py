@@ -680,7 +680,51 @@ class OhmHandler(BaseHTTPRequestHandler):
         qs = parse_qs(parsed.query)
 
         # Infrastructure endpoints bypass auth
-        if path == "/health":
+        if path == "" or path == "/":
+            # Root discovery endpoint — OpenAPI-style route listing (ADR-005)
+            self._json_response(200, {
+                "service": "ohmd",
+                "version": "0.2.0",
+                "schema": self.schema_config.name,
+                "description": "Multi-agent knowledge graph daemon",
+                "endpoints": {
+                    "/": {"method": "GET", "description": "This discovery index (no auth required)"},
+                    "/health": {"method": "GET", "description": "Health check (no auth required)"},
+                    "/ready": {"method": "GET", "description": "Readiness check (no auth required)"},
+                    "/metrics": {"method": "GET", "description": "Prometheus-style metrics"},
+                    "/stats": {"method": "GET", "description": "Graph statistics (nodes, edges, layers)"},
+                    "/status": {"method": "GET", "description": "Daemon status and configuration"},
+                    "/schema": {"method": "GET", "description": "Node types, edge types, layers"},
+                    "/layers": {"method": "GET", "description": "L1-L4 layer descriptions"},
+                    "/node/{id}": {"method": "GET", "description": "Get a single node by ID"},
+                    "/edge/{id}": {"method": "GET", "description": "Get a single edge by ID"},
+                    "/neighborhood/{id}": {"method": "GET", "description": "Bounded-depth graph traversal"},
+                    "/path/{from}/{to}": {"method": "GET", "description": "Shortest path between two nodes"},
+                    "/impact/{id}": {"method": "GET", "description": "Downstream failure impact analysis"},
+                    "/confidence/{id}": {"method": "GET", "description": "Provenance and challenge audit"},
+                    "/agent/{name}": {"method": "GET", "description": "Agent state and focus"},
+                    "/agents": {"method": "GET", "description": "List all registered agents"},
+                    "/listen": {"method": "GET", "description": "Change feed since last check"},
+                    "/events": {"method": "GET", "description": "SSE stream of real-time change feed events"},
+                    "/node": {"method": "POST", "description": "Create a new node"},
+                    "/edge": {"method": "POST", "description": "Create a new edge"},
+                    "/challenge/{id}": {"method": "POST", "description": "Challenge an existing edge"},
+                    "/support/{id}": {"method": "POST", "description": "Support an existing edge"},
+                    "/observe/{id}": {"method": "POST", "description": "Record an observation on a node"},
+                    "/state": {"method": "POST", "description": "Update agent state/focus"},
+                    "/register": {"method": "POST", "description": "Register a new agent"},
+                    "/heartbeat": {"method": "POST", "description": "Agent heartbeat with sync"},
+                    "/webhook/{agent}": {"method": "POST", "description": "Register a webhook callback"},
+                },
+                "links": {
+                    "schema": "/schema",
+                    "layers": "/layers",
+                    "health": "/health",
+                    "docs": "https://github.com/mdlmarkham/OHM",
+                },
+            })
+            return
+        elif path == "/health":
             self._json_response(200, {
                 "status": "ok",
                 "uptime": round(time.time() - _START_TIME, 1),
