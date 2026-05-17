@@ -906,6 +906,39 @@ class Graph:
             dry_run=dry_run,
         )
 
+    def expiring_soon(
+        self,
+        *,
+        product_type: str | None = None,
+        days: int = 5,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Find batches expiring within a given number of days.
+
+        Uses BATCH_EXPIRES_BEFORE edges with expires_at metadata.
+        Returns batches sorted by expiry date (soonest first).
+
+        Retail scenario: inventory agent tracks delivery batches and
+        alerts when they approach expiry.
+
+        Args:
+            product_type: Optional filter by product type (e.g., 'dairy', 'produce').
+            days: Look-ahead window in days (default 5).
+            limit: Maximum results to return.
+
+        Returns:
+            List of dicts with batch_id, product_type, expires_at,
+            days_until_expiry, from_node, to_node, and metadata.
+        """
+        from ohm.queries import query_find_expiring_batches
+
+        return query_find_expiring_batches(
+            self._conn,
+            product_type=product_type,
+            days=days,
+            limit=limit,
+        )
+
     def detect_trend(
         self, node_id: str, *, window_days: int = 60, min_observations: int = 3,
     ) -> dict[str, Any]:

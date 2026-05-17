@@ -654,7 +654,81 @@ class TestCompositeScore:
             assert result_geom["baseline"] == 2.5
 
 
-# ===== Graph Import/Export =====
+# ===== Temporal Decay =====
+
+class TestTemporalDecay:
+    def test_composite_score_with_temporal_decay(self, tmp_path):
+        """Temporal decay weights recent observations more heavily."""
+        db = str(tmp_path / "temporal_decay.duckdb")
+        with connect(db, actor="metis") as g:
+            g.register_agent(values=["wisdom"])
+            node = g.create_node(label="Weather", node_type="concept")
+            # Add observation — will be very recent (age ~0 hours)
+            g.observe(node["id"], obs_type="measurement", value=0.9,
+                      baseline=0.5, sigma=0.1)
+
+            # Without decay
+            result_no_decay = g.composite_score(node["id"])
+            # With decay (should be same since observation is fresh)
+            result_decay = g.composite_score(node["id"], temporal_decay_hours=4.0)
+
+            assert result_no_decay["composite_score"] is not None
+            assert result_decay["composite_score"] is not None
+            # Fresh observation: decay should not change result significantly
+            assert abs(result_no_decay["composite_score"] - result_decay["composite_score"]) < 0.01
+            assert result_decay["temporal_decay_hours"] == 4.0
+
+    def test_composite_score_temporal_decay_returns_param(self, tmp_path):
+        """composite_score returns temporal_decay_hours in result."""
+        db = str(tmp_path / "temporal_param.duckdb")
+        with connect(db, actor="metis") as g:
+            g.register_agent(values=["wisdom"])
+            node = g.create_node(label="Test", node_type="concept")
+            g.observe(node["id"], obs_type="measurement", value=0.5,
+                      baseline=0.5, sigma=0.1)
+
+            result = g.composite_score(node["id"], temporal_decay_hours=4.0)
+            assert "temporal_decay_hours" in result
+            assert result["temporal_decay_hours"] == 4.0
+
+            result_none = g.composite_score(node["id"])
+            assert result_none["temporal_decay_hours"] is None
+
+    def test_decay_observations_dry_run(self, tmp_path):
+        """decay_observations in dry_run mode returns results without modifying data."""
+        db = str(tmp_path / "decay_dryrun.duckdb")
+        with connect(db, actor="metis") as g:
+            g.register_agent(values=["wisdom"])
+            node = g.create_node(label="Product", node_type="concept")
+            g.observe(node["id"], obs_type="measurement", value=0.8,
+                      baseline=0.5, sigma=0.1)
+
+            results = g.decay_observations(node["id"], temporal_decay_hours=4.0, dry_run=True)
+            assert len(results) >= 1
+            assert abs(results[0]["original_value"] - 0.8) < 0.001
+            assert results[0]["decayed_value"] is not None
+            assert results[0]["decay_factor"] > 0
+            assert results[0]["age_hours"] >= 0
+
+            # Original value should be unchanged after dry_run
+            check = g._conn.execute(
+                "SELECT value FROM ohm_observations WHERE node_id = ?",
+                [node["id"]],
+            ).fetchone()
+            assert abs(check[0] - 0.8) < 0.001
+
+    def test_decay_observations_all_nodes(self, tmp_path):
+        """decay_observations with node_id=None processes all observations."""
+        db = str(tmp_path / "decay_all.duckdb")
+        with connect(db, actor="metis") as g:
+            g.register_agent(values=["wisdom"])
+            n1 = g.create_node(label="Node1", node_type="concept")
+            n2 = g.create_node(label="Node2", node_type="concept")
+            g.observe(n1["id"], obs_type="measurement", value=0.7, baseline=0.5, sigma=0.1)
+            g.observe(n2["id"], obs_type="measurement", value=0.9, baseline=0.5, sigma=0.1)
+
+            results = g.decay_observations(temporal_decay_hours=168.0, dry_run=True)
+            assert len(results) >= 2
 
 class TestGraphImportExport:
     def test_export_contains_all_tables(self, tmp_path):
