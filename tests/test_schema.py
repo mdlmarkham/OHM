@@ -53,6 +53,48 @@ class TestSchemaValidation:
         assert validate_edge_type("L1", "CAUSES") is False
         assert validate_edge_type("L4", "CONTAINS") is False
 
+    # ── Multi-scenario edge types (OHM-af8.6) ──
+
+    def test_l2_new_edge_types(self):
+        """L2 edge types for multi-scenario support."""
+        l2_new = [
+            "BATCH_EXPIRES_BEFORE", "TRANSFERRED_TO",
+            "OPENED_BY", "STARTED_BY", "AWAITING",
+            "RESOLVED_BY", "CLOSED_BY",
+            "INVESTIGATED_BY", "CONTAINED_BY",
+            "ERADICATED_BY", "RECOVERED_BY",
+            "NEGOTIATES_WITH",
+        ]
+        for et in l2_new:
+            assert validate_edge_type("L2", et) is True, f"{et} should be valid in L2"
+
+    def test_l3_new_edge_types(self):
+        """L3 edge types for multi-scenario support."""
+        l3_new = [
+            "NEGATES", "EXPECTED_LIKELIHOOD",
+            "ESCALATED_TO", "DELEGATED_TO", "THREAT_CLUSTER",
+        ]
+        for et in l3_new:
+            assert validate_edge_type("L3", et) is True, f"{et} should be valid in L3"
+
+    def test_l4_new_edge_types(self):
+        """L4 edge types for multi-scenario support."""
+        l4_new = ["ORDERS_TEST", "TRIGGERS_INCIDENT"]
+        for et in l4_new:
+            assert validate_edge_type("L4", et) is True, f"{et} should be valid in L4"
+
+    def test_new_edge_types_wrong_layer(self):
+        """New edge types should not be valid in wrong layers."""
+        # L2 types should not work in L3
+        assert validate_edge_type("L3", "BATCH_EXPIRES_BEFORE") is False
+        assert validate_edge_type("L3", "TRANSFERRED_TO") is False
+        # L3 types should not work in L2
+        assert validate_edge_type("L2", "NEGATES") is False
+        assert validate_edge_type("L2", "ESCALATED_TO") is False
+        # L4 types should not work in L2
+        assert validate_edge_type("L2", "ORDERS_TEST") is False
+        assert validate_edge_type("L2", "TRIGGERS_INCIDENT") is False
+
     def test_valid_observation_types(self):
         assert "anomaly" in VALID_OBSERVATION_TYPES
         assert "measurement" in VALID_OBSERVATION_TYPES

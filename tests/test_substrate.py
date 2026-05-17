@@ -584,13 +584,13 @@ class TestCompositeScore:
         with connect(db, actor="metis") as g:
             g.register_agent(values=["wisdom"])
             node = g.create_node(label="Demand Node", node_type="concept")
-            # Observation: value=1.3 (hot day multiplier)
-            g.observe(node["id"], obs_type="measurement", value=1.3,
-                      baseline=1.0, sigma=0.1)
-            # Evidence: confidence=1.5 (Saturday multiplier)
+            # Observation: value=0.8
+            g.observe(node["id"], obs_type="measurement", value=0.8,
+                      baseline=0.5, sigma=0.1)
+            # Evidence: confidence=0.75
             source = g.create_node(label="Saturday", node_type="concept")
             g.create_edge(from_node=source["id"], to_node=node["id"],
-                          edge_type="PREDICTS", layer="L3", confidence=1.5)
+                          edge_type="PREDICTS", layer="L3", confidence=0.75)
 
             result = g.composite_score(
                 node["id"], method="geometric", baseline=1.0,
