@@ -455,6 +455,27 @@ class OhmHandler(BaseHTTPRequestHandler):
             threshold = float(qs.get("threshold", [0.1])[0])
             result = query_stale_edges(self.store.conn, stale_threshold=threshold)
             self._json_response(200, result)
+        elif path.startswith("/monte-carlo/"):
+            node_id = path[13:]
+            from .validation import validate_identifier
+            node_id = validate_identifier(node_id, name="node_id")
+            from .methods import monte_carlo_impact
+            sims = int(qs.get("simulations", [1000])[0])
+            depth = int(qs.get("depth", [3])[0])
+            result = monte_carlo_impact(self.store.conn, node_id, simulations=sims, depth=depth)
+            self._json_response(200, result)
+        elif path == "/duplicates":
+            from .methods import detect_near_duplicates
+            threshold = float(qs.get("similarity", [0.8])[0])
+            result = detect_near_duplicates(self.store.conn, similarity_threshold=threshold)
+            self._json_response(200, result)
+        elif path.startswith("/calibration/"):
+            agent_name = path[13:]
+            from .validation import validate_identifier
+            agent_name = validate_identifier(agent_name, name="agent_name")
+            from .methods import compute_confidence_calibration
+            result = compute_confidence_calibration(self.store.conn, agent_name)
+            self._json_response(200, result)
         else:
             self._json_response(404, {"error": f"Unknown endpoint: {path}"})
 

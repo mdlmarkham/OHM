@@ -409,3 +409,97 @@ class TestChangeFeedConsumer:
             ).fetchone()
             # last_sync should be updated (or at least not None)
             assert state_after[0] is not None
+
+
+# ===== Monte Carlo Simulation =====
+
+class TestMonteCarlo:
+    def test_cascade_propagation(self, tmp_path):
+        db = str(tmp_path / "mc.duckdb")
+        with connect(db, actor="metis") as g:
+            a = g.create_node(label="Root", node_type="concept")
+            b = g.create_node(label="Child1", node_type="concept")
+            c = g.create_node(label="Child2", node_type="concept")
+            g.create_edge(from_node=a["id"], to_node=b["id"], edge_type="CAUSES", layer="L3", confidence=0.95)
+            g.create_edge(from_node=b["id"], to_node=c["id"], edge_type="CAUSES", layer="L3", confidence=0.8)
+
+            result = g.monte_carlo(a["id"], simulations=1000, depth=3)
+            assert result["simulation_count"] == 1000
+            assert len(result["affected_nodes"]) >= 1
+            # Child1 should have high impact probability (0.95 confidence edge)
+            child1 = [n for n in result["affected_nodes"] if n["label"] == "Child1"]
+            assert len(child1) >= 1
+            assert child1[0]["impact_probability"] > 0.8
+
+    def test_no_downstream(self, tmp_path):
+        db = str(tmp_path / "mc_isolated.duckdb")
+        with connect(db, actor="metis") as g:
+            a = g.create_node(label="Isolated", node_type="concept")
+            result = g.monte_carlo(a["id"], simulations=100)
+            assert result["mean_affected"] == 0
+            assert result["affected_nodes"] == []
+
+
+# ===== Near Duplicate Detection =====
+
+class TestNearDuplicates:
+    def test_detects_similar_observations(self, tmp_path):
+        db = str(tmp_path / "dedup.duckdb")
+        with connect(db, actor="metis") as g:
+            g.register_agent(values=["wisdom"])
+            node = g.create_node(label="Hormuz traffic", node_type="concept")
+            g.observe(node["id"], obs_type="measurement", value=0.85, baseline=0.5, sigma=0.3)
+
+        with connect(db, actor="clio") as g:
+            g.register_agent(values=["source-coverage"])
+            node = g.find_or_create_node(label="Hormuz traffic", node_type="concept")
+            g.observe(node["id"], obs_type="measurement", value=0.87, baseline=0.5, sigma=0.3)
+
+        with connect(db, actor="metis") as g:
+            dups = g.near_duplicates(similarity_threshold=0.5)
+            assert len(dups) >= 1
+            assert dups[0]["similarity"] > 0.9
+
+    def test_no_duplicates_different_values(self, tmp_path):
+        db = str(tmp_path / "dedup_none.duckdb")
+        with connect(db, actor="metis") as g:
+            g.register_agent(values=["wisdom"])
+            node = g.create_node(label="test", node_type="concept")
+            g.observe(node["id"], obs_type="measurement", value=0.1, baseline=0.5, sigma=0.3)
+
+        with connect(db, actor="clio") as g:
+            g.register_agent(values=["source-coverage"])
+            node = g.find_or_create_node(label="test", node_type="concept")
+            g.observe(node["id"], obs_type="measurement", value=0.9, baseline=0.5, sigma=0.3)
+
+        with connect(db, actor="metis") as g:
+            dups = g.near_duplicates(similarity_threshold=0.8)
+            # 0.1 vs 0.9 = very different, should not match at 0.8 threshold
+            assert len(dups) == 0
+
+
+# ===== Confidence Calibration =====
+
+class TestConfidenceCalibration:
+    def test_calibration_score(self, tmp_path):
+        db = str(tmp_path / "cal.duckdb")
+        with connect(db, actor="metis") as g:
+            g.register_agent(values=["wisdom"])
+            a = g.create_node(label="A", node_type="concept")
+            b = g.create_node(label="B", node_type="concept")
+            c = g.create_node(label="C", node_type="concept")
+            g.create_edge(from_node=a["id"], to_node=b["id"], edge_type="CAUSES", layer="L3", confidence=0.9)
+            g.create_edge(from_node=b["id"], to_node=c["id"], edge_type="SUPPORTS", layer="L3", confidence=0.7)
+
+            result = g.calibration("metis")
+            assert result["agent_name"] == "metis"
+            assert result["total_l3_l4_edges"] >= 2
+            assert "calibration_by_band" in result
+            assert "calibration_score" in result
+
+    def test_calibration_unregistered(self, tmp_path):
+        db = str(tmp_path / "cal_empty.duckdb")
+        with connect(db, actor="unknown") as g:
+            result = g.calibration("unknown")
+            assert result["total_l3_l4_edges"] == 0
+            assert result["calibration_score"] is None

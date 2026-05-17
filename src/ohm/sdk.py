@@ -927,6 +927,88 @@ class Graph:
         """
         return self.listen()
 
+    # ── Substrate Computation ──────────────────────────────────────────
+
+    def monte_carlo(
+        self,
+        node_id: str,
+        *,
+        simulations: int = 1000,
+        depth: int = 3,
+        confidence_threshold: float = 0.5,
+    ) -> dict[str, Any]:
+        """Monte Carlo simulation of failure propagation from a node.
+
+        Randomly sample edge activation (on/off based on confidence) and
+        trace downstream impact. Runs N simulations and returns the
+        distribution of affected nodes.
+
+        Same result regardless of which agent calls it — substrate method.
+
+        Args:
+            node_id: Source node for impact simulation.
+            simulations: Number of Monte Carlo trials (default 1000).
+            depth: Maximum traversal depth (default 3).
+            confidence_threshold: Minimum confidence to consider edge active.
+
+        Returns:
+            Dict with affected_nodes, simulation_count, mean_affected, max_affected.
+        """
+        from ohm.methods import monte_carlo_impact
+
+        return monte_carlo_impact(
+            self._conn, node_id,
+            simulations=simulations, depth=depth,
+            confidence_threshold=confidence_threshold,
+        )
+
+    def near_duplicates(
+        self,
+        *,
+        similarity_threshold: float = 0.8,
+    ) -> list[dict[str, Any]]:
+        """Find observations that may be duplicates from different agents.
+
+        Two observations are near-duplicates if they're on the same node,
+        same type, values within 10% of each other, and created within
+        1 hour. The substrate flags these; agents decide whether to
+        deduplicate.
+
+        Same result regardless of which agent calls it — substrate method.
+
+        Args:
+            similarity_threshold: Minimum value similarity ratio (default 0.8).
+
+        Returns:
+            List of near-duplicate pairs with similarity scores.
+        """
+        from ohm.methods import detect_near_duplicates
+
+        return detect_near_duplicates(
+            self._conn, similarity_threshold=similarity_threshold,
+        )
+
+    def calibration(self, agent_name: str | None = None) -> dict[str, Any]:
+        """Track how well an agent's confidence ratings predict outcomes.
+
+        Calibration: do edges with high confidence actually hold up better?
+        Measures the ratio of challenged vs. unchallenged edges by
+        confidence band.
+
+        Same result regardless of which agent calls it — substrate method.
+
+        Args:
+            agent_name: Agent to evaluate. Defaults to current actor.
+
+        Returns:
+            Dict with calibration_by_band, calibration_score (0-1).
+        """
+        from ohm.methods import compute_confidence_calibration
+
+        return compute_confidence_calibration(
+            self._conn, agent_name or self.actor,
+        )
+
     def close(self) -> None:
         """Close the database connection."""
         self._conn.close()
