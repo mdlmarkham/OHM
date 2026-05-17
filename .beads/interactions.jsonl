@@ -102,3 +102,4 @@
 {"id":"int-0981d178","kind":"field_change","created_at":"2026-05-17T04:24:43.2710428Z","actor":"Matt Markham","issue_id":"OHM-3w1.3","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-a139700a","kind":"field_change","created_at":"2026-05-17T04:25:44.8592332Z","actor":"Matt Markham","issue_id":"OHM-xgm.2","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-b4e229d1","kind":"field_change","created_at":"2026-05-17T04:25:57.6561463Z","actor":"Matt Markham","issue_id":"OHM-3w1","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
+{"id":"int-52415e62","kind":"field_change","created_at":"2026-05-17T04:31:41.4776401Z","actor":"Matt Markham","issue_id":"OHM-xgm.4","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
