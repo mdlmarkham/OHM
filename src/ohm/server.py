@@ -394,6 +394,67 @@ class OhmHandler(BaseHTTPRequestHandler):
             sql, params = build_change_feed_query(since, agent_name=agent_name)
             results = self.store.execute(sql, params)
             self._json_response(200, results)
+        elif path == "/search":
+            query_text = qs.get("q", [""])[0]
+            node_type = qs.get("type", [None])[0]
+            limit = int(qs.get("limit", [20])[0])
+            if not query_text:
+                raise ValidationError("Search requires ?q=QUERY")
+            conditions = ["(label ILIKE ? OR content ILIKE ?)"]
+            params = [f"%{query_text}%", f"%{query_text}%"]
+            if node_type:
+                conditions.append("type = ?")
+                params.append(node_type)
+            params.append(limit)
+            # Column names hardcoded, values parameterized
+            sql = (
+                "SELECT * FROM ohm_nodes WHERE "
+                + " AND ".join(conditions)
+                + " ORDER BY created_at DESC LIMIT ?"
+            )
+            results = self.store.execute(sql, params)
+            self._json_response(200, results)
+        elif path == "/health/graph":
+            from .queries import query_graph_health
+            result = query_graph_health(self.store.conn)
+            self._json_response(200, result)
+        elif path == "/health/agents":
+            from .methods import query_agent_health
+            result = query_agent_health(self.store.conn)
+            self._json_response(200, result)
+        elif path == "/contradictions":
+            from .methods import detect_contradictions
+            conf_thresh = float(qs.get("confidence", [0.5])[0])
+            result = detect_contradictions(self.store.conn, confidence_threshold=conf_thresh)
+            self._json_response(200, result)
+        elif path == "/anomalies":
+            from .methods import detect_anomalies
+            sigma = float(qs.get("sigma", [2.0])[0])
+            layer = qs.get("layer", [None])[0]
+            limit = int(qs.get("limit", [50])[0])
+            result = detect_anomalies(self.store.conn, sigma_threshold=sigma, layer=layer, limit=limit)
+            self._json_response(200, result)
+        elif path.startswith("/aggregate/"):
+            node_id = path[11:]
+            from .validation import validate_identifier
+            node_id = validate_identifier(node_id, name="node_id")
+            method = qs.get("method", ["weighted"])[0]
+            from .methods import aggregate_observations
+            result = aggregate_observations(self.store.conn, node_id, method=method)
+            self._json_response(200, result)
+        elif path.startswith("/provenance/"):
+            node_id = path[12:]
+            from .validation import validate_identifier
+            node_id = validate_identifier(node_id, name="node_id")
+            max_depth = int(qs.get("depth", [10])[0])
+            from .queries import query_provenance
+            result = query_provenance(self.store.conn, node_id, max_depth=max_depth)
+            self._json_response(200, result)
+        elif path == "/stale":
+            from .queries import query_stale_edges
+            threshold = float(qs.get("threshold", [0.1])[0])
+            result = query_stale_edges(self.store.conn, stale_threshold=threshold)
+            self._json_response(200, result)
         else:
             self._json_response(404, {"error": f"Unknown endpoint: {path}"})
 
@@ -491,6 +552,114 @@ class OhmHandler(BaseHTTPRequestHandler):
                 active_patterns=body.get("patterns"),
                 available_services=body.get("services"),
                 session_id=body.get("session_id"),
+            )
+            self._json_response(200, result)
+
+        elif path == "/register":
+            # Agent registration — creates agent node + VALUES/GOALS/CAPABLE_OF/INTERESTED_IN/LISTENS_TO edges
+            from .queries import create_node, batch_create_nodes, batch_create_edges
+            from .schema import generate_node_id
+
+            agent_label = body.get("name", agent)
+            me = create_node(
+                self.store.conn,
+                label=agent_label,
+                node_type="agent",
+                content=body.get("description"),
+                created_by=agent,
+            )
+
+            created_edges = []
+            for v in body.get("values", []):
+                value_node = create_node(
+                    self.store.conn, label=v, node_type="value", created_by=agent,
+                )
+                edge_result = self.store.conn.execute(
+                    "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = 'VALUES' AND created_by = ?",
+                    [me["id"], value_node["id"], agent],
+                ).fetchone()
+                if not edge_result:
+                    edge = create_edge(
+                        self.store.conn, from_node=me["id"], to_node=value_node["id"],
+                        edge_type="VALUES", layer="L1", created_by=agent, confidence=1.0,
+                        provenance="self_declaration",
+                    )
+                    created_edges.append(edge)
+
+            for g in body.get("goals", []):
+                goal_node = create_node(
+                    self.store.conn, label=g, node_type="goal", created_by=agent,
+                )
+                edge_result = self.store.conn.execute(
+                    "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = 'GOALS' AND created_by = ?",
+                    [me["id"], goal_node["id"], agent],
+                ).fetchone()
+                if not edge_result:
+                    edge = create_edge(
+                        self.store.conn, from_node=me["id"], to_node=goal_node["id"],
+                        edge_type="GOALS", layer="L1", created_by=agent, confidence=1.0,
+                        provenance="self_declaration",
+                    )
+                    created_edges.append(edge)
+
+            for c in body.get("capabilities", []):
+                cap_node = create_node(
+                    self.store.conn, label=c, node_type="skill", created_by=agent,
+                )
+                edge_result = self.store.conn.execute(
+                    "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = 'CAPABLE_OF' AND created_by = ?",
+                    [me["id"], cap_node["id"], agent],
+                ).fetchone()
+                if not edge_result:
+                    edge = create_edge(
+                        self.store.conn, from_node=me["id"], to_node=cap_node["id"],
+                        edge_type="CAPABLE_OF", layer="L1", created_by=agent, confidence=1.0,
+                        provenance="self_declaration",
+                    )
+                    created_edges.append(edge)
+
+            for i in body.get("interests", []):
+                topic_node = create_node(
+                    self.store.conn, label=i, node_type="topic", created_by=agent,
+                )
+                edge_result = self.store.conn.execute(
+                    "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = 'INTERESTED_IN' AND created_by = ?",
+                    [me["id"], topic_node["id"], agent],
+                ).fetchone()
+                if not edge_result:
+                    edge = create_edge(
+                        self.store.conn, from_node=me["id"], to_node=topic_node["id"],
+                        edge_type="INTERESTED_IN", layer="L1", created_by=agent, confidence=1.0,
+                        provenance="self_declaration",
+                    )
+                    created_edges.append(edge)
+
+            for a in body.get("listens_to", []):
+                other = create_node(
+                    self.store.conn, label=a, node_type="agent", created_by=agent,
+                )
+                edge_result = self.store.conn.execute(
+                    "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = 'LISTENS_TO' AND created_by = ?",
+                    [me["id"], other["id"], agent],
+                ).fetchone()
+                if not edge_result:
+                    edge = create_edge(
+                        self.store.conn, from_node=me["id"], to_node=other["id"],
+                        edge_type="LISTENS_TO", layer="L3", created_by=agent, confidence=0.7,
+                        provenance="self_declaration",
+                    )
+                    created_edges.append(edge)
+
+            self._json_response(201, {
+                "agent": me,
+                "edges_created": len(created_edges),
+            })
+
+        elif path == "/heartbeat":
+            from .methods import agent_heartbeat
+            result = agent_heartbeat(
+                self.store.conn, agent,
+                focus=body.get("focus"),
             )
             self._json_response(200, result)
 
