@@ -160,3 +160,48 @@ class TestCLIIntegration:
         ])
         assert code == 0
         assert "Schema version" in out
+
+    def test_diff_empty_db(self):
+        """Test that ohm diff on an empty DB returns zero changes."""
+        code, out, err = _run_cli([
+            "--db", ":memory:", "diff",
+            "2020-01-01T00:00:00", "2030-01-01T00:00:00",
+        ])
+        assert code == 0
+        assert "Total changes" in out
+
+    def test_diff_with_data(self):
+        """Test that ohm diff detects changes after writes."""
+        db_path = os.path.join(tempfile.gettempdir(), "ohm_test_diff.db")
+        try:
+            # Write some data
+            c1, o1, _ = _run_cli([
+                "--db", db_path, "--actor", "test",
+                "graph", "write",
+                "--from", "diff_a", "--to", "diff_b",
+                "--type", "CAUSES", "--layer", "L3",
+            ])
+            assert c1 == 0
+
+            # Diff should find the changes
+            c2, o2, _ = _run_cli([
+                "--db", db_path, "diff",
+                "2020-01-01T00:00:00", "2030-01-01T00:00:00",
+            ])
+            assert c2 == 0
+            assert "Total changes" in o2
+        finally:
+            if os.path.exists(db_path):
+                os.unlink(db_path)
+
+    def test_diff_json_format(self):
+        """Test that ohm diff --format json returns valid JSON."""
+        code, out, err = _run_cli([
+            "--db", ":memory:", "--format", "json", "diff",
+            "2020-01-01T00:00:00", "2030-01-01T00:00:00",
+        ])
+        assert code == 0
+        data = json.loads(out)
+        assert "summary" in data
+        assert "from" in data
+        assert "to" in data

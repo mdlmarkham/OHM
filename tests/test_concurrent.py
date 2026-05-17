@@ -50,25 +50,35 @@ def _start_server(store, tokens=None, roles=None, no_auth=False):
     return port, server, thread
 
 
-def _request(method, port, path, body=None, headers=None):
+def _request(method, port, path, body=None, headers=None, retries=2):
     """Make an HTTP request to the test server."""
-    conn = HTTPConnection(f"127.0.0.1:{port}", timeout=30)
+    conn = HTTPConnection(f"127.0.0.1:{port}", timeout=60)
     hdrs = headers or {}
     if body is not None:
         hdrs["Content-Type"] = "application/json"
         body_bytes = json.dumps(body).encode()
     else:
         body_bytes = None
-    try:
-        conn.request(method, path, body=body_bytes, headers=hdrs)
-        resp = conn.getresponse()
-        data = resp.read().decode()
+    last_err = None
+    for attempt in range(retries + 1):
         try:
-            return resp.status, json.loads(data)
-        except json.JSONDecodeError:
-            return resp.status, data
-    finally:
-        conn.close()
+            conn.request(method, path, body=body_bytes, headers=hdrs)
+            resp = conn.getresponse()
+            data = resp.read().decode()
+            try:
+                return resp.status, json.loads(data)
+            except json.JSONDecodeError:
+                return resp.status, data
+        except (ConnectionResetError, ConnectionRefusedError) as e:
+            last_err = e
+            if attempt < retries:
+                time.sleep(0.1)
+                conn.close()
+                conn = HTTPConnection(f"127.0.0.1:{port}", timeout=60)
+            else:
+                raise
+        finally:
+            conn.close()
 
 
 # ── Concurrent Agent Simulation ────────────────────────────

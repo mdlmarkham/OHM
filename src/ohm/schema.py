@@ -14,6 +14,11 @@ Layer model (L1-L4):
     L3: Knowledge — Agent-owned, challengeable
     L4: Prospect — Agent-owned, visible
     Private: Agent-only, not shared
+
+Schema customization:
+    Use SchemaConfig to create domain-specific configurations (e.g., TOPO
+    for industrial knowledge graphs). The default config provides the base
+    OHM schema; domain configs extend or override it.
 """
 
 from __future__ import annotations
@@ -69,6 +74,154 @@ VALID_OBSERVATION_TYPES = frozenset({
 VALID_OBSERVATION_SOURCES = frozenset({
     "signal", "research", "conversation", "analysis",
 })
+
+# ── Layer Descriptions ──────────────────────────────────────────────────────
+
+LAYER_DESCRIPTIONS: dict[str, str] = {
+    "L1": "Structure — Fully shared, all agents read/write",
+    "L2": "Flow — Shared with attribution",
+    "L3": "Knowledge — Agent-owned, challengeable",
+    "L4": "Prospect — Agent-owned, visible",
+}
+
+# ── Schema Configuration ────────────────────────────────────────────────────
+
+
+class SchemaConfig:
+    """Configurable schema for domain-specific knowledge graphs.
+
+    OHM and TOPO share the same engine but with different node types,
+    edge types, and layer descriptions. SchemaConfig allows creating
+    domain-specific configurations that extend or override the defaults.
+
+    Usage:
+        # Default OHM schema
+        config = SchemaConfig()
+
+        # TOPO (industrial) schema
+        topo = SchemaConfig.topo()
+
+        # Custom schema
+        custom = SchemaConfig(
+            name="my-domain",
+            node_types=VALID_NODE_TYPES | {"custom_type"},
+            layer_edge_types={**LAYER_EDGE_TYPES, "L5": frozenset({"CUSTOM_EDGE"})},
+            layer_descriptions={**LAYER_DESCRIPTIONS, "L5": "Custom layer"},
+        )
+    """
+
+    def __init__(
+        self,
+        name: str = "ohm",
+        node_types: frozenset[str] | None = None,
+        edge_types_by_layer: dict[str, frozenset[str]] | None = None,
+        layer_descriptions: dict[str, str] | None = None,
+        observation_types: frozenset[str] | None = None,
+        observation_sources: frozenset[str] | None = None,
+        visibilities: frozenset[str] | None = None,
+        provenances: frozenset[str] | None = None,
+    ):
+        self.name = name
+        self.node_types = node_types if node_types is not None else VALID_NODE_TYPES
+        self.layer_edge_types = edge_types_by_layer if edge_types_by_layer is not None else dict(LAYER_EDGE_TYPES)
+        self.layer_descriptions = layer_descriptions if layer_descriptions is not None else dict(LAYER_DESCRIPTIONS)
+        self.observation_types = observation_types if observation_types is not None else VALID_OBSERVATION_TYPES
+        self.observation_sources = observation_sources if observation_sources is not None else VALID_OBSERVATION_SOURCES
+        self.visibilities = visibilities if visibilities is not None else VALID_VISIBILITIES
+        self.provenances = provenances if provenances is not None else VALID_PROVENANCES
+
+    @property
+    def all_edge_types(self) -> frozenset[str]:
+        """All edge types across all layers."""
+        return frozenset().union(*self.layer_edge_types.values())
+
+    @property
+    def valid_layers(self) -> frozenset[str]:
+        """All valid layer identifiers."""
+        return frozenset(self.layer_edge_types.keys())
+
+    def validate_node_type(self, node_type: str) -> bool:
+        """Check that *node_type* is valid for this schema."""
+        return node_type in self.node_types
+
+    def validate_edge_type(self, layer: str, edge_type: str) -> bool:
+        """Check that *edge_type* is valid for the given *layer*."""
+        allowed = self.layer_edge_types.get(layer)
+        if allowed is None:
+            return False
+        return edge_type in allowed
+
+    def validate_layer(self, layer: str) -> bool:
+        """Check that *layer* is a valid layer identifier."""
+        return layer in self.layer_edge_types
+
+    @classmethod
+    def topo(cls) -> "SchemaConfig":
+        """Create a TOPO (industrial knowledge graph) schema configuration.
+
+        Extends the base OHM schema with industrial-specific types:
+        - Additional node types: equipment, system, area, site (already in base)
+        - Additional edge types: FEEDS, FLOWS_TO, DEPENDS_ON (already in base)
+        - Custom layer descriptions for industrial context
+        - Additional observation types for industrial monitoring
+        """
+        topo_node_types = VALID_NODE_TYPES | frozenset({
+            "process", "instrument", "controller", "valve", "pump",
+            "motor", "sensor", "pipeline", "vessel", "reactor",
+            "heat_exchanger", "tank", "compressor", "generator",
+            "transformer", "circuit", "bus", "line",
+        })
+
+        topo_layer_descriptions = {
+            "L1": "Structure — Physical hierarchy (site → area → system → equipment)",
+            "L2": "Flow — Process flows, material/energy/information paths",
+            "L3": "Knowledge — Operational insights, failure modes, best practices",
+            "L4": "Prospect — Predictive maintenance, risk assessments, what-if scenarios",
+        }
+
+        topo_observation_types = VALID_OBSERVATION_TYPES | frozenset({
+            "vibration", "temperature", "pressure", "flow_rate",
+            "voltage", "current", "rpm", "level",
+        })
+
+        topo_observation_sources = VALID_OBSERVATION_SOURCES | frozenset({
+            "scada", "dcs", "historian", "maintenance_log",
+        })
+
+        topo_provenances = VALID_PROVENANCES | frozenset({
+            "inspection", "monitoring", "audit", "simulation",
+        })
+
+        return cls(
+            name="topo",
+            node_types=topo_node_types,
+            layer_descriptions=topo_layer_descriptions,
+            observation_types=topo_observation_types,
+            observation_sources=topo_observation_sources,
+            provenances=topo_provenances,
+        )
+
+    def to_dict(self) -> dict:
+        """Serialize the schema configuration to a dictionary."""
+        return {
+            "name": self.name,
+            "node_types": sorted(self.node_types),
+            "layer_edge_types": {
+                layer: sorted(types) for layer, types in self.layer_edge_types.items()
+            },
+            "layer_descriptions": self.layer_descriptions,
+            "observation_types": sorted(self.observation_types),
+            "observation_sources": sorted(self.observation_sources),
+            "visibilities": sorted(self.visibilities),
+            "provenances": sorted(self.provenances),
+        }
+
+
+# Default OHM schema config instance
+DEFAULT_SCHEMA = SchemaConfig()
+
+# TOPO (industrial) schema config instance
+TOPO_SCHEMA = SchemaConfig.topo()
 
 # ── DDL Statements ──────────────────────────────────────────────────────────
 
@@ -386,9 +539,3 @@ SCHEMA_SQL = "\n".join(DDL_STATEMENTS + INDEX_DDL)
 # Compatibility exports for server.py
 EDGE_TYPES = {k: list(v) for k, v in LAYER_EDGE_TYPES.items()}
 NODE_TYPES = sorted(VALID_NODE_TYPES)
-LAYER_DESCRIPTIONS = {
-    "L1": "Structure — Fully shared, all agents read/write",
-    "L2": "Flow — Shared with attribution",
-    "L3": "Knowledge — Agent-owned, challengeable",
-    "L4": "Prospect — Agent-owned, visible",
-}
