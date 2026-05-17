@@ -43,6 +43,18 @@ class TestOhmStore:
         assert node["label"] == "Test Node"
         assert node["created_by"] == "test_agent"
 
+    def test_write_node_with_agent_name_override(self, store):
+        """OHM-y2i.19: write_node should accept agent_name parameter."""
+        node = store.write_node("override_node", "Override", "concept", agent_name="metis")
+        assert node["created_by"] == "metis"
+
+    def test_write_node_upsert_with_different_agent(self, store):
+        """OHM-y2i.19: upsert should update updated_by to the new agent."""
+        store.write_node("test", "Original", "concept")
+        node = store.write_node("test", "Updated", "concept", agent_name="socrates")
+        assert node["label"] == "Updated"
+        assert node["updated_by"] == "socrates"
+
     def test_write_node_upsert(self, store):
         store.write_node("test", "Original", "concept")
         node = store.write_node("test", "Updated", "concept")
@@ -54,6 +66,13 @@ class TestOhmStore:
         assert len(edges) == 1
         assert edges[0]["created_by"] == "test_agent"
         assert edges[0]["layer"] == "L3"
+
+    def test_write_edge_with_agent_name_override(self, populated_store):
+        """OHM-y2i.19: write_edge should accept agent_name parameter."""
+        edge = populated_store.write_edge(
+            "and_or", "hungary", "EXPLAINS", "L3", confidence=0.8, agent_name="metis"
+        )
+        assert edge["created_by"] == "metis"
 
     def test_challenge_edge(self, populated_store):
         # Get the CAUSES edge
@@ -76,6 +95,17 @@ class TestOhmStore:
         original = populated_store.get_edge(edge["id"])
         assert abs(original["confidence"] - 0.94) < 0.001
 
+    def test_challenge_edge_with_agent_name_override(self, populated_store):
+        """OHM-y2i.19: challenge_edge should accept agent_name parameter."""
+        edge = populated_store.execute_one(
+            "SELECT * FROM ohm_edges WHERE edge_type = 'CAUSES'"
+        )
+        challenge = populated_store.challenge_edge(
+            edge["id"], "doubtful", 0.3, "CHALLENGED_BY", agent_name="metis"
+        )
+        assert challenge is not None
+        assert challenge["created_by"] == "metis"
+
     def test_update_edge_confidence_owner_only(self, populated_store):
         edge = populated_store.execute_one(
             "SELECT * FROM ohm_edges WHERE edge_type = 'CAUSES'"
@@ -90,6 +120,23 @@ class TestOhmStore:
         with pytest.raises(PermissionError):
             populated_store.update_edge_confidence(edge["id"], 0.5)
 
+    def test_update_edge_confidence_with_agent_name_override(self, populated_store):
+        """OHM-y2i.19: update_edge_confidence should accept agent_name parameter."""
+        edge = populated_store.execute_one(
+            "SELECT * FROM ohm_edges WHERE edge_type = 'CAUSES'"
+        )
+        # Owner can update using agent_name parameter
+        result = populated_store.update_edge_confidence(
+            edge["id"], 0.97, agent_name="test_agent"
+        )
+        assert abs(result["confidence"] - 0.97) < 0.001
+
+        # Non-owner cannot update even with agent_name parameter
+        with pytest.raises(PermissionError):
+            populated_store.update_edge_confidence(
+                edge["id"], 0.5, agent_name="socrates"
+            )
+
     def test_write_observation(self, populated_store):
         obs = populated_store.write_observation(
             "hungary", "measurement", value=0.85, baseline=0.5, sigma=3.5, source="research"
@@ -97,6 +144,13 @@ class TestOhmStore:
         assert obs["node_id"] == "hungary"
         assert obs["type"] == "measurement"
         assert abs(obs["value"] - 0.85) < 0.001
+
+    def test_write_observation_with_agent_name_override(self, populated_store):
+        """OHM-y2i.19: write_observation should accept agent_name parameter."""
+        obs = populated_store.write_observation(
+            "hungary", "measurement", value=0.9, agent_name="metis"
+        )
+        assert obs["created_by"] == "metis"
 
     def test_agent_state(self, store):
         state = store.update_agent_state(
@@ -106,6 +160,15 @@ class TestOhmStore:
         )
         assert state["agent_name"] == "test_agent"
         assert state["current_focus"] == "Testing agent state"
+
+    def test_agent_state_with_agent_name_override(self, store):
+        """OHM-y2i.19: update_agent_state should accept agent_name parameter."""
+        state = store.update_agent_state(
+            current_focus="Socrates focus",
+            agent_name="socrates",
+        )
+        assert state["agent_name"] == "socrates"
+        assert state["current_focus"] == "Socrates focus"
 
     def test_who_is_working_on(self, store):
         store.update_agent_state(

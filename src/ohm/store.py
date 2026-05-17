@@ -133,13 +133,18 @@ class OhmStore:
         provenance: Optional[str] = None,
         tags: Optional[list[str]] = None,
         metadata: Optional[dict] = None,
+        agent_name: Optional[str] = None,
     ) -> dict[str, Any]:
-        """Create or update a node. Attributed to the current agent.
+        """Create or update a node. Attributed to the given agent.
+
+        Args:
+            agent_name: Agent to attribute the write to. Defaults to self.agent_name.
 
         Returns a dict with the node record and a 'created' key
         indicating whether this was a new creation (True) or an
         update of an existing node (False).
         """
+        actor = agent_name or self.agent_name
         metadata_json = json.dumps(metadata) if metadata else None
         tag_list = tags if tags else []
         tags_json = json.dumps(tag_list) if tag_list else None
@@ -157,7 +162,7 @@ class OhmStore:
                 WHERE id = ?
                 """,
                 [label, type, content, confidence, visibility, provenance,
-                 tags_json, metadata_json, now, self.agent_name, id],
+                 tags_json, metadata_json, now, actor, id],
             )
             self._log_change("ohm_nodes", id, "UPDATE", None)
             result = self.get_node(id) or {}
@@ -170,7 +175,7 @@ class OhmStore:
                                        visibility, provenance, tags, metadata, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                [id, label, type, content, self.agent_name, confidence,
+                [id, label, type, content, actor, confidence,
                  visibility, provenance, tags_json, metadata_json, now, now],
             )
             self._log_change("ohm_nodes", id, "INSERT", None)
@@ -189,14 +194,19 @@ class OhmStore:
         provenance: Optional[str] = None,
         challenge_of: Optional[str] = None,
         challenge_type: Optional[str] = None,
+        agent_name: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
-        """Create an edge. Attributed to the current agent.
+        """Create an edge. Attributed to the given agent.
+
+        Args:
+            agent_name: Agent to attribute the write to. Defaults to self.agent_name.
 
         Enforces boundary rules:
         - L1/L2: any agent can write
         - L3/L4: creates with attribution, cannot overwrite
         - Challenge edges: create separate, don't modify
         """
+        actor = agent_name or self.agent_name
         now = self._now()
         self.conn.execute(
             """
@@ -206,13 +216,13 @@ class OhmStore:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [from_node, to_node, layer, edge_type, confidence, condition,
-             provenance, self.agent_name, challenge_of, challenge_type, now, now],
+             provenance, actor, challenge_of, challenge_type, now, now],
         )
 
         edge = self.execute_one(
             "SELECT * FROM ohm_edges WHERE from_node = ? AND to_node = ? "
             "AND edge_type = ? AND created_by = ? ORDER BY created_at DESC LIMIT 1",
-            [from_node, to_node, edge_type, self.agent_name],
+            [from_node, to_node, edge_type, actor],
         )
 
         if edge:
@@ -225,12 +235,17 @@ class OhmStore:
         reason: str,
         confidence: float,
         challenge_type: str = "CHALLENGED_BY",
+        agent_name: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
         """Challenge an existing edge. Creates a new edge referencing the original.
+
+        Args:
+            agent_name: Agent to attribute the challenge to. Defaults to self.agent_name.
 
         Boundary rule: cannot modify the original edge — only create a challenge.
         Enforces that only L3/L4 edges can be challenged (via enforce_challenge_boundary).
         """
+        actor = agent_name or self.agent_name
         from .boundary import enforce_challenge_boundary
 
         original = self.get_edge(edge_id)
@@ -238,7 +253,7 @@ class OhmStore:
             return None
 
         # Enforce boundary: only L3/L4 edges can be challenged
-        enforce_challenge_boundary(self.conn, self.agent_name, edge_id)
+        enforce_challenge_boundary(self.conn, actor, edge_id)
 
         return self.write_edge(
             from_node=original["to_node"],
@@ -249,6 +264,7 @@ class OhmStore:
             provenance=reason,
             challenge_of=edge_id,
             challenge_type=challenge_type,
+            agent_name=actor,
         )
 
     def update_edge_confidence(
@@ -256,26 +272,31 @@ class OhmStore:
         edge_id: str,
         new_confidence: float,
         reason: Optional[str] = None,
+        agent_name: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
-        """Update confidence on an edge owned by the current agent.
+        """Update confidence on an edge owned by the given agent.
+
+        Args:
+            agent_name: Agent performing the update. Defaults to self.agent_name.
 
         Boundary rule: only the owning agent can update their own edges.
         """
+        actor = agent_name or self.agent_name
         edge = self.get_edge(edge_id)
         if not edge:
             return None
 
         # Enforce ownership
-        if edge["created_by"] != self.agent_name:
+        if edge["created_by"] != actor:
             raise PermissionError(
-                f"Cannot update edge {edge_id}: owned by {edge['created_by']}, not {self.agent_name}. "
+                f"Cannot update edge {edge_id}: owned by {edge['created_by']}, not {actor}. "
                 f"Use challenge_edge instead."
             )
 
         now = self._now()
         self.conn.execute(
             "UPDATE ohm_edges SET confidence = ?, updated_at = ?, updated_by = ? WHERE id = ?",
-            [new_confidence, now, self.agent_name, edge_id],
+            [new_confidence, now, actor, edge_id],
         )
 
         self._log_change("ohm_edges", edge_id, "UPDATE", edge["layer"])
@@ -290,8 +311,14 @@ class OhmStore:
         sigma: Optional[float] = None,
         source: Optional[str] = None,
         edge_id: Optional[str] = None,
+        agent_name: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
-        """Create an observation. Attributed to the current agent."""
+        """Create an observation. Attributed to the given agent.
+
+        Args:
+            agent_name: Agent to attribute the observation to. Defaults to self.agent_name.
+        """
+        actor = agent_name or self.agent_name
         now = self._now()
         self.conn.execute(
             """
@@ -299,12 +326,12 @@ class OhmStore:
                 (node_id, edge_id, type, value, baseline, sigma, source, created_by, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            [node_id, edge_id, type, value, baseline, sigma, source, self.agent_name, now],
+            [node_id, edge_id, type, value, baseline, sigma, source, actor, now],
         )
 
         obs = self.execute_one(
             "SELECT * FROM ohm_observations WHERE node_id = ? AND created_by = ? ORDER BY created_at DESC LIMIT 1",
-            [node_id, self.agent_name],
+            [node_id, actor],
         )
         if obs:
             self._log_change("ohm_observations", obs["id"], "INSERT", None)
@@ -316,14 +343,20 @@ class OhmStore:
         active_patterns: Optional[list[str]] = None,
         available_services: Optional[list[str]] = None,
         session_id: Optional[str] = None,
+        agent_name: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
-        """Update the current agent's state in the hive mind awareness layer."""
+        """Update the given agent's state in the hive mind awareness layer.
+
+        Args:
+            agent_name: Agent whose state to update. Defaults to self.agent_name.
+        """
+        actor = agent_name or self.agent_name
         patterns_json = json.dumps(active_patterns or [])
         services_json = json.dumps(available_services or [])
         now = self._now()
 
         # Check if agent state exists
-        existing = self.get_agent_state(self.agent_name)
+        existing = self.get_agent_state(actor)
         if existing:
             self.conn.execute(
                 """
@@ -332,7 +365,7 @@ class OhmStore:
                     current_session_id = ?, last_sync = ?, updated_at = ?
                 WHERE agent_name = ?
                 """,
-                [current_focus, patterns_json, services_json, session_id, now, now, self.agent_name],
+                [current_focus, patterns_json, services_json, session_id, now, now, actor],
             )
         else:
             self.conn.execute(
@@ -342,10 +375,10 @@ class OhmStore:
                                                current_session_id, last_sync, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                [self.agent_name, current_focus, patterns_json, 0.7, services_json, session_id, now, now],
+                [actor, current_focus, patterns_json, 0.7, services_json, session_id, now, now],
             )
 
-        return self.get_agent_state(self.agent_name)
+        return self.get_agent_state(actor)
 
     def get_node(self, node_id: str) -> Optional[dict[str, Any]]:
         """Get a node by ID."""

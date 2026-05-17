@@ -181,3 +181,97 @@ class TestSocratesIntegration:
         assert "insufficient_evidence" in SocratesIntegration.CHALLENGE_CATEGORIES
         assert "scope_too_narrow" in SocratesIntegration.CHALLENGE_CATEGORIES
         assert "alternative_explanation" in SocratesIntegration.CHALLENGE_CATEGORIES
+
+
+class TestAgentWorkflowE2E:
+    """End-to-end agent workflow: Métis → Clio → Socrates → Hephaestus."""
+
+    def test_full_agent_workflow(self, graph):
+        """Simulate the complete agent collaboration cycle.
+
+        1. Métis creates zettelkasten notes with wikilinks
+        2. Clio researches and publishes findings as L3 edges
+        3. Socrates challenges a low-confidence finding
+        4. Hephaestus audits the code and reports observations
+        """
+        # ── Phase 1: Métis creates notes ──────────────────────────────
+        metis = MetisIntegration(graph, source="conversation")
+        metis.sync_note(
+            note_id="note-democracy",
+            title="Democratic Backsliding Patterns",
+            content="Research on AND→OR conversion in constitutional amendments.",
+            tags=["democracy", "constitution"],
+            wikilinks=["note-hungary", "note-poland"],
+        )
+        metis.sync_note(
+            note_id="note-hungary",
+            title="Hungary Case Study",
+            content="Fidesz used Article 21(2) to amend constitution.",
+            tags=["hungary", "case-study"],
+        )
+
+        # Verify Métis created nodes and edges
+        nodes = graph.search_nodes("Democratic")
+        assert len(nodes) >= 1
+        edges = graph.search_edges(edge_type="DERIVES_FROM", layer="L2")
+        assert len(edges) >= 1
+
+        # ── Phase 2: Clio researches ──────────────────────────────────
+        clio = ClioIntegration(graph)
+        clio.add_source("src-constitution", "Hungarian Constitution Art. 21(2)")
+        finding = clio.add_finding(
+            "src-constitution", "note-democracy",
+            edge_type="CAUSES",
+            confidence=0.85,
+            condition="when supermajority controls parliament",
+        )
+        assert finding["edge_type"] == "CAUSES"
+        assert finding["provenance"] == "research"
+
+        # Clio publishes a synthesis
+        synthesis = clio.publish_synthesis(
+            "AND→OR Conversion Mechanism",
+            "Supermajority amendments enable democratic backsliding via...",
+            supporting_edge_ids=[finding["id"]],
+        )
+        assert synthesis["type"] == "concept"
+
+        # ── Phase 3: Socrates challenges ──────────────────────────────
+        socrates = SocratesIntegration(graph)
+        challenge = socrates.challenge(
+            finding["id"],
+            reason="Scope too narrow — only covers parliamentary systems.",
+            category="scope_too_narrow",
+            confidence=0.4,
+        )
+        assert challenge["edge_type"] == "CHALLENGED_BY"
+        assert "scope_too_narrow" in challenge["condition"]
+
+        # Verify the original edge is preserved (ADR-003)
+        original = graph.get_edge(finding["id"])
+        assert original is not None
+        assert original["edge_type"] == "CAUSES"
+
+        # ── Phase 4: Hephaestus audits ────────────────────────────────
+        heph = HephaestusIntegration(graph)
+        entity = heph.register_entity("code-analyzer", "Constitutional Analysis Module")
+        obs = heph.report_finding(
+            entity["id"],
+            "vulnerability",
+            value=7.5,
+            sigma=1.5,
+            description="Missing validation for amendment threshold calculations",
+        )
+        assert obs["type"] == "vulnerability"
+        assert obs["value"] == pytest.approx(7.5)
+
+        # Link audit finding to code
+        code_node = graph.create_node(label="analyzer.py", node_type="source")
+        edge = heph.link_to_code(entity["id"], code_node["id"])
+        assert edge["edge_type"] == "REFERENCES"
+
+        # ── Final verification ────────────────────────────────────────
+        stats = graph.stats()
+        assert stats["total_nodes"] >= 8  # All nodes created across phases
+        assert stats["total_edges"] >= 5  # DERIVES_FROM + CAUSES + CHALLENGED_BY + REFERENCES + SUPPORTS
+        assert stats["total_observations"] >= 1

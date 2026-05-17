@@ -56,6 +56,20 @@ RATE_LIMIT_MAX_REQUESTS = 1000  # per window per IP
 # Simple in-memory rate limiter: {ip: [(timestamp, ...)]}
 _rate_limit_store: dict[str, list[float]] = {}
 
+# ── Metrics ────────────────────────────────────────────────
+
+# Simple in-memory metrics collector
+_metrics: dict[str, int] = {
+    "requests_total": 0,
+    "requests_get": 0,
+    "requests_post": 0,
+    "errors_4xx": 0,
+    "errors_5xx": 0,
+    "rate_limited": 0,
+}
+_request_latencies: list[float] = []  # last 1000 latencies in ms
+_MAX_LATENCY_SAMPLES = 1000
+
 # ── Webhook Registry ──────────────────────────────────────
 
 # In-memory registry: {agent_name: {"url": str, "events": list[str]}}
@@ -479,8 +493,11 @@ class OhmHandler(BaseHTTPRequestHandler):
         """Handle GET requests with error mapping and correlation IDs."""
         self._correlation_id = str(uuid.uuid4())
         start = time.time()
+        _metrics["requests_total"] += 1
+        _metrics["requests_get"] += 1
         try:
             if not self._check_rate_limit():
+                _metrics["rate_limited"] += 1
                 self._json_response(429, {
                     "error": "rate_limited",
                     "message": "Too many requests. Try again later.",
@@ -495,6 +512,13 @@ class OhmHandler(BaseHTTPRequestHandler):
         finally:
             elapsed = (time.time() - start) * 1000
             code = getattr(self, "_response_code", 0)
+            if 400 <= code < 500:
+                _metrics["errors_4xx"] += 1
+            elif code >= 500:
+                _metrics["errors_5xx"] += 1
+            _request_latencies.append(elapsed)
+            if len(_request_latencies) > _MAX_LATENCY_SAMPLES:
+                _request_latencies.pop(0)
             self.log_message(
                 "GET %s → %s (%.1fms)", self.path, code, elapsed,
             )
@@ -503,8 +527,11 @@ class OhmHandler(BaseHTTPRequestHandler):
         """Handle POST requests with error mapping and correlation IDs."""
         self._correlation_id = str(uuid.uuid4())
         start = time.time()
+        _metrics["requests_total"] += 1
+        _metrics["requests_post"] += 1
         try:
             if not self._check_rate_limit():
+                _metrics["rate_limited"] += 1
                 self._json_response(429, {
                     "error": "rate_limited",
                     "message": "Too many requests. Try again later.",
@@ -519,6 +546,13 @@ class OhmHandler(BaseHTTPRequestHandler):
         finally:
             elapsed = (time.time() - start) * 1000
             code = getattr(self, "_response_code", 0)
+            if 400 <= code < 500:
+                _metrics["errors_4xx"] += 1
+            elif code >= 500:
+                _metrics["errors_5xx"] += 1
+            _request_latencies.append(elapsed)
+            if len(_request_latencies) > _MAX_LATENCY_SAMPLES:
+                _request_latencies.pop(0)
             self.log_message(
                 "POST %s → %s (%.1fms)", self.path, code, elapsed,
             )
@@ -777,6 +811,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                 provenance=body.get("provenance"),
                 tags=body.get("tags"),
                 metadata=body.get("metadata"),
+                agent_name=agent,
             )
             event_type = "node.created" if result.get("created") else "node.updated"
             _trigger_webhooks({
@@ -787,7 +822,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             if result.get("created", True):
                 self._json_response(201, result)
             else:
-                raise ConflictError(f"Node {body['id']} already exists")
+                self._json_response(200, result)
 
         elif path == "/edge":
             result = self.store.write_edge(
@@ -800,6 +835,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                 provenance=body.get("provenance"),
                 challenge_of=body.get("challenge_of"),
                 challenge_type=body.get("challenge_type"),
+                agent_name=agent,
             )
             _trigger_webhooks({
                 "type": "edge.created",
@@ -815,7 +851,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             reason = body.get("reason", "")
             confidence = body.get("confidence", 0.5)
             challenge_type = body.get("challenge_type", "CHALLENGED_BY")
-            result = self.store.challenge_edge(edge_id, reason, confidence, challenge_type)
+            result = self.store.challenge_edge(edge_id, reason, confidence, challenge_type, agent_name=agent)
             if result:
                 _trigger_webhooks({
                     "type": "edge.challenged",
@@ -833,7 +869,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             edge_id = validate_identifier(edge_id, name="edge_id")
             reason = body.get("reason", "")
             confidence = body.get("confidence", 0.8)
-            result = self.store.challenge_edge(edge_id, reason, confidence, "SUPPORTS")
+            result = self.store.challenge_edge(edge_id, reason, confidence, "SUPPORTS", agent_name=agent)
             if result:
                 _trigger_webhooks({
                     "type": "edge.supported",
@@ -855,6 +891,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                 baseline=body.get("baseline"),
                 sigma=body.get("sigma"),
                 source=body.get("source"),
+                agent_name=agent,
             )
             _trigger_webhooks({
                 "type": "observation.created",
@@ -883,6 +920,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                 active_patterns=body.get("patterns"),
                 available_services=body.get("services"),
                 session_id=body.get("session_id"),
+                agent_name=agent,
             )
             self._json_response(200, result)
 

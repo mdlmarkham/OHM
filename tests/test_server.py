@@ -347,6 +347,138 @@ class TestAuthEndpoints:
 
 
 @pytest.mark.xdist_group("server")
+class TestAgentAttribution:
+    """Tests for OHM-y2i.19: Server routes must attribute writes to authenticated agent."""
+
+    def test_node_created_by_authenticated_agent(self, auth_server):
+        """POST /node should set created_by to the authenticated agent, not 'ohmd'."""
+        port, store = auth_server
+        status, data = _request("POST", port, "/node", body={
+            "id": "attr_node", "label": "Attributed", "type": "concept",
+        }, headers={"Authorization": "Bearer test-token-abc"})
+        assert status == 201
+        # Verify created_by is 'metis' (the agent mapped to test-token-abc), not 'test_agent'
+        node = store.get_node("attr_node")
+        assert node["created_by"] == "metis"
+
+    def test_edge_created_by_authenticated_agent(self, auth_server):
+        """POST /edge should set created_by to the authenticated agent."""
+        port, store = auth_server
+        # Create nodes first
+        _request("POST", port, "/node", body={
+            "id": "attr_from", "label": "From", "type": "concept",
+        }, headers={"Authorization": "Bearer test-token-abc"})
+        _request("POST", port, "/node", body={
+            "id": "attr_to", "label": "To", "type": "concept",
+        }, headers={"Authorization": "Bearer test-token-abc"})
+        status, data = _request("POST", port, "/edge", body={
+            "from": "attr_from", "to": "attr_to", "type": "CAUSES", "layer": "L3",
+        }, headers={"Authorization": "Bearer test-token-abc"})
+        assert status == 201
+        # Verify edge is attributed to 'metis'
+        edges = store.execute(
+            "SELECT * FROM ohm_edges WHERE from_node = 'attr_from' AND to_node = 'attr_to'"
+        )
+        assert len(edges) == 1
+        assert edges[0]["created_by"] == "metis"
+
+    def test_observation_created_by_authenticated_agent(self, auth_server):
+        """POST /observe should set created_by to the authenticated agent."""
+        port, store = auth_server
+        _request("POST", port, "/node", body={
+            "id": "obs_attr_node", "label": "ObsNode", "type": "concept",
+        }, headers={"Authorization": "Bearer test-token-abc"})
+        status, data = _request("POST", port, "/observe/obs_attr_node", body={
+            "type": "measurement", "value": 0.85,
+        }, headers={"Authorization": "Bearer test-token-abc"})
+        assert status == 201
+        obs = store.execute(
+            "SELECT * FROM ohm_observations WHERE node_id = 'obs_attr_node' ORDER BY created_at DESC LIMIT 1"
+        )
+        assert len(obs) == 1
+        assert obs[0]["created_by"] == "metis"
+
+    def test_state_updated_by_authenticated_agent(self, auth_server):
+        """POST /state should update the authenticated agent's state, not 'ohmd'."""
+        port, store = auth_server
+        status, data = _request("POST", port, "/state", body={
+            "focus": "testing attribution",
+        }, headers={"Authorization": "Bearer test-token-abc"})
+        assert status == 200
+        # Verify state is for 'metis', not 'test_agent'
+        state = store.get_agent_state("metis")
+        assert state is not None
+        assert state["current_focus"] == "testing attribution"
+
+    def test_challenge_attributed_to_authenticated_agent(self, auth_server):
+        """POST /challenge should create a CHALLENGED_BY edge attributed to the challenger."""
+        port, store = auth_server
+        # Create nodes and edge as metis
+        _request("POST", port, "/node", body={
+            "id": "ch_from", "label": "From", "type": "concept",
+        }, headers={"Authorization": "Bearer test-token-abc"})
+        _request("POST", port, "/node", body={
+            "id": "ch_to", "label": "To", "type": "concept",
+        }, headers={"Authorization": "Bearer test-token-abc"})
+        _, edge_data = _request("POST", port, "/edge", body={
+            "from": "ch_from", "to": "ch_to", "type": "CAUSES", "layer": "L3",
+        }, headers={"Authorization": "Bearer test-token-abc"})
+        edge_id = edge_data["id"]
+        # Challenge as metis
+        status, data = _request("POST", port, f"/challenge/{edge_id}", body={
+            "reason": "doubtful", "confidence": 0.3,
+        }, headers={"Authorization": "Bearer test-token-abc"})
+        assert status == 201
+        # Verify challenge edge is attributed to 'metis'
+        challenge_edges = store.execute(
+            "SELECT * FROM ohm_edges WHERE challenge_of = ?", [edge_id]
+        )
+        assert len(challenge_edges) == 1
+        assert challenge_edges[0]["created_by"] == "metis"
+
+
+@pytest.mark.xdist_group("server")
+class TestNodeIdempotency:
+    """Tests for OHM-y2i.20: POST /node should be idempotent, not raise ConflictError."""
+
+    def test_post_node_idempotent_on_existing_id(self, test_server):
+        """POST /node with an existing ID should return 200 with updated data, not 409."""
+        port, _ = test_server
+        # Create a node
+        status, data = _request("POST", port, "/node", body={
+            "id": "idem_node", "label": "Original", "type": "concept",
+        })
+        assert status == 201
+        assert data["created"] is True
+
+        # Re-post same ID with updated data
+        status, data = _request("POST", port, "/node", body={
+            "id": "idem_node", "label": "Updated", "type": "concept",
+        })
+        assert status == 200
+        assert data["created"] is False
+        assert data["label"] == "Updated"
+
+    def test_post_node_idempotent_with_auth(self, auth_server):
+        """POST /node idempotency should work with authenticated agents."""
+        port, _ = auth_server
+        # Create a node as metis
+        status, data = _request("POST", port, "/node", body={
+            "id": "idem_auth", "label": "First", "type": "concept",
+        }, headers={"Authorization": "Bearer test-token-abc"})
+        assert status == 201
+        assert data["created"] is True
+
+        # Re-post same ID as metis — should update, not conflict
+        status, data = _request("POST", port, "/node", body={
+            "id": "idem_auth", "label": "Second", "type": "concept",
+        }, headers={"Authorization": "Bearer test-token-abc"})
+        assert status == 200
+        assert data["created"] is False
+        assert data["label"] == "Second"
+
+
+@pytest.mark.xdist_group("server")
 class TestErrorHandling:
     """Tests for error response format."""
 
