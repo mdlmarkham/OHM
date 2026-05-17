@@ -780,6 +780,7 @@ def composite_score(
     evidence_weight: float = 0.5,
     method: str = "arithmetic",
     baseline: float = 1.0,
+    temporal_decay_hours: float | None = None,
 ) -> dict[str, Any]:
     """Compute a composite decision score for a node.
 
@@ -802,6 +803,13 @@ def composite_score(
     - baseline=1.0 means values are 1.0 = no change, 2.0 = double
     - Result is expressed as a multiplier from baseline
 
+    Temporal decay:
+    - When temporal_decay_hours is set, observation values are weighted by
+      0.5^(age_hours / temporal_decay_hours). This makes stale observations
+      contribute less to the composite score.
+    - Retail example: temporal_decay_hours=4.0 (weather relevant for ~4 hours)
+    - Cattle example: temporal_decay_hours=168.0 (NDVI relevant for ~7 days)
+
     This is a universal substrate method — works for any domain.
 
     Args:
@@ -811,6 +819,8 @@ def composite_score(
         evidence_weight: Weight for evidence signal (0-1).
         method: 'arithmetic' (default) or 'geometric' (multiplicative).
         baseline: Baseline for multiplicative mode (default 1.0).
+        temporal_decay_hours: Half-life in hours for temporal decay of
+            observations. None (default) disables temporal weighting.
 
     Returns:
         Dict with composite_score, observation_score, evidence_score,
@@ -819,21 +829,39 @@ def composite_score(
     from ohm.queries import query_confidence_chain
 
     # ── Observation score ──────────────────────────────────────────
-    obs_result = conn.execute(
-        "SELECT value, sigma FROM ohm_observations WHERE node_id = ? AND value IS NOT NULL",
-        [node_id],
-    ).fetchall()
+    if temporal_decay_hours is not None and temporal_decay_hours > 0:
+        obs_result = conn.execute(
+            """SELECT value, sigma,
+                  EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - created_at)) / 3600.0 AS age_hours
+               FROM ohm_observations
+               WHERE node_id = ? AND value IS NOT NULL""",
+            [node_id],
+        ).fetchall()
+    else:
+        obs_result = conn.execute(
+            "SELECT value, sigma FROM ohm_observations WHERE node_id = ? AND value IS NOT NULL",
+            [node_id],
+        ).fetchall()
 
     obs_score: float | None = None
     obs_count = len(obs_result)
     if obs_result:
         total_weight = 0.0
         weighted_sum = 0.0
-        for value, sigma in obs_result:
+        for row in obs_result:
+            value = row[0]
+            sigma = row[1]
+            # Base weight from inverse-variance
             if sigma and sigma > 0:
                 w = 1.0 / (sigma ** 2)
             else:
                 w = 1.0
+            # Apply temporal decay if enabled
+            if temporal_decay_hours is not None and temporal_decay_hours > 0:
+                age_hours = row[2] if len(row) > 2 else 0.0
+                # Decay factor: 0.5^(age/half_life)
+                decay = 0.5 ** (age_hours / temporal_decay_hours) if age_hours is not None else 1.0
+                w *= decay
             weighted_sum += (value or 0) * w
             total_weight += w
         obs_score = round(weighted_sum / total_weight, 4) if total_weight > 0 else None
@@ -886,7 +914,85 @@ def composite_score(
         },
         "method": method,
         "baseline": baseline,
+        "temporal_decay_hours": temporal_decay_hours,
     }
+
+
+def decay_observations(
+    conn: DuckDBPyConnection,
+    node_id: str | None = None,
+    *,
+    temporal_decay_hours: float = 4.0,
+    dry_run: bool = False,
+) -> list[dict[str, Any]]:
+    """Compute time-decayed observation values using exponential half-life.
+
+    For each observation, computes an effective value weighted by how recently
+    it was observed. The decay formula is:
+
+        effective_weight = 0.5^(age_hours / temporal_decay_hours)
+
+    This means an observation that is one half-life old contributes at 50%,
+    two half-lives at 25%, etc.
+
+    In dry_run mode, returns what would change without modifying the database.
+    In non-dry_run mode, updates observation values in-place.
+
+    Args:
+        conn: Database connection.
+        node_id: Optional node ID to filter. None = all observations.
+        temporal_decay_hours: Half-life in hours (default 4.0).
+            Retail: 4.0 (weather relevant for ~4 hours)
+            Cattle: 168.0 (NDVI relevant for ~7 days)
+        dry_run: If True, return what would change without modifying data.
+
+    Returns:
+        List of dicts with observation id, node_id, original value,
+        decayed_value, age_hours, and decay_factor.
+    """
+    # Query observations with age
+    if node_id:
+        rows = conn.execute(
+            """SELECT id, node_id, value, sigma,
+                  EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - created_at)) / 3600.0 AS age_hours
+               FROM ohm_observations
+               WHERE node_id = ? AND value IS NOT NULL
+               ORDER BY created_at DESC""",
+            [node_id],
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT id, node_id, value, sigma,
+                  EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - created_at)) / 3600.0 AS age_hours
+               FROM ohm_observations
+               WHERE value IS NOT NULL
+               ORDER BY created_at DESC""",
+        ).fetchall()
+
+    results = []
+    for row in rows:
+        obs_id, obs_node_id, value, sigma, age_hours = row
+        age_hours = age_hours or 0.0
+        decay_factor = 0.5 ** (age_hours / temporal_decay_hours)
+        decayed_value = round(value * decay_factor, 6) if value is not None else None
+
+        results.append({
+            "id": obs_id,
+            "node_id": obs_node_id,
+            "original_value": value,
+            "decayed_value": decayed_value,
+            "age_hours": round(age_hours, 4),
+            "decay_factor": round(decay_factor, 6),
+            "sigma": sigma,
+        })
+
+        if not dry_run and decayed_value is not None:
+            conn.execute(
+                "UPDATE ohm_observations SET value = ? WHERE id = ?",
+                [decayed_value, obs_id],
+            )
+
+    return results
 
 
 def detect_trend(
