@@ -643,6 +643,184 @@ class Graph:
         columns = [desc[0] for desc in result.description]
         return [dict(zip(columns, row)) for row in result.fetchall()]
 
+    def evolve_identity(
+        self,
+        edge_id: str,
+        *,
+        new_target: str,
+        reason: str,
+        confidence: float = 1.0,
+    ) -> dict[str, Any]:
+        """Evolve an identity edge (VALUES, GOALS, CAPABLE_OF, INTERESTED_IN).
+
+        Identity evolution is NOT modification — it's a directed replacement.
+        The old edge is marked superseded, and a new edge is created pointing
+        to the new target. The change feed preserves the full history.
+
+        Only the owning agent can evolve their own identity edges.
+        Non-identity edges cannot be evolved (use challenge instead).
+
+        Args:
+            edge_id: The identity edge to evolve.
+            new_target: Label of the new target node.
+            reason: Why this evolution happened (stored in provenance).
+            confidence: Confidence in the new identity declaration.
+
+        Returns:
+            The new edge record.
+        """
+        from ohm.boundary import enforce_identity_evolution
+        from ohm.queries import _log_change
+
+        enforce_identity_evolution(self._conn, self.actor, edge_id)
+
+        # Get the old edge details
+        old_edge = self.get_edge(edge_id)
+        if old_edge is None:
+            raise ValueError(f"Edge {edge_id} not found")
+
+        # Mark old edge as superseded via metadata
+        self._conn.execute(
+            "UPDATE ohm_edges SET metadata = ? WHERE id = ?",
+            ['{"superseded": true, "superseded_by": "pending"}', edge_id],
+        )
+
+        # Find or create the new target node
+        edge_type = old_edge["edge_type"]
+        node_type_map = {
+            "VALUES": "value",
+            "GOALS": "goal",
+            "CAPABLE_OF": "skill",
+            "INTERESTED_IN": "topic",
+        }
+        target_type = node_type_map.get(edge_type, "concept")
+        new_node = self.find_or_create_node(label=new_target, node_type=target_type)
+
+        # Create the new edge
+        new_edge = self.create_edge(
+            from_node=old_edge["from_node"],
+            to_node=new_node["id"],
+            edge_type=edge_type,
+            layer="L1",
+            confidence=confidence,
+            provenance=f"evolved_from:{edge_id} reason:{reason}",
+        )
+
+        # Update the old edge's metadata with the new edge ID
+        import json
+        self._conn.execute(
+            "UPDATE ohm_edges SET metadata = ? WHERE id = ?",
+            [json.dumps({"superseded": True, "superseded_by": new_edge["id"]}), edge_id],
+        )
+
+        _log_change(self._conn, "ohm_edges", edge_id, "EVOLVE", self.actor)
+        return new_edge
+
+    def discover_peers(self) -> list[dict[str, Any]]:
+        """Cold start discovery — find agents with shared values and interests.
+
+        For new agents who need to bootstrap their relationships:
+        1. Find agents with overlapping VALUES edges
+        2. Find agents with overlapping INTERESTED_IN edges
+        3. Find agents CAPABLE_OF what you need
+        4. Rank by overlap count
+
+        Returns:
+            List of peer agents with overlap scores and suggested LISTENS_TO edges.
+        """
+        # Get my agent node
+        me = self.get_node(self._conn.execute(
+            "SELECT id FROM ohm_nodes WHERE label = ? AND type = 'agent'",
+            [self.actor],
+        ).fetchone()[0]) if self._conn.execute(
+            "SELECT id FROM ohm_nodes WHERE label = ? AND type = 'agent'",
+            [self.actor],
+        ).fetchone() else None
+
+        if me is None:
+            return []  # Not registered yet
+
+        me_id = me["id"]
+
+        # Find my values and interests
+        my_values = set()
+        my_interests = set()
+        my_capabilities = set()
+
+        for row in self._conn.execute(
+            "SELECT to_node, edge_type FROM ohm_edges WHERE from_node = ? AND layer = 'L1'",
+            [me_id],
+        ).fetchall():
+            if row[1] == "VALUES":
+                my_values.add(row[0])
+            elif row[1] == "INTERESTED_IN":
+                my_interests.add(row[0])
+            elif row[1] == "CAPABLE_OF":
+                my_capabilities.add(row[0])
+
+        if not my_values and not my_interests:
+            return []  # No identity declared
+
+        # Find other agents with overlapping edges
+        other_agents = self._conn.execute("""
+            SELECT
+                n.id AS agent_id,
+                n.label AS agent_name,
+                COUNT(DISTINCT e.to_node) AS overlap_count
+            FROM ohm_nodes n
+            JOIN ohm_edges e ON e.from_node = n.id AND e.layer = 'L1'
+            WHERE n.type = 'agent'
+              AND n.id != ?
+              AND (
+                (e.edge_type = 'VALUES' AND e.to_node IN (SELECT to_node FROM ohm_edges WHERE from_node = ? AND edge_type = 'VALUES' AND layer = 'L1'))
+                OR
+                (e.edge_type = 'INTERESTED_IN' AND e.to_node IN (SELECT to_node FROM ohm_edges WHERE from_node = ? AND edge_type = 'INTERESTED_IN' AND layer = 'L1'))
+              )
+            GROUP BY n.id, n.label
+            ORDER BY overlap_count DESC
+            LIMIT 10
+        """, [me_id, me_id, me_id]).fetchall()
+
+        # Find agents with capabilities I might need (complementary)
+        # (agents who can do what I can't)
+        complementary = self._conn.execute("""
+            SELECT
+                n.id AS agent_id,
+                n.label AS agent_name,
+                e.to_node AS capability_id,
+                cn.label AS capability_label
+            FROM ohm_nodes n
+            JOIN ohm_edges e ON e.from_node = n.id AND e.edge_type = 'CAPABLE_OF' AND e.layer = 'L1'
+            LEFT JOIN ohm_nodes cn ON cn.id = e.to_node
+            WHERE n.type = 'agent'
+              AND n.id != ?
+              AND e.to_node NOT IN (
+                SELECT to_node FROM ohm_edges WHERE from_node = ? AND edge_type = 'CAPABLE_OF' AND layer = 'L1'
+              )
+            LIMIT 10
+        """, [me_id, me_id]).fetchall()
+
+        results = []
+        for agent in other_agents:
+            results.append({
+                "agent_id": agent[0],
+                "agent_name": agent[1],
+                "shared_values_interests": agent[2],
+                "recommendation": "LISTENS_TO",
+            })
+
+        for cap in complementary:
+            # Don't duplicate if already in results
+            if not any(r["agent_id"] == cap[0] for r in results):
+                results.append({
+                    "agent_id": cap[0],
+                    "agent_name": cap[1],
+                    "complementary_capability": cap[3],
+                    "recommendation": "LISTENS_TO",
+                })
+
+        return results
+
     def close(self) -> None:
         """Close the database connection."""
         self._conn.close()
