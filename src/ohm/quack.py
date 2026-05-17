@@ -32,6 +32,7 @@ ADR-002: Quack for concurrent access.
 
 from __future__ import annotations
 
+import duckdb  # module-level for test patching
 import os
 import re
 from typing import TYPE_CHECKING, Any
@@ -64,8 +65,6 @@ def is_available(conn: DuckDBPyConnection | None = None) -> bool:
 
     if _quack_available is not None:
         return _quack_available
-
-    import duckdb
 
     test_conn = conn
     should_close = False
