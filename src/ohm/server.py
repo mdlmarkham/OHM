@@ -109,36 +109,6 @@ def _trigger_webhooks(event: dict) -> None:
             executor.submit(deliver_to_agent, agent_name, config)
 
 
-# ── Token Hashing ──────────────────────────────────────────
-
-def _hash_token(token: str) -> str:
-    """Hash a token for storage. Uses SHA-256 with a per-installation salt."""
-    salt = os.environ.get("OHM_TOKEN_SALT", "ohm-default-salt")
-    return hashlib.sha256(f"{salt}:{token}".encode()).hexdigest()
-
-
-def _verify_token(token: str, stored_hash: str) -> bool:
-    """Constant-time token verification."""
-    return secrets.compare_digest(_hash_token(token), stored_hash)
-
-
-def _build_token_lookup(tokens_config: dict) -> dict[str, str]:
-    """Build a hash->agent_name lookup from config tokens.
-
-    Supports both plaintext tokens (legacy) and pre-hashed tokens.
-    Plaintext tokens are hashed on load for constant-time comparison.
-    """
-    lookup: dict[str, str] = {}
-    for key, value in tokens_config.items():
-        # If the key looks like a hash (64 hex chars), treat as pre-hashed
-        if len(key) == 64 and all(c in "0123456789abcdef" for c in key):
-            lookup[key] = value
-        else:
-            # Legacy plaintext token — hash it
-            lookup[_hash_token(key)] = value
-    return lookup
-
-
 # ── Token Security ──────────────────────────────────────────
 
 def _hash_token(token: str) -> str:
@@ -163,7 +133,7 @@ def _build_token_lookup(tokens_config: dict) -> tuple[dict, dict]:
     """Build token lookup tables from config.
 
     Config format supports two modes:
-      1. Hashed mode (recommended): {"agent_name": {"hash": "sha256_hex"}}
+      1. Hashed mode (recommended): {"agent_name": {"hash": "sha256_hex", "role": "read-write"}}
       2. Legacy plaintext mode: {"agent_name": "plaintext_token"}
 
     In legacy mode, tokens are hashed on load and the original plaintext
@@ -632,9 +602,8 @@ class OhmHandler(BaseHTTPRequestHandler):
             node_id = validate_identifier(node_id, name="node_id")
             depth = int(qs.get("depth", [3])[0])
             layer = qs.get("layer", [None])[0]
-            from .graph import build_neighborhood_query
-            sql, params = build_neighborhood_query(node_id, depth, layer)
-            results = self.store.execute(sql, params)
+            from .queries import query_neighborhood
+            results = query_neighborhood(self.store.conn, node_id, depth=depth, layer=layer)
             self._json_response(200, results)
         elif path.startswith("/path/"):
             parts = path[6:].split("/")
@@ -642,9 +611,8 @@ class OhmHandler(BaseHTTPRequestHandler):
                 from .validation import validate_identifier
                 from_node = validate_identifier(parts[0], name="from_node")
                 to_node = validate_identifier(parts[1], name="to_node")
-                from .graph import build_path_query
-                sql, params = build_path_query(from_node, to_node)
-                results = self.store.execute(sql, params)
+                from .queries import query_path
+                results = query_path(self.store.conn, from_node, to_node)
                 self._json_response(200, results)
             else:
                 raise ValidationError("Path requires /path/from/to")
@@ -653,17 +621,15 @@ class OhmHandler(BaseHTTPRequestHandler):
             from .validation import validate_identifier
             node_id = validate_identifier(node_id, name="node_id")
             depth = int(qs.get("depth", [5])[0])
-            from .graph import build_impact_query
-            sql, params = build_impact_query(node_id, depth)
-            results = self.store.execute(sql, params)
+            from .queries import query_impact
+            results = query_impact(self.store.conn, node_id, depth=depth)
             self._json_response(200, results)
         elif path.startswith("/confidence/"):
             edge_id = path[12:]
             from .validation import validate_identifier
             edge_id = validate_identifier(edge_id, name="edge_id")
-            from .graph import build_confidence_audit_query
-            sql, params = build_confidence_audit_query(edge_id)
-            results = self.store.execute(sql, params)
+            from .queries import query_confidence
+            results = query_confidence(self.store.conn, edge_id)
             self._json_response(200, results)
         elif path.startswith("/agent/"):
             agent_name = path[7:]
@@ -686,9 +652,8 @@ class OhmHandler(BaseHTTPRequestHandler):
                     since = state["last_sync"]
                 else:
                     raise ValidationError("No last-check timestamp. Use ?since=ISO_TIMESTAMP")
-            from .graph import build_change_feed_query
-            sql, params = build_change_feed_query(since, agent_name=agent_name)
-            results = self.store.execute(sql, params)
+            from .queries import query_change_feed
+            results = query_change_feed(self.store.conn, since=since, agent_name=agent_name)
             self._json_response(200, results)
         elif path == "/search":
             query_text = qs.get("q", [""])[0]
@@ -916,8 +881,7 @@ class OhmHandler(BaseHTTPRequestHandler):
 
         elif path == "/register":
             # Agent registration — creates agent node + VALUES/GOALS/CAPABLE_OF/INTERESTED_IN/LISTENS_TO edges
-            from .queries import create_node, batch_create_nodes, batch_create_edges
-            from .schema import generate_node_id
+            from .queries import create_node
 
             agent_label = body.get("name", agent)
             me = create_node(
@@ -1058,7 +1022,7 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     # ── Quack integration ──────────────────────────────────────────────
     quack_info: dict | None = None
     if config.get("quack", False):
-        from .quack import is_available, start_server, validate_quack_uri
+        from .quack import is_available, start_server
 
         if is_available(store.conn):
             quack_uri = config.get("quack_uri", "quack:localhost")
@@ -1081,9 +1045,9 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     print(f"OHM daemon listening on {config['host']}:{config['port']}", file=sys.stderr)
     print(f"Schema: {schema_config.name}", file=sys.stderr)
     if quack_info:
-        print(f"Concurrent access: Quack (multi-writer)", file=sys.stderr)
+        print("Concurrent access: Quack (multi-writer)", file=sys.stderr)
     else:
-        print(f"Concurrent access: HTTP (single-writer)", file=sys.stderr)
+        print("Concurrent access: HTTP (single-writer)", file=sys.stderr)
 
     # Graceful shutdown
     def shutdown_handler(signum, frame):
