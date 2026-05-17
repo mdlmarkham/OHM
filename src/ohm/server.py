@@ -6,8 +6,10 @@ token-based authentication and per-agent role enforcement.
 """
 
 import argparse
+import hashlib
 import json
 import os
+import secrets
 import signal
 import sys
 import time
@@ -53,6 +55,141 @@ RATE_LIMIT_MAX_REQUESTS = 1000  # per window per IP
 
 # Simple in-memory rate limiter: {ip: [(timestamp, ...)]}
 _rate_limit_store: dict[str, list[float]] = {}
+
+# ── Webhook Registry ──────────────────────────────────────
+
+# In-memory registry: {agent_name: {"url": str, "events": list[str]}}
+# Agents register their callback URL and the event types they want to receive.
+_webhook_registry: dict[str, dict] = {}
+
+
+def _deliver_webhook(url: str, event: dict, timeout: float = 5.0) -> bool:
+    """Deliver a webhook event to a callback URL.
+
+    Uses HTTP POST with JSON body. Returns True on success, False on failure.
+    Failures are logged but not raised — webhooks are fire-and-forget.
+    """
+    import urllib.request
+    import urllib.error
+
+    body = json.dumps(event).encode("utf-8")
+    try:
+        req = urllib.request.Request(
+            url,
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status in (200, 201, 202, 204)
+    except Exception:
+        return False
+
+
+def _trigger_webhooks(event: dict) -> None:
+    """Trigger webhooks for all registered agents matching the event.
+
+    Events are delivered asynchronously to avoid blocking the request that
+    triggered them. Each registered agent receives the event if they subscribed
+    to that event type.
+    """
+    import concurrent.futures
+
+    event_type = event.get("type", "")
+
+    def deliver_to_agent(agent_name: str, config: dict) -> None:
+        url = config.get("url", "")
+        events = config.get("events", [])
+        if url and (event_type in events or "*" in events):
+            _deliver_webhook(url, event)
+
+    # Deliver in parallel using a thread pool
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        for agent_name, config in _webhook_registry.items():
+            executor.submit(deliver_to_agent, agent_name, config)
+
+
+# ── Token Hashing ──────────────────────────────────────────
+
+def _hash_token(token: str) -> str:
+    """Hash a token for storage. Uses SHA-256 with a per-installation salt."""
+    salt = os.environ.get("OHM_TOKEN_SALT", "ohm-default-salt")
+    return hashlib.sha256(f"{salt}:{token}".encode()).hexdigest()
+
+
+def _verify_token(token: str, stored_hash: str) -> bool:
+    """Constant-time token verification."""
+    return secrets.compare_digest(_hash_token(token), stored_hash)
+
+
+def _build_token_lookup(tokens_config: dict) -> dict[str, str]:
+    """Build a hash->agent_name lookup from config tokens.
+
+    Supports both plaintext tokens (legacy) and pre-hashed tokens.
+    Plaintext tokens are hashed on load for constant-time comparison.
+    """
+    lookup: dict[str, str] = {}
+    for key, value in tokens_config.items():
+        # If the key looks like a hash (64 hex chars), treat as pre-hashed
+        if len(key) == 64 and all(c in "0123456789abcdef" for c in key):
+            lookup[key] = value
+        else:
+            # Legacy plaintext token — hash it
+            lookup[_hash_token(key)] = value
+    return lookup
+
+
+# ── Token Security ──────────────────────────────────────────
+
+def _hash_token(token: str) -> str:
+    """Hash a token using SHA-256 for storage.
+
+    Tokens are never stored in plaintext. The hash is one-way —
+    the original token is only shown once at creation time.
+    """
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _verify_token(provided: str, token_hash: str) -> bool:
+    """Constant-time comparison of a provided token against a stored hash.
+
+    Uses secrets.compare_digest to prevent timing attacks.
+    Hashes the provided token first, then compares the hashes.
+    """
+    return secrets.compare_digest(_hash_token(provided), token_hash)
+
+
+def _build_token_lookup(tokens_config: dict) -> tuple[dict, dict]:
+    """Build token lookup tables from config.
+
+    Config format supports two modes:
+      1. Hashed mode (recommended): {"agent_name": {"hash": "sha256_hex"}}
+      2. Legacy plaintext mode: {"agent_name": "plaintext_token"}
+
+    In legacy mode, tokens are hashed on load and the original plaintext
+    is discarded from memory.
+
+    Returns:
+        (token_hashes, agent_roles) where:
+        - token_hashes: {token_hash: agent_name} for O(1) lookup
+        - agent_roles: {agent_name: role} from config
+    """
+    token_hashes: dict[str, str] = {}
+    roles: dict[str, str] = {}
+
+    for agent_name, value in tokens_config.items():
+        if isinstance(value, dict):
+            # Hashed mode: {"hash": "sha256_hex", "role": "read-write"}
+            token_hash = value.get("hash", "")
+            if token_hash:
+                token_hashes[token_hash] = agent_name
+            roles[agent_name] = value.get("role", "read-write")
+        elif isinstance(value, str):
+            # Legacy plaintext mode: hash the token and discard plaintext
+            token_hashes[_hash_token(value)] = agent_name
+            roles[agent_name] = "read-write"
+
+    return token_hashes, roles
 
 
 def load_config(config_path: Optional[str] = None) -> dict:
@@ -119,19 +256,21 @@ class OhmHandler(BaseHTTPRequestHandler):
         sys.stderr.flush()
 
     def _authenticate(self) -> Optional[str]:
-        """Validate bearer token, return agent name or None."""
+        """Validate bearer token using constant-time comparison, return agent name or None."""
         auth = self.headers.get("Authorization", "")
         if auth.startswith("Bearer "):
             token = auth[7:]
-            if token in self.tokens:
-                return self.tokens[token]
+            for token_hash, agent_name in self.tokens.items():
+                if _verify_token(token, token_hash):
+                    return agent_name
         from urllib.parse import parse_qs, urlparse
 
         qs = parse_qs(urlparse(self.path).query)
         if "token" in qs:
             token = qs["token"][0]
-            if token in self.tokens:
-                return self.tokens[token]
+            for token_hash, agent_name in self.tokens.items():
+                if _verify_token(token, token_hash):
+                    return agent_name
         return None
 
     def _require_auth(self) -> str:
@@ -220,6 +359,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         "/challenge": [],
         "/support": [],
         "/observe": [],
+        "/webhook": [],
     }
 
     _FIELD_TYPES = {
@@ -278,7 +418,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         # Normalize path prefixes for sub-resource endpoints
         # /challenge/xxx → /challenge, /support/xxx → /support, /observe/xxx → /observe
         validation_path = path
-        for prefix in ("/challenge/", "/support/", "/observe/"):
+        for prefix in ("/challenge/", "/support/", "/observe/", "/webhook/"):
             if path.startswith(prefix):
                 validation_path = prefix.rstrip("/")
                 break
@@ -661,6 +801,12 @@ class OhmHandler(BaseHTTPRequestHandler):
                 tags=body.get("tags"),
                 metadata=body.get("metadata"),
             )
+            event_type = "node.created" if result.get("created") else "node.updated"
+            _trigger_webhooks({
+                "type": event_type,
+                "agent": agent,
+                "node": result,
+            })
             if result.get("created", True):
                 self._json_response(201, result)
             else:
@@ -678,6 +824,11 @@ class OhmHandler(BaseHTTPRequestHandler):
                 challenge_of=body.get("challenge_of"),
                 challenge_type=body.get("challenge_type"),
             )
+            _trigger_webhooks({
+                "type": "edge.created",
+                "agent": agent,
+                "edge": result,
+            })
             self._json_response(201, result)
 
         elif path.startswith("/challenge/"):
@@ -689,6 +840,12 @@ class OhmHandler(BaseHTTPRequestHandler):
             challenge_type = body.get("challenge_type", "CHALLENGED_BY")
             result = self.store.challenge_edge(edge_id, reason, confidence, challenge_type)
             if result:
+                _trigger_webhooks({
+                    "type": "edge.challenged",
+                    "agent": agent,
+                    "edge": result,
+                    "challenge_type": challenge_type,
+                })
                 self._json_response(201, result)
             else:
                 raise EdgeNotFoundError(f"Edge {edge_id} not found")
@@ -701,6 +858,11 @@ class OhmHandler(BaseHTTPRequestHandler):
             confidence = body.get("confidence", 0.8)
             result = self.store.challenge_edge(edge_id, reason, confidence, "SUPPORTS")
             if result:
+                _trigger_webhooks({
+                    "type": "edge.supported",
+                    "agent": agent,
+                    "edge": result,
+                })
                 self._json_response(201, result)
             else:
                 raise EdgeNotFoundError(f"Edge {edge_id} not found")
@@ -717,7 +879,26 @@ class OhmHandler(BaseHTTPRequestHandler):
                 sigma=body.get("sigma"),
                 source=body.get("source"),
             )
+            _trigger_webhooks({
+                "type": "observation.created",
+                "agent": agent,
+                "observation": result,
+            })
             self._json_response(201, result)
+
+        elif path == "/webhook":
+            # Register or update webhook callback URL for this agent
+            url = body.get("url", "")
+            events = body.get("events", ["node.created", "node.updated", "edge.created"])
+            if not url:
+                raise ValidationError("Webhook requires a 'url' field")
+            _webhook_registry[agent] = {"url": url, "events": events}
+            self._json_response(200, {
+                "status": "registered",
+                "agent": agent,
+                "url": url,
+                "events": events,
+            })
 
         elif path == "/state":
             result = self.store.update_agent_state(
@@ -844,7 +1025,7 @@ def run_server(config: dict, store: OhmStore):
     """Run the HTTP server."""
     OhmHandler.store = store
     OhmHandler.config = config
-    OhmHandler.tokens = config.get("tokens", {})
+    OhmHandler.tokens = _build_token_lookup(config.get("tokens", {}))
     OhmHandler.roles = config.get("roles", {})
     OhmHandler.no_auth = config.get("no_auth", False)
 
@@ -888,15 +1069,20 @@ def main():
 
     # Handle token generation
     if args.init_token:
-        import secrets
         token = secrets.token_urlsafe(32)
-        config.setdefault("tokens", {})[args.init_token] = token
+        token_hash = _hash_token(token)
+        # Store hashed token in config — plaintext is never persisted
+        config.setdefault("tokens", {})[args.init_token] = {
+            "hash": token_hash,
+            "role": "read-write",
+        }
         config_path = Path(os.environ.get("OHM_CONFIG", str(Path.home() / ".ohm" / "ohmd.json")))
         config_path.parent.mkdir(parents=True, exist_ok=True)
         with open(config_path, "w") as f:
             json.dump(config, f, indent=2)
         print(f"Token for {args.init_token}: {token}")
         print(f"Config saved to {config_path}")
+        print("WARNING: Store this token securely — it will not be shown again.")
         return
 
     # Initialize store

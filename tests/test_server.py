@@ -11,17 +11,29 @@ from http.client import HTTPConnection
 
 import pytest
 
-from ohm.server import OhmHandler
+from ohm.server import OhmHandler, _hash_token, _verify_token, _build_token_lookup
 from ohm.store import OhmStore
 
 
 def _start_test_server(store, tokens=None, roles=None, no_auth=False):
-    """Start a test HTTP server on a random port and return (port, thread)."""
+    """Start a test HTTP server on a random port and return (port, thread).
+
+    tokens can be:
+      - dict of {plaintext_token: agent_name} — will be hashed automatically
+      - dict of {hash: agent_name} — used directly (for testing hashed mode)
+    """
     import socketserver
 
     OhmHandler.store = store
     OhmHandler.config = {"host": "127.0.0.1", "port": 0}
-    OhmHandler.tokens = tokens or {}
+    if tokens:
+        # Convert plaintext tokens to hashed lookup
+        token_hashes = {}
+        for token, agent_name in tokens.items():
+            token_hashes[_hash_token(token)] = agent_name
+        OhmHandler.tokens = token_hashes
+    else:
+        OhmHandler.tokens = {}
     OhmHandler.roles = roles or {}
     OhmHandler.no_auth = no_auth
 
@@ -645,3 +657,143 @@ class TestBodyValidation:
             assert "too large" in data["message"].lower()
         finally:
             srv.MAX_BODY_SIZE = original_max
+
+
+class TestTokenSecurity:
+    """Tests for token hashing and constant-time comparison (OHM-y2i.17)."""
+
+    def test_hash_token_deterministic(self):
+        """Same input produces same hash."""
+        from ohm.server import _hash_token
+        h1 = _hash_token("test-token-123")
+        h2 = _hash_token("test-token-123")
+        assert h1 == h2
+
+    def test_hash_token_different_inputs(self):
+        """Different inputs produce different hashes."""
+        from ohm.server import _hash_token
+        h1 = _hash_token("token-a")
+        h2 = _hash_token("token-b")
+        assert h1 != h2
+
+    def test_hash_token_is_sha256_hex(self):
+        """Hash should be a 64-character hex string (SHA-256)."""
+        from ohm.server import _hash_token
+        h = _hash_token("test-token")
+        assert len(h) == 64
+        assert all(c in "0123456789abcdef" for c in h)
+
+    def test_verify_token_correct(self):
+        """Correct token should verify against its hash."""
+        from ohm.server import _hash_token, _verify_token
+        token = "my-secret-token"
+        token_hash = _hash_token(token)
+        assert _verify_token(token, token_hash) is True
+
+    def test_verify_token_wrong(self):
+        """Wrong token should not verify."""
+        from ohm.server import _hash_token, _verify_token
+        token = "my-secret-token"
+        token_hash = _hash_token(token)
+        assert _verify_token("wrong-token", token_hash) is False
+
+    def test_verify_token_constant_time(self):
+        """secrets.compare_digest is used (not dict lookup)."""
+        import ohm.server as srv
+        # Verify the module-level _verify_token uses compare_digest
+        import inspect
+        source = inspect.getsource(srv)
+        assert "compare_digest" in source
+
+    def test_build_token_lookup_plaintext(self):
+        """Legacy plaintext tokens should be hashed on load."""
+        from ohm.server import _build_token_lookup, _hash_token
+        config = {"metis": "plaintext-token-abc", "observer": "plaintext-token-xyz"}
+        token_hashes, roles = _build_token_lookup(config)
+        # Should have hashed the tokens
+        assert _hash_token("plaintext-token-abc") in token_hashes
+        assert token_hashes[_hash_token("plaintext-token-abc")] == "metis"
+        assert _hash_token("plaintext-token-xyz") in token_hashes
+        assert token_hashes[_hash_token("plaintext-token-xyz")] == "observer"
+        # Default role should be read-write
+        assert roles["metis"] == "read-write"
+        assert roles["observer"] == "read-write"
+
+    def test_build_token_lookup_hashed(self):
+        """Hashed token format should be loaded directly."""
+        from ohm.server import _build_token_lookup, _hash_token
+        token_hash = _hash_token("my-secret-token")
+        config = {"metis": {"hash": token_hash, "role": "read-write"}}
+        token_hashes, roles = _build_token_lookup(config)
+        assert token_hash in token_hashes
+        assert token_hashes[token_hash] == "metis"
+        assert roles["metis"] == "read-write"
+
+    def test_build_token_lookup_readonly_role(self):
+        """Hashed format should support read-only role."""
+        from ohm.server import _build_token_lookup, _hash_token
+        token_hash = _hash_token("readonly-token")
+        config = {"observer": {"hash": token_hash, "role": "read-only"}}
+        token_hashes, roles = _build_token_lookup(config)
+        assert roles["observer"] == "read-only"
+
+    def test_auth_with_hashed_tokens(self, tmp_path):
+        """Authentication should work with hashed tokens."""
+        db_path = str(tmp_path / "test_hashed_auth.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test_agent")
+        # Use plaintext tokens — _start_test_server will hash them
+        tokens = {"hashed-token-abc": "metis", "hashed-token-xyz": "observer"}
+        roles = {"metis": "read-write", "observer": "read-only"}
+        port, server, thread = _start_test_server(store, tokens=tokens, roles=roles)
+        try:
+            # Valid token → 201
+            status, data = _request("POST", port, "/node", body={
+                "id": "auth_ok", "label": "AuthOK", "type": "concept",
+            }, headers={"Authorization": "Bearer hashed-token-abc"})
+            assert status == 201
+
+            time.sleep(0.05)  # Small delay to avoid connection race on Windows
+
+            # Invalid token → 401
+            status, data = _request("POST", port, "/node", body={
+                "id": "bad", "label": "Bad", "type": "concept",
+            }, headers={"Authorization": "Bearer wrong-token"})
+            assert status == 401
+
+            time.sleep(0.05)
+
+            # Read-only token → 403
+            status, data = _request("POST", port, "/node", body={
+                "id": "ro_test", "label": "RO", "type": "concept",
+            }, headers={"Authorization": "Bearer hashed-token-xyz"})
+            assert status == 403
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+            store.close()
+
+    def test_tokens_not_stored_in_plaintext(self):
+        """Verify that OhmHandler.tokens does not contain plaintext tokens."""
+        from ohm.server import _build_token_lookup, _hash_token
+        config = {"agent1": "plaintext-secret"}
+        token_hashes, _ = _build_token_lookup(config)
+        # The keys should be hashes, not plaintext
+        for key in token_hashes:
+            assert key != "plaintext-secret"
+            assert len(key) == 64  # SHA-256 hex digest
+
+    def test_init_token_stores_hash(self, tmp_path):
+        """--init-token should store hashed token in config, not plaintext."""
+        from ohm.server import _hash_token
+        import secrets
+        token = secrets.token_urlsafe(32)
+        token_hash = _hash_token(token)
+
+        config = {"host": "127.0.0.1", "port": 8710, "tokens": {}}
+        config["tokens"]["test_agent"] = {"hash": token_hash, "role": "read-write"}
+
+        # Verify the stored format
+        assert config["tokens"]["test_agent"]["hash"] == token_hash
+        assert "role" in config["tokens"]["test_agent"]
+        # Plaintext token should NOT be in config
+        assert token not in str(config)

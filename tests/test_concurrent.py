@@ -21,9 +21,17 @@ def _start_server(store, tokens=None, roles=None, no_auth=False):
     """Start a test HTTP server on a random port."""
     import socketserver
 
+    from ohm.server import _hash_token
+
     OhmHandler.store = store
     OhmHandler.config = {"host": "127.0.0.1", "port": 0}
-    OhmHandler.tokens = tokens or {}
+    if tokens:
+        token_hashes = {}
+        for token, agent_name in tokens.items():
+            token_hashes[_hash_token(token)] = agent_name
+        OhmHandler.tokens = token_hashes
+    else:
+        OhmHandler.tokens = {}
     OhmHandler.roles = roles or {}
     OhmHandler.no_auth = no_auth
 
