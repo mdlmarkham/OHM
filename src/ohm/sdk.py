@@ -459,6 +459,7 @@ class Graph:
         """Combine multiple observations on a node into a single value.
 
         Strategies: weighted (inverse-variance), mean, max_confidence, consensus.
+        Same result regardless of caller — substrate method.
         """
         from ohm.methods import aggregate_observations
 
@@ -471,12 +472,62 @@ class Graph:
         layer: str | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
-        """Detect anomalous observations using sigma-based flagging."""
+        """Detect anomalous observations using sigma-based flagging.
+
+        |value - baseline| / sigma > threshold. Same result regardless of caller.
+        """
         from ohm.methods import detect_anomalies
 
         return detect_anomalies(
             self._conn, sigma_threshold=sigma_threshold, layer=layer, limit=limit,
         )
+
+    def contradictions(
+        self,
+        *,
+        confidence_threshold: float = 0.5,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """Flag conflicting observations and interpretations between agents.
+
+        Detects: opposite observations, high-confidence challenges, contradictory
+        L3 interpretations. Does NOT resolve — only surfaces for agents to address.
+
+        Same result regardless of caller — substrate method.
+        """
+        from ohm.methods import detect_contradictions
+
+        return detect_contradictions(
+            self._conn, confidence_threshold=confidence_threshold, limit=limit,
+        )
+
+    def heartbeat(self, *, focus: str | None = None) -> dict[str, Any]:
+        """Send an agent heartbeat. Updates last-seen timestamp.
+
+        Call this at regular intervals (every sync_interval_sec). The substrate
+        uses this to detect stale agents for health monitoring.
+
+        Args:
+            focus: Optional update to current focus.
+
+        Returns:
+            Updated agent state record.
+        """
+        from ohm.methods import agent_heartbeat
+
+        return agent_heartbeat(self._conn, self.actor, focus=focus)
+
+    def agent_health(self) -> list[dict[str, Any]]:
+        """Check health of all registered agents.
+
+        Returns status per agent: alive, stale, dead, or unknown.
+        Stale = last heartbeat > 2x sync interval. Dead = never heartbeated.
+
+        Same result regardless of caller — substrate method.
+        """
+        from ohm.methods import query_agent_health
+
+        return query_agent_health(self._conn)
 
     def health(self) -> dict[str, Any]:
         """Compute structural health metrics for the graph."""
