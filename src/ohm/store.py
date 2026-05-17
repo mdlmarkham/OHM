@@ -589,7 +589,7 @@ class OhmStore:
             for change in changes:
                 table_name, row_id, operation, remote_agent, new_data, occurred_at = change
                 self._apply_remote_change(
-                    table_name, row_id, operation, remote_agent, new_data
+                    table_name, row_id, operation, remote_agent, new_data, occurred_at
                 )
                 applied += 1
 
@@ -609,6 +609,7 @@ class OhmStore:
         operation: str,
         remote_agent: str,
         new_data: Any,
+        occurred_at: str | None = None,
     ) -> None:
         """Apply a remote change from DuckLake to local database.
 
@@ -639,8 +640,8 @@ class OhmStore:
                          data.get("visibility", "team"), data.get("provenance"),
                          json.dumps(data.get("tags", [])) if data.get("tags") else None,
                          json.dumps(data.get("metadata", {})) if data.get("metadata") else None,
-                         occurred_at if 'occurred_at' in locals() else self._now(),
-                         occurred_at if 'occurred_at' in locals() else self._now()],
+                         occurred_at or self._now(),
+                         occurred_at or self._now()],
                     )
             elif operation == "UPDATE":
                 self.conn.execute(
@@ -675,8 +676,8 @@ class OhmStore:
                          data.get("confidence"), data.get("condition"),
                          data.get("provenance"), remote_agent,
                          data.get("challenge_of"), data.get("challenge_type"),
-                         occurred_at if 'occurred_at' in locals() else self._now(),
-                         occurred_at if 'occurred_at' in locals() else self._now()],
+                         occurred_at or self._now(),
+                         occurred_at or self._now()],
                     )
 
     def _get_last_push_timestamp(self) -> Optional[str]:

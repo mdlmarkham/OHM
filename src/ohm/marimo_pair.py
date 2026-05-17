@@ -54,7 +54,7 @@ class OHMPair:
 
     def search(self, query: str, *, node_type: str | None = None) -> Any:
         """Search nodes by label/content. Returns marimo table."""
-        results = self._graph.search(query, node_type=node_type)
+        results = self._graph.search_nodes(query, node_type=node_type)
         return self._table(results)
 
     def anomalies(self, *, sigma: float = 2.0) -> Any:

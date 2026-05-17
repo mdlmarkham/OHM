@@ -49,6 +49,17 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-n auto"
 markers = [
     "benchmark: Performance benchmark tests (pytest-benchmark)",
+    "slow: Tests that take >1s (excluded from fast CI runs)",
 ]
+
+[tool.pytest-benchmark]
+# CI-friendly defaults — reduce rounds for faster feedback.
+# For dedicated benchmark runs, override with:
+#   pytest --benchmark-min-rounds=50 --benchmark-max-time=5.0
+min_rounds = 5
+max_time = 1.0
+timer = "time.perf_counter"
+disable_gc = true

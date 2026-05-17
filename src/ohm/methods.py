@@ -79,7 +79,7 @@ def detect_contradictions(
     *,
     confidence_threshold: float = 0.5,
     limit: int = 50,
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     """Flag conflicting observations or interpretations between agents.
 
     Detects three types of contradictions:
@@ -634,7 +634,7 @@ def compute_confidence_calibration(
     ).fetchall()
 
     # Count challenges TO this agent's edges
-    challenged_edges = conn.execute(
+    challenged_row = conn.execute(
         """
         SELECT COUNT(DISTINCT e.id)
         FROM ohm_edges c
@@ -643,7 +643,8 @@ def compute_confidence_calibration(
           AND c.challenge_type = 'CHALLENGED_BY'
         """,
         [agent_name],
-    ).fetchone()[0]
+    ).fetchone()
+    challenged_edges = challenged_row[0] if challenged_row else 0
 
     total_edges = sum(b[1] for b in bands)
 

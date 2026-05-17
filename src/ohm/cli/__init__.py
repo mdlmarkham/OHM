@@ -1111,11 +1111,11 @@ def _handle_anomalies(args: argparse.Namespace) -> None:
 
 def _handle_health(args: argparse.Namespace) -> None:
     """Handle graph health check."""
-    from ohm.methods import graph_health
+    from ohm.queries import query_graph_health
 
     conn = _get_db(args)
     try:
-        result = graph_health(conn)
+        result = query_graph_health(conn)
         if args.format == "json":
             import json
             print(json.dumps(result, indent=2, default=str))

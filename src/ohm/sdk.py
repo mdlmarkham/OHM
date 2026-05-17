@@ -480,12 +480,6 @@ class Graph:
 
         return query_confidence(self._conn, edge_id)
 
-    def listen(self, *, since: str | None = None) -> list[dict[str, Any]]:
-        """Change feed since a timestamp."""
-        from ohm.queries import query_change_feed
-
-        return query_change_feed(self._conn, since=since)
-
     def agent_state(self, agent_name: str | None = None) -> list[dict[str, Any]]:
         """Query agent state."""
         from ohm.queries import query_agent_state
@@ -776,13 +770,11 @@ class Graph:
             List of peer agents with overlap scores and suggested LISTENS_TO edges.
         """
         # Get my agent node
-        me = self.get_node(self._conn.execute(
+        agent_row = self._conn.execute(
             "SELECT id FROM ohm_nodes WHERE label = ? AND type = 'agent'",
             [self.actor],
-        ).fetchone()[0]) if self._conn.execute(
-            "SELECT id FROM ohm_nodes WHERE label = ? AND type = 'agent'",
-            [self.actor],
-        ).fetchone() else None
+        ).fetchone()
+        me = self.get_node(agent_row[0]) if agent_row else None
 
         if me is None:
             return []  # Not registered yet
@@ -1207,11 +1199,11 @@ class Graph:
         return {
             "meta": {
                 "format": "ohm-export-v1",
-                "schema_version": self._conn.execute(
-                    "SELECT value FROM ohm_meta WHERE key = 'schema_version'",
-                ).fetchone()[0] if self._conn.execute(
-                    "SELECT COUNT(*) FROM ohm_meta WHERE key = 'schema_version'",
-                ).fetchone()[0] > 0 else "unknown",
+                "schema_version": (
+                    sv_row[0] if (sv_row := self._conn.execute(
+                        "SELECT value FROM ohm_meta WHERE key = 'schema_version'",
+                    ).fetchone()) else "unknown"
+                ),
                 "exported_at": __import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat(),
                 "node_count": len(nodes_json),
                 "edge_count": len(edges_json),

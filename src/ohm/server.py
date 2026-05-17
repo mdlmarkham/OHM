@@ -333,7 +333,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         "/webhook": [],
     }
 
-    _FIELD_TYPES = {
+    _FIELD_TYPES: dict[str, dict[str, type | tuple[type, ...]]] = {
         "/node": {
             "id": str, "label": str,
             "type": str, "content": (str, type(None)),
@@ -406,8 +406,15 @@ class OhmHandler(BaseHTTPRequestHandler):
             if field in field_types:
                 expected = field_types[field]
                 if not isinstance(value, expected):
+                    if isinstance(expected, tuple):
+                        type_names = " / ".join(
+                            t.__name__ if hasattr(t, "__name__") else str(t)
+                            for t in expected
+                        )
+                    else:
+                        type_names = expected.__name__ if hasattr(expected, "__name__") else str(expected)
                     raise ValidationError(
-                        f"Field '{field}' must be {expected.__name__ if isinstance(expected, type) else ' / '.join(t.__name__ for t in expected)}, "
+                        f"Field '{field}' must be {type_names}, "
                         f"got {type(value).__name__}"
                     )
 

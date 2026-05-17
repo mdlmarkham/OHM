@@ -842,16 +842,17 @@ def query_graph_health(
     Same result regardless of which agent calls it — substrate method.
     """
     # Orphan nodes
-    orphans = conn.execute("""
+    orphan_row = conn.execute("""
         SELECT COUNT(*) FROM ohm_nodes n
         WHERE NOT EXISTS (
             SELECT 1 FROM ohm_edges e
             WHERE e.from_node = n.id OR e.to_node = n.id
         )
-    """).fetchone()[0]
+    """).fetchone()
+    orphans = orphan_row[0] if orphan_row else 0
 
     # Low-confidence unchallenged edges
-    low_conf = conn.execute("""
+    low_conf_row = conn.execute("""
         SELECT COUNT(*) FROM ohm_edges e
         WHERE e.confidence < 0.3
           AND e.layer IN ('L3', 'L4')
@@ -859,7 +860,8 @@ def query_graph_health(
             SELECT 1 FROM ohm_edges c
             WHERE c.challenge_of = e.id AND c.challenge_type = 'CHALLENGED_BY'
           )
-    """).fetchone()[0]
+    """).fetchone()
+    low_conf = low_conf_row[0] if low_conf_row else 0
 
     # Dense clusters (nodes with 10+ edges)
     dense = conn.execute("""
@@ -880,8 +882,10 @@ def query_graph_health(
     stale_count = stale[0] if stale else 0
 
     # Total counts
-    total_nodes = conn.execute("SELECT COUNT(*) FROM ohm_nodes").fetchone()[0]
-    total_edges = conn.execute("SELECT COUNT(*) FROM ohm_edges").fetchone()[0]
+    total_nodes_row = conn.execute("SELECT COUNT(*) FROM ohm_nodes").fetchone()
+    total_nodes = total_nodes_row[0] if total_nodes_row else 0
+    total_edges_row = conn.execute("SELECT COUNT(*) FROM ohm_edges").fetchone()
+    total_edges = total_edges_row[0] if total_edges_row else 0
 
     return {
         "orphan_nodes": orphans,

@@ -2,6 +2,9 @@
 
 Starts a test server on a random port and tests all 17+ endpoints
 including auth, error handling, and edge cases.
+
+NOTE: Server tests share class-level state on OhmHandler (tokens, roles, etc.)
+and must run sequentially. They are grouped with xdist_group("server").
 """
 
 import json
@@ -101,6 +104,7 @@ def auth_server(tmp_path):
     store.close()
 
 
+@pytest.mark.xdist_group("server")
 class TestHealthEndpoints:
     """Tests for /health, /ready, /status endpoints."""
 
@@ -127,6 +131,7 @@ class TestHealthEndpoints:
         assert "version" in data
 
 
+@pytest.mark.xdist_group("server")
 class TestSchemaEndpoints:
     """Tests for /schema and /layers."""
 
@@ -146,6 +151,7 @@ class TestSchemaEndpoints:
         assert "L1" in data
 
 
+@pytest.mark.xdist_group("server")
 class TestNodeEndpoints:
     """Tests for node CRUD via HTTP."""
 
@@ -169,6 +175,7 @@ class TestNodeEndpoints:
         assert data["label"] == "Test Node"
 
 
+@pytest.mark.xdist_group("server")
 class TestEdgeEndpoints:
     """Tests for edge CRUD via HTTP."""
 
@@ -193,6 +200,7 @@ class TestEdgeEndpoints:
         assert data["from_node"] == "a"
 
 
+@pytest.mark.xdist_group("server")
 class TestQueryEndpoints:
     """Tests for graph query endpoints."""
 
@@ -232,6 +240,7 @@ class TestQueryEndpoints:
         assert status == 200
 
 
+@pytest.mark.xdist_group("server")
 class TestAgentEndpoints:
     """Tests for agent state endpoints."""
 
@@ -255,6 +264,7 @@ class TestAgentEndpoints:
         assert data["current_focus"] == "testing OHM endpoints"
 
 
+@pytest.mark.xdist_group("server")
 class TestChallengeEndpoints:
     """Tests for challenge and support endpoints."""
 
@@ -283,6 +293,7 @@ class TestChallengeEndpoints:
         assert status == 201
 
 
+@pytest.mark.xdist_group("server")
 class TestObservationEndpoints:
     """Tests for observation endpoints."""
 
@@ -295,6 +306,7 @@ class TestObservationEndpoints:
         assert status == 201
 
 
+@pytest.mark.xdist_group("server")
 class TestAuthEndpoints:
     """Tests for authentication and authorization."""
 
@@ -334,6 +346,7 @@ class TestAuthEndpoints:
         assert status == 200
 
 
+@pytest.mark.xdist_group("server")
 class TestErrorHandling:
     """Tests for error response format."""
 
@@ -355,6 +368,7 @@ class TestErrorHandling:
         assert data["error"] == "not_found"
 
 
+@pytest.mark.xdist_group("server")
 class TestSecurity:
     """Tests for security features: rate limiting, body size limit, auth fail-closed."""
 
@@ -465,6 +479,7 @@ class TestSecurity:
             store.close()
 
 
+@pytest.mark.xdist_group("server")
 class TestBodyValidation:
     """Tests for request body validation (OHM-y2i.16)."""
 
@@ -664,6 +679,7 @@ class TestBodyValidation:
             srv.MAX_BODY_SIZE = original_max
 
 
+@pytest.mark.xdist_group("server")
 class TestTokenSecurity:
     """Tests for token hashing and constant-time comparison (OHM-y2i.17)."""
 
@@ -803,6 +819,7 @@ class TestTokenSecurity:
         assert token not in str(config)
 
 
+@pytest.mark.xdist_group("server")
 class TestTopoSchemaServer:
     """Tests for the TOPO schema variant of the daemon."""
 
@@ -873,6 +890,7 @@ class TestTopoSchemaServer:
         assert "FLOWS_TO" in data["edge_types"]["L2"]
 
 
+@pytest.mark.xdist_group("server")
 class TestTopodEntryPoint:
     """Tests for the topod entry point function."""
 

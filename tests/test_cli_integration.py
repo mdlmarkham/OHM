@@ -49,7 +49,8 @@ class TestCLIIntegration:
         assert code == 0
 
     def test_write_and_query(self):
-        db_path = os.path.join(tempfile.gettempdir(), "ohm_test_shared.db")
+        import uuid
+        db_path = os.path.join(tempfile.gettempdir(), f"ohm_test_shared_{uuid.uuid4().hex[:8]}.db")
         try:
             c1, o1, _ = _run_cli([
                 "--db", db_path, "--actor", "test",
@@ -75,7 +76,8 @@ class TestCLIIntegration:
                 os.unlink(db_path)
 
     def test_state_set_and_show(self):
-        db_path = os.path.join(tempfile.gettempdir(), "ohm_test_state.db")
+        import uuid
+        db_path = os.path.join(tempfile.gettempdir(), f"ohm_test_state_{uuid.uuid4().hex[:8]}.db")
         try:
             c1, o1, _ = _run_cli([
                 "--db", db_path, "--actor", "metis",
@@ -172,7 +174,8 @@ class TestCLIIntegration:
 
     def test_diff_with_data(self):
         """Test that ohm diff detects changes after writes."""
-        db_path = os.path.join(tempfile.gettempdir(), "ohm_test_diff.db")
+        import uuid
+        db_path = os.path.join(tempfile.gettempdir(), f"ohm_test_diff_{uuid.uuid4().hex[:8]}.db")
         try:
             # Write some data
             c1, o1, _ = _run_cli([
