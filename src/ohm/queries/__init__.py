@@ -330,6 +330,7 @@ def query_change_feed(
     since: str | None = None,
     agent_name: str | None = None,
     node_type: str | None = None,
+    node_id: str | None = None,
     limit: int = 100,
 ) -> list[dict[str, Any]]:
     """Retrieve the change feed since a given timestamp.
@@ -341,6 +342,8 @@ def query_change_feed(
         node_type: Filter by node type (e.g., 'concept', 'pattern', 'equipment').
             Matches changes to nodes of this type AND edges that touch nodes
             of this type (source or target).
+        node_id: Filter to changes for a specific node (by node ID).
+            Matches changes where row_id is that node OR edges touching it.
         limit: Maximum number of changes to return.
 
     Returns:
@@ -358,6 +361,17 @@ def query_change_feed(
         agent_name = validate_identifier(agent_name, name="agent_name")
         conditions.append("agent_name = ?")
         params.append(agent_name)
+
+    # node_id filter: match changes where row_id is the node OR
+    # it's an edge that touches the node (from_node or to_node).
+    if node_id:
+        node_id = validate_identifier(node_id, name="node_id")
+        conditions.append(
+            "(row_id = ? OR row_id IN ("
+            "  SELECT e.id FROM ohm_edges e WHERE e.from_node = ? OR e.to_node = ?"
+            "))"
+        )
+        params.extend([node_id, node_id, node_id])
 
     # node_type filter: match changes where the row_id is a node of that type,
     # or the row_id is an edge that touches a node of that type.

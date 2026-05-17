@@ -252,6 +252,37 @@ class TestChangeFeedQuery:
         results = query_change_feed(test_db, node_type="equipment", limit=100)
         assert len(results) == 0
 
+    def test_change_feed_filter_by_node_id(self, test_db):
+        """Change feed can be filtered by specific node_id."""
+        from ohm.queries import query_change_feed, create_node
+
+        # Create nodes
+        target = create_node(test_db, label="Target Node", node_type="concept", created_by="agent_a")
+        other = create_node(test_db, label="Other Node", node_type="concept", created_by="agent_a")
+
+        # Filter by target node_id — should only get that node's changes
+        target_changes = query_change_feed(test_db, node_id=target["id"], limit=100)
+        row_ids = {c["row_id"] for c in target_changes}
+        assert target["id"] in row_ids
+        # Other node should not be in results for this specific node_id
+        assert other["id"] not in row_ids
+
+    def test_change_feed_filter_by_node_id_with_edges(self, test_db):
+        """Change feed node_id filter matches edges touching that node."""
+        from ohm.queries import query_change_feed, create_node, create_edge
+
+        # Create two nodes and connect them
+        node_a = create_node(test_db, label="Node A", node_type="concept", created_by="agent_a")
+        node_b = create_node(test_db, label="Node B", node_type="concept", created_by="agent_a")
+        edge = create_edge(test_db, from_node=node_a["id"], to_node=node_b["id"],
+                           edge_type="CAUSES", layer="L3", created_by="agent_a")
+
+        # Filter by node_a's id — should include the edge too (touches node_a)
+        node_a_changes = query_change_feed(test_db, node_id=node_a["id"], limit=100)
+        row_ids = {c["row_id"] for c in node_a_changes}
+        assert node_a["id"] in row_ids
+        assert edge["id"] in row_ids  # Edge touches node_a
+
 
 class TestDiffQuery:
     """Tests for the ohm diff query (OHM-xgm.3)."""
