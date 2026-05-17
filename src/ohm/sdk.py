@@ -831,6 +831,7 @@ class Graph:
         evidence_weight: float = 0.5,
         method: str = "arithmetic",
         baseline: float = 1.0,
+        temporal_decay_hours: float | None = None,
     ) -> dict[str, Any]:
         """Compute a composite decision score combining observations and evidence.
 
@@ -845,16 +846,25 @@ class Graph:
         - baseline=1.0 means values are 1.0 = no change, 2.0 = double
         - Result is expressed as a multiplier from baseline
 
+        Temporal decay:
+        - When temporal_decay_hours is set, observation values are weighted by
+          0.5^(age_hours / temporal_decay_hours). Stale observations contribute less.
+        - Retail: temporal_decay_hours=4.0 (weather relevant for ~4 hours)
+        - Cattle: temporal_decay_hours=168.0 (NDVI relevant for ~7 days)
+
         Args:
             node_id: The node to score.
             observation_weight: Weight for observation signal (0-1).
             evidence_weight: Weight for evidence signal (0-1).
             method: 'arithmetic' (default) or 'geometric' (multiplicative).
             baseline: Baseline for multiplicative mode (default 1.0).
+            temporal_decay_hours: Half-life in hours for temporal decay.
+                None (default) disables temporal weighting.
 
         Returns:
             Dict with composite_score, observation_score, evidence_score,
-            observation_count, evidence_count, method, and baseline.
+            observation_count, evidence_count, method, baseline,
+            and temporal_decay_hours.
         """
         from ohm.methods import composite_score as _composite_score
 
@@ -862,6 +872,38 @@ class Graph:
             self._conn, node_id,
             observation_weight=observation_weight, evidence_weight=evidence_weight,
             method=method, baseline=baseline,
+            temporal_decay_hours=temporal_decay_hours,
+        )
+
+    def decay_observations(
+        self,
+        node_id: str | None = None,
+        *,
+        temporal_decay_hours: float = 4.0,
+        dry_run: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Compute time-decayed observation values using exponential half-life.
+
+        For each observation, computes an effective value weighted by recency.
+        Decay formula: effective_weight = 0.5^(age_hours / temporal_decay_hours).
+
+        In dry_run mode, returns what would change without modifying the database.
+
+        Args:
+            node_id: Optional node ID to filter. None = all observations.
+            temporal_decay_hours: Half-life in hours (default 4.0).
+            dry_run: If True, return what would change without modifying data.
+
+        Returns:
+            List of dicts with id, node_id, original_value, decayed_value,
+            age_hours, decay_factor, and sigma.
+        """
+        from ohm.methods import decay_observations as _decay_observations
+
+        return _decay_observations(
+            self._conn, node_id,
+            temporal_decay_hours=temporal_decay_hours,
+            dry_run=dry_run,
         )
 
     def detect_trend(
