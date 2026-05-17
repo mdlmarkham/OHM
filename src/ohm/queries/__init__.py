@@ -1159,3 +1159,91 @@ def query_diff(
         "observations_added": observations_added,
         "summary": summary,
     }
+
+
+# ── Snapshot ────────────────────────────────────────────────────────────────
+
+def query_snapshot(
+    conn: DuckDBPyConnection,
+    timestamp: str,
+    *,
+    node_id: str | None = None,
+    edge_id: str | None = None,
+) -> dict[str, Any]:
+    """Reconstruct graph state at a historical timestamp.
+
+    Shows all nodes, edges, and observations that existed at or before
+    the given timestamp. Useful for: "what did we know about X on May 1st?"
+
+    Args:
+        conn: Database connection.
+        timestamp: ISO timestamp to reconstruct state at.
+        node_id: Optional single node ID to focus on.
+        edge_id: Optional single edge ID to focus on.
+
+    Returns:
+        Dict with keys: timestamp, nodes, edges, observations, summary.
+    """
+    from ohm.validation import validate_identifier, validate_timestamp
+
+    timestamp = validate_timestamp(timestamp)
+    if node_id:
+        node_id = validate_identifier(node_id, name="node_id")
+    if edge_id:
+        edge_id = validate_identifier(edge_id, name="edge_id")
+
+    # ── Nodes ──────────────────────────────────────────────────────────
+    if node_id:
+        nodes = _rows_to_dicts(conn.execute(
+            "SELECT * FROM ohm_nodes WHERE id = ? AND created_at <= ?",
+            [node_id, timestamp],
+        ))
+    else:
+        nodes = _rows_to_dicts(conn.execute(
+            "SELECT * FROM ohm_nodes WHERE created_at <= ? ORDER BY created_at",
+            [timestamp],
+        ))
+
+    # ── Edges ──────────────────────────────────────────────────────────
+    if edge_id:
+        edges = _rows_to_dicts(conn.execute(
+            "SELECT * FROM ohm_edges WHERE id = ? AND created_at <= ?",
+            [edge_id, timestamp],
+        ))
+    elif node_id:
+        edges = _rows_to_dicts(conn.execute(
+            "SELECT * FROM ohm_edges WHERE (from_node = ? OR to_node = ?) AND created_at <= ? ORDER BY created_at",
+            [node_id, node_id, timestamp],
+        ))
+    else:
+        edges = _rows_to_dicts(conn.execute(
+            "SELECT * FROM ohm_edges WHERE created_at <= ? ORDER BY created_at",
+            [timestamp],
+        ))
+
+    # ── Observations ───────────────────────────────────────────────────
+    if node_id:
+        observations = _rows_to_dicts(conn.execute(
+            "SELECT * FROM ohm_observations WHERE node_id = ? AND created_at <= ? ORDER BY created_at",
+            [node_id, timestamp],
+        ))
+    else:
+        observations = _rows_to_dicts(conn.execute(
+            "SELECT * FROM ohm_observations WHERE created_at <= ? ORDER BY created_at",
+            [timestamp],
+        ))
+
+    # ── Summary ────────────────────────────────────────────────────────
+    summary = {
+        "nodes": len(nodes),
+        "edges": len(edges),
+        "observations": len(observations),
+    }
+
+    return {
+        "timestamp": timestamp,
+        "nodes": nodes,
+        "edges": edges,
+        "observations": observations,
+        "summary": summary,
+    }

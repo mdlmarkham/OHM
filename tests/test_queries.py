@@ -262,3 +262,57 @@ class TestDiffQuery:
         assert "nodes_added" in result["summary"]
         assert "edges_added" in result["summary"]
         assert "total_changes" in result["summary"]
+
+
+class TestSnapshotQuery:
+    """Tests for the ohm snapshot query (OHM-xgm.2)."""
+
+    def test_snapshot_empty_db(self, test_db):
+        """Snapshot on empty database returns zero items."""
+        from ohm.queries import query_snapshot
+
+        result = query_snapshot(test_db, "2030-01-01T00:00:00")
+        assert result["summary"]["nodes"] == 0
+        assert result["summary"]["edges"] == 0
+
+    def test_snapshot_finds_existing_nodes(self, test_db, sample_graph_small):
+        """Snapshot finds nodes that existed at the timestamp."""
+        from ohm.queries import query_snapshot
+
+        result = query_snapshot(test_db, "2030-01-01T00:00:00")
+        assert result["summary"]["nodes"] >= 3  # a, b, c
+        assert result["summary"]["edges"] >= 2  # a->b, b->c
+
+    def test_snapshot_before_creation_empty(self, test_db, sample_graph_small):
+        """Snapshot before any nodes were created returns empty."""
+        from ohm.queries import query_snapshot
+
+        result = query_snapshot(test_db, "2020-01-01T00:00:00")
+        assert result["summary"]["nodes"] == 0
+        assert result["summary"]["edges"] == 0
+
+    def test_snapshot_single_node(self, test_db, sample_graph_small):
+        """Snapshot with --node filter returns only that node."""
+        from ohm.queries import query_snapshot
+
+        node_a = sample_graph_small["nodes"]["a"]
+        result = query_snapshot(test_db, "2030-01-01T00:00:00", node_id=node_a)
+        assert result["summary"]["nodes"] == 1
+        assert result["nodes"][0]["id"] == node_a
+
+    def test_snapshot_single_edge(self, test_db, sample_graph_small):
+        """Snapshot with --edge filter returns only that edge."""
+        from ohm.queries import query_snapshot
+
+        edge_ab = sample_graph_small["edges"]["ab"]
+        result = query_snapshot(test_db, "2030-01-01T00:00:00", edge_id=edge_ab)
+        assert result["summary"]["edges"] == 1
+        assert result["edges"][0]["id"] == edge_ab
+
+    def test_snapshot_has_timestamp(self, test_db, sample_graph_small):
+        """Snapshot result includes the requested timestamp."""
+        from ohm.queries import query_snapshot
+
+        ts = "2025-06-15T12:00:00"
+        result = query_snapshot(test_db, ts)
+        assert result["timestamp"] == ts

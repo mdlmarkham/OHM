@@ -521,7 +521,27 @@ def _handle_agents(args: argparse.Namespace) -> None:
 
 def _handle_snapshot(args: argparse.Namespace) -> None:
     """Handle 'ohm snapshot' command."""
-    print(f"Snapshot at {args.timestamp}: (placeholder)")
+    from ohm.queries import query_snapshot
+
+    conn = _get_db(args)
+    try:
+        result = query_snapshot(
+            conn,
+            timestamp=args.timestamp,
+            node_id=getattr(args, "node", None),
+            edge_id=getattr(args, "edge", None),
+        )
+        if args.format == "json":
+            import json
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            s = result["summary"]
+            print(f"Snapshot at {result['timestamp']}")
+            print(f"  Nodes:         {s['nodes']}")
+            print(f"  Edges:         {s['edges']}")
+            print(f"  Observations:  {s['observations']}")
+    finally:
+        conn.close()
 
 
 def _handle_diff(args: argparse.Namespace) -> None:
