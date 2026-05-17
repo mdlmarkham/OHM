@@ -59,7 +59,6 @@ def _request(method, port, path, body=None, headers=None, retries=2):
         body_bytes = json.dumps(body).encode()
     else:
         body_bytes = None
-    last_err = None
     for attempt in range(retries + 1):
         try:
             conn.request(method, path, body=body_bytes, headers=hdrs)
@@ -69,8 +68,7 @@ def _request(method, port, path, body=None, headers=None, retries=2):
                 return resp.status, json.loads(data)
             except json.JSONDecodeError:
                 return resp.status, data
-        except (ConnectionResetError, ConnectionRefusedError) as e:
-            last_err = e
+        except (ConnectionResetError, ConnectionRefusedError):
             if attempt < retries:
                 time.sleep(0.1)
                 conn.close()

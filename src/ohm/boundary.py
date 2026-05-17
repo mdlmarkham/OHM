@@ -12,7 +12,7 @@ Rules:
    updated by the owning agent with evolution tracking
 """
 
-from .exceptions import EdgeNotFoundError, PermissionDeniedError, ValidationError
+from .exceptions import EdgeNotFoundError, PermissionDeniedError
 
 
 def check_can_write_layer(agent_name: str, layer: str) -> None:

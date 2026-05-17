@@ -208,7 +208,7 @@ class TestIdentityEvolution:
     def test_cannot_evolve_other_agents_edge(self, tmp_path):
         db = str(tmp_path / "evolution_fail.duckdb")
         with connect(db, actor="metis") as g:
-            me = g.register_agent(values=["wisdom"])
+            g.register_agent(values=["wisdom"])
 
         with connect(db, actor="socrates") as g:
             # Find metis's VALUES edge
@@ -225,7 +225,7 @@ class TestIdentityEvolution:
         with connect(db, actor="metis") as g:
             n1 = g.create_node(label="A", node_type="concept")
             n2 = g.create_node(label="B", node_type="concept")
-            edge = g.create_edge(from_node=n1["id"], to_node=n2["id"],
+            g.create_edge(from_node=n1["id"], to_node=n2["id"],
                                  edge_type="CAUSES", layer="L3")
 
             from ohm.boundary import check_can_evolve_identity_edge
@@ -400,7 +400,7 @@ class TestChangeFeedConsumer:
 
         with connect(db, actor="metis") as g:
             # Get last_sync before
-            state_before = g._conn.execute(
+            g._conn.execute(
                 "SELECT last_sync FROM ohm_agent_state WHERE agent_name = 'metis'",
             ).fetchone()
             g.listen()
@@ -561,7 +561,7 @@ class TestGraphImportExport:
     def test_merge_mode_skips_duplicates(self, tmp_path):
         db = str(tmp_path / "merge.duckdb")
         with connect(db, actor="metis") as g:
-            a = g.create_node(label="Existing", node_type="concept")
+            g.create_node(label="Existing", node_type="concept")
             exported = g.export_graph()
 
         # Import into same DB (merge mode)
@@ -611,7 +611,7 @@ class TestEdgeVersioning:
                 [me["id"]],
             ).fetchall()
             if val_edges:
-                evolved = g.evolve_identity(val_edges[0][0], new_target="emergence", reason="test")
+                g.evolve_identity(val_edges[0][0], new_target="emergence", reason="test")
                 history = g.edge_history(val_edges[0][0])
                 types = [h["type"] for h in history]
                 assert "superseded" in types or "evolved_to" in types

@@ -1234,7 +1234,6 @@ class Graph:
         Returns:
             Dict with import statistics.
         """
-        from ohm.schema import initialize_schema
         import_count = {"nodes": 0, "edges": 0, "observations": 0, "skipped": 0}
 
         if not merge:

@@ -690,14 +690,14 @@ class TestTokenSecurity:
 
     def test_verify_token_correct(self):
         """Correct token should verify against its hash."""
-        from ohm.server import _hash_token, _verify_token
+        from ohm.server import _hash_token
         token = "my-secret-token"
         token_hash = _hash_token(token)
         assert _verify_token(token, token_hash) is True
 
     def test_verify_token_wrong(self):
         """Wrong token should not verify."""
-        from ohm.server import _hash_token, _verify_token
+        from ohm.server import _hash_token
         token = "my-secret-token"
         token_hash = _hash_token(token)
         assert _verify_token("wrong-token", token_hash) is False
@@ -712,7 +712,7 @@ class TestTokenSecurity:
 
     def test_build_token_lookup_plaintext(self):
         """Legacy plaintext tokens should be hashed on load."""
-        from ohm.server import _build_token_lookup, _hash_token
+        from ohm.server import _hash_token
         config = {"metis": "plaintext-token-abc", "observer": "plaintext-token-xyz"}
         token_hashes, roles = _build_token_lookup(config)
         # Should have hashed the tokens
@@ -726,7 +726,7 @@ class TestTokenSecurity:
 
     def test_build_token_lookup_hashed(self):
         """Hashed token format should be loaded directly."""
-        from ohm.server import _build_token_lookup, _hash_token
+        from ohm.server import _hash_token
         token_hash = _hash_token("my-secret-token")
         config = {"metis": {"hash": token_hash, "role": "read-write"}}
         token_hashes, roles = _build_token_lookup(config)
@@ -736,7 +736,7 @@ class TestTokenSecurity:
 
     def test_build_token_lookup_readonly_role(self):
         """Hashed format should support read-only role."""
-        from ohm.server import _build_token_lookup, _hash_token
+        from ohm.server import _hash_token
         token_hash = _hash_token("readonly-token")
         config = {"observer": {"hash": token_hash, "role": "read-only"}}
         token_hashes, roles = _build_token_lookup(config)
@@ -779,7 +779,6 @@ class TestTokenSecurity:
 
     def test_tokens_not_stored_in_plaintext(self):
         """Verify that OhmHandler.tokens does not contain plaintext tokens."""
-        from ohm.server import _build_token_lookup, _hash_token
         config = {"agent1": "plaintext-secret"}
         token_hashes, _ = _build_token_lookup(config)
         # The keys should be hashes, not plaintext
@@ -885,7 +884,6 @@ class TestTopodEntryPoint:
     def test_topod_main_passes_topo_schema(self):
         """topod_main should pass TOPO_SCHEMA to main()."""
         from ohm.server import topod_main
-        from ohm.schema import TOPO_SCHEMA
         # We can't actually run topod_main (it starts a server),
         # but we can verify it references TOPO_SCHEMA
         import inspect

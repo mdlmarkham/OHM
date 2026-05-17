@@ -120,7 +120,6 @@ class TestQuackAvailability:
         assert result1 == result2
 
     def test_reset_availability_clears_cache(self):
-        from ohm.quack import is_available, _quack_available
         reset_availability()
         from ohm import quack as qm
         assert qm._quack_available is None
@@ -443,7 +442,7 @@ class TestServerQuackIntegration:
         import threading
         import time
         from http.client import HTTPConnection
-        from ohm.server import OhmHandler, _hash_token
+        from ohm.server import OhmHandler
         from ohm.store import OhmStore
 
         db_path = str(tmp_path / "test_quack_status.duckdb")

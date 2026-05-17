@@ -5,7 +5,7 @@ OHM Tests — comprehensive test suite for the knowledge graph.
 import pytest
 
 from ohm.store import OhmStore
-from ohm.graph import build_neighborhood_query, build_path_query, build_impact_query
+from ohm.queries import query_neighborhood, query_path, query_impact
 
 
 @pytest.fixture
@@ -145,24 +145,19 @@ class TestGraphQueries:
     """Test recursive CTE queries."""
 
     def test_neighborhood_query(self, populated_store):
-        sql, params = build_neighborhood_query("hungary", depth=2)
-        results = populated_store.execute(sql, params)
+        results = query_neighborhood(populated_store.conn, "hungary", depth=2)
         assert len(results) > 0
 
     def test_path_query(self, populated_store):
-        sql, params = build_path_query("and_or", "democratic_escape", max_depth=3)
-        results = populated_store.execute(sql, params)
+        results = query_path(populated_store.conn, "and_or", "democratic_escape", max_depth=3)
         assert len(results) > 0
 
     def test_impact_query(self, populated_store):
-        sql, params = build_impact_query("and_or", depth=3)
-        results = populated_store.execute(sql, params)
+        results = query_impact(populated_store.conn, "and_or", depth=3)
         assert len(results) > 0
 
     def test_neighborhood_depth_limit(self, populated_store):
-        sql1, _ = build_neighborhood_query("hungary", depth=1)
-        sql3, _ = build_neighborhood_query("hungary", depth=3)
         # Depth 3 should return at least as many results as depth 1
-        results1 = populated_store.execute(sql1, ["hungary", "hungary", 1])
-        results3 = populated_store.execute(sql3, ["hungary", "hungary", 3])
+        results1 = query_neighborhood(populated_store.conn, "hungary", depth=1)
+        results3 = query_neighborhood(populated_store.conn, "hungary", depth=3)
         assert len(results3) >= len(results1)

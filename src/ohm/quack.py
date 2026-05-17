@@ -234,11 +234,11 @@ def start_server(
 
     # Get the server info
     try:
-        result = conn.execute(
+        conn.execute(
             "SELECT * FROM duckdb_settings() WHERE name = 'quack_listen_uri'"
         ).fetchall()
     except Exception:
-        result = []
+        pass
 
     # Return what we can — the actual return format depends on DuckDB version
     return {

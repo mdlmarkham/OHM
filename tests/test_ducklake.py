@@ -1,11 +1,6 @@
 """Tests for DuckLake shared backend sync (OHM-xgm.1)."""
 
-import json
-import os
-import tempfile
-from pathlib import Path
 
-import pytest
 
 from ohm.store import OhmStore
 

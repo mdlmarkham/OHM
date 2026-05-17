@@ -15,8 +15,6 @@ from ohm.schema import (
     SchemaConfig,
     DEFAULT_SCHEMA,
     TOPO_SCHEMA,
-    VALID_PROVENANCES,
-    VALID_OBSERVATION_SOURCES,
 )
 
 

@@ -119,7 +119,7 @@ class OhmStore:
 
     def _now(self) -> str:
         """Return current timestamp as ISO string."""
-        from datetime import datetime, timezone
+        from datetime import datetime
         return datetime.now(timezone.utc).isoformat()
 
     def write_node(
@@ -499,7 +499,7 @@ class OhmStore:
         Returns:
             Number of changes pushed.
         """
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         # Get last push timestamp for this agent
         last_push = self._get_last_push_timestamp()
@@ -527,7 +527,7 @@ class OhmStore:
                 table_name = change["table_name"]
                 row_id = change["row_id"]
                 operation = change["operation"]
-                layer = change["layer"]
+                change["layer"]
                 change_data = change["change_data"]
                 changed_at = change["changed_at"]
 

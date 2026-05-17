@@ -5,9 +5,7 @@ OHM Integration Tests — full workflow tests.
 import pytest
 
 from ohm.store import OhmStore
-from ohm.graph import (
-    build_neighborhood_query,
-)
+from ohm.queries import query_neighborhood
 
 
 @pytest.fixture
@@ -44,8 +42,7 @@ class TestFullWorkflow:
 
     def test_create_and_query(self, populated_store):
         """Create nodes and edges, then query neighborhood."""
-        sql, params = build_neighborhood_query("hungary", depth=2)
-        results = populated_store.execute(sql, params)
+        results = query_neighborhood(populated_store.conn, "hungary", depth=2)
         assert len(results) > 0
         # Should find art21 → hungary and and_or → art21 → hungary
         edge_types = {r["edge_type"] for r in results}

@@ -779,7 +779,7 @@ def query_provenance(
     node_id = validate_identifier(node_id, name="node_id")
     max_depth = validate_depth(max_depth)
 
-    PROVENANCE_EDGE_TYPES = frozenset({
+    frozenset({
         "DERIVES_FROM", "REFERENCES", "INFLUENCES", "SUPPORTS",
     })
 
