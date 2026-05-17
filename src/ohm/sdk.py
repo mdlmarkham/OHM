@@ -821,6 +821,112 @@ class Graph:
 
         return results
 
+    # ── Change Feed Consumer ─────────────────────────────────────────────
+
+    def listen(
+        self,
+        *,
+        since: str | None = None,
+        topics: list[str] | None = None,
+        agents: list[str] | None = None,
+        operations: list[str] | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Consume the change feed, optionally filtered by topic, agent, or operation.
+
+        This is the primary mechanism for agents to stay aware of changes.
+        Called at regular intervals (heartbeat cadence).
+
+        Topic filtering: if topics are specified, only returns changes to nodes
+        whose label matches one of the agent's INTERESTED_IN topics (fuzzy match).
+
+        Args:
+            since: ISO timestamp or None (uses last_sync from agent state).
+            topics: Filter to changes affecting these topic labels.
+            agents: Filter to changes by these agents.
+            operations: Filter to these operations (INSERT, UPDATE, EVOLVE, CHALLENGE).
+            limit: Maximum changes to return.
+
+        Returns:
+            List of change feed entries relevant to this agent.
+        """
+        from ohm.queries import query_change_feed
+
+        # Resolve 'since' from agent state if not provided
+        if since is None:
+            state = self._conn.execute(
+                "SELECT last_sync FROM ohm_agent_state WHERE agent_name = ?",
+                [self.actor],
+            ).fetchone()
+            if state and state[0]:
+                since = str(state[0])
+            else:
+                # Default to last hour
+                since = None  # Will return recent changes
+
+        # Get raw change feed
+        changes = query_change_feed(
+            self._conn,
+            since=since,
+            agent_name=agents[0] if agents and len(agents) == 1 else None,
+            limit=limit * 2,  # Overfetch for filtering
+        )
+
+        # Filter by topics if specified
+        if topics:
+            topic_labels = set(t.lower() for t in topics)
+            filtered = []
+            for change in changes:
+                row_id = change.get("row_id", "")
+                # Check if the changed node/edge relates to a topic
+                node_label = self._conn.execute(
+                    "SELECT label FROM ohm_nodes WHERE id = ?",
+                    [row_id],
+                ).fetchone()
+                if node_label and any(t in node_label[0].lower() for t in topic_labels):
+                    filtered.append(change)
+                # Also check edges — target node might be a topic
+                edge_target = self._conn.execute(
+                    "SELECT n.label FROM ohm_edges e JOIN ohm_nodes n ON n.id = e.to_node WHERE e.id = ?",
+                    [row_id],
+                ).fetchone()
+                if edge_target and any(t in edge_target[0].lower() for t in topic_labels):
+                    filtered.append(change)
+            changes = filtered
+
+        # Filter by multiple agents if specified
+        if agents and len(agents) > 1:
+            agent_set = set(agents)
+            changes = [c for c in changes if c.get("agent_name") in agent_set]
+
+        # Filter by operations if specified
+        if operations:
+            op_set = set(operations)
+            changes = [c for c in changes if c.get("operation") in op_set]
+
+        # Don't include own changes by default (an agent doesn't need
+        # to be notified about its own writes)
+        changes = [c for c in changes if c.get("agent_name") != self.actor]
+
+        # Update last_sync
+        self._conn.execute(
+            "UPDATE ohm_agent_state SET last_sync = now() WHERE agent_name = ?",
+            [self.actor],
+        )
+
+        return changes[:limit]
+
+    def pending_notifications(self) -> list[dict[str, Any]]:
+        """Get pending notifications — changes since last listen() call.
+
+        Shortcut for listen() with no filters. Returns changes from all
+        agents since this agent last checked.
+
+        Returns:
+            List of change feed entries since last check.
+        """
+        return self.listen()
+
     def close(self) -> None:
         """Close the database connection."""
         self._conn.close()
