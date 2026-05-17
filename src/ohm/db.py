@@ -56,6 +56,10 @@ def _load_extensions(conn: "duckdb.DuckDBPyConnection") -> None:
 
     Always loads: json
     Optionally loads: quack (if available, for concurrent multi-writer access)
+
+    Uses INSTALL (not FORCE INSTALL) to avoid re-downloading extensions
+    that are already cached locally. FORCE INSTALL re-downloads every time,
+    leaving orphaned .tmp- files if interrupted.
     """
     extensions = ["json"]
     for ext in extensions:
@@ -65,8 +69,11 @@ def _load_extensions(conn: "duckdb.DuckDBPyConnection") -> None:
             pass  # Extension may already be installed
 
     # Try to load Quack extension (optional, for concurrent access)
+    # Use INSTALL (not FORCE INSTALL) to avoid re-downloading on every call.
+    # If the extension isn't cached yet, INSTALL fetches it once; subsequent
+    # calls skip the download entirely.
     try:
-        conn.execute("FORCE INSTALL quack FROM core_nightly; LOAD quack;")
+        conn.execute("INSTALL quack FROM core_nightly; LOAD quack;")
     except Exception:
         pass  # Quack not available — fall back to single-writer mode
 

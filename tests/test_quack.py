@@ -107,17 +107,32 @@ class TestQuackAvailability:
         reset_availability()
 
     def test_is_available_returns_bool(self):
+        """is_available should return a bool without hitting real DuckDB."""
         from ohm.quack import is_available
-        result = is_available()
-        assert isinstance(result, bool)
+
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value = None
+        mock_conn.close.return_value = None
+
+        with patch("duckdb.connect", return_value=mock_conn):
+            reset_availability()
+            result = is_available()
+            assert isinstance(result, bool)
 
     def test_is_available_caches_result(self):
+        """Second call should use cached result without re-connecting."""
         from ohm.quack import is_available
-        # First call may take time (tries to install extension)
-        result1 = is_available()
-        # Second call should be cached
-        result2 = is_available()
-        assert result1 == result2
+
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value = None
+        mock_conn.close.return_value = None
+
+        with patch("duckdb.connect", return_value=mock_conn):
+            reset_availability()
+            result1 = is_available()
+            # Second call should be cached — no additional duckdb.connect calls
+            result2 = is_available()
+            assert result1 == result2
 
     def test_reset_availability_clears_cache(self):
         reset_availability()

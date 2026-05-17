@@ -6,6 +6,9 @@ pre-initialized, plus sample data factories.
 
 from __future__ import annotations
 
+import glob
+import os
+import pathlib
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -13,6 +16,33 @@ import pytest
 
 if TYPE_CHECKING:
     import duckdb
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _cleanup_duckdb_tmp_files():
+    """Remove orphaned .tmp- files from the DuckDB extensions directory.
+
+    DuckDB's INSTALL command writes to a temp file with a UUID suffix, then
+    renames it on success. If the process is interrupted (common in tests),
+    these temp files are left behind and accumulate over time, consuming
+    significant disk space. This fixture cleans them up after the test session.
+    """
+    yield  # Run after all tests complete
+
+    ext_dir = pathlib.Path.home() / ".duckdb" / "extensions"
+    if not ext_dir.exists():
+        return
+
+    count = 0
+    for tmp_file in ext_dir.rglob("*.tmp-*"):
+        try:
+            tmp_file.unlink()
+            count += 1
+        except OSError:
+            pass  # File may be in use or already deleted
+
+    if count > 0:
+        print(f"\nCleaned up {count} orphaned DuckDB extension temp file(s)")
 
 
 @pytest.fixture(autouse=True)

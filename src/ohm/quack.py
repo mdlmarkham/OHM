@@ -77,8 +77,11 @@ def is_available(conn: DuckDBPyConnection | None = None) -> bool:
             return False
 
     try:
-        # Try to install and load the Quack extension
-        test_conn.execute("FORCE INSTALL quack FROM core_nightly")
+        # Try to install and load the Quack extension.
+        # Use INSTALL (not FORCE INSTALL) to avoid re-downloading on every
+        # call — FORCE INSTALL always re-downloads, leaving orphaned .tmp-
+        # files if the process is interrupted.
+        test_conn.execute("INSTALL quack FROM core_nightly")
         test_conn.execute("LOAD quack")
         _quack_available = True
     except Exception:
