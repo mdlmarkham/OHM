@@ -848,21 +848,21 @@ def composite_score(
         composite = None
     elif obs_score is None:
         composite = evidence_score
+        if method == "geometric" and composite is not None and baseline != 1.0:
+            composite = round(composite * baseline, 4)
     elif evidence_score is None:
         composite = obs_score
+        if method == "geometric" and composite is not None and baseline != 1.0:
+            composite = round(composite * baseline, 4)
     else:
         if method == "geometric" and obs_score > 0 and evidence_score > 0:
-            # Geometric mean for multiplicative factors
-            # composite = (obs * evidence)^0.5 expressed as multiplier from baseline
-            product = obs_score * evidence_score
-            # Use weighted geometric mean based on weights
+            # Weighted geometric mean for multiplicative factors
             total_w = observation_weight + evidence_weight
             if total_w > 0:
-                # Weighted geometric mean
                 composite = round((obs_score ** (observation_weight / total_w) *
                                    evidence_score ** (evidence_weight / total_w)), 4)
             else:
-                composite = round(product ** 0.5, 4)
+                composite = round((obs_score * evidence_score) ** 0.5, 4)
             # Apply baseline scaling
             if baseline != 1.0:
                 composite = round(composite * baseline, 4)
