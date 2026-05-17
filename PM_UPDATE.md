@@ -14,19 +14,37 @@ Replace single-threaded http.server with Quack for multi-process concurrent Duck
 This is the last P0 before team testing can begin.
 Run `bd show OHM-y2i.4` for acceptance criteria.
 
-### 3. OHM-a35.10 — Agent registration [P1, feature]
+### 3. OHM-a35.12 — SDK change feed gap [P1, bug]
+SDK direct writes don't populate ohm_change_feed. Only ohmd daemon writes do.
+Agents using the SDK directly can't see each other's changes via listen().
+Fix: add _log_change() calls to queries/__init__.py write functions.
+
+### 4. OHM-a35.13 — SDK-ohmd endpoint parity [P1, feature]
+5 SDK methods missing from ohmd HTTP API: register, search, find-or-create, aggregate, anomalies.
+Blocks daemon-based multi-agent testing.
+
+### 5. OHM-a35.10 — Agent registration [P1, feature]
 First-class AGENT nodes with VALUES, GOALS, CAPABLE_OF edges.
-This unblocks all agent integration (a35.1-4).
-Run `bd show OHM-a35.10` for acceptance criteria.
+Schema v0.4.0 + SDK register_agent() DONE. Needs integration tests.
 
-### 4. OHM-a35.8 — SDK documentation [P1, feature]
+### 6. OHM-a35.8 — SDK documentation [P1, feature]
 Agent-facing guide: how to connect, register, write edges, read the graph.
-Not CLI docs — agent integration guide.
 
-### 5. OHM-xgm.1 — DuckLake shared backend [P1, feature]
+### 7. OHM-xgm.1 — DuckLake shared backend [P1, feature]
 WAL, snapshots, change feed for multi-agent shared truth.
 
-That's it. Do not start anything else until these five are done.
+That's it. Do not start anything else until these are done.
+
+---
+
+## Bugs Found During Testing (May 16, 20:30 EDT)
+
+1. **Neighborhood CTE duplicate edges** — same edge returned N times (one per hop). Fixed: GROUP BY edge ID with MIN(hop).
+2. **Duplicate node IDs accepted** — store.py upsert returned 201 for updates. Fixed: ConflictError → 409.
+3. **Timestamp validation rejected Z suffix** — listen(since='2026-01-01T00:00:00Z') threw ValueError. Fixed: regex accepts Z and timezone offsets.
+4. **APPLIES_TO missing from L3 edge types** — referenced in docs but not in schema. Fixed: added APPLIES_TO, RELATED_TO to L3.
+5. **SDK change feed gap** — queries/__init__.py writes don't log to ohm_change_feed. Only store.py (ohmd path) does. OPEN: OHM-a35.12.
+6. **L2 support boundary correctly enforced** — can't support/challenge L2 citations. This is correct behavior, not a bug.
 
 ---
 
