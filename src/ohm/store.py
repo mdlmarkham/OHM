@@ -403,12 +403,23 @@ class OhmStore:
             # Pull remote changes from DuckLake
             pulled = self.pull_from_ducklake(ducklake_path)
 
-        # Update last_sync timestamp
-        self.conn.execute(
-            "UPDATE ohm_agent_state SET last_sync = CURRENT_TIMESTAMP, "
-            "updated_at = CURRENT_TIMESTAMP WHERE agent_name = ?",
+        # Update last_sync timestamp — ensure agent row exists
+        existing = self.conn.execute(
+            "SELECT 1 FROM ohm_agent_state WHERE agent_name = ?",
             [self.agent_name],
-        )
+        ).fetchone()
+        if existing:
+            self.conn.execute(
+                "UPDATE ohm_agent_state SET last_sync = CURRENT_TIMESTAMP, "
+                "updated_at = CURRENT_TIMESTAMP WHERE agent_name = ?",
+                [self.agent_name],
+            )
+        else:
+            self.conn.execute(
+                "INSERT INTO ohm_agent_state (agent_name, last_sync, updated_at) "
+                "VALUES (?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                [self.agent_name],
+            )
         row = self.conn.execute(
             "SELECT last_sync FROM ohm_agent_state WHERE agent_name = ?",
             [self.agent_name],
@@ -440,7 +451,7 @@ class OhmStore:
 
         # Get last push timestamp for this agent
         last_push = self._get_last_push_timestamp()
-        last_push_str = last_push.isoformat() if last_push else "1970-01-01T00:00:00Z"
+        last_push_str = last_push if last_push else "1970-01-01T00:00:00Z"
 
         # Read local changes since last push
         changes = self.execute(
@@ -502,7 +513,7 @@ class OhmStore:
         """
         # Get last pull timestamp for this agent
         last_pull = self._get_last_pull_timestamp()
-        last_pull_str = last_pull.isoformat() if last_pull else "1970-01-01T00:00:00Z"
+        last_pull_str = last_pull if last_pull else "1970-01-01T00:00:00Z"
 
         # Connect to DuckLake and read changes
         ducklake = duckdb.connect(ducklake_path, read_only=True)
