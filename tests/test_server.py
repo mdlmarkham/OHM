@@ -893,7 +893,7 @@ class TestTokenSecurity:
     def test_auth_with_hashed_tokens(self, tmp_path):
         """Authentication should work with hashed tokens."""
         import time
-        time.sleep(0.3)  # Ensure previous server cleanup is complete (xdist)
+        time.sleep(0.5)  # Ensure previous server cleanup is complete (xdist)
         db_path = str(tmp_path / "test_hashed_auth.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test_agent")
         # Use plaintext tokens — _start_test_server will hash them
@@ -901,11 +901,15 @@ class TestTokenSecurity:
         roles = {"metis": "read-write", "observer": "read-only"}
         port, server, thread = _start_test_server(store, tokens=tokens, roles=roles)
         try:
-            # Valid token → 201
-            status, data = _request("POST", port, "/node", body={
-                "id": "auth_ok", "label": "AuthOK", "type": "concept",
-            }, headers={"Authorization": "Bearer hashed-token-abc"})
-            assert status == 201
+            # Retry loop for first request (server may still be starting under xdist)
+            for attempt in range(3):
+                status, data = _request("POST", port, "/node", body={
+                    "id": "auth_ok", "label": "AuthOK", "type": "concept",
+                }, headers={"Authorization": "Bearer hashed-token-abc"})
+                if status == 201:
+                    break
+                time.sleep(0.2)
+            assert status == 201, f"Expected 201, got {status}: {data}"
 
             time.sleep(0.05)  # Small delay to avoid connection race on Windows
 
