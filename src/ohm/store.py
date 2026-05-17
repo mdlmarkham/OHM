@@ -82,7 +82,12 @@ class OhmStore:
         tags: Optional[list[str]] = None,
         metadata: Optional[dict] = None,
     ) -> dict[str, Any]:
-        """Create or update a node. Attributed to the current agent."""
+        """Create or update a node. Attributed to the current agent.
+
+        Returns a dict with the node record and a 'created' key
+        indicating whether this was a new creation (True) or an
+        update of an existing node (False).
+        """
         metadata_json = json.dumps(metadata) if metadata else None
         tag_list = tags if tags else []
         tags_json = json.dumps(tag_list) if tag_list else None
@@ -103,6 +108,9 @@ class OhmStore:
                  tags_json, metadata_json, now, self.agent_name, id],
             )
             self._log_change("ohm_nodes", id, "UPDATE", None)
+            result = self.get_node(id) or {}
+            result["created"] = False
+            return result
         else:
             self.conn.execute(
                 """
@@ -114,8 +122,9 @@ class OhmStore:
                  visibility, provenance, tags_json, metadata_json, now, now],
             )
             self._log_change("ohm_nodes", id, "INSERT", None)
-
-        return self.get_node(id) or {}
+            result = self.get_node(id) or {}
+            result["created"] = True
+            return result
 
     def write_edge(
         self,

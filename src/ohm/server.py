@@ -19,6 +19,7 @@ from typing import Optional
 
 from .exceptions import (
     AuthenticationError,
+    ConflictError,
     EdgeNotFoundError,
     NodeNotFoundError,
     OHMError,
@@ -88,6 +89,8 @@ def _map_exception_to_http(exc: Exception) -> tuple[int, str]:
         return 403, "permission_denied"
     if isinstance(exc, AuthenticationError):
         return 401, "authentication_error"
+    if isinstance(exc, ConflictError):
+        return 409, "conflict"
     if isinstance(exc, ValidationError):
         return 400, "validation_error"
     if isinstance(exc, OHMError):
@@ -424,7 +427,10 @@ class OhmHandler(BaseHTTPRequestHandler):
                 tags=body.get("tags"),
                 metadata=body.get("metadata"),
             )
-            self._json_response(201, result)
+            if result.get("created", True):
+                self._json_response(201, result)
+            else:
+                raise ConflictError(f"Node {body['id']} already exists")
 
         elif path == "/edge":
             result = self.store.write_edge(

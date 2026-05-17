@@ -65,6 +65,12 @@ class ConfigurationError(OHMError):
     exit_code = 1
 
 
+class ConflictError(OHMError):
+    """Resource already exists (duplicate ID, constraint violation)."""
+
+    exit_code = 6
+
+
 EXIT_CODES = {
     0: "Success",
     1: "General error",
@@ -72,4 +78,5 @@ EXIT_CODES = {
     3: "Authentication error",
     4: "Permission denied",
     5: "Node or edge not found",
+    6: "Conflict (resource already exists)",
 }

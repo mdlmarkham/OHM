@@ -50,6 +50,7 @@ LAYER_EDGE_TYPES: dict[str, frozenset[str]] = {
         "CAUSES", "CORRELATES_WITH", "PREDICTS", "EXPLAINS",
         "CHALLENGED_BY", "SUPPORTS", "REFINES", "CONTRADICTS",
         "LISTENS_TO", "DEFERS_TO", "COLLABORATES_WITH",
+        "APPLIES_TO", "RELATED_TO",
     }),
     "L4": frozenset({"EXPECTS", "PLANS", "RISKS", "DEPENDS_ON",
                       "THREATENS", "ENABLES", "EXPECTS_FROM"}),

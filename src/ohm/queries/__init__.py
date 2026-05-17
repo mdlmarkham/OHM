@@ -78,7 +78,7 @@ def query_neighborhood(
             WHERE v.hop < ?
               {layer_clause}
         )
-        SELECT DISTINCT
+        SELECT DISTINCT ON (e.id)
             e.id AS edge_id,
             e.from_node,
             e.to_node,
@@ -89,11 +89,14 @@ def query_neighborhood(
             e.created_at,
             e.challenge_of,
             e.challenge_type,
-            v.hop
+            MIN(v.hop) AS hop
         FROM visited v
         JOIN ohm_edges e ON (e.from_node = v.node OR e.to_node = v.node)
         {layer_clause}
-        ORDER BY v.hop, e.edge_type
+        GROUP BY e.id, e.from_node, e.to_node, e.layer, e.edge_type,
+                 e.confidence, e.created_by, e.created_at,
+                 e.challenge_of, e.challenge_type
+        ORDER BY hop, e.edge_type
     """
 
     result = conn.execute(query, params)
