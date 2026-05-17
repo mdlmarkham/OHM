@@ -1,9 +1,10 @@
 """
 OHM Store — DuckDB connection management for local cache and shared backend.
 
-Supports two modes:
+Supports three modes:
 1. Local mode: single DuckDB file for development or single-agent use
-2. Quack mode: HTTP connection to ohmd daemon for multi-agent shared access
+2. Quack mode: DuckDB connection with Quack server for concurrent multi-writer access
+3. Remote mode: HTTP connection to ohmd daemon for multi-agent shared access
 """
 
 import json
@@ -25,6 +26,9 @@ class OhmStore:
         db_path: Optional[str] = None,
         agent_name: str = "ohm",
         readonly: bool = False,
+        quack: bool = False,
+        quack_uri: str = "quack:localhost",
+        quack_token_env: str = "QUACK_TOKEN",
     ):
         """Initialize the store.
 
@@ -32,9 +36,18 @@ class OhmStore:
             db_path: Path to DuckDB file. Defaults to ~/.ohm/ohm.duckdb
             agent_name: Name of the owning agent (for attribution)
             readonly: Open in read-only mode
+            quack: Enable Quack server for concurrent multi-writer access.
+                When True and Quack is available, starts a Quack server
+                on this connection. Falls back to direct DuckDB if unavailable.
+            quack_uri: Quack server URI (default: quack:localhost)
+            quack_token_env: Environment variable for Quack token
         """
         self.agent_name = agent_name
         self.readonly = readonly
+        self.quack = quack
+        self.quack_uri = quack_uri
+        self.quack_token_env = quack_token_env
+        self.quack_started = False
 
         if db_path is None:
             db_path = os.environ.get("OHM_DB_PATH", str(Path.home() / ".ohm" / "ohm.duckdb"))
@@ -45,10 +58,48 @@ class OhmStore:
         self.conn = duckdb.connect(str(self.db_path), read_only=readonly)
         self._init_schema()
 
+        # Start Quack server if requested and available
+        if self.quack and not self.readonly:
+            self._start_quack()
+
     def _init_schema(self):
         """Initialize the schema if not already present."""
         if not self.readonly:
             self.conn.execute(SCHEMA_SQL)
+
+    def _start_quack(self) -> None:
+        """Start Quack server if available. Sets self.quack_started on success."""
+        try:
+            from .quack import is_available, start_server
+
+            if is_available(self.conn):
+                start_server(
+                    self.conn,
+                    uri=self.quack_uri,
+                    token_env=self.quack_token_env,
+                )
+                self.quack_started = True
+            else:
+                import sys
+                print(
+                    "Quack extension not available — running in single-writer mode",
+                    file=sys.stderr,
+                )
+        except Exception as e:
+            import sys
+            print(f"Quack server failed to start: {e}", file=sys.stderr)
+            print("Falling back to single-writer mode", file=sys.stderr)
+            self.quack_started = False
+
+    def _stop_quack(self) -> None:
+        """Stop Quack server if it was started."""
+        if self.quack_started:
+            try:
+                from .quack import stop_server
+                stop_server(self.conn, uri=self.quack_uri)
+            except Exception:
+                pass
+            self.quack_started = False
 
     def execute(self, sql: str, params: Optional[list] = None) -> list[dict[str, Any]]:
         """Execute a SQL query and return results as list of dicts."""
@@ -359,7 +410,8 @@ class OhmStore:
         )
 
     def close(self):
-        """Close the DuckDB connection."""
+        """Close the DuckDB connection. Stops Quack server if running."""
+        self._stop_quack()
         self.conn.close()
 
     def __enter__(self):

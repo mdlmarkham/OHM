@@ -596,6 +596,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             status["uptime"] = round(time.time() - _START_TIME, 1)
             status["version"] = "0.2.0"
             status["schema"] = self.schema_config.name
+            status["quack"] = self.config.get("quack", False)
             self._json_response(200, status)
         elif path == "/schema":
             schema = self.schema_config
@@ -1031,6 +1032,13 @@ class OhmHandler(BaseHTTPRequestHandler):
 def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None = None):
     """Run the HTTP server.
 
+    When Quack is enabled and available, starts a Quack server on the
+    DuckDB connection for concurrent multi-writer access. The HTTP
+    handler continues to serve OHM-specific endpoints (auth, boundary
+    enforcement, challenge semantics) regardless.
+
+    If Quack is not available, falls back to the HTTP-only mode.
+
     Args:
         config: Server configuration dict.
         store: OhmStore instance for database access.
@@ -1047,9 +1055,35 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     OhmHandler.no_auth = config.get("no_auth", False)
     OhmHandler.schema_config = schema_config
 
+    # ── Quack integration ──────────────────────────────────────────────
+    quack_info: dict | None = None
+    if config.get("quack", False):
+        from .quack import is_available, start_server, validate_quack_uri
+
+        if is_available(store.conn):
+            quack_uri = config.get("quack_uri", "quack:localhost")
+            quack_token_env = config.get("quack_token_env", "QUACK_TOKEN")
+            try:
+                quack_info = start_server(
+                    store.conn,
+                    uri=quack_uri,
+                    token_env=quack_token_env,
+                )
+                print(f"Quack server started: {quack_uri}", file=sys.stderr)
+            except Exception as e:
+                print(f"Quack server failed to start: {e}", file=sys.stderr)
+                print("Falling back to HTTP-only mode", file=sys.stderr)
+                quack_info = None
+        else:
+            print("Quack extension not available — using HTTP-only mode", file=sys.stderr)
+
     server = HTTPServer((config["host"], config["port"]), OhmHandler)
     print(f"OHM daemon listening on {config['host']}:{config['port']}", file=sys.stderr)
     print(f"Schema: {schema_config.name}", file=sys.stderr)
+    if quack_info:
+        print(f"Concurrent access: Quack (multi-writer)", file=sys.stderr)
+    else:
+        print(f"Concurrent access: HTTP (single-writer)", file=sys.stderr)
 
     # Graceful shutdown
     def shutdown_handler(signum, frame):
@@ -1084,6 +1118,18 @@ def main(schema_config: SchemaConfig | None = None):
         "--schema", choices=["ohm", "topo"], default=None,
         help="Schema configuration (default: determined by entry point)",
     )
+    parser.add_argument(
+        "--quack", action="store_true",
+        help="Enable Quack protocol for concurrent multi-writer access",
+    )
+    parser.add_argument(
+        "--quack-uri", default=None,
+        help="Quack server URI (default: quack:localhost)",
+    )
+    parser.add_argument(
+        "--quack-token-env", default=None,
+        help="Environment variable for Quack token (default: QUACK_TOKEN)",
+    )
     args = parser.parse_args()
 
     # Allow CLI override of schema
@@ -1102,6 +1148,14 @@ def main(schema_config: SchemaConfig | None = None):
         config["db_path"] = args.db
     if args.no_auth or os.environ.get("OHM_NO_AUTH", "").lower() in ("1", "true", "yes"):
         config["no_auth"] = True
+
+    # Quack configuration
+    if args.quack or os.environ.get("OHM_QUACK", "").lower() in ("1", "true", "yes"):
+        config["quack"] = True
+    if args.quack_uri:
+        config["quack_uri"] = args.quack_uri
+    if args.quack_token_env:
+        config["quack_token_env"] = args.quack_token_env
 
     # Handle token generation
     if args.init_token:

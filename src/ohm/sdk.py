@@ -17,6 +17,7 @@ Usage:
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -1446,4 +1447,64 @@ def connect(
     conn = db_connect(db_path)
     graph = Graph(conn, actor=actor)
     graph.token = resolved_token
+    return graph
+
+
+def connect_remote(
+    uri: str = "quack:localhost",
+    *,
+    actor: str = "unknown",
+    token: str | None = None,
+    token_env: str | None = None,
+    alias: str = "remote",
+) -> Graph:
+    """Connect to a remote OHM graph via Quack protocol.
+
+    Creates a local in-memory DuckDB connection and attaches the remote
+    Quack server as a catalog. All graph operations are sent to the
+    remote server through Quack.
+
+    Falls back to a direct file connection if Quack is not available
+    (using the OHM_DB environment variable or default path).
+
+    Args:
+        uri: Quack URI of the remote server (default: quack:localhost).
+        actor: Agent name for attribution.
+        token: Quack authentication token.
+        token_env: Environment variable for the token (default: QUACK_TOKEN).
+        alias: Catalog alias for the remote (default: 'remote').
+
+    Returns:
+        A Graph instance connected to the remote server.
+    """
+    import os
+
+    from ohm.db import connect as db_connect
+    from ohm.quack import attach_remote, is_available
+
+    conn = db_connect(":memory:")
+
+    if is_available(conn):
+        try:
+            attach_remote(
+                conn,
+                uri=uri,
+                alias=alias,
+                token=token,
+                token_env=token_env or "QUACK_TOKEN",
+            )
+            # Set search path to remote catalog so queries go there
+            conn.execute(f"SET search_path = {alias}.main")
+            graph = Graph(conn, actor=actor)
+            graph.token = token or os.environ.get(token_env or "QUACK_TOKEN")
+            return graph
+        except Exception:
+            # Fall back to direct connection
+            pass
+
+    # Fallback: direct file connection
+    db_path = os.environ.get("OHM_DB", str(Path.home() / ".ohm" / "ohm.duckdb"))
+    conn = db_connect(db_path)
+    graph = Graph(conn, actor=actor)
+    graph.token = token or os.environ.get("OHM_TOKEN")
     return graph

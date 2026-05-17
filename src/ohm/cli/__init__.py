@@ -61,6 +61,18 @@ def build_parser() -> argparse.ArgumentParser:
     serve_start = serve_sub.add_parser("start", help="Start ohmd (Quack server)")
     serve_start.add_argument("--port", type=int, default=9876, help="Quack server port")
     serve_start.add_argument("--config", default=None, help="Path to config file")
+    serve_start.add_argument(
+        "--quack", action="store_true",
+        help="Enable Quack protocol for concurrent multi-writer access",
+    )
+    serve_start.add_argument(
+        "--quack-uri", default=None,
+        help="Quack server URI (default: quack:localhost)",
+    )
+    serve_start.add_argument(
+        "--quack-token-env", default=None,
+        help="Environment variable for Quack token (default: QUACK_TOKEN)",
+    )
 
     serve_sub.add_parser("stop", help="Graceful shutdown")
     serve_sub.add_parser("status", help="Is ohmd running?")
@@ -341,7 +353,10 @@ def _handle_serve(args: argparse.Namespace) -> None:
     """Handle 'ohm serve' subcommands."""
     cmd = args.serve_command
     if cmd == "start":
-        print(f"Starting ohmd on port {args.port}...")
+        quack_flag = " --quack" if getattr(args, "quack", False) else ""
+        quack_uri = f" --quack-uri {args.quack_uri}" if getattr(args, "quack_uri", None) else ""
+        quack_token = f" --quack-token-env {args.quack_token_env}" if getattr(args, "quack_token_env", None) else ""
+        print(f"Starting ohmd on port {args.port}{quack_flag}{quack_uri}{quack_token}...")
         # TODO: Implement ohmd daemon startup (OHM-y2i.3)
         print("ohmd started (placeholder)")
     elif cmd == "stop":
