@@ -724,6 +724,45 @@ class OhmHandler(BaseHTTPRequestHandler):
                 },
             })
             return
+        elif path == "/openapi.json":
+            # OpenAPI 3.0 spec endpoint (ADR-005)
+            self._json_response(200, {
+                "openapi": "3.0.3",
+                "info": {
+                    "title": "OHM Daemon API",
+                    "version": "0.2.0",
+                    "description": "Multi-agent knowledge graph daemon — shared awareness, individual judgment.",
+                },
+                "servers": [{"url": f"http://{self.config.get('host', '127.0.0.1')}:{self.config.get('port', 8710)}"}],
+                "paths": {
+                    "/": {"get": {"summary": "Discovery index", "responses": {"200": {"description": "Route listing"}}}},
+                    "/health": {"get": {"summary": "Health check", "responses": {"200": {"description": "OK"}}}},
+                    "/ready": {"get": {"summary": "Readiness check", "responses": {"200": {"description": "Ready"}, "503": {"description": "Not ready"}}}},
+                    "/metrics": {"get": {"summary": "Prometheus-style metrics", "responses": {"200": {"description": "Metrics"}}}},
+                    "/stats": {"get": {"summary": "Graph statistics", "responses": {"200": {"description": "Stats"}}}},
+                    "/status": {"get": {"summary": "Daemon status", "responses": {"200": {"description": "Status"}}}},
+                    "/schema": {"get": {"summary": "Node/edge types", "responses": {"200": {"description": "Schema"}}}},
+                    "/layers": {"get": {"summary": "L1-L4 descriptions", "responses": {"200": {"description": "Layers"}}}},
+                    "/node/{id}": {"get": {"summary": "Get node"}, "post": {"summary": "Create node"}},
+                    "/edge/{id}": {"get": {"summary": "Get edge"}, "post": {"summary": "Create edge"}},
+                    "/neighborhood/{id}": {"get": {"summary": "Graph traversal"}},
+                    "/path/{from}/{to}": {"get": {"summary": "Shortest path"}},
+                    "/impact/{id}": {"get": {"summary": "Impact analysis"}},
+                    "/confidence/{id}": {"get": {"summary": "Confidence audit"}},
+                    "/agent/{name}": {"get": {"summary": "Agent state"}},
+                    "/agents": {"get": {"summary": "List agents"}},
+                    "/listen": {"get": {"summary": "Change feed"}},
+                    "/events": {"get": {"summary": "SSE event stream"}},
+                    "/challenge/{id}": {"post": {"summary": "Challenge edge"}},
+                    "/support/{id}": {"post": {"summary": "Support edge"}},
+                    "/observe/{id}": {"post": {"summary": "Record observation"}},
+                    "/state": {"post": {"summary": "Update agent state"}},
+                    "/register": {"post": {"summary": "Register agent"}},
+                    "/heartbeat": {"post": {"summary": "Agent heartbeat"}},
+                    "/webhook/{agent}": {"post": {"summary": "Register webhook"}},
+                },
+            })
+            return
         elif path == "/health":
             self._json_response(200, {
                 "status": "ok",
