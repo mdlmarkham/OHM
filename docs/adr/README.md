@@ -111,3 +111,46 @@ Package the entire stack as `ohm` CLI. Agents call `ohm graph write`, `ohm graph
 - `ohm graph schema` and `ohm graph layers` are living documentation
 - `ohm graph listen --since last-check` wraps the change feed
 - The CLI is the contract between agents and the graph
+
+---
+
+## ADR-006: Advisory Schema with Graduated Enforcement
+
+**Date:** 2026-05-17
+**Status:** Decided
+
+### Context
+
+OHM's schema (node types, edge types, layers) is currently advisory — any node_type or edge_type can be created without validation. This is intentional for early-stage exploration, but as a domain matures, stricter enforcement becomes desirable.
+
+### Decision
+
+The schema remains advisory by default. Enforcement is graduated through `SchemaConfig`: advisory (default), lenient (known types validated, unknown accepted), strict (only registered types accepted). Schema evolution is handled through the existing migration framework.
+
+### Consequences
+
+- New projects start in advisory mode — no friction for exploration
+- Mature domains opt into strict mode via `SchemaConfig`
+- Schema migrations are versioned and auditable through `ohm_meta`
+
+---
+
+## ADR-007: Schema Evolution and Type Governance for Domain Expansion
+
+**Date:** 2026-05-17
+**Status:** Decided
+
+### Context
+
+As OHM is applied to new domains (cattle operations, industrial monitoring), the schema must accommodate domain-specific types without polluting the core ontology or breaking existing queries.
+
+### Decision
+
+Domain types are isolated through `SchemaConfig` instances. Each domain extends — but never overrides — the base OHM types. Types follow a three-stage lifecycle: experimental (advisory) → registered (lenient) → canonical (strict). Promotion to canonical requires a schema migration.
+
+### Consequences
+
+- No schema pollution — domain types stay in their `SchemaConfig` until promoted
+- Domain autonomy — each domain controls its own type lifecycle
+- Cross-domain visibility — all domains share the same physical tables
+- Migration audit trail — every type promotion is recorded in `MIGRATIONS`
