@@ -770,3 +770,193 @@ def apply_confidence_decay(
             f"(half-life: {half_life_days}d, floor: {min_confidence})"
         ),
     }
+
+
+def composite_score(
+    conn: DuckDBPyConnection,
+    node_id: str,
+    *,
+    observation_weight: float = 0.5,
+    evidence_weight: float = 0.5,
+) -> dict[str, Any]:
+    """Compute a composite decision score for a node.
+
+    Combines two independent signals into a single 0-1 score:
+    1. Observation score: aggregate of direct observations on the node
+       (weighted by inverse-variance, or simple mean if no sigma).
+    2. Evidence score: aggregate confidence from incoming evidence edges
+       (from query_confidence_chain).
+
+    The weights control how much each signal contributes. Default is
+    equal weighting (0.5 each). Set observation_weight=0 to use only
+    evidence, or evidence_weight=0 to use only observations.
+
+    This is a universal substrate method — works for any domain.
+
+    Args:
+        conn: Database connection.
+        node_id: The node to score.
+        observation_weight: Weight for observation signal (0-1).
+        evidence_weight: Weight for evidence signal (0-1).
+
+    Returns:
+        Dict with composite_score, observation_score, evidence_score,
+        observation_count, evidence_count, and components.
+    """
+    from ohm.queries import query_confidence_chain
+
+    # ── Observation score ──────────────────────────────────────────
+    obs_result = conn.execute(
+        "SELECT value, sigma FROM ohm_observations WHERE node_id = ? AND value IS NOT NULL",
+        [node_id],
+    ).fetchall()
+
+    obs_score: float | None = None
+    obs_count = len(obs_result)
+    if obs_result:
+        total_weight = 0.0
+        weighted_sum = 0.0
+        for value, sigma in obs_result:
+            if sigma and sigma > 0:
+                w = 1.0 / (sigma ** 2)
+            else:
+                w = 1.0
+            weighted_sum += (value or 0) * w
+            total_weight += w
+        obs_score = round(weighted_sum / total_weight, 4) if total_weight > 0 else None
+
+    # ── Evidence score ─────────────────────────────────────────────
+    evidence = query_confidence_chain(conn, node_id)
+    evidence_score = evidence.get("aggregate_confidence")
+    evidence_count = evidence.get("evidence_count", 0)
+
+    # ── Composite ──────────────────────────────────────────────────
+    if obs_score is None and evidence_score is None:
+        composite = None
+    elif obs_score is None:
+        composite = evidence_score
+    elif evidence_score is None:
+        composite = obs_score
+    else:
+        total_w = observation_weight + evidence_weight
+        composite = round(
+            (obs_score * observation_weight + evidence_score * evidence_weight) / total_w, 4,
+        )
+
+    return {
+        "node_id": node_id,
+        "composite_score": composite,
+        "observation_score": obs_score,
+        "evidence_score": evidence_score,
+        "observation_count": obs_count,
+        "evidence_count": evidence_count,
+        "weights": {
+            "observation": observation_weight,
+            "evidence": evidence_weight,
+        },
+    }
+
+
+def detect_trend(
+    conn: DuckDBPyConnection,
+    node_id: str,
+    *,
+    window_days: int = 60,
+    min_observations: int = 3,
+) -> dict[str, Any]:
+    """Detect temporal trends in observations for a node.
+
+    Uses simple linear regression over observations within *window_days*
+    to compute the trend direction (rising/falling/stable) and magnitude
+    (slope per day). Returns the trend along with the raw observations
+    so agents can apply domain-specific interpretation.
+
+    This is a universal substrate method — works for any domain:
+    NDVI decline, vibration increase, confidence decay, etc.
+
+    Args:
+        conn: Database connection.
+        node_id: The node to analyze.
+        window_days: Lookback window in days (default 60).
+        min_observations: Minimum observations needed for a trend (default 3).
+
+    Returns:
+        Dict with trend (rising/falling/stable), slope_per_day,
+        r_squared, observation_count, and observations.
+    """
+    observations = conn.execute(
+        """
+        SELECT value, created_at,
+               EXTRACT(EPOCH FROM created_at) AS epoch_sec
+        FROM ohm_observations
+        WHERE node_id = ?
+          AND value IS NOT NULL
+          AND created_at >= CURRENT_TIMESTAMP - INTERVAL '1 day' * ?
+        ORDER BY created_at ASC
+        """,
+        [node_id, window_days],
+    ).fetchall()
+
+    n = len(observations)
+    if n < min_observations:
+        return {
+            "node_id": node_id,
+            "trend": "insufficient_data",
+            "slope_per_day": None,
+            "r_squared": None,
+            "observation_count": n,
+            "window_days": window_days,
+            "observations": [
+                {"value": v, "created_at": str(t)} for v, t, _ in observations
+            ],
+        }
+
+    # Simple linear regression: value = slope * x + intercept
+    # x = days since first observation
+    values = [o[0] for o in observations]
+    timestamps = [o[1] for o in observations]
+    epoch_secs = [o[2] for o in observations]
+
+    # Use epoch seconds for precision, convert slope to per-day
+    t0 = epoch_secs[0]
+    x_vals = [(t - t0) / 86400.0 for t in epoch_secs]  # days since first obs
+
+    mean_x = sum(x_vals) / n
+    mean_y = sum(values) / n
+
+    # Covariance and variance
+    cov_xy = sum((x - mean_x) * (y - mean_y) for x, y in zip(x_vals, values))
+    var_x = sum((x - mean_x) ** 2 for x in x_vals)
+
+    if var_x == 0:
+        slope = 0.0
+        r_squared = 0.0
+    else:
+        slope = cov_xy / var_x
+        intercept = mean_y - slope * mean_x
+
+        # R-squared
+        y_pred = [slope * x + intercept for x in x_vals]
+        ss_res = sum((y - yp) ** 2 for y, yp in zip(values, y_pred))
+        ss_tot = sum((y - mean_y) ** 2 for y in values)
+        r_squared = round(1.0 - (ss_res / ss_tot), 4) if ss_tot > 0 else 0.0
+
+    # Classify trend
+    if abs(slope) < 0.001:
+        trend = "stable"
+    elif slope > 0:
+        trend = "rising"
+    else:
+        trend = "falling"
+
+    return {
+        "node_id": node_id,
+        "trend": trend,
+        "slope_per_day": round(slope, 6),
+        "r_squared": r_squared,
+        "observation_count": n,
+        "window_days": window_days,
+        "observations": [
+            {"value": v, "created_at": str(t)} for v, t, _ in observations
+        ],
+    }

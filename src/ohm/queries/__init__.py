@@ -1331,3 +1331,116 @@ def query_snapshot(
         "observations": observations,
         "summary": summary,
     }
+
+
+def query_confidence_chain(
+    conn: DuckDBPyConnection,
+    node_id: str,
+    *,
+    max_depth: int = 5,
+) -> dict[str, Any]:
+    """Trace all incoming evidence edges to compute aggregate confidence.
+
+    Walks incoming L2/L3 edges (CAUSES, SUPPORTS, DERIVES_FROM, REFERENCES,
+    PREDICTS, CORRELATES_WITH, EXPLAINS) recursively to build an evidence
+    tree. Computes aggregate confidence using inverse-variance weighting
+    of all evidence paths.
+
+    This is a universal substrate method — works for any domain:
+    cattle health, constitutional law, industrial systems, etc.
+
+    Args:
+        conn: Database connection.
+        node_id: The node to trace evidence for.
+        max_depth: Maximum chain depth (default 5).
+
+    Returns:
+        Dict with evidence_chain (list of edges), aggregate_confidence,
+        evidence_count, and chain_depth.
+    """
+    from ohm.validation import validate_depth, validate_identifier
+
+    node_id = validate_identifier(node_id, name="node_id")
+    max_depth = validate_depth(max_depth, max_depth=20)
+
+    evidence_types = (
+        "CAUSES", "SUPPORTS", "DERIVES_FROM", "REFERENCES",
+        "PREDICTS", "CORRELATES_WITH", "EXPLAINS",
+    )
+    placeholders = ",".join(["?"] * len(evidence_types))
+
+    query = f"""
+        WITH RECURSIVE evidence_chain AS (
+            SELECT
+                e.id,
+                e.from_node,
+                e.to_node,
+                e.edge_type,
+                e.layer,
+                e.confidence,
+                e.created_by,
+                e.condition,
+                1 AS depth,
+                ARRAY[e.id] AS path
+            FROM ohm_edges e
+            WHERE e.to_node = ?
+              AND e.edge_type IN ({placeholders})
+
+            UNION ALL
+
+            SELECT
+                e.id,
+                e.from_node,
+                e.to_node,
+                e.edge_type,
+                e.layer,
+                e.confidence,
+                e.created_by,
+                e.condition,
+                c.depth + 1,
+                array_append(c.path, e.id)
+            FROM ohm_edges e
+            JOIN evidence_chain c ON e.to_node = c.from_node
+            WHERE c.depth < ?
+              AND e.edge_type IN ({placeholders})
+              AND e.id NOT IN (SELECT unnest(c.path))
+        )
+        SELECT DISTINCT
+            id, from_node, to_node, edge_type, layer,
+            confidence, created_by, condition, depth
+        FROM evidence_chain
+        ORDER BY depth, confidence DESC
+    """
+    params = [node_id, *evidence_types, max_depth, *evidence_types]
+    result = conn.execute(query, params)
+    edges = _rows_to_dicts(result)
+
+    # Compute aggregate confidence using inverse-variance of all evidence
+    if not edges:
+        return {
+            "node_id": node_id,
+            "evidence_chain": [],
+            "aggregate_confidence": None,
+            "evidence_count": 0,
+            "max_depth": 0,
+        }
+
+    # Weighted aggregate: deeper edges contribute less (decay factor 0.8^depth)
+    total_weight = 0.0
+    weighted_sum = 0.0
+    for edge in edges:
+        depth = edge.get("depth", 1)
+        conf = edge.get("confidence", 0.5) or 0.5
+        weight = 0.8 ** (depth - 1)
+        weighted_sum += conf * weight
+        total_weight += weight
+
+    aggregate = round(weighted_sum / total_weight, 4) if total_weight > 0 else None
+
+    return {
+        "node_id": node_id,
+        "evidence_chain": edges,
+        "aggregate_confidence": aggregate,
+        "evidence_count": len(edges),
+        "max_depth": max(e.get("depth", 0) for e in edges) if edges else 0,
+    }

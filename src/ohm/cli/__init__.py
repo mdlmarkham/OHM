@@ -154,6 +154,15 @@ def build_parser() -> argparse.ArgumentParser:
     confidence_parser = graph_sub.add_parser("confidence", help="Provenance and challenge audit")
     confidence_parser.add_argument("edge_id", help="Edge ID to audit")
 
+    # graph confidence-chain
+    chain_parser = graph_sub.add_parser(
+        "confidence-chain", help="Trace evidence chain and compute aggregate confidence",
+    )
+    chain_parser.add_argument("node_id", help="Node ID to trace evidence for")
+    chain_parser.add_argument(
+        "--max-depth", type=int, default=5, help="Maximum chain depth (default: 5)",
+    )
+
     # graph listen
     listen_parser = graph_sub.add_parser("listen", help="Change feed since last check")
     listen_parser.add_argument("--since", help="ISO timestamp or 'last-check'")
@@ -246,6 +255,34 @@ def build_parser() -> argparse.ArgumentParser:
     decay_parser.add_argument(
         "--layer", choices=["L1", "L2", "L3", "L4"],
         help="Only decay edges in this layer",
+    )
+
+    # graph composite-score
+    score_parser = graph_sub.add_parser(
+        "composite-score", help="Compute composite decision score for a node",
+    )
+    score_parser.add_argument("node_id", help="Node ID to score")
+    score_parser.add_argument(
+        "--obs-weight", type=float, default=0.5,
+        help="Weight for observation signal (default: 0.5)",
+    )
+    score_parser.add_argument(
+        "--evidence-weight", type=float, default=0.5,
+        help="Weight for evidence signal (default: 0.5)",
+    )
+
+    # graph trend
+    trend_parser = graph_sub.add_parser(
+        "trend", help="Detect temporal trends in observations",
+    )
+    trend_parser.add_argument("node_id", help="Node ID to analyze")
+    trend_parser.add_argument(
+        "--window", type=int, default=60,
+        help="Lookback window in days (default: 60)",
+    )
+    trend_parser.add_argument(
+        "--min-obs", type=int, default=3,
+        help="Minimum observations needed (default: 3)",
     )
 
     # ── state ────────────────────────────────────────────────────────────
@@ -464,6 +501,8 @@ def _handle_graph(args: argparse.Namespace) -> None:
         _handle_support(args)
     elif cmd == "confidence":
         _handle_confidence(args)
+    elif cmd == "confidence-chain":
+        _handle_confidence_chain(args)
     elif cmd == "listen":
         _handle_listen(args)
     elif cmd == "events":
@@ -484,6 +523,10 @@ def _handle_graph(args: argparse.Namespace) -> None:
         _handle_health(args)
     elif cmd == "decay":
         _handle_decay(args)
+    elif cmd == "composite-score":
+        _handle_composite_score(args)
+    elif cmd == "trend":
+        _handle_trend(args)
     else:
         print(f"Unknown graph command: {cmd}")
 
@@ -938,6 +981,34 @@ def _handle_confidence(args: argparse.Namespace) -> None:
         conn.close()
 
 
+def _handle_confidence_chain(args: argparse.Namespace) -> None:
+    """Handle confidence chain — trace evidence and compute aggregate confidence."""
+    from ohm.queries import query_confidence_chain
+
+    conn = _get_db(args)
+    try:
+        result = query_confidence_chain(conn, args.node_id, max_depth=args.max_depth)
+        if args.format == "json":
+            import json
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            print(f"── Confidence Chain: {args.node_id} ──")
+            print(f"  Aggregate confidence: {result['aggregate_confidence']}")
+            print(f"  Evidence count:       {result['evidence_count']}")
+            print(f"  Max depth:            {result['max_depth']}")
+            if result["evidence_chain"]:
+                print(f"\n  Evidence chain ({len(result['evidence_chain'])} edges):")
+                for e in result["evidence_chain"]:
+                    indent = "  " * e["depth"]
+                    print(
+                        f"{indent}[d{e['depth']}] {e['edge_type']}: "
+                        f"{e['from_node']} → {e['to_node']} "
+                        f"(conf: {e['confidence']}, by: {e['created_by']})"
+                    )
+    finally:
+        conn.close()
+
+
 def _handle_listen(args: argparse.Namespace) -> None:
     """Handle change feed query."""
     from ohm.queries import query_change_feed
@@ -1279,6 +1350,57 @@ def _handle_decay(args: argparse.Namespace) -> None:
             print(f"Decayed {result['updated']} edges")
             if result.get("skipped"):
                 print(f"Skipped {result['skipped']} L1/L2 edges")
+    finally:
+        conn.close()
+
+
+def _handle_composite_score(args: argparse.Namespace) -> None:
+    """Compute composite decision score combining observations and evidence."""
+    from ohm.methods import composite_score
+
+    conn = _get_db(args)
+    try:
+        result = composite_score(
+            conn, args.node_id,
+            observation_weight=args.obs_weight,
+            evidence_weight=args.evidence_weight,
+        )
+        if args.format == "json":
+            import json
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            print(f"── Composite Score: {args.node_id} ──")
+            print(f"  Composite:     {result['composite_score']}")
+            print(f"  Observation:   {result['observation_score']} "
+                  f"({result['observation_count']} obs)")
+            print(f"  Evidence:      {result['evidence_score']} "
+                  f"({result['evidence_count']} edges)")
+            print(f"  Weights:       obs={result['weights']['observation']}, "
+                  f"evidence={result['weights']['evidence']}")
+    finally:
+        conn.close()
+
+
+def _handle_trend(args: argparse.Namespace) -> None:
+    """Detect temporal trends in observations for a node."""
+    from ohm.methods import detect_trend
+
+    conn = _get_db(args)
+    try:
+        result = detect_trend(
+            conn, args.node_id,
+            window_days=args.window, min_observations=args.min_obs,
+        )
+        if args.format == "json":
+            import json
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            print(f"── Trend: {args.node_id} ──")
+            print(f"  Direction:  {result['trend']}")
+            print(f"  Slope/day:  {result['slope_per_day']}")
+            print(f"  R-squared:  {result['r_squared']}")
+            print(f"  Obs count:  {result['observation_count']} "
+                  f"(window: {result['window_days']}d)")
     finally:
         conn.close()
 

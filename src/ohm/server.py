@@ -297,6 +297,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         Query parameters:
         - since: ISO timestamp to stream from (optional, defaults to last sync)
         - agent: filter to changes by this agent (optional)
+        - layer: filter to changes in this layer (optional, e.g. L3)
         - topics: comma-separated topic labels (optional)
         """
         from urllib.parse import parse_qs
@@ -312,6 +313,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         # Parse parameters
         since = qs.get("since", [None])[0]
         filter_agent = qs.get("agent", [None])[0]
+        filter_layer = qs.get("layer", [None])[0]
         topics_param = qs.get("topics", [None])[0]
         topics = topics_param.split(",") if topics_param else None
 
@@ -334,6 +336,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             "last_event_id": sub_id,
             "topics": topics,
             "filter_agent": filter_agent,
+            "filter_layer": filter_layer,
         }
 
         # Send SSE headers
@@ -715,6 +718,13 @@ class OhmHandler(BaseHTTPRequestHandler):
         elif path == "/events" or path.startswith("/events/"):
             # SSE endpoint — streams change feed events to connected clients
             self._handle_sse_events(path, qs)
+            return
+
+        elif path == "/stats":
+            from ohm.queries import query_stats
+            stats = query_stats(self.store.conn)
+            stats["uptime"] = round(time.time() - _START_TIME, 1)
+            self._json_response(200, stats)
             return
 
         # Auth for all other GET endpoints

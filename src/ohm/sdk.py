@@ -480,6 +480,24 @@ class Graph:
 
         return query_confidence(self._conn, edge_id)
 
+    def confidence_chain(self, node_id: str, *, max_depth: int = 5) -> dict[str, Any]:
+        """Trace all incoming evidence edges to compute aggregate confidence.
+
+        Walks incoming L2/L3 evidence edges recursively to build an evidence
+        tree and computes aggregate confidence. Universal substrate method —
+        works for any domain.
+
+        Args:
+            node_id: The node to trace evidence for.
+            max_depth: Maximum chain depth (default 5).
+
+        Returns:
+            Dict with evidence_chain, aggregate_confidence, evidence_count.
+        """
+        from ohm.queries import query_confidence_chain
+
+        return query_confidence_chain(self._conn, node_id, max_depth=max_depth)
+
     def agent_state(self, agent_name: str | None = None) -> list[dict[str, Any]]:
         """Query agent state."""
         from ohm.queries import query_agent_state
@@ -540,6 +558,54 @@ class Graph:
 
         return detect_contradictions(
             self._conn, confidence_threshold=confidence_threshold, limit=limit,
+        )
+
+    def composite_score(
+        self,
+        node_id: str,
+        *,
+        observation_weight: float = 0.5,
+        evidence_weight: float = 0.5,
+    ) -> dict[str, Any]:
+        """Compute a composite decision score combining observations and evidence.
+
+        Universal substrate method — works for any domain.
+
+        Args:
+            node_id: The node to score.
+            observation_weight: Weight for observation signal (0-1).
+            evidence_weight: Weight for evidence signal (0-1).
+
+        Returns:
+            Dict with composite_score, observation_score, evidence_score.
+        """
+        from ohm.methods import composite_score as _composite_score
+
+        return _composite_score(
+            self._conn, node_id,
+            observation_weight=observation_weight, evidence_weight=evidence_weight,
+        )
+
+    def detect_trend(
+        self, node_id: str, *, window_days: int = 60, min_observations: int = 3,
+    ) -> dict[str, Any]:
+        """Detect temporal trends in observations for a node.
+
+        Uses linear regression over observations within the window.
+        Universal substrate method — works for any domain.
+
+        Args:
+            node_id: The node to analyze.
+            window_days: Lookback window in days (default 60).
+            min_observations: Minimum observations needed (default 3).
+
+        Returns:
+            Dict with trend (rising/falling/stable), slope_per_day, r_squared.
+        """
+        from ohm.methods import detect_trend as _detect_trend
+
+        return _detect_trend(
+            self._conn, node_id, window_days=window_days, min_observations=min_observations,
         )
 
     def heartbeat(self, *, focus: str | None = None) -> dict[str, Any]:
