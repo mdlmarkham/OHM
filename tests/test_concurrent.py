@@ -37,7 +37,8 @@ def _start_server(store, tokens=None, roles=None, no_auth=False):
 
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    time.sleep(0.1)
+    # Wait for server to be fully ready - longer on Windows
+    time.sleep(0.5)
     return port, server, thread
 
 
