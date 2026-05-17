@@ -132,8 +132,7 @@ class TestQuackAvailability:
         mock_conn = MagicMock()
         mock_conn.execute.return_value = None
 
-        with patch("ohm.quack.duckdb") as mock_duckdb:
-            mock_duckdb.connect.return_value = mock_conn
+        with patch("duckdb.connect", return_value=mock_conn):
             reset_availability()
             result = is_available()
             # The mock should make it return True
@@ -147,8 +146,7 @@ class TestQuackAvailability:
         mock_conn.execute.side_effect = Exception("Extension not found")
         mock_conn.close.return_value = None
 
-        with patch("ohm.quack.duckdb") as mock_duckdb:
-            mock_duckdb.connect.return_value = mock_conn
+        with patch("duckdb.connect", return_value=mock_conn):
             reset_availability()
             result = is_available()
             assert result is False
