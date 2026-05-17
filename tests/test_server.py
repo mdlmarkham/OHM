@@ -893,7 +893,7 @@ class TestTokenSecurity:
     def test_auth_with_hashed_tokens(self, tmp_path):
         """Authentication should work with hashed tokens."""
         import time
-        time.sleep(0.1)  # Ensure previous server cleanup is complete (xdist)
+        time.sleep(0.3)  # Ensure previous server cleanup is complete (xdist)
         db_path = str(tmp_path / "test_hashed_auth.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test_agent")
         # Use plaintext tokens — _start_test_server will hash them

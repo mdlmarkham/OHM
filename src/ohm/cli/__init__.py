@@ -1055,6 +1055,33 @@ def _handle_path(args: argparse.Namespace) -> None:
         conn.close()
 
 
+def _handle_impact(args: argparse.Namespace) -> None:
+    """Handle downstream failure impact analysis."""
+    from ohm.queries import query_impact
+
+    conn = _get_db(args)
+    try:
+        results = query_impact(conn, args.node_id, depth=args.depth)
+        if args.format == "json":
+            import json
+            print(json.dumps(results, indent=2, default=str))
+        elif getattr(args, "mermaid", False):
+            from ohm.visualization import to_mermaid
+            print(to_mermaid(results, title=f"Impact from {args.node_id}"))
+        else:
+            if not results:
+                print(f"No downstream impact from '{args.node_id}' "
+                      f"(max depth: {args.depth})")
+                return
+            print(f"Downstream impact from '{args.node_id}':")
+            for r in results:
+                print(f"  [depth {r['depth']}] [{r['layer']}] {r['edge_type']}: "
+                      f"{r['from_node']} → {r['to_node']} "
+                      f"(conf: {r.get('confidence', '?')})")
+    finally:
+        conn.close()
+
+
 def _handle_update(args: argparse.Namespace) -> None:
     """Handle edge update — only the owning agent can update their own edges."""
     from ohm.boundary import enforce_write_boundary

@@ -104,8 +104,14 @@ class TestCLIIntegration:
         assert code == 0
 
     def test_graph_impact(self):
-        code, out, _ = _run_cli(["--db", ":memory:", "graph", "impact", "nonexistent"])
-        assert code == 0
+        import uuid
+        db_path = os.path.join(tempfile.gettempdir(), f"ohm_test_impact_{uuid.uuid4().hex[:8]}.db")
+        try:
+            code, out, _ = _run_cli(["--db", db_path, "graph", "impact", "nonexistent"])
+            assert code == 0
+        finally:
+            if os.path.exists(db_path):
+                os.unlink(db_path)
 
     def test_graph_path(self):
         code, out, _ = _run_cli(["--db", ":memory:", "graph", "path", "a", "z"])
