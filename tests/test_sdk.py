@@ -164,6 +164,26 @@ class TestConnect:
         assert g.actor == "metis"
         g.close()
 
+    def test_connect_remote_strict_raises(self):
+        """connect_remote with strict=True raises when Quack unavailable."""
+        from pytest import raises
+        from ohm.sdk import connect_remote
+
+        # Quack not available in test env — should raise
+        with raises(ConnectionError, match="Failed to attach"):
+            connect_remote(uri="quack:localhost", actor="test", strict=True)
+
+    def test_connect_remote_non_strict_succeeds(self, monkeypatch):
+        """connect_remote with strict=False falls back to in-memory DB."""
+        import os
+        from ohm.sdk import connect_remote
+
+        # Force in-memory fallback to avoid file path issues
+        monkeypatch.setenv("OHM_DB", ":memory:")
+        g = connect_remote(uri="quack:localhost", actor="test", strict=False)
+        assert g.actor == "test"
+        g.close()
+
 
 class TestSDKParity:
     """Tests for OHM-azn.4: CLI↔SDK parity gap methods."""
