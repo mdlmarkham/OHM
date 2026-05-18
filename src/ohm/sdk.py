@@ -1634,6 +1634,77 @@ class Graph:
         """
         return self.listen()
 
+    def urgent_changes(
+        self,
+        *,
+        urgency_filter: list[str] | None = None,
+        since: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Get change feed entries filtered by urgency level.
+
+        Returns changes associated with high-urgency edges (critical, high).
+        Useful for agents that need to prioritize urgent updates.
+
+        Args:
+            urgency_filter: List of urgency levels to include
+                (e.g., ['critical', 'high']). Default: ['critical', 'high'].
+            since: ISO timestamp or None (uses last_sync from agent state).
+            limit: Maximum changes to return.
+
+        Returns:
+            List of change feed entries matching the urgency filter.
+        """
+        from ohm.queries import query_change_feed
+
+        if urgency_filter is None:
+            urgency_filter = ["critical", "high"]
+
+        # Get changes from the change feed
+        changes = query_change_feed(
+            self._conn,
+            since=since,
+            limit=limit * 2,  # Overfetch for filtering
+        )
+
+        # Filter to changes involving edges with matching urgency
+        if not changes:
+            return []
+
+        # Get edge IDs from changes
+        edge_ids = []
+        for change in changes:
+            row_id = change.get("row_id", "")
+            table = change.get("table_name", "")
+            if table == "ohm_edges" and row_id:
+                edge_ids.append(row_id)
+
+        # Query urgency for those edges
+        urgent_edge_ids = set()
+        if edge_ids:
+            placeholders = ",".join(["?"] * len(edge_ids))
+            rows = self._conn.execute(
+                f"SELECT id FROM ohm_edges WHERE id IN ({placeholders}) AND urgency IN ({','.join(['?'] * len(urgency_filter))})",
+                edge_ids + list(urgency_filter),
+            ).fetchall()
+            urgent_edge_ids = {row[0] for row in rows}
+
+        # Filter changes to those involving urgent edges
+        result = []
+        for change in changes:
+            row_id = change.get("row_id", "")
+            table = change.get("table_name", "")
+            if table == "ohm_edges" and row_id in urgent_edge_ids:
+                change["urgency"] = next(
+                    (r[1] for r in self._conn.execute(
+                        "SELECT id, urgency FROM ohm_edges WHERE id = ?", [row_id]
+                    ).fetchall() if r[1] in urgency_filter),
+                    "unknown",
+                )
+                result.append(change)
+
+        return result[:limit]
+
     # ── Substrate Computation ──────────────────────────────────────────
 
     def monte_carlo(
@@ -2290,13 +2361,19 @@ def connect_remote(
             )
 
     # Fallback: direct file connection
-    if not strict:
-        import warnings
-        warnings.warn(
-            "Quack not available, connecting to local DB. "
-            "Set strict=False to suppress this warning.",
-            UserWarning,
+    if strict:
+        raise ConnectionError(
+            f"Quack is not available in this DuckDB installation. "
+            f"Cannot connect to remote server at {uri}. "
+            "Set strict=False to fall back to direct file connection, "
+            "or install DuckDB with Quack extension support."
         )
+    import warnings
+    warnings.warn(
+        "Quack not available, connecting to local DB. "
+        "Set strict=False to suppress this warning.",
+        UserWarning,
+    )
     db_path = os.environ.get("OHM_DB", str(Path.home() / ".ohm" / "ohm.duckdb"))
     conn = db_connect(db_path)
     graph = Graph(conn, actor=actor)
