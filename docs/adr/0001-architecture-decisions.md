@@ -88,3 +88,56 @@ Schema evolution is handled through the existing migration framework (`MIGRATION
 - Schema migrations are versioned and auditable through `ohm_meta`
 - `SchemaConfig.topo()` already demonstrates domain-specific schemas
 - The migration from advisory → strict is itself a schema migration
+
+## ADR-007: Probability and Confidence as Separate Edge Attributes
+
+**Status:** Accepted
+
+**Context:** OHM originally used `confidence` as the sole quantitative attribute on edges. However, supply chain risk modeling and cybersecurity incident response revealed that two distinct concepts were being conflated:
+
+- **Confidence:** How sure is the agent about this claim? (epistemic — "I'm 90% sure this supplier relationship exists")
+- **Probability:** How likely is the event to occur? (aleatoric — "There's a 5% chance this supplier will fail this quarter")
+
+A supplier edge with `confidence=0.2` is ambiguous: does it mean the agent is unsure about the relationship, or that disruption is 20% likely? These are semantically different and must be stored separately.
+
+**Decision:** Add `probability FLOAT` as a distinct column on `ohm_edges`, separate from `confidence`. When `probability` is NULL, `confidence` serves as the default probability for cascade computations. The `EXPECTED_LIKELIHOOD` edge type (L3) explicitly carries probability claims.
+
+**Consequences:**
+- `cascade_scenario()` uses `COALESCE(probability, confidence)` for failure propagation
+- `what_if()` treats the edge's probability as the event likelihood
+- Backwards compatible: existing edges with only `confidence` continue to work
+- Schema migration 0.5.0 added the `probability` column
+
+## ADR-008: NEGATES Edge Type for Negative Evidence
+
+**Status:** Accepted
+
+**Context:** Medical diagnosis requires the ability to rule out conditions based on absent findings. "Fever absent" doesn't just lower the probability of malaria — it actively rules it out. This is semantically different from a low-confidence SUPPORTS edge.
+
+Without NEGATES, an agent must either:
+1. Create a low-confidence edge (which doesn't capture the semantics of "rules out")
+2. Not create any edge (which loses the information entirely)
+
+**Decision:** Add `NEGATES` as an L3 edge type. `rules_out()` is the SDK convenience method. `differential_diagnosis()` automatically excludes NEGATES-ruled-out conditions from candidate rankings.
+
+**Consequences:**
+- NEGATES edges are first-class citizens in the graph, not just low-confidence edges
+- `differential_diagnosis()` surfaces ruled-out conditions separately with their ruling evidence
+- `compound_confidence()` with correlation parameter handles the case where multiple findings from the same modality shouldn't double-count
+- NEGATES is domain-agnostic: works for medical (rules out diagnosis), cybersecurity (rules out false positive), and any scenario with negative evidence
+
+## ADR-009: Observation Type Extensibility
+
+**Status:** Accepted
+
+**Context:** OHM's observation system started with simple numeric measurements (temperature, NDVI, head count). As scenarios expanded, new observation types emerged: sentiment scores (customer support), binary outcomes (cybersecurity true/false positives), diagnostic confidences (medical), and demand multipliers (retail).
+
+Hardcoding observation types in the schema would require a migration for every new scenario. A flexible type system allows domain-specific observations without schema changes.
+
+**Decision:** Observation types are validated against a registry but not constrained by DDL. The `type` field on `ohm_observations` is a VARCHAR that can hold any domain-appropriate value. `SchemaConfig` maintains the registry of known types per domain. New types are registered through `SchemaConfig` without requiring DDL migrations.
+
+**Consequences:**
+- Domain-specific observation types (sentiment, vibration, hoof_score, ndvi) work without schema changes
+- `SchemaConfig` provides the registry for validation in strict mode
+- The `metadata` JSON field carries type-specific payload (units, modality, source)
+- Observation types are discoverable through `graph.schema()`
