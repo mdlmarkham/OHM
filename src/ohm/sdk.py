@@ -338,6 +338,7 @@ class Graph:
         edge_type: str,
         layer: str = "L3",
         confidence: float = 0.7,
+        probability: float | None = None,
         condition: str | None = None,
         provenance: str | None = None,
         metadata: dict[str, Any] | None = None,
@@ -357,6 +358,7 @@ class Graph:
             edge_type=edge_type,
             created_by=self.actor,
             confidence=confidence,
+            probability=probability,
             condition=condition,
             provenance=provenance,
             metadata=metadata,
@@ -705,6 +707,21 @@ class Graph:
         result = self._conn.execute(sql, params)
         columns = [desc[0] for desc in result.description]
         return [dict(zip(columns, row)) for row in result.fetchall()]
+
+    def threat_cluster(
+        self,
+        ioc_node_id: str,
+        *, edge_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Find all alerts sharing a given IOC (Indicator of Compromise).
+
+        Traverses THREAT_CLUSTER edges from the IOC node to find all related
+        alerts — used in cybersecurity incident response to correlate IOCs
+        across multiple alerts.
+        """
+        from ohm.queries import query_threat_cluster
+
+        return query_threat_cluster(self._conn, ioc_node_id, edge_type=edge_type)
 
     def neighborhood(
         self,

@@ -408,6 +408,54 @@ def query_change_feed(
     return _rows_to_dicts(result)
 
 
+# ── Threat Cluster ──────────────────────────────────────────────────────────
+
+def query_threat_cluster(
+    conn: DuckDBPyConnection,
+    ioc_node_id: str,
+    *, edge_type: str | None = None,
+) -> list[dict[str, Any]]:
+    """Find all alerts sharing a given IOC (Indicator of Compromise).
+
+    Traverses THREAT_CLUSTER edges from the IOC node to find all related
+    alerts — used in cybersecurity incident response to correlate IOCs
+    across multiple alerts.
+    """
+    from ohm.validation import validate_identifier
+
+    ioc_node_id = validate_identifier(ioc_node_id, name="ioc_node_id")
+
+    edge_filter = ""
+    params: list = [ioc_node_id, ioc_node_id, ioc_node_id, ioc_node_id]
+    if edge_type:
+        edge_type = validate_identifier(edge_type, name="edge_type")
+        edge_filter = "AND e.edge_type = ?"
+        params.append(edge_type)
+
+    # Find all nodes connected to IOC via THREAT_CLUSTER edges
+    query = f"""
+        SELECT DISTINCT ON (n.id)
+            n.id AS node_id,
+            n.label,
+            n.type AS node_type,
+            e.id AS edge_id,
+            e.edge_type,
+            e.confidence,
+            e.created_by,
+            e.created_at
+        FROM ohm_edges e
+        JOIN ohm_nodes n ON n.id = (
+            CASE WHEN e.from_node = ? THEN e.to_node ELSE e.from_node END
+        )
+        WHERE (e.from_node = ? OR e.to_node = ?)
+          AND n.id != ?
+          {edge_filter}
+        ORDER BY n.id, e.confidence DESC
+    """
+    result = conn.execute(query, params)
+    return _rows_to_dicts(result)
+
+
 # ── Agent State ─────────────────────────────────────────────────────────────
 
 def query_agent_state(
@@ -589,6 +637,7 @@ def create_edge(
     edge_type: str,
     created_by: str,
     confidence: float = 0.7,
+    probability: float | None = None,
     condition: str | None = None,
     provenance: str | None = None,
     metadata: dict[str, Any] | None = None,
@@ -609,10 +658,10 @@ def create_edge(
     conn.execute(
         """INSERT INTO ohm_edges
            (id, from_node, to_node, layer, edge_type, created_by,
-            confidence, condition, provenance, metadata)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            confidence, probability, condition, provenance, metadata)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [edge_id, from_node, to_node, layer, edge_type, created_by,
-         confidence, condition, provenance, metadata_json],
+         confidence, probability, condition, provenance, metadata_json],
     )
     _log_change(conn, "ohm_edges", edge_id, "INSERT", created_by)
     # Return full edge record

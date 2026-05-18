@@ -507,6 +507,46 @@ class TestConfidenceCalibration:
 
 # ===== Connection Discovery =====
 
+# ===== Threat Cluster =====
+
+class TestThreatCluster:
+    def test_threat_cluster_finds_related_alerts(self, tmp_path):
+        """THREAT_CLUSTER edge links IOC to multiple alerts."""
+        db = str(tmp_path / "threat_cluster.duckdb")
+        with connect(db, actor="siem") as g:
+            g.register_agent(values=["security"])
+
+            # Create IOC node
+            ioc = g.create_node(label="malicious-ip-192.168.1.1", node_type="concept")
+
+            # Create two alerts
+            alert1 = g.create_node(label="SIEM: port scan detected", node_type="concept")
+            alert2 = g.create_node(label="EDR: lateral movement", node_type="concept")
+
+            # Link IOC to alerts via THREAT_CLUSTER
+            g.create_edge(from_node=ioc["id"], to_node=alert1["id"],
+                          edge_type="THREAT_CLUSTER", layer="L3")
+            g.create_edge(from_node=ioc["id"], to_node=alert2["id"],
+                          edge_type="THREAT_CLUSTER", layer="L3")
+
+            # Query threat cluster
+            results = g.threat_cluster(ioc["id"])
+            assert len(results) == 2
+            labels = {r["label"] for r in results}
+            assert "SIEM: port scan detected" in labels
+            assert "EDR: lateral movement" in labels
+
+    def test_threat_cluster_empty_for_unconnected_ioc(self, tmp_path):
+        """IOC with no THREAT_CLUSTER edges returns empty list."""
+        db = str(tmp_path / "threat_cluster_empty.duckdb")
+        with connect(db, actor="siem") as g:
+            g.register_agent(values=["security"])
+            ioc = g.create_node(label="unused-ioc", node_type="concept")
+
+            results = g.threat_cluster(ioc["id"])
+            assert len(results) == 0
+
+
 class TestConnectionDiscovery:
     def test_suggest_connections_returns_list(self, tmp_path):
         db = str(tmp_path / "discover.duckdb")
