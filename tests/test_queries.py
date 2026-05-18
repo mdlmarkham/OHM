@@ -850,3 +850,39 @@ class TestCreateBatch:
         created_ids = {n["id"] for n in result["nodes"]}
         feed_ids = {r[0] for r in rows}
         assert created_ids.issubset(feed_ids)
+
+
+class TestFindOrCreateNode:
+    """Tests for find_or_create_node() (OHM-5n7: idempotent registration)."""
+
+    def test_find_or_create_creates_new(self, test_db):
+        """find_or_create_node creates a node when none exists."""
+        from ohm.queries import find_or_create_node
+
+        node = find_or_create_node(test_db, label="Courage", node_type="value", created_by="metis")
+        assert node["label"] == "Courage"
+        assert node["type"] == "value"
+
+    def test_find_or_create_finds_existing(self, test_db):
+        """find_or_create_node returns existing node with same label and type."""
+        from ohm.queries import find_or_create_node, create_node
+
+        original = create_node(test_db, label="Courage", node_type="value", created_by="metis")
+        found = find_or_create_node(test_db, label="Courage", node_type="value", created_by="metis")
+        assert found["id"] == original["id"]
+
+    def test_find_or_create_different_type(self, test_db):
+        """find_or_create_node creates separate nodes for different types."""
+        from ohm.queries import find_or_create_node
+
+        value = find_or_create_node(test_db, label="Courage", node_type="value", created_by="metis")
+        concept = find_or_create_node(test_db, label="Courage", node_type="concept", created_by="metis")
+        assert value["id"] != concept["id"]
+
+    def test_find_or_create_case_insensitive(self, test_db):
+        """find_or_create_node matches labels case-insensitively."""
+        from ohm.queries import find_or_create_node, create_node
+
+        original = create_node(test_db, label="Courage", node_type="value", created_by="metis")
+        found = find_or_create_node(test_db, label="courage", node_type="value", created_by="metis")
+        assert found["id"] == original["id"]

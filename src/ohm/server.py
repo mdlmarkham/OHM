@@ -1341,7 +1341,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             # Agent registration — idempotent: creates or updates agent node + edges.
             # If an agent with the same name already exists, reuses its node and
             # refreshes its edges (deletes old, creates new).
-            from .queries import create_node, create_edge, find_or_create_node
+            from .queries import create_edge, find_or_create_node
 
             agent_label = body.get("name", agent)
             # Use deterministic ID for agent nodes to prevent duplicates
@@ -1359,9 +1359,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "UPDATE ohm_nodes SET content = ?, updated_at = CURRENT_TIMESTAMP, updated_by = ? WHERE id = ?",
                     [body.get("description"), agent, agent_id],
                 )
-                me = _rows_to_dicts(
-                    self.store.conn.execute("SELECT * FROM ohm_nodes WHERE id = ?", [agent_id])
-                )[0]
+                me = self.store.execute("SELECT * FROM ohm_nodes WHERE id = ?", [agent_id])[0]
                 # Delete old registration edges for this agent (VALUES, GOALS, CAPABLE_OF, INTERESTED_IN, LISTENS_TO)
                 reg_edge_types = ("VALUES", "GOALS", "CAPABLE_OF", "INTERESTED_IN", "LISTENS_TO")
                 placeholders = ",".join(["?"] * len(reg_edge_types))
@@ -1371,19 +1369,13 @@ class OhmHandler(BaseHTTPRequestHandler):
                 )
             else:
                 # Create new agent node with deterministic ID
-                me = create_node(
-                    self.store.conn,
-                    label=agent_label,
-                    node_type="agent",
-                    content=body.get("description"),
-                    created_by=agent,
-                )
-                # Override the generated ID with our deterministic one
                 self.store.conn.execute(
-                    "UPDATE ohm_nodes SET id = ? WHERE id = ?",
-                    [agent_id, me["id"]],
+                    """INSERT INTO ohm_nodes
+                       (id, label, type, content, created_by, confidence, visibility, created_at, updated_at)
+                       VALUES (?, ?, 'agent', ?, ?, 1.0, 'team', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
+                    [agent_id, agent_label, body.get("description"), agent],
                 )
-                me["id"] = agent_id
+                me = self.store.execute("SELECT * FROM ohm_nodes WHERE id = ?", [agent_id])[0]
 
             created_edges = []
             for v in body.get("values", []):
