@@ -204,8 +204,12 @@ class Graph:
         """
         from ohm.schema import SCHEMA_VERSION, MIGRATIONS, get_schema_version, initialize_schema
 
+        def _version_tuple(v: str) -> tuple[int, ...]:
+            return tuple(int(x) for x in v.split("."))
+
         current = get_schema_version(self._conn)
-        pending = [(v, d) for v, d, _ in MIGRATIONS if current < v]
+        current_key = _version_tuple(current)
+        pending = [(v, d) for v, d, _ in MIGRATIONS if current_key < _version_tuple(v)]
 
         if dry_run:
             return {

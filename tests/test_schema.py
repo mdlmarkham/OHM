@@ -189,7 +189,10 @@ class TestSchemaVersion:
     def test_migrations_are_ordered(self):
         """Migrations should be in ascending version order."""
         versions = [m[0] for m in MIGRATIONS]
-        assert versions == sorted(versions)
+        # Use semantic version sorting (tuple of ints)
+        def version_key(v: str) -> tuple[int, ...]:
+            return tuple(int(x) for x in v.split("."))
+        assert versions == sorted(versions, key=version_key)
 
     def test_get_schema_version_on_empty_db(self):
         """get_schema_version on a database without ohm_meta should return 0.0.0."""

@@ -517,7 +517,8 @@ class OhmHandler(BaseHTTPRequestHandler):
         "/observe": {
             "type": (str, type(None)), "value": (int, float, str, type(None)),
             "baseline": (int, float, type(None)), "sigma": (int, float, type(None)),
-            "source": (str, type(None)),
+            "source": (str, type(None)), "notes": (str, type(None)),
+            "source_name": (str, type(None)), "source_url": (str, type(None)),
         },
     }
 

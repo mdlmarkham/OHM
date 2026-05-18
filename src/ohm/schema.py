@@ -399,7 +399,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.9.0"
+SCHEMA_VERSION = "0.10.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -523,8 +523,13 @@ def _apply_migrations(conn: "DuckDBPyConnection") -> None:
     ).fetchone()
     current_version = current[0] if current else "0.1.0"
 
+    def _version_tuple(v: str) -> tuple[int, ...]:
+        return tuple(int(x) for x in v.split("."))
+
+    current_key = _version_tuple(current_version)
+
     for version, description, statements in MIGRATIONS:
-        if current_version < version:
+        if current_key < _version_tuple(version):
             for stmt in statements:
                 try:
                     conn.execute(stmt)
@@ -535,7 +540,7 @@ def _apply_migrations(conn: "DuckDBPyConnection") -> None:
                 "UPDATE ohm_meta SET value = ? WHERE key = 'schema_version'",
                 [version],
             )
-            current_version = version
+            current_key = _version_tuple(version)
 
 
 def _seed_agent_configs(conn: "DuckDBPyConnection") -> None:
