@@ -1149,3 +1149,62 @@ class TestCompositeScore:
         result = graph.composite_score(a, observation_weight=0.3, evidence_weight=0.7)
         assert result["weights"]["observation"] == 0.3
         assert result["weights"]["evidence"] == 0.7
+
+
+class TestContradictions:
+    """Tests for contradictions() SDK method."""
+
+    def test_contradictions_returns_list(self, graph):
+        """contradictions() returns a list."""
+        results = graph.contradictions()
+        assert isinstance(results, list)
+
+    def test_contradictions_empty_graph(self, graph):
+        """contradictions() on empty graph returns empty list."""
+        results = graph.contradictions()
+        assert len(results) == 0
+
+
+class TestDetectTrend:
+    """Tests for detect_trend() SDK method."""
+
+    def test_detect_trend_returns_dict(self, graph):
+        """detect_trend() returns a dict with trend info."""
+        a = graph.create_node(label="A")["id"]
+        graph.observe(a, obs_type="measurement", value=0.5, sigma=0.1)
+        graph.observe(a, obs_type="measurement", value=0.6, sigma=0.1)
+        graph.observe(a, obs_type="measurement", value=0.7, sigma=0.1)
+        result = graph.detect_trend(a, window_days=60)
+        assert isinstance(result, dict)
+        assert "trend" in result
+
+    def test_detect_trend_insufficient_observations(self, graph):
+        """detect_trend() with too few observations returns stable."""
+        a = graph.create_node(label="A")["id"]
+        graph.observe(a, obs_type="measurement", value=0.5, sigma=0.1)
+        result = graph.detect_trend(a, window_days=60, min_observations=5)
+        assert isinstance(result, dict)
+
+
+class TestUrgentChanges:
+    """Tests for urgent_changes() SDK method."""
+
+    def test_urgent_changes_returns_list(self, graph):
+        """urgent_changes() returns a list."""
+        results = graph.urgent_changes()
+        assert isinstance(results, list)
+
+    def test_urgent_changes_with_filter(self, graph):
+        """urgent_changes() accepts urgency_filter parameter."""
+        results = graph.urgent_changes(urgency_filter=["critical"])
+        assert isinstance(results, list)
+
+
+class TestHelp:
+    """Tests for help() SDK method."""
+
+    def test_help_returns_dict(self, graph):
+        """help() returns a dict with usage info."""
+        result = graph.help()
+        assert isinstance(result, dict)
+        assert "methods" in result or "commands" in result or "usage" in result
