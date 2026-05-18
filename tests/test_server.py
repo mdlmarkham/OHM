@@ -1402,6 +1402,18 @@ class TestCascadingDelete:
 
 
 @pytest.mark.xdist_group("server")
+class TestListenWithoutSince:
+    """Tests for OHM-9ud: /listen without 'since' returns 400, not 500."""
+
+    def test_listen_without_since_no_agent_returns_400(self, test_server):
+        """GET /listen without 'since' and unknown agent returns 400 with validation error."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/listen")
+        assert status == 400
+        assert "since" in str(data).lower() or "last-check" in str(data).lower()
+
+
+@pytest.mark.xdist_group("server")
 class TestEnrichedChangeFeed:
     """Tests for enriched change feed (OHM-m8a: include node content in listen())."""
 
