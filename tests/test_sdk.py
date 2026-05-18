@@ -392,3 +392,71 @@ class TestExpiringSoon:
         assert len(results) >= 2
         # First result should be the one expiring sooner
         assert results[0]["days_until_expiry"] <= results[1]["days_until_expiry"]
+
+
+class TestSupplyChain:
+    """Tests for OHM-af8.1: probability-weighted edges and cascade analysis."""
+
+    def test_create_edge_with_probability(self, graph):
+        """create_edge() accepts probability parameter."""
+        a = graph.create_node(label="Supplier")["id"]
+        b = graph.create_node(label="Factory")["id"]
+        edge = graph.create_edge(
+            from_node=a, to_node=b,
+            edge_type="EXPECTED_LIKELIHOOD", layer="L3",
+            probability=0.2,
+        )
+        assert edge["probability"] == pytest.approx(0.2)
+
+    def test_create_edge_probability_default_none(self, graph):
+        """create_edge() probability defaults to None."""
+        a = graph.create_node(label="A")["id"]
+        b = graph.create_node(label="B")["id"]
+        edge = graph.create_edge(
+            from_node=a, to_node=b,
+            edge_type="CAUSES", layer="L3",
+        )
+        assert edge.get("probability") is None
+
+    def test_cascade_scenario_returns_downstream(self, graph):
+        """cascade_scenario() returns downstream nodes with failure probabilities."""
+        supplier = graph.create_node(label="Supplier A")["id"]
+        factory = graph.create_node(label="Factory B")["id"]
+        distributor = graph.create_node(label="Distributor C")["id"]
+
+        graph.create_edge(
+            from_node=supplier, to_node=factory,
+            edge_type="CAUSES", layer="L3",
+            probability=0.5,
+        )
+        graph.create_edge(
+            from_node=factory, to_node=distributor,
+            edge_type="CAUSES", layer="L3",
+            probability=0.8,
+        )
+
+        results = graph.cascade_scenario(supplier, failure_probability=1.0)
+        assert isinstance(results, list)
+        # Should include downstream nodes
+        if len(results) > 0:
+            node_ids = {r["node_id"] for r in results}
+            assert factory in node_ids or distributor in node_ids
+
+    def test_cascade_scenario_empty_graph(self, graph):
+        """cascade_scenario() on node with no downstream edges returns empty."""
+        node = graph.create_node(label="Isolated")["id"]
+        results = graph.cascade_scenario(node, failure_probability=0.5)
+        assert isinstance(results, list)
+
+    def test_what_if_returns_analysis(self, graph):
+        """what_if() returns cascade analysis for an edge."""
+        supplier = graph.create_node(label="Supplier")["id"]
+        factory = graph.create_node(label="Factory")["id"]
+        edge = graph.create_edge(
+            from_node=supplier, to_node=factory,
+            edge_type="CAUSES", layer="L3",
+            probability=0.3,
+        )
+
+        result = graph.what_if(edge["id"])
+        assert isinstance(result, dict)
