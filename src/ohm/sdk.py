@@ -1335,6 +1335,30 @@ class Graph:
 
         return batch_create_edges(self._conn, edges=edges, created_by=self.actor)
 
+    def create_batch(
+        self,
+        *,
+        nodes: list[dict[str, Any]] | None = None,
+        edges: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Create multiple nodes and edges in a single transaction.
+
+        All succeed or all fail. Each item populates the change feed individually.
+
+        Args:
+            nodes: Optional list of node dicts (keys: label, node_type, content,
+                   visibility, provenance, confidence, priority, url).
+            edges: Optional list of edge dicts (keys: from_node, to_node,
+                   edge_type, layer, confidence, condition, provenance, urgency,
+                   probability).
+
+        Returns:
+            Dict with keys: nodes_created, edges_created, nodes, edges.
+        """
+        from ohm.queries import create_batch
+
+        return create_batch(self._conn, nodes=nodes, edges=edges, created_by=self.actor)
+
     def get_agent_config(self, agent_name: str) -> dict[str, Any] | None:
         """Get an agent's configuration (optimization target, services, etc.).
 

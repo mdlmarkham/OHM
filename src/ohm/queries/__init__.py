@@ -1333,6 +1333,42 @@ def batch_create_edges(
     return results
 
 
+def create_batch(
+    conn: DuckDBPyConnection,
+    *,
+    nodes: list[dict[str, Any]] | None = None,
+    edges: list[dict[str, Any]] | None = None,
+    created_by: str,
+) -> dict[str, Any]:
+    """Create multiple nodes and edges in a single transaction.
+
+    All succeed or all fail. Each item populates the change feed individually.
+
+    Args:
+        nodes: Optional list of node dicts (keys: label, node_type, content,
+               visibility, provenance, confidence, priority, url).
+        edges: Optional list of edge dicts (keys: from_node, to_node,
+               edge_type, layer, confidence, condition, provenance, urgency,
+               probability).
+        created_by: Agent name for attribution.
+
+    Returns:
+        Dict with keys: nodes_created, edges_created, nodes, edges.
+    """
+    nodes = nodes or []
+    edges = edges or []
+
+    created_nodes = batch_create_nodes(conn, nodes=nodes, created_by=created_by)
+    created_edges = batch_create_edges(conn, edges=edges, created_by=created_by)
+
+    return {
+        "nodes_created": len(created_nodes),
+        "edges_created": len(created_edges),
+        "nodes": created_nodes,
+        "edges": created_edges,
+    }
+
+
 # ── Diff ────────────────────────────────────────────────────────────────────
 
 def query_diff(
