@@ -1184,7 +1184,7 @@ class OhmHandler(BaseHTTPRequestHandler):
 
         elif path == "/register":
             # Agent registration — creates agent node + VALUES/GOALS/CAPABLE_OF/INTERESTED_IN/LISTENS_TO edges
-            from .queries import create_node
+            from .queries import create_node, create_edge
 
             agent_label = body.get("name", agent)
             me = create_node(

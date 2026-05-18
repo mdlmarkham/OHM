@@ -1045,3 +1045,64 @@ class TestTopodEntryPoint:
         import inspect
         source = inspect.getsource(topod_main)
         assert "TOPO_SCHEMA" in source
+
+
+@pytest.mark.xdist_group("server")
+class TestRegisterEndpoint:
+    """Tests for POST /register endpoint (OHM-jn1: NameError fix)."""
+
+    def test_register_creates_agent_node(self, test_server):
+        """POST /register creates an agent node with identity edges."""
+        port, store = test_server
+        status, data = _request("POST", port, "/register", body={
+            "name": "test-agent-reg",
+            "description": "Test agent for registration",
+            "values": ["accuracy", "transparency"],
+            "goals": ["help users"],
+            "capabilities": ["search"],
+        })
+        assert status == 201
+        assert "agent" in data
+        assert data["agent"]["type"] == "agent"
+        assert data["agent"]["label"] == "test-agent-reg"
+        assert data["edges_created"] >= 1
+
+    def test_register_with_interests(self, test_server):
+        """POST /register creates INTERESTED_IN edges for interests."""
+        port, store = test_server
+        status, data = _request("POST", port, "/register", body={
+            "name": "curious-agent",
+            "interests": ["climate", "energy"],
+        })
+        assert status == 201
+        assert data["edges_created"] >= 2
+
+    def test_register_with_listens_to(self, test_server):
+        """POST /register creates LISTENS_TO edges for listens_to."""
+        port, store = test_server
+        status, data = _request("POST", port, "/register", body={
+            "name": "listener-agent",
+            "listens_to": ["metis", "clio"],
+        })
+        assert status == 201
+        assert data["edges_created"] >= 2
+
+    def test_register_no_duplicate_edges(self, test_server):
+        """POST /register does not create duplicate edges on re-registration."""
+        port, store = test_server
+        # First registration
+        status1, data1 = _request("POST", port, "/register", body={
+            "name": "dedup-agent",
+            "values": ["accuracy"],
+        })
+        assert status1 == 201
+        first_edges = data1["edges_created"]
+
+        # Second registration with same values
+        status2, data2 = _request("POST", port, "/register", body={
+            "name": "dedup-agent",
+            "values": ["accuracy"],
+        })
+        assert status2 == 201
+        # Should not create duplicate edges
+        assert data2["edges_created"] <= first_edges

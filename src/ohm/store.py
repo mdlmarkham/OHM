@@ -438,7 +438,12 @@ class OhmStore:
         operation: str,
         layer: Optional[str],
     ):
-        """Log a change to the change log."""
+        """Log a change to both the change log and the change feed.
+
+        ohm_change_log is the internal audit trail (used by push_to_ducklake).
+        ohm_change_feed is the agent-facing change feed (used by listen() and SSE /events).
+        Both must be populated for agents to see each other's writes.
+        """
         now = self._now()
         self.conn.execute(
             """
@@ -446,6 +451,14 @@ class OhmStore:
             VALUES (?, ?, ?, ?, ?, ?)
             """,
             [table_name, row_id, operation, self.agent_name, layer, now],
+        )
+        # Also populate the agent-facing change feed
+        self.conn.execute(
+            """
+            INSERT INTO ohm_change_feed (table_name, row_id, operation, agent_name, occurred_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [table_name, row_id, operation, self.agent_name, now],
         )
 
     def close(self):
