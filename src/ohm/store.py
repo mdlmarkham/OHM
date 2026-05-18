@@ -135,6 +135,7 @@ class OhmStore:
         tags: Optional[list[str]] = None,
         metadata: Optional[dict] = None,
         priority: Optional[str] = None,
+        url: Optional[str] = None,
         agent_name: Optional[str] = None,
     ) -> dict[str, Any]:
         """Create or update a node. Attributed to the given agent.
@@ -142,6 +143,7 @@ class OhmStore:
         Args:
             agent_name: Agent to attribute the write to. Defaults to self.agent_name.
             priority: Node priority (P0-P3).
+            url: External URL reference for this node.
 
         Returns a dict with the node record and a 'created' key
         indicating whether this was a new creation (True) or an
@@ -161,11 +163,11 @@ class OhmStore:
                 UPDATE ohm_nodes SET
                     label = ?, type = ?, content = ?, confidence = ?,
                     visibility = ?, provenance = ?, tags = ?, metadata = ?,
-                    priority = ?, updated_at = ?, updated_by = ?
+                    priority = ?, url = ?, updated_at = ?, updated_by = ?
                 WHERE id = ?
                 """,
                 [label, type, content, confidence, visibility, provenance,
-                 tags_json, metadata_json, priority, now, actor, id],
+                 tags_json, metadata_json, priority, url, now, actor, id],
             )
             self._log_change("ohm_nodes", id, "UPDATE", None, agent_name=actor)
             result = self.get_node(id) or {}
@@ -175,11 +177,11 @@ class OhmStore:
             self.conn.execute(
                 """
                 INSERT INTO ohm_nodes (id, label, type, content, created_by, confidence,
-                                       visibility, provenance, tags, metadata, priority, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                       visibility, provenance, tags, metadata, priority, url, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [id, label, type, content, actor, confidence,
-                 visibility, provenance, tags_json, metadata_json, priority, now, now],
+                 visibility, provenance, tags_json, metadata_json, priority, url, now, now],
             )
             self._log_change("ohm_nodes", id, "INSERT", None, agent_name=actor)
             result = self.get_node(id) or {}

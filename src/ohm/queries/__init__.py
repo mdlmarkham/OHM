@@ -704,6 +704,7 @@ def create_node(
     provenance: str | None = None,
     confidence: float = 1.0,
     priority: str | None = None,
+    url: str | None = None,
 ) -> dict[str, Any]:
     """Create a new node and return its full record."""
     from ohm.schema import generate_node_id, validate_node_type, VALID_PRIORITY
@@ -720,10 +721,10 @@ def create_node(
     node_id = generate_node_id(label)
     conn.execute(
         """INSERT INTO ohm_nodes
-           (id, label, type, content, created_by, visibility, provenance, confidence, priority)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           (id, label, type, content, created_by, visibility, provenance, confidence, priority, url)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [node_id, label, node_type, content, created_by, visibility, provenance, confidence,
-         priority],
+         priority, url],
     )
     _log_change(conn, "ohm_nodes", node_id, "INSERT", created_by)
     # Return full node record
@@ -916,6 +917,8 @@ def create_observation(
     source: str | None = None,
     edge_id: str | None = None,
     notes: str | None = None,
+    source_name: str | None = None,
+    source_url: str | None = None,
 ) -> dict[str, Any]:
     """Create an observation on a node or edge and return its full record."""
     import uuid
@@ -923,9 +926,10 @@ def create_observation(
     obs_id = str(uuid.uuid4())
     conn.execute(
         """INSERT INTO ohm_observations
-           (id, node_id, edge_id, type, value, baseline, sigma, source, created_by, notes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        [obs_id, node_id, edge_id, obs_type, value, baseline, sigma, source, created_by, notes],
+           (id, node_id, edge_id, type, value, baseline, sigma, source, created_by, notes, source_name, source_url)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [obs_id, node_id, edge_id, obs_type, value, baseline, sigma, source, created_by, notes,
+         source_name, source_url],
     )
     _log_change(conn, "ohm_observations", obs_id, "INSERT", created_by)
     # Return full observation record

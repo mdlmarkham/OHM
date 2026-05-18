@@ -259,6 +259,7 @@ DDL_STATEMENTS: list[str] = [
         label         VARCHAR NOT NULL,
         type          VARCHAR NOT NULL,
         content       TEXT,
+        url           TEXT,
         created_by    VARCHAR NOT NULL,
         created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -395,7 +396,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.8.0"
+SCHEMA_VERSION = "0.9.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -438,6 +439,13 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
     ]),
     ("0.8.0", "add notes column to ohm_observations", [
         "ALTER TABLE ohm_observations ADD COLUMN notes TEXT",
+    ]),
+    ("0.9.0", "add url column to ohm_nodes for external references", [
+        "ALTER TABLE ohm_nodes ADD COLUMN url TEXT",
+    ]),
+    ("0.10.0", "add source_name and source_url to ohm_observations", [
+        "ALTER TABLE ohm_observations ADD COLUMN source_name TEXT",
+        "ALTER TABLE ohm_observations ADD COLUMN source_url TEXT",
     ]),
 ]
 

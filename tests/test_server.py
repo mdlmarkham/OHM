@@ -1290,6 +1290,50 @@ class TestDeleteValidation:
 
 
 @pytest.mark.xdist_group("server")
+class TestNodeUrlField:
+    """Tests for URL field on nodes (OHM-qp6: External URL field on nodes)."""
+
+    def test_post_node_with_url(self, test_server):
+        """POST /node accepts and persists url field."""
+        port, store = test_server
+        status, data = _request("POST", port, "/node", body={
+            "id": "url-test-node",
+            "label": "Reuters Article",
+            "type": "source",
+            "content": "Summary of the article",
+            "url": "https://reuters.com/article/12345",
+        })
+        assert status == 201
+        assert data["url"] == "https://reuters.com/article/12345"
+
+    def test_get_node_returns_url(self, test_server):
+        """GET /node/{id} returns url field."""
+        port, store = test_server
+        # Create node with URL
+        _request("POST", port, "/node", body={
+            "id": "url-get-test",
+            "label": "Research Paper",
+            "type": "source",
+            "url": "https://arxiv.org/pdf/1234.5678",
+        })
+        # Retrieve it
+        status, data = _request("GET", port, "/node/url-get-test")
+        assert status == 200
+        assert data["url"] == "https://arxiv.org/pdf/1234.5678"
+
+    def test_post_node_without_url_succeeds(self, test_server):
+        """POST /node without url field still works (backward compatible)."""
+        port, store = test_server
+        status, data = _request("POST", port, "/node", body={
+            "id": "no-url-node",
+            "label": "Concept Node",
+            "type": "concept",
+        })
+        assert status == 201
+        assert data.get("url") is None
+
+
+@pytest.mark.xdist_group("server")
 class TestObservationNotes:
     """Tests for observation notes persistence (OHM-of8: notes accepted but not persisted)."""
 

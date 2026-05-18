@@ -311,6 +311,7 @@ class Graph:
         provenance: str | None = None,
         confidence: float = 1.0,
         priority: str | None = None,
+        url: str | None = None,
     ) -> dict[str, Any]:
         """Create a node and return its full record.
 
@@ -330,6 +331,7 @@ class Graph:
             provenance=provenance,
             confidence=confidence,
             priority=priority,
+            url=url,
         )
 
     def create_edge(
@@ -437,6 +439,8 @@ class Graph:
         sigma: float | None = None,
         source: str = "analysis",
         notes: str | None = None,
+        source_name: str | None = None,
+        source_url: str | None = None,
     ) -> dict[str, Any]:
         """Record an observation on a node. Returns the full observation record."""
         from ohm.queries import create_observation
@@ -451,6 +455,8 @@ class Graph:
             source=source,
             notes=notes,
             created_by=self.actor,
+            source_name=source_name,
+            source_url=source_url,
         )
 
     def set_focus(self, focus: str) -> None:

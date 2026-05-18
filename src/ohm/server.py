@@ -1141,6 +1141,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                 tags=body.get("tags"),
                 metadata=body.get("metadata"),
                 priority=body.get("priority"),
+                url=body.get("url"),
                 agent_name=agent,
             )
             event_type = "node.created" if result.get("created") else "node.updated"
