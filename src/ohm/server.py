@@ -359,11 +359,12 @@ class OhmHandler(BaseHTTPRequestHandler):
         self.wfile.write(f"data: {json.dumps({'subscription_id': sub_id, 'since': since})}\n\n".encode())
         self.wfile.flush()
 
-        # Stream change feed events
+        # Stream change feed events in batches
         from .queries import query_change_feed
         last_ts = since
         event_count = 0
         max_events = 1000  # Safety limit
+        batch_size = 50  # Batch events for efficiency
 
         try:
             while event_count < max_events:
@@ -374,9 +375,18 @@ class OhmHandler(BaseHTTPRequestHandler):
                     agent_name=filter_agent,
                     node_type=filter_node_type,
                     node_id=filter_node_id,
-                    limit=50,
+                    limit=batch_size,
                 )
 
+                if not changes:
+                    # No new events — send heartbeat and wait
+                    self.wfile.write(f": heartbeat\n\n".encode())
+                    self.wfile.flush()
+                    time.sleep(0.5)
+                    continue
+
+                # Batch events together for efficiency (reduce syscall overhead)
+                batch_lines: list[str] = []
                 for change in changes:
                     event_id = f"{sub_id}-{event_count}"
                     last_ts = change.get("created_at", last_ts)
@@ -387,14 +397,19 @@ class OhmHandler(BaseHTTPRequestHandler):
                         if not any(t.lower() in node_label for t in topics):
                             continue
 
-                    # Send SSE event
-                    self.wfile.write(f"id: {event_id}\n".encode())
-                    self.wfile.write(f"data: {json.dumps(change, default=str)}\n\n".encode())
-                    self.wfile.flush()
+                    batch_lines.append(f"id: {event_id}")
+                    batch_lines.append(f"data: {json.dumps(change, default=str)}")
                     event_count += 1
 
-                # Small delay between polls
-                time.sleep(0.5)
+                # Write entire batch in one syscall (batched SSE)
+                if batch_lines:
+                    self.wfile.write("\n".join(batch_lines).encode() + b"\n\n")
+                    self.wfile.flush()
+
+                # If we got fewer than batch_size, we've exhausted changes
+                if len(changes) < batch_size:
+                    time.sleep(0.5)
+
         except (BrokenPipeError, ConnectionResetError):
             pass  # Client disconnected
         finally:
