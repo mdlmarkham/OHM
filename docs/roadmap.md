@@ -4,7 +4,7 @@
 
 **Goal:** CLI, schema, store, boundary enforcement, graph queries
 
-- [x] OHM schema (nodes, edges, observations, agent_state, change_log)
+- [x] OHM schema (nodes, edges, observations, agent_state, change_log, agent_config, meta)
 - [x] DuckDB store with all CRUD operations
 - [x] Recursive CTE queries (neighborhood, path, impact, confidence audit)
 - [x] `ohm` CLI: write, neighborhood, path, impact, confidence, challenge, support, observe, listen
@@ -15,31 +15,59 @@
 - [x] Input validation module (SQL injection prevention for CTE identifiers)
 - [x] Exception hierarchy with exit codes (0-5) and correlation IDs
 - [x] CLI integration tests against real database
-- [x] 144 tests passing across all modules
-- [x] `ohmd` HTTP server scaffold (GET/POST endpoints, token auth stub)
+- [x] 528 tests passing across all modules
+- [x] `ohmd` HTTP daemon with auth, error handling, health endpoints
 
-**Deliverable:** `ohm graph status` returns node/edge counts. Boundary rules enforced. Challenge edges work. SDK works end-to-end.
+## Phase 1: Daemon + Multi-Agent ✅ (Complete)
 
-## Phase 1: Daemon + Multi-Agent (Week 1-2)
+**Goal:** `ohmd` daemon running with auth, multiple agents connecting
 
-**Goal:** `ohmd` daemon running with Quack server, multiple agents connecting
+- [x] Production-ready ohmd with proper error handling and correlation IDs
+- [x] Token auth with per-agent Bearer tokens
+- [x] Health check endpoints (`/health`, `/ready`, `/status`)
+- [x] Systemd unit file (`ohmd.service`)
+- [x] Configuration file (`/etc/ohm/ohmd.json`)
+- [x] Recursive CTE queries through HTTP API
+- [x] Server test coverage (17 HTTP endpoints)
+- [x] Remove dead code (queries.py top-level, query.py NLP parser)
+- [x] Document module boundaries (store.py vs queries/)
+- [x] 9 agents registered with values, goals, and capabilities
 
-- [ ] Production-ready ohmd with proper error handling
-- [ ] Token auth with role-based access per agent
-- [ ] Health check endpoint (`/health`)
-- [ ] Systemd unit file
-- [ ] Configuration file (`~/.ohm/ohmd.json`)
-- [ ] Test concurrent access with multiple agent tokens
-- [ ] Verify recursive CTE queries work through HTTP API
-- [ ] `ohm serve status` properly detects running daemon
-- [ ] Server test coverage (17 HTTP endpoints)
-- [ ] SDK test coverage (Graph class methods)
-- [ ] Remove dead code (queries.py top-level, query.py NLP parser)
-- [ ] Document module boundaries (store.py vs queries/)
+**Deliverable:** `ohmd` runs as systemd service. Multiple agents connect via tokens. All CLI commands work through daemon. Full HTTP API.
 
-**Deliverable:** `ohm serve start` runs daemon. Multiple agents connect via tokens. All CLI commands work through daemon. 17 HTTP endpoints tested.
+## Phase 2: Domain Flexibility ✅ (In Progress)
 
-## Phase 2: DuckLake + Time Travel (Week 3-4)
+**Goal:** OHM works for multiple domains beyond cognitive agents
+
+- [x] Schema v0.5.0: urgency (edges), priority (nodes), probability (edges)
+- [x] NEGATES edge type for medical diagnosis (rules out conditions)
+- [x] Scenario-specific edge types: BATCH_EXPIRES_BEFORE, TRANSFERRED_TO, ESCALATED_TO, THREAT_CLUSTER, ORDERS_TEST, TRIGGERS_INCIDENT, etc.
+- [x] compound_confidence() with correlation parameter
+- [x] differential_diagnosis() for medical reasoning
+- [x] rules_out() for negative evidence
+- [x] threat_cluster() for cybersecurity IOC correlation
+- [x] Batch SSE writes for high-velocity scenarios
+- [x] Temporal confidence decay (decay_observations, expiring_soon)
+- [x] Multiplicative composite scoring
+- [ ] Source reliability calibration (record_outcome, source_reliability) — OHM-7e4
+- [ ] Handoff chains and escalation (handoff, escalate) — OHM-3yo
+- [ ] Cascade simulation (cascade_scenario, what_if) — OHM-af8.1
+- [ ] Urgent change filtering (urgent_changes) — OHM-af8.2
+
+## Phase 3: Agent Integration (Next)
+
+**Goal:** Each Olympus agent uses OHM as its knowledge graph
+
+- [ ] Métis integration — zettelkasten notes → OHM nodes, wikilinks → OHM edges
+- [ ] Clio integration — research findings → OHM L3 edges with source attribution
+- [ ] Hephaestus integration — audit findings → OHM observations
+- [ ] Socrates integration — challenges → OHM CHALLENGED_BY edges
+- [ ] SDK tests (OHM-9dq) — zero coverage on primary agent interface
+- [ ] marimo-pair integration — OHM queries in notebooks via Quack
+
+**Deliverable:** All agents reading/writing via OHM. Shared graph accumulates perspectives.
+
+## Phase 4: DuckLake + Time Travel (Later)
 
 **Goal:** DuckLake shared backend with change feed and time travel
 
@@ -52,28 +80,26 @@
 
 **Deliverable:** Change feed works across agents. Time travel queries return historical state.
 
-## Phase 3: Agent Integration (Week 5-6)
-
-**Goal:** Each Olympus agent uses OHM as its knowledge graph
-
-- [ ] Métis integration — zettelkasten notes → OHM nodes, wikilinks → OHM edges
-- [ ] Clio integration — research findings → OHM L3 edges with source attribution
-- [ ] Hephaestus integration — audit findings → OHM observations
-- [ ] Socrates integration — challenges → OHM CHALLENGED_BY edges
-- [ ] Promote shared graph from Kuzu → DuckLake migration
-- [ ] marimo-pair integration — OHM queries in notebooks via Quack
-
-**Deliverable:** All agents reading/writing via OHM. Kuzu deprecated for knowledge graph.
-
-## Phase 4: Advanced Queries + TOPO (Week 7+)
+## Phase 5: Advanced Queries + TOPO (Later)
 
 **Goal:** Full L1-L4 power + TOPO instantiation
 
-- [ ] `ohm graph stats` — edge counts by layer, confidence distribution, challenge ratio
 - [ ] Materialized views for hot-path queries
-- [ ] Confidence decay for L4 (prospective) edges
+- [ ] Source reliability calibration across agents
+- [ ] Cascade simulation with Monte Carlo
 - [ ] TOPO-specific CLI with industrial edge/node types
 - [ ] TOPO-specific commands (failure analysis, compliance mapping)
 - [ ] Shared `ohmd`/`topod` daemon codebase
 
 **Deliverable:** Full L1-L4 query capability. TOPO running on same architecture. One pattern, two instantiations.
+
+## Cross-cutting Issues
+
+| ID | Priority | Title | Status |
+|----|----------|-------|--------|
+| OHM-9dq | P1 | SDK tests — zero coverage on primary agent interface | Open |
+| OHM-zag | P1 | No request size cap on POST bodies — OOM risk | Open |
+| OHM-e19 | P2 | No SIGPIPE handling in daemon | Open |
+| OHM-pfk | P1 | Comprehensive doc update for multi-scenario architecture | Open |
+| OHM-c8i | P1 | ADRs for probability/confidence, NEGATES, urgency/priority | Open |
+| OHM-5di | P2 | ADR for observation type extensibility | Open |

@@ -38,6 +38,7 @@ src/ohm/
 ├── cli/
 │   ├── __init__.py      # Full argparse command tree (serve, graph, state, snapshot, diff)
 │   └── __main__.py      # `python -m ohm.cli` entry point
+├── methods.py           # Substrate methods: aggregation, anomalies, Monte Carlo, etc.
 ├── queries/
 │   └── __init__.py      # Parameterized CTE query functions (direct-connection API)
 tests/
@@ -48,11 +49,14 @@ tests/
 ├── test_queries.py      # CTE query correctness tests
 ├── test_cli.py          # CLI argument parsing tests (23 commands)
 ├── test_cli_integration.py  # End-to-end CLI tests against real DB
-├── test_ohm.py          # OhmStore integration tests
-├── test_integration.py  # Full workflow integration tests
-├── test_server.py       # HTTP daemon endpoint tests
-├── test_quack.py        # Quack protocol integration tests
-└── test_topo_cli.py     # TOPO CLI tests
+├── test_ohm.py           # OhmStore integration tests
+├── test_integration.py   # Full workflow integration tests
+├── test_server.py        # HTTP daemon endpoint tests
+├── test_quack.py         # Quack protocol integration tests
+└── test_topo_cli.py      # TOPO CLI tests
+```
+
+**528 tests passing** across all modules.
 ```
 
 ### Module Boundaries
@@ -139,13 +143,24 @@ bd create "title" -t feature -p 0 --parent <epic-id>  # Create child issue
 
 ### Backlog Structure
 Active epics (use `bd list` for current state):
-- **OHM-y2i**: P0 — Production Daemon (auth, Quack, error handling, systemd)
-- **OHM-xgm**: P1 — DuckLake + Time Travel (shared backend, snapshot, diff, heartbeat sync)
-- **OHM-a35**: P1 — Agent Integration (Métis, Clio, Hephaestus, Socrates, agent config)
-- **OHM-3w1**: P2 — TOPO Instantiation (industrial schema, CLI, shared daemon)
-- **OHM-l5k**: P1 — CI/CD pipeline
-- **OHM-xj4**: P1 — marimo-pair integration
-- **OHM-dy9**: P2 — Performance benchmarks
+- **OHM-0e0**: P1 — Domain Flexibility (cattle, retail, temporal decay, SSE, batch expiry)
+- **OHM-af8**: P1 — Multi-scenario Extensibility (medical, cybersecurity, supply chain, customer support)
+- **OHM-xgm**: P1 — DuckLake + Time Travel
+- **OHM-a35**: P1 — Agent Integration (Métis, Clio, Hephaestus, Socrates)
+- **OHM-3w1**: P2 — TOPO Instantiation
+
+Schema blockers (P0):
+- **OHM-pap**: P0 — Add urgency + priority fields to schema (blocks af8.2, af8.4, af8.5)
+- **OHM-2xy**: P0 — Add probability field to edges (blocks af8.1)
+
+Cross-cutting:
+- **OHM-9dq**: P1 — SDK tests (zero coverage on primary agent interface)
+- **OHM-zag**: P1 — No request size cap on POST bodies (OOM risk)
+- **OHM-7e4**: P1 — source_reliability() + record_outcome() for cybersecurity
+- **OHM-3yo**: P1 — handoff() + escalate() for customer support
+- **OHM-pfk**: P1 — Comprehensive doc update for multi-scenario architecture
+- **OHM-c8i**: P1 — ADRs for probability/confidence, NEGATES, urgency/priority
+- **OHM-e19**: P2 — No SIGPIPE handling in daemon
 
 Issues tagged with **PM input needed** are blocked on product decisions. Issues without that tag are actionable now.
 
@@ -180,10 +195,48 @@ Issues tagged with **PM input needed** are blocked on product decisions. Issues 
 ## Security
 
 - **Never hardcode credentials.** Read from environment variables or config files
-- **Token auth**: Agent tokens passed via `--actor` flag or `$OHM_ACTOR` env var
+- **Token auth**: Agent tokens in `/etc/ohm/ohmd.json` or `$OHM_TOKEN` env var. Bearer tokens for HTTP API.
 - **Boundary enforcement**: No agent can overwrite another agent's L3/L4 edges (ADR-003)
-- **SQL injection**: All user-provided values in CTE queries must be validated before interpolation. Use parameterized queries where DuckDB supports them
-- **File permissions**: DuckDB files and config should be readable only by the agent user
+- **SQL injection**: All user-provided values in CTE queries are validated. Parameterized queries used where DuckDB supports them.
+- **File permissions**: `/etc/ohm/ohmd.json` (600), `/var/lib/ohm/` (root:root)
+- **Request size**: POST bodies have no cap yet (OHM-zag). Be cautious with large payloads.
+
+## Deployment
+
+OHM runs as a systemd service:
+
+```bash
+# Check status
+systemctl status ohmd
+
+# Restart
+sudo systemctl restart ohmd
+
+# Logs
+journalctl -u ohmd -f
+
+# Config
+cat /etc/ohm/ohmd.json
+
+# Agent tokens
+cat /root/olympus/shared/ohm-config.json
+```
+
+Agents connect via HTTP API on `127.0.0.1:8710`:
+
+```python
+import requests
+headers = {"Authorization": "Bearer ohm-metis-u0-KEjbnU_WfJnmNq7rbzQ"}
+response = requests.get("http://127.0.0.1:8710/stats", headers=headers)
+```
+
+Or via SDK (when daemon is stopped, for reads):
+
+```python
+from ohm.sdk import connect
+with connect("/var/lib/ohm/ohm.duckdb", actor="metis") as g:
+    stats = g.stats()
+```
 
 ## Common Pitfalls
 

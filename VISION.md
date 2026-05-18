@@ -20,47 +20,58 @@ This is Popperian epistemology as database schema. Knowledge grows through refut
 
 ## What "Done" Looks Like
 
-### The Daemon Works (P0)
+### Phase 0: Foundation ✅
 
-An agent can start `ohmd`, get a token, and read/write the graph over HTTP. Multiple agents connect concurrently. The daemon handles auth, errors, and doesn't crash. This is table stakes — nothing else matters until this is solid.
+- Schema, CLI, recursive CTEs, boundary enforcement
+- Python SDK, input validation, exception hierarchy
+- 528 tests passing across all modules
 
-**Acceptance:**
-- `ohmd` starts, stays running, handles 10+ concurrent connections
-- Bearer token auth works — agents can only modify their own L3/L4 edges
-- Error responses have status codes, messages, and correlation IDs
-- `/health` returns 200, `/status` returns meaningful data
-- Systemd unit keeps it alive across reboots
+### Phase 1: Daemon + Multi-Agent ✅
 
-**Also done (P0 foundations):**
-- 144 tests passing across all modules
-- Python SDK (`ohm.sdk`) for programmatic agent access
-- Input validation module (SQL injection prevention for CTE identifiers)
-- Exception hierarchy with exit codes (0-5) and correlation IDs
-- CLI integration tests against real database
-- Beads issue tracker with 24 active issues organized by priority
+- `ohmd` running with Bearer token auth, per-agent roles
+- Health/ready/status endpoints with correlation IDs
+- Error handling with exit codes
+- Systemd unit file
+- 9 agents registered with values, goals, and capabilities
+- Server test coverage (17 HTTP endpoints)
 
-### Agents See Each Other (P1)
+### Phase 2: Domain Flexibility ✅ (in progress)
 
-Métis writes a note about AND→OR conversion. Clio researches it and adds sources. Socrates challenges the confidence. The graph shows all three perspectives, who holds them, and how they connect. That's the hive mind.
+- Cattle + retail scenarios with domain-specific edge types
+- Medical diagnosis (NEGATES, compound_confidence, differential_diagnosis)
+- Cybersecurity incident response (source reliability, threat clustering, SSE batch)
+- Supply chain disruption (probability-weighted edges, cascade simulation, what_if)
+- Customer support (priority, handoff chains, resolution state machine)
+- Urgency and priority as first-class schema fields
+- Schema v0.5.0: urgency, priority, probability, NEGATES, scenario edge types
 
-**Acceptance:**
-- Each agent can push/pull on heartbeat
-- `ohm snapshot <timestamp>` reconstructs the graph at any point
-- `ohm diff <t1> <t2>` shows what changed between two moments
-- Agent state table shows who's working on what
+### Phase 3: Agent Integration (next)
 
-### The Knowledge Compounds (P2+)
+- Each Olympus agent uses OHM as its knowledge graph
+- Métis zettelkasten → OHM nodes/edges
+- Clio research findings → OHM L3 edges
+- Hephaestus audit findings → OHM observations
+- Socrates challenges → OHM CHALLENGED_BY edges
+- Change feed enables reactive behavior
 
-Over time, the graph should get more useful, not just bigger. Connections emerge between domains. Challenges accumulate and confidence scores adjust. Patterns become visible that no single agent would see.
+### Phase 4: DuckLake + Time Travel (later)
 
-**Acceptance:**
-- A query like `ohm graph neighborhood hungary --depth 3` returns edges from multiple agents with their confidence scores
-- The change feed enables reactive behavior — agents can subscribe to changes in their domain
-- TOPO proves the architecture generalizes beyond cognitive domains
+- Shared DuckLake backend
+- `ohm snapshot <timestamp>` — historical graph state
+- `ohm diff <t1> <t2>` — change comparison
+- Agent heartbeat sync
+
+### Phase 5: Advanced + TOPO
+
+- Confidence decay for L4 edges
+- Source reliability calibration
+- Cascade simulation (Monte Carlo)
+- TOPO industrial instantiation
+- Shared ohmd/topod daemon codebase
 
 ## Agent Interface
 
-Agents use the **Python SDK** for regular graph operations. The CLI is for human diagnostics and ad-hoc exploration. The HTTP daemon (ohmd) is for shared access.
+Agents use the **Python SDK** (`ohm.sdk`) for regular graph operations. The CLI is for human diagnostics and ad-hoc exploration. The HTTP daemon (ohmd) is for shared access.
 
 ```
 Agent code  → SDK → queries/ → DuckDB (local cache)
@@ -73,35 +84,30 @@ All three paths go through the same logic and boundary enforcement. The differen
 ## What I Don't Care About
 
 - **Pretty UI.** This is an agent API, not a dashboard.
-- **Perfect code.** Ship, then iterate. 130 tests is enough coverage for now.
+- **Perfect code.** Ship, then iterate. 528 tests is solid coverage.
 - **Debate about architecture.** The schema works. The boundary rules work. The challenge semantics work. Build on top, don't redesign underneath.
 - **Feature creep.** If it doesn't help agents share awareness while preserving judgment, it doesn't belong here.
 
 ## Architecture Decisions That Are Locked
-
-These aren't up for debate. They're the foundation everything else builds on:
 
 1. **DuckDB, not Postgres.** Embedded, zero-config, recursive CTEs. Agents don't need a DBA.
 2. **Challenge edges, not modification.** ADR-002. This is the core insight. Don't break it.
 3. **Quack for concurrent access.** HTTP protocol, not IPC. Agents are processes, not threads.
 4. **CLI as primary interface.** If it doesn't work from the command line, it doesn't work.
 5. **Attribution on every write.** No anonymous edges. The graph must know who thinks what.
+6. **Probability ≠ confidence.** Confidence is agent belief; probability is objective likelihood. Both are needed for risk modeling. (ADR-008)
+7. **Urgency ≠ priority.** Urgency is time-sensitivity of information (edge). Priority is importance of an entity (node). Different dimensions. (ADR-009)
+8. **NEGATES is not CHALLENGED_BY.** CHALLENGED_BY is subjective disagreement. NEGATES is objective ruling-out. Both preserve the original. (ADR-010)
 
 ## Architecture Decisions That Are Open
 
-These need exploration, not implementation:
+1. **Observation type extensibility.** Should `VALID_OBSERVATION_TYPES` be a frozenset (requiring schema.py changes), a SchemaConfig field (extensible per domain), or an open string with suggested types? Need ADR before medical/cyber scenarios.
 
-1. **DuckLake sync strategy.** How often? On write? On heartbeat? Batch? Real-time?
-   - *My leaning:* Heartbeat-based. Each agent syncs when it checks in (every 5-15 minutes depending on activity). Real-time is overkill for knowledge graph updates.
+2. **DuckLake sync strategy.** How often? On write? On heartbeat? Batch? Real-time?
+   - *Leaning:* Heartbeat-based. Each agent syncs when it checks in (every 5-15 minutes).
 
-2. **Conflict resolution.** What happens when two agents write the same L2 edge simultaneously?
-   - *My leaning:* L2 edges are shared — last-write-wins with attribution. L3/L4 edges are agent-owned — no conflict possible. Challenge semantics handle disagreements.
-
-3. **Confidence decay.** Should L4 edges lose confidence over time?
-   - *My leaning:* Yes. L4 (prospect) predictions should decay. Default half-life of 30 days. The decay function should be configurable. Predictions that don't decay are noise.
-
-4. **Observation aggregation.** When three agents observe the same anomaly, is that one observation or three?
-   - *My leaning:* Three observations, linked to the same node. Each agent's observation preserves their attribution and confidence. The graph accumulates, not collapses. Downstream consumers choose how to aggregate.
+3. **Conflict resolution.** What happens when two agents write the same L2 edge simultaneously?
+   - *Leaning:* L2 edges are shared — last-write-wins with attribution. L3/L4 edges are agent-owned — no conflict possible.
 
 ## How to Contribute
 

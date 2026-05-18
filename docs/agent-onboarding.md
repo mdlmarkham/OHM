@@ -85,6 +85,7 @@ pattern = graph.create_node(
     content="When an AND gate's constraints are systematically bypassed, it becomes an OR gate",
     visibility="team",
     confidence=1.0,
+    priority="P1",  # Node priority (P0-P3)
 )
 
 # Create an edge (L3 = your interpretation)
@@ -95,6 +96,8 @@ graph.create_edge(
     layer="L3",
     confidence=0.8,
     provenance="pattern_analysis_2026-05-16",
+    urgency="high",     # Edge urgency (critical, high, medium, low)
+    probability=0.2,     # Objective likelihood (distinct from confidence)
 )
 
 # Record an observation (your measurement of a node)
@@ -118,6 +121,13 @@ graph.challenge(
 graph.support(
     edge_id=clios_edge["id"],
     reason="Three independent observations confirm this pattern",
+    confidence=0.9,
+)
+
+# Rule out a diagnosis (medical scenario)
+graph.rules_out(
+    finding_node=fever_absent["id"],
+    condition_node=malaria["id"],
     confidence=0.9,
 )
 ```
@@ -150,10 +160,13 @@ provenance = graph.confidence(edge_id)
 # What changed since your last check
 changes = graph.listen(since="2026-05-16T12:00:00Z")
 
+# Urgent changes only
+urgent = graph.listen(since="2026-05-16T12:00:00Z", urgency=["critical", "high"])
+
 # Graph statistics
 stats = graph.stats()
 # Returns: node_count, edge_count, observations, agents, layer_distribution,
-#          observation_stats (count, mean, min, max confidence)
+#          edges_by_type, challenge_ratio, active_agents
 ```
 
 ## How to Set Focus
@@ -219,6 +232,47 @@ anomalies = graph.anomalies(sigma=2.0, layer="L3")
 # Graph health — orphans, unchallenged low-confidence, dense clusters
 health = graph.health()
 # Returns: orphan_count, low_confidence_count, cluster_count, staleness
+
+# Compound confidence — multiple observations with correlation
+# correlation=0.0 means independent (geometric), 1.0 means correlated (use highest)
+result = graph.compound_confidence(
+    observations=[
+        {"node_id": "node1", "confidence": 0.8},
+        {"node_id": "node2", "confidence": 0.7},
+    ],
+    correlation=0.3
+)
+
+# Rules out — negative evidence for medical diagnosis
+graph.rules_out(
+    finding_node=fever_absent["id"],
+    condition_node=malaria["id"],
+    confidence=0.9
+)
+
+# Differential diagnosis — rank conditions by composite score
+dd = graph.differential_diagnosis(patient_node, depth=2)
+# Returns: conditions sorted by composite_score, excluding ruled-out conditions
+
+# Threat cluster — all alerts sharing an IOC
+cluster = graph.threat_cluster(ioc_node)
+
+# Cascade scenario — Monte Carlo through probability-weighted graph
+cascade = graph.cascade_scenario(supplier_node, failure_probability=0.3)
+# Returns: downstream nodes with computed failure probabilities
+
+# What-if — dry-run impact analysis
+impact = graph.what_if(edge_id)
+# Returns: downstream impact without modifying graph
+
+# Decay observations that are past their half-life
+graph.decay_observations(hours=24)
+
+# Find edges expiring soon
+expiring = graph.expiring_soon(hours=48)
+
+# Detect trends in observations
+trend = graph.detect_trend(node_id, window=24)
 ```
 
 ## Conventions
@@ -232,16 +286,13 @@ health = graph.health()
 - `observation` — a measurement or data point
 
 ### Edge Types
-- `CAUSES` — causal relationship
-- `APPLIES_TO` — pattern instantiation
-- `SUPPORTS` — supporting evidence
-- `CHALLENGD_BY` — disagreement (creates new edge, doesn't modify original)
-- `VALUES` — agent value declaration
-- `GOALS` — agent goal declaration
-- `CAPABLE_OF` — agent capability declaration
-- `RELATED_TO` — general association
-- `DERIVED_FROM` — provenance chain
-- `PREDICTS` — L4 prediction edge
+**L1 (Structure):** CONTAINS, BELONGS_TO, HAS_COMPONENT, PART_OF, CAPABLE_OF, VALUES, GOALS, INTERESTED_IN
+
+**L2 (Flow):** DERIVES_FROM, INFLUENCES, REFERENCES, USES, FEEDS, FLOWS_TO, NOTIFIES, TRUSTS, SERVES, BATCH_EXPIRES_BEFORE, TRANSFERRED_TO, OPENED_BY, STARTED_BY, AWAITING, RESOLVED_BY, CLOSED_BY, INVESTIGATED_BY, CONTAINED_BY, ERADICATED_BY, RECOVERED_BY, NEGOTIATES_WITH
+
+**L3 (Knowledge):** CAUSES, CORRELATES_WITH, PREDICTS, EXPLAINS, CHALLENGED_BY, SUPPORTS, REFINES, CONTRADICTS, LISTENS_TO, DEFERS_TO, COLLABORATES_WITH, APPLIES_TO, RELATED_TO, NEGATES, EXPECTED_LIKELIHOOD, ESCALATED_TO, DELEGATED_TO, THREAT_CLUSTER
+
+**L4 (Prospect):** EXPECTS, PLANS, RISKS, DEPENDS_ON, THREATENS, ENABLES, EXPECTS_FROM, PREDICTS, ORDERS_TEST, TRIGGERS_INCIDENT
 
 ### Confidence
 - 1.0 — certain (L1/L2 shared facts)
@@ -249,6 +300,24 @@ health = graph.health()
 - 0.4-0.6 — moderate confidence (pattern visible, needs confirmation)
 - 0.1-0.3 — low confidence (hunch, early observation)
 - 0.0 — unknown
+
+### Urgency
+- `critical` — requires immediate attention (security breach, system down)
+- `high` — time-sensitive (escalating situation, deadline approaching)
+- `medium` — normal priority
+- `low` — informational, no time pressure
+
+### Priority
+- `P0` — critical (system down, data loss)
+- `P1` — high (blocking, significant impact)
+- `P2` — normal (standard work)
+- `P3` — low (nice to have, backlog)
+
+### Probability (distinct from confidence)
+- Confidence = how sure the agent is (belief)
+- Probability = objective likelihood of the outcome (claim about the world)
+- Example: confidence=0.9, probability=0.2 means "I'm very sure there's a 20% chance of disruption"
+- Use for supply chain risk modeling, cascade scenarios, what-if analysis
 
 ### Provenance
 Every edge should include a `provenance` string describing where it came from:
