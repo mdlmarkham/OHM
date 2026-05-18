@@ -2555,6 +2555,23 @@ def connect_http(
                 path += "?" + "&".join(params)
             return self._http_request("GET", path)
 
+        def search(self, query: str, *, node_type: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+            """Search nodes via the daemon's /search endpoint.
+
+            Args:
+                query: Text to search for in labels and content.
+                node_type: Optional type filter.
+                limit: Maximum results (default 20).
+
+            Returns:
+                List of matching node records.
+            """
+            params = [f"q={query}", f"limit={limit}"]
+            if node_type:
+                params.append(f"type={node_type}")
+            path = "/search?" + "&".join(params)
+            return self._http_request("GET", path)
+
     graph = HttpGraph(conn, actor, base_url, resolved_token)
     graph.token = resolved_token
     return graph
