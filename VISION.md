@@ -35,7 +35,7 @@ This is Popperian epistemology as database schema. Knowledge grows through refut
 - 9 agents registered with values, goals, and capabilities
 - Server test coverage (17 HTTP endpoints)
 
-### Phase 2: Domain Flexibility ✅ (in progress)
+### Phase 2: Domain Flexibility ✅
 
 - Cattle + retail scenarios with domain-specific edge types
 - Medical diagnosis (NEGATES, compound_confidence, differential_diagnosis)
@@ -44,6 +44,8 @@ This is Popperian epistemology as database schema. Knowledge grows through refut
 - Customer support (priority, handoff chains, resolution state machine)
 - Urgency and priority as first-class schema fields
 - Schema v0.5.0: urgency, priority, probability, NEGATES, scenario edge types
+- 6 scenario docs with runnable code examples
+- 603+ tests passing
 
 ### Phase 3: Agent Integration (next)
 
