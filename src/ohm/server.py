@@ -972,6 +972,8 @@ class OhmHandler(BaseHTTPRequestHandler):
             # List nodes with pagination and optional type/label filtering
             node_type = qs.get("type", [None])[0]
             label = qs.get("label", [None])[0]
+            label_contains = qs.get("label_contains", [None])[0]
+            label_prefix = qs.get("label_prefix", [None])[0]
             limit = int(qs.get("limit", [100])[0])
             offset = int(qs.get("offset", [0])[0])
             conditions = ["1=1"]
@@ -982,6 +984,12 @@ class OhmHandler(BaseHTTPRequestHandler):
             if label:
                 conditions.append("label ILIKE ?")
                 params.append(f"%{label}%")
+            if label_contains:
+                conditions.append("label ILIKE ?")
+                params.append(f"%{label_contains}%")
+            if label_prefix:
+                conditions.append("label ILIKE ?")
+                params.append(f"{label_prefix}%")
             params.append(limit)
             params.append(offset)
             sql = (
@@ -1225,6 +1233,8 @@ class OhmHandler(BaseHTTPRequestHandler):
                 sigma=body.get("sigma"),
                 source=body.get("source"),
                 notes=body.get("notes"),
+                source_name=body.get("source_name"),
+                source_url=body.get("source_url"),
                 agent_name=agent,
             )
             _trigger_webhooks({
@@ -1233,6 +1243,71 @@ class OhmHandler(BaseHTTPRequestHandler):
                 "observation": result,
             })
             self._json_response(201, result)
+
+        elif path == "/batch":
+            # Batch node and edge creation — all-or-nothing transaction
+            nodes = body.get("nodes", [])
+            edges = body.get("edges", [])
+            errors = []
+            nodes_created = 0
+            edges_created = 0
+
+            # Validate all inputs first
+            for i, node in enumerate(nodes):
+                if "id" not in node or "label" not in node:
+                    errors.append({"index": i, "type": "node", "error": "Missing required field: id and label"})
+            for i, edge in enumerate(edges):
+                if "from" not in edge or "to" not in edge or "type" not in edge:
+                    errors.append({"index": i, "type": "edge", "error": "Missing required field: from, to, type"})
+
+            if errors:
+                raise ValidationError(f"Batch validation failed: {json.dumps(errors)}")
+
+            # All-or-nothing: execute in a single transaction
+            try:
+                self.store.conn.execute("BEGIN TRANSACTION")
+                for node in nodes:
+                    self.store.write_node(
+                        id=node["id"],
+                        label=node["label"],
+                        type=node.get("type", "concept"),
+                        content=node.get("content"),
+                        confidence=node.get("confidence", 1.0),
+                        visibility=node.get("visibility", "team"),
+                        provenance=node.get("provenance"),
+                        tags=node.get("tags"),
+                        metadata=node.get("metadata"),
+                        priority=node.get("priority"),
+                        url=node.get("url"),
+                        agent_name=agent,
+                    )
+                    nodes_created += 1
+                for edge in edges:
+                    self.store.write_edge(
+                        from_node=edge["from"],
+                        to_node=edge["to"],
+                        edge_type=edge["type"],
+                        layer=edge.get("layer", "L3"),
+                        confidence=edge.get("confidence"),
+                        condition=edge.get("condition"),
+                        provenance=edge.get("provenance"),
+                        challenge_of=edge.get("challenge_of"),
+                        challenge_type=edge.get("challenge_type"),
+                        urgency=edge.get("urgency"),
+                        probability=edge.get("probability"),
+                        agent_name=agent,
+                    )
+                    edges_created += 1
+                self.store.conn.execute("COMMIT")
+            except Exception:
+                self.store.conn.execute("ROLLBACK")
+                raise
+
+            self._json_response(201, {
+                "nodes_created": nodes_created,
+                "edges_created": edges_created,
+                "errors": errors,
+            })
 
         elif path == "/webhook":
             # Register or update webhook callback URL for this agent

@@ -307,7 +307,10 @@ DDL_STATEMENTS: list[str] = [
         source      VARCHAR,
         created_by  VARCHAR NOT NULL,
         created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        metadata    JSON
+        metadata    JSON,
+        notes       TEXT,
+        source_name TEXT,
+        source_url  TEXT
     );
     """,
     # ── Agent State ──────────────────────────────────────────────────────
