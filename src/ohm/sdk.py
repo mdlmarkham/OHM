@@ -2379,3 +2379,109 @@ def connect_remote(
     graph = Graph(conn, actor=actor)
     graph.token = token or os.environ.get("OHM_TOKEN")
     return graph
+
+
+def connect_http(
+    base_url: str = "http://127.0.0.1:8710",
+    *,
+    actor: str = "unknown",
+    token: str | None = None,
+) -> Graph:
+    """Connect to an OHM daemon via HTTP REST API.
+
+    Creates a local in-memory DuckDB connection for query caching and
+    wraps HTTP calls to the ohmd REST API for write operations.
+    Field names are mapped: SDK uses from_node/to_node/edge_type,
+    HTTP API uses from/to/type.
+
+    Args:
+        base_url: URL of the ohmd daemon (default: http://127.0.0.1:8710).
+        actor: Agent name for attribution.
+        token: Bearer token for authentication. Reads from OHM_TOKEN env if not provided.
+
+    Returns:
+        A Graph instance connected via HTTP.
+    """
+    import json
+    import os
+    import urllib.request
+    import urllib.error
+
+    from ohm.db import connect as db_connect
+
+    resolved_token = token or os.environ.get("OHM_TOKEN")
+    conn = db_connect(":memory:")
+
+    class HttpGraph(Graph):
+        """Graph subclass that routes writes through HTTP API with field name mapping."""
+
+        def __init__(self, conn, actor, base_url, token):
+            super().__init__(conn, actor=actor)
+            self._base_url = base_url.rstrip("/")
+            self._token = token
+
+        def _http_request(self, method: str, path: str, body: dict | None = None) -> dict:
+            """Make an HTTP request to the ohmd daemon."""
+            url = f"{self._base_url}{path}"
+            data = json.dumps(body).encode() if body else None
+            headers = {"Content-Type": "application/json"}
+            if self._token:
+                headers["Authorization"] = f"Bearer {self._token}"
+
+            req = urllib.request.Request(url, data=data, headers=headers, method=method)
+            try:
+                with urllib.request.urlopen(req) as resp:
+                    return json.loads(resp.read())
+            except urllib.error.HTTPError as e:
+                error_body = e.read().decode() if e.fp else str(e)
+                raise ConnectionError(f"HTTP {e.code} from {method} {path}: {error_body}") from e
+
+        def create_node(self, label: str, *, node_type: str = "concept", **kwargs) -> dict[str, Any]:
+            """Create a node via HTTP API. Auto-generates ID from label."""
+            import re
+            node_id = re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")[:60]
+            body = {
+                "id": node_id,
+                "label": label,
+                "type": node_type,
+                "content": kwargs.get("content"),
+                "confidence": kwargs.get("confidence", 1.0),
+                "visibility": kwargs.get("visibility", "team"),
+                "provenance": kwargs.get("provenance"),
+                "priority": kwargs.get("priority"),
+            }
+            return self._http_request("POST", "/node", body)
+
+        def create_edge(self, *, from_node: str, to_node: str, edge_type: str,
+                        layer: str = "L3", **kwargs) -> dict[str, Any]:
+            """Create an edge via HTTP API. Maps from_node→from, to_node→to, edge_type→type."""
+            body = {
+                "from": from_node,
+                "to": to_node,
+                "type": edge_type,
+                "layer": layer,
+                "confidence": kwargs.get("confidence", 0.7),
+                "condition": kwargs.get("condition"),
+                "provenance": kwargs.get("provenance"),
+                "urgency": kwargs.get("urgency"),
+                "probability": kwargs.get("probability"),
+            }
+            return self._http_request("POST", "/edge", body)
+
+        def stats(self) -> dict[str, Any]:
+            """Get graph stats from the daemon."""
+            return self._http_request("GET", "/stats")
+
+        def listen(self, *, since: str | None = None, **kwargs) -> list[dict[str, Any]]:
+            """Get change feed from the daemon."""
+            params = []
+            if since:
+                params.append(f"since={since}")
+            path = "/listen"
+            if params:
+                path += "?" + "&".join(params)
+            return self._http_request("GET", path)
+
+    graph = HttpGraph(conn, actor, base_url, resolved_token)
+    graph.token = resolved_token
+    return graph
