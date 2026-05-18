@@ -771,6 +771,61 @@ class TestBatchCreateEdges:
         assert types == {"CAUSES", "INFLUENCES"}
 
 
+class TestCreateBatch:
+    """Tests for SDK create_batch() method (OHM-1m3)."""
+
+    def test_create_batch_nodes_and_edges(self, graph):
+        """create_batch() creates both nodes and edges in one call."""
+        result = graph.create_batch(
+            nodes=[
+                {"label": "Event", "node_type": "event"},
+                {"label": "Source", "node_type": "source"},
+            ],
+            edges=[],
+        )
+        assert result["nodes_created"] == 2
+        assert result["edges_created"] == 0
+        assert len(result["nodes"]) == 2
+
+    def test_create_batch_with_edges(self, graph):
+        """create_batch() creates nodes and edges together."""
+        a = graph.create_node(label="A")["id"]
+        b = graph.create_node(label="B")["id"]
+        result = graph.create_batch(
+            nodes=[{"label": "C", "node_type": "concept"}],
+            edges=[
+                {"from_node": a, "to_node": b, "edge_type": "CAUSES", "layer": "L3"},
+            ],
+        )
+        assert result["nodes_created"] == 1
+        assert result["edges_created"] == 1
+        assert len(result["nodes"]) == 1
+        assert len(result["edges"]) == 1
+
+    def test_create_batch_empty(self, graph):
+        """create_batch() with no nodes or edges returns zeros."""
+        result = graph.create_batch()
+        assert result["nodes_created"] == 0
+        assert result["edges_created"] == 0
+        assert result["nodes"] == []
+        assert result["edges"] == []
+
+    def test_create_batch_populates_change_feed(self, graph):
+        """create_batch() populates change feed for each item individually."""
+        result = graph.create_batch(
+            nodes=[
+                {"label": "CF1", "node_type": "concept"},
+                {"label": "CF2", "node_type": "concept"},
+            ],
+        )
+        assert result["nodes_created"] == 2
+        # Each node creation should have its own change feed entry
+        changes = graph.query("SELECT * FROM ohm_change_feed WHERE table_name = 'ohm_nodes' ORDER BY created_at DESC")
+        node_ids = {n["id"] for n in result["nodes"]}
+        changed_ids = {c["row_id"] for c in changes}
+        assert node_ids.issubset(changed_ids)
+
+
 # ===== Medical Diagnosis SDK Tests =====
 
 class TestRulesOut:
