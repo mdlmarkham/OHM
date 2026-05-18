@@ -755,3 +755,98 @@ class TestProbabilityCascade:
         assert result["trigger_edge"]["id"] == edge["id"]
         assert result["trigger_probability"] == pytest.approx(0.15)
         assert "downstream_impact" in result
+
+
+class TestCreateBatch:
+    """Tests for create_batch() combined node+edge creation (OHM-1m3)."""
+
+    def test_create_batch_nodes_only(self, test_db):
+        """create_batch() creates nodes without edges."""
+        from ohm.queries import create_batch
+
+        result = create_batch(
+            test_db,
+            nodes=[
+                {"label": "Node A", "node_type": "concept"},
+                {"label": "Node B", "node_type": "source"},
+            ],
+            created_by="test_agent",
+        )
+        assert result["nodes_created"] == 2
+        assert result["edges_created"] == 0
+        assert len(result["nodes"]) == 2
+        assert result["nodes"][0]["label"] == "Node A"
+
+    def test_create_batch_edges_only(self, test_db):
+        """create_batch() creates edges without new nodes."""
+        from ohm.queries import create_node, create_batch
+
+        a = create_node(test_db, label="A", node_type="concept", created_by="test_agent")
+        b = create_node(test_db, label="B", node_type="concept", created_by="test_agent")
+
+        result = create_batch(
+            test_db,
+            edges=[
+                {"from_node": a["id"], "to_node": b["id"], "edge_type": "CAUSES", "layer": "L3"},
+            ],
+            created_by="test_agent",
+        )
+        assert result["nodes_created"] == 0
+        assert result["edges_created"] == 1
+        assert len(result["edges"]) == 1
+
+    def test_create_batch_nodes_and_edges(self, test_db):
+        """create_batch() creates both nodes and edges."""
+        from ohm.queries import create_batch
+
+        result = create_batch(
+            test_db,
+            nodes=[
+                {"label": "Event", "node_type": "event"},
+                {"label": "Source", "node_type": "source"},
+            ],
+            created_by="test_agent",
+        )
+        assert result["nodes_created"] == 2
+        node_ids = [n["id"] for n in result["nodes"]]
+
+        # Now create edges between the nodes
+        result2 = create_batch(
+            test_db,
+            edges=[
+                {"from_node": node_ids[1], "to_node": node_ids[0], "edge_type": "REFERENCES", "layer": "L2"},
+            ],
+            created_by="test_agent",
+        )
+        assert result2["edges_created"] == 1
+
+    def test_create_batch_empty(self, test_db):
+        """create_batch() with no nodes or edges returns zeros."""
+        from ohm.queries import create_batch
+
+        result = create_batch(test_db, created_by="test_agent")
+        assert result["nodes_created"] == 0
+        assert result["edges_created"] == 0
+        assert result["nodes"] == []
+        assert result["edges"] == []
+
+    def test_create_batch_populates_change_feed(self, test_db):
+        """create_batch() populates change feed for each item."""
+        from ohm.queries import create_batch
+
+        result = create_batch(
+            test_db,
+            nodes=[
+                {"label": "CF1", "node_type": "concept"},
+                {"label": "CF2", "node_type": "concept"},
+            ],
+            created_by="test_agent",
+        )
+        assert result["nodes_created"] == 2
+        # Verify change feed entries exist for each node
+        rows = test_db.execute(
+            "SELECT row_id FROM ohm_change_feed WHERE table_name = 'ohm_nodes' ORDER BY occurred_at DESC"
+        ).fetchall()
+        created_ids = {n["id"] for n in result["nodes"]}
+        feed_ids = {r[0] for r in rows}
+        assert created_ids.issubset(feed_ids)

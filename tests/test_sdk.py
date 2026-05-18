@@ -820,9 +820,11 @@ class TestCreateBatch:
         )
         assert result["nodes_created"] == 2
         # Each node creation should have its own change feed entry
-        changes = graph.query("SELECT * FROM ohm_change_feed WHERE table_name = 'ohm_nodes' ORDER BY created_at DESC")
+        rows = graph._conn.execute(
+            "SELECT row_id FROM ohm_change_feed WHERE table_name = 'ohm_nodes' ORDER BY occurred_at DESC"
+        ).fetchall()
         node_ids = {n["id"] for n in result["nodes"]}
-        changed_ids = {c["row_id"] for c in changes}
+        changed_ids = {r[0] for r in rows}
         assert node_ids.issubset(changed_ids)
 
 

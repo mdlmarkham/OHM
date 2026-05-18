@@ -1428,3 +1428,77 @@ class TestSourceAttribution:
         assert status == 201
         assert data.get("source_name") is None
         assert data.get("source_url") is None
+
+
+@pytest.mark.xdist_group("server")
+class TestBatchEndpoint:
+    """Tests for POST /batch endpoint (OHM-1m3)."""
+
+    def test_batch_create_nodes(self, test_server):
+        """POST /batch creates multiple nodes."""
+        port, store = test_server
+        status, data = _request("POST", port, "/batch", body={
+            "nodes": [
+                {"id": "batch-n1", "label": "Node 1", "type": "concept"},
+                {"id": "batch-n2", "label": "Node 2", "type": "source"},
+            ],
+            "edges": [],
+        })
+        assert status == 201
+        assert data["nodes_created"] == 2
+        assert data["edges_created"] == 0
+
+    def test_batch_create_nodes_and_edges(self, test_server):
+        """POST /batch creates nodes and edges together."""
+        port, store = test_server
+        status, data = _request("POST", port, "/batch", body={
+            "nodes": [
+                {"id": "batch-n3", "label": "Node A", "type": "concept"},
+                {"id": "batch-n4", "label": "Node B", "type": "concept"},
+            ],
+            "edges": [
+                {"from": "batch-n3", "to": "batch-n4", "type": "CAUSES", "layer": "L3"},
+            ],
+        })
+        assert status == 201
+        assert data["nodes_created"] == 2
+        assert data["edges_created"] == 1
+
+    def test_batch_validation_error(self, test_server):
+        """POST /batch with missing required fields returns validation error."""
+        port, store = test_server
+        status, data = _request("POST", port, "/batch", body={
+            "nodes": [
+                {"id": "batch-bad"},  # missing 'label'
+            ],
+            "edges": [],
+        })
+        assert status == 400
+
+    def test_batch_empty(self, test_server):
+        """POST /batch with empty arrays returns zeros."""
+        port, store = test_server
+        status, data = _request("POST", port, "/batch", body={
+            "nodes": [],
+            "edges": [],
+        })
+        assert status == 201
+        assert data["nodes_created"] == 0
+        assert data["edges_created"] == 0
+
+    def test_batch_populates_change_feed(self, test_server):
+        """POST /batch populates change feed for each created item."""
+        port, store = test_server
+        _request("POST", port, "/batch", body={
+            "nodes": [
+                {"id": "cf-batch-1", "label": "CF1", "type": "concept"},
+                {"id": "cf-batch-2", "label": "CF2", "type": "concept"},
+            ],
+            "edges": [],
+        })
+        # Verify change feed entries
+        feed = store.execute(
+            "SELECT row_id FROM ohm_change_feed WHERE table_name = 'ohm_nodes' "
+            "AND row_id IN ('cf-batch-1', 'cf-batch-2') ORDER BY occurred_at DESC"
+        )
+        assert len(feed) == 2
