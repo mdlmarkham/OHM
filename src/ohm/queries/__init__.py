@@ -677,11 +677,15 @@ def query_stats(conn: DuckDBPyConnection) -> dict[str, Any]:
     challenged = challenged_row[0] if challenged_row else 0
     stats["challenge_ratio"] = round(challenged / total_l3_l4, 4) if total_l3_l4 > 0 else 0.0
 
-    # Active agents
+    # Active agents — agents with writes in the last 24 hours.
+    # Uses ohm_agent_state.last_sync which is updated on every write
+    # via store._log_change(). Survives daemon restarts because it's
+    # stored in the persistent ohm_agent_state table, not the ephemeral
+    # change feed.
     agents_row = conn.execute("""
         SELECT COUNT(*) FROM ohm_agent_state
         WHERE last_sync IS NOT NULL
-          AND last_sync > CURRENT_TIMESTAMP - INTERVAL '1 hour'
+          AND last_sync > CURRENT_TIMESTAMP - INTERVAL '24 hours'
     """).fetchone()
     stats["active_agents"] = agents_row[0] if agents_row else 0
 
