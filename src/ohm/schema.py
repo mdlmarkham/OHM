@@ -272,6 +272,7 @@ DDL_STATEMENTS: list[str] = [
         layer           VARCHAR NOT NULL,
         edge_type       VARCHAR NOT NULL,
         confidence      FLOAT,
+        probability     FLOAT,
         condition       TEXT,
         provenance      VARCHAR,
         created_by      VARCHAR NOT NULL,
@@ -373,7 +374,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.4.0"
+SCHEMA_VERSION = "0.5.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -392,6 +393,9 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
     ]),
     ("0.4.0", "add agent relationship node types and edge types", [
         "",  # Node types and edge types are validated in Python, not DDL
+    ]),
+    ("0.5.0", "add probability column to ohm_edges for supply chain / risk modeling", [
+        "ALTER TABLE ohm_edges ADD COLUMN probability FLOAT",
     ]),
 ]
 

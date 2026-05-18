@@ -1631,3 +1631,136 @@ def query_find_expiring_batches(
     output.sort(key=lambda x: x["days_until_expiry"] if x["days_until_expiry"] is not None else float("inf"))
 
     return output[:limit]
+
+
+# ── Cascade Scenario (Supply Chain / Risk Modeling) ─────────────────────────
+
+def query_cascade_scenario(
+    conn: DuckDBPyConnection,
+    node_id: str,
+    *,
+    failure_probability: float = 1.0,
+    max_depth: int = 10,
+) -> list[dict[str, Any]]:
+    """Monte Carlo-style cascade through downstream graph from a node.
+
+    Starting from *node_id* with *failure_probability*, walks downstream
+    through CAUSES, EXPECTED_LIKELIHOOD, DEPENDS_ON, and THREATENS edges.
+    Each downstream node's failure probability is computed as:
+
+        P_downstream = P_upstream × edge.probability (or edge.confidence if no probability)
+
+    Returns all downstream nodes with computed failure probabilities and
+    the path chain that leads to each.
+
+    Args:
+        conn: Database connection.
+        node_id: Starting node (e.g., supplier that might fail).
+        failure_probability: Probability that the starting node fails (0.0-1.0).
+        max_depth: Maximum traversal depth.
+
+    Returns:
+        List of dicts with node_id, label, failure_probability, depth, and path.
+    """
+    from ohm.validation import validate_confidence, validate_depth, validate_identifier
+
+    node_id = validate_identifier(node_id, name="node_id")
+    failure_probability = validate_confidence(failure_probability)
+    max_depth = validate_depth(max_depth)
+
+    # Use a recursive CTE to walk downstream
+    query = """
+        WITH RECURSIVE cascade AS (
+            -- Anchor: the starting node
+            SELECT
+                ? AS node_id,
+                CAST(? AS FLOAT) AS failure_probability,
+                0 AS depth,
+                [?] AS path
+            UNION ALL
+            -- Recursive: follow downstream edges
+            SELECT
+                e.to_node AS node_id,
+                CAST(
+                    c.failure_probability *
+                    COALESCE(e.probability, e.confidence, 0.5)
+                    AS FLOAT
+                ) AS failure_probability,
+                c.depth + 1 AS depth,
+                list_concat(c.path, [e.to_node]) AS path
+            FROM cascade c
+            JOIN ohm_edges e ON e.from_node = c.node_id
+            WHERE c.depth < ?
+              AND e.edge_type IN ('CAUSES', 'EXPECTED_LIKELIHOOD', 'DEPENDS_ON', 'THREATENS')
+              AND e.to_node NOT IN (SELECT unnest(c.path))
+        )
+        SELECT DISTINCT
+            c.node_id,
+            n.label AS node_label,
+            n.type AS node_type,
+            c.failure_probability,
+            c.depth,
+            c.path
+        FROM cascade c
+        JOIN ohm_nodes n ON c.node_id = n.id
+        WHERE c.depth > 0
+        ORDER BY c.depth, c.failure_probability DESC
+    """
+    result = conn.execute(query, [node_id, failure_probability, [node_id], max_depth])
+    return _rows_to_dicts(result)
+
+
+def query_what_if(
+    conn: DuckDBPyConnection,
+    edge_id: str,
+    *,
+    max_depth: int = 10,
+) -> dict[str, Any]:
+    """Dry-run: what happens downstream if this edge's event occurs?
+
+    Treats the edge's to_node as the failure origin with probability
+    equal to the edge's probability (or confidence). Returns the cascade
+    analysis without modifying the graph.
+
+    Args:
+        conn: Database connection.
+        edge_id: The edge whose event we're simulating.
+        max_depth: Maximum traversal depth.
+
+    Returns:
+        Dict with edge details and downstream cascade results.
+    """
+    from ohm.validation import validate_depth, validate_identifier
+
+    edge_id = validate_identifier(edge_id, name="edge_id")
+
+    # Get the edge details
+    edge = conn.execute(
+        """SELECT id, from_node, to_node, edge_type, layer,
+                  confidence, probability, condition, created_by
+           FROM ohm_edges WHERE id = ?""",
+        [edge_id],
+    ).fetchone()
+    if edge is None:
+        raise ValueError(f"Edge not found: {edge_id}")
+
+    columns = ["id", "from_node", "to_node", "edge_type", "layer",
+               "confidence", "probability", "condition", "created_by"]
+    edge_dict = dict(zip(columns, edge))
+
+    # Use edge's probability (or confidence) as the failure probability
+    trigger_prob = edge_dict.get("probability") or edge_dict.get("confidence") or 1.0
+
+    cascade = query_cascade_scenario(
+        conn,
+        edge_dict["to_node"],
+        failure_probability=float(trigger_prob),
+        max_depth=max_depth,
+    )
+
+    return {
+        "trigger_edge": edge_dict,
+        "trigger_probability": trigger_prob,
+        "downstream_impact": cascade,
+        "affected_nodes": len(cascade),
+    }
