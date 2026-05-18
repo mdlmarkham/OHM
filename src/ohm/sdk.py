@@ -1117,6 +1117,76 @@ class Graph:
 
         return query_provenance(self._conn, node_id, max_depth=max_depth)
 
+    def cascade_scenario(
+        self,
+        node_id: str,
+        *,
+        failure_probability: float = 1.0,
+        max_depth: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Monte Carlo-style cascade through downstream graph from a node.
+
+        Starting from *node_id* with *failure_probability*, walks downstream
+        through CAUSES, EXPECTED_LIKELIHOOD, DEPENDS_ON, and THREATENS edges.
+        Each downstream node's failure probability is computed as:
+
+            P_downstream = P_upstream × edge.probability (or edge.confidence)
+
+        Returns all downstream nodes with computed failure probabilities and
+        the path chain that leads to each.
+
+        Example:
+            g.cascade_scenario(supplier_node, failure_probability=0.3)
+            → {node: 'factory_a', failure_probability: 0.28, path: ['supplier_a']}
+            → {node: 'distribution_b', failure_probability: 0.19, path: [...]}
+
+        Args:
+            node_id: Starting node (e.g., supplier that might fail).
+            failure_probability: Probability that the starting node fails (0.0-1.0).
+            max_depth: Maximum traversal depth.
+
+        Returns:
+            List of dicts with node_id, node_label, node_type, failure_probability,
+            depth, and path.
+        """
+        from ohm.queries import query_cascade_scenario
+
+        return query_cascade_scenario(
+            self._conn,
+            node_id,
+            failure_probability=failure_probability,
+            max_depth=max_depth,
+        )
+
+    def what_if(
+        self,
+        edge_id: str,
+        *,
+        max_depth: int = 10,
+    ) -> dict[str, Any]:
+        """Dry-run: what happens downstream if this edge's event occurs?
+
+        Treats the edge's to_node as the failure origin with probability
+        equal to the edge's probability (or confidence). Returns the cascade
+        analysis without modifying the graph.
+
+        Example:
+            g.what_if(edge_id)
+            → {trigger_edge: {...}, trigger_probability: 0.2,
+               downstream_impact: [...], affected_nodes: 5}
+
+        Args:
+            edge_id: The edge whose event we're simulating.
+            max_depth: Maximum traversal depth.
+
+        Returns:
+            Dict with trigger_edge, trigger_probability, downstream_impact,
+            and affected_nodes count.
+        """
+        from ohm.queries import query_what_if
+
+        return query_what_if(self._conn, edge_id, max_depth=max_depth)
+
     def stale_edges(
         self,
         *,
