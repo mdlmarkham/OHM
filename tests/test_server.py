@@ -1587,3 +1587,89 @@ class TestBatchEndpoint:
             "AND row_id IN ('cf-batch-1', 'cf-batch-2') ORDER BY occurred_at DESC"
         )
         assert len(feed) == 2
+
+
+@pytest.mark.xdist_group("server")
+class TestIdempotentRegistration:
+    """Tests for idempotent agent registration (OHM-5n7: deduplicate registration)."""
+
+    def test_register_creates_agent_node(self, test_server):
+        """POST /register creates an agent node with deterministic ID."""
+        port, store = test_server
+        status, data = _request("POST", port, "/register", body={
+            "name": "testbot",
+            "description": "A test agent",
+            "values": ["accuracy"],
+            "goals": ["explore"],
+        })
+        assert status == 201
+        assert data["agent"]["label"] == "testbot"
+        assert data["agent"]["type"] == "agent"
+        assert data["edges_created"] >= 2  # VALUES + GOALS
+
+    def test_register_idempotent(self, test_server):
+        """POST /register twice with same name reuses agent node (no duplicates)."""
+        port, store = test_server
+        # First registration
+        status1, data1 = _request("POST", port, "/register", body={
+            "name": "idem_agent",
+            "values": ["truth"],
+        })
+        assert status1 == 201
+        agent_id_1 = data1["agent"]["id"]
+
+        # Second registration with same name
+        status2, data2 = _request("POST", port, "/register", body={
+            "name": "idem_agent",
+            "values": ["truth", "fairness"],
+        })
+        assert status2 == 201
+        agent_id_2 = data2["agent"]["id"]
+
+        # Same agent node ID (deterministic)
+        assert agent_id_1 == agent_id_2
+
+        # No duplicate agent nodes
+        agent_nodes = store.execute(
+            "SELECT * FROM ohm_nodes WHERE type = 'agent' AND label = 'idem_agent'"
+        )
+        assert len(agent_nodes) == 1
+
+    def test_register_reuses_value_nodes(self, test_server):
+        """POST /register reuses existing value/goal/skill nodes."""
+        port, store = test_server
+        _request("POST", port, "/register", body={
+            "name": "reuse_agent",
+            "values": ["courage"],
+        })
+        _request("POST", port, "/register", body={
+            "name": "other_agent",
+            "values": ["courage"],
+        })
+        # Only one "courage" value node should exist
+        courage_nodes = store.execute(
+            "SELECT * FROM ohm_nodes WHERE label = 'courage' AND type = 'value'"
+        )
+        assert len(courage_nodes) == 1
+
+    def test_register_updates_edges(self, test_server):
+        """POST /register replaces old edges on re-registration."""
+        port, store = test_server
+        # First registration with 1 value
+        _request("POST", port, "/register", body={
+            "name": "edge_agent",
+            "values": ["loyalty"],
+        })
+        # Second registration with 2 values
+        status, data = _request("POST", port, "/register", body={
+            "name": "edge_agent",
+            "values": ["loyalty", "honesty"],
+        })
+        assert status == 201
+        # Should have 2 VALUES edges (old ones deleted, new ones created)
+        agent_id = data["agent"]["id"]
+        values_edges = store.execute(
+            "SELECT * FROM ohm_edges WHERE from_node = ? AND edge_type = 'VALUES'",
+            [agent_id],
+        )
+        assert len(values_edges) == 2
