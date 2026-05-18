@@ -1308,3 +1308,75 @@ class TestHelp:
         result = graph.help()
         assert isinstance(result, dict)
         assert "methods" in result or "commands" in result or "usage" in result
+
+
+class TestOHMClient:
+    """Tests for OHMClient (OHM-12w)."""
+
+    def test_ohmclient_init_defaults(self):
+        """OHMClient initializes with defaults."""
+        from ohm.client import OHMClient
+        client = OHMClient(actor="test")
+        assert client.actor == "test"
+        assert client.base_url == "http://127.0.0.1:8710"
+
+    def test_ohmclient_init_with_base_url(self):
+        """OHMClient accepts explicit base_url."""
+        from ohm.client import OHMClient
+        client = OHMClient(actor="test", base_url="http://localhost:9999")
+        assert client.base_url == "http://localhost:9999"
+
+    def test_ohmclient_init_with_token(self):
+        """OHMClient accepts explicit token."""
+        from ohm.client import OHMClient
+        client = OHMClient(actor="test", token="test-token-123")
+        assert client.token == "test-token-123"
+
+    def test_ohmclient_repr(self):
+        """OHMClient repr includes actor and base_url."""
+        from ohm.client import OHMClient
+        client = OHMClient(actor="metis")
+        r = repr(client)
+        assert "metis" in r
+        assert "8710" in r
+
+    def test_ohmclient_context_manager(self):
+        """OHMClient supports context manager protocol."""
+        from ohm.client import OHMClient
+        with OHMClient(actor="test") as client:
+            assert client.actor == "test"
+        # Should close cleanly
+
+    def test_resolve_token_from_env(self, monkeypatch):
+        """_resolve_token reads from OHM_TOKEN env var."""
+        monkeypatch.setenv("OHM_TOKEN", "env-token-456")
+        from ohm.client import _resolve_token
+        token = _resolve_token("metis", None)
+        assert token == "env-token-456"
+
+    def test_resolve_token_from_config(self):
+        """_resolve_token reads from config tokens dict."""
+        from ohm.client import _resolve_token
+        config = {"tokens": {"metis": "config-token-789"}}
+        token = _resolve_token("metis", config)
+        assert token == "config-token-789"
+
+    def test_resolve_token_wildcard_fallback(self):
+        """_resolve_token falls back to wildcard token."""
+        from ohm.client import _resolve_token
+        config = {"tokens": {"*": "wildcard-token"}}
+        token = _resolve_token("unknown_agent", config)
+        assert token == "wildcard-token"
+
+    def test_resolve_base_url_default(self):
+        """_resolve_base_url returns default when no config."""
+        from ohm.client import _resolve_base_url
+        url = _resolve_base_url(None)
+        assert url == "http://127.0.0.1:8710"
+
+    def test_resolve_base_url_from_config(self):
+        """_resolve_base_url reads from config."""
+        from ohm.client import _resolve_base_url
+        config = {"host": "10.0.0.1", "port": 9999}
+        url = _resolve_base_url(config)
+        assert url == "http://10.0.0.1:9999"
