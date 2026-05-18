@@ -165,7 +165,8 @@ def query_path(
                 e.layer,
                 e.edge_type,
                 e.confidence,
-                1 AS depth
+                1 AS depth,
+                [e.id] AS path_ids
             FROM ohm_edges e
             WHERE (e.from_node = ? OR e.to_node = ?)
               {layer_clause}
@@ -179,16 +180,18 @@ def query_path(
                 e.layer,
                 e.edge_type,
                 e.confidence,
-                p.depth + 1
+                p.depth + 1,
+                list_append(p.path_ids, e.id)
             FROM path_cte p
-            JOIN ohm_edges e ON e.from_node = p.to_node
+            JOIN ohm_edges e ON (e.from_node = p.to_node OR e.to_node = p.to_node
+                                  OR e.from_node = p.from_node OR e.to_node = p.from_node)
             WHERE p.depth < ?
-              AND p.to_node != ?
+              AND e.id NOT IN (SELECT UNNEST(p.path_ids))
               {layer_clause}
         )
         SELECT edge_id, from_node, to_node, layer, edge_type, confidence, depth
         FROM path_cte
-        WHERE to_node = ?
+        WHERE to_node = ? OR from_node = ?
         ORDER BY depth
         LIMIT 1
     """
