@@ -283,47 +283,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Baseline for geometric mode (default: 1.0 = no change)",
     )
 
-    # graph handoff
-    handoff_parser = graph_sub.add_parser(
-        "handoff", help="Transfer a ticket between agents",
-    )
-    handoff_parser.add_argument("--from-agent", required=True, help="Agent node ID transferring from")
-    handoff_parser.add_argument("--to-agent", required=True, help="Agent node ID transferring to")
-    handoff_parser.add_argument("--ticket", required=True, help="Ticket/case node ID")
-    handoff_parser.add_argument("--reason", required=True, help="Reason for the handoff")
-    handoff_parser.add_argument(
-        "--type", choices=["TRANSFERRED_TO", "ESCALATED_TO", "DELEGATED_TO"],
-        default="TRANSFERRED_TO", dest="edge_type",
-        help="Handoff edge type (default: TRANSFERRED_TO)",
-    )
-    handoff_parser.add_argument(
-        "--confidence", type=float, default=0.8,
-        help="Confidence for the handoff edge (default: 0.8)",
-    )
-
-    # graph escalate
-    escalate_parser = graph_sub.add_parser(
-        "escalate", help="Escalate a ticket to a higher tier",
-    )
-    escalate_parser.add_argument("--ticket", required=True, help="Ticket/case node ID")
-    escalate_parser.add_argument("--to-tier", required=True, help="Agent/tier node ID to escalate to")
-    escalate_parser.add_argument("--reason", required=True, help="Reason for escalation")
-    escalate_parser.add_argument("--from-agent", default=None, help="Agent node ID escalating from")
-    escalate_parser.add_argument(
-        "--confidence", type=float, default=0.9,
-        help="Confidence for the escalation edge (default: 0.9)",
-    )
-
-    # graph ticket-provenance
-    provenance_parser = graph_sub.add_parser(
-        "ticket-provenance", help="Show handoff and state history for a ticket",
-    )
-    provenance_parser.add_argument("ticket_node", help="Ticket/case node ID")
-    provenance_parser.add_argument(
-        "--max-depth", type=int, default=10,
-        help="Maximum traversal depth (default: 10)",
-    )
-
     # graph trend
     trend_parser = graph_sub.add_parser(
         "trend", help="Detect temporal trends in observations",
@@ -578,12 +537,6 @@ def _handle_graph(args: argparse.Namespace) -> None:
         _handle_decay(args)
     elif cmd == "composite-score":
         _handle_composite_score(args)
-    elif cmd == "handoff":
-        _handle_handoff(args)
-    elif cmd == "escalate":
-        _handle_escalate(args)
-    elif cmd == "ticket-provenance":
-        _handle_ticket_provenance(args)
     elif cmd == "trend":
         _handle_trend(args)
     else:
@@ -1470,102 +1423,6 @@ def _handle_trend(args: argparse.Namespace) -> None:
                   f"(window: {result['window_days']}d)")
     finally:
         conn.close()
-
-
-def _handle_handoff(args: argparse.Namespace) -> None:
-    """Transfer a ticket between agents with full context tracking."""
-    from ohm.sdk import connect as sdk_connect
-
-    graph = sdk_connect(args.db, actor=_get_actor(args))
-    try:
-        result = graph.handoff(
-            from_agent=args.from_agent,
-            to_agent=args.to_agent,
-            ticket_node=args.ticket,
-            reason=args.reason,
-            edge_type=args.edge_type,
-            confidence=args.confidence,
-        )
-        if args.format == "json":
-            import json
-            print(json.dumps(result, indent=2, default=str))
-        else:
-            edge = result["edge"]
-            print(f"── Handoff: {args.edge_type} ──")
-            print(f"  Edge ID:     {edge['id']}")
-            print(f"  From:        {args.from_agent}")
-            print(f"  To:          {args.to_agent}")
-            print(f"  Reason:      {args.reason}")
-            print(f"  Confidence:  {args.confidence}")
-            chain = result.get("handoff_chain", [])
-            if chain:
-                print(f"  Chain ({len(chain)} steps):")
-                for step in chain:
-                    print(f"    {step.get('edge_type', '?')}: "
-                          f"{step.get('from_label', step.get('from_node', '?'))} → "
-                          f"{step.get('to_label', step.get('to_node', '?'))}")
-    finally:
-        graph.close()
-
-
-def _handle_escalate(args: argparse.Namespace) -> None:
-    """Escalate a ticket to a higher tier with urgency."""
-    from ohm.sdk import connect as sdk_connect
-
-    graph = sdk_connect(args.db, actor=_get_actor(args))
-    try:
-        result = graph.escalate(
-            ticket_node=args.ticket,
-            to_tier=args.to_tier,
-            reason=args.reason,
-            from_agent=args.from_agent,
-            confidence=args.confidence,
-        )
-        if args.format == "json":
-            import json
-            print(json.dumps(result, indent=2, default=str))
-        else:
-            edge = result["edge"]
-            ticket = result.get("ticket", {})
-            print(f"── Escalation ──")
-            print(f"  Edge ID:     {edge['id']}")
-            print(f"  Ticket:      {args.ticket}")
-            if ticket:
-                print(f"  Urgency:     {ticket.get('urgency', 'N/A')}")
-                print(f"  Priority:    {ticket.get('priority', 'N/A')}")
-            print(f"  To tier:     {args.to_tier}")
-            print(f"  Reason:      {args.reason}")
-    finally:
-        graph.close()
-
-
-def _handle_ticket_provenance(args: argparse.Namespace) -> None:
-    """Show handoff and state history for a ticket."""
-    from ohm.sdk import connect as sdk_connect
-
-    graph = sdk_connect(args.db, actor=_get_actor(args))
-    try:
-        chain = graph.ticket_provenance(
-            args.ticket_node,
-            max_depth=args.max_depth,
-        )
-        if args.format == "json":
-            import json
-            print(json.dumps(chain, indent=2, default=str))
-        else:
-            print(f"── Ticket Provenance: {args.ticket_node} ──")
-            if not chain:
-                print("  (no handoff or state history found)")
-            for step in chain:
-                edge_type = step.get("edge_type", "?")
-                from_label = step.get("from_label", step.get("from_node", "?"))
-                to_label = step.get("to_label", step.get("to_node", "?"))
-                reason = step.get("reason", "")
-                ts = step.get("created_at", "")
-                print(f"  [{ts}] {edge_type}: {from_label} → {to_label}"
-                      + (f" ({reason})" if reason else ""))
-    finally:
-        graph.close()
 
 
 # ── State Command Implementations ───────────────────────────────────────────
