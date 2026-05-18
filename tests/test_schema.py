@@ -157,7 +157,7 @@ class TestSchemaVersion:
         """A fresh database should start at the current version after init."""
         initialize_schema(test_db)
         version = get_schema_version(test_db)
-        assert version == "0.4.0"
+        assert version == SCHEMA_VERSION
 
     def test_migrations_applied_incrementally(self, test_db):
         """Migrations should be applied in order."""

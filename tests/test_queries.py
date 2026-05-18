@@ -1,5 +1,6 @@
 """Tests for the OHM CTE graph traversal queries."""
 
+import pytest
 import uuid
 from datetime import datetime, timezone
 
@@ -529,3 +530,228 @@ class TestDecayQuery:
         l3_row = test_db.execute("SELECT confidence FROM ohm_edges WHERE id = ?", [l3_id]).fetchone()
         assert l4_row[0] < 0.8
         assert abs(l3_row[0] - 0.8) < 0.0001  # L3 not decayed (100-day half-life still above threshold)
+
+
+class TestProbabilityCascade:
+    """Tests for probability-weighted edges and cascade scenarios (OHM-af8.1)."""
+
+    def test_create_edge_with_probability(self, test_db):
+        """Edge can be created with a probability field."""
+        from ohm.queries import create_node, create_edge
+
+        supplier = create_node(test_db, label="Supplier A", node_type="system", created_by="test_agent")
+        factory = create_node(test_db, label="Factory B", node_type="system", created_by="test_agent")
+
+        edge = create_edge(
+            test_db,
+            from_node=supplier["id"],
+            to_node=factory["id"],
+            layer="L3",
+            edge_type="EXPECTED_LIKELIHOOD",
+            created_by="test_agent",
+            confidence=0.8,
+            probability=0.2,
+        )
+
+        assert edge["probability"] == pytest.approx(0.2)
+        assert edge["confidence"] == pytest.approx(0.8)
+        # probability and confidence are distinct
+        assert edge["probability"] != edge["confidence"]
+
+    def test_create_edge_probability_none(self, test_db):
+        """Edge without probability defaults to None."""
+        from ohm.queries import create_node, create_edge
+
+        a = create_node(test_db, label="Node A", node_type="concept", created_by="test_agent")
+        b = create_node(test_db, label="Node B", node_type="concept", created_by="test_agent")
+
+        edge = create_edge(
+            test_db,
+            from_node=a["id"],
+            to_node=b["id"],
+            layer="L3",
+            edge_type="CAUSES",
+            created_by="test_agent",
+            confidence=0.7,
+        )
+
+        assert edge["probability"] is None
+
+    def test_cascade_scenario_downstream(self, test_db):
+        """Cascade scenario computes downstream failure probabilities."""
+        from ohm.queries import create_node, create_edge, query_cascade_scenario
+
+        # Build a supply chain: supplier → factory → distributor → retailer
+        supplier = create_node(test_db, label="Supplier", node_type="system", created_by="test_agent")
+        factory = create_node(test_db, label="Factory", node_type="system", created_by="test_agent")
+        distributor = create_node(test_db, label="Distributor", node_type="system", created_by="test_agent")
+        retailer = create_node(test_db, label="Retailer", node_type="system", created_by="test_agent")
+
+        # Supplier → Factory at 20% disruption probability
+        create_edge(test_db, from_node=supplier["id"], to_node=factory["id"],
+                     layer="L3", edge_type="EXPECTED_LIKELIHOOD",
+                     created_by="test_agent", confidence=0.8, probability=0.2)
+        # Factory → Distributor at 50% pass-through
+        create_edge(test_db, from_node=factory["id"], to_node=distributor["id"],
+                     layer="L3", edge_type="CAUSES",
+                     created_by="test_agent", confidence=0.5)
+        # Distributor → Retailer at 80% pass-through (DEPENDS_ON is L4)
+        create_edge(test_db, from_node=distributor["id"], to_node=retailer["id"],
+                     layer="L4", edge_type="DEPENDS_ON",
+                     created_by="test_agent", confidence=0.8)
+
+        # Start cascade from supplier with 100% failure
+        results = query_cascade_scenario(test_db, supplier["id"], failure_probability=1.0)
+
+        assert len(results) >= 3  # factory, distributor, retailer
+
+        # Find each node in results
+        by_node = {r["node_id"]: r for r in results}
+
+        # Factory: 1.0 * 0.2 = 0.2
+        assert by_node[factory["id"]]["failure_probability"] == pytest.approx(0.2)
+        # Distributor: 0.2 * 0.5 = 0.1
+        assert by_node[distributor["id"]]["failure_probability"] == pytest.approx(0.1)
+        # Retailer: 0.1 * 0.8 = 0.08
+        assert by_node[retailer["id"]]["failure_probability"] == pytest.approx(0.08)
+
+    def test_cascade_scenario_uses_confidence_when_no_probability(self, test_db):
+        """When probability is None, cascade uses confidence as fallback."""
+        from ohm.queries import create_node, create_edge, query_cascade_scenario
+
+        a = create_node(test_db, label="A", node_type="concept", created_by="test_agent")
+        b = create_node(test_db, label="B", node_type="concept", created_by="test_agent")
+
+        # Edge with confidence=0.6 but no probability
+        create_edge(test_db, from_node=a["id"], to_node=b["id"],
+                     layer="L3", edge_type="CAUSES",
+                     created_by="test_agent", confidence=0.6)
+
+        results = query_cascade_scenario(test_db, a["id"], failure_probability=1.0)
+
+        assert len(results) == 1
+        assert results[0]["failure_probability"] == pytest.approx(0.6)
+
+    def test_cascade_scenario_max_depth(self, test_db):
+        """Cascade respects max_depth limit."""
+        from ohm.queries import create_node, create_edge, query_cascade_scenario
+
+        # Build a chain of 5 nodes
+        nodes = []
+        for i in range(5):
+            n = create_node(test_db, label=f"Node_{i}", node_type="concept", created_by="test_agent")
+            nodes.append(n)
+
+        for i in range(4):
+            create_edge(test_db, from_node=nodes[i]["id"], to_node=nodes[i + 1]["id"],
+                         layer="L3", edge_type="CAUSES",
+                         created_by="test_agent", confidence=0.5)
+
+        # With max_depth=2, should only reach 2 hops
+        results = query_cascade_scenario(test_db, nodes[0]["id"], failure_probability=1.0, max_depth=2)
+
+        assert len(results) == 2  # nodes 1 and 2 only
+        assert all(r["depth"] <= 2 for r in results)
+
+    def test_cascade_scenario_no_downstream(self, test_db):
+        """Cascade from a leaf node returns empty."""
+        from ohm.queries import create_node, query_cascade_scenario
+
+        leaf = create_node(test_db, label="Leaf", node_type="concept", created_by="test_agent")
+
+        results = query_cascade_scenario(test_db, leaf["id"], failure_probability=1.0)
+
+        assert len(results) == 0
+
+    def test_what_if_returns_impact_analysis(self, test_db):
+        """what_if returns trigger edge details and downstream impact."""
+        from ohm.queries import create_node, create_edge, query_what_if
+
+        supplier = create_node(test_db, label="Supplier", node_type="system", created_by="test_agent")
+        factory = create_node(test_db, label="Factory", node_type="system", created_by="test_agent")
+        distributor = create_node(test_db, label="Distributor", node_type="system", created_by="test_agent")
+
+        edge = create_edge(test_db, from_node=supplier["id"], to_node=factory["id"],
+                            layer="L3", edge_type="EXPECTED_LIKELIHOOD",
+                            created_by="test_agent", confidence=0.8, probability=0.3)
+
+        create_edge(test_db, from_node=factory["id"], to_node=distributor["id"],
+                     layer="L3", edge_type="CAUSES",
+                     created_by="test_agent", confidence=0.5)
+
+        result = query_what_if(test_db, edge["id"])
+
+        assert result["trigger_edge"]["id"] == edge["id"]
+        assert result["trigger_probability"] == pytest.approx(0.3)
+        assert result["affected_nodes"] >= 1
+        assert len(result["downstream_impact"]) >= 1
+
+    def test_what_if_nonexistent_edge(self, test_db):
+        """what_if on nonexistent edge raises ValueError."""
+        import pytest
+        from ohm.queries import query_what_if
+
+        with pytest.raises(ValueError, match="Edge not found"):
+            query_what_if(test_db, "nonexistent_edge_id")
+
+    def test_cascade_scenario_path_tracking(self, test_db):
+        """Cascade results include the path chain to each node."""
+        from ohm.queries import create_node, create_edge, query_cascade_scenario
+
+        a = create_node(test_db, label="A", node_type="concept", created_by="test_agent")
+        b = create_node(test_db, label="B", node_type="concept", created_by="test_agent")
+        c = create_node(test_db, label="C", node_type="concept", created_by="test_agent")
+
+        create_edge(test_db, from_node=a["id"], to_node=b["id"],
+                     layer="L3", edge_type="CAUSES",
+                     created_by="test_agent", confidence=0.5)
+        create_edge(test_db, from_node=b["id"], to_node=c["id"],
+                     layer="L3", edge_type="CAUSES",
+                     created_by="test_agent", confidence=0.5)
+
+        results = query_cascade_scenario(test_db, a["id"], failure_probability=1.0)
+
+        # Node C should have path [a, b, c]
+        c_result = next(r for r in results if r["node_id"] == c["id"])
+        assert a["id"] in c_result["path"]
+        assert b["id"] in c_result["path"]
+        assert c["id"] in c_result["path"]
+
+    def test_sdk_cascade_scenario(self, test_db):
+        """SDK cascade_scenario method works correctly."""
+        from ohm.sdk import Graph
+
+        g = Graph(test_db, actor="test_agent")
+        supplier = g.create_node("Supplier X", node_type="system")
+        factory = g.create_node("Factory Y", node_type="system")
+
+        g.create_edge(
+            from_node=supplier["id"], to_node=factory["id"],
+            edge_type="EXPECTED_LIKELIHOOD", layer="L3",
+            confidence=0.8, probability=0.25,
+        )
+
+        results = g.cascade_scenario(supplier["id"], failure_probability=1.0)
+
+        assert len(results) == 1
+        assert results[0]["failure_probability"] == pytest.approx(0.25)
+
+    def test_sdk_what_if(self, test_db):
+        """SDK what_if method works correctly."""
+        from ohm.sdk import Graph
+
+        g = Graph(test_db, actor="test_agent")
+        supplier = g.create_node("Supplier Z", node_type="system")
+        factory = g.create_node("Factory W", node_type="system")
+
+        edge = g.create_edge(
+            from_node=supplier["id"], to_node=factory["id"],
+            edge_type="EXPECTED_LIKELIHOOD", layer="L3",
+            confidence=0.9, probability=0.15,
+        )
+
+        result = g.what_if(edge["id"])
+
+        assert result["trigger_edge"]["id"] == edge["id"]
+        assert result["trigger_probability"] == pytest.approx(0.15)
+        assert "downstream_impact" in result

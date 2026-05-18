@@ -1676,7 +1676,7 @@ def query_cascade_scenario(
                 ? AS node_id,
                 CAST(? AS FLOAT) AS failure_probability,
                 0 AS depth,
-                [?] AS path
+                list_value(?) AS path
             UNION ALL
             -- Recursive: follow downstream edges
             SELECT
@@ -1687,12 +1687,12 @@ def query_cascade_scenario(
                     AS FLOAT
                 ) AS failure_probability,
                 c.depth + 1 AS depth,
-                list_concat(c.path, [e.to_node]) AS path
+                list_concat(c.path, list_value(e.to_node)) AS path
             FROM cascade c
             JOIN ohm_edges e ON e.from_node = c.node_id
             WHERE c.depth < ?
               AND e.edge_type IN ('CAUSES', 'EXPECTED_LIKELIHOOD', 'DEPENDS_ON', 'THREATENS')
-              AND e.to_node NOT IN (SELECT unnest(c.path))
+              AND NOT list_contains(c.path, e.to_node)
         )
         SELECT DISTINCT
             c.node_id,
@@ -1706,7 +1706,7 @@ def query_cascade_scenario(
         WHERE c.depth > 0
         ORDER BY c.depth, c.failure_probability DESC
     """
-    result = conn.execute(query, [node_id, failure_probability, [node_id], max_depth])
+    result = conn.execute(query, [node_id, failure_probability, node_id, max_depth])
     return _rows_to_dicts(result)
 
 
