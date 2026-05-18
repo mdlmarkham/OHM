@@ -1293,6 +1293,11 @@ class TestDeleteValidation:
 class TestEnrichedChangeFeed:
     """Tests for enriched change feed (OHM-m8a: include node content in listen())."""
 
+    def _make_timestamp(self):
+        """Generate a recent ISO timestamp for testing."""
+        from datetime import datetime, timedelta
+        return (datetime.now() - timedelta(hours=1)).isoformat()
+
     def test_listen_without_enrich_returns_raw_entries(self, test_server):
         """GET /listen without enrich=true returns raw entries (backward compatible)."""
         port, store = test_server
@@ -1302,10 +1307,8 @@ class TestEnrichedChangeFeed:
             "label": "Test Node",
             "type": "concept",
         })
-        # Get last sync timestamp
-        state = store.get_agent_state("test_agent")
-        since = state.get("last_sync") if state else None
-        # Fetch change feed without enrichment
+        # Use a timestamp from 1 hour ago
+        since = self._make_timestamp()
         status, data = _request("GET", port, f"/listen?since={since}&agent=test_agent")
         assert status == 200
         assert isinstance(data, list)
@@ -1323,10 +1326,8 @@ class TestEnrichedChangeFeed:
             "type": "pattern",
             "content": "This is the content",
         })
-        # Get last sync timestamp
-        state = store.get_agent_state("test_agent")
-        since = state.get("last_sync") if state else None
-        # Fetch with enrichment
+        # Use a timestamp from 1 hour ago
+        since = self._make_timestamp()
         status, data = _request("GET", port, f"/listen?since={since}&agent=test_agent&enrich=true")
         assert status == 200
         assert isinstance(data, list)
@@ -1358,10 +1359,8 @@ class TestEnrichedChangeFeed:
             "type": "CAUSES",
             "layer": "L3",
         })
-        # Get last sync timestamp
-        state = store.get_agent_state("test_agent")
-        since = state.get("last_sync") if state else None
-        # Fetch with enrichment
+        # Use a timestamp from 1 hour ago
+        since = self._make_timestamp()
         status, data = _request("GET", port, f"/listen?since={since}&agent=test_agent&enrich=true")
         assert status == 200
         assert isinstance(data, list)

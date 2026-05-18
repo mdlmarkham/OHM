@@ -769,6 +769,49 @@ def create_node(
     )[0]
 
 
+def find_or_create_node(
+    conn: DuckDBPyConnection,
+    *,
+    label: str,
+    node_type: str = "concept",
+    content: str | None = None,
+    created_by: str,
+    visibility: str = "team",
+    provenance: str | None = None,
+    confidence: float = 1.0,
+    priority: str | None = None,
+    url: str | None = None,
+) -> dict[str, Any]:
+    """Find an existing node by label and type, or create one if not found.
+
+    Used for idempotent agent registration — avoids creating duplicate
+    value/goal/skill/topic nodes when re-registering.
+
+    Returns the existing or newly created node record.
+    """
+    # Try to find an existing node with matching label and type
+    existing = _rows_to_dicts(conn.execute(
+        "SELECT * FROM ohm_nodes WHERE label = ? AND type = ? LIMIT 1",
+        [label, node_type],
+    ))
+    if existing:
+        return existing[0]
+
+    # Not found — create a new one
+    return create_node(
+        conn,
+        label=label,
+        node_type=node_type,
+        content=content,
+        created_by=created_by,
+        visibility=visibility,
+        provenance=provenance,
+        confidence=confidence,
+        priority=priority,
+        url=url,
+    )
+
+
 def create_edge(
     conn: DuckDBPyConnection,
     *,

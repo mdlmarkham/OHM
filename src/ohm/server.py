@@ -1338,98 +1338,108 @@ class OhmHandler(BaseHTTPRequestHandler):
             self._json_response(200, result)
 
         elif path == "/register":
-            # Agent registration — creates agent node + VALUES/GOALS/CAPABLE_OF/INTERESTED_IN/LISTENS_TO edges
-            from .queries import create_node, create_edge
+            # Agent registration — idempotent: creates or updates agent node + edges.
+            # If an agent with the same name already exists, reuses its node and
+            # refreshes its edges (deletes old, creates new).
+            from .queries import create_node, create_edge, find_or_create_node
 
             agent_label = body.get("name", agent)
-            me = create_node(
-                self.store.conn,
-                label=agent_label,
-                node_type="agent",
-                content=body.get("description"),
-                created_by=agent,
-            )
+            # Use deterministic ID for agent nodes to prevent duplicates
+            import re
+            agent_id = "agent_" + re.sub(r'[^a-zA-Z0-9]+', '_', agent_label.lower()).strip('_')
+
+            # Check if agent node already exists
+            existing = self.store.conn.execute(
+                "SELECT id FROM ohm_nodes WHERE id = ?", [agent_id]
+            ).fetchone()
+
+            if existing:
+                # Update existing agent node (description may have changed)
+                self.store.conn.execute(
+                    "UPDATE ohm_nodes SET content = ?, updated_at = CURRENT_TIMESTAMP, updated_by = ? WHERE id = ?",
+                    [body.get("description"), agent, agent_id],
+                )
+                me = _rows_to_dicts(
+                    self.store.conn.execute("SELECT * FROM ohm_nodes WHERE id = ?", [agent_id])
+                )[0]
+                # Delete old registration edges for this agent (VALUES, GOALS, CAPABLE_OF, INTERESTED_IN, LISTENS_TO)
+                reg_edge_types = ("VALUES", "GOALS", "CAPABLE_OF", "INTERESTED_IN", "LISTENS_TO")
+                placeholders = ",".join(["?"] * len(reg_edge_types))
+                self.store.conn.execute(
+                    f"DELETE FROM ohm_edges WHERE from_node = ? AND edge_type IN ({placeholders})",
+                    [agent_id] + list(reg_edge_types),
+                )
+            else:
+                # Create new agent node with deterministic ID
+                me = create_node(
+                    self.store.conn,
+                    label=agent_label,
+                    node_type="agent",
+                    content=body.get("description"),
+                    created_by=agent,
+                )
+                # Override the generated ID with our deterministic one
+                self.store.conn.execute(
+                    "UPDATE ohm_nodes SET id = ? WHERE id = ?",
+                    [agent_id, me["id"]],
+                )
+                me["id"] = agent_id
 
             created_edges = []
             for v in body.get("values", []):
-                value_node = create_node(
+                value_node = find_or_create_node(
                     self.store.conn, label=v, node_type="value", created_by=agent,
                 )
-                edge_result = self.store.conn.execute(
-                    "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = 'VALUES' AND created_by = ?",
-                    [me["id"], value_node["id"], agent],
-                ).fetchone()
-                if not edge_result:
-                    edge = create_edge(
-                        self.store.conn, from_node=me["id"], to_node=value_node["id"],
-                        edge_type="VALUES", layer="L1", created_by=agent, confidence=1.0,
-                        provenance="self_declaration",
-                    )
-                    created_edges.append(edge)
+                edge = create_edge(
+                    self.store.conn, from_node=agent_id, to_node=value_node["id"],
+                    edge_type="VALUES", layer="L1", created_by=agent, confidence=1.0,
+                    provenance="self_declaration",
+                )
+                created_edges.append(edge)
 
             for g in body.get("goals", []):
-                goal_node = create_node(
+                goal_node = find_or_create_node(
                     self.store.conn, label=g, node_type="goal", created_by=agent,
                 )
-                edge_result = self.store.conn.execute(
-                    "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = 'GOALS' AND created_by = ?",
-                    [me["id"], goal_node["id"], agent],
-                ).fetchone()
-                if not edge_result:
-                    edge = create_edge(
-                        self.store.conn, from_node=me["id"], to_node=goal_node["id"],
-                        edge_type="GOALS", layer="L1", created_by=agent, confidence=1.0,
-                        provenance="self_declaration",
-                    )
-                    created_edges.append(edge)
+                edge = create_edge(
+                    self.store.conn, from_node=agent_id, to_node=goal_node["id"],
+                    edge_type="GOALS", layer="L1", created_by=agent, confidence=1.0,
+                    provenance="self_declaration",
+                )
+                created_edges.append(edge)
 
             for c in body.get("capabilities", []):
-                cap_node = create_node(
+                cap_node = find_or_create_node(
                     self.store.conn, label=c, node_type="skill", created_by=agent,
                 )
-                edge_result = self.store.conn.execute(
-                    "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = 'CAPABLE_OF' AND created_by = ?",
-                    [me["id"], cap_node["id"], agent],
-                ).fetchone()
-                if not edge_result:
-                    edge = create_edge(
-                        self.store.conn, from_node=me["id"], to_node=cap_node["id"],
-                        edge_type="CAPABLE_OF", layer="L1", created_by=agent, confidence=1.0,
-                        provenance="self_declaration",
-                    )
-                    created_edges.append(edge)
+                edge = create_edge(
+                    self.store.conn, from_node=agent_id, to_node=cap_node["id"],
+                    edge_type="CAPABLE_OF", layer="L1", created_by=agent, confidence=1.0,
+                    provenance="self_declaration",
+                )
+                created_edges.append(edge)
 
             for i in body.get("interests", []):
-                topic_node = create_node(
+                topic_node = find_or_create_node(
                     self.store.conn, label=i, node_type="topic", created_by=agent,
                 )
-                edge_result = self.store.conn.execute(
-                    "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = 'INTERESTED_IN' AND created_by = ?",
-                    [me["id"], topic_node["id"], agent],
-                ).fetchone()
-                if not edge_result:
-                    edge = create_edge(
-                        self.store.conn, from_node=me["id"], to_node=topic_node["id"],
-                        edge_type="INTERESTED_IN", layer="L1", created_by=agent, confidence=1.0,
-                        provenance="self_declaration",
-                    )
-                    created_edges.append(edge)
+                edge = create_edge(
+                    self.store.conn, from_node=agent_id, to_node=topic_node["id"],
+                    edge_type="INTERESTED_IN", layer="L1", created_by=agent, confidence=1.0,
+                    provenance="self_declaration",
+                )
+                created_edges.append(edge)
 
             for a in body.get("listens_to", []):
-                other = create_node(
+                other = find_or_create_node(
                     self.store.conn, label=a, node_type="agent", created_by=agent,
                 )
-                edge_result = self.store.conn.execute(
-                    "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = 'LISTENS_TO' AND created_by = ?",
-                    [me["id"], other["id"], agent],
-                ).fetchone()
-                if not edge_result:
-                    edge = create_edge(
-                        self.store.conn, from_node=me["id"], to_node=other["id"],
-                        edge_type="LISTENS_TO", layer="L3", created_by=agent, confidence=0.7,
-                        provenance="self_declaration",
-                    )
-                    created_edges.append(edge)
+                edge = create_edge(
+                    self.store.conn, from_node=agent_id, to_node=other["id"],
+                    edge_type="LISTENS_TO", layer="L3", created_by=agent, confidence=0.7,
+                    provenance="self_declaration",
+                )
+                created_edges.append(edge)
 
             self._json_response(201, {
                 "agent": me,
