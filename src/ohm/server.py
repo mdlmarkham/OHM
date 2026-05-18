@@ -956,12 +956,49 @@ class OhmHandler(BaseHTTPRequestHandler):
             results = query_impact(self.store.conn, node_id, depth=depth)
             self._json_response(200, results)
         elif path.startswith("/confidence/"):
-            edge_id = path[12:]
+            target_id = path[12:]
             from .validation import validate_identifier
-            edge_id = validate_identifier(edge_id, name="edge_id")
+            target_id = validate_identifier(target_id, name="target_id")
             from .queries import query_confidence
-            results = query_confidence(self.store.conn, edge_id)
-            self._json_response(200, results)
+
+            # Check if target_id is a node or an edge
+            is_node = self.store.conn.execute(
+                "SELECT COUNT(*) FROM ohm_nodes WHERE id = ?", [target_id],
+            ).fetchone()
+            is_edge = self.store.conn.execute(
+                "SELECT COUNT(*) FROM ohm_edges WHERE id = ?", [target_id],
+            ).fetchone()
+
+            if is_node and is_node[0] > 0:
+                # Node: find all challenge/support/refine edges pointing TO this node
+                refs_result = self.store.conn.execute(
+                    """SELECT id, edge_type, confidence, condition, created_by, created_at,
+                              from_node, to_node, layer
+                       FROM ohm_edges
+                       WHERE to_node = ?
+                         AND edge_type IN ('CHALLENGED_BY', 'SUPPORTS', 'REFINES')
+                       ORDER BY created_at DESC""",
+                    [target_id],
+                )
+                ref_columns = [desc[0] for desc in refs_result.description]
+                refs = [dict(zip(ref_columns, row)) for row in refs_result.fetchall()]
+
+                challenges = [r for r in refs if r["edge_type"] == "CHALLENGED_BY"]
+                supports = [r for r in refs if r["edge_type"] == "SUPPORTS"]
+                refinements = [r for r in refs if r["edge_type"] == "REFINES"]
+
+                self._json_response(200, {
+                    "node_id": target_id,
+                    "challenges": challenges,
+                    "supports": supports,
+                    "refinements": refinements,
+                })
+            elif is_edge and is_edge[0] > 0:
+                # Edge: use existing query_confidence
+                results = query_confidence(self.store.conn, target_id)
+                self._json_response(200, results)
+            else:
+                raise NodeNotFoundError(f"Neither node nor edge found with id: {target_id}")
         elif path.startswith("/agent/"):
             agent_name = path[7:]
             from .validation import validate_identifier
