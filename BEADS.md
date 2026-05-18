@@ -55,14 +55,37 @@ OHM-3w1     P2: TOPO — Industrial Knowledge Graph
 ├── OHM-3w1.2  TOPO CLI (failure-analysis, compliance-map)
 └── OHM-3w1.3  Shared ohmd/topod daemon codebase
 
-Cross-cutting:
-  OHM-654  P0: Server tests (under OHM-y2i)
-  OHM-tjr  P1: SDK tests (under OHM-a35)
-  OHM-4w7  P1: Remove dead queries.py (under OHM-y2i)
-  OHM-n16  P1: Document module boundaries (under OHM-y2i)
-  OHM-ad3  P1: Update AGENTS.md module docs (under OHM-y2i)
-  OHM-hol  P2: Remove dead query.py NLP parser
-  OHM-l5k  P1: CI/CD pipeline (GitHub Actions)
+OHM-0e0    P1: Domain Flexibility — cattle, retail, and beyond
+├── OHM-0e0.2  docs: cattle + retail agent workflow scenarios
+├── OHM-0e0.4  SDK: temporal confidence decay for observations
+├── OHM-0e0.5  ohmd: SSE /events filter by node_type and node_id
+├── OHM-0e0.6  SDK: batch expiry detection helper
+└── OHM-0e0.7  docs: domain edge type guide
+
+OHM-af8    P1: Multi-scenario Extensibility — medical, cybersecurity, supply chain, customer support
+├── OHM-af8.1  Probability-weighted edges for supply chain (IN PROGRESS)
+├── OHM-af8.2  Urgency and priority as first-class edge attributes (IN PROGRESS)
+├── OHM-af8.3  Medical diagnosis: NEGATES edge type and compound confidence
+├── OHM-af8.4  Cybersecurity: source reliability and SSE throughput
+├── OHM-af8.5  Customer support: triage, handoff chains, resolution state machine
+├── OHM-af8.6  Schema: new edge types across all four scenarios
+└── OHM-af8.7  docs: add medical, cybersecurity, supply chain, customer support scenarios
+
+Cross-cutting (security/review findings):
+  OHM-hsf  P0: store.py bypasses boundary enforcement on challenges (security bug)
+  OHM-zag  P1: No request size cap on POST bodies — OOM risk
+  OHM-xfh  P1: SDK missing basic read methods (get_node, get_edge, find_or_create, search)
+  OHM-9dq  P1: SDK tests — zero coverage on primary agent interface
+  OHM-e19  P2: No SIGPIPE handling in daemon
+
+Closed cross-cutting (completed):
+  OHM-654  ✅ Server tests (17 HTTP endpoints)
+  OHM-tjr  → replaced by OHM-9dq
+  OHM-4w7  ✅ Remove dead queries.py
+  OHM-n16  ✅ Document module boundaries
+  OHM-ad3  ✅ Update AGENTS.md module docs
+  OHM-hol  ✅ Remove dead query.py NLP parser
+  OHM-l5k  ✅ CI/CD pipeline (GitHub Actions)
   OHM-xj4  P1: marimo-pair integration
   OHM-dy9  P2: Performance benchmarks
 ```
@@ -76,25 +99,32 @@ Cross-cutting:
 
 ## Current State
 
-- **144 tests passing** (schema, store, graph, boundary, queries, CLI, integration, exceptions, validation)
-- **Error handling:** server.py maps all OHMError types to HTTP status codes with correlation IDs ✅
-- **Health endpoints:** /health, /ready, /status with uptime and DB connectivity check ✅
-- **CI/CD:** GitHub Actions for test + release ✅ (but ruff/mypy not in dev deps yet — OHM-dw1)
-- **Performance benchmarks:** Framework exists, needs pytest-benchmark dep
+- **180 tests passing** (schema, store, graph, boundary, queries, CLI, integration, exceptions, validation, server)
 - **Phase 0 (Foundation):** Schema, CLI, recursive CTEs, boundary enforcement ✅
 - **Phase 1 (Core Operations):** All read/write/challenge/support/observe/listen/state commands ✅
+- **Phase 2 (Daemon):** Scaffold + error handling + health endpoints + auth + Quack ✅
+- **P0 Security:** Parameterized queries (OHM-y2i.6), auth fail-closed (OHM-y2i.7), path traversal fix (OHM-y2i.9) ✅
 - **SDK:** Python SDK (`ohm.sdk`) for programmatic agent access ✅
 - **Validation:** Input validation module (SQL injection prevention for CTE identifiers) ✅
-- **Phase 2 (Daemon + Multi-Agent):** Scaffold + error handling + health endpoints ✅. Token auth and Quack remaining.
 - **Phase 3 (DuckLake):** Not started
-- **Phase 4 (Agent Integration):** Not started
+- **Phase 4 (Agent Integration):** Blocked by SDK gaps (OHM-xfh, OHM-9dq)
 
 ## Known Issues
 
-- **Dead code:** `src/ohm/queries.py` (top-level) shadows the `queries/` package and is unreachable — needs removal (OHM-4w7)
-- **Dead code:** `src/ohm/query.py` (NLP parser) is never used by production code — needs removal (OHM-hol)
-- **Module boundary unclear:** `store.py` (daemon ORM) and `queries/` (direct-connection API) both do create_node/create_edge etc. — needs documentation (OHM-n16, OHM-ad3)
-- **No server tests:** `server.py` has zero test coverage despite error handling being implemented (OHM-654)
-- **No SDK tests:** `sdk.py` has no dedicated test file (OHM-tjr)
-- **CI will fail:** `ruff`, `mypy`, `pytest-benchmark` not in dev dependencies (OHM-dw1)
-- **Benchmark tests broken:** Need `pytest-benchmark` fixture (8 tests error on missing fixture)
+### P0 — Critical
+- **store.py boundary bypass:** `challenge_edge()` in store.py doesn't call `enforce_challenge_boundary()`, allowing L1/L2 challenges through the daemon path (OHM-hsf)
+
+### P1 — High
+- **No request size cap:** `_read_body()` reads unlimited Content-Length bytes (OOM risk) (OHM-zag)
+- **SDK missing read methods:** No `get_node()`, `get_edge()`, `find_or_create()`, `search()` — blocks all agent integrations (OHM-xfh)
+- **SDK zero test coverage:** Primary agent interface has no tests (OHM-9dq)
+
+### P2 — Medium
+- **No SIGPIPE handling:** Daemon can crash on broken connections (OHM-e19)
+
+### Closed/Resolved
+- **Dead code removed:** queries.py top-level, query.py NLP parser ✅
+- **Module boundaries documented:** store.py vs queries/ ✅
+- **Server tests:** 17 HTTP endpoints now covered ✅
+- **Auth fail-open fixed:** Default is fail-closed, --no-auth for dev ✅
+- **Parameterized queries:** f-string SQL replaced ✅
