@@ -395,7 +395,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.7.0"
+SCHEMA_VERSION = "0.8.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -435,6 +435,9 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
         )""",
         "CREATE INDEX IF NOT EXISTS idx_outcomes_source ON ohm_outcomes(source_agent)",
         "CREATE INDEX IF NOT EXISTS idx_outcomes_claim ON ohm_outcomes(claim_node)",
+    ]),
+    ("0.8.0", "add notes column to ohm_observations", [
+        "ALTER TABLE ohm_observations ADD COLUMN notes TEXT",
     ]),
 ]
 

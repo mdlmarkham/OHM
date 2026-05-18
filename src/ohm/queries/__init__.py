@@ -915,6 +915,7 @@ def create_observation(
     sigma: float | None = None,
     source: str | None = None,
     edge_id: str | None = None,
+    notes: str | None = None,
 ) -> dict[str, Any]:
     """Create an observation on a node or edge and return its full record."""
     import uuid
@@ -922,9 +923,9 @@ def create_observation(
     obs_id = str(uuid.uuid4())
     conn.execute(
         """INSERT INTO ohm_observations
-           (id, node_id, edge_id, type, value, baseline, sigma, source, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        [obs_id, node_id, edge_id, obs_type, value, baseline, sigma, source, created_by],
+           (id, node_id, edge_id, type, value, baseline, sigma, source, created_by, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [obs_id, node_id, edge_id, obs_type, value, baseline, sigma, source, created_by, notes],
     )
     _log_change(conn, "ohm_observations", obs_id, "INSERT", created_by)
     # Return full observation record

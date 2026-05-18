@@ -145,6 +145,20 @@ class TestOhmStore:
         assert obs["type"] == "measurement"
         assert abs(obs["value"] - 0.85) < 0.001
 
+    def test_write_observation_with_notes(self, populated_store):
+        """OHM-of8: write_observation should persist notes field."""
+        obs = populated_store.write_observation(
+            "hungary", "measurement", value=0.9, notes="Unusual pattern detected"
+        )
+        assert obs["notes"] == "Unusual pattern detected"
+
+    def test_write_observation_without_notes(self, populated_store):
+        """OHM-of8: write_observation without notes should have notes=None."""
+        obs = populated_store.write_observation(
+            "hungary", "measurement", value=0.7
+        )
+        assert obs.get("notes") is None
+
     def test_write_observation_with_agent_name_override(self, populated_store):
         """OHM-y2i.19: write_observation should accept agent_name parameter."""
         obs = populated_store.write_observation(

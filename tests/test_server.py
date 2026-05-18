@@ -1251,3 +1251,86 @@ class TestChangeFeedAttribution:
         )
         assert len(log) == 1
         assert log[0]["agent_name"] == "metis"
+
+
+@pytest.mark.xdist_group("server")
+class TestDeleteValidation:
+    """Tests for DELETE endpoint input validation (OHM-i60: 500 on invalid ID)."""
+
+    def test_delete_node_invalid_id_returns_400(self, test_server):
+        """DELETE /node/{invalid_id} returns 400, not 500."""
+        port, _ = test_server
+        status, data = _request("DELETE", port, "/node/invalid%20id%20with%20spaces")
+        assert status == 400
+        assert "validation" in data.get("error", "").lower() or "invalid" in str(data).lower()
+
+    def test_delete_node_special_chars_returns_400(self, test_server):
+        """DELETE /node/{id_with_special_chars} returns 400."""
+        port, _ = test_server
+        status, data = _request("DELETE", port, "/node/bad!id@here")
+        assert status == 400
+
+    def test_delete_edge_invalid_id_returns_400(self, test_server):
+        """DELETE /edge/{invalid_id} returns 400, not 500."""
+        port, _ = test_server
+        status, data = _request("DELETE", port, "/edge/invalid%20id%20with%20spaces")
+        assert status == 400
+
+    def test_get_node_invalid_id_returns_400(self, test_server):
+        """GET /node/{invalid_id} returns 400, not 500."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/node/invalid%20id%20with%20spaces")
+        assert status == 400
+
+    def test_get_edge_invalid_id_returns_400(self, test_server):
+        """GET /edge/{invalid_id} returns 400, not 500."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/edge/bad!id")
+        assert status == 400
+
+
+@pytest.mark.xdist_group("server")
+class TestObservationNotes:
+    """Tests for observation notes persistence (OHM-of8: notes accepted but not persisted)."""
+
+    def test_observe_notes_persisted(self, test_server):
+        """POST /observe/{id} with notes field persists and returns notes."""
+        port, store = test_server
+        # Create a node first
+        _request("POST", port, "/node", body={
+            "id": "obs-notes-node", "label": "Notes Test", "type": "concept",
+        })
+        # Create observation with notes
+        status, data = _request("POST", port, "/observe/obs-notes-node", body={
+            "type": "measurement", "value": 42.0, "notes": "Anomalous reading",
+        })
+        assert status == 201
+        assert data.get("notes") == "Anomalous reading"
+
+    def test_observe_notes_stored_in_db(self, test_server):
+        """Notes are actually stored in the database, not just echoed."""
+        port, store = test_server
+        _request("POST", port, "/node", body={
+            "id": "obs-notes-db", "label": "DB Notes Test", "type": "concept",
+        })
+        _request("POST", port, "/observe/obs-notes-db", body={
+            "type": "measurement", "value": 1.0, "notes": "Stored in DB",
+        })
+        # Query the database directly
+        obs = store.execute(
+            "SELECT notes FROM ohm_observations WHERE node_id = ? ORDER BY created_at DESC LIMIT 1",
+            ["obs-notes-db"],
+        )
+        assert len(obs) == 1
+        assert obs[0]["notes"] == "Stored in DB"
+
+    def test_observe_without_notes(self, test_server):
+        """POST /observe/{id} without notes field works fine (notes is optional)."""
+        port, store = test_server
+        _request("POST", port, "/node", body={
+            "id": "obs-no-notes", "label": "No Notes", "type": "concept",
+        })
+        status, data = _request("POST", port, "/observe/obs-no-notes", body={
+            "type": "measurement", "value": 5.0,
+        })
+        assert status == 201

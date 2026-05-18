@@ -436,6 +436,7 @@ class Graph:
         baseline: float | None = None,
         sigma: float | None = None,
         source: str = "analysis",
+        notes: str | None = None,
     ) -> dict[str, Any]:
         """Record an observation on a node. Returns the full observation record."""
         from ohm.queries import create_observation
@@ -448,6 +449,7 @@ class Graph:
             baseline=baseline,
             sigma=sigma,
             source=source,
+            notes=notes,
             created_by=self.actor,
         )
 

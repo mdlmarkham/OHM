@@ -640,6 +640,8 @@ class OhmHandler(BaseHTTPRequestHandler):
             self._do_GET()
         except OHMError as e:
             self._error_response(e)
+        except ValueError as e:
+            self._error_response(ValidationError(str(e)))
         except Exception as e:
             self._error_response(OHMError(str(e)))
         finally:
@@ -674,6 +676,8 @@ class OhmHandler(BaseHTTPRequestHandler):
             self._do_POST()
         except OHMError as e:
             self._error_response(e)
+        except ValueError as e:
+            self._error_response(ValidationError(str(e)))
         except Exception as e:
             self._error_response(OHMError(str(e)))
         finally:
@@ -707,6 +711,8 @@ class OhmHandler(BaseHTTPRequestHandler):
             self._do_DELETE()
         except OHMError as e:
             self._error_response(e)
+        except ValueError as e:
+            self._error_response(ValidationError(str(e)))
         except Exception as e:
             self._error_response(OHMError(str(e)))
         finally:
@@ -1217,6 +1223,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                 baseline=body.get("baseline"),
                 sigma=body.get("sigma"),
                 source=body.get("source"),
+                notes=body.get("notes"),
                 agent_name=agent,
             )
             _trigger_webhooks({

@@ -63,9 +63,10 @@ class OhmStore:
             self._start_quack()
 
     def _init_schema(self):
-        """Initialize the schema if not already present."""
+        """Initialize the schema if not already present, including migrations."""
         if not self.readonly:
-            self.conn.execute(SCHEMA_SQL)
+            from .schema import initialize_schema
+            initialize_schema(self.conn)
 
     def _start_quack(self) -> None:
         """Start Quack server if available. Sets self.quack_started on success."""
@@ -317,22 +318,24 @@ class OhmStore:
         sigma: Optional[float] = None,
         source: Optional[str] = None,
         edge_id: Optional[str] = None,
+        notes: Optional[str] = None,
         agent_name: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
         """Create an observation. Attributed to the given agent.
 
         Args:
             agent_name: Agent to attribute the observation to. Defaults to self.agent_name.
+            notes: Optional free-text notes for the observation.
         """
         actor = agent_name or self.agent_name
         now = self._now()
         self.conn.execute(
             """
             INSERT INTO ohm_observations
-                (node_id, edge_id, type, value, baseline, sigma, source, created_by, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (node_id, edge_id, type, value, baseline, sigma, source, created_by, created_at, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            [node_id, edge_id, type, value, baseline, sigma, source, actor, now],
+            [node_id, edge_id, type, value, baseline, sigma, source, actor, now, notes],
         )
 
         obs = self.execute_one(

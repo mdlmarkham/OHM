@@ -79,6 +79,13 @@ class TestGraphWrite:
         assert obs["id"]
         assert obs["type"] == "measurement"
 
+    def test_observe_with_notes(self, graph):
+        """OHM-of8: observe() should persist and return notes."""
+        a = graph.create_node(label="NotesTest")["id"]
+        obs = graph.observe(a, obs_type="measurement", value=2.0, notes="Anomalous spike")
+        assert obs["id"]
+        assert obs["notes"] == "Anomalous spike"
+
     def test_set_focus(self, graph):
         graph.set_focus("researching patterns")
         state = graph.agent_state("test_agent")
