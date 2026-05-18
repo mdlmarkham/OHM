@@ -1406,7 +1406,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                                      [node_id, node_id])
             self.store.conn.execute("DELETE FROM ohm_observations WHERE node_id = ?", [node_id])
             self.store.conn.execute("DELETE FROM ohm_nodes WHERE id = ?", [node_id])
-            self.store._log_change("ohm_nodes", node_id, "DELETE", None)
+            self.store._log_change("ohm_nodes", node_id, "DELETE", None, agent_name=agent)
             self._json_response(200, {"deleted": node_id, "type": "node"})
 
         elif path.startswith("/edge/"):
@@ -1429,7 +1429,7 @@ class OhmHandler(BaseHTTPRequestHandler):
 
             self.store.conn.execute("DELETE FROM ohm_observations WHERE edge_id = ?", [edge_id])
             self.store.conn.execute("DELETE FROM ohm_edges WHERE id = ?", [edge_id])
-            self.store._log_change("ohm_edges", edge_id, "DELETE", edge[2])
+            self.store._log_change("ohm_edges", edge_id, "DELETE", edge[2], agent_name=agent)
             self._json_response(200, {"deleted": edge_id, "type": "edge"})
 
         else:

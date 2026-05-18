@@ -185,6 +185,57 @@ class TestOhmStore:
         assert status["edge_count"] == 3
         assert "L3" in status["edges_by_layer"]
 
+    def test_change_feed_attributed_to_caller_write_node(self, store):
+        """OHM-qyn: write_node change feed should use caller agent_name, not store default."""
+        store.write_node("cf-test-1", "CF Test", "concept", agent_name="metis")
+        feed = store.execute(
+            "SELECT agent_name FROM ohm_change_feed WHERE row_id = ?",
+            ["cf-test-1"],
+        )
+        assert len(feed) >= 1
+        assert feed[0]["agent_name"] == "metis"
+
+    def test_change_feed_attributed_to_caller_write_edge(self, store):
+        """OHM-qyn: write_edge change feed should use caller agent_name, not store default."""
+        store.write_node("cf-from", "From", "concept")
+        store.write_node("cf-to", "To", "concept")
+        store.write_edge("cf-from", "cf-to", "RELATES_TO", "L2", agent_name="clio")
+        feed = store.execute(
+            "SELECT agent_name FROM ohm_change_feed WHERE table_name = 'ohm_edges' AND agent_name = 'clio'",
+        )
+        assert len(feed) >= 1
+        assert feed[0]["agent_name"] == "clio"
+
+    def test_change_feed_attributed_to_caller_write_observation(self, store):
+        """OHM-qyn: write_observation change feed should use caller agent_name."""
+        store.write_node("cf-obs-target", "Obs Target", "concept")
+        store.write_observation("cf-obs-target", "measurement", value=1.0, agent_name="hephaestus")
+        feed = store.execute(
+            "SELECT agent_name FROM ohm_change_feed WHERE table_name = 'ohm_observations' AND agent_name = 'hephaestus'",
+        )
+        assert len(feed) >= 1
+        assert feed[0]["agent_name"] == "hephaestus"
+
+    def test_change_log_attributed_to_caller(self, store):
+        """OHM-qyn: ohm_change_log should also use caller agent_name."""
+        store.write_node("cf-log-test", "Log Test", "concept", agent_name="socrates")
+        log = store.execute(
+            "SELECT agent_name FROM ohm_change_log WHERE row_id = ?",
+            ["cf-log-test"],
+        )
+        assert len(log) >= 1
+        assert log[0]["agent_name"] == "socrates"
+
+    def test_change_feed_uses_default_when_no_override(self, store):
+        """When no agent_name override, change feed should use store's default agent."""
+        store.write_node("cf-default", "Default Agent", "concept")
+        feed = store.execute(
+            "SELECT agent_name FROM ohm_change_feed WHERE row_id = ?",
+            ["cf-default"],
+        )
+        assert len(feed) >= 1
+        assert feed[0]["agent_name"] == "test_agent"
+
     def test_boundary_rules_l3(self, populated_store):
         """L3 edges are agent-owned, challengeable."""
         # Create edge as metis

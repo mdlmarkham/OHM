@@ -1166,3 +1166,88 @@ class TestNodesEndpoint:
         assert len(data["nodes"]) <= 1
         assert data["limit"] == 1
         assert data["offset"] == 0
+
+
+@pytest.mark.xdist_group("server")
+class TestChangeFeedAttribution:
+    """Tests for change feed agent attribution (OHM-qyn: writes attributed to 'ohmd' bug)."""
+
+    def test_post_node_change_feed_uses_caller_agent(self, auth_server):
+        """POST /node should attribute change feed entry to the calling agent, not 'ohmd'."""
+        port, store = auth_server
+        headers = {"Authorization": "Bearer test-token-abc"}
+        status, data = _request("POST", port, "/node", body={
+            "id": "cf-attrib-node-1", "label": "Attribution Test", "type": "concept",
+        }, headers=headers)
+        assert status == 201
+
+        # Check change feed — should show 'metis' (the agent from the token), not 'ohmd'
+        feed = store.execute(
+            "SELECT agent_name FROM ohm_change_feed WHERE row_id = ? ORDER BY occurred_at DESC LIMIT 1",
+            ["cf-attrib-node-1"],
+        )
+        assert len(feed) == 1
+        assert feed[0]["agent_name"] == "metis"
+
+    def test_post_edge_change_feed_uses_caller_agent(self, auth_server):
+        """POST /edge should attribute change feed entry to the calling agent, not 'ohmd'."""
+        port, store = auth_server
+        headers = {"Authorization": "Bearer test-token-abc"}
+        # Create two nodes first
+        _request("POST", port, "/node", body={
+            "id": "cf-edge-from", "label": "From Node", "type": "concept",
+        }, headers=headers)
+        _request("POST", port, "/node", body={
+            "id": "cf-edge-to", "label": "To Node", "type": "concept",
+        }, headers=headers)
+        # Create edge
+        status, data = _request("POST", port, "/edge", body={
+            "from": "cf-edge-from", "to": "cf-edge-to",
+            "type": "REFERENCES", "layer": "L2",
+        }, headers=headers)
+        assert status == 201
+
+        # Check change feed for edge entries by 'metis'
+        feed = store.execute(
+            "SELECT agent_name, table_name FROM ohm_change_feed "
+            "WHERE table_name = 'ohm_edges' AND agent_name = 'metis' ORDER BY occurred_at DESC LIMIT 1",
+        )
+        assert len(feed) >= 1
+        assert feed[0]["agent_name"] == "metis"
+
+    def test_post_observation_change_feed_uses_caller_agent(self, auth_server):
+        """POST /observe/{node_id} should attribute change feed entry to the calling agent."""
+        port, store = auth_server
+        headers = {"Authorization": "Bearer test-token-abc"}
+        # Create a node first
+        _request("POST", port, "/node", body={
+            "id": "cf-obs-node", "label": "Obs Node", "type": "concept",
+        }, headers=headers)
+        # Create observation via /observe/{node_id}
+        status, data = _request("POST", port, "/observe/cf-obs-node", body={
+            "type": "measurement", "value": 42.0,
+        }, headers=headers)
+        assert status == 201
+
+        # Check change feed for observation entries by 'metis'
+        feed = store.execute(
+            "SELECT agent_name, table_name FROM ohm_change_feed "
+            "WHERE table_name = 'ohm_observations' AND agent_name = 'metis' ORDER BY occurred_at DESC LIMIT 1",
+        )
+        assert len(feed) >= 1
+        assert feed[0]["agent_name"] == "metis"
+
+    def test_change_log_uses_caller_agent(self, auth_server):
+        """ohm_change_log should also attribute to the calling agent, not 'ohmd'."""
+        port, store = auth_server
+        headers = {"Authorization": "Bearer test-token-abc"}
+        _request("POST", port, "/node", body={
+            "id": "cf-log-node", "label": "Log Test", "type": "concept",
+        }, headers=headers)
+
+        log = store.execute(
+            "SELECT agent_name FROM ohm_change_log WHERE row_id = ? ORDER BY changed_at DESC LIMIT 1",
+            ["cf-log-node"],
+        )
+        assert len(log) == 1
+        assert log[0]["agent_name"] == "metis"

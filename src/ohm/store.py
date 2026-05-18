@@ -166,7 +166,7 @@ class OhmStore:
                 [label, type, content, confidence, visibility, provenance,
                  tags_json, metadata_json, priority, now, actor, id],
             )
-            self._log_change("ohm_nodes", id, "UPDATE", None)
+            self._log_change("ohm_nodes", id, "UPDATE", None, agent_name=actor)
             result = self.get_node(id) or {}
             result["created"] = False
             return result
@@ -180,7 +180,7 @@ class OhmStore:
                 [id, label, type, content, actor, confidence,
                  visibility, provenance, tags_json, metadata_json, priority, now, now],
             )
-            self._log_change("ohm_nodes", id, "INSERT", None)
+            self._log_change("ohm_nodes", id, "INSERT", None, agent_name=actor)
             result = self.get_node(id) or {}
             result["created"] = True
             return result
@@ -232,7 +232,7 @@ class OhmStore:
         )
 
         if edge:
-            self._log_change("ohm_edges", edge["id"], "INSERT", layer)
+            self._log_change("ohm_edges", edge["id"], "INSERT", layer, agent_name=actor)
         return edge
 
     def challenge_edge(
@@ -305,7 +305,7 @@ class OhmStore:
             [new_confidence, now, actor, edge_id],
         )
 
-        self._log_change("ohm_edges", edge_id, "UPDATE", edge["layer"])
+        self._log_change("ohm_edges", edge_id, "UPDATE", edge["layer"], agent_name=actor)
         return self.get_edge(edge_id)
 
     def write_observation(
@@ -340,7 +340,7 @@ class OhmStore:
             [node_id, actor],
         )
         if obs:
-            self._log_change("ohm_observations", obs["id"], "INSERT", None)
+            self._log_change("ohm_observations", obs["id"], "INSERT", None, agent_name=actor)
         return obs
 
     def update_agent_state(
@@ -437,20 +437,25 @@ class OhmStore:
         row_id: str,
         operation: str,
         layer: Optional[str],
+        agent_name: Optional[str] = None,
     ):
         """Log a change to both the change log and the change feed.
 
         ohm_change_log is the internal audit trail (used by push_to_ducklake).
         ohm_change_feed is the agent-facing change feed (used by listen() and SSE /events).
         Both must be populated for agents to see each other's writes.
+
+        Args:
+            agent_name: Agent to attribute the change to. Defaults to self.agent_name.
         """
+        actor = agent_name or self.agent_name
         now = self._now()
         self.conn.execute(
             """
             INSERT INTO ohm_change_log (table_name, row_id, operation, agent_name, layer, changed_at)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            [table_name, row_id, operation, self.agent_name, layer, now],
+            [table_name, row_id, operation, actor, layer, now],
         )
         # Also populate the agent-facing change feed
         self.conn.execute(
@@ -458,7 +463,7 @@ class OhmStore:
             INSERT INTO ohm_change_feed (table_name, row_id, operation, agent_name, occurred_at)
             VALUES (?, ?, ?, ?, ?)
             """,
-            [table_name, row_id, operation, self.agent_name, now],
+            [table_name, row_id, operation, actor, now],
         )
 
     def close(self):
