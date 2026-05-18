@@ -1106,3 +1106,63 @@ class TestRegisterEndpoint:
         assert status2 == 201
         # Should not create duplicate edges
         assert data2["edges_created"] <= first_edges
+
+
+@pytest.mark.xdist_group("server")
+class TestNodesEndpoint:
+    """Tests for GET /nodes endpoint (OHM-usg: node search/list)."""
+
+    def test_nodes_returns_list(self, test_server):
+        """GET /nodes returns paginated node list."""
+        port, store = test_server
+        # Create some nodes first
+        _request("POST", port, "/node", body={
+            "id": "test-node-1", "label": "Alpha", "type": "concept",
+        })
+        _request("POST", port, "/node", body={
+            "id": "test-node-2", "label": "Beta", "type": "source",
+        })
+        status, data = _request("GET", port, "/nodes")
+        assert status == 200
+        assert "nodes" in data
+        assert "total" in data
+        assert data["total"] >= 2
+
+    def test_nodes_filter_by_type(self, test_server):
+        """GET /nodes?type=source filters by node type."""
+        port, store = test_server
+        _request("POST", port, "/node", body={
+            "id": "filter-source-1", "label": "Source A", "type": "source",
+        })
+        _request("POST", port, "/node", body={
+            "id": "filter-concept-1", "label": "Concept A", "type": "concept",
+        })
+        status, data = _request("GET", port, "/nodes?type=source")
+        assert status == 200
+        assert all(n["type"] == "source" for n in data["nodes"])
+
+    def test_nodes_filter_by_label(self, test_server):
+        """GET /nodes?label=... filters by label text."""
+        port, store = test_server
+        _request("POST", port, "/node", body={
+            "id": "label-test-1", "label": "UniqueLabelXYZ", "type": "concept",
+        })
+        status, data = _request("GET", port, "/nodes?label=UniqueLabelXYZ")
+        assert status == 200
+        assert len(data["nodes"]) >= 1
+        assert any("UniqueLabelXYZ" in n["label"] for n in data["nodes"])
+
+    def test_nodes_pagination(self, test_server):
+        """GET /nodes supports limit and offset for pagination."""
+        port, store = test_server
+        _request("POST", port, "/node", body={
+            "id": "page-node-1", "label": "PageTest1", "type": "concept",
+        })
+        _request("POST", port, "/node", body={
+            "id": "page-node-2", "label": "PageTest2", "type": "concept",
+        })
+        status, data = _request("GET", port, "/nodes?limit=1&offset=0")
+        assert status == 200
+        assert len(data["nodes"]) <= 1
+        assert data["limit"] == 1
+        assert data["offset"] == 0

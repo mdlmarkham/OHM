@@ -417,17 +417,26 @@ class TestSDKRemoteConnection:
         assert callable(connect_remote)
 
     def test_connect_remote_fallback(self, tmp_path):
-        """Verify connect_remote falls back to direct connection when Quack unavailable."""
+        """Verify connect_remote falls back to direct connection when Quack unavailable (strict=False)."""
         from ohm.sdk import connect_remote
 
         # Set OHM_DB to a temp path so fallback has somewhere to go
         db_path = str(tmp_path / "test_sdk_remote.duckdb")
         with patch.dict(os.environ, {"OHM_DB": db_path}):
             with patch("ohm.quack.is_available", return_value=False):
-                graph = connect_remote(actor="test-agent")
+                graph = connect_remote(actor="test-agent", strict=False)
                 assert graph is not None
                 assert graph.actor == "test-agent"
                 graph._conn.close()
+
+    def test_connect_remote_strict_raises(self, tmp_path):
+        """Verify connect_remote raises ConnectionError when Quack unavailable (strict=True)."""
+        from ohm.sdk import connect_remote
+        import pytest
+
+        with patch("ohm.quack.is_available", return_value=False):
+            with pytest.raises(ConnectionError, match="Quack"):
+                connect_remote(actor="test-agent", strict=True)
 
     def test_connect_remote_with_mock_quack(self, tmp_path):
         """Verify connect_remote uses Quack when available."""
