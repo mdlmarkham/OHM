@@ -71,14 +71,25 @@ OHM-af8    P1: Multi-scenario Extensibility — medical, cybersecurity, supply c
 ├── OHM-af8.6  Schema: new edge types across all four scenarios
 └── OHM-af8.7  docs: add medical, cybersecurity, supply chain, customer support scenarios
 
+Schema gaps (P0 — blocking multi-scenario features):
+  OHM-pap  P0: Add urgency (edges) + priority (nodes) to schema — blocks OHM-af8.2, af8.4, af8.5
+  OHM-2xy   P0: Add probability field to edges — blocks OHM-af8.1 (supply chain, risk modeling)
+
 Cross-cutting (security/review findings):
-  OHM-hsf  P0: store.py bypasses boundary enforcement on challenges (security bug)
   OHM-zag  P1: No request size cap on POST bodies — OOM risk
-  OHM-xfh  P1: SDK missing basic read methods (get_node, get_edge, find_or_create, search)
   OHM-9dq  P1: SDK tests — zero coverage on primary agent interface
+  OHM-7e4  P1: SDK source_reliability() + record_outcome() — needed for OHM-af8.4
+  OHM-3yo  P1: SDK handoff() + escalate() — needed for OHM-af8.5
   OHM-e19  P2: No SIGPIPE handling in daemon
 
-Closed cross-cutting (completed):
+Documentation:
+  OHM-pfk  P1: Update all docs for multi-scenario architecture (VISION, roadmap, scenarios, schema, onboarding)
+  OHM-c8i  P1: ADR for probability/confidence separation, NEGATES semantics, urgency vs priority
+  OHM-5di  P2: ADR for observation type extensibility
+
+Closed cross-cutting:
+  OHM-hsf  ✅ store.py boundary enforcement (fixed in OHM-evm)
+  OHM-xfh  ✅ SDK read methods (added in commit 1c69836)
   OHM-654  ✅ Server tests (17 HTTP endpoints)
   OHM-tjr  → replaced by OHM-9dq
   OHM-4w7  ✅ Remove dead queries.py
