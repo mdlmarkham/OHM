@@ -14,7 +14,7 @@ import signal
 import sys
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any, Optional
@@ -326,9 +326,11 @@ class OhmHandler(BaseHTTPRequestHandler):
             state = self.store.get_agent_state(agent)
             if state and state.get("last_sync"):
                 since = state["last_sync"]
+                # last_sync is a TIMESTAMP column — DuckDB returns datetime, not string
+                if isinstance(since, datetime):
+                    since = since.isoformat()
             else:
                 # Default to current time (only stream new events)
-                from datetime import datetime, timezone
                 since = datetime.now(timezone.utc).isoformat()
 
         # Register subscription
@@ -1060,8 +1062,12 @@ class OhmHandler(BaseHTTPRequestHandler):
                 state = self.store.get_agent_state(agent_name)
                 if state and state.get("last_sync"):
                     since = state["last_sync"]
+                    # last_sync is a TIMESTAMP column — DuckDB returns datetime, not string
+                    if isinstance(since, datetime):
+                        since = since.isoformat()
                 else:
-                    raise ValidationError("No last-check timestamp. Use ?since=ISO_TIMESTAMP")
+                    # Default to 24 hours ago (OHM-4oc)
+                    since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
             from .queries import query_change_feed
             results = query_change_feed(
                 self.store.conn, since=since, agent_name=agent_name, enrich=enrich

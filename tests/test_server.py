@@ -1403,14 +1403,33 @@ class TestCascadingDelete:
 
 @pytest.mark.xdist_group("server")
 class TestListenWithoutSince:
-    """Tests for OHM-9ud: /listen without 'since' returns 400, not 500."""
+    """Tests for OHM-4oc: /listen without 'since' defaults to 24h, not 500."""
 
-    def test_listen_without_since_no_agent_returns_400(self, test_server):
-        """GET /listen without 'since' and unknown agent returns 400 with validation error."""
+    def test_listen_without_since_defaults_to_24h(self, test_server):
+        """GET /listen without 'since' returns 200 with last 24h of changes."""
         port, _ = test_server
         status, data = _request("GET", port, "/listen")
-        assert status == 400
-        assert "since" in str(data).lower() or "last-check" in str(data).lower()
+        assert status == 200
+        # Should return a list (possibly empty) — not an error
+        assert isinstance(data, list)
+
+    def test_listen_with_datetime_last_sync_returns_200(self, test_server):
+        """GET /listen without 'since' but with agent_state.last_sync as datetime returns 200."""
+        port, proc = test_server
+        # Register an agent so it has state
+        _request("POST", port, "/register", body={
+            "name": "test-listen-agent",
+            "role": "analyst",
+        })
+        # Create a node to generate a change feed entry
+        _request("POST", port, "/node", body={
+            "label": "test node for listen",
+            "type": "concept",
+        }, headers={"X-Agent": "test-listen-agent"})
+        # Calling /listen without since should use last_sync and convert it to string
+        status, data = _request("GET", port, "/listen", headers={"X-Agent": "test-listen-agent"})
+        assert status == 200
+        assert isinstance(data, list)
 
 
 @pytest.mark.xdist_group("server")
