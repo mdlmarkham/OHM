@@ -730,6 +730,129 @@ class TestTemporalDecay:
             results = g.decay_observations(temporal_decay_hours=168.0, dry_run=True)
             assert len(results) >= 2
 
+
+# ===== Medical Diagnosis =====
+
+class TestMedicalDiagnosis:
+    def test_rules_out_creates_negates_edge(self, tmp_path):
+        """rules_out() creates a NEGATES edge between finding and condition."""
+        db = str(tmp_path / "rules_out.duckdb")
+        with connect(db, actor="metis") as g:
+            g.register_agent(values=["wisdom"])
+            finding = g.create_node(label="Fever Absent", node_type="concept")
+            condition = g.create_node(label="Malaria", node_type="concept")
+
+            edge = g.rules_out(from_node=finding["id"], to_node=condition["id"],
+                                confidence=0.9)
+            assert edge["edge_type"] == "NEGATES"
+            assert edge["from_node"] == finding["id"]
+            assert edge["to_node"] == condition["id"]
+            assert abs(edge["confidence"] - 0.9) < 0.01
+
+    def test_differential_diagnosis_returns_candidates(self, tmp_path):
+        """differential_diagnosis returns candidate conditions ranked by score."""
+        db = str(tmp_path / "ddx.duckdb")
+        with connect(db, actor="metis") as g:
+            g.register_agent(values=["wisdom"])
+            patient = g.create_node(label="Patient", node_type="concept")
+            malaria = g.create_node(label="Malaria", node_type="concept")
+            flu = g.create_node(label="Flu", node_type="concept")
+
+            # Evidence: malaria CAUSES patient symptoms
+            g.create_edge(from_node=malaria["id"], to_node=patient["id"],
+                          edge_type="CAUSES", layer="L3", confidence=0.7)
+            # Evidence: flu PREDICTS patient symptoms
+            g.create_edge(from_node=flu["id"], to_node=patient["id"],
+                          edge_type="PREDICTS", layer="L3", confidence=0.5)
+
+            results = g.differential_diagnosis(patient["id"])
+            assert len(results) >= 2
+            # Non-ruled-out candidates should come first
+            assert not results[0]["ruled_out"]
+
+    def test_differential_diagnosis_excludes_negated(self, tmp_path):
+        """differential_diagnosis marks ruled-out conditions."""
+        db = str(tmp_path / "ddx_negated.duckdb")
+        with connect(db, actor="metis") as g:
+            g.register_agent(values=["wisdom"])
+            patient = g.create_node(label="Patient", node_type="concept")
+            malaria = g.create_node(label="Malaria", node_type="concept")
+            flu = g.create_node(label="Flu", node_type="concept")
+            no_fever = g.create_node(label="Fever Absent", node_type="concept")
+
+            # Evidence edges
+            g.create_edge(from_node=malaria["id"], to_node=patient["id"],
+                          edge_type="CAUSES", layer="L3", confidence=0.7)
+            g.create_edge(from_node=flu["id"], to_node=patient["id"],
+                          edge_type="PREDICTS", layer="L3", confidence=0.5)
+
+            # Fever absent NEGATES malaria
+            g.rules_out(from_node=no_fever["id"], to_node=malaria["id"],
+                        confidence=0.9)
+
+            results = g.differential_diagnosis(patient["id"])
+            # Malaria should be marked as ruled out
+            malaria_result = [r for r in results if r["node_id"] == malaria["id"]]
+            if malaria_result:
+                assert malaria_result[0]["ruled_out"] is True
+                assert len(malaria_result[0]["ruled_out_by"]) > 0
+
+    def test_compound_confidence_independent(self):
+        """Independent observations compound multiplicatively."""
+        from ohm.methods import compound_confidence
+
+        result = compound_confidence(
+            [{"confidence": 0.6}, {"confidence": 0.7}],
+            correlation=0.0,
+        )
+        # Independent: 1 - (1-0.6)*(1-0.7) = 1 - 0.12 = 0.88
+        assert result["compound_confidence"] is not None
+        assert result["compound_confidence"] > 0.7  # Higher than either alone
+        assert result["correlation"] == 0.0
+        assert result["observation_count"] == 2
+
+    def test_compound_confidence_correlated(self):
+        """Perfectly correlated observations use max only."""
+        from ohm.methods import compound_confidence
+
+        result = compound_confidence(
+            [{"confidence": 0.6}, {"confidence": 0.7}],
+            correlation=1.0,
+        )
+        # Correlated: max(0.6, 0.7) = 0.7
+        assert result["compound_confidence"] == 0.7
+        assert result["correlation"] == 1.0
+
+    def test_compound_confidence_independent_higher_than_correlated(self):
+        """Independent findings give higher composite than correlated ones."""
+        from ohm.methods import compound_confidence
+
+        obs = [{"confidence": 0.6}, {"confidence": 0.7}]
+        result_indep = compound_confidence(obs, correlation=0.0)
+        result_corr = compound_confidence(obs, correlation=1.0)
+        assert result_indep["compound_confidence"] > result_corr["compound_confidence"]
+
+    def test_compound_confidence_empty(self):
+        """Empty observations returns None."""
+        from ohm.methods import compound_confidence
+
+        result = compound_confidence([], correlation=0.0)
+        assert result["compound_confidence"] is None
+        assert result["observation_count"] == 0
+
+    def test_compound_confidence_partial_correlation(self):
+        """Partial correlation interpolates between independent and correlated."""
+        from ohm.methods import compound_confidence
+
+        obs = [{"confidence": 0.6}, {"confidence": 0.7}]
+        result_0 = compound_confidence(obs, correlation=0.0)
+        result_05 = compound_confidence(obs, correlation=0.5)
+        result_1 = compound_confidence(obs, correlation=1.0)
+        # Partial should be between independent and correlated
+        assert result_05["compound_confidence"] >= result_1["compound_confidence"]
+        assert result_05["compound_confidence"] <= result_0["compound_confidence"]
+
+
 class TestGraphImportExport:
     def test_export_contains_all_tables(self, tmp_path):
         db = str(tmp_path / "export.duckdb")

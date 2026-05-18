@@ -963,6 +963,91 @@ class Graph:
             self._conn, node_id, window_days=window_days, min_observations=min_observations,
         )
 
+    def rules_out(
+        self,
+        *,
+        from_node: str,
+        to_node: str,
+        confidence: float = 0.9,
+        layer: str = "L3",
+        condition: str | None = None,
+        provenance: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a NEGATES edge indicating a finding rules out a condition.
+
+        Convenience method for medical diagnosis: 'fever_absent NEGATES malaria'.
+        Semantically different from a low-confidence SUPPORTS — absence of a finding
+        actively rules out a condition rather than weakly supporting it.
+
+        Args:
+            from_node: The finding node (e.g., 'fever_absent').
+            to_node: The condition node being ruled out (e.g., 'malaria').
+            confidence: How confident the ruling-out is (default 0.9).
+            layer: Edge layer (default L3).
+            condition: Optional condition string.
+            provenance: Optional provenance string.
+
+        Returns:
+            The created NEGATES edge record.
+        """
+        return self.create_edge(
+            from_node=from_node,
+            to_node=to_node,
+            edge_type="NEGATES",
+            layer=layer,
+            confidence=confidence,
+            condition=condition,
+            provenance=provenance,
+        )
+
+    def differential_diagnosis(
+        self, node_id: str, *, max_depth: int = 3,
+    ) -> list[dict[str, Any]]:
+        """Return candidate diagnoses for a patient node, ranked by evidence.
+
+        Walks incoming evidence edges to find candidate conditions, then
+        excludes any conditions ruled out by NEGATES edges. Results sorted
+        by composite_score descending, with ruled-out conditions at the end.
+
+        Args:
+            node_id: The patient/finding node to diagnose.
+            max_depth: Maximum traversal depth for evidence chain.
+
+        Returns:
+            List of dicts with node_id, label, type, composite_score,
+            ruled_out (bool), ruled_out_by (list of edge ids).
+        """
+        from ohm.methods import differential_diagnosis as _dd
+
+        return _dd(self._conn, node_id, max_depth=max_depth)
+
+    def compound_confidence(
+        self,
+        observations: list[dict[str, Any]],
+        *,
+        correlation: float = 0.0,
+    ) -> dict[str, Any]:
+        """Combine multiple confidence values accounting for correlation.
+
+        When observations are independent (correlation=0.0), confidences compound
+        multiplicatively. When perfectly correlated (correlation=1.0), only the
+        strongest evidence matters. Values between interpolate.
+
+        Critical for medical diagnosis: two findings from the same modality
+        are correlated and shouldn't double-count evidence, while findings from
+        different modalities are independent and should compound.
+
+        Args:
+            observations: List of dicts with 'confidence' key (0-1).
+            correlation: 0.0 = independent, 1.0 = perfectly correlated.
+
+        Returns:
+            Dict with compound_confidence, method, correlation, observation_count.
+        """
+        from ohm.methods import compound_confidence as _cc
+
+        return _cc(observations, correlation=correlation)
+
     def heartbeat(self, *, focus: str | None = None) -> dict[str, Any]:
         """Send an agent heartbeat. Updates last-seen timestamp.
 

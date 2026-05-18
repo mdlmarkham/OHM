@@ -1098,3 +1098,178 @@ def detect_trend(
             {"value": v, "created_at": str(t)} for v, t, _ in observations
         ],
     }
+
+
+def compound_confidence(
+    observations: list[dict[str, Any]],
+    *,
+    correlation: float = 0.0,
+) -> dict[str, Any]:
+    """Combine multiple confidence values accounting for correlation.
+
+    When observations are independent (correlation=0.0), confidences compound
+    multiplicatively: P(all) = 1 - Π(1 - p_i). When perfectly correlated
+    (correlation=1.0), only the strongest evidence matters: result = max(p_i).
+
+    This is critical for medical diagnosis where two findings from the same
+    modality (e.g., two blood tests from the same lab) are correlated and
+    shouldn't double-count evidence, while findings from different modalities
+    (imaging + blood work) are independent and should compound.
+
+    Args:
+        observations: List of dicts with 'confidence' key (0-1).
+            May also include 'source' or 'modality' for grouping.
+        correlation: 0.0 = independent (geometric compounding),
+            1.0 = perfectly correlated (use max only).
+            Values between interpolate between the two extremes.
+
+    Returns:
+        Dict with compound_confidence, method, correlation, observation_count.
+    """
+    if not observations:
+        return {
+            "compound_confidence": None,
+            "method": "compound",
+            "correlation": correlation,
+            "observation_count": 0,
+        }
+
+    # Clamp correlation to [0, 1]
+    correlation = max(0.0, min(1.0, correlation))
+    confidences = [obs.get("confidence", 0.0) for obs in observations]
+    confidences = [max(0.0, min(1.0, c)) for c in confidences]
+
+    n = len(confidences)
+
+    if correlation >= 1.0:
+        # Perfectly correlated: use maximum only
+        result = max(confidences)
+    elif correlation <= 0.0:
+        # Independent: compound multiplicatively
+        # P(at least one) = 1 - Π(1 - p_i)
+        product = 1.0
+        for c in confidences:
+            product *= (1.0 - c)
+        result = round(1.0 - product, 4)
+    else:
+        # Interpolate between independent and correlated
+        # independent_result = 1 - Π(1 - p_i)
+        # correlated_result = max(p_i)
+        # blended = correlated * correlation + independent * (1 - correlation)
+        product = 1.0
+        for c in confidences:
+            product *= (1.0 - c)
+        independent = 1.0 - product
+        correlated = max(confidences)
+        result = round(correlated * correlation + independent * (1.0 - correlation), 4)
+
+    return {
+        "compound_confidence": result,
+        "method": "compound",
+        "correlation": correlation,
+        "observation_count": n,
+    }
+
+
+def differential_diagnosis(
+    conn: DuckDBPyConnection,
+    node_id: str,
+    *,
+    max_depth: int = 3,
+) -> list[dict[str, Any]]:
+    """Return candidate diagnoses for a patient node, ranked by composite score.
+
+    Walks incoming evidence edges (CAUSES, PREDICTS, CORRELATES_WITH, etc.)
+    to find candidate condition nodes, then excludes any conditions that are
+    ruled out by NEGATES edges. Results are sorted by composite_score descending.
+
+    This is a medical-domain substrate method, but works for any domain where
+    you need to find candidate explanations ranked by evidence strength while
+    excluding ruled-out alternatives.
+
+    Args:
+        conn: Database connection.
+        node_id: The patient/finding node to diagnose.
+        max_depth: Maximum traversal depth for evidence chain.
+
+    Returns:
+        List of dicts with node_id, label, composite_score, ruled_out (bool),
+        ruled_out_by (list of NEGATES edge ids if applicable).
+    """
+    from ohm.queries import query_confidence_chain
+
+    # Find candidate conditions: nodes that have evidence edges pointing to
+    # or from this node (CAUSES, PREDICTS, CORRELATES_WITH, SUPPORTS, etc.)
+    candidates = conn.execute(
+        """SELECT DISTINCT n.id, n.label, n.type
+           FROM ohm_edges e
+           JOIN ohm_nodes n ON (
+               n.id = e.from_node OR n.id = e.to_node
+           )
+           WHERE (e.from_node = ? OR e.to_node = ?)
+             AND e.edge_type IN (
+               'CAUSES', 'PREDICTS', 'CORRELATES_WITH', 'SUPPORTS',
+               'EXPECTED_LIKELIHOOD', 'EXPLAINS'
+             )
+             AND n.id != ?
+        """,
+        [node_id, node_id, node_id],
+    ).fetchall()
+
+    # Find conditions ruled out by NEGATES edges
+    # A candidate is ruled out if any node has a NEGATES edge pointing to it.
+    # We check: does any of the candidate nodes have an incoming NEGATES edge?
+    ruled_out_map: dict[str, list[str]] = {}
+
+    if candidates:
+        cand_ids = [c[0] for c in candidates]
+        # Build parameterized query for all candidate IDs
+        placeholders = ",".join(["?"] * len(cand_ids))
+        negated_edges = conn.execute(
+            f"""SELECT e.to_node, e.id, e.from_node
+                FROM ohm_edges e
+                WHERE e.to_node IN ({placeholders})
+                  AND e.edge_type = 'NEGATES'
+            """,
+            cand_ids,
+        ).fetchall()
+        for to_node, edge_id, from_node in negated_edges:
+            ruled_out_map.setdefault(to_node, []).append(edge_id)
+
+    # Also: the patient node itself may NEGATE conditions
+    # (patient finding rules out condition)
+    negated_by_node = conn.execute(
+        """SELECT e.to_node, e.id
+           FROM ohm_edges e
+           WHERE e.from_node = ?
+             AND e.edge_type = 'NEGATES'
+        """,
+        [node_id],
+    ).fetchall()
+    for to_node, edge_id in negated_by_node:
+        ruled_out_map.setdefault(to_node, []).append(edge_id)
+
+    # Build results
+    results = []
+    for cand_id, cand_label, cand_type in candidates:
+        # Get composite score for this candidate
+        try:
+            score_result = composite_score(conn, cand_id)
+            score = score_result.get("composite_score")
+        except Exception:
+            score = None
+
+        is_ruled_out = cand_id in ruled_out_map
+        results.append({
+            "node_id": cand_id,
+            "label": cand_label,
+            "type": cand_type,
+            "composite_score": score,
+            "ruled_out": is_ruled_out,
+            "ruled_out_by": ruled_out_map.get(cand_id, []),
+        })
+
+    # Sort: non-ruled-out first, then by composite_score descending
+    results.sort(key=lambda r: (r["ruled_out"], -(r["composite_score"] or 0)))
+
+    return results
