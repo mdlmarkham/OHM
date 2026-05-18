@@ -727,6 +727,71 @@ class Graph:
 
         return query_threat_cluster(self._conn, ioc_node_id, edge_type=edge_type)
 
+    # ── Cybersecurity: Source Reliability ──────────────────────────────
+
+    def record_outcome(
+        self,
+        *,
+        source_agent: str,
+        claim_node: str,
+        outcome: bool,
+    ) -> dict[str, Any]:
+        """Record whether a source agent's claim was correct or incorrect.
+
+        Stores an outcome observation on the claim node. Use this to build
+        a reliability history for each source, enabling source_reliability()
+        to compute P(accurate) and false_positive_rate.
+
+        Example:
+            g.record_outcome(source_agent=edr_node, claim_node=alert_node, outcome=False)
+            # EDR was wrong about this alert (false positive)
+
+            g.record_outcome(source_agent=siem_node, claim_node=alert_node, outcome=True)
+            # SIEM was correct about this alert
+
+        Args:
+            source_agent: Agent node ID that made the claim.
+            claim_node: Node ID of the claim being evaluated.
+            outcome: True if the claim was correct, False if incorrect.
+
+        Returns:
+            The observation record.
+        """
+        from ohm.queries import query_record_outcome
+
+        return query_record_outcome(
+            self._conn,
+            source_agent=source_agent,
+            claim_node=claim_node,
+            outcome=outcome,
+            recorded_by=self.actor,
+        )
+
+    def source_reliability(
+        self,
+        source_agent: str,
+    ) -> dict[str, Any]:
+        """Compute source reliability metrics from historical outcomes.
+
+        Returns P(accurate), false_positive_rate, and claim counts for the
+        given source agent. Sources with high false_positive_rate should be
+        downweighted in composite scores.
+
+        Example:
+            g.source_reliability(edr_node)
+            → {p_accurate: 0.7, false_positive_rate: 0.3, total_claims: 100, ...}
+
+        Args:
+            source_agent: Agent node ID to evaluate.
+
+        Returns:
+            Dict with P(accurate), false_positive_rate, total_claims,
+            correct_claims, incorrect_claims.
+        """
+        from ohm.queries import query_source_reliability
+
+        return query_source_reliability(self._conn, source_agent)
+
     def neighborhood(
         self,
         node_id: str,

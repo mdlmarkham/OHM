@@ -546,6 +546,72 @@ class TestThreatCluster:
             results = g.threat_cluster(ioc["id"])
             assert len(results) == 0
 
+    def test_record_outcome_stores_observation(self, tmp_path):
+        """record_outcome stores an outcome record in ohm_outcomes."""
+        db = str(tmp_path / "record_outcome.duckdb")
+        with connect(db, actor="analyst") as g:
+            g.register_agent(values=["security"])
+            edr = g.create_node(label="EDR Sensor", node_type="system")
+            alert = g.create_node(label="Suspicious Login", node_type="event")
+
+            obs = g.record_outcome(
+                source_agent=edr["id"],
+                claim_node=alert["id"],
+                outcome=False,
+            )
+            assert obs["source_agent"] == edr["id"]
+            assert obs["claim_node"] == alert["id"]
+            assert obs["outcome"] is False
+            assert obs["recorded_by"] == "analyst"
+
+    def test_record_outcome_true_stores_one(self, tmp_path):
+        """record_outcome with outcome=True stores outcome=True."""
+        db = str(tmp_path / "record_outcome_true.duckdb")
+        with connect(db, actor="analyst") as g:
+            g.register_agent(values=["security"])
+            siem = g.create_node(label="SIEM", node_type="system")
+            alert = g.create_node(label="Brute Force", node_type="event")
+
+            obs = g.record_outcome(
+                source_agent=siem["id"],
+                claim_node=alert["id"],
+                outcome=True,
+            )
+            assert obs["outcome"] is True
+
+    def test_source_reliability_computes_metrics(self, tmp_path):
+        """source_reliability computes P(accurate) from outcomes."""
+        db = str(tmp_path / "source_reliability.duckdb")
+        with connect(db, actor="analyst") as g:
+            g.register_agent(values=["security"])
+            edr = g.create_node(label="EDR", node_type="system")
+            alert1 = g.create_node(label="Alert 1", node_type="event")
+            alert2 = g.create_node(label="Alert 2", node_type="event")
+            alert3 = g.create_node(label="Alert 3", node_type="event")
+
+            # EDR: 2 correct, 1 incorrect → P(accurate) = 0.67
+            g.record_outcome(source_agent=edr["id"], claim_node=alert1["id"], outcome=True)
+            g.record_outcome(source_agent=edr["id"], claim_node=alert2["id"], outcome=True)
+            g.record_outcome(source_agent=edr["id"], claim_node=alert3["id"], outcome=False)
+
+            result = g.source_reliability(edr["id"])
+            assert result["total_outcomes"] == 3
+            assert result["accurate_count"] == 2
+            assert result["false_positive_count"] == 1
+            assert result["p_accurate"] == pytest.approx(2 / 3, abs=0.01)
+            assert result["false_positive_rate"] == pytest.approx(1 / 3, abs=0.01)
+
+    def test_source_reliability_no_data(self, tmp_path):
+        """source_reliability with no outcomes returns zero counts."""
+        db = str(tmp_path / "source_reliability_empty.duckdb")
+        with connect(db, actor="analyst") as g:
+            g.register_agent(values=["security"])
+            edr = g.create_node(label="New EDR", node_type="system")
+
+            result = g.source_reliability(edr["id"])
+            assert result["total_outcomes"] == 0
+            assert result["p_accurate"] is None
+
 
 class TestConnectionDiscovery:
     def test_suggest_connections_returns_list(self, tmp_path):

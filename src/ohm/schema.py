@@ -89,6 +89,7 @@ VALID_LAYERS = frozenset(LAYER_EDGE_TYPES.keys())
 VALID_OBSERVATION_TYPES = frozenset({
     "anomaly", "measurement", "pattern", "challenge", "support",
     "sentiment",  # customer support: sentiment observation
+    "outcome",    # cybersecurity: source reliability outcome tracking
 })
 
 VALID_OBSERVATION_SOURCES = frozenset({
@@ -379,11 +380,23 @@ DDL_STATEMENTS: list[str] = [
         value VARCHAR NOT NULL
     );
     """,
+    # ── Source Reliability Outcomes ──────────────────────────────────────
+    """
+    CREATE TABLE IF NOT EXISTS ohm_outcomes (
+        id           VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        source_agent VARCHAR NOT NULL,
+        claim_node   VARCHAR NOT NULL,
+        outcome      BOOLEAN NOT NULL,
+        recorded_by  VARCHAR NOT NULL,
+        recorded_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        notes        TEXT
+    );
+    """,
 ]
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.6.0"
+SCHEMA_VERSION = "0.7.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -409,6 +422,19 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
     ("0.6.0", "add urgency/priority columns and sentiment observation type", [
         "ALTER TABLE ohm_nodes ADD COLUMN urgency VARCHAR DEFAULT 'normal'",
         "ALTER TABLE ohm_nodes ADD COLUMN priority VARCHAR",
+    ]),
+    ("0.7.0", "add ohm_outcomes table for source reliability tracking", [
+        """CREATE TABLE IF NOT EXISTS ohm_outcomes (
+            id          VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+            source_agent VARCHAR NOT NULL,
+            claim_node  VARCHAR NOT NULL,
+            outcome     BOOLEAN NOT NULL,
+            recorded_by VARCHAR NOT NULL,
+            recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            notes       TEXT
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_outcomes_source ON ohm_outcomes(source_agent)",
+        "CREATE INDEX IF NOT EXISTS idx_outcomes_claim ON ohm_outcomes(claim_node)",
     ]),
 ]
 
@@ -437,6 +463,9 @@ INDEX_DDL: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_feed_time ON ohm_change_feed(occurred_at);",
     # Composite index for CTE traversal (from_node + layer + edge_type)
     "CREATE INDEX IF NOT EXISTS idx_edges_traversal ON ohm_edges(from_node, layer, edge_type);",
+    # Source reliability indexes
+    "CREATE INDEX IF NOT EXISTS idx_outcomes_source ON ohm_outcomes(source_agent);",
+    "CREATE INDEX IF NOT EXISTS idx_outcomes_claim ON ohm_outcomes(claim_node);",
 ]
 
 

@@ -456,6 +456,106 @@ def query_threat_cluster(
     return _rows_to_dicts(result)
 
 
+# ── Source Reliability ──────────────────────────────────────────────────────
+
+def query_record_outcome(
+    conn: DuckDBPyConnection,
+    *,
+    source_agent: str,
+    claim_node: str,
+    outcome: bool,
+    recorded_by: str,
+    notes: str | None = None,
+) -> dict[str, Any]:
+    """Record whether a source agent's claim was correct.
+
+    Stores an outcome record in ohm_outcomes for later reliability
+    computation. Used in cybersecurity incident response to calibrate
+    source trustworthiness over time.
+
+    Args:
+        conn: Database connection.
+        source_agent: The agent whose claim is being evaluated.
+        claim_node: The node representing the claim.
+        outcome: True if the source was correct, False otherwise.
+        recorded_by: Agent recording the outcome.
+        notes: Optional context about the outcome.
+
+    Returns:
+        The created outcome record.
+    """
+    import uuid
+
+    from ohm.validation import validate_identifier
+
+    source_agent = validate_identifier(source_agent, name="source_agent")
+    claim_node = validate_identifier(claim_node, name="claim_node")
+    recorded_by = validate_identifier(recorded_by, name="recorded_by")
+
+    outcome_id = str(uuid.uuid4())
+    conn.execute(
+        """INSERT INTO ohm_outcomes
+           (id, source_agent, claim_node, outcome, recorded_by, notes)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        [outcome_id, source_agent, claim_node, outcome, recorded_by, notes],
+    )
+    _log_change(conn, "ohm_outcomes", outcome_id, "INSERT", recorded_by)
+    return _rows_to_dicts(
+        conn.execute("SELECT * FROM ohm_outcomes WHERE id = ?", [outcome_id])
+    )[0]
+
+
+def query_source_reliability(
+    conn: DuckDBPyConnection,
+    source_agent: str,
+) -> dict[str, Any]:
+    """Compute reliability metrics for a source agent.
+
+    Returns P(accurate) and false_positive_rate computed from historical
+    outcomes. If fewer than 5 outcomes recorded, returns a warning that
+    the estimate is low-confidence.
+
+    Args:
+        conn: Database connection.
+        source_agent: The agent to evaluate.
+
+    Returns:
+        Dict with source_agent, total_outcomes, accurate_count,
+        false_positive_count, p_accurate, false_positive_rate,
+        and low_confidence_warning (bool).
+    """
+    from ohm.validation import validate_identifier
+
+    source_agent = validate_identifier(source_agent, name="source_agent")
+
+    result = conn.execute(
+        """SELECT
+            COUNT(*) AS total,
+            SUM(CASE WHEN outcome THEN 1 ELSE 0 END) AS accurate,
+            SUM(CASE WHEN NOT outcome THEN 1 ELSE 0 END) AS false_positives
+        FROM ohm_outcomes
+        WHERE source_agent = ?""",
+        [source_agent],
+    ).fetchone()
+
+    total = result[0] if result else 0
+    accurate = result[1] or 0
+    false_positives = result[2] or 0
+
+    p_accurate = round(accurate / total, 4) if total > 0 else None
+    fpr = round(false_positives / total, 4) if total > 0 else None
+
+    return {
+        "source_agent": source_agent,
+        "total_outcomes": total,
+        "accurate_count": accurate,
+        "false_positive_count": false_positives,
+        "p_accurate": p_accurate,
+        "false_positive_rate": fpr,
+        "low_confidence_warning": total < 5,
+    }
+
+
 # ── Agent State ─────────────────────────────────────────────────────────────
 
 def query_agent_state(
@@ -2049,3 +2149,100 @@ def query_ticket_provenance(
     """
     result = conn.execute(query, [ticket_node, ticket_node])
     return _rows_to_dicts(result)
+
+
+# ── Cybersecurity: Source Reliability ────────────────────────────────────────
+
+def record_outcome(
+    conn: DuckDBPyConnection,
+    *,
+    source_agent: str,
+    claim_node: str,
+    outcome: bool,
+    created_by: str = "unknown",
+) -> dict[str, Any]:
+    """Record whether a source agent's claim was correct or incorrect.
+
+    Stores an observation on the claim node with obs_type='outcome',
+    value=1.0 for correct (True) and value=0.0 for incorrect (False).
+    The source_agent is recorded in the provenance field.
+
+    This enables source_reliability() to compute P(accurate) and
+    false_positive_rate for each source over time.
+
+    Args:
+        conn: Database connection.
+        source_agent: Agent node ID that made the claim.
+        claim_node: Node ID of the claim being evaluated.
+        outcome: True if the claim was correct, False if incorrect.
+        created_by: Actor recording the outcome.
+
+    Returns:
+        The observation record.
+    """
+    from ohm.validation import validate_identifier
+
+    source_agent = validate_identifier(source_agent, name="source_agent")
+    claim_node = validate_identifier(claim_node, name="claim_node")
+
+    return create_observation(
+        conn,
+        node_id=claim_node,
+        obs_type="outcome",
+        value=1.0 if outcome else 0.0,
+        source=source_agent,
+        created_by=created_by,
+    )
+
+
+def source_reliability(
+    conn: DuckDBPyConnection,
+    source_agent: str,
+) -> dict[str, Any]:
+    """Compute source reliability metrics from historical outcomes.
+
+    Analyzes all 'outcome' observations attributed to the given source
+    agent and computes:
+    - P(accurate): fraction of claims that were correct
+    - false_positive_rate: fraction of claims that were incorrect
+    - total_claims: number of outcome observations
+    - correct_claims: number of correct claims
+    - incorrect_claims: number of incorrect claims
+
+    Args:
+        conn: Database connection.
+        source_agent: Agent node ID to evaluate.
+
+    Returns:
+        Dict with P(accurate), false_positive_rate, total_claims,
+        correct_claims, incorrect_claims.
+    """
+    from ohm.validation import validate_identifier
+
+    source_agent = validate_identifier(source_agent, name="source_agent")
+
+    result = conn.execute(
+        """SELECT
+            COUNT(*) AS total_claims,
+            SUM(CASE WHEN value >= 0.5 THEN 1 ELSE 0 END) AS correct_claims,
+            SUM(CASE WHEN value < 0.5 THEN 1 ELSE 0 END) AS incorrect_claims
+           FROM ohm_observations
+           WHERE type = 'outcome' AND source = ?""",
+        [source_agent],
+    ).fetchone()
+
+    total = result[0] or 0
+    correct = result[1] or 0
+    incorrect = result[2] or 0
+
+    p_accurate = correct / total if total > 0 else None
+    fp_rate = incorrect / total if total > 0 else None
+
+    return {
+        "source_agent": source_agent,
+        "p_accurate": round(p_accurate, 4) if p_accurate is not None else None,
+        "false_positive_rate": round(fp_rate, 4) if fp_rate is not None else None,
+        "total_claims": total,
+        "correct_claims": correct,
+        "incorrect_claims": incorrect,
+    }
