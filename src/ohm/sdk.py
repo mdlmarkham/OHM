@@ -757,14 +757,14 @@ class Graph:
         Returns:
             Dict with source_agent, claim_node, outcome, and recorded_by.
         """
-        from ohm.queries import record_outcome
+        from ohm.queries import query_record_outcome
 
-        return record_outcome(
+        return query_record_outcome(
             self._conn,
             source_agent=source_agent,
             claim_node=claim_node,
             outcome=outcome,
-            created_by=self.actor,
+            recorded_by=self.actor,
         )
 
     def source_reliability(
@@ -788,9 +788,9 @@ class Graph:
             Dict with P(accurate), false_positive_rate, total_outcomes,
             accurate_count, false_positive_count.
         """
-        from ohm.queries import source_reliability
+        from ohm.queries import query_source_reliability
 
-        return source_reliability(self._conn, source_agent)
+        return query_source_reliability(self._conn, source_agent)
         from ohm.queries import query_source_reliability
 
         return query_source_reliability(self._conn, source_agent)

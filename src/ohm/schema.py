@@ -89,7 +89,6 @@ VALID_LAYERS = frozenset(LAYER_EDGE_TYPES.keys())
 VALID_OBSERVATION_TYPES = frozenset({
     "anomaly", "measurement", "pattern", "challenge", "support",
     "sentiment",  # customer support: sentiment observation
-    "outcome",    # cybersecurity: source reliability outcome tracking
 })
 
 VALID_OBSERVATION_SOURCES = frozenset({
