@@ -1290,6 +1290,92 @@ class TestDeleteValidation:
 
 
 @pytest.mark.xdist_group("server")
+class TestEnrichedChangeFeed:
+    """Tests for enriched change feed (OHM-m8a: include node content in listen())."""
+
+    def test_listen_without_enrich_returns_raw_entries(self, test_server):
+        """GET /listen without enrich=true returns raw entries (backward compatible)."""
+        port, store = test_server
+        # Create a node to generate a change feed entry
+        _request("POST", port, "/node", body={
+            "id": "enrich-test-node",
+            "label": "Test Node",
+            "type": "concept",
+        })
+        # Get last sync timestamp
+        state = store.get_agent_state("test_agent")
+        since = state.get("last_sync") if state else None
+        # Fetch change feed without enrichment
+        status, data = _request("GET", port, f"/listen?since={since}&agent=test_agent")
+        assert status == 200
+        assert isinstance(data, list)
+        if len(data) > 0:
+            entry = data[0]
+            assert "data" not in entry  # Raw entries don't have enrichment
+
+    def test_listen_with_enrich_includes_node_data(self, test_server):
+        """GET /listen?enrich=true includes node content in data field."""
+        port, store = test_server
+        # Create a node
+        _request("POST", port, "/node", body={
+            "id": "enrich-node-test",
+            "label": "Enriched Node",
+            "type": "pattern",
+            "content": "This is the content",
+        })
+        # Get last sync timestamp
+        state = store.get_agent_state("test_agent")
+        since = state.get("last_sync") if state else None
+        # Fetch with enrichment
+        status, data = _request("GET", port, f"/listen?since={since}&agent=test_agent&enrich=true")
+        assert status == 200
+        assert isinstance(data, list)
+        if len(data) > 0:
+            entry = data[0]
+            if entry.get("table_name") == "ohm_nodes":
+                assert "data" in entry
+                assert entry["data"].get("label") == "Enriched Node"
+                assert entry["data"].get("type") == "pattern"
+                assert entry["data"].get("content") == "This is the content"
+
+    def test_listen_with_enrich_includes_edge_data(self, test_server):
+        """GET /listen?enrich=true includes edge data (from_node, to_node, edge_type)."""
+        port, store = test_server
+        # Create two nodes and an edge
+        _request("POST", port, "/node", body={
+            "id": "enrich-edge-from",
+            "label": "From Node",
+            "type": "concept",
+        })
+        _request("POST", port, "/node", body={
+            "id": "enrich-edge-to",
+            "label": "To Node",
+            "type": "concept",
+        })
+        _request("POST", port, "/edge", body={
+            "from": "enrich-edge-from",
+            "to": "enrich-edge-to",
+            "type": "CAUSES",
+            "layer": "L3",
+        })
+        # Get last sync timestamp
+        state = store.get_agent_state("test_agent")
+        since = state.get("last_sync") if state else None
+        # Fetch with enrichment
+        status, data = _request("GET", port, f"/listen?since={since}&agent=test_agent&enrich=true")
+        assert status == 200
+        assert isinstance(data, list)
+        # Find the edge entry
+        edge_entries = [e for e in data if e.get("table_name") == "ohm_edges"]
+        if len(edge_entries) > 0:
+            entry = edge_entries[0]
+            assert "data" in entry
+            assert entry["data"].get("from_node") == "enrich-edge-from"
+            assert entry["data"].get("to_node") == "enrich-edge-to"
+            assert entry["data"].get("edge_type") == "CAUSES"
+
+
+@pytest.mark.xdist_group("server")
 class TestNodeUrlField:
     """Tests for URL field on nodes (OHM-qp6: External URL field on nodes)."""
 

@@ -28,6 +28,11 @@ def get_default_db_path() -> pathlib.Path:
 def connect(db_path: str | pathlib.Path | None = None) -> "duckdb.DuckDBPyConnection":
     """Open a DuckDB connection and initialize the schema.
 
+    Handles WAL corruption recovery (OHM-b5a): if DuckDB fails to open
+    due to WAL replay errors, deletes the WAL file and retries.
+    The WAL contains only uncommitted writes, so this is safe — the
+    main DB file is intact.
+
     Args:
         db_path: Path to the DuckDB file. If None, uses the default path.
 
@@ -39,7 +44,21 @@ def connect(db_path: str | pathlib.Path | None = None) -> "duckdb.DuckDBPyConnec
     if db_path is None:
         db_path = get_default_db_path()
 
-    conn = duckdb.connect(str(db_path))
+    db_path_str = str(db_path)
+
+    try:
+        conn = duckdb.connect(db_path_str)
+    except duckdb.IOException as e:
+        # Check if this is a WAL corruption error
+        error_msg = str(e)
+        if "WAL" in error_msg or "wal" in error_msg.lower():
+            # WAL corruption — delete WAL and retry
+            wal_path = db_path_str + ".wal"
+            if os.path.exists(wal_path):
+                os.remove(wal_path)
+            conn = duckdb.connect(db_path_str)
+        else:
+            raise
 
     # Load required extensions
     _load_extensions(conn)

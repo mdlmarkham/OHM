@@ -332,6 +332,7 @@ def query_change_feed(
     node_type: str | None = None,
     node_id: str | None = None,
     limit: int = 100,
+    enrich: bool = False,
 ) -> list[dict[str, Any]]:
     """Retrieve the change feed since a given timestamp.
 
@@ -345,9 +346,12 @@ def query_change_feed(
         node_id: Filter to changes for a specific node (by node ID).
             Matches changes where row_id is that node OR edges touching it.
         limit: Maximum number of changes to return.
+        enrich: If True, include node/edge data (label, type, content for
+            nodes; from_node, to_node, edge_type for edges) in each entry.
 
     Returns:
         List of change feed entries ordered by time descending.
+        If enrich=True, each entry includes a 'data' field with node/edge content.
     """
     from ohm.validation import validate_identifier, validate_timestamp
 
@@ -405,7 +409,39 @@ def query_change_feed(
     params.append(limit)
 
     result = conn.execute(query, params)
-    return _rows_to_dicts(result)
+    entries = _rows_to_dicts(result)
+
+    # Optional enrichment: fetch node/edge data for each entry
+    if enrich and entries:
+        for entry in entries:
+            table = entry.get("table_name")
+            row_id = entry.get("row_id")
+            if table == "ohm_nodes" and row_id:
+                node = conn.execute(
+                    "SELECT label, type, content, created_by FROM ohm_nodes WHERE id = ?",
+                    [row_id],
+                ).fetchone()
+                if node:
+                    entry["data"] = {
+                        "label": node[0],
+                        "type": node[1],
+                        "content": node[2],
+                        "created_by": node[3],
+                    }
+            elif table == "ohm_edges" and row_id:
+                edge = conn.execute(
+                    "SELECT from_node, to_node, edge_type, layer FROM ohm_edges WHERE id = ?",
+                    [row_id],
+                ).fetchone()
+                if edge:
+                    entry["data"] = {
+                        "from_node": edge[0],
+                        "to_node": edge[1],
+                        "edge_type": edge[2],
+                        "layer": edge[3],
+                    }
+
+    return entries
 
 
 # ── Threat Cluster ──────────────────────────────────────────────────────────

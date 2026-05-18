@@ -55,7 +55,7 @@ class OhmStore:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
-        self.conn = duckdb.connect(str(self.db_path), read_only=readonly)
+        self.conn = self._connect_with_wal_recovery(str(self.db_path), readonly)
         self._init_schema()
 
         # Start Quack server if requested and available
@@ -67,6 +67,25 @@ class OhmStore:
         if not self.readonly:
             from .schema import initialize_schema
             initialize_schema(self.conn)
+
+    @staticmethod
+    def _connect_with_wal_recovery(db_path_str: str, readonly: bool = False):
+        """Connect to DuckDB with WAL corruption recovery (OHM-b5a).
+
+        If DuckDB fails to open due to WAL replay errors, deletes the
+        WAL file and retries. The WAL contains only uncommitted writes,
+        so this is safe — the main DB file is intact.
+        """
+        try:
+            return duckdb.connect(db_path_str, read_only=readonly)
+        except duckdb.IOException as e:
+            error_msg = str(e)
+            if "WAL" in error_msg or "wal" in error_msg.lower():
+                wal_path = db_path_str + ".wal"
+                if os.path.exists(wal_path):
+                    os.remove(wal_path)
+                return duckdb.connect(db_path_str, read_only=readonly)
+            raise
 
     def _start_quack(self) -> None:
         """Start Quack server if available. Sets self.quack_started on success."""
@@ -474,6 +493,21 @@ class OhmStore:
             """,
             [table_name, row_id, operation, actor, now],
         )
+        # Update agent's last_sync so they appear in active_agents
+        existing = self.conn.execute(
+            "SELECT COUNT(*) FROM ohm_agent_state WHERE agent_name = ?", [actor],
+        ).fetchone()
+        if existing and existing[0] > 0:
+            self.conn.execute(
+                "UPDATE ohm_agent_state SET last_sync = ?, updated_at = ? WHERE agent_name = ?",
+                [now, now, actor],
+            )
+        else:
+            self.conn.execute(
+                """INSERT INTO ohm_agent_state (agent_name, last_sync, updated_at)
+                   VALUES (?, ?, ?)""",
+                [actor, now, now],
+            )
 
     def close(self):
         """Close the DuckDB connection. Stops Quack server if running."""

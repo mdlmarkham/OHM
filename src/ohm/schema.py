@@ -517,7 +517,13 @@ def _ensure_meta_table(conn: "DuckDBPyConnection") -> None:
 
 
 def _apply_migrations(conn: "DuckDBPyConnection") -> None:
-    """Apply pending migrations based on the current schema version."""
+    """Apply pending migrations based on the current schema version.
+
+    Safety measures against WAL corruption (OHM-b5a):
+    1. Checkpoint before migrations to flush pending WAL entries
+    2. Each migration runs in its own transaction
+    3. Checkpoint after each migration to commit schema changes to disk
+    """
     current = conn.execute(
         "SELECT value FROM ohm_meta WHERE key = 'schema_version'"
     ).fetchone()
@@ -530,16 +536,41 @@ def _apply_migrations(conn: "DuckDBPyConnection") -> None:
 
     for version, description, statements in MIGRATIONS:
         if current_key < _version_tuple(version):
-            for stmt in statements:
+            # Checkpoint before migration to flush any pending WAL entries
+            # This prevents WAL replay failures if the daemon is restarted
+            # during or after migration.
+            try:
+                conn.execute("PRAGMA checkpoint")
+            except Exception:
+                pass
+
+            # Run migration statements in a transaction for atomicity
+            try:
+                conn.execute("BEGIN TRANSACTION")
+                for stmt in statements:
+                    try:
+                        conn.execute(stmt)
+                    except Exception:
+                        # DuckDB ALTER TABLE ADD COLUMN fails if column exists
+                        pass  # Column/table already exists — safe to ignore
+                conn.execute("COMMIT")
+            except Exception:
                 try:
-                    conn.execute(stmt)
+                    conn.execute("ROLLBACK")
                 except Exception:
-                    # DuckDB ALTER TABLE ADD COLUMN fails if column exists
-                    pass  # Column/table already exists — safe to ignore
+                    pass
+                raise  # Re-raise — migration failure should be visible
+
+            # Update version and checkpoint to persist schema change
             conn.execute(
                 "UPDATE ohm_meta SET value = ? WHERE key = 'schema_version'",
                 [version],
             )
+            try:
+                conn.execute("PRAGMA checkpoint")
+            except Exception:
+                pass
+
             current_key = _version_tuple(version)
 
 

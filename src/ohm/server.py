@@ -1013,6 +1013,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         elif path == "/listen":
             since = qs.get("since", [None])[0]
             agent_name = qs.get("agent", [agent or "ohm"])[0]
+            enrich = qs.get("enrich", ["false"])[0].lower() == "true"
             if not since:
                 state = self.store.get_agent_state(agent_name)
                 if state and state.get("last_sync"):
@@ -1020,7 +1021,9 @@ class OhmHandler(BaseHTTPRequestHandler):
                 else:
                     raise ValidationError("No last-check timestamp. Use ?since=ISO_TIMESTAMP")
             from .queries import query_change_feed
-            results = query_change_feed(self.store.conn, since=since, agent_name=agent_name)
+            results = query_change_feed(
+                self.store.conn, since=since, agent_name=agent_name, enrich=enrich
+            )
             self._json_response(200, results)
         elif path == "/search":
             query_text = qs.get("q", [""])[0]
