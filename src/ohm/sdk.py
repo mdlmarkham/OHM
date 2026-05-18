@@ -755,16 +755,16 @@ class Graph:
             outcome: True if the claim was correct, False if incorrect.
 
         Returns:
-            The observation record.
+            Dict with source_agent, claim_node, outcome, and recorded_by.
         """
-        from ohm.queries import query_record_outcome
+        from ohm.queries import record_outcome
 
-        return query_record_outcome(
+        return record_outcome(
             self._conn,
             source_agent=source_agent,
             claim_node=claim_node,
             outcome=outcome,
-            recorded_by=self.actor,
+            created_by=self.actor,
         )
 
     def source_reliability(
@@ -773,21 +773,24 @@ class Graph:
     ) -> dict[str, Any]:
         """Compute source reliability metrics from historical outcomes.
 
-        Returns P(accurate), false_positive_rate, and claim counts for the
+        Returns P(accurate), false_positive_rate, and outcome counts for the
         given source agent. Sources with high false_positive_rate should be
         downweighted in composite scores.
 
         Example:
             g.source_reliability(edr_node)
-            → {p_accurate: 0.7, false_positive_rate: 0.3, total_claims: 100, ...}
+            → {p_accurate: 0.7, false_positive_rate: 0.3, total_outcomes: 100, ...}
 
         Args:
             source_agent: Agent node ID to evaluate.
 
         Returns:
-            Dict with P(accurate), false_positive_rate, total_claims,
-            correct_claims, incorrect_claims.
+            Dict with P(accurate), false_positive_rate, total_outcomes,
+            accurate_count, false_positive_count.
         """
+        from ohm.queries import source_reliability
+
+        return source_reliability(self._conn, source_agent)
         from ohm.queries import query_source_reliability
 
         return query_source_reliability(self._conn, source_agent)

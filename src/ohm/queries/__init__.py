@@ -2165,7 +2165,7 @@ def record_outcome(
 
     Stores an observation on the claim node with obs_type='outcome',
     value=1.0 for correct (True) and value=0.0 for incorrect (False).
-    The source_agent is recorded in the provenance field.
+    The source_agent is recorded in the source field.
 
     This enables source_reliability() to compute P(accurate) and
     false_positive_rate for each source over time.
@@ -2178,14 +2178,14 @@ def record_outcome(
         created_by: Actor recording the outcome.
 
     Returns:
-        The observation record.
+        Dict with source_agent, claim_node, outcome, and recorded_by.
     """
     from ohm.validation import validate_identifier
 
     source_agent = validate_identifier(source_agent, name="source_agent")
     claim_node = validate_identifier(claim_node, name="claim_node")
 
-    return create_observation(
+    create_observation(
         conn,
         node_id=claim_node,
         obs_type="outcome",
@@ -2193,6 +2193,13 @@ def record_outcome(
         source=source_agent,
         created_by=created_by,
     )
+
+    return {
+        "source_agent": source_agent,
+        "claim_node": claim_node,
+        "outcome": outcome,
+        "recorded_by": created_by,
+    }
 
 
 def source_reliability(
@@ -2205,17 +2212,17 @@ def source_reliability(
     agent and computes:
     - P(accurate): fraction of claims that were correct
     - false_positive_rate: fraction of claims that were incorrect
-    - total_claims: number of outcome observations
-    - correct_claims: number of correct claims
-    - incorrect_claims: number of incorrect claims
+    - total_outcomes: number of outcome observations
+    - accurate_count: number of correct claims
+    - false_positive_count: number of incorrect claims
 
     Args:
         conn: Database connection.
         source_agent: Agent node ID to evaluate.
 
     Returns:
-        Dict with P(accurate), false_positive_rate, total_claims,
-        correct_claims, incorrect_claims.
+        Dict with P(accurate), false_positive_rate, total_outcomes,
+        accurate_count, false_positive_count.
     """
     from ohm.validation import validate_identifier
 
@@ -2223,26 +2230,26 @@ def source_reliability(
 
     result = conn.execute(
         """SELECT
-            COUNT(*) AS total_claims,
-            SUM(CASE WHEN value >= 0.5 THEN 1 ELSE 0 END) AS correct_claims,
-            SUM(CASE WHEN value < 0.5 THEN 1 ELSE 0 END) AS incorrect_claims
+            COUNT(*) AS total_outcomes,
+            SUM(CASE WHEN value >= 0.5 THEN 1 ELSE 0 END) AS accurate_count,
+            SUM(CASE WHEN value < 0.5 THEN 1 ELSE 0 END) AS false_positive_count
            FROM ohm_observations
            WHERE type = 'outcome' AND source = ?""",
         [source_agent],
     ).fetchone()
 
     total = result[0] or 0
-    correct = result[1] or 0
-    incorrect = result[2] or 0
+    accurate = result[1] or 0
+    fp_count = result[2] or 0
 
-    p_accurate = correct / total if total > 0 else None
-    fp_rate = incorrect / total if total > 0 else None
+    p_accurate = accurate / total if total > 0 else None
+    fp_rate = fp_count / total if total > 0 else None
 
     return {
         "source_agent": source_agent,
         "p_accurate": round(p_accurate, 4) if p_accurate is not None else None,
         "false_positive_rate": round(fp_rate, 4) if fp_rate is not None else None,
-        "total_claims": total,
-        "correct_claims": correct,
-        "incorrect_claims": incorrect,
+        "total_outcomes": total,
+        "accurate_count": accurate,
+        "false_positive_count": fp_count,
     }
