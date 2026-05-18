@@ -144,3 +144,229 @@ class TestDuckLakeSync:
         result = store.sync_heartbeat()  # Uses env var
         assert result["pushed"] >= 1
         store.close()
+
+
+class TestDuckLakeExtension:
+    """Tests for DuckLake extension loading and catalog setup (OHM-kdk.1)."""
+
+    def test_ducklake_extension_loads(self, tmp_path):
+        """DuckLake extension loads without error."""
+        import duckdb
+        from ohm.db import _load_extensions
+
+        conn = duckdb.connect(str(tmp_path / "test.duckdb"))
+        _load_extensions(conn)
+
+        # Verify DuckLake extension is loaded
+        result = conn.execute(
+            "SELECT extension_name FROM duckdb_extensions() "
+            "WHERE loaded = true AND extension_name = 'ducklake'"
+        ).fetchone()
+        conn.close()
+
+        # DuckLake extension should be available in DuckDB 1.5+
+        assert result is not None, "DuckLake extension should load"
+
+    def test_attach_ducklake_creates_catalog(self, tmp_path):
+        """attach_ducklake creates a DuckLake catalog with mirror tables."""
+        import duckdb
+        from ohm.db import connect, attach_ducklake
+
+        db_path = str(tmp_path / "test.duckdb")
+        conn = connect(db_path)
+
+        catalog_path = str(tmp_path / "ohm_lake.ducklake")
+        data_path = str(tmp_path / "ohm_lake_data")
+
+        result = attach_ducklake(conn, catalog_path=catalog_path, data_path=data_path)
+        assert result is True, "DuckLake should attach successfully"
+
+        # Verify mirror tables exist in the ohm_lake schema
+        tables = conn.execute(
+            "SELECT table_name FROM duckdb_tables() WHERE database_name = 'ohm_lake'"
+        ).fetchall()
+        table_names = {t[0] for t in tables}
+
+        assert "ohm_nodes" in table_names, "ohm_nodes mirror table should exist"
+        assert "ohm_edges" in table_names, "ohm_edges mirror table should exist"
+        assert "ohm_observations" in table_names, "ohm_observations mirror table should exist"
+        assert "ohm_change_feed" in table_names, "ohm_change_feed mirror table should exist"
+
+        conn.close()
+
+    def test_attach_ducklake_no_pks(self, tmp_path):
+        """DuckLake mirror tables have no PRIMARY KEY constraints."""
+        import duckdb
+        from ohm.db import connect, attach_ducklake
+
+        db_path = str(tmp_path / "test.duckdb")
+        conn = connect(db_path)
+
+        catalog_path = str(tmp_path / "ohm_lake.ducklake")
+        data_path = str(tmp_path / "ohm_lake_data")
+
+        attach_ducklake(conn, catalog_path=catalog_path, data_path=data_path)
+
+        # Verify ohm_nodes has no PRIMARY KEY (DuckLake constraint)
+        # DuckDB stores constraint info in duckdb_constraints()
+        constraints = conn.execute(
+            "SELECT constraint_type, table_name FROM duckdb_constraints() "
+            "WHERE database_name = 'ohm_lake'"
+        ).fetchall()
+
+        pk_constraints = [c for c in constraints if c[0] == "PRIMARY KEY"]
+        assert len(pk_constraints) == 0, (
+            f"DuckLake tables should have no PRIMARY KEY, found: {pk_constraints}"
+        )
+
+        conn.close()
+
+    def test_attach_ducklake_varchar_columns(self, tmp_path):
+        """DuckLake mirror tables use VARCHAR for all columns."""
+        import duckdb
+        from ohm.db import connect, attach_ducklake
+
+        db_path = str(tmp_path / "test.duckdb")
+        conn = connect(db_path)
+
+        catalog_path = str(tmp_path / "ohm_lake.ducklake")
+        data_path = str(tmp_path / "ohm_lake_data")
+
+        attach_ducklake(conn, catalog_path=catalog_path, data_path=data_path)
+
+        # Check ohm_nodes columns are all VARCHAR (except id which is VARCHAR too)
+        columns = conn.execute(
+            "SELECT column_name, data_type FROM duckdb_columns() "
+            "WHERE database_name = 'ohm_lake' AND table_name = 'ohm_nodes'"
+        ).fetchall()
+
+        for col_name, col_type in columns:
+            assert col_type == "VARCHAR", (
+                f"Column {col_name} should be VARCHAR, got {col_type}"
+            )
+
+        conn.close()
+
+    def test_attach_ducklake_idempotent(self, tmp_path):
+        """Attaching DuckLake twice does not error (idempotent)."""
+        import duckdb
+        from ohm.db import connect, attach_ducklake
+
+        db_path = str(tmp_path / "test.duckdb")
+        conn = connect(db_path)
+
+        catalog_path = str(tmp_path / "ohm_lake.ducklake")
+        data_path = str(tmp_path / "ohm_lake_data")
+
+        result1 = attach_ducklake(conn, catalog_path=catalog_path, data_path=data_path)
+        assert result1 is True
+
+        # Second attach should succeed (already attached)
+        result2 = attach_ducklake(conn, catalog_path=catalog_path, data_path=data_path)
+        assert result2 is True
+
+        conn.close()
+
+    def test_store_attach_ducklake_method(self, tmp_path):
+        """OhmStore.attach_ducklake() works with catalog_path argument."""
+        from ohm.store import OhmStore
+
+        db_path = str(tmp_path / "local.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test_agent")
+
+        catalog_path = str(tmp_path / "ohm_lake.ducklake")
+        data_path = str(tmp_path / "ohm_lake_data")
+
+        result = store.attach_ducklake(catalog_path=catalog_path, data_path=data_path)
+        assert result is True, "OhmStore.attach_ducklake should succeed"
+
+        # Verify tables exist
+        tables = store.conn.execute(
+            "SELECT table_name FROM duckdb_tables() WHERE database_name = 'ohm_lake'"
+        ).fetchall()
+        table_names = {t[0] for t in tables}
+        assert "ohm_nodes" in table_names
+
+        store.close()
+
+    def test_store_attach_ducklake_env_var(self, tmp_path, monkeypatch):
+        """OhmStore.attach_ducklake() uses OHM_DUCKLAKE_PATH env var."""
+        from ohm.store import OhmStore
+
+        db_path = str(tmp_path / "local.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test_agent")
+
+        catalog_path = str(tmp_path / "ohm_lake.ducklake")
+        data_path = str(tmp_path / "ohm_lake_data")
+        monkeypatch.setenv("OHM_DUCKLAKE_PATH", catalog_path)
+
+        result = store.attach_ducklake(data_path=data_path)
+        assert result is True
+
+        store.close()
+
+    def test_store_attach_ducklake_no_path_returns_false(self, tmp_path):
+        """OhmStore.attach_ducklake() returns False when no path configured."""
+        from ohm.store import OhmStore
+
+        db_path = str(tmp_path / "local.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test_agent")
+
+        result = store.attach_ducklake()
+        assert result is False, "Should return False when no DuckLake path configured"
+
+        store.close()
+
+    def test_ducklake_write_to_mirror_table(self, tmp_path):
+        """Can write to DuckLake mirror tables after attachment."""
+        import duckdb
+        from ohm.db import connect, attach_ducklake
+
+        db_path = str(tmp_path / "test.duckdb")
+        conn = connect(db_path)
+
+        catalog_path = str(tmp_path / "ohm_lake.ducklake")
+        data_path = str(tmp_path / "ohm_lake_data")
+
+        attach_ducklake(conn, catalog_path=catalog_path, data_path=data_path)
+
+        # Insert a row into the DuckLake mirror table
+        conn.execute(
+            "INSERT INTO ohm_lake.ohm_nodes "
+            "(id, label, type, created_by, created_at) "
+            "VALUES ('test-1', 'Test Node', 'concept', 'agent_a', '2026-01-01T00:00:00')"
+        )
+
+        # Read it back
+        result = conn.execute(
+            "SELECT id, label, type FROM ohm_lake.ohm_nodes WHERE id = 'test-1'"
+        ).fetchone()
+
+        assert result is not None
+        assert result[0] == "test-1"
+        assert result[1] == "Test Node"
+        assert result[2] == "concept"
+
+        conn.close()
+
+    def test_ducklake_config_in_default_config(self):
+        """DEFAULT_CONFIG includes ducklake configuration section."""
+        from ohm.server import DEFAULT_CONFIG
+
+        assert "ducklake" in DEFAULT_CONFIG
+        assert "path" in DEFAULT_CONFIG["ducklake"]
+        assert "data_path" in DEFAULT_CONFIG["ducklake"]
+        assert "sync_interval_seconds" in DEFAULT_CONFIG["ducklake"]
+        assert DEFAULT_CONFIG["ducklake"]["sync_interval_seconds"] == 60
+
+    def test_load_config_ducklake_env_vars(self, tmp_path, monkeypatch):
+        """load_config reads DuckLake env vars."""
+        from ohm.server import load_config
+
+        monkeypatch.setenv("OHM_DUCKLAKE_PATH", "/tmp/test_lake.ducklake")
+        monkeypatch.setenv("OHM_DUCKLAKE_DATA", "/tmp/test_lake_data")
+
+        config = load_config(config_path=str(tmp_path / "nonexistent.json"))
+
+        assert config["ducklake"]["path"] == "/tmp/test_lake.ducklake"
+        assert config["ducklake"]["data_path"] == "/tmp/test_lake_data"
