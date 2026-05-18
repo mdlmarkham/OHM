@@ -608,12 +608,10 @@ class OhmHandler(BaseHTTPRequestHandler):
                     raise ValidationError(str(e))
 
         elif validation_path == "/register":
-            from .validation import validate_identifier
-            if "name" in body and body["name"]:
-                try:
-                    validate_identifier(body["name"], name="agent_name")
-                except ValueError as e:
-                    raise ValidationError(str(e))
+            # Don't validate the display 'name' as an identifier — it's a human-readable
+            # label that may contain Unicode (e.g., "Métis"). The agent identifier comes
+            # from the auth token, not the body.
+            pass
 
         elif validation_path in ("/challenge", "/support"):
             if "confidence" in body and body["confidence"] is not None:
@@ -1245,7 +1243,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                 priority=body.get("priority"),
                 url=body.get("url"),
             )
-            is_new = node.get("created", False)
+            is_new = node.pop("created", False)
             self._json_response(201 if is_new else 200, node)
 
         elif path == "/edge":

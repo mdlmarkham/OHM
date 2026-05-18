@@ -802,7 +802,9 @@ def find_or_create_node(
         [label, node_type],
     ))
     if existing:
-        return existing[0]
+        node = existing[0]
+        node["created"] = False
+        return node
 
     # Not found — create a new one
     node = create_node(
