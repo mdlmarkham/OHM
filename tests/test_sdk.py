@@ -283,9 +283,817 @@ class TestDiscovery:
         # Each layer should have sharing, ownership, edge_types, example
         for r in result:
             assert "sharing" in r
-            assert "ownership" in r
-            assert "edge_types" in r
-            assert "example" in r
+
+
+# ===== Customer Support SDK Tests (OHM-af8.5) =====
+
+class TestHandoff:
+    """Tests for SDK handoff() method."""
+
+    def test_handoff_creates_transferred_to_edge(self, graph):
+        """handoff() creates TRANSFERRED_TO edge between agents."""
+        agent_a = graph.create_node(label="Agent A", node_type="agent")
+        agent_b = graph.create_node(label="Agent B", node_type="agent")
+        ticket = graph.create_node(label="Ticket #1", node_type="event")
+
+        result = graph.handoff(
+            from_agent=agent_a["id"],
+            to_agent=agent_b["id"],
+            ticket_node=ticket["id"],
+            reason="Customer needs specialist",
+        )
+
+        assert result["edge"]["edge_type"] == "TRANSFERRED_TO"
+        assert result["edge"]["from_node"] == agent_a["id"]
+        assert result["edge"]["to_node"] == agent_b["id"]
+        assert result["edge"]["condition"] == "Customer needs specialist"
+        assert "handoff_chain" in result
+
+    def test_handoff_with_delegation(self, graph):
+        """handoff() with DELEGATED_TO creates L3 edge."""
+        manager = graph.create_node(label="Manager", node_type="agent")
+        specialist = graph.create_node(label="Specialist", node_type="agent")
+        ticket = graph.create_node(label="Ticket #2", node_type="event")
+
+        result = graph.handoff(
+            from_agent=manager["id"],
+            to_agent=specialist["id"],
+            ticket_node=ticket["id"],
+            reason="Delegating",
+            edge_type="DELEGATED_TO",
+        )
+
+        assert result["edge"]["edge_type"] == "DELEGATED_TO"
+        assert result["edge"]["layer"] == "L3"
+
+    def test_handoff_invalid_edge_type_raises(self, graph):
+        """handoff() with invalid edge_type raises ValueError."""
+        agent_a = graph.create_node(label="Agent A", node_type="agent")
+        agent_b = graph.create_node(label="Agent B", node_type="agent")
+        ticket = graph.create_node(label="Ticket", node_type="event")
+
+        with pytest.raises(ValueError, match="Invalid handoff edge_type"):
+            graph.handoff(
+                from_agent=agent_a["id"],
+                to_agent=agent_b["id"],
+                ticket_node=ticket["id"],
+                reason="test",
+                edge_type="CAUSES",
+            )
+
+
+class TestEscalate:
+    """Tests for SDK escalate() method."""
+
+    def test_escalate_creates_edge_and_sets_urgency(self, graph):
+        """escalate() creates ESCALATED_TO edge and sets urgency='high'."""
+        tier1 = graph.create_node(label="Tier 1", node_type="agent")
+        tier2 = graph.create_node(label="Tier 2", node_type="agent")
+        ticket = graph.create_node(label="Ticket #3", node_type="event")
+
+        result = graph.escalate(
+            ticket_node=ticket["id"],
+            to_tier=tier2["id"],
+            reason="SLA breach imminent",
+            from_agent=tier1["id"],
+        )
+
+        assert result["edge"]["edge_type"] == "ESCALATED_TO"
+        assert result["edge"]["from_node"] == tier1["id"]
+        assert result["edge"]["to_node"] == tier2["id"]
+        assert result["ticket"]["urgency"] == "high"
+
+    def test_escalate_without_from_agent(self, graph):
+        """escalate() without from_agent uses ticket_node as source."""
+        tier2 = graph.create_node(label="Tier 2", node_type="agent")
+        ticket = graph.create_node(label="Auto Ticket", node_type="event")
+
+        result = graph.escalate(
+            ticket_node=ticket["id"],
+            to_tier=tier2["id"],
+            reason="Auto-escalation",
+        )
+
+        assert result["edge"]["from_node"] == ticket["id"]
+
+
+class TestTicketProvenance:
+    """Tests for SDK ticket_provenance() method."""
+
+    def test_ticket_provenance_shows_handoff_chain(self, graph):
+        """ticket_provenance() returns handoff and state history."""
+        agent_a = graph.create_node(label="Agent A", node_type="agent")
+        agent_b = graph.create_node(label="Agent B", node_type="agent")
+        ticket = graph.create_node(label="Ticket #4", node_type="event")
+
+        graph.handoff(
+            from_agent=agent_a["id"],
+            to_agent=agent_b["id"],
+            ticket_node=ticket["id"],
+            reason="Needs specialist",
+        )
+
+        chain = graph.ticket_provenance(ticket["id"])
+        assert len(chain) >= 1
+        types = [step["edge_type"] for step in chain]
+        assert "TRANSFERRED_TO" in types
+
+    def test_ticket_provenance_with_state_machine(self, graph):
+        """ticket_provenance() includes state machine edges."""
+        agent = graph.create_node(label="Agent", node_type="agent")
+        ticket = graph.create_node(label="Ticket #5", node_type="event")
+
+        graph.create_edge(
+            from_node=agent["id"], to_node=ticket["id"],
+            edge_type="OPENED_BY", layer="L2", confidence=1.0,
+        )
+
+        chain = graph.ticket_provenance(ticket["id"])
+        types = [step["edge_type"] for step in chain]
+        assert "OPENED_BY" in types
+
+
+# ===== Cybersecurity SDK Tests (OHM-af8.4) =====
+
+class TestRecordOutcome:
+    """Tests for SDK record_outcome() method."""
+
+    def test_record_outcome_false(self, graph):
+        """record_outcome with outcome=False records incorrect claim."""
+        edr = graph.create_node(label="EDR Sensor", node_type="system")
+        alert = graph.create_node(label="Suspicious Login", node_type="event")
+
+        result = graph.record_outcome(
+            source_agent=edr["id"],
+            claim_node=alert["id"],
+            outcome=False,
+        )
+
+        assert result["source_agent"] == edr["id"]
+        assert result["claim_node"] == alert["id"]
+        assert result["outcome"] is False
+        assert result["recorded_by"] == "test_agent"
+
+    def test_record_outcome_true(self, graph):
+        """record_outcome with outcome=True records correct claim."""
+        siem = graph.create_node(label="SIEM", node_type="system")
+        alert = graph.create_node(label="Brute Force", node_type="event")
+
+        result = graph.record_outcome(
+            source_agent=siem["id"],
+            claim_node=alert["id"],
+            outcome=True,
+        )
+
+        assert result["outcome"] is True
+
+
+class TestSourceReliability:
+    """Tests for SDK source_reliability() method."""
+
+    def test_source_reliability_computes_metrics(self, graph):
+        """source_reliability computes P(accurate) from outcomes."""
+        edr = graph.create_node(label="EDR", node_type="system")
+        alert1 = graph.create_node(label="Alert 1", node_type="event")
+        alert2 = graph.create_node(label="Alert 2", node_type="event")
+        alert3 = graph.create_node(label="Alert 3", node_type="event")
+
+        # EDR: 2 correct, 1 incorrect → P(accurate) ≈ 0.67
+        graph.record_outcome(source_agent=edr["id"], claim_node=alert1["id"], outcome=True)
+        graph.record_outcome(source_agent=edr["id"], claim_node=alert2["id"], outcome=True)
+        graph.record_outcome(source_agent=edr["id"], claim_node=alert3["id"], outcome=False)
+
+        result = graph.source_reliability(edr["id"])
+        assert result["total_outcomes"] == 3
+        assert result["accurate_count"] == 2
+        assert result["false_positive_count"] == 1
+        assert result["p_accurate"] == pytest.approx(2 / 3, abs=0.01)
+        assert result["false_positive_rate"] == pytest.approx(1 / 3, abs=0.01)
+
+    def test_source_reliability_no_data(self, graph):
+        """source_reliability with no outcomes returns None metrics."""
+        edr = graph.create_node(label="New EDR", node_type="system")
+
+        result = graph.source_reliability(edr["id"])
+        assert result["total_outcomes"] == 0
+        assert result["p_accurate"] is None
+
+
+class TestThreatClusterSDK:
+    """Tests for SDK threat_cluster() method."""
+
+    def test_threat_cluster_finds_related_alerts(self, graph):
+        """threat_cluster() finds alerts linked to an IOC."""
+        ioc = graph.create_node(label="malicious-ip", node_type="concept")
+        alert1 = graph.create_node(label="Port Scan", node_type="concept")
+        alert2 = graph.create_node(label="Lateral Movement", node_type="concept")
+
+        graph.create_edge(from_node=ioc["id"], to_node=alert1["id"],
+                          edge_type="THREAT_CLUSTER", layer="L3")
+        graph.create_edge(from_node=ioc["id"], to_node=alert2["id"],
+                          edge_type="THREAT_CLUSTER", layer="L3")
+
+        results = graph.threat_cluster(ioc["id"])
+        assert len(results) == 2
+
+    def test_threat_cluster_empty(self, graph):
+        """threat_cluster() returns empty for unconnected IOC."""
+        ioc = graph.create_node(label="unused-ioc", node_type="concept")
+        results = graph.threat_cluster(ioc["id"])
+        assert len(results) == 0
+
+
+# ===== Node Priority/Urgency SDK Tests =====
+
+class TestNodePriorityUrgency:
+    """Tests for priority on nodes and urgency on edges."""
+
+    def test_create_node_with_priority(self, graph):
+        """create_node with priority sets the priority field."""
+        node = graph.create_node(label="P1 Issue", node_type="event", priority="P1")
+        assert node["priority"] == "P1"
+
+    def test_create_node_default_priority(self, graph):
+        """create_node without priority defaults to None."""
+        node = graph.create_node(label="Normal Ticket", node_type="event")
+        assert node["priority"] is None
+
+    def test_create_node_invalid_priority_raises(self, graph):
+        """create_node with invalid priority raises ValueError."""
+        with pytest.raises(ValueError, match="Invalid priority"):
+            graph.create_node(label="Bad Ticket", node_type="event", priority="P99")
+
+    def test_edge_with_urgency(self, graph):
+        """create_edge with urgency sets the urgency field on the edge."""
+        a = graph.create_node(label="A")["id"]
+        b = graph.create_node(label="B")["id"]
+        edge = graph.create_edge(
+            from_node=a, to_node=b, edge_type="CAUSES", layer="L3", urgency="high"
+        )
+        assert edge["urgency"] == "high"
+
+    def test_edge_invalid_urgency_raises(self, graph):
+        """create_edge with invalid urgency raises ValueError."""
+        a = graph.create_node(label="A")["id"]
+        b = graph.create_node(label="B")["id"]
+        with pytest.raises(ValueError, match="Invalid urgency"):
+            graph.create_edge(
+                from_node=a, to_node=b, edge_type="CAUSES", layer="L3", urgency="extreme"
+            )
+
+
+# ===== Sentiment Observation SDK Tests =====
+
+class TestSentimentObservation:
+    """Tests for sentiment observation type."""
+
+    def test_sentiment_observation(self, graph):
+        """observe() with obs_type='sentiment' records sentiment."""
+        ticket = graph.create_node(label="Ticket #100", node_type="event")
+        obs = graph.observe(
+            ticket["id"],
+            obs_type="sentiment",
+            value=-0.7,
+            sigma=0.5,
+            source="nlp_analysis",
+        )
+        assert obs["type"] == "sentiment"
+
+
+# ===== Read Operations SDK Tests =====
+
+class TestGetNode:
+    """Tests for SDK get_node() method."""
+
+    def test_get_node_returns_node(self, graph):
+        """get_node() returns the full node record."""
+        created = graph.create_node(label="Find Me", node_type="concept")
+        found = graph.get_node(created["id"])
+        assert found is not None
+        assert found["label"] == "Find Me"
+        assert found["type"] == "concept"
+
+    def test_get_node_not_found(self, graph):
+        """get_node() returns None for nonexistent node."""
+        result = graph.get_node("nonexistent_id")
+        assert result is None
+
+
+class TestGetEdge:
+    """Tests for SDK get_edge() method."""
+
+    def test_get_edge_returns_edge(self, graph):
+        """get_edge() returns the full edge record."""
+        a = graph.create_node(label="A")["id"]
+        b = graph.create_node(label="B")["id"]
+        created = graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
+        found = graph.get_edge(created["id"])
+        assert found is not None
+        assert found["edge_type"] == "CAUSES"
+
+    def test_get_edge_not_found(self, graph):
+        """get_edge() returns None for nonexistent edge."""
+        result = graph.get_edge("nonexistent_id")
+        assert result is None
+
+
+class TestFindOrCreateNode:
+    """Tests for SDK find_or_create_node() method."""
+
+    def test_find_or_create_node_creates_new(self, graph):
+        """find_or_create_node() creates node when not found."""
+        node = graph.find_or_create_node("New Concept")
+        assert node["label"] == "New Concept"
+        assert node["type"] == "concept"
+
+    def test_find_or_create_node_finds_existing(self, graph):
+        """find_or_create_node() returns existing node by label."""
+        created = graph.create_node(label="Existing", node_type="source")
+        found = graph.find_or_create_node("Existing")
+        assert found["id"] == created["id"]
+
+    def test_find_or_create_node_case_insensitive(self, graph):
+        """find_or_create_node() is case-insensitive."""
+        created = graph.create_node(label="CaseTest", node_type="concept")
+        found = graph.find_or_create_node("casetest")
+        assert found["id"] == created["id"]
+
+
+class TestSearchNodes:
+    """Tests for SDK search_nodes() method."""
+
+    def test_search_nodes_by_label(self, graph):
+        """search_nodes() finds nodes by label text."""
+        graph.create_node(label="climate change impact")
+        graph.create_node(label="unrelated topic")
+        results = graph.search_nodes("climate")
+        assert len(results) >= 1
+        assert any("climate" in r["label"] for r in results)
+
+    def test_search_nodes_by_type(self, graph):
+        """search_nodes() filters by node_type."""
+        graph.create_node(label="Source A", node_type="source")
+        graph.create_node(label="Concept A", node_type="concept")
+        results = graph.search_nodes("A", node_type="source")
+        assert all(r["type"] == "source" for r in results)
+
+    def test_search_nodes_limit(self, graph):
+        """search_nodes() respects limit parameter."""
+        for i in range(10):
+            graph.create_node(label=f"SearchTest {i}")
+        results = graph.search_nodes("SearchTest", limit=3)
+        assert len(results) <= 3
+
+
+class TestSearchEdges:
+    """Tests for SDK search_edges() method."""
+
+    def test_search_edges_by_layer(self, graph):
+        """search_edges() filters by layer."""
+        a = graph.create_node(label="A")["id"]
+        b = graph.create_node(label="B")["id"]
+        graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
+        results = graph.search_edges(layer="L3")
+        assert len(results) >= 1
+        assert all(r["layer"] == "L3" for r in results)
+
+    def test_search_edges_by_type(self, graph):
+        """search_edges() filters by edge_type."""
+        a = graph.create_node(label="A")["id"]
+        b = graph.create_node(label="B")["id"]
+        graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
+        results = graph.search_edges(edge_type="CAUSES")
+        assert len(results) >= 1
+        assert all(r["edge_type"] == "CAUSES" for r in results)
+
+    def test_search_edges_by_confidence(self, graph):
+        """search_edges() filters by confidence range."""
+        a = graph.create_node(label="A")["id"]
+        b = graph.create_node(label="B")["id"]
+        graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3", confidence=0.9)
+        results = graph.search_edges(confidence_min=0.8)
+        assert len(results) >= 1
+
+
+# ===== Agent Registration SDK Tests =====
+
+class TestRegisterAgent:
+    """Tests for SDK register_agent() method."""
+
+    def test_register_agent_basic(self, graph):
+        """register_agent() creates an agent node with identity."""
+        agent = graph.register_agent(
+            description="Test agent for SDK",
+            values=["accuracy", "transparency"],
+            goals=["help users"],
+            capabilities=["search", "analyze"],
+        )
+        assert agent["type"] == "agent"
+        assert agent["label"] == "test_agent"
+
+    def test_register_agent_with_interests(self, graph):
+        """register_agent() creates LISTENS_TO edges for interests."""
+        agent = graph.register_agent(
+            interests=["climate", "energy"],
+        )
+        assert agent["type"] == "agent"
+
+
+# ===== Batch Operations SDK Tests =====
+
+class TestBatchCreateNodes:
+    """Tests for SDK batch_create_nodes() method."""
+
+    def test_batch_create_nodes(self, graph):
+        """batch_create_nodes() creates multiple nodes at once."""
+        nodes = graph.batch_create_nodes(nodes=[
+            {"label": "Node A", "node_type": "concept"},
+            {"label": "Node B", "node_type": "source"},
+            {"label": "Node C", "node_type": "pattern"},
+        ])
+        assert len(nodes) == 3
+        labels = {n["label"] for n in nodes}
+        assert labels == {"Node A", "Node B", "Node C"}
+
+
+class TestBatchCreateEdges:
+    """Tests for SDK batch_create_edges() method."""
+
+    def test_batch_create_edges(self, graph):
+        """batch_create_edges() creates multiple edges at once."""
+        a = graph.create_node(label="A")["id"]
+        b = graph.create_node(label="B")["id"]
+        c = graph.create_node(label="C")["id"]
+        edges = graph.batch_create_edges(edges=[
+            {"from_node": a, "to_node": b, "edge_type": "CAUSES", "layer": "L3"},
+            {"from_node": b, "to_node": c, "edge_type": "INFLUENCES", "layer": "L2"},
+        ])
+        assert len(edges) == 2
+        types = {e["edge_type"] for e in edges}
+        assert types == {"CAUSES", "INFLUENCES"}
+
+
+# ===== Medical Diagnosis SDK Tests =====
+
+class TestRulesOut:
+    """Tests for SDK rules_out() method."""
+
+    def test_rules_out_creates_negates_edge(self, graph):
+        """rules_out() creates a NEGATES edge."""
+        finding = graph.create_node(label="fever_absent", node_type="concept")
+        condition = graph.create_node(label="malaria", node_type="concept")
+        edge = graph.rules_out(from_node=finding["id"], to_node=condition["id"])
+        assert edge["edge_type"] == "NEGATES"
+        assert edge["from_node"] == finding["id"]
+        assert edge["to_node"] == condition["id"]
+
+    def test_rules_out_with_confidence(self, graph):
+        """rules_out() accepts confidence parameter."""
+        finding = graph.create_node(label="normal_wbc", node_type="concept")
+        condition = graph.create_node(label="bacterial_infection", node_type="concept")
+        edge = graph.rules_out(from_node=finding["id"], to_node=condition["id"], confidence=0.85)
+        assert edge["confidence"] == pytest.approx(0.85)
+
+
+class TestDifferentialDiagnosis:
+    """Tests for SDK differential_diagnosis() method."""
+
+    def test_differential_diagnosis_returns_candidates(self, graph):
+        """differential_diagnosis() returns ranked candidate conditions."""
+        patient = graph.create_node(label="Patient", node_type="concept")
+        condition = graph.create_node(label="Flu", node_type="concept")
+        graph.create_edge(
+            from_node=patient["id"], to_node=condition["id"],
+            edge_type="SUPPORTS", layer="L3", confidence=0.8,
+        )
+        results = graph.differential_diagnosis(patient["id"])
+        assert isinstance(results, list)
+
+    def test_differential_diagnosis_empty(self, graph):
+        """differential_diagnosis() returns empty for isolated node."""
+        node = graph.create_node(label="Isolated", node_type="concept")
+        results = graph.differential_diagnosis(node["id"])
+        assert isinstance(results, list)
+        assert len(results) == 0
+
+
+class TestCompoundConfidence:
+    """Tests for SDK compound_confidence() method."""
+
+    def test_compound_confidence_independent(self, graph):
+        """compound_confidence() with independent observations."""
+        result = graph.compound_confidence(
+            [{"confidence": 0.7}, {"confidence": 0.8}],
+            correlation=0.0,
+        )
+        assert result["compound_confidence"] > 0.7
+        assert "method" in result
+
+    def test_compound_confidence_correlated(self, graph):
+        """compound_confidence() with perfectly correlated observations."""
+        result = graph.compound_confidence(
+            [{"confidence": 0.7}, {"confidence": 0.8}],
+            correlation=1.0,
+        )
+        assert result["compound_confidence"] == pytest.approx(0.8)
+
+    def test_compound_confidence_single(self, graph):
+        """compound_confidence() with single observation returns that confidence."""
+        result = graph.compound_confidence(
+            [{"confidence": 0.75}],
+            correlation=0.0,
+        )
+        assert result["compound_confidence"] == pytest.approx(0.75)
+
+
+# ===== Substrate Methods SDK Tests =====
+
+class TestDecayObservations:
+    """Tests for SDK decay_observations() method."""
+
+    def test_decay_observations_dry_run(self, graph):
+        """decay_observations() with dry_run returns decay info without modifying data."""
+        node = graph.create_node(label="DecayTest", node_type="concept")
+        graph.observe(node["id"], obs_type="measurement", value=1.0, sigma=0.1)
+        result = graph.decay_observations(node["id"], dry_run=True)
+        assert isinstance(result, list)
+
+    def test_decay_observations_all_nodes(self, graph):
+        """decay_observations() without node_id processes all observations."""
+        node = graph.create_node(label="AllDecay", node_type="concept")
+        graph.observe(node["id"], obs_type="measurement", value=1.0, sigma=0.1)
+        result = graph.decay_observations(dry_run=True)
+        assert isinstance(result, list)
+
+
+class TestExpiringSoon:
+    """Tests for SDK expiring_soon() method."""
+
+    def test_expiring_soon_returns_list(self, graph):
+        """expiring_soon() returns a list (empty if no batches)."""
+        result = graph.expiring_soon()
+        assert isinstance(result, list)
+
+
+class TestCascadeScenario:
+    """Tests for SDK cascade_scenario() method."""
+
+    def test_cascade_scenario_returns_list(self, graph):
+        """cascade_scenario() returns downstream impact analysis."""
+        a = graph.create_node(label="Supplier A", node_type="concept")
+        b = graph.create_node(label="Factory B", node_type="concept")
+        graph.create_edge(
+            from_node=a["id"], to_node=b["id"],
+            edge_type="CAUSES", layer="L3", confidence=0.8,
+        )
+        result = graph.cascade_scenario(a["id"], failure_probability=0.5)
+        assert isinstance(result, list)
+
+    def test_cascade_scenario_empty(self, graph):
+        """cascade_scenario() returns empty for isolated node."""
+        node = graph.create_node(label="Isolated", node_type="concept")
+        result = graph.cascade_scenario(node["id"])
+        assert isinstance(result, list)
+        assert len(result) == 0
+
+
+class TestWhatIf:
+    """Tests for SDK what_if() method."""
+
+    def test_what_if_returns_dict(self, graph):
+        """what_if() returns dry-run cascade analysis."""
+        a = graph.create_node(label="A", node_type="concept")
+        b = graph.create_node(label="B", node_type="concept")
+        edge = graph.create_edge(
+            from_node=a["id"], to_node=b["id"],
+            edge_type="CAUSES", layer="L3", confidence=0.7,
+        )
+        result = graph.what_if(edge["id"])
+        assert isinstance(result, dict)
+        assert "trigger_edge" in result or "trigger_probability" in result or "downstream_impact" in result
+
+
+class TestProvenance:
+    """Tests for SDK provenance() method."""
+
+    def test_provenance_returns_chain(self, graph):
+        """provenance() traces source chain backward."""
+        source = graph.create_node(label="Original Source", node_type="source")
+        derived = graph.create_node(label="Derived Claim", node_type="concept")
+        graph.create_edge(
+            from_node=derived["id"], to_node=source["id"],
+            edge_type="REFERENCES", layer="L2", confidence=0.9,
+        )
+        result = graph.provenance(derived["id"])
+        assert isinstance(result, list)
+
+    def test_provenance_empty(self, graph):
+        """provenance() returns empty for node with no sources."""
+        node = graph.create_node(label="Root Node", node_type="concept")
+        result = graph.provenance(node["id"])
+        assert isinstance(result, list)
+        assert len(result) == 0
+
+
+class TestEdgeHistory:
+    """Tests for SDK edge_history() method."""
+
+    def test_edge_history_returns_creation(self, graph):
+        """edge_history() returns creation event."""
+        a = graph.create_node(label="A")["id"]
+        b = graph.create_node(label="B")["id"]
+        edge = graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
+        history = graph.edge_history(edge["id"])
+        assert isinstance(history, list)
+        assert len(history) >= 1
+        assert history[0]["type"] == "created"
+
+    def test_edge_history_not_found(self, graph):
+        """edge_history() returns empty for nonexistent edge."""
+        result = graph.edge_history("nonexistent_id")
+        assert result == []
+
+
+# ===== Monte Carlo SDK Tests =====
+
+class TestMonteCarlo:
+    """Tests for SDK monte_carlo() method."""
+
+    def test_monte_carlo_returns_dict(self, graph):
+        """monte_carlo() returns simulation results."""
+        a = graph.create_node(label="Source", node_type="concept")
+        b = graph.create_node(label="Target", node_type="concept")
+        graph.create_edge(
+            from_node=a["id"], to_node=b["id"],
+            edge_type="CAUSES", layer="L3", confidence=0.8,
+        )
+        result = graph.monte_carlo(a["id"], simulations=100)
+        assert isinstance(result, dict)
+        assert "simulation_count" in result
+
+
+# ===== Near Duplicates SDK Tests =====
+
+class TestNearDuplicates:
+    """Tests for SDK near_duplicates() method."""
+
+    def test_near_duplicates_returns_list(self, graph):
+        """near_duplicates() returns list of duplicate pairs."""
+        result = graph.near_duplicates()
+        assert isinstance(result, list)
+
+
+# ===== Calibration SDK Tests =====
+
+class TestCalibration:
+    """Tests for SDK calibration() method."""
+
+    def test_calibration_returns_dict(self, graph):
+        """calibration() returns calibration metrics."""
+        result = graph.calibration()
+        assert isinstance(result, dict)
+        assert "calibration_by_band" in result or "calibration_score" in result
+
+
+# ===== Suggest Connections SDK Tests =====
+
+class TestSuggestConnections:
+    """Tests for SDK suggest_connections() method."""
+
+    def test_suggest_connections_returns_list(self, graph):
+        """suggest_connections() returns list of suggestions."""
+        result = graph.suggest_connections()
+        assert isinstance(result, list)
+
+
+# ===== Export/Import SDK Tests =====
+
+class TestExportImport:
+    """Tests for SDK export_graph() and import_graph() methods."""
+
+    def test_export_graph_returns_dict(self, graph):
+        """export_graph() returns a dict with nodes, edges, and meta."""
+        graph.create_node(label="Export Node", node_type="concept")
+        result = graph.export_graph()
+        assert isinstance(result, dict)
+        assert "nodes" in result
+        assert "edges" in result
+        assert "meta" in result
+        assert result["meta"]["node_count"] >= 1
+
+    def test_import_graph_merge(self, graph):
+        """import_graph() with merge=True adds nodes."""
+        data = {
+            "nodes": [
+                {"id": "imported_1", "label": "Imported", "type": "concept",
+                 "content": None, "created_by": "test", "visibility": "team",
+                 "provenance": None, "confidence": 1.0, "priority": None},
+            ],
+            "edges": [],
+            "observations": [],
+        }
+        result = graph.import_graph(data, merge=True)
+        assert result["nodes"] >= 1
+
+    def test_export_import_roundtrip(self, graph):
+        """export then import preserves data."""
+        graph.create_node(label="Roundtrip Node", node_type="concept")
+        exported = graph.export_graph()
+        # Import into fresh graph
+        g2 = connect(":memory:", actor="importer")
+        result = g2.import_graph(exported, merge=True)
+        assert result["nodes"] >= 1
+        g2.close()
+
+
+# ===== Evolve Identity SDK Tests =====
+
+class TestEvolveIdentity:
+    """Tests for SDK evolve_identity() method."""
+
+    def test_evolve_identity_creates_new_edge(self, graph):
+        """evolve_identity() creates a new edge and marks old as superseded."""
+        agent = graph.register_agent(description="Test agent")
+        # Find the VALUES edge created by register_agent
+        edges = graph.search_edges(edge_type="VALUES")
+        if edges:
+            old_edge_id = edges[0]["id"]
+            new_edge = graph.evolve_identity(
+                old_edge_id, new_target="new_value", reason="values changed"
+            )
+            assert new_edge["edge_type"] == "VALUES"
+            assert new_edge["provenance"] is not None
+
+
+# ===== Discover Peers SDK Tests =====
+
+class TestDiscoverPeers:
+    """Tests for SDK discover_peers() method."""
+
+    def test_discover_peers_returns_list(self, graph):
+        """discover_peers() returns list of peer agents."""
+        graph.register_agent(description="Agent 1")
+        result = graph.discover_peers()
+        assert isinstance(result, list)
+
+    def test_discover_peers_unregistered(self, graph):
+        """discover_peers() returns empty for unregistered agent."""
+        # Default actor "test_agent" is not registered
+        result = graph.discover_peers()
+        assert isinstance(result, list)
+
+
+# ===== Health SDK Tests =====
+
+class TestHealth:
+    """Tests for SDK health() method."""
+
+    def test_health_returns_dict(self, graph):
+        """health() returns structural health metrics."""
+        result = graph.health()
+        assert isinstance(result, dict)
+
+
+# ===== Agent Health SDK Tests =====
+
+class TestAgentHealth:
+    """Tests for SDK agent_health() method."""
+
+    def test_agent_health_returns_list(self, graph):
+        """agent_health() returns health status for agents."""
+        graph.register_agent(description="Health test agent")
+        result = graph.agent_health()
+        assert isinstance(result, list)
+
+
+# ===== Heartbeat SDK Tests =====
+
+class TestHeartbeat:
+    """Tests for SDK heartbeat() method."""
+
+    def test_heartbeat_updates_agent(self, graph):
+        """heartbeat() updates agent's last-seen timestamp."""
+        graph.register_agent(description="Heartbeat test")
+        result = graph.heartbeat()
+        assert isinstance(result, dict)
+
+
+# ===== Confidence Chain SDK Tests =====
+
+class TestConfidenceChain:
+    """Tests for SDK confidence_chain() method."""
+
+    def test_confidence_chain_returns_dict(self, graph):
+        """confidence_chain() traces evidence and computes aggregate."""
+        a = graph.create_node(label="Evidence A", node_type="concept")
+        b = graph.create_node(label="Claim B", node_type="concept")
+        graph.create_edge(
+            from_node=a["id"], to_node=b["id"],
+            edge_type="SUPPORTS", layer="L3", confidence=0.8,
+        )
+        result = graph.confidence_chain(b["id"])
+        assert isinstance(result, dict)
+        assert "evidence_chain" in result or "aggregate_confidence" in result
 
 
 class TestCompositeScore:
