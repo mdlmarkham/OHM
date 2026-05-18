@@ -1178,12 +1178,27 @@ class OhmHandler(BaseHTTPRequestHandler):
                 raise AuthenticationError("Authentication required — provide Bearer token")
         self._check_write_access(agent)
 
-        from urllib.parse import urlparse
-        path = urlparse(self.path).path.rstrip("/")
+        from urllib.parse import urlparse, parse_qs
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/")
+        qs = parse_qs(parsed.query)
         body = self._read_body()
         body = self._validate_body(path, body)
 
         if path == "/node":
+            # Support ?create_only=true to reject overwrites
+            create_only = qs.get("create_only", ["false"])[0].lower() in ("true", "1", "yes")
+            if create_only:
+                existing = self.store.conn.execute(
+                    "SELECT id FROM ohm_nodes WHERE id = ?", [body["id"]],
+                ).fetchone()
+                if existing:
+                    self._json_response(409, {
+                        "error": "conflict",
+                        "message": f"Node {body['id']} already exists. Use ?create_only=false for upsert.",
+                    })
+                    return
+
             result = self.store.write_node(
                 id=body["id"],
                 label=body["label"],
@@ -1208,6 +1223,24 @@ class OhmHandler(BaseHTTPRequestHandler):
                 self._json_response(201, result)
             else:
                 self._json_response(200, result)
+
+        elif path == "/node/find_or_create":
+            # Find existing node by label+type, or create new one
+            from .queries import find_or_create_node
+            node = find_or_create_node(
+                self.store.conn,
+                label=body["label"],
+                node_type=body.get("type", "concept"),
+                content=body.get("content"),
+                created_by=agent,
+                visibility=body.get("visibility", "team"),
+                provenance=body.get("provenance"),
+                confidence=body.get("confidence", 1.0),
+                priority=body.get("priority"),
+                url=body.get("url"),
+            )
+            is_new = node.get("created_at") == node.get("updated_at") or node.get("created_at") is not None
+            self._json_response(201 if is_new else 200, node)
 
         elif path == "/edge":
             result = self.store.write_edge(
