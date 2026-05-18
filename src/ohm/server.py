@@ -727,6 +727,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "/confidence/{id}": {"method": "GET", "description": "Provenance and challenge audit"},
                     "/agent/{name}": {"method": "GET", "description": "Agent state and focus"},
                     "/agents": {"method": "GET", "description": "List all registered agents"},
+                    "/nodes": {"method": "GET", "description": "List nodes with pagination and filtering (?type=&label=&limit=&offset=)"},
                     "/listen": {"method": "GET", "description": "Change feed since last check"},
                     "/events": {"method": "GET", "description": "SSE stream of real-time change feed events"},
                     "/node": {"method": "POST", "description": "Create a new node"},
@@ -774,6 +775,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "/confidence/{id}": {"get": {"summary": "Confidence audit"}},
                     "/agent/{name}": {"get": {"summary": "Agent state"}},
                     "/agents": {"get": {"summary": "List agents"}},
+                    "/nodes": {"get": {"summary": "List nodes with pagination and filtering"}},
                     "/listen": {"get": {"summary": "Change feed"}},
                     "/events": {"get": {"summary": "SSE event stream"}},
                     "/challenge/{id}": {"post": {"summary": "Challenge edge"}},
@@ -927,6 +929,39 @@ class OhmHandler(BaseHTTPRequestHandler):
         elif path == "/agents":
             results = self.store.execute("SELECT * FROM ohm_agent_state ORDER BY agent_name")
             self._json_response(200, results)
+        elif path == "/nodes":
+            # List nodes with pagination and optional type/label filtering
+            node_type = qs.get("type", [None])[0]
+            label = qs.get("label", [None])[0]
+            limit = int(qs.get("limit", [100])[0])
+            offset = int(qs.get("offset", [0])[0])
+            conditions = ["1=1"]
+            params = []
+            if node_type:
+                conditions.append("type = ?")
+                params.append(node_type)
+            if label:
+                conditions.append("label ILIKE ?")
+                params.append(f"%{label}%")
+            params.append(limit)
+            params.append(offset)
+            sql = (
+                "SELECT * FROM ohm_nodes WHERE "
+                + " AND ".join(conditions)
+                + " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            )
+            results = self.store.execute(sql, params)
+            # Also return total count for pagination
+            count_sql = "SELECT COUNT(*) as cnt FROM ohm_nodes WHERE " + " AND ".join(conditions)
+            count_params = params[:-2]  # Remove limit and offset
+            total_result = self.store.execute(count_sql, count_params)
+            total = total_result[0]["cnt"] if total_result else len(results)
+            self._json_response(200, {
+                "nodes": results,
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            })
         elif path == "/listen":
             since = qs.get("since", [None])[0]
             agent_name = qs.get("agent", [agent or "ohm"])[0]
