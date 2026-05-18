@@ -1500,6 +1500,9 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
 
     signal.signal(signal.SIGTERM, shutdown_handler)
     signal.signal(signal.SIGINT, shutdown_handler)
+    # Ignore SIGPIPE to prevent crashes on broken client connections
+    if hasattr(signal, "SIGPIPE"):
+        signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
     server.serve_forever()
     store.close()
