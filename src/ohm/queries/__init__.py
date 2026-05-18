@@ -789,9 +789,9 @@ def find_or_create_node(
 
     Returns the existing or newly created node record.
     """
-    # Try to find an existing node with matching label and type
+    # Try to find an existing node with matching label and type (case-insensitive)
     existing = _rows_to_dicts(conn.execute(
-        "SELECT * FROM ohm_nodes WHERE label = ? AND type = ? LIMIT 1",
+        "SELECT * FROM ohm_nodes WHERE LOWER(label) = LOWER(?) AND type = ? LIMIT 1",
         [label, node_type],
     ))
     if existing:
