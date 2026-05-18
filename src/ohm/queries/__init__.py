@@ -945,6 +945,93 @@ def create_support(
     )[0]
 
 
+def delete_node(
+    conn: DuckDBPyConnection,
+    *,
+    node_id: str,
+    deleted_by: str,
+) -> dict[str, Any]:
+    """Delete a node and all its associated edges and observations.
+
+    Deletes edges in two separate statements (from_node, to_node) to avoid
+    DuckDB index issues with OR conditions (OHM-cpi).
+
+    Returns a dict with the deleted node_id and counts of removed edges/observations.
+    Raises NodeNotFoundError if the node doesn't exist.
+    """
+    from ohm.validation import validate_identifier
+
+    node_id = validate_identifier(node_id, name="node_id")
+
+    # Verify node exists
+    node = _rows_to_dicts(
+        conn.execute("SELECT * FROM ohm_nodes WHERE id = ?", [node_id])
+    )
+    if not node:
+        from ohm.exceptions import NodeNotFoundError
+        raise NodeNotFoundError(f"Node not found: {node_id}")
+
+    # Delete associated edges — split into two statements to avoid DuckDB
+    # index issues with OR conditions (OHM-cpi)
+    edges_from = conn.execute("DELETE FROM ohm_edges WHERE from_node = ?", [node_id]).fetchone()
+    edges_to = conn.execute("DELETE FROM ohm_edges WHERE to_node = ?", [node_id]).fetchone()
+    edges_deleted = (edges_from[0] if edges_from else 0) + (edges_to[0] if edges_to else 0)
+
+    # Delete observations
+    obs_result = conn.execute("DELETE FROM ohm_observations WHERE node_id = ?", [node_id])
+    obs_deleted = obs_result.fetchone()
+    obs_count = obs_deleted[0] if obs_deleted else 0
+
+    # Delete the node itself
+    conn.execute("DELETE FROM ohm_nodes WHERE id = ?", [node_id])
+    _log_change(conn, "ohm_nodes", node_id, "DELETE", deleted_by)
+
+    return {
+        "deleted": node_id,
+        "type": "node",
+        "edges_removed": edges_deleted,
+        "observations_removed": obs_count,
+    }
+
+
+def delete_edge(
+    conn: DuckDBPyConnection,
+    *,
+    edge_id: str,
+    deleted_by: str,
+) -> dict[str, Any]:
+    """Delete an edge by ID.
+
+    Returns a dict with the deleted edge_id.
+    Raises EdgeNotFoundError if the edge doesn't exist.
+    """
+    from ohm.validation import validate_identifier
+
+    edge_id = validate_identifier(edge_id, name="edge_id")
+
+    # Verify edge exists
+    edge = _rows_to_dicts(
+        conn.execute("SELECT * FROM ohm_edges WHERE id = ?", [edge_id])
+    )
+    if not edge:
+        from ohm.exceptions import EdgeNotFoundError
+        raise EdgeNotFoundError(f"Edge not found: {edge_id}")
+
+    layer = edge[0].get("layer")
+
+    # Delete observations referencing this edge
+    conn.execute("DELETE FROM ohm_observations WHERE edge_id = ?", [edge_id])
+
+    # Delete the edge
+    conn.execute("DELETE FROM ohm_edges WHERE id = ?", [edge_id])
+    _log_change(conn, "ohm_edges", edge_id, "DELETE", deleted_by)
+
+    return {
+        "deleted": edge_id,
+        "type": "edge",
+    }
+
+
 def set_agent_state(
     conn: DuckDBPyConnection,
     *,

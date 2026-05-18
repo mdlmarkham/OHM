@@ -1290,6 +1290,118 @@ class TestDeleteValidation:
 
 
 @pytest.mark.xdist_group("server")
+class TestCascadingDelete:
+    """Tests for cascading DELETE — node deletion removes edges (OHM-cpi)."""
+
+    def test_delete_node_removes_edges(self, test_server):
+        """DELETE /node/{id} removes all edges referencing the node."""
+        port, _ = test_server
+        # Create two nodes and an edge between them
+        _request("POST", port, "/node", body={
+            "id": "del-node-a", "label": "Node A", "type": "concept",
+        })
+        _request("POST", port, "/node", body={
+            "id": "del-node-b", "label": "Node B", "type": "concept",
+        })
+        _request("POST", port, "/edge", body={
+            "from": "del-node-a", "to": "del-node-b",
+            "type": "CAUSES", "layer": "L1",
+        })
+        # Verify edge exists
+        status, data = _request("GET", port, "/edge/del-edge-1")
+        # Edge ID is auto-generated, so we need to find it
+        # Instead, just verify the node deletion cascades by checking node is gone
+        status, data = _request("DELETE", port, "/node/del-node-a")
+        assert status == 200
+        assert data["deleted"] == "del-node-a"
+        assert data["type"] == "node"
+        assert data["edges_removed"] >= 1
+
+        # Node should be gone
+        status, data = _request("GET", port, "/node/del-node-a")
+        assert status == 404
+
+    def test_delete_node_removes_observations(self, test_server):
+        """DELETE /node/{id} removes observations on the node."""
+        port, _ = test_server
+        _request("POST", port, "/node", body={
+            "id": "del-obs-node", "label": "Obs Node", "type": "concept",
+        })
+        _request("POST", port, "/observe/del-obs-node", body={
+            "type": "metric",
+            "value": 42.0,
+        })
+        # Delete the node
+        status, data = _request("DELETE", port, "/node/del-obs-node")
+        assert status == 200
+        assert data["observations_removed"] >= 1
+
+    def test_delete_node_idempotent_404(self, test_server):
+        """DELETE /node/{id} twice returns 404 on second call (idempotent)."""
+        port, _ = test_server
+        _request("POST", port, "/node", body={
+            "id": "del-twice-node", "label": "Twice Node", "type": "concept",
+        })
+        # First delete succeeds
+        status, data = _request("DELETE", port, "/node/del-twice-node")
+        assert status == 200
+        # Second delete returns 404 (not 500)
+        status, data = _request("DELETE", port, "/node/del-twice-node")
+        assert status == 404
+
+    def test_delete_edge_idempotent_404(self, test_server):
+        """DELETE /edge/{id} twice returns 404 on second call (idempotent)."""
+        port, _ = test_server
+        _request("POST", port, "/node", body={
+            "id": "del-edge-node-a", "label": "A", "type": "concept",
+        })
+        _request("POST", port, "/node", body={
+            "id": "del-edge-node-b", "label": "B", "type": "concept",
+        })
+        resp = _request("POST", port, "/edge", body={
+            "from": "del-edge-node-a", "to": "del-edge-node-b",
+            "type": "CAUSES", "layer": "L1",
+        })
+        edge_id = resp[1]["id"]
+        # First delete succeeds
+        status, data = _request("DELETE", port, f"/edge/{edge_id}")
+        assert status == 200
+        # Second delete returns 404 (not 500)
+        status, data = _request("DELETE", port, f"/edge/{edge_id}")
+        assert status == 404
+
+    def test_delete_node_with_incoming_edges(self, test_server):
+        """DELETE /node/{id} removes edges where node is the target."""
+        port, _ = test_server
+        _request("POST", port, "/node", body={
+            "id": "del-target-node", "label": "Target", "type": "concept",
+        })
+        _request("POST", port, "/node", body={
+            "id": "del-source-node", "label": "Source", "type": "concept",
+        })
+        _request("POST", port, "/edge", body={
+            "from": "del-source-node", "to": "del-target-node",
+            "type": "CAUSES", "layer": "L1",
+        })
+        # Delete the target node — should remove the incoming edge
+        status, data = _request("DELETE", port, "/node/del-target-node")
+        assert status == 200
+        assert data["edges_removed"] >= 1
+
+    def test_delete_nonexistent_node_returns_404(self, test_server):
+        """DELETE /node/{nonexistent} returns 404, not 500."""
+        port, _ = test_server
+        status, data = _request("DELETE", port, "/node/nonexistent_node_xyz")
+        assert status == 404
+
+    def test_delete_nonexistent_edge_returns_404(self, test_server):
+        """DELETE /edge/{nonexistent} returns 404, not 500."""
+        port, _ = test_server
+        status, data = _request("DELETE", port, "/edge/nonexistent_edge_xyz")
+        assert status == 404
+
+
+@pytest.mark.xdist_group("server")
 class TestEnrichedChangeFeed:
     """Tests for enriched change feed (OHM-m8a: include node content in listen())."""
 

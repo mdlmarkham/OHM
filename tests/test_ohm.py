@@ -308,3 +308,66 @@ class TestGraphQueries:
         results1 = query_neighborhood(populated_store.conn, "hungary", depth=1)
         results3 = query_neighborhood(populated_store.conn, "hungary", depth=3)
         assert len(results3) >= len(results1)
+
+
+class TestDeleteNodeStore:
+    """Tests for OhmStore.delete_node() — cascading edge deletion (OHM-cpi)."""
+
+    def test_delete_node_removes_edges(self, store):
+        """delete_node removes all edges referencing the node."""
+        a = store.write_node("del-a", "Node A", "concept")
+        b = store.write_node("del-b", "Node B", "concept")
+        store.write_edge("del-a", "del-b", "CAUSES", "L3", confidence=0.8)
+
+        result = store.delete_node("del-a", deleted_by="test_agent")
+        assert result["deleted"] == "del-a"
+        assert result["type"] == "node"
+        assert result["edges_removed"] >= 1
+
+        # Node should be gone
+        assert store.get_node("del-a") is None
+
+    def test_delete_node_removes_incoming_edges(self, store):
+        """delete_node removes edges where node is the target."""
+        a = store.write_node("src-a", "Source", "concept")
+        b = store.write_node("tgt-b", "Target", "concept")
+        store.write_edge("src-a", "tgt-b", "CAUSES", "L3", confidence=0.8)
+
+        result = store.delete_node("tgt-b", deleted_by="test_agent")
+        assert result["edges_removed"] >= 1
+
+    def test_delete_node_not_found(self, store):
+        """delete_node raises NodeNotFoundError for nonexistent node."""
+        from ohm.exceptions import NodeNotFoundError
+        with pytest.raises(NodeNotFoundError):
+            store.delete_node("nonexistent_xyz", deleted_by="test_agent")
+
+    def test_delete_node_no_edges(self, store):
+        """delete_node works on a node with no edges."""
+        store.write_node("lonely", "Lonely", "concept")
+        result = store.delete_node("lonely", deleted_by="test_agent")
+        assert result["edges_removed"] == 0
+        assert result["observations_removed"] == 0
+
+
+class TestDeleteEdgeStore:
+    """Tests for OhmStore.delete_edge() (OHM-cpi)."""
+
+    def test_delete_edge(self, store):
+        """delete_edge removes an edge by ID."""
+        a = store.write_node("e-a", "A", "concept")
+        b = store.write_node("e-b", "B", "concept")
+        edge = store.write_edge("e-a", "e-b", "CAUSES", "L3", confidence=0.8)
+
+        result = store.delete_edge(edge["id"], deleted_by="test_agent")
+        assert result["deleted"] == edge["id"]
+        assert result["type"] == "edge"
+
+        # Edge should be gone
+        assert store.get_edge(edge["id"]) is None
+
+    def test_delete_edge_not_found(self, store):
+        """delete_edge raises EdgeNotFoundError for nonexistent edge."""
+        from ohm.exceptions import EdgeNotFoundError
+        with pytest.raises(EdgeNotFoundError):
+            store.delete_edge("nonexistent_edge_xyz", deleted_by="test_agent")

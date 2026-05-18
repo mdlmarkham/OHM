@@ -2295,6 +2295,43 @@ class Graph:
             self._conn, ticket_node, max_depth=max_depth,
         )
 
+    def delete_node(self, node_id: str) -> dict[str, Any]:
+        """Delete a node and all its associated edges and observations.
+
+        Removes all edges referencing the node (both as source and target),
+        all observations on the node, then the node itself.
+
+        Args:
+            node_id: The node to delete.
+
+        Returns:
+            Dict with deleted node_id, type, and counts of removed edges/observations.
+
+        Raises:
+            NodeNotFoundError: If the node doesn't exist.
+        """
+        from ohm.queries import delete_node
+
+        return delete_node(self._conn, node_id=node_id, deleted_by=self.actor)
+
+    def delete_edge(self, edge_id: str) -> dict[str, Any]:
+        """Delete an edge by ID.
+
+        Also removes any observations referencing the edge.
+
+        Args:
+            edge_id: The edge to delete.
+
+        Returns:
+            Dict with deleted edge_id and type.
+
+        Raises:
+            EdgeNotFoundError: If the edge doesn't exist.
+        """
+        from ohm.queries import delete_edge
+
+        return delete_edge(self._conn, edge_id=edge_id, deleted_by=self.actor)
+
     def close(self) -> None:
         """Close the database connection."""
         self._conn.close()

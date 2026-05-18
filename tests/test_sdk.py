@@ -1380,3 +1380,68 @@ class TestOHMClient:
         config = {"host": "10.0.0.1", "port": 9999}
         url = _resolve_base_url(config)
         assert url == "http://10.0.0.1:9999"
+
+
+# ===== Delete Node/Edge SDK Tests =====
+
+class TestDeleteNodeSDK:
+    """Tests for SDK delete_node() method (OHM-cpi)."""
+
+    def test_delete_node_removes_edges(self, graph):
+        """delete_node() removes all edges referencing the node."""
+        a = graph.create_node(label="DelA", node_type="concept")
+        b = graph.create_node(label="DelB", node_type="concept")
+        graph.create_edge(
+            from_node=a["id"], to_node=b["id"],
+            edge_type="CAUSES", layer="L3",
+        )
+        result = graph.delete_node(a["id"])
+        assert result["deleted"] == a["id"]
+        assert result["type"] == "node"
+        assert result["edges_removed"] >= 1
+
+    def test_delete_node_removes_incoming_edges(self, graph):
+        """delete_node() removes edges where node is the target."""
+        a = graph.create_node(label="SrcA", node_type="concept")
+        b = graph.create_node(label="TgtB", node_type="concept")
+        graph.create_edge(
+            from_node=a["id"], to_node=b["id"],
+            edge_type="CAUSES", layer="L3",
+        )
+        result = graph.delete_node(b["id"])
+        assert result["edges_removed"] >= 1
+
+    def test_delete_node_not_found(self, graph):
+        """delete_node() raises NodeNotFoundError for nonexistent node."""
+        from ohm.exceptions import NodeNotFoundError
+        with pytest.raises(NodeNotFoundError):
+            graph.delete_node("nonexistent_node_xyz")
+
+    def test_delete_node_no_edges(self, graph):
+        """delete_node() works on a node with no edges."""
+        node = graph.create_node(label="Lonely", node_type="concept")
+        result = graph.delete_node(node["id"])
+        assert result["edges_removed"] == 0
+        assert result["observations_removed"] == 0
+
+
+class TestDeleteEdgeSDK:
+    """Tests for SDK delete_edge() method (OHM-cpi)."""
+
+    def test_delete_edge(self, graph):
+        """delete_edge() removes an edge by ID."""
+        a = graph.create_node(label="A", node_type="concept")
+        b = graph.create_node(label="B", node_type="concept")
+        edge = graph.create_edge(
+            from_node=a["id"], to_node=b["id"],
+            edge_type="CAUSES", layer="L3",
+        )
+        result = graph.delete_edge(edge["id"])
+        assert result["deleted"] == edge["id"]
+        assert result["type"] == "edge"
+
+    def test_delete_edge_not_found(self, graph):
+        """delete_edge() raises EdgeNotFoundError for nonexistent edge."""
+        from ohm.exceptions import EdgeNotFoundError
+        with pytest.raises(EdgeNotFoundError):
+            graph.delete_edge("nonexistent_edge_xyz")

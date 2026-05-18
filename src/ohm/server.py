@@ -1459,6 +1459,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         DELETE /edge/{id} — removes an edge.
 
         Requires auth. Agents can only delete their own nodes/edges.
+        Idempotent: returns 404 on second call (not 500).
         """
         from urllib.parse import urlparse, parse_qs
         parsed = urlparse(self.path)
@@ -1477,7 +1478,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             from .validation import validate_identifier
             node_id = validate_identifier(node_id, name="node_id")
 
-            # Verify node exists
+            # Verify node exists (idempotent 404)
             node = self.store.conn.execute(
                 "SELECT id, created_by FROM ohm_nodes WHERE id = ?", [node_id],
             ).fetchone()
@@ -1490,22 +1491,18 @@ class OhmHandler(BaseHTTPRequestHandler):
                     f"Cannot delete node {node_id}: owned by {node[1]}, you are {agent}"
                 )
 
-            # Delete associated edges first, then the node
-            self.store.conn.execute("DELETE FROM ohm_edges WHERE from_node = ? OR to_node = ?",
-                                     [node_id, node_id])
-            self.store.conn.execute("DELETE FROM ohm_observations WHERE node_id = ?", [node_id])
-            self.store.conn.execute("DELETE FROM ohm_nodes WHERE id = ?", [node_id])
-            self.store._log_change("ohm_nodes", node_id, "DELETE", None, agent_name=agent)
-            self._json_response(200, {"deleted": node_id, "type": "node"})
+            # Use store method — splits edge deletion to avoid DuckDB index issues (OHM-cpi)
+            result = self.store.delete_node(node_id, deleted_by=agent)
+            self._json_response(200, result)
 
         elif path.startswith("/edge/"):
             edge_id = path[6:]
             from .validation import validate_identifier
             edge_id = validate_identifier(edge_id, name="edge_id")
 
-            # Verify edge exists
+            # Verify edge exists (idempotent 404)
             edge = self.store.conn.execute(
-                "SELECT id, created_by, layer FROM ohm_edges WHERE id = ?", [edge_id],
+                "SELECT id, created_by FROM ohm_edges WHERE id = ?", [edge_id],
             ).fetchone()
             if not edge:
                 raise EdgeNotFoundError(f"Edge not found: {edge_id}")
@@ -1516,10 +1513,9 @@ class OhmHandler(BaseHTTPRequestHandler):
                     f"Cannot delete edge {edge_id}: owned by {edge[1]}, you are {agent}"
                 )
 
-            self.store.conn.execute("DELETE FROM ohm_observations WHERE edge_id = ?", [edge_id])
-            self.store.conn.execute("DELETE FROM ohm_edges WHERE id = ?", [edge_id])
-            self.store._log_change("ohm_edges", edge_id, "DELETE", edge[2], agent_name=agent)
-            self._json_response(200, {"deleted": edge_id, "type": "edge"})
+            # Use store method
+            result = self.store.delete_edge(edge_id, deleted_by=agent)
+            self._json_response(200, result)
 
         else:
             self._json_response(404, {"error": f"Unknown endpoint: {path}"})

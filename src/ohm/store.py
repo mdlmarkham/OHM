@@ -422,6 +422,70 @@ class OhmStore:
         """Get an edge by ID."""
         return self.execute_one("SELECT * FROM ohm_edges WHERE id = ?", [edge_id])
 
+    def delete_node(self, node_id: str, deleted_by: str) -> dict[str, Any]:
+        """Delete a node and all its associated edges and observations.
+
+        Splits edge deletion into two statements to avoid DuckDB index
+        issues with OR conditions (OHM-cpi).
+
+        Raises NodeNotFoundError if the node doesn't exist.
+        """
+        from ohm.exceptions import NodeNotFoundError
+
+        node = self.get_node(node_id)
+        if not node:
+            raise NodeNotFoundError(f"Node not found: {node_id}")
+
+        # Delete edges in two statements to avoid DuckDB index issues
+        edges_from = self.conn.execute(
+            "DELETE FROM ohm_edges WHERE from_node = ?", [node_id]
+        ).fetchone()
+        edges_to = self.conn.execute(
+            "DELETE FROM ohm_edges WHERE to_node = ?", [node_id]
+        ).fetchone()
+        edges_deleted = (edges_from[0] if edges_from else 0) + (edges_to[0] if edges_to else 0)
+
+        # Delete observations
+        obs_result = self.conn.execute(
+            "DELETE FROM ohm_observations WHERE node_id = ?", [node_id]
+        )
+        obs_deleted = obs_result.fetchone()
+        obs_count = obs_deleted[0] if obs_deleted else 0
+
+        # Delete the node
+        self.conn.execute("DELETE FROM ohm_nodes WHERE id = ?", [node_id])
+        self._log_change("ohm_nodes", node_id, "DELETE", deleted_by)
+
+        return {
+            "deleted": node_id,
+            "type": "node",
+            "edges_removed": edges_deleted,
+            "observations_removed": obs_count,
+        }
+
+    def delete_edge(self, edge_id: str, deleted_by: str) -> dict[str, Any]:
+        """Delete an edge by ID.
+
+        Raises EdgeNotFoundError if the edge doesn't exist.
+        """
+        from ohm.exceptions import EdgeNotFoundError
+
+        edge = self.get_edge(edge_id)
+        if not edge:
+            raise EdgeNotFoundError(f"Edge not found: {edge_id}")
+
+        # Delete observations referencing this edge
+        self.conn.execute("DELETE FROM ohm_observations WHERE edge_id = ?", [edge_id])
+
+        # Delete the edge
+        self.conn.execute("DELETE FROM ohm_edges WHERE id = ?", [edge_id])
+        self._log_change("ohm_edges", edge_id, "DELETE", deleted_by)
+
+        return {
+            "deleted": edge_id,
+            "type": "edge",
+        }
+
     def get_agent_state(self, agent_name: str) -> Optional[dict[str, Any]]:
         """Get an agent's current state."""
         return self.execute_one("SELECT * FROM ohm_agent_state WHERE agent_name = ?", [agent_name])

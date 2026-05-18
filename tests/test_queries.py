@@ -886,3 +886,108 @@ class TestFindOrCreateNode:
         original = create_node(test_db, label="Courage", node_type="value", created_by="metis")
         found = find_or_create_node(test_db, label="courage", node_type="value", created_by="metis")
         assert found["id"] == original["id"]
+
+
+class TestDeleteNode:
+    """Tests for delete_node() — cascading edge deletion (OHM-cpi)."""
+
+    def test_delete_node_removes_edges(self, test_db):
+        """delete_node removes all edges referencing the node."""
+        from ohm.queries import create_node, create_edge, delete_node
+
+        a = create_node(test_db, label="A", node_type="concept", created_by="test")
+        b = create_node(test_db, label="B", node_type="concept", created_by="test")
+        create_edge(test_db, from_node=a["id"], to_node=b["id"],
+                     edge_type="CAUSES", layer="L3", created_by="test")
+
+        result = delete_node(test_db, node_id=a["id"], deleted_by="test")
+        assert result["deleted"] == a["id"]
+        assert result["type"] == "node"
+        assert result["edges_removed"] >= 1
+
+        # Node should be gone
+        rows = test_db.execute("SELECT * FROM ohm_nodes WHERE id = ?", [a["id"]]).fetchall()
+        assert len(rows) == 0
+
+        # Edge should be gone
+        rows = test_db.execute("SELECT * FROM ohm_edges WHERE from_node = ?", [a["id"]]).fetchall()
+        assert len(rows) == 0
+
+    def test_delete_node_removes_incoming_edges(self, test_db):
+        """delete_node removes edges where node is the target."""
+        from ohm.queries import create_node, create_edge, delete_node
+
+        a = create_node(test_db, label="A", node_type="concept", created_by="test")
+        b = create_node(test_db, label="B", node_type="concept", created_by="test")
+        create_edge(test_db, from_node=a["id"], to_node=b["id"],
+                     edge_type="CAUSES", layer="L3", created_by="test")
+
+        result = delete_node(test_db, node_id=b["id"], deleted_by="test")
+        assert result["edges_removed"] >= 1
+
+        # Edge should be gone (b was the target)
+        rows = test_db.execute("SELECT * FROM ohm_edges WHERE to_node = ?", [b["id"]]).fetchall()
+        assert len(rows) == 0
+
+    def test_delete_node_removes_observations(self, test_db):
+        """delete_node removes observations on the node."""
+        from ohm.queries import create_node, delete_node
+
+        node = create_node(test_db, label="Obs", node_type="concept", created_by="test")
+        test_db.execute(
+            "INSERT INTO ohm_observations (id, node_id, type, value, created_by) VALUES (?, ?, ?, ?, ?)",
+            ["obs-1", node["id"], "metric", 42.0, "test"],
+        )
+
+        result = delete_node(test_db, node_id=node["id"], deleted_by="test")
+        assert result["observations_removed"] >= 1
+
+        # Observation should be gone
+        rows = test_db.execute("SELECT * FROM ohm_observations WHERE node_id = ?", [node["id"]]).fetchall()
+        assert len(rows) == 0
+
+    def test_delete_node_not_found(self, test_db):
+        """delete_node raises NodeNotFoundError for nonexistent node."""
+        from ohm.queries import delete_node
+        from ohm.exceptions import NodeNotFoundError
+
+        with pytest.raises(NodeNotFoundError):
+            delete_node(test_db, node_id="nonexistent_xyz", deleted_by="test")
+
+    def test_delete_node_no_edges(self, test_db):
+        """delete_node works on a node with no edges."""
+        from ohm.queries import create_node, delete_node
+
+        node = create_node(test_db, label="Lonely", node_type="concept", created_by="test")
+        result = delete_node(test_db, node_id=node["id"], deleted_by="test")
+        assert result["edges_removed"] == 0
+        assert result["observations_removed"] == 0
+
+
+class TestDeleteEdge:
+    """Tests for delete_edge() (OHM-cpi)."""
+
+    def test_delete_edge(self, test_db):
+        """delete_edge removes an edge by ID."""
+        from ohm.queries import create_node, create_edge, delete_edge
+
+        a = create_node(test_db, label="A", node_type="concept", created_by="test")
+        b = create_node(test_db, label="B", node_type="concept", created_by="test")
+        edge = create_edge(test_db, from_node=a["id"], to_node=b["id"],
+                            edge_type="CAUSES", layer="L3", created_by="test")
+
+        result = delete_edge(test_db, edge_id=edge["id"], deleted_by="test")
+        assert result["deleted"] == edge["id"]
+        assert result["type"] == "edge"
+
+        # Edge should be gone
+        rows = test_db.execute("SELECT * FROM ohm_edges WHERE id = ?", [edge["id"]]).fetchall()
+        assert len(rows) == 0
+
+    def test_delete_edge_not_found(self, test_db):
+        """delete_edge raises EdgeNotFoundError for nonexistent edge."""
+        from ohm.queries import delete_edge
+        from ohm.exceptions import EdgeNotFoundError
+
+        with pytest.raises(EdgeNotFoundError):
+            delete_edge(test_db, edge_id="nonexistent_edge_xyz", deleted_by="test")
