@@ -194,42 +194,39 @@ class OHMClient:
     def register(
         self,
         *,
+        name: str | None = None,
         description: str | None = None,
         values: list[str] | None = None,
         goals: list[str] | None = None,
-        capabilities: list[str] | None = None,
-        interests: list[str] | None = None,
-        listens_to: list[str] | None = None,
+        skills: list[str] | None = None,
+        services: list[str] | None = None,
     ) -> dict[str, Any]:
         """Register this agent in the shared graph (idempotent).
 
-        Maps description to the API's content field. All parameters are
-        keyword-only to match the /register API endpoint.
+        Parameters match the /register API endpoint exactly.
 
         Args:
+            name: Agent display name (defaults to self.actor).
             description: Agent description (stored as node content).
             values: What this agent optimizes for.
             goals: What this agent is trying to achieve.
-            capabilities: What this agent can do.
-            interests: Topics this agent subscribes to.
-            listens_to: Other agents whose output this agent follows.
+            skills: What this agent can do (maps to CAPABLE_OF edges).
+            services: Services this agent provides (maps to LISTENS_TO edges).
 
         Returns:
             The agent node record with created edges.
         """
-        body: dict[str, Any] = {"name": self.actor}
+        body: dict[str, Any] = {"name": name or self.actor}
         if description is not None:
             body["description"] = description
         if values is not None:
             body["values"] = values
         if goals is not None:
             body["goals"] = goals
-        if capabilities is not None:
-            body["capabilities"] = capabilities
-        if interests is not None:
-            body["interests"] = interests
-        if listens_to is not None:
-            body["listens_to"] = listens_to
+        if skills is not None:
+            body["skills"] = skills
+        if services is not None:
+            body["services"] = services
         return self.graph._http_request("POST", "/register", body)
 
     def close(self):

@@ -1024,8 +1024,8 @@ class TestTopoSchemaServer:
         status, data = _request("GET", port, "/schema")
         assert status == 200
         # FEEDS and FLOWS_TO are in L2
-        assert "FEEDS" in data["edge_types"]["L2"]
-        assert "FLOWS_TO" in data["edge_types"]["L2"]
+        assert "FEEDS" in data["edge_types_by_layer"]["L2"]
+        assert "FLOWS_TO" in data["edge_types_by_layer"]["L2"]
 
 
 @pytest.mark.xdist_group("server")
