@@ -1174,15 +1174,20 @@ class TestCompositeScore:
 class TestContradictions:
     """Tests for contradictions() SDK method."""
 
-    def test_contradictions_returns_list(self, graph):
-        """contradictions() returns a list."""
+    def test_contradictions_returns_dict(self, graph):
+        """contradictions() returns a dict with contradiction categories."""
         results = graph.contradictions()
-        assert isinstance(results, list)
+        assert isinstance(results, dict)
+        assert "contradictory_interpretations" in results
+        assert "high_confidence_challenges" in results
+        assert "opposite_observations" in results
 
     def test_contradictions_empty_graph(self, graph):
-        """contradictions() on empty graph returns empty list."""
+        """contradictions() on empty graph returns empty categories."""
         results = graph.contradictions()
-        assert len(results) == 0
+        assert results["contradictory_interpretations"] == []
+        assert results["high_confidence_challenges"] == []
+        assert results["opposite_observations"] == []
 
 
 class TestDetectTrend:
