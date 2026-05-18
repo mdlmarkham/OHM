@@ -310,6 +310,8 @@ class Graph:
         visibility: str = "team",
         provenance: str | None = None,
         confidence: float = 1.0,
+        urgency: str | None = None,
+        priority: str | None = None,
     ) -> dict[str, Any]:
         """Create a node and return its full record.
 
@@ -328,6 +330,8 @@ class Graph:
             visibility=visibility,
             provenance=provenance,
             confidence=confidence,
+            urgency=urgency,
+            priority=priority,
         )
 
     def create_edge(
@@ -1997,6 +2001,124 @@ class Graph:
         # Sort by timestamp
         history.sort(key=lambda h: h.get("timestamp", ""))
         return history
+
+    # ── Customer Support: Handoff, Escalation, Provenance ──────────────
+
+    def handoff(
+        self,
+        *,
+        from_agent: str,
+        to_agent: str,
+        ticket_node: str,
+        reason: str,
+        edge_type: str = "TRANSFERRED_TO",
+        confidence: float = 0.8,
+    ) -> dict[str, Any]:
+        """Transfer a ticket between agents with full context tracking.
+
+        Creates a TRANSFERRED_TO (default), ESCALATED_TO, or DELEGATED_TO
+        edge from the from_agent to the to_agent, and returns the full
+        handoff chain for the ticket.
+
+        Example:
+            g.handoff(from_agent=agent_a, to_agent=agent_b,
+                      ticket_node=ticket, reason="Customer needs specialist")
+            → {edge: {...}, handoff_chain: [...]}
+
+        Args:
+            from_agent: Agent node ID transferring from.
+            to_agent: Agent node ID transferring to.
+            ticket_node: The ticket/case node being handed off.
+            reason: Reason for the handoff.
+            edge_type: TRANSFERRED_TO, ESCALATED_TO, or DELEGATED_TO.
+            confidence: Confidence for the edge (default 0.8).
+
+        Returns:
+            Dict with the created edge and the full handoff chain.
+        """
+        from ohm.queries import query_handoff
+
+        return query_handoff(
+            self._conn,
+            from_agent=from_agent,
+            to_agent=to_agent,
+            ticket_node=ticket_node,
+            reason=reason,
+            edge_type=edge_type,
+            confidence=confidence,
+            created_by=self.actor,
+        )
+
+    def escalate(
+        self,
+        *,
+        ticket_node: str,
+        to_tier: str,
+        reason: str,
+        from_agent: str | None = None,
+        confidence: float = 0.9,
+    ) -> dict[str, Any]:
+        """Escalate a ticket to a higher tier with urgency.
+
+        Creates an ESCALATED_TO edge and sets the ticket's urgency to 'high'.
+        Returns the escalation edge and the updated ticket info.
+
+        Example:
+            g.escalate(ticket_node=ticket, to_tier=tier2,
+                       reason="SLA breach imminent")
+            → {edge: {...}, ticket: {urgency: 'high', ...}}
+
+        Args:
+            ticket_node: The ticket/case node being escalated.
+            to_tier: Agent node ID or tier identifier to escalate to.
+            reason: Reason for the escalation.
+            from_agent: Agent node ID escalating from (optional).
+            confidence: Confidence for the edge (default 0.9).
+
+        Returns:
+            Dict with the created edge and updated ticket info.
+        """
+        from ohm.queries import query_escalate
+
+        return query_escalate(
+            self._conn,
+            ticket_node=ticket_node,
+            to_tier=to_tier,
+            reason=reason,
+            from_agent=from_agent,
+            confidence=confidence,
+            created_by=self.actor,
+        )
+
+    def ticket_provenance(
+        self,
+        ticket_node: str,
+        *,
+        max_depth: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Show the complete handoff and state history for a ticket.
+
+        Follows TRANSFERRED_TO, ESCALATED_TO, DELEGATED_TO edges and
+        state machine edges (OPENED_BY, STARTED_BY, AWAITING, RESOLVED_BY,
+        CLOSED_BY) to reconstruct the full provenance chain.
+
+        Example:
+            g.ticket_provenance(ticket_node=ticket)
+            → [{edge_type: 'OPENED_BY', from_label: 'agent_a', ...},
+               {edge_type: 'TRANSFERRED_TO', from_label: 'agent_a', ...}]
+
+        Args:
+            ticket_node: The ticket/case node.
+            max_depth: Maximum traversal depth.
+
+        Returns:
+            List of provenance records ordered chronologically.
+        """
+        from ohm.queries import query_ticket_provenance
+
+        return query_ticket_provenance(
+            self._conn, ticket_node, max_depth=max_depth,
+        )
 
     def close(self) -> None:
         """Close the database connection."""

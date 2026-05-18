@@ -88,11 +88,18 @@ VALID_LAYERS = frozenset(LAYER_EDGE_TYPES.keys())
 
 VALID_OBSERVATION_TYPES = frozenset({
     "anomaly", "measurement", "pattern", "challenge", "support",
+    "sentiment",  # customer support: sentiment observation
 })
 
 VALID_OBSERVATION_SOURCES = frozenset({
     "signal", "research", "conversation", "analysis",
 })
+
+# ── Urgency / Priority ──────────────────────────────────────────────────────
+
+VALID_URGENCY = frozenset({"low", "normal", "high", "critical"})
+
+VALID_PRIORITY = frozenset({"P0", "P1", "P2", "P3", "P4"})
 
 # ── Layer Descriptions ──────────────────────────────────────────────────────
 
@@ -260,7 +267,9 @@ DDL_STATEMENTS: list[str] = [
         visibility    VARCHAR DEFAULT 'team',
         provenance    VARCHAR,
         tags          JSON,
-        metadata      JSON
+        metadata      JSON,
+        urgency       VARCHAR DEFAULT 'normal',
+        priority      VARCHAR
     );
     """,
     # ── Edges ────────────────────────────────────────────────────────────
@@ -374,7 +383,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.5.0"
+SCHEMA_VERSION = "0.6.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -396,6 +405,10 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
     ]),
     ("0.5.0", "add probability column to ohm_edges for supply chain / risk modeling", [
         "ALTER TABLE ohm_edges ADD COLUMN probability FLOAT",
+    ]),
+    ("0.6.0", "add urgency/priority columns and sentiment observation type", [
+        "ALTER TABLE ohm_nodes ADD COLUMN urgency VARCHAR DEFAULT 'normal'",
+        "ALTER TABLE ohm_nodes ADD COLUMN priority VARCHAR",
     ]),
 ]
 

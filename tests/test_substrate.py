@@ -998,3 +998,222 @@ class TestEdgeVersioning:
         with connect(db, actor="metis") as g:
             history = g.edge_history("nonexistent_edge_id")
             assert history == []
+
+
+# ===== Customer Support: Handoff, Escalation, Provenance (OHM-af8.5) =====
+
+class TestCustomerSupport:
+    """Tests for OHM-af8.5: customer support handoff, escalation, provenance."""
+
+    def test_handoff_creates_transferred_to_edge(self, tmp_path):
+        """handoff() creates a TRANSFERRED_TO edge and returns chain."""
+        db = str(tmp_path / "handoff1.duckdb")
+        with connect(db, actor="agent_a") as g:
+            agent_a = g.create_node(label="Agent A", node_type="agent")
+            agent_b = g.create_node(label="Agent B", node_type="agent")
+            ticket = g.create_node(label="Ticket #123", node_type="event")
+
+            result = g.handoff(
+                from_agent=agent_a["id"],
+                to_agent=agent_b["id"],
+                ticket_node=ticket["id"],
+                reason="Customer needs billing specialist",
+            )
+
+            assert "edge" in result
+            assert result["edge"]["edge_type"] == "TRANSFERRED_TO"
+            assert result["edge"]["from_node"] == agent_a["id"]
+            assert result["edge"]["to_node"] == agent_b["id"]
+            assert result["edge"]["condition"] == "Customer needs billing specialist"
+            assert "handoff_chain" in result
+
+    def test_handoff_with_delegation(self, tmp_path):
+        """handoff() with edge_type=DELEGATED_TO creates delegation edge."""
+        db = str(tmp_path / "handoff2.duckdb")
+        with connect(db, actor="manager") as g:
+            manager = g.create_node(label="Manager", node_type="agent")
+            specialist = g.create_node(label="Specialist", node_type="agent")
+            ticket = g.create_node(label="Ticket #456", node_type="event")
+
+            result = g.handoff(
+                from_agent=manager["id"],
+                to_agent=specialist["id"],
+                ticket_node=ticket["id"],
+                reason="Delegating to specialist",
+                edge_type="DELEGATED_TO",
+            )
+
+            assert result["edge"]["edge_type"] == "DELEGATED_TO"
+
+    def test_handoff_invalid_edge_type_raises(self, tmp_path):
+        """handoff() with invalid edge_type raises ValueError."""
+        db = str(tmp_path / "handoff3.duckdb")
+        with connect(db, actor="agent_a") as g:
+            agent_a = g.create_node(label="Agent A", node_type="agent")
+            agent_b = g.create_node(label="Agent B", node_type="agent")
+            ticket = g.create_node(label="Ticket", node_type="event")
+
+            with pytest.raises(ValueError, match="Invalid handoff edge_type"):
+                g.handoff(
+                    from_agent=agent_a["id"],
+                    to_agent=agent_b["id"],
+                    ticket_node=ticket["id"],
+                    reason="test",
+                    edge_type="CAUSES",
+                )
+
+    def test_escalate_creates_edge_and_sets_urgency(self, tmp_path):
+        """escalate() creates ESCALATED_TO edge and sets urgency='high'."""
+        db = str(tmp_path / "escalate1.duckdb")
+        with connect(db, actor="tier1") as g:
+            tier1 = g.create_node(label="Tier 1", node_type="agent")
+            tier2 = g.create_node(label="Tier 2", node_type="agent")
+            ticket = g.create_node(label="Ticket #789", node_type="event")
+
+            result = g.escalate(
+                ticket_node=ticket["id"],
+                to_tier=tier2["id"],
+                reason="SLA breach imminent",
+                from_agent=tier1["id"],
+            )
+
+            assert "edge" in result
+            assert result["edge"]["edge_type"] == "ESCALATED_TO"
+            assert result["edge"]["from_node"] == tier1["id"]
+            assert result["edge"]["to_node"] == tier2["id"]
+            assert "ticket" in result
+            assert result["ticket"]["urgency"] == "high"
+
+    def test_escalate_without_from_agent_uses_ticket(self, tmp_path):
+        """escalate() without from_agent uses ticket_node as edge source."""
+        db = str(tmp_path / "escalate2.duckdb")
+        with connect(db, actor="system") as g:
+            tier2 = g.create_node(label="Tier 2", node_type="agent")
+            ticket = g.create_node(label="Auto Ticket", node_type="event")
+
+            result = g.escalate(
+                ticket_node=ticket["id"],
+                to_tier=tier2["id"],
+                reason="Auto-escalation",
+            )
+
+            assert result["edge"]["from_node"] == ticket["id"]
+            assert result["edge"]["to_node"] == tier2["id"]
+
+    def test_ticket_provenance_shows_handoff_chain(self, tmp_path):
+        """ticket_provenance() returns handoff and state history."""
+        db = str(tmp_path / "prov1.duckdb")
+        with connect(db, actor="agent_a") as g:
+            agent_a = g.create_node(label="Agent A", node_type="agent")
+            agent_b = g.create_node(label="Agent B", node_type="agent")
+            ticket = g.create_node(label="Ticket #100", node_type="event")
+
+            # Create handoff
+            g.handoff(
+                from_agent=agent_a["id"],
+                to_agent=agent_b["id"],
+                ticket_node=ticket["id"],
+                reason="Needs specialist",
+            )
+
+            chain = g.ticket_provenance(ticket["id"])
+            assert len(chain) >= 1
+            # Should find the TRANSFERRED_TO edge
+            types = [step["edge_type"] for step in chain]
+            assert "TRANSFERRED_TO" in types
+
+    def test_ticket_provenance_with_state_machine(self, tmp_path):
+        """ticket_provenance() includes state machine edges."""
+        db = str(tmp_path / "prov2.duckdb")
+        with connect(db, actor="agent_a") as g:
+            agent_a = g.create_node(label="Agent A", node_type="agent")
+            ticket = g.create_node(label="Ticket #200", node_type="event")
+
+            # Create state machine edges
+            g.create_edge(
+                from_node=agent_a["id"], to_node=ticket["id"],
+                edge_type="OPENED_BY", layer="L2", confidence=1.0,
+            )
+            g.create_edge(
+                from_node=agent_a["id"], to_node=ticket["id"],
+                edge_type="STARTED_BY", layer="L2", confidence=1.0,
+            )
+
+            chain = g.ticket_provenance(ticket["id"])
+            types = [step["edge_type"] for step in chain]
+            assert "OPENED_BY" in types
+            assert "STARTED_BY" in types
+
+    def test_sentiment_observation_supported(self, tmp_path):
+        """Sentiment observation type is supported."""
+        db = str(tmp_path / "sentiment.duckdb")
+        with connect(db, actor="nlp_bot") as g:
+            ticket = g.create_node(label="Ticket #300", node_type="event")
+
+            obs = g.observe(
+                ticket["id"],
+                obs_type="sentiment",
+                value=-0.7,
+                sigma=0.5,
+                source="nlp_analysis",
+            )
+
+            assert obs["type"] == "sentiment"
+            assert abs(obs["value"] - (-0.7)) < 0.01
+
+    def test_full_customer_support_workflow(self, tmp_path):
+        """End-to-end: open → handoff → escalate → resolve."""
+        db = str(tmp_path / "workflow.duckdb")
+        with connect(db, actor="tier1") as g:
+            tier1 = g.create_node(label="Tier 1 Agent", node_type="agent")
+            tier2 = g.create_node(label="Tier 2 Agent", node_type="agent")
+            ticket = g.create_node(label="Support Ticket", node_type="event")
+
+            # 1. Open ticket
+            g.create_edge(
+                from_node=tier1["id"], to_node=ticket["id"],
+                edge_type="OPENED_BY", layer="L2", confidence=1.0,
+            )
+
+            # 2. Handoff to tier 2
+            handoff_result = g.handoff(
+                from_agent=tier1["id"],
+                to_agent=tier2["id"],
+                ticket_node=ticket["id"],
+                reason="Complex issue needs escalation",
+                edge_type="TRANSFERRED_TO",
+            )
+            assert handoff_result["edge"]["edge_type"] == "TRANSFERRED_TO"
+
+            # 3. Escalate
+            escalate_result = g.escalate(
+                ticket_node=ticket["id"],
+                to_tier=tier2["id"],
+                reason="SLA breach risk",
+                from_agent=tier1["id"],
+            )
+            assert escalate_result["edge"]["edge_type"] == "ESCALATED_TO"
+            assert escalate_result["ticket"]["urgency"] == "high"
+
+            # 4. Record sentiment
+            g.observe(
+                ticket["id"],
+                obs_type="sentiment",
+                value=-0.3,
+                sigma=0.4,
+                source="nlp_analysis",
+            )
+
+            # 5. Resolve
+            g.create_edge(
+                from_node=tier2["id"], to_node=ticket["id"],
+                edge_type="RESOLVED_BY", layer="L2", confidence=1.0,
+            )
+
+            # 6. Check provenance
+            chain = g.ticket_provenance(ticket["id"])
+            types = [step["edge_type"] for step in chain]
+            assert "OPENED_BY" in types
+            assert "TRANSFERRED_TO" in types
+            assert "ESCALATED_TO" in types
+            assert "RESOLVED_BY" in types
