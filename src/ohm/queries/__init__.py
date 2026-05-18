@@ -1268,6 +1268,33 @@ def query_graph_health(
     }
 
 
+def query_find_orphan_agents(
+    conn: DuckDBPyConnection,
+) -> list[dict[str, Any]]:
+    """Find orphan agent nodes from pre-idempotent registration (OHM-7pf).
+
+    Before idempotent registration, agents could create multiple nodes
+    with non-deterministic IDs (e.g., metis_8b678b). Returns agent nodes
+    whose IDs don't match the deterministic pattern.
+    """
+    import re
+
+    result = conn.execute(
+        "SELECT id, label, type, created_by, created_at, content "
+        "FROM ohm_nodes WHERE type = 'agent' ORDER BY created_at"
+    )
+    agents = _rows_to_dicts(result)
+
+    orphans = []
+    for agent in agents:
+        label = agent.get("label", "")
+        expected_id = "agent_" + re.sub(r'[^a-zA-Z0-9]+', '_', label.lower()).strip('_')
+        if agent["id"] != expected_id:
+            orphans.append({**agent, "expected_id": expected_id})
+
+    return orphans
+
+
 def query_stale_edges(
     conn: DuckDBPyConnection,
     *,

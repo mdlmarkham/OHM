@@ -246,6 +246,13 @@ def build_parser() -> argparse.ArgumentParser:
     # graph health
     graph_sub.add_parser("health", help="Graph structural health metrics")
 
+    # graph cleanup
+    cleanup_parser = graph_sub.add_parser("cleanup", help="Find and remove orphan agent nodes")
+    cleanup_parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Show orphan agents without deleting",
+    )
+
     # graph decay
     decay_parser = graph_sub.add_parser("decay", help="Apply confidence decay to stale edges")
     decay_parser.add_argument(
@@ -590,6 +597,8 @@ def _handle_graph(args: argparse.Namespace) -> None:
         _handle_anomalies(args)
     elif cmd == "health":
         _handle_health(args)
+    elif cmd == "cleanup":
+        _handle_cleanup(args)
     elif cmd == "decay":
         _handle_decay(args)
     elif cmd == "composite-score":
@@ -1396,6 +1405,37 @@ def _handle_health(args: argparse.Namespace) -> None:
                   f"(unchallenged low-confidence: {result['unchallenged_low_confidence']})")
             print(f"  Dense clusters: {result['dense_cluster_nodes']}")
             print(f"  Stale observations: {result['stale_observations']}")
+    finally:
+        conn.close()
+
+
+def _handle_cleanup(args: argparse.Namespace) -> None:
+    """Handle orphan agent node cleanup (OHM-7pf)."""
+    from ohm.queries import query_find_orphan_agents
+
+    conn = _get_db(args)
+    try:
+        orphans = query_find_orphan_agents(conn)
+
+        if args.format == "json":
+            import json
+            print(json.dumps({"orphan_agents": orphans, "count": len(orphans)}, indent=2, default=str))
+        elif not orphans:
+            print("No orphan agent nodes found.")
+        elif args.dry_run:
+            print(f"Found {len(orphans)} orphan agent node(s) (dry-run):")
+            for o in orphans:
+                print(f"  {o['id']} (label={o['label']}, created_by={o['created_by']})")
+            print("Run without --dry-run to delete them.")
+        else:
+            print(f"Deleting {len(orphans)} orphan agent node(s)...")
+            for o in orphans:
+                # Delete associated edges first, then the node
+                conn.execute("DELETE FROM ohm_edges WHERE from_node = ? OR to_node = ?",
+                             [o["id"], o["id"]])
+                conn.execute("DELETE FROM ohm_nodes WHERE id = ?", [o["id"]])
+                print(f"  Deleted {o['id']} (label={o['label']})")
+            print("Done.")
     finally:
         conn.close()
 
