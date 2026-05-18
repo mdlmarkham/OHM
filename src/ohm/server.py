@@ -43,6 +43,11 @@ DEFAULT_CONFIG = {
         # Populated from config file or env vars
     },
     "log_level": "INFO",
+    "ducklake": {
+        "path": "",  # DuckLake catalog path (e.g., /var/lib/ohm/ohm_lake.ducklake)
+        "data_path": "",  # Parquet data path (e.g., /var/lib/ohm/ohm_lake_data)
+        "sync_interval_seconds": 60,  # How often to sync to DuckLake
+    },
 }
 
 _START_TIME = time.time()
@@ -204,6 +209,13 @@ def load_config(config_path: Optional[str] = None) -> dict:
         config["host"] = os.environ["OHM_HOST"]
     if "OHM_DB_PATH" in os.environ:
         config["db_path"] = os.environ["OHM_DB_PATH"]
+
+    # DuckLake config overrides (OHM-kdk.1)
+    ducklake_config = config.setdefault("ducklake", {})
+    if "OHM_DUCKLAKE_PATH" in os.environ:
+        ducklake_config["path"] = os.environ["OHM_DUCKLAKE_PATH"]
+    if "OHM_DUCKLAKE_DATA" in os.environ:
+        ducklake_config["data_path"] = os.environ["OHM_DUCKLAKE_DATA"]
 
     return config
 
@@ -1754,6 +1766,22 @@ def main(schema_config: SchemaConfig | None = None):
     store = OhmStore(db_path=config["db_path"], agent_name="ohmd")
     print(f"OHM database: {config['db_path']}", file=sys.stderr)
     print(f"Status: {store.status()}", file=sys.stderr)
+
+    # Attach DuckLake if configured (OHM-kdk.1)
+    ducklake_config = config.get("ducklake", {})
+    ducklake_path = ducklake_config.get("path", "")
+    if ducklake_path:
+        from .db import attach_ducklake
+        data_path = ducklake_config.get("data_path", "")
+        attached = attach_ducklake(
+            store.conn,
+            catalog_path=ducklake_path,
+            data_path=data_path or None,
+        )
+        if attached:
+            print(f"DuckLake attached: {ducklake_path}", file=sys.stderr)
+        else:
+            print("DuckLake extension not available — lakehouse features disabled", file=sys.stderr)
 
     # Run server
     try:

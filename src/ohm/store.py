@@ -584,6 +584,46 @@ class OhmStore:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
 
+    # ── DuckLake Attachment ────────────────────────────────────────────
+
+    def attach_ducklake(
+        self,
+        catalog_path: Optional[str] = None,
+        data_path: Optional[str] = None,
+        alias: str = "ohm_lake",
+    ) -> bool:
+        """Attach a DuckLake catalog to this store's connection.
+
+        Creates mirror tables (ohm_nodes, ohm_edges, ohm_observations,
+        ohm_change_feed) in the DuckLake schema without PRIMARY KEY
+        constraints (DuckLake limitation). Uniqueness is enforced in
+        application code.
+
+        Args:
+            catalog_path: Path to DuckLake catalog file.
+                If None, uses OHM_DUCKLAKE_PATH env var.
+            data_path: Path for Parquet data files.
+                If None, defaults to a 'data' subdirectory next to catalog.
+            alias: Database alias for the attached catalog.
+
+        Returns:
+            True if DuckLake was attached successfully, False if
+            the DuckLake extension is not available.
+        """
+        from .db import attach_ducklake
+
+        if catalog_path is None:
+            catalog_path = os.environ.get("OHM_DUCKLAKE_PATH")
+        if not catalog_path:
+            return False
+
+        return attach_ducklake(
+            self.conn,
+            catalog_path=catalog_path,
+            data_path=data_path,
+            alias=alias,
+        )
+
     # ── DuckLake Sync ────────────────────────────────────────────────
 
     def sync_heartbeat(
