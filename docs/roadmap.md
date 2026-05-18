@@ -35,7 +35,7 @@
 
 **Deliverable:** `ohmd` runs as systemd service. Multiple agents connect via tokens. All CLI commands work through daemon. Full HTTP API.
 
-## Phase 2: Domain Flexibility ✅ (In Progress)
+## Phase 2: Domain Flexibility ✅ (Complete)
 
 **Goal:** OHM works for multiple domains beyond cognitive agents
 
@@ -49,10 +49,12 @@
 - [x] Batch SSE writes for high-velocity scenarios
 - [x] Temporal confidence decay (decay_observations, expiring_soon)
 - [x] Multiplicative composite scoring
-- [ ] Source reliability calibration (record_outcome, source_reliability) — OHM-7e4
-- [ ] Handoff chains and escalation (handoff, escalate) — OHM-3yo
-- [ ] Cascade simulation (cascade_scenario, what_if) — OHM-af8.1
-- [ ] Urgent change filtering (urgent_changes) — OHM-af8.2
+- [x] Source reliability calibration (record_outcome, source_reliability)
+- [x] Handoff chains and escalation (handoff, escalate)
+- [x] Cascade simulation (cascade_scenario, what_if)
+- [x] Urgent change filtering (urgent_changes)
+- [x] 6 scenario docs with runnable code examples
+- [x] 603+ tests passing
 
 ## Phase 3: Agent Integration (Next)
 
