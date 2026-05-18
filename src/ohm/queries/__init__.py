@@ -591,9 +591,11 @@ def create_edge(
     confidence: float = 0.7,
     condition: str | None = None,
     provenance: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create a new edge and return its full record. Validates layer/type compatibility."""
     import uuid
+    import json
 
     from ohm.schema import validate_edge_type
     from ohm.validation import validate_confidence
@@ -603,13 +605,14 @@ def create_edge(
     confidence = validate_confidence(confidence)
 
     edge_id = str(uuid.uuid4())
+    metadata_json = json.dumps(metadata) if metadata else None
     conn.execute(
         """INSERT INTO ohm_edges
            (id, from_node, to_node, layer, edge_type, created_by,
-            confidence, condition, provenance)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            confidence, condition, provenance, metadata)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [edge_id, from_node, to_node, layer, edge_type, created_by,
-         confidence, condition, provenance],
+         confidence, condition, provenance, metadata_json],
     )
     _log_change(conn, "ohm_edges", edge_id, "INSERT", created_by)
     # Return full edge record
@@ -1478,3 +1481,104 @@ def query_confidence_chain(
         "evidence_count": len(edges),
         "max_depth": max(e.get("depth", 0) for e in edges) if edges else 0,
     }
+
+
+# ── Batch Expiry ────────────────────────────────────────────────────────────
+
+def query_find_expiring_batches(
+    conn: DuckDBPyConnection,
+    *,
+    product_type: str | None = None,
+    days: int = 5,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """Find batches expiring within a given number of days.
+
+    Uses BATCH_EXPIRES_BEFORE edges where the edge metadata contains an
+    expires_at ISO timestamp. Returns batches sorted by expiry (soonest first).
+
+    Args:
+        conn: Database connection.
+        product_type: Optional filter by source node type (e.g., 'dairy', 'produce').
+        days: Look-ahead window in days (default 5).
+        limit: Maximum results to return.
+
+    Returns:
+        List of dicts with batch_id, product_type, expires_at, days_until_expiry,
+        from_node, to_node, and edge metadata.
+    """
+    from datetime import datetime, timezone
+
+    conditions = ["e.edge_type = 'BATCH_EXPIRES_BEFORE'"]
+    params: list = []
+
+    if product_type:
+        from ohm.validation import validate_identifier
+        product_type = validate_identifier(product_type, name="product_type")
+        conditions.append("n_from.type = ?")
+        params.append(product_type)
+
+    where_clause = "WHERE " + " AND ".join(conditions)
+
+    query = f"""
+        SELECT
+            e.id AS edge_id,
+            e.from_node,
+            e.to_node,
+            n_from.label AS batch_label,
+            n_from.type AS product_type,
+            n_to.label AS location_label,
+            e.metadata,
+            e.confidence,
+            e.created_at
+        FROM ohm_edges e
+        JOIN ohm_nodes n_from ON e.from_node = n_from.id
+        JOIN ohm_nodes n_to ON e.to_node = n_to.id
+        {where_clause}
+        ORDER BY e.created_at DESC
+        LIMIT ?
+    """
+    params.append(limit)
+
+    result = conn.execute(query, params)
+    rows = _rows_to_dicts(result)
+
+    now = datetime.now(timezone.utc)
+    output: list[dict[str, Any]] = []
+    for row in rows:
+        metadata = row.get("metadata")
+        if isinstance(metadata, str):
+            import json
+            metadata = json.loads(metadata)
+        expires_at_str = metadata.get("expires_at") if isinstance(metadata, dict) else None
+
+        if expires_at_str:
+            try:
+                expires_at = datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
+                days_until = (expires_at - now).total_seconds() / 86400.0
+            except (ValueError, TypeError):
+                days_until = None
+        else:
+            days_until = None
+
+        # Filter by days window
+        if days_until is not None and days_until > days:
+            continue
+
+        output.append({
+            "edge_id": row["edge_id"],
+            "from_node": row["from_node"],
+            "to_node": row["to_node"],
+            "batch_label": row["batch_label"],
+            "product_type": row["product_type"],
+            "location_label": row["location_label"],
+            "expires_at": expires_at_str,
+            "days_until_expiry": round(days_until, 1) if days_until is not None else None,
+            "confidence": row["confidence"],
+            "metadata": metadata,
+        })
+
+    # Sort by days_until_expiry ascending (soonest first)
+    output.sort(key=lambda x: x["days_until_expiry"] if x["days_until_expiry"] is not None else float("inf"))
+
+    return output[:limit]

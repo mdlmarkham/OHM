@@ -286,3 +286,109 @@ class TestDiscovery:
             assert "ownership" in r
             assert "edge_types" in r
             assert "example" in r
+
+
+class TestExpiringSoon:
+    """Tests for OHM-0e0.6: batch expiry detection."""
+
+    def test_expiring_soon_empty(self, graph):
+        """expiring_soon() returns empty list when no expiry edges exist."""
+        results = graph.expiring_soon()
+        assert isinstance(results, list)
+        assert len(results) == 0
+
+    def test_expiring_soon_with_expiry_edge(self, graph):
+        """expiring_soon() finds batches with BATCH_EXPIRES_BEFORE edges."""
+        from datetime import datetime, timezone, timedelta
+
+        # Create product batch node and location node
+        batch = graph.create_node(label="Milk Batch #42", node_type="equipment")
+        location = graph.create_node(label="Store #7 Cooler", node_type="site")
+
+        # Create expiry edge with metadata
+        expires = datetime.now(timezone.utc) + timedelta(days=3)
+        graph.create_edge(
+            from_node=batch["id"], to_node=location["id"],
+            edge_type="BATCH_EXPIRES_BEFORE", layer="L2",
+            metadata={"expires_at": expires.isoformat()},
+        )
+
+        results = graph.expiring_soon(days=5)
+        assert len(results) >= 1
+        assert results[0]["from_node"] == batch["id"]
+        assert results[0]["product_type"] == "equipment"
+        assert results[0]["days_until_expiry"] is not None
+        assert results[0]["days_until_expiry"] <= 5
+
+    def test_expiring_soon_product_type_filter(self, graph):
+        """expiring_soon() filters by product_type."""
+        from datetime import datetime, timezone, timedelta
+
+        dairy = graph.create_node(label="Yogurt Batch", node_type="equipment")
+        produce = graph.create_node(label="Lettuce Batch", node_type="system")
+        loc = graph.create_node(label="Store", node_type="site")
+
+        expires = datetime.now(timezone.utc) + timedelta(days=2)
+        graph.create_edge(
+            from_node=dairy["id"], to_node=loc["id"],
+            edge_type="BATCH_EXPIRES_BEFORE", layer="L2",
+            metadata={"expires_at": expires.isoformat()},
+        )
+        graph.create_edge(
+            from_node=produce["id"], to_node=loc["id"],
+            edge_type="BATCH_EXPIRES_BEFORE", layer="L2",
+            metadata={"expires_at": expires.isoformat()},
+        )
+
+        dairy_results = graph.expiring_soon(product_type="equipment", days=5)
+        assert len(dairy_results) >= 1
+        assert all(r["product_type"] == "equipment" for r in dairy_results)
+
+    def test_expiring_soon_days_filter(self, graph):
+        """expiring_soon() only returns batches within the days window."""
+        from datetime import datetime, timezone, timedelta
+
+        batch = graph.create_node(label="Cheese Batch", node_type="equipment")
+        loc = graph.create_node(label="Store", node_type="site")
+
+        # Expires in 10 days — should NOT appear with days=5
+        expires = datetime.now(timezone.utc) + timedelta(days=10)
+        graph.create_edge(
+            from_node=batch["id"], to_node=loc["id"],
+            edge_type="BATCH_EXPIRES_BEFORE", layer="L2",
+            metadata={"expires_at": expires.isoformat()},
+        )
+
+        results = graph.expiring_soon(days=5)
+        assert len(results) == 0
+
+        # But should appear with days=15
+        results_wide = graph.expiring_soon(days=15)
+        assert len(results_wide) >= 1
+
+    def test_expiring_soon_sorted_by_expiry(self, graph):
+        """expiring_soon() returns soonest-expiring batches first."""
+        from datetime import datetime, timezone, timedelta
+
+        loc = graph.create_node(label="Store", node_type="site")
+
+        # Batch expiring in 1 day
+        urgent = graph.create_node(label="Urgent Batch", node_type="equipment")
+        graph.create_edge(
+            from_node=urgent["id"], to_node=loc["id"],
+            edge_type="BATCH_EXPIRES_BEFORE", layer="L2",
+            metadata={"expires_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()},
+        )
+
+        # Batch expiring in 4 days
+        later = graph.create_node(label="Later Batch", node_type="equipment")
+        graph.create_edge(
+            from_node=later["id"], to_node=loc["id"],
+            edge_type="BATCH_EXPIRES_BEFORE", layer="L2",
+            metadata={"expires_at": (datetime.now(timezone.utc) + timedelta(days=4)).isoformat()},
+        )
+
+        results = graph.expiring_soon(days=5)
+        assert len(results) >= 2
+        # First result should be the one expiring sooner
+        assert results[0]["days_until_expiry"] <= results[1]["days_until_expiry"]

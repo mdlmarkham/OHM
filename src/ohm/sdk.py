@@ -340,6 +340,7 @@ class Graph:
         confidence: float = 0.7,
         condition: str | None = None,
         provenance: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Create an edge and return its full record.
 
@@ -358,6 +359,7 @@ class Graph:
             confidence=confidence,
             condition=condition,
             provenance=provenance,
+            metadata=metadata,
         )
 
     def challenge(self, edge_id: str, *, reason: str, confidence: float = 0.5) -> dict[str, Any]:
