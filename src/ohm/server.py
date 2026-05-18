@@ -896,10 +896,15 @@ class OhmHandler(BaseHTTPRequestHandler):
             self._json_response(200, status)
         elif path == "/schema":
             schema = self.schema_config
+            # Flatten edge types: collect all unique edge type names across layers
+            all_edge_types: set[str] = set()
+            for types in schema.layer_edge_types.values():
+                all_edge_types.update(types)
             self._json_response(200, {
                 "schema": schema.name,
                 "node_types": sorted(schema.node_types),
-                "edge_types": {k: sorted(v) for k, v in schema.layer_edge_types.items()},
+                "edge_types": sorted(all_edge_types),
+                "edge_types_by_layer": {k: sorted(v) for k, v in schema.layer_edge_types.items()},
                 "layers": schema.layer_descriptions,
             })
         elif path == "/layers":
