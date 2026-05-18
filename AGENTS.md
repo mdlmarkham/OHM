@@ -56,7 +56,7 @@ tests/
 └── test_topo_cli.py      # TOPO CLI tests
 ```
 
-**528 tests passing** across all modules.
+**603+ tests passing** across all modules.
 ```
 
 ### Module Boundaries
@@ -81,6 +81,10 @@ Two codepaths exist for the same operations. This is intentional:
 - **ADR-003**: Agent-owned edges with challenge semantics (no overwrites, CHALLENGED_BY/SUPPORTS edges)
 - **ADR-004**: Three-layer data architecture (local DuckDB cache → DuckLake shared backend → private)
 - **ADR-005**: Self-documenting CLI as agent interface (agents call `ohm`, not raw SQL)
+- **ADR-006**: Advisory Schema with Graduated Enforcement (advisory → lenient → strict via SchemaConfig)
+- **ADR-007**: Probability and Confidence as separate edge attributes (confidence = belief, probability = likelihood)
+- **ADR-008**: NEGATES edge type for negative evidence (semantically distinct from CHALLENGED_BY)
+- **ADR-009**: Observation Type Extensibility (domain-specific types without DDL migrations)
 
 ## Conventions
 
@@ -143,26 +147,15 @@ bd create "title" -t feature -p 0 --parent <epic-id>  # Create child issue
 
 ### Backlog Structure
 Active epics (use `bd list` for current state):
-- **OHM-0e0**: P1 — Domain Flexibility (cattle, retail, temporal decay, SSE, batch expiry)
-- **OHM-af8**: P1 — Multi-scenario Extensibility (medical, cybersecurity, supply chain, customer support)
-- **OHM-xgm**: P1 — DuckLake + Time Travel
-- **OHM-a35**: P1 — Agent Integration (Métis, Clio, Hephaestus, Socrates)
-- **OHM-3w1**: P2 — TOPO Instantiation
+- **OHM-0e0**: P1 — Domain Flexibility ✅ (Complete: cattle, retail, temporal decay, SSE, batch expiry)
+- **OHM-af8**: P1 — Multi-scenario Extensibility ✅ (Complete: medical, cybersecurity, supply chain, customer support)
+- **OHM-xgm**: P1 — DuckLake + Time Travel (future)
+- **OHM-a35**: P1 — Agent Integration (Métis, Clio, Hephaestus, Socrates) (future)
+- **OHM-3w1**: P2 — TOPO Instantiation (future)
 
-Schema blockers (P0):
-- **OHM-pap**: P0 — Add urgency + priority fields to schema (blocks af8.2, af8.4, af8.5)
-- **OHM-2xy**: P0 — Add probability field to edges (blocks af8.1)
+Schema v0.5.0 shipped: urgency, priority, probability, NEGATES, scenario edge types.
 
-Cross-cutting:
-- **OHM-9dq**: P1 — SDK tests (zero coverage on primary agent interface)
-- **OHM-zag**: P1 — No request size cap on POST bodies (OOM risk)
-- **OHM-7e4**: P1 — source_reliability() + record_outcome() for cybersecurity
-- **OHM-3yo**: P1 — handoff() + escalate() for customer support
-- **OHM-pfk**: P1 — Comprehensive doc update for multi-scenario architecture
-- **OHM-c8i**: P1 — ADRs for probability/confidence, NEGATES, urgency/priority
-- **OHM-e19**: P2 — No SIGPIPE handling in daemon
-
-Issues tagged with **PM input needed** are blocked on product decisions. Issues without that tag are actionable now.
+Remaining docs/P2 items (use `bd list` for current state).
 
 ### Session Completion (MANDATORY)
 
