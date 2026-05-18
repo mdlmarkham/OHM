@@ -1245,7 +1245,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                 priority=body.get("priority"),
                 url=body.get("url"),
             )
-            is_new = node.get("created_at") == node.get("updated_at") or node.get("created_at") is not None
+            is_new = node.get("created", False)
             self._json_response(201 if is_new else 200, node)
 
         elif path == "/edge":

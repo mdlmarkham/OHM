@@ -805,7 +805,7 @@ def find_or_create_node(
         return existing[0]
 
     # Not found — create a new one
-    return create_node(
+    node = create_node(
         conn,
         label=label,
         node_type=node_type,
@@ -817,6 +817,9 @@ def find_or_create_node(
         priority=priority,
         url=url,
     )
+    # Add a 'created' flag to distinguish find vs create
+    node["created"] = True
+    return node
 
 
 def create_edge(

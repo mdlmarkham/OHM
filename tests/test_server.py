@@ -479,6 +479,41 @@ class TestNodeIdempotency:
 
 
 @pytest.mark.xdist_group("server")
+class TestFindOrCreateStatus:
+    """Tests for OHM-smq: find_or_create returns 200 when finding existing, 201 when creating new."""
+
+    def test_find_or_create_returns_201_for_new_node(self, test_server):
+        """POST /node/find_or_create returns 201 when creating a new node."""
+        port, _ = test_server
+        status, data = _request("POST", port, "/node/find_or_create", body={
+            "label": "Find or Create Test",
+            "type": "concept",
+        })
+        assert status == 201
+        assert data["label"] == "Find or Create Test"
+
+    def test_find_or_create_returns_200_for_existing_node(self, test_server):
+        """POST /node/find_or_create returns 200 when finding an existing node."""
+        port, _ = test_server
+        # First call creates the node
+        status, data = _request("POST", port, "/node/find_or_create", body={
+            "label": "Existing Find Or Create",
+            "type": "concept",
+            "content": "Original content",
+        })
+        assert status == 201
+
+        # Second call should find existing and return 200
+        status, data = _request("POST", port, "/node/find_or_create", body={
+            "label": "Existing Find Or Create",
+            "type": "concept",
+            "content": "Should not overwrite",
+        })
+        assert status == 200
+        assert data["content"] == "Original content"  # Original preserved
+
+
+@pytest.mark.xdist_group("server")
 class TestErrorHandling:
     """Tests for error response format."""
 
