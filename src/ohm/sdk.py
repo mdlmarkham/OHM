@@ -310,7 +310,6 @@ class Graph:
         visibility: str = "team",
         provenance: str | None = None,
         confidence: float = 1.0,
-        urgency: str | None = None,
         priority: str | None = None,
     ) -> dict[str, Any]:
         """Create a node and return its full record.
@@ -330,7 +329,6 @@ class Graph:
             visibility=visibility,
             provenance=provenance,
             confidence=confidence,
-            urgency=urgency,
             priority=priority,
         )
 
@@ -343,6 +341,7 @@ class Graph:
         layer: str = "L3",
         confidence: float = 0.7,
         probability: float | None = None,
+        urgency: str | None = None,
         condition: str | None = None,
         provenance: str | None = None,
         metadata: dict[str, Any] | None = None,
@@ -363,6 +362,7 @@ class Graph:
             created_by=self.actor,
             confidence=confidence,
             probability=probability,
+            urgency=urgency,
             condition=condition,
             provenance=provenance,
             metadata=metadata,

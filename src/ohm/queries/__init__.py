@@ -703,11 +703,10 @@ def create_node(
     visibility: str = "team",
     provenance: str | None = None,
     confidence: float = 1.0,
-    urgency: str | None = None,
     priority: str | None = None,
 ) -> dict[str, Any]:
     """Create a new node and return its full record."""
-    from ohm.schema import generate_node_id, validate_node_type, VALID_URGENCY, VALID_PRIORITY
+    from ohm.schema import generate_node_id, validate_node_type, VALID_PRIORITY
     from ohm.validation import validate_confidence
 
     if not label or len(label) > 500:
@@ -715,18 +714,16 @@ def create_node(
     if not validate_node_type(node_type):
         raise ValueError(f"Invalid node type: {node_type}")
     confidence = validate_confidence(confidence)
-    if urgency is not None and urgency not in VALID_URGENCY:
-        raise ValueError(f"Invalid urgency: {urgency}. Must be one of: {sorted(VALID_URGENCY)}")
     if priority is not None and priority not in VALID_PRIORITY:
         raise ValueError(f"Invalid priority: {priority}. Must be one of: {sorted(VALID_PRIORITY)}")
 
     node_id = generate_node_id(label)
     conn.execute(
         """INSERT INTO ohm_nodes
-           (id, label, type, content, created_by, visibility, provenance, confidence, urgency, priority)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           (id, label, type, content, created_by, visibility, provenance, confidence, priority)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [node_id, label, node_type, content, created_by, visibility, provenance, confidence,
-         urgency or "normal", priority],
+         priority],
     )
     _log_change(conn, "ohm_nodes", node_id, "INSERT", created_by)
     # Return full node record
@@ -745,6 +742,7 @@ def create_edge(
     created_by: str,
     confidence: float = 0.7,
     probability: float | None = None,
+    urgency: str | None = None,
     condition: str | None = None,
     provenance: str | None = None,
     metadata: dict[str, Any] | None = None,
@@ -753,22 +751,24 @@ def create_edge(
     import uuid
     import json
 
-    from ohm.schema import validate_edge_type
+    from ohm.schema import validate_edge_type, VALID_URGENCY
     from ohm.validation import validate_confidence
 
     if not validate_edge_type(layer, edge_type):
         raise ValueError(f"Invalid edge type '{edge_type}' for layer '{layer}'")
     confidence = validate_confidence(confidence)
+    if urgency is not None and urgency not in VALID_URGENCY:
+        raise ValueError(f"Invalid urgency: {urgency}. Must be one of: {sorted(VALID_URGENCY)}")
 
     edge_id = str(uuid.uuid4())
     metadata_json = json.dumps(metadata) if metadata else None
     conn.execute(
         """INSERT INTO ohm_edges
            (id, from_node, to_node, layer, edge_type, created_by,
-            confidence, probability, condition, provenance, metadata)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            confidence, probability, urgency, condition, provenance, metadata)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [edge_id, from_node, to_node, layer, edge_type, created_by,
-         confidence, probability, condition, provenance, metadata_json],
+         confidence, probability, urgency, condition, provenance, metadata_json],
     )
     _log_change(conn, "ohm_edges", edge_id, "INSERT", created_by)
     # Return full edge record

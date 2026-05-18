@@ -133,12 +133,14 @@ class OhmStore:
         provenance: Optional[str] = None,
         tags: Optional[list[str]] = None,
         metadata: Optional[dict] = None,
+        priority: Optional[str] = None,
         agent_name: Optional[str] = None,
     ) -> dict[str, Any]:
         """Create or update a node. Attributed to the given agent.
 
         Args:
             agent_name: Agent to attribute the write to. Defaults to self.agent_name.
+            priority: Node priority (P0-P3).
 
         Returns a dict with the node record and a 'created' key
         indicating whether this was a new creation (True) or an
@@ -158,11 +160,11 @@ class OhmStore:
                 UPDATE ohm_nodes SET
                     label = ?, type = ?, content = ?, confidence = ?,
                     visibility = ?, provenance = ?, tags = ?, metadata = ?,
-                    updated_at = ?, updated_by = ?
+                    priority = ?, updated_at = ?, updated_by = ?
                 WHERE id = ?
                 """,
                 [label, type, content, confidence, visibility, provenance,
-                 tags_json, metadata_json, now, actor, id],
+                 tags_json, metadata_json, priority, now, actor, id],
             )
             self._log_change("ohm_nodes", id, "UPDATE", None)
             result = self.get_node(id) or {}
@@ -172,11 +174,11 @@ class OhmStore:
             self.conn.execute(
                 """
                 INSERT INTO ohm_nodes (id, label, type, content, created_by, confidence,
-                                       visibility, provenance, tags, metadata, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                       visibility, provenance, tags, metadata, priority, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [id, label, type, content, actor, confidence,
-                 visibility, provenance, tags_json, metadata_json, now, now],
+                 visibility, provenance, tags_json, metadata_json, priority, now, now],
             )
             self._log_change("ohm_nodes", id, "INSERT", None)
             result = self.get_node(id) or {}
@@ -194,12 +196,16 @@ class OhmStore:
         provenance: Optional[str] = None,
         challenge_of: Optional[str] = None,
         challenge_type: Optional[str] = None,
+        urgency: Optional[str] = None,
+        probability: Optional[float] = None,
         agent_name: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
         """Create an edge. Attributed to the given agent.
 
         Args:
             agent_name: Agent to attribute the write to. Defaults to self.agent_name.
+            urgency: Edge urgency (critical, high, medium, low).
+            probability: Objective likelihood of the outcome (0.0-1.0).
 
         Enforces boundary rules:
         - L1/L2: any agent can write
@@ -212,11 +218,11 @@ class OhmStore:
             """
             INSERT INTO ohm_edges (from_node, to_node, layer, edge_type, confidence,
                                     condition, provenance, created_by, challenge_of,
-                                    challenge_type, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    challenge_type, urgency, probability, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [from_node, to_node, layer, edge_type, confidence, condition,
-             provenance, actor, challenge_of, challenge_type, now, now],
+             provenance, actor, challenge_of, challenge_type, urgency, probability, now, now],
         )
 
         edge = self.execute_one(

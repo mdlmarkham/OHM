@@ -268,7 +268,6 @@ DDL_STATEMENTS: list[str] = [
         provenance    VARCHAR,
         tags          JSON,
         metadata      JSON,
-        urgency       VARCHAR DEFAULT 'normal',
         priority      VARCHAR
     );
     """,
@@ -282,6 +281,7 @@ DDL_STATEMENTS: list[str] = [
         edge_type       VARCHAR NOT NULL,
         confidence      FLOAT,
         probability     FLOAT,
+        urgency         VARCHAR,
         condition       TEXT,
         provenance      VARCHAR,
         created_by      VARCHAR NOT NULL,
@@ -418,9 +418,10 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
     ("0.5.0", "add probability column to ohm_edges for supply chain / risk modeling", [
         "ALTER TABLE ohm_edges ADD COLUMN probability FLOAT",
     ]),
-    ("0.6.0", "add urgency/priority columns and sentiment observation type", [
-        "ALTER TABLE ohm_nodes ADD COLUMN urgency VARCHAR DEFAULT 'normal'",
+    ("0.6.0", "add priority column to ohm_nodes, urgency column to ohm_edges, and sentiment observation type", [
         "ALTER TABLE ohm_nodes ADD COLUMN priority VARCHAR",
+        "ALTER TABLE ohm_edges ADD COLUMN urgency VARCHAR",
+        "ALTER TABLE ohm_observations ADD COLUMN sentiment VARCHAR"
     ]),
     ("0.7.0", "add ohm_outcomes table for source reliability tracking", [
         """CREATE TABLE IF NOT EXISTS ohm_outcomes (

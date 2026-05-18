@@ -1066,6 +1066,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                 provenance=body.get("provenance"),
                 tags=body.get("tags"),
                 metadata=body.get("metadata"),
+                priority=body.get("priority"),
                 agent_name=agent,
             )
             event_type = "node.created" if result.get("created") else "node.updated"
@@ -1090,6 +1091,8 @@ class OhmHandler(BaseHTTPRequestHandler):
                 provenance=body.get("provenance"),
                 challenge_of=body.get("challenge_of"),
                 challenge_type=body.get("challenge_type"),
+                urgency=body.get("urgency"),
+                probability=body.get("probability"),
                 agent_name=agent,
             )
             _trigger_webhooks({
