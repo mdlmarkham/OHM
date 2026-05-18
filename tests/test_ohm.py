@@ -159,6 +159,25 @@ class TestOhmStore:
         )
         assert obs.get("notes") is None
 
+    def test_write_observation_with_source_attribution(self, populated_store):
+        """OHM-lmr: write_observation should persist source_name and source_url."""
+        obs = populated_store.write_observation(
+            "hungary", "measurement", value=0.88,
+            source_name="Reuters", source_url="https://reuters.com/article/123",
+            notes="Initial report"
+        )
+        assert obs["source_name"] == "Reuters"
+        assert obs["source_url"] == "https://reuters.com/article/123"
+        assert obs["notes"] == "Initial report"
+
+    def test_write_observation_without_source_attribution(self, populated_store):
+        """OHM-lmr: write_observation without source attribution should have None fields."""
+        obs = populated_store.write_observation(
+            "hungary", "measurement", value=0.75
+        )
+        assert obs.get("source_name") is None
+        assert obs.get("source_url") is None
+
     def test_write_observation_with_agent_name_override(self, populated_store):
         """OHM-y2i.19: write_observation should accept agent_name parameter."""
         obs = populated_store.write_observation(

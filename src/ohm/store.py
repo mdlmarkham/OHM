@@ -321,6 +321,8 @@ class OhmStore:
         source: Optional[str] = None,
         edge_id: Optional[str] = None,
         notes: Optional[str] = None,
+        source_name: Optional[str] = None,
+        source_url: Optional[str] = None,
         agent_name: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
         """Create an observation. Attributed to the given agent.
@@ -328,16 +330,18 @@ class OhmStore:
         Args:
             agent_name: Agent to attribute the observation to. Defaults to self.agent_name.
             notes: Optional free-text notes for the observation.
+            source_name: Name of the source (e.g., 'Reuters').
+            source_url: URL of the source (e.g., 'https://reuters.com/...').
         """
         actor = agent_name or self.agent_name
         now = self._now()
         self.conn.execute(
             """
             INSERT INTO ohm_observations
-                (node_id, edge_id, type, value, baseline, sigma, source, created_by, created_at, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (node_id, edge_id, type, value, baseline, sigma, source, created_by, created_at, notes, source_name, source_url)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            [node_id, edge_id, type, value, baseline, sigma, source, actor, now, notes],
+            [node_id, edge_id, type, value, baseline, sigma, source, actor, now, notes, source_name, source_url],
         )
 
         obs = self.execute_one(

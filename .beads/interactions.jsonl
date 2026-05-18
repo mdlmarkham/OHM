@@ -246,3 +246,5 @@
 >>>>>>> Stashed changes
 {"id":"int-8b9a28a2","kind":"field_change","created_at":"2026-05-18T14:33:04.1184273Z","actor":"Matt Markham","issue_id":"OHM-qp6","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
 {"id":"int-087e9352","kind":"field_change","created_at":"2026-05-18T14:37:34.5390123Z","actor":"Matt Markham","issue_id":"OHM-lwr","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
+{"id":"int-59090c34","kind":"field_change","created_at":"2026-05-18T14:54:23.016124Z","actor":"Matt Markham","issue_id":"OHM-qp6","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
+{"id":"int-3c3e9d9b","kind":"field_change","created_at":"2026-05-18T14:55:09.934568Z","actor":"Matt Markham","issue_id":"OHM-lmr","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}

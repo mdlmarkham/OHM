@@ -1378,3 +1378,53 @@ class TestObservationNotes:
             "type": "measurement", "value": 5.0,
         })
         assert status == 201
+
+
+@pytest.mark.xdist_group("server")
+class TestSourceAttribution:
+    """Tests for structured source attribution on observations (OHM-lmr)."""
+
+    def test_observe_with_source_name_and_url(self, test_server):
+        """POST /observe/{id} with source_name and source_url persists them."""
+        port, store = test_server
+        _request("POST", port, "/node", body={
+            "id": "src-attrib-node", "label": "Source Test", "type": "concept",
+        })
+        status, data = _request("POST", port, "/observe/src-attrib-node", body={
+            "type": "measurement", "value": 1.5,
+            "source_name": "Reuters", "source_url": "https://reuters.com/article/123",
+        })
+        assert status == 201
+        assert data.get("source_name") == "Reuters"
+        assert data.get("source_url") == "https://reuters.com/article/123"
+
+    def test_observe_source_attribution_in_db(self, test_server):
+        """source_name and source_url are stored in the database."""
+        port, store = test_server
+        _request("POST", port, "/node", body={
+            "id": "src-attrib-db", "label": "DB Source Test", "type": "concept",
+        })
+        _request("POST", port, "/observe/src-attrib-db", body={
+            "type": "measurement", "value": 2.0,
+            "source_name": "AP News", "source_url": "https://apnews.com/article/456",
+        })
+        obs = store.execute(
+            "SELECT source_name, source_url FROM ohm_observations WHERE node_id = ? ORDER BY created_at DESC LIMIT 1",
+            ["src-attrib-db"],
+        )
+        assert len(obs) == 1
+        assert obs[0]["source_name"] == "AP News"
+        assert obs[0]["source_url"] == "https://apnews.com/article/456"
+
+    def test_observe_without_source_attribution(self, test_server):
+        """POST /observe/{id} without source fields works (backward compatible)."""
+        port, store = test_server
+        _request("POST", port, "/node", body={
+            "id": "src-no-attrib", "label": "No Source", "type": "concept",
+        })
+        status, data = _request("POST", port, "/observe/src-no-attrib", body={
+            "type": "measurement", "value": 3.0,
+        })
+        assert status == 201
+        assert data.get("source_name") is None
+        assert data.get("source_url") is None

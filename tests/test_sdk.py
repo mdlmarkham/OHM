@@ -86,6 +86,17 @@ class TestGraphWrite:
         assert obs["id"]
         assert obs["notes"] == "Anomalous spike"
 
+    def test_observe_with_source_attribution(self, graph):
+        """OHM-lmr: observe() should persist and return source_name and source_url."""
+        a = graph.create_node(label="SourceTest")["id"]
+        obs = graph.observe(
+            a, obs_type="measurement", value=3.0,
+            source_name="Reuters", source_url="https://reuters.com/article/456",
+        )
+        assert obs["id"]
+        assert obs["source_name"] == "Reuters"
+        assert obs["source_url"] == "https://reuters.com/article/456"
+
     def test_set_focus(self, graph):
         graph.set_focus("researching patterns")
         state = graph.agent_state("test_agent")
