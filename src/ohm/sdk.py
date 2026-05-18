@@ -2234,6 +2234,7 @@ def connect_remote(
     token: str | None = None,
     token_env: str | None = None,
     alias: str = "remote",
+    strict: bool = True,
 ) -> Graph:
     """Connect to a remote OHM graph via Quack protocol.
 
@@ -2241,15 +2242,14 @@ def connect_remote(
     Quack server as a catalog. All graph operations are sent to the
     remote server through Quack.
 
-    Falls back to a direct file connection if Quack is not available
-    (using the OHM_DB environment variable or default path).
-
     Args:
         uri: Quack URI of the remote server (default: quack:localhost).
         actor: Agent name for attribution.
         token: Quack authentication token.
         token_env: Environment variable for the token (default: QUACK_TOKEN).
         alias: Catalog alias for the remote (default: 'remote').
+        strict: If True (default), raise ConnectionError when Quack attach
+            fails. If False, fall back to local file connection with warnings.
 
     Returns:
         A Graph instance connected to the remote server.
@@ -2275,11 +2275,28 @@ def connect_remote(
             graph = Graph(conn, actor=actor)
             graph.token = token or os.environ.get(token_env or "QUACK_TOKEN")
             return graph
-        except Exception:
-            # Fall back to direct connection
-            pass
+        except Exception as e:
+            if strict:
+                raise ConnectionError(
+                    f"Failed to attach to remote Quack server at {uri}: {e}. "
+                    "Set strict=False to fall back to direct file connection."
+                ) from e
+            # Fall back to direct connection with warning
+            import warnings
+            warnings.warn(
+                f"Quack attach failed ({e}), falling back to local DB. "
+                "Data may be stale. Set strict=False to suppress this warning.",
+                UserWarning,
+            )
 
     # Fallback: direct file connection
+    if not strict:
+        import warnings
+        warnings.warn(
+            "Quack not available, connecting to local DB. "
+            "Set strict=False to suppress this warning.",
+            UserWarning,
+        )
     db_path = os.environ.get("OHM_DB", str(Path.home() / ".ohm" / "ohm.duckdb"))
     conn = db_connect(db_path)
     graph = Graph(conn, actor=actor)
