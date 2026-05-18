@@ -650,6 +650,10 @@ class TestCompositeScore:
             node = g.create_node(label="Baseline Node", node_type="concept")
             g.observe(node["id"], obs_type="measurement", value=0.8,
                       baseline=0.5, sigma=0.1)
+            # Add evidence so both scores are present (geometric path is used)
+            source = g.create_node(label="Evidence Source", node_type="concept")
+            g.create_edge(from_node=source["id"], to_node=node["id"],
+                          edge_type="SUPPORTS", layer="L3", confidence=0.6)
 
             result_default = g.composite_score(node["id"], method="geometric", baseline=1.0)
             result_scaled = g.composite_score(node["id"], method="geometric", baseline=2.0)

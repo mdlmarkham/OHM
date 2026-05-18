@@ -460,3 +460,58 @@ class TestSupplyChain:
 
         result = graph.what_if(edge["id"])
         assert isinstance(result, dict)
+
+
+class TestCompositeScore:
+    """Tests for OHM-0e0.3: multiplicative composite score."""
+
+    def test_composite_score_arithmetic_default(self, graph):
+        """composite_score() defaults to arithmetic (backwards compatible)."""
+        a = graph.create_node(label="A")["id"]
+        graph.observe(a, obs_type="measurement", value=0.8, sigma=0.1)
+        result = graph.composite_score(a)
+        assert result["method"] == "arithmetic"
+        assert result["composite_score"] is not None
+        assert result["observation_score"] is not None
+        assert result["observation_count"] >= 1
+
+    def test_composite_score_geometric(self, graph):
+        """composite_score() with method='geometric' uses geometric mean."""
+        a = graph.create_node(label="A")["id"]
+        graph.observe(a, obs_type="measurement", value=1.3, sigma=0.1)
+        graph.observe(a, obs_type="measurement", value=1.5, sigma=0.1)
+        result = graph.composite_score(a, method="geometric")
+        assert result["method"] == "geometric"
+        assert result["composite_score"] is not None
+
+    def test_composite_score_geometric_with_baseline(self, graph):
+        """composite_score() geometric with baseline scales result."""
+        a = graph.create_node(label="A")["id"]
+        graph.observe(a, obs_type="measurement", value=2.0, sigma=0.1)
+        result = graph.composite_score(a, method="geometric", baseline=2.0)
+        assert result["method"] == "geometric"
+        assert result["baseline"] == 2.0
+        assert result["composite_score"] is not None
+
+    def test_composite_score_arithmetic_explicit(self, graph):
+        """composite_score() with method='arithmetic' explicitly."""
+        a = graph.create_node(label="A")["id"]
+        graph.observe(a, obs_type="measurement", value=0.5, sigma=0.1)
+        result = graph.composite_score(a, method="arithmetic")
+        assert result["method"] == "arithmetic"
+        assert result["composite_score"] is not None
+
+    def test_composite_score_no_observations(self, graph):
+        """composite_score() with no observations returns None composite."""
+        a = graph.create_node(label="A")["id"]
+        result = graph.composite_score(a)
+        assert result["composite_score"] is None
+        assert result["observation_count"] == 0
+
+    def test_composite_score_weights_preserved(self, graph):
+        """composite_score() preserves weight parameters in result."""
+        a = graph.create_node(label="A")["id"]
+        graph.observe(a, obs_type="measurement", value=0.7, sigma=0.1)
+        result = graph.composite_score(a, observation_weight=0.3, evidence_weight=0.7)
+        assert result["weights"]["observation"] == 0.3
+        assert result["weights"]["evidence"] == 0.7

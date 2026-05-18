@@ -274,6 +274,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--evidence-weight", type=float, default=0.5,
         help="Weight for evidence signal (default: 0.5)",
     )
+    score_parser.add_argument(
+        "--method", choices=["arithmetic", "geometric"], default="arithmetic",
+        help="Composition method: arithmetic (weighted mean) or geometric (multiplicative factors)",
+    )
+    score_parser.add_argument(
+        "--baseline", type=float, default=1.0,
+        help="Baseline for geometric mode (default: 1.0 = no change)",
+    )
 
     # graph trend
     trend_parser = graph_sub.add_parser(
@@ -1371,12 +1379,17 @@ def _handle_composite_score(args: argparse.Namespace) -> None:
             conn, args.node_id,
             observation_weight=args.obs_weight,
             evidence_weight=args.evidence_weight,
+            method=args.method,
+            baseline=args.baseline,
         )
         if args.format == "json":
             import json
             print(json.dumps(result, indent=2, default=str))
         else:
             print(f"── Composite Score: {args.node_id} ──")
+            print(f"  Method:        {result['method']}")
+            if result.get('baseline') and result['baseline'] != 1.0:
+                print(f"  Baseline:      {result['baseline']}")
             print(f"  Composite:     {result['composite_score']}")
             print(f"  Observation:   {result['observation_score']} "
                   f"({result['observation_count']} obs)")
