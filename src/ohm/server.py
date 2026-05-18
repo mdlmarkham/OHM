@@ -690,6 +690,39 @@ class OhmHandler(BaseHTTPRequestHandler):
                 "POST %s → %s (%.1fms)", self.path, code, elapsed,
             )
 
+    def do_DELETE(self):
+        """Handle DELETE requests with error mapping and correlation IDs."""
+        self._correlation_id = str(uuid.uuid4())
+        start = time.time()
+        _metrics["requests_total"] += 1
+        try:
+            if not self._check_rate_limit():
+                _metrics["rate_limited"] += 1
+                self._json_response(429, {
+                    "error": "rate_limited",
+                    "message": "Too many requests. Try again later.",
+                    "correlation_id": self._correlation_id,
+                })
+                return
+            self._do_DELETE()
+        except OHMError as e:
+            self._error_response(e)
+        except Exception as e:
+            self._error_response(OHMError(str(e)))
+        finally:
+            elapsed = (time.time() - start) * 1000
+            code = getattr(self, "_response_code", 0)
+            if 400 <= code < 500:
+                _metrics["errors_4xx"] += 1
+            elif code >= 500:
+                _metrics["errors_5xx"] += 1
+            _request_latencies.append(elapsed)
+            if len(_request_latencies) > _MAX_LATENCY_SAMPLES:
+                _request_latencies.pop(0)
+            self.log_message(
+                "DELETE %s → %s (%.1fms)", self.path, code, elapsed,
+            )
+
     def _do_GET(self):
         """Handle GET requests — queries.
 
@@ -1326,6 +1359,78 @@ class OhmHandler(BaseHTTPRequestHandler):
             sync_result = self.store.sync_heartbeat()
             result["ducklake_sync"] = sync_result
             self._json_response(200, result)
+
+        else:
+            self._json_response(404, {"error": f"Unknown endpoint: {path}"})
+
+    def _do_DELETE(self):
+        """Handle DELETE requests — remove nodes or edges.
+
+        DELETE /node/{id} — removes a node and its associated edges.
+        DELETE /edge/{id} — removes an edge.
+
+        Requires auth. Agents can only delete their own nodes/edges.
+        """
+        from urllib.parse import urlparse, parse_qs
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/")
+
+        # Auth required for DELETE
+        agent = self._authenticate()
+        if agent is None:
+            if self.no_auth or not self.tokens:
+                agent = "ohm"
+            else:
+                raise AuthenticationError("Authentication required — provide Bearer token")
+
+        if path.startswith("/node/"):
+            node_id = path[6:]
+            from .validation import validate_identifier
+            node_id = validate_identifier(node_id, name="node_id")
+
+            # Verify node exists
+            node = self.store.conn.execute(
+                "SELECT id, created_by FROM ohm_nodes WHERE id = ?", [node_id],
+            ).fetchone()
+            if not node:
+                raise NodeNotFoundError(f"Node not found: {node_id}")
+
+            # Only allow deletion of own nodes (unless no_auth mode)
+            if not self.no_auth and node[1] != agent:
+                raise PermissionDeniedError(
+                    f"Cannot delete node {node_id}: owned by {node[1]}, you are {agent}"
+                )
+
+            # Delete associated edges first, then the node
+            self.store.conn.execute("DELETE FROM ohm_edges WHERE from_node = ? OR to_node = ?",
+                                     [node_id, node_id])
+            self.store.conn.execute("DELETE FROM ohm_observations WHERE node_id = ?", [node_id])
+            self.store.conn.execute("DELETE FROM ohm_nodes WHERE id = ?", [node_id])
+            self.store._log_change("ohm_nodes", node_id, "DELETE", None)
+            self._json_response(200, {"deleted": node_id, "type": "node"})
+
+        elif path.startswith("/edge/"):
+            edge_id = path[6:]
+            from .validation import validate_identifier
+            edge_id = validate_identifier(edge_id, name="edge_id")
+
+            # Verify edge exists
+            edge = self.store.conn.execute(
+                "SELECT id, created_by, layer FROM ohm_edges WHERE id = ?", [edge_id],
+            ).fetchone()
+            if not edge:
+                raise EdgeNotFoundError(f"Edge not found: {edge_id}")
+
+            # Only allow deletion of own edges (unless no_auth mode)
+            if not self.no_auth and edge[1] != agent:
+                raise PermissionDeniedError(
+                    f"Cannot delete edge {edge_id}: owned by {edge[1]}, you are {agent}"
+                )
+
+            self.store.conn.execute("DELETE FROM ohm_observations WHERE edge_id = ?", [edge_id])
+            self.store.conn.execute("DELETE FROM ohm_edges WHERE id = ?", [edge_id])
+            self.store._log_change("ohm_edges", edge_id, "DELETE", edge[2])
+            self._json_response(200, {"deleted": edge_id, "type": "edge"})
 
         else:
             self._json_response(404, {"error": f"Unknown endpoint: {path}"})
