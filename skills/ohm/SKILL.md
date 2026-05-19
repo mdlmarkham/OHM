@@ -47,6 +47,7 @@ with ohm.connect("/var/lib/ohm/ohm.duckdb", actor="YOUR_AGENT_NAME") as g:
 ### Write
 - `create_node(label, node_type, confidence)` — Create a concept, event, source, question
 - `create_edge(from_node, to_node, edge_type, layer, confidence)` — Connect nodes
+  - **HTTP API note:** The `/edge` POST endpoint uses field names `from`, `to`, `type` (not `from_node`, `to_node`, `edge_type`)
 - `observe(node_id, obs_type, value, baseline, sigma)` — Record a measurement
 - `challenge(edge_id, reason, confidence)` — Disagree (creates new edge, original stays)
 - `support(edge_id, reason, confidence)` — Agree with evidence
