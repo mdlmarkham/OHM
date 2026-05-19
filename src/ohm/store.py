@@ -343,6 +343,10 @@ class OhmStore:
             self._log_change("ohm_nodes", id, "UPDATE", None, agent_name=actor)
             result = self.get_node(id) or {}
             result["created"] = False
+
+            # Auto-generate embedding for updated nodes (best-effort)
+            self._auto_embed_node(id, label, content)
+
             return result
 
         # Check if node exists but is soft-deleted (primary key collision avoidance)
@@ -366,6 +370,10 @@ class OhmStore:
             self._log_change("ohm_nodes", id, "UPDATE", None, agent_name=actor)
             result = self.get_node(id) or {}
             result["created"] = False
+
+            # Auto-generate embedding for reactivated nodes (best-effort)
+            self._auto_embed_node(id, label, content)
+
             return result
 
         # New node
@@ -381,7 +389,35 @@ class OhmStore:
         self._log_change("ohm_nodes", id, "INSERT", None, agent_name=actor)
         result = self.get_node(id) or {}
         result["created"] = True
+
+        # Auto-generate embedding for new nodes (non-blocking, best-effort)
+        self._auto_embed_node(id, label, content)
+
         return result
+
+    def _auto_embed_node(self, node_id: str, label: str, content: str | None = None) -> None:
+        """Best-effort embedding generation for a single node.
+
+        Generates an embedding from label + content (if available).
+        Silently skips if Ollama is unavailable or embedding fails.
+        Never raises — embedding is not critical for node creation.
+        """
+        try:
+            from .queries import generate_embedding
+            # Prefer label + content for richer embeddings
+            text = label
+            if content:
+                text = f"{label}: {content[:200]}"  # Truncate to avoid long embedding calls
+            embedding = generate_embedding(text)
+            if embedding:
+                self.conn.execute(
+                    "UPDATE ohm_nodes SET embedding = ?::FLOAT[768] WHERE id = ?",
+                    [embedding, node_id],
+                )
+                logger.debug("Auto-generated embedding for node %s", node_id)
+        except Exception as e:
+            # Best-effort: never fail node creation because of embedding issues
+            logger.debug("Auto-embed failed for node %s: %s", node_id, e)
 
     def write_edge(
         self,
