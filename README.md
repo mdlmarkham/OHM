@@ -163,7 +163,7 @@ OHM serves multiple domains with the same core engine. The schema, layer model, 
 | Geopolitical intelligence | Challenge edges, confidence audit, change feed | [scenarios.md](docs/scenarios.md) |
 | Medical diagnosis | `NEGATES` edges, `differential_diagnosis()`, `compound_confidence()` with correlation | [medical-scenario.md](docs/medical-scenario.md) |
 | Cybersecurity incident response | `threat_cluster()`, `record_outcome()`, `source_reliability()`, urgency filtering | [cybersecurity-scenario.md](docs/cybersecurity-scenario.md) |
-| Supply chain disruption | `probability` on edges, `cascade_scenario()`, `what_if()`, Monte Carlo | [supply-chain-scenario.md](docs/supply-chain-scenario.md) |
+| Supply chain disruption | `probability` on edges, `cascade_scenario()`, `bayesian_inference()`, Monte Carlo | [supply-chain-scenario.md](docs/supply-chain-scenario.md) |
 | Customer support | `handoff()`, `escalate()`, priority/urgency, sentiment observations | [customer-support-scenario.md](docs/customer-support-scenario.md) |
 | Cattle operations | Composite scoring, temporal decay, batch expiry | [cattle-scenario.md](docs/cattle-scenario.md) |
 | Beef herd management | AND-gate analysis, drought response, disease cascades, PLF adoption | [beef-herd-scenario.md](docs/beef-herd-scenario.md) |
@@ -223,6 +223,44 @@ custom = SchemaConfig(
 ```
 
 See [ADR-006](docs/adr/README.md#adr-006-advisory-schema-with-graduated-enforcement) (graduated enforcement), [ADR-007](docs/adr/README.md#adr-007-schema-evolution-and-type-governance-for-domain-expansion) (type governance), and [ADR-011](docs/adr/README.md#adr-011-observation-type-extensibility) (observation type extensibility).
+
+## Bayesian Inference
+
+OHM uses **pgmpy Variable Elimination** for exact Bayesian inference on the knowledge graph. When edges have probability or confidence values, OHM constructs a Bayesian network and computes posterior probabilities given observed evidence.
+
+**State convention:** 0 = "bad" (failure, closed, negative), 1 = "good" (normal, open, positive).
+
+**Noisy-OR gate with leak probability:** For multi-parent nodes, OHM uses a noisy-OR gate with a configurable leak probability (default 0.15). The leak represents the baseline probability of a bad outcome even when all parents are good — critical for realistic priors.
+
+```bash
+# REST API
+# P(target=bad | evidence)
+GET /inference?target=concept-fed-rate&evidence=concept-hormuz:0
+GET /inference?target=concept-fed-rate&evidence=concept-hormuz:0,concept-oil-price:0&leak=0.1
+
+# SDK
+result = graph.bayesian_inference(
+    target="concept-fed-rate",
+    evidence={"concept-hormuz": 0},  # 0 = bad/closed
+    leak_probability=0.15,
+)
+# Returns: {"method": "bayesian_variable_elimination",
+#           "posterior": {"good": 0.44, "bad": 0.56},
+#           "network_info": {"n_nodes": 4, "n_edges": 3}}
+```
+
+**Validation (Hormuz chain):**
+
+| Evidence | P(bad) | Interpretation |
+|----------|--------|---------------|
+| Prior (none) | 0.38 | Baseline |
+| Hormuz=closed | 0.56 | +47% risk of bad outcomes |
+| Hormuz=open | 0.30 | −21% risk |
+| Hormuz=closed + Oil=high | 0.62 | Compounding evidence |
+
+Falls back to heuristic `cascade_scenario()` if pgmpy is unavailable.
+
+Edge types included by default: `CAUSES`, `DEPENDS_ON`, `THREATENS`, `EXPECTED_LIKELIHOOD`. The network is automatically pruned of cycles using NetworkX minimum feedback arc removal.
 
 ## Technology Stack
 
