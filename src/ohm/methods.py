@@ -1594,8 +1594,51 @@ def suggest_connections(
             for row in rows
         ]
 
+    elif method == "shared_tags":
+        # Find node pairs sharing tags but not connected
+        # Tags are stored as JSON arrays in the tags column
+        # Uses unnest + join for tag intersection (DuckDB compatible)
+        query = """
+            WITH tag_sets AS (
+                SELECT id, label, unnest(json_extract_string(tags, '$[*]')) AS tag
+                FROM ohm_nodes
+                WHERE tags IS NOT NULL AND deleted_at IS NULL
+            )
+            SELECT
+                a.id AS from_id,
+                a.label AS from_label,
+                b.id AS to_id,
+                b.label AS to_label,
+                count(*) AS shared_tag_count,
+            FROM tag_sets a
+            JOIN tag_sets b ON a.tag = b.tag AND a.id < b.id
+            WHERE NOT EXISTS (
+                SELECT 1 FROM ohm_edges e
+                WHERE (e.from_node = a.id AND e.to_node = b.id)
+                OR (e.from_node = b.id AND e.to_node = a.id)
+                AND e.deleted_at IS NULL
+            )
+            GROUP BY a.id, a.label, b.id, b.label
+            HAVING count(*) >= ?
+            ORDER BY shared_tag_count DESC
+            LIMIT ?
+        """
+        rows = conn.execute(query, [min_shared, limit]).fetchall()
+        return [
+            {
+                "from_id": row[0],
+                "from_label": row[1],
+                "to_id": row[2],
+                "to_label": row[3],
+                "shared_tag_count": row[4],
+                "reason": f"Shared {row[4]} tags",
+                "score": min(row[4] / 5.0, 1.0),  # Normalize: 5+ shared tags = score 1.0
+            }
+            for row in rows
+        ]
+
     else:
-        raise ValueError(f"Unknown method: {method}. Use 'shared_provenance', 'shared_type', or 'semantic'.")
+        raise ValueError(f"Unknown method: {method}. Use 'shared_provenance', 'shared_type', 'shared_tags', or 'semantic'.")
 
 
 def graph_stats(
