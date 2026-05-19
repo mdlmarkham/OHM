@@ -3124,6 +3124,43 @@ def connect_http(
             path = f"/suggest_causes?min_confidence={min_confidence}"
             return self._http_request("GET", path)
 
+        def refute(
+            self,
+            cause: str,
+            effect: str,
+            *,
+            n_samples: int = 1000,
+            seed: int = 42,
+            methods: list[str] | None = None,
+        ) -> dict[str, Any]:
+            """Test robustness of causal conclusions using DoWhy refutation methods.
+
+            Generates synthetic data from the Bayesian network, then applies
+            refutation methods to test how robust the causal estimate is.
+
+            Methods: random_common_cause, placebo_treatment, data_subset,
+            unobserved_confounder (default: all).
+
+            Args:
+                cause: Node ID for the treatment variable.
+                effect: Node ID for the outcome variable.
+                n_samples: Number of synthetic samples to generate.
+                seed: Random seed for reproducibility.
+                methods: List of refutation methods to apply.
+
+            Returns:
+                Dict with refutation results for each method.
+            """
+            import urllib.parse
+            params = [f"cause={urllib.parse.quote(cause)}"]
+            params.append(f"effect={urllib.parse.quote(effect)}")
+            params.append(f"n_samples={n_samples}")
+            params.append(f"seed={seed}")
+            if methods:
+                params.append(f"methods={urllib.parse.quote(','.join(methods))}")
+            path = "/refute?" + "&".join(params)
+            return self._http_request("GET", path)
+
         def lint(
             self,
             *,

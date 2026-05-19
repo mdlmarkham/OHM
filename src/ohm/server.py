@@ -807,6 +807,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "/sensitivity": {"method": "GET", "description": "Sensitivity analysis: E-value quantifying how much unmeasured confounding would overturn a causal conclusion"},
                     "/adjustment": {"method": "GET", "description": "Find valid backdoor/frontdoor adjustment sets for causal identification (Pearl's criteria)"},
                     "/suggest_causes": {"method": "GET", "description": "Suggest candidate CAUSES edges from existing non-causal relationships (DEPENDS_ON, APPLIES_TO, etc.)"},
+                    "/refute": {"method": "GET", "description": "Test robustness of causal conclusions using DoWhy refutation methods (random common cause, placebo, data subset, unobserved confounder)"},
                     "/lint": {"method": "GET", "description": "Contract layer linting: validate graph against naming conventions and required fields"},
                     "/contract": {"method": "GET", "description": "Current contract configuration (naming conventions, required fields, schema)"},
                     "/status": {"method": "GET", "description": "Daemon status and configuration"},
@@ -1528,6 +1529,29 @@ class OhmHandler(BaseHTTPRequestHandler):
             min_confidence = float(qs.get("min_confidence", ["0.5"])[0])
             from .bayesian import suggest_causes
             result = suggest_causes(self.store.conn, min_confidence=min_confidence)
+            self._json_response(200, result)
+        elif path == "/refute":
+            # Causal refutation: test robustness of causal conclusions
+            # Uses DoWhy refutation methods (requires dowhy package)
+            cause = qs.get("cause", [None])[0]
+            effect = qs.get("effect", [None])[0]
+            if not cause or not effect:
+                self._json_response(400, {"error": "missing_parameter", "message": "?cause=X\u0026effect=Y required"})
+                return
+            from .validation import validate_identifier
+            cause = validate_identifier(cause, name="cause")
+            effect = validate_identifier(effect, name="effect")
+            n_samples = int(qs.get("n_samples", ["1000"])[0])
+            seed = int(qs.get("seed", ["42"])[0])
+            methods_str = qs.get("methods", [None])[0]
+            refutation_methods = methods_str.split(",") if methods_str else None
+            from .causal_refutation import refute_causal_effect
+            result = refute_causal_effect(
+                self.store.conn, cause, effect,
+                n_samples=n_samples,
+                seed=seed,
+                refutation_methods=refutation_methods,
+            )
             self._json_response(200, result)
         elif path == "/admin/checkpoint":
             # Force DuckDB CHECKPOINT to flush WAL to main DB file
