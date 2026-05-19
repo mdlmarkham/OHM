@@ -3018,6 +3018,63 @@ def connect_http(
             path = "/intervene?" + "&".join(params)
             return self._http_request("GET", path)
 
+        def ate(
+            self,
+            cause: str,
+            effect: str,
+            *,
+            leak_probability: float = 0.15,
+        ) -> dict[str, Any]:
+            """Compute Average Treatment Effect (ATE) from the Bayesian model.
+
+            Model-based ATE: P(effect=bad|do(cause=bad)) - P(effect=bad|do(cause=good)).
+            No observational data required — computed from the noisy-OR CPDs.
+
+            Args:
+                cause: Node ID for the treatment variable.
+                effect: Node ID for the outcome variable.
+                leak_probability: Baseline probability of bad outcome when all
+                    parents are good (default 0.15).
+
+            Returns:
+                Dict with ATE, risk ratio, effect size, and interpretation.
+            """
+            import urllib.parse
+            params = [f"cause={urllib.parse.quote(cause)}"]
+            params.append(f"effect={urllib.parse.quote(effect)}")
+            params.append(f"leak={leak_probability}")
+            path = "/ate?" + "&".join(params)
+            return self._http_request("GET", path)
+
+        def sensitivity(
+            self,
+            cause: str,
+            effect: str,
+            *,
+            leak_probability: float = 0.15,
+        ) -> dict[str, Any]:
+            """Compute sensitivity analysis (E-value) for a causal effect.
+
+            The E-value (VanderWeele & Ding, 2017) answers:
+            "How much unmeasured confounding would it take to overturn this conclusion?"
+
+            Args:
+                cause: Node ID for the treatment variable.
+                effect: Node ID for the outcome variable.
+                leak_probability: Baseline probability of bad outcome when all
+                    parents are good (default 0.15).
+
+            Returns:
+                Dict with E-value, risk ratio, robustness assessment, and
+                confounder perturbation analysis.
+            """
+            import urllib.parse
+            params = [f"cause={urllib.parse.quote(cause)}"]
+            params.append(f"effect={urllib.parse.quote(effect)}")
+            params.append(f"leak={leak_probability}")
+            path = "/sensitivity?" + "&".join(params)
+            return self._http_request("GET", path)
+
         def lint(
             self,
             *,

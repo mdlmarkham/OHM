@@ -803,6 +803,8 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "/stats": {"method": "GET", "description": "Graph statistics (nodes, edges, layers)"},
                     "/inference": {"method": "GET", "description": "Bayesian inference: compute posterior probabilities given evidence (observation, includes confounders)"},
                     "/intervene": {"method": "GET", "description": "Causal intervention using Pearl's do-operator: sever incoming edges to target, set value externally, propagate direct causal effect (no confounders)"},
+                    "/ate": {"method": "GET", "description": "Average Treatment Effect: model-based ATE from noisy-OR CPDs (ATE = P(effect=bad|do(cause=bad)) - P(effect=bad|do(cause=good)))"},
+                    "/sensitivity": {"method": "GET", "description": "Sensitivity analysis: E-value quantifying how much unmeasured confounding would overturn a causal conclusion"},
                     "/lint": {"method": "GET", "description": "Contract layer linting: validate graph against naming conventions and required fields"},
                     "/contract": {"method": "GET", "description": "Current contract configuration (naming conventions, required fields, schema)"},
                     "/status": {"method": "GET", "description": "Daemon status and configuration"},
@@ -1472,6 +1474,36 @@ class OhmHandler(BaseHTTPRequestHandler):
                 query_nodes=query_nodes,
                 leak_probability=leak_probability,
             )
+            self._json_response(200, result)
+        elif path == "/ate":
+            # Average Treatment Effect: model-based ATE from noisy-OR CPDs
+            # ATE = P(effect=bad|do(cause=bad)) - P(effect=bad|do(cause=good))
+            cause = qs.get("cause", [None])[0]
+            effect = qs.get("effect", [None])[0]
+            if not cause or not effect:
+                self._json_response(400, {"error": "missing_parameter", "message": "?cause=X&effect=Y required"})
+                return
+            from .validation import validate_identifier
+            cause = validate_identifier(cause, name="cause")
+            effect = validate_identifier(effect, name="effect")
+            leak_probability = float(qs.get("leak", ["0.15"])[0])
+            from .bayesian import compute_ate
+            result = compute_ate(self.store.conn, cause, effect, leak_probability=leak_probability)
+            self._json_response(200, result)
+        elif path == "/sensitivity":
+            # Sensitivity analysis: E-value for causal robustness
+            # "How much unmeasured confounding would overturn this conclusion?"
+            cause = qs.get("cause", [None])[0]
+            effect = qs.get("effect", [None])[0]
+            if not cause or not effect:
+                self._json_response(400, {"error": "missing_parameter", "message": "?cause=X&effect=Y required"})
+                return
+            from .validation import validate_identifier
+            cause = validate_identifier(cause, name="cause")
+            effect = validate_identifier(effect, name="effect")
+            leak_probability = float(qs.get("leak", ["0.15"])[0])
+            from .bayesian import compute_sensitivity
+            result = compute_sensitivity(self.store.conn, cause, effect, leak_probability=leak_probability)
             self._json_response(200, result)
         elif path == "/admin/checkpoint":
             # Force DuckDB CHECKPOINT to flush WAL to main DB file

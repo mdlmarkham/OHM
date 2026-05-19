@@ -758,3 +758,234 @@ def causal_intervention(
             "n_edges": network["n_edges"],
         },
     }
+
+
+def compute_ate(
+    conn,
+    cause: str,
+    effect: str,
+    *,
+    edge_types: list[str] | None = None,
+    leak_probability: float = 0.15,
+) -> dict[str, Any]:
+    """Compute Average Treatment Effect (ATE) from the Bayesian model.
+
+    ATE = E[Y|do(X=bad)] - E[Y|do(X=good)]
+        = P(Y=bad|do(X=bad)) - P(Y=bad|do(X=good))
+
+    This is a model-based ATE computed directly from the noisy-OR CPDs.
+    No observational data required — the ATE follows from the causal model.
+
+    Args:
+        conn: DuckDB connection.
+        cause: Node ID for the treatment variable.
+        effect: Node ID for the outcome variable.
+        edge_types: Edge types to include in the network.
+        leak_probability: Baseline probability of bad outcome when all
+            parents are good (default 0.15).
+
+    Returns:
+        Dict with ATE, do(bad) and do(good) posteriors, risk ratio, and interpretation.
+    """
+    cause = validate_identifier(cause, name="cause")
+    effect = validate_identifier(effect, name="effect")
+
+    if not PGMPY_AVAILABLE:
+        return {
+            "method": "none",
+            "pgmpy_available": False,
+            "cause": cause,
+            "effect": effect,
+            "error": "pgmpy not available — ATE requires pgmpy",
+        }
+
+    # Compute interventional distributions: do(cause=bad) and do(cause=good)
+    do_bad = causal_intervention(
+        conn, cause, 0,
+        query_nodes=[effect],
+        edge_types=edge_types,
+        leak_probability=leak_probability,
+    )
+    do_good = causal_intervention(
+        conn, cause, 1,
+        query_nodes=[effect],
+        edge_types=edge_types,
+        leak_probability=leak_probability,
+    )
+
+    # Extract posteriors
+    p_bad_do_bad = do_bad.get("posterior", {}).get(effect, {}).get("bad")
+    p_bad_do_good = do_good.get("posterior", {}).get(effect, {}).get("bad")
+
+    if p_bad_do_bad is None or p_bad_do_good is None:
+        error_msg = do_bad.get("error") or do_good.get("error") or "Unknown error"
+        return {
+            "method": "error",
+            "cause": cause,
+            "effect": effect,
+            "error": error_msg,
+        }
+
+    ate = p_bad_do_bad - p_bad_do_good
+
+    # Risk ratio: how much does the treatment increase risk?
+    risk_ratio = p_bad_do_bad / p_bad_do_good if p_bad_do_good > 0 else float("inf")
+
+    # Effect size interpretation
+    if abs(ate) < 0.05:
+        interpretation = "negligible causal effect"
+    elif abs(ate) < 0.10:
+        interpretation = "small causal effect"
+    elif abs(ate) < 0.20:
+        interpretation = "moderate causal effect"
+    else:
+        interpretation = "large causal effect"
+
+    direction = "increases" if ate > 0 else "decreases"
+
+    return {
+        "method": "model_based_ate",
+        "pgmpy_available": True,
+        "cause": cause,
+        "effect": effect,
+        "ate": round(ate, 4),
+        "p_effect_bad_do_cause_bad": p_bad_do_bad,
+        "p_effect_bad_do_cause_good": p_bad_do_good,
+        "risk_ratio": round(risk_ratio, 4),
+        "effect_size": interpretation,
+        "interpretation": f"Setting {cause} to bad {direction} P({effect}=bad) by {abs(ate):.2%} (ATE={ate:.4f})",
+        "state_labels": {
+            "0": "bad/failure/closed/negative",
+            "1": "good/normal/open/positive",
+        },
+    }
+
+
+def compute_sensitivity(
+    conn,
+    cause: str,
+    effect: str,
+    *,
+    edge_types: list[str] | None = None,
+    leak_probability: float = 0.15,
+) -> dict[str, Any]:
+    """Compute sensitivity analysis (E-value) for a causal effect.
+
+    The E-value (VanderWeele & Ding, 2017) answers:
+    "How much unmeasured confounding would it take to overturn this conclusion?"
+
+    An unmeasured confounder would need a risk ratio of at least E-value
+    with both the treatment and the outcome to explain away the observed effect.
+
+    E-value = RR + sqrt(RR * (RR - 1))  for RR >= 1
+
+    Interpretation:
+    - E-value = 1.0: trivial confounding could explain away the result
+    - E-value ~ 1.5: moderate robustness
+    - E-value >= 2.0: strong robustness (confounder needs RR>=2 with both)
+    - E-value >= 3.0: very strong robustness
+
+    Args:
+        conn: DuckDB connection.
+        cause: Node ID for the treatment variable.
+        effect: Node ID for the outcome variable.
+        edge_types: Edge types to include in the network.
+        leak_probability: Baseline probability of bad outcome when all
+            parents are good (default 0.15).
+
+    Returns:
+        Dict with E-value, risk ratio, ATE, and robustness assessment.
+    """
+    import math
+
+    cause = validate_identifier(cause, name="cause")
+    effect = validate_identifier(effect, name="effect")
+
+    # First compute ATE to get risk ratio
+    ate_result = compute_ate(
+        conn, cause, effect,
+        edge_types=edge_types,
+        leak_probability=leak_probability,
+    )
+
+    if "error" in ate_result:
+        return ate_result
+
+    risk_ratio = ate_result.get("risk_ratio", 1.0)
+    ate = ate_result.get("ate", 0.0)
+    p_bad_do_bad = ate_result.get("p_effect_bad_do_cause_bad", 0.0)
+    p_bad_do_good = ate_result.get("p_effect_bad_do_cause_good", 0.0)
+
+    # Compute E-value
+    if risk_ratio >= 1.0:
+        rr = risk_ratio
+    else:
+        # If RR < 1, compute for the inverse (flip cause interpretation)
+        rr = 1.0 / risk_ratio if risk_ratio > 0 else float("inf")
+
+    if rr > 1.0 and math.isfinite(rr):
+        e_value = rr + math.sqrt(rr * (rr - 1))
+    elif rr == 1.0:
+        e_value = 1.0
+    else:
+        e_value = float("inf")
+
+    # Robustness interpretation
+    if e_value <= 1.0:
+        robustness = "none"
+        robustness_desc = "No causal effect detected — E-value=1.0"
+    elif e_value < 1.5:
+        robustness = "weak"
+        robustness_desc = "Weak robustness — small confounding could explain away result"
+    elif e_value < 2.0:
+        robustness = "moderate"
+        robustness_desc = "Moderate robustness — confounder needs RR>={:.2f} with both cause and effect".format(e_value)
+    elif e_value < 3.0:
+        robustness = "strong"
+        robustness_desc = "Strong robustness — confounder needs RR>={:.2f} with both cause and effect".format(e_value)
+    else:
+        robustness = "very_strong"
+        robustness_desc = "Very strong robustness — confounder needs RR>={:.2f} with both cause and effect".format(e_value)
+
+    # Confounder perturbation analysis
+    # Simulate how ATE changes as confounder strength grows
+    perturbation_levels = [0.0, 0.1, 0.2, 0.3, 0.5, 0.7, 1.0]
+    perturbation_results = []
+    for conf_strength in perturbation_levels:
+        # Approximate: if confounder has RR=s with both cause and effect,
+        # bias = conf_strength^2 * (RR-1) * 0.5, subtracted from ATE
+        if ate > 0:
+            bias = conf_strength ** 2 * min(risk_ratio - 1, ate) * 0.5
+            adjusted_ate = max(0, round(ate - bias, 4))
+        else:
+            bias = conf_strength ** 2 * min(1 - risk_ratio, abs(ate)) * 0.5
+            adjusted_ate = min(0, round(ate + bias, 4))
+
+        perturbation_results.append({
+            "confounder_strength": conf_strength,
+            "adjusted_ate": adjusted_ate,
+            "ate_zero": adjusted_ate == 0,
+        })
+
+    # Find the confounder strength that overturns the result
+    overturn_strength = None
+    for pr in perturbation_results:
+        if pr["ate_zero"]:
+            overturn_strength = pr["confounder_strength"]
+            break
+
+    return {
+        "method": "e_value_sensitivity",
+        "cause": cause,
+        "effect": effect,
+        "ate": ate,
+        "risk_ratio": round(risk_ratio, 4),
+        "e_value": round(e_value, 4),
+        "robustness": robustness,
+        "robustness_description": robustness_desc,
+        "p_effect_bad_do_cause_bad": p_bad_do_bad,
+        "p_effect_bad_do_cause_good": p_bad_do_good,
+        "confounder_perturbation": perturbation_results,
+        "overturn_confounder_strength": overturn_strength,
+        "interpretation": f"An unmeasured confounder would need RR>={round(e_value, 2)} with both {cause} and {effect} to explain away the observed effect (ATE={ate:.4f})",
+    }
