@@ -261,6 +261,87 @@ DEFAULT_SCHEMA = SchemaConfig()
 # TOPO (industrial) schema config instance
 TOPO_SCHEMA = SchemaConfig.topo()
 
+
+@classmethod
+def beef_herd(cls) -> "SchemaConfig":
+    """Create a Beef Herd Management schema configuration.
+
+    Extends the base OHM schema with domain-specific types for
+    beef cattle herd management decision systems:
+    - Additional node types: animal, herd, pasture, feed, breed, health_event
+    - Task management for operational decisions (heifer retention, drought response)
+    - L4 edge types for risk/threat assessment (drought, disease, market volatility)
+    - Observation types for PLF sensors and veterinary data
+    """
+    beef_node_types = VALID_NODE_TYPES | frozenset({
+        # Cattle lifecycle
+        "animal",       # Individual animal or cohort
+        "herd",          # Group of animals managed together
+        "breed",         # Breed or genetic line
+        "feed",          # Feed type, ration, or nutrition plan
+        # Land and environment
+        "pasture",       # Grazing unit or paddock
+        "weather",       # Weather event or condition
+        "water",         # Water source or availability
+        # Health
+        "health_event",  # Disease occurrence, treatment, vaccination
+        "diagnosis",     # Veterinary diagnosis
+        "treatment",     # Treatment protocol or intervention
+        # Market
+        "market",         # Market condition or price signal
+        "contract",      # Forward contract or pricing agreement
+        # Infrastructure
+        "equipment",     # Already in base — kept for ranch equipment
+        "system",         # Already in base — used for management systems
+    })
+
+    beef_layer_descriptions = {
+        "L1": "Structure — Herd hierarchy (ranch → herd → cohort → animal), land, infrastructure",
+        "L2": "Flow — Animal movements, feed flows, market transactions, veterinary records",
+        "L3": "Knowledge — AND-gate analysis, drought response, disease patterns, market cycles",
+        "L4": "Prospect — Risk assessments, heifer retention decisions, what-if scenarios",
+    }
+
+    beef_observation_types = VALID_OBSERVATION_TYPES | frozenset({
+        "weight",       # Animal or cohort weight measurement
+        "temperature",  # Body temperature (fever detection)
+        "movement",     # GPS or accelerometer movement data
+        "intake",       # Feed or water intake measurement
+        "mortality",    # Death loss event
+        "conception",   # Pregnancy check result
+        "price",        # Market price observation
+        "rainfall",     # Precipitation measurement
+    })
+
+    beef_observation_sources = VALID_OBSERVATION_SOURCES | frozenset({
+        "sensor",         # IoT sensor (GPS collar, accelerometer, temperature probe)
+        "veterinarian",   # Veterinary examination or record
+        "auction",        # Market report from livestock auction
+        "usda",           # USDA report or survey
+        "noaa",           # National Weather Service data
+        "producer",       # Rancher observation or record
+    })
+
+    beef_provenances = VALID_PROVENANCES | frozenset({
+        "plf",              # Precision livestock farming system
+        "veterinary",       # Veterinary diagnosis or record
+        "market_report",   # Market analysis or price data
+        "weather_service", # Meteorological data
+        "extension",       # University extension service
+    })
+
+    return cls(
+        name="beef_herd",
+        node_types=beef_node_types,
+        layer_descriptions=beef_layer_descriptions,
+        observation_types=beef_observation_types,
+        observation_sources=beef_observation_sources,
+        provenances=beef_provenances,
+    )
+
+SchemaConfig.beef_herd = beef_herd
+BEEF_SCHEMA = SchemaConfig.beef_herd()
+
 # ── DDL Statements ──────────────────────────────────────────────────────────
 
 DDL_STATEMENTS: list[str] = [

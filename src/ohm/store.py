@@ -12,6 +12,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from .schema import DEFAULT_SCHEMA, SchemaConfig
 from typing import Any, Optional
 
 import duckdb
@@ -32,6 +33,7 @@ class OhmStore:
         quack: bool = False,
         quack_uri: str = "quack:localhost",
         quack_token_env: str = "QUACK_TOKEN",
+        schema: Optional['SchemaConfig'] = None,
     ):
         """Initialize the store.
 
@@ -44,6 +46,8 @@ class OhmStore:
                 on this connection. Falls back to direct DuckDB if unavailable.
             quack_uri: Quack server URI (default: quack:localhost)
             quack_token_env: Environment variable for Quack token
+            schema: SchemaConfig for domain-specific validation.
+                Defaults to OHM schema if not provided.
         """
         self.agent_name = agent_name
         self.readonly = readonly
@@ -51,6 +55,7 @@ class OhmStore:
         self.quack_uri = quack_uri
         self.quack_token_env = quack_token_env
         self.quack_started = False
+        self.schema = schema or DEFAULT_SCHEMA
 
         if db_path is None:
             db_path = os.environ.get("OHM_DB_PATH", str(Path.home() / ".ohm" / "ohm.duckdb"))
