@@ -603,19 +603,34 @@ class TestSecurity:
             store.close()
 
     def test_get_without_token_with_tokens_configured_denied(self, tmp_path):
-        """GET without token should be denied when tokens are configured."""
+        """GET without token is denied when require_read_auth=True (OHM-gwg).
+
+        Default behavior (public-read): unauthenticated reads are allowed.
+        With require_read_auth=True: all reads require authentication.
+        """
         db_path = str(tmp_path / "test_get_auth.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test_agent")
         tokens = {"valid-token": "agent1"}
+        # Default (public-read): unauthenticated reads allowed
         port, server, thread = _start_test_server(store, tokens=tokens)
         try:
-            # GET /status without token → 401
             status, data = _request("GET", port, "/status")
-            assert status == 401
+            assert status == 200  # Public-read model: reads allowed without token
         finally:
             server.shutdown()
             thread.join(timeout=2)
             store.close()
+
+        # With require_read_auth: unauthenticated reads denied
+        store2 = OhmStore(db_path=str(tmp_path / "test_get_auth2.duckdb"), agent_name="test_agent")
+        port2, server2, thread2 = _start_test_server(store2, tokens=tokens, require_read_auth=True)
+        try:
+            status, data = _request("GET", port2, "/status")
+            assert status == 401  # require_read_auth: reads need token
+        finally:
+            server2.shutdown()
+            thread2.join(timeout=2)
+            store2.close()
 
     def test_get_with_valid_token_succeeds(self, tmp_path):
         """GET with valid token should succeed when tokens are configured."""

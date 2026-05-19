@@ -127,6 +127,31 @@ ohm serve status                           # is ohmd running?
 ohm serve stop                             # graceful shutdown
 ```
 
+## Authentication Model
+
+OHM uses a **public-read, authenticated-write** model by default (OHM-gwg):
+
+- **Reads** (GET /stats, /neighborhood, /search, /listen, etc.) are accessible without authentication
+- **Writes** (POST /node, /edge, /challenge, etc.) require a valid Bearer token
+- **Infrastructure** endpoints (/health, /ready, /) are always open
+
+This design reflects OHM's core principle: shared awareness, individual judgment. Any agent can observe the shared graph, but only authenticated agents can modify it — ensuring accountability for writes while maximizing awareness.
+
+### Configuration
+
+| Mode | Flag | Behavior |
+|------|------|----------|
+| Public read (default) | *(none)* | Reads open, writes require token |
+| Authenticated reads | `--require-read-auth` or `OHM_REQUIRE_READ_AUTH=1` | All endpoints require token |
+| No auth (dev) | `--no-auth` or `OHM_NO_AUTH=1` | All endpoints open, no tokens needed |
+
+### Security Considerations
+
+- **Network-level controls**: In production, restrict access to trusted networks (firewall, VPN, or private subnet)
+- **Change feed visibility**: The change feed reveals who wrote what and when — consider `--require-read-auth` if this is sensitive
+- **Node content**: Nodes may contain sensitive observations — use `--require-read-auth` if content should be private
+- **Token management**: Tokens are stored as SHA-256 hashes; original tokens are shown only at creation time
+
 ## Key Boundaries
 
 1. **No agent can overwrite another agent's edges.** Challenges create separate edges.

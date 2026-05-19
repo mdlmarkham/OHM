@@ -894,14 +894,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             self._handle_sse_events(path, qs)
             return
 
-        elif path == "/stats":
-            from ohm.queries import query_stats
-            stats = query_stats(self.store.conn)
-            stats["uptime"] = round(time.time() - _START_TIME, 1)
-            self._json_response(200, stats)
-            return
-
-        # Auth for all other GET endpoints
+        # Auth for all non-infrastructure GET endpoints
         # OHM-gwg: Public-read model (default) vs. require-read-auth
         #   - --no-auth: all requests allowed (dev mode)
         #   - require_read_auth=True: all requests require valid Bearer token
@@ -916,6 +909,29 @@ class OhmHandler(BaseHTTPRequestHandler):
             else:
                 # Public-read model: unauthenticated reads allowed
                 agent = "ohm"
+
+        if path == "/metrics":
+            latencies = _request_latencies
+            sorted_lats = sorted(latencies) if latencies else [0]
+            n = len(sorted_lats)
+            self._json_response(200, {
+                "uptime_seconds": round(time.time() - _START_TIME, 1),
+                "requests": dict(_metrics),
+                "latency_ms": {
+                    "p50": sorted_lats[n // 2] if n > 0 else 0,
+                    "p95": sorted_lats[int(n * 0.95)] if n > 1 else sorted_lats[0] if n > 0 else 0,
+                    "p99": sorted_lats[int(n * 0.99)] if n > 1 else sorted_lats[0] if n > 0 else 0,
+                    "max": sorted_lats[-1] if n > 0 else 0,
+                    "sample_count": n,
+                },
+            })
+            return
+        elif path == "/stats":
+            from ohm.queries import query_stats
+            stats = query_stats(self.store.conn)
+            stats["uptime"] = round(time.time() - _START_TIME, 1)
+            self._json_response(200, stats)
+            return
 
         if path == "/status":
             status = self.store.status()
