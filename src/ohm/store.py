@@ -8,6 +8,7 @@ Supports three modes:
 """
 
 import json
+import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +17,8 @@ from typing import Any, Optional
 import duckdb
 
 from .exceptions import OHMError
+
+logger = logging.getLogger(__name__)
 
 
 class OhmStore:
@@ -630,6 +633,7 @@ class OhmStore:
     def sync_heartbeat(
         self,
         ducklake_path: Optional[str] = None,
+        alias: str = "ohm_lake",
     ) -> dict[str, Any]:
         """Push local changes to DuckLake and pull remote changes.
 
@@ -639,10 +643,15 @@ class OhmStore:
         2. Pulls changes from DuckLake (if path configured)
         3. Updates last_sync timestamp
 
+        When DuckLake is attached as an alias on the current connection,
+        sync uses mirror tables (ohm_lake.ohm_nodes, etc.) directly.
+        Otherwise, falls back to the legacy separate-connection approach.
+
         Args:
             ducklake_path: Optional path to DuckLake database.
                 If None, uses OHM_DUCKLAKE_PATH env var.
                 If neither set, sync is a no-op (local-only mode).
+            alias: Database alias for the attached DuckLake catalog.
 
         Returns:
             Dict with sync results: pushed_count, pulled_count, last_sync.
@@ -656,9 +665,9 @@ class OhmStore:
 
         if ducklake_path:
             # Push local changes to DuckLake
-            pushed = self.push_to_ducklake(ducklake_path)
+            pushed = self.push_to_ducklake(ducklake_path, alias=alias)
             # Pull remote changes from DuckLake
-            pulled = self.pull_from_ducklake(ducklake_path)
+            pulled = self.pull_from_ducklake(ducklake_path, alias=alias)
 
         # Update last_sync timestamp — ensure agent row exists
         existing = self.conn.execute(
@@ -691,15 +700,260 @@ class OhmStore:
             "agent": self.agent_name,
         }
 
-    def push_to_ducklake(self, ducklake_path: str) -> int:
-        """Push local changes to DuckLake shared backend.
+    def push_to_ducklake(self, ducklake_path: str, alias: str = "ohm_lake") -> int:
+        """Push local data to DuckLake shared backend via mirror tables.
 
-        Reads changes from local ohm_change_log since last_push,
-        replicates them to DuckLake's ohm_change_feed, and records
-        the push timestamp.
+        Uses the attached DuckLake catalog (ohm_lake alias) to sync
+        local ohm_nodes, ohm_edges, and ohm_observations to mirror
+        tables. Falls back to the old change-feed approach if DuckLake
+        is not attached.
+
+        The sync strategy:
+        1. Check if DuckLake alias is attached
+        2. If attached, use sync_to_ducklake() for mirror table sync
+        3. If not attached, fall back to separate DB connection
 
         Args:
-            ducklake_path: Path to DuckLake database.
+            ducklake_path: Path to DuckLake database (used for fallback).
+            alias: Database alias for the attached DuckLake catalog.
+
+        Returns:
+            Number of rows synced.
+        """
+        # Check if DuckLake alias is attached on this connection
+        try:
+            attached = self.conn.execute(
+                "SELECT database_name FROM duckdb_databases() "
+                "WHERE database_name = ?",
+                [alias],
+            ).fetchone()
+        except Exception:
+            attached = None
+
+        if attached:
+            # New approach: sync via attached mirror tables
+            result = self.sync_to_ducklake(alias=alias)
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc)
+            self._set_last_push_timestamp(now)
+            return result
+
+        # Fallback: old approach using separate DB connection
+        return self._push_to_ducklake_legacy(ducklake_path)
+
+    def sync_to_ducklake(self, alias: str = "ohm_lake") -> int:
+        """Sync local data to DuckLake mirror tables.
+
+        Copies new/changed rows from local DuckDB to the attached
+        DuckLake catalog's mirror tables. Uses upsert logic:
+        - INSERT rows that don't exist in DuckLake
+        - UPDATE rows that have changed since last sync
+
+        Also performs initial sync if mirror tables are empty.
+
+        Args:
+            alias: Database alias for the attached DuckLake catalog.
+
+        Returns:
+            Total number of rows synced (inserted + updated).
+        """
+        total_synced = 0
+
+        # Get last sync timestamp
+        last_push = self._get_last_push_timestamp()
+
+        for table in ["ohm_nodes", "ohm_edges", "ohm_observations"]:
+            try:
+                # Check if mirror table has any data (for initial sync)
+                mirror_count = self.conn.execute(
+                    f"SELECT COUNT(*) FROM {alias}.{table}"
+                ).fetchone()[0]
+
+                if mirror_count == 0:
+                    # Initial sync: copy all rows
+                    synced = self._initial_sync_table(table, alias)
+                else:
+                    # Incremental sync: copy new/changed rows
+                    synced = self._incremental_sync_table(table, alias, last_push)
+                total_synced += synced
+            except Exception as e:
+                # Mirror table may not exist yet — skip
+                logger.debug(f"Sync of {table} to {alias} failed: {e}")
+
+        # Also sync change feed
+        try:
+            synced = self._sync_change_feed(alias, last_push)
+            total_synced += synced
+        except Exception as e:
+            logger.debug(f"Sync of change_feed to {alias} failed: {e}")
+
+        return total_synced
+
+    def _initial_sync_table(self, table: str, alias: str) -> int:
+        """Perform initial full sync of a table to DuckLake mirror.
+
+        Args:
+            table: Local table name (e.g., 'ohm_nodes').
+            alias: DuckLake alias.
+
+        Returns:
+            Number of rows inserted.
+        """
+        # Get column lists using duckdb_columns() for DuckLake tables
+        local_cols = self.conn.execute(
+            f"SELECT column_name FROM information_schema.columns "
+            f"WHERE table_name = '{table}' ORDER BY ordinal_position"
+        ).fetchall()
+        # Deduplicate while preserving order (information_schema may return duplicates)
+        local_col_names = list(dict.fromkeys(c[0] for c in local_cols))
+
+        mirror_cols = self.conn.execute(
+            f"SELECT column_name FROM duckdb_columns() "
+            f"WHERE database_name = '{alias}' AND table_name = '{table}'"
+        ).fetchall()
+        mirror_col_names = [c[0] for c in mirror_cols]
+
+        # Use intersection of local and mirror columns
+        common_cols = [c for c in local_col_names if c in mirror_col_names]
+        if not common_cols:
+            return 0
+        common_str = ", ".join(common_cols)
+
+        # Insert all local rows into mirror
+        self.conn.execute(
+            f"INSERT INTO {alias}.{table} ({common_str}) "
+            f"SELECT {common_str} FROM {table}"
+        )
+
+        count = self.conn.execute(
+            f"SELECT COUNT(*) FROM {alias}.{table}"
+        ).fetchone()[0]
+        return count
+
+    def _incremental_sync_table(self, table: str, alias: str,
+                                 last_push: str | None) -> int:
+        """Perform incremental sync of changed rows to DuckLake mirror.
+
+        Uses updated_at (or created_at for observations) to find rows
+        that have changed since the last sync.
+
+        Args:
+            table: Local table name.
+            alias: DuckLake alias.
+            last_push: ISO timestamp of last push, or None for full sync.
+
+        Returns:
+            Number of rows synced.
+        """
+        # Determine timestamp column
+        ts_col = "updated_at" if table != "ohm_observations" else "created_at"
+
+        # Get column lists using duckdb_columns() for DuckLake tables
+        local_cols = self.conn.execute(
+            f"SELECT column_name FROM information_schema.columns "
+            f"WHERE table_name = '{table}' ORDER BY ordinal_position"
+        ).fetchall()
+        # Deduplicate while preserving order (information_schema may return duplicates)
+        col_names = list(dict.fromkeys(c[0] for c in local_cols))
+
+        mirror_cols = self.conn.execute(
+            f"SELECT column_name FROM duckdb_columns() "
+            f"WHERE database_name = '{alias}' AND table_name = '{table}'"
+        ).fetchall()
+        mirror_col_names = [c[0] for c in mirror_cols]
+
+        common_cols = [c for c in col_names if c in mirror_col_names]
+        if not common_cols:
+            return 0
+        common_str = ", ".join(common_cols)
+
+        if last_push:
+            # Find rows changed since last push
+            changed_rows = self.conn.execute(
+                f"SELECT id FROM {table} WHERE {ts_col} > ?::TIMESTAMP",
+                [last_push],
+            ).fetchall()
+        else:
+            # No last push — sync everything
+            changed_rows = self.conn.execute(
+                f"SELECT id FROM {table}"
+            ).fetchall()
+
+        if not changed_rows:
+            return 0
+
+        changed_ids = [r[0] for r in changed_rows]
+
+        # Delete stale rows from mirror and re-insert
+        # (upsert via delete + insert is simpler than MERGE for DuckLake)
+        placeholders = ", ".join(["?"] * len(changed_ids))
+        self.conn.execute(
+            f"DELETE FROM {alias}.{table} WHERE id IN ({placeholders})",
+            changed_ids,
+        )
+
+        id_placeholders = ", ".join([f"'{cid}'" for cid in changed_ids])
+        self.conn.execute(
+            f"INSERT INTO {alias}.{table} ({common_str}) "
+            f"SELECT {common_str} FROM {table} WHERE id IN ({id_placeholders})"
+        )
+
+        return len(changed_ids)
+
+    def _sync_change_feed(self, alias: str, last_push: str | None) -> int:
+        """Sync local change log entries to DuckLake change feed.
+
+        Maps local ohm_change_log columns to mirror ohm_change_feed columns:
+        - row_id -> change_row_id
+        - changed_at -> occurred_at
+        - change_data -> new_data (old_data set to NULL)
+
+        Args:
+            alias: DuckLake alias.
+            last_push: ISO timestamp of last push, or None.
+
+        Returns:
+            Number of change feed entries synced.
+        """
+        if last_push:
+            changes = self.conn.execute(
+                "SELECT table_name, row_id, operation, agent_name, "
+                "change_data, changed_at FROM ohm_change_log "
+                "WHERE changed_at > ?::TIMESTAMP",
+                [last_push],
+            ).fetchall()
+        else:
+            changes = self.conn.execute(
+                "SELECT table_name, row_id, operation, agent_name, "
+                "change_data, changed_at FROM ohm_change_log"
+            ).fetchall()
+
+        if not changes:
+            return 0
+
+        for change in changes:
+            try:
+                self.conn.execute(
+                    f"INSERT INTO {alias}.ohm_change_feed "
+                    f"(table_name, change_row_id, operation, agent_name, "
+                    f"old_data, new_data, occurred_at) "
+                    f"VALUES (?, ?, ?, ?, NULL, ?, ?)",
+                    [change[0], change[1], change[2], change[3], change[4], change[5]],
+                )
+            except Exception:
+                # Duplicate or schema mismatch — skip
+                pass
+
+        return len(changes)
+
+    def _push_to_ducklake_legacy(self, ducklake_path: str) -> int:
+        """Legacy push: open separate DuckDB connection to DuckLake.
+
+        Used as fallback when DuckLake is not attached as an alias
+        on the current connection.
+
+        Args:
+            ducklake_path: Path to DuckLake database file.
 
         Returns:
             Number of changes pushed.
@@ -755,15 +1009,112 @@ class OhmStore:
         finally:
             ducklake.close()
 
-    def pull_from_ducklake(self, ducklake_path: str) -> int:
+    def pull_from_ducklake(self, ducklake_path: str, alias: str = "ohm_lake") -> int:
         """Pull remote changes from DuckLake shared backend.
 
-        Reads changes from DuckLake's ohm_change_feed that occurred
-        after the last pull timestamp, and applies them to the local
-        database (if they don't conflict).
+        When DuckLake is attached as an alias, reads from the mirror
+        tables directly. Otherwise, falls back to the legacy separate
+        connection approach.
 
         Args:
-            ducklake_path: Path to DuckLake database.
+            ducklake_path: Path to DuckLake database (used for fallback).
+            alias: Database alias for the attached DuckLake catalog.
+
+        Returns:
+            Number of changes pulled and applied.
+        """
+        # Check if DuckLake alias is attached on this connection
+        try:
+            attached = self.conn.execute(
+                "SELECT database_name FROM duckdb_databases() "
+                "WHERE database_name = ?",
+                [alias],
+            ).fetchone()
+        except Exception:
+            attached = None
+
+        if attached:
+            # New approach: pull from attached mirror tables
+            return self._pull_from_ducklake_attached(alias)
+
+        # Fallback: legacy separate connection
+        return self._pull_from_ducklake_legacy(ducklake_path)
+
+    def _pull_from_ducklake_attached(self, alias: str = "ohm_lake") -> int:
+        """Pull remote changes from attached DuckLake mirror tables.
+
+        Reads rows from DuckLake mirror tables that don't exist in
+        local tables (or have been updated by other agents) and
+        applies them to the local database.
+
+        Args:
+            alias: Database alias for the attached DuckLake catalog.
+
+        Returns:
+            Number of rows pulled and applied.
+        """
+        pulled = 0
+
+        for table in ["ohm_nodes", "ohm_edges", "ohm_observations"]:
+            try:
+                # Find rows in DuckLake that are not in local table
+                # (new rows from other agents)
+                new_rows = self.conn.execute(
+                    f"SELECT dl.id FROM {alias}.{table} dl "
+                    f"LEFT JOIN {table} l ON dl.id = l.id "
+                    f"WHERE l.id IS NULL"
+                ).fetchall()
+
+                if new_rows:
+                    # Get common columns
+                    local_cols = self.conn.execute(
+                        f"SELECT column_name FROM information_schema.columns "
+                        f"WHERE table_name = '{table}' ORDER BY ordinal_position"
+                    ).fetchall()
+                    local_col_names = [c[0] for c in local_cols]
+
+                    mirror_cols = self.conn.execute(
+                        f"SELECT column_name FROM information_schema.columns "
+                        f"WHERE table_schema = '{alias}' AND table_name = '{table}' "
+                        f"ORDER BY ordinal_position"
+                    ).fetchall()
+                    mirror_col_names = [c[0] for c in mirror_cols]
+
+                    common_cols = [c for c in local_col_names if c in mirror_col_names]
+                    if not common_cols:
+                        continue
+                    common_str = ", ".join(common_cols)
+
+                    new_ids = [r[0] for r in new_rows]
+                    id_list = ", ".join([f"'{i}'" for i in new_ids])
+
+                    # Insert new rows from DuckLake into local table
+                    self.conn.execute(
+                        f"INSERT INTO {table} ({common_str}) "
+                        f"SELECT {common_str} FROM {alias}.{table} dl "
+                        f"WHERE dl.id IN ({id_list})"
+                    )
+                    pulled += len(new_ids)
+
+            except Exception:
+                # Table may not exist in DuckLake — skip
+                pass
+
+        # Record pull timestamp
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        self._set_last_pull_timestamp(now)
+
+        return pulled
+
+    def _pull_from_ducklake_legacy(self, ducklake_path: str) -> int:
+        """Legacy pull: open separate DuckDB connection to DuckLake.
+
+        Used as fallback when DuckLake is not attached as an alias
+        on the current connection.
+
+        Args:
+            ducklake_path: Path to DuckLake database file.
 
         Returns:
             Number of changes pulled and applied.

@@ -442,3 +442,240 @@ class TestDuckLakeTimeTravel:
         assert len(result["nodes"]) >= 1
         assert result["edge_count"] >= 0
         store.close()
+
+
+class TestDuckLakeMirrorSync:
+    """Tests for DuckLake mirror table sync (OHM-0ku).
+
+    Verifies that sync_to_ducklake writes to the attached DuckLake
+    mirror tables (ohm_lake.ohm_nodes, etc.) instead of opening a
+    separate connection to a different database.
+    """
+
+    def test_sync_to_ducklake_populates_mirror_tables(self, tmp_path):
+        """sync_to_ducklake copies local data to DuckLake mirror tables."""
+        from ohm.db import connect, attach_ducklake
+
+        db_path = str(tmp_path / "local.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test_agent")
+
+        catalog_path = str(tmp_path / "ohm_lake.ducklake")
+        data_path = str(tmp_path / "ohm_lake_data")
+
+        # Attach DuckLake
+        attached = store.attach_ducklake(catalog_path=catalog_path, data_path=data_path)
+        if not attached:
+            pytest.skip("DuckLake extension not available")
+
+        # Create local data
+        store.write_node("sync_node_1", "Sync Node 1", "concept")
+        store.write_node("sync_node_2", "Sync Node 2", "concept")
+
+        # Sync to DuckLake
+        result = store.sync_to_ducklake(alias="ohm_lake")
+        assert result >= 2  # At least the two nodes
+
+        # Verify mirror tables have data
+        mirror_count = store.conn.execute(
+            "SELECT COUNT(*) FROM ohm_lake.ohm_nodes"
+        ).fetchone()[0]
+        assert mirror_count >= 2
+
+        store.close()
+
+    def test_sync_to_ducklake_includes_edges(self, tmp_path):
+        """sync_to_ducklake copies edges to mirror tables."""
+        from ohm.db import connect, attach_ducklake
+
+        db_path = str(tmp_path / "local.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test_agent")
+
+        catalog_path = str(tmp_path / "ohm_lake.ducklake")
+        data_path = str(tmp_path / "ohm_lake_data")
+
+        attached = store.attach_ducklake(catalog_path=catalog_path, data_path=data_path)
+        if not attached:
+            pytest.skip("DuckLake extension not available")
+
+        # Create local data with edges
+        store.write_node("edge_node_a", "Node A", "concept")
+        store.write_node("edge_node_b", "Node B", "concept")
+        store.write_edge("edge_node_a", "edge_node_b", "CAUSES", "L3")
+
+        # Sync to DuckLake
+        result = store.sync_to_ducklake(alias="ohm_lake")
+        assert result >= 3  # 2 nodes + 1 edge minimum
+
+        # Verify edges in mirror
+        edge_count = store.conn.execute(
+            "SELECT COUNT(*) FROM ohm_lake.ohm_edges"
+        ).fetchone()[0]
+        assert edge_count >= 1
+
+        store.close()
+
+    def test_sync_to_ducklake_includes_observations(self, tmp_path):
+        """sync_to_ducklake copies observations to mirror tables."""
+        from ohm.db import connect, attach_ducklake
+
+        db_path = str(tmp_path / "local.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test_agent")
+
+        catalog_path = str(tmp_path / "ohm_lake.ducklake")
+        data_path = str(tmp_path / "ohm_lake_data")
+
+        attached = store.attach_ducklake(catalog_path=catalog_path, data_path=data_path)
+        if not attached:
+            pytest.skip("DuckLake extension not available")
+
+        # Create local data with observations
+        node_id = store.write_node("obs_node", "Obs Node", "concept")
+        store.write_observation(node_id, type="measurement", value=1.5)
+
+        # Sync to DuckLake
+        result = store.sync_to_ducklake(alias="ohm_lake")
+        assert result >= 2  # 1 node + 1 observation minimum
+
+        # Verify observations in mirror
+        obs_count = store.conn.execute(
+            "SELECT COUNT(*) FROM ohm_lake.ohm_observations"
+        ).fetchone()[0]
+        assert obs_count >= 1
+
+        store.close()
+
+    def test_push_to_ducklake_uses_attached_alias(self, tmp_path):
+        """push_to_ducklake uses attached DuckLake alias when available."""
+        from ohm.db import connect, attach_ducklake
+
+        db_path = str(tmp_path / "local.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test_agent")
+
+        catalog_path = str(tmp_path / "ohm_lake.ducklake")
+        data_path = str(tmp_path / "ohm_lake_data")
+
+        attached = store.attach_ducklake(catalog_path=catalog_path, data_path=data_path)
+        if not attached:
+            pytest.skip("DuckLake extension not available")
+
+        # Create local data
+        store.write_node("push_node", "Push Node", "concept")
+
+        # Push using the new method (should use attached alias)
+        result = store.push_to_ducklake(
+            ducklake_path=str(tmp_path / "fallback.duckdb"),
+            alias="ohm_lake",
+        )
+        assert result >= 1
+
+        # Verify mirror tables have data
+        mirror_count = store.conn.execute(
+            "SELECT COUNT(*) FROM ohm_lake.ohm_nodes"
+        ).fetchone()[0]
+        assert mirror_count >= 1
+
+        store.close()
+
+    def test_sync_heartbeat_with_attached_ducklake(self, tmp_path):
+        """sync_heartbeat uses attached DuckLake for sync when available."""
+        from ohm.db import connect, attach_ducklake
+
+        db_path = str(tmp_path / "local.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test_agent")
+
+        catalog_path = str(tmp_path / "ohm_lake.ducklake")
+        data_path = str(tmp_path / "ohm_lake_data")
+
+        attached = store.attach_ducklake(catalog_path=catalog_path, data_path=data_path)
+        if not attached:
+            pytest.skip("DuckLake extension not available")
+
+        # Create local data
+        store.write_node("hb_node", "Heartbeat Node", "concept")
+
+        # Sync heartbeat with DuckLake path (should use attached alias)
+        result = store.sync_heartbeat(
+            ducklake_path=str(tmp_path / "fallback.duckdb"),
+            alias="ohm_lake",
+        )
+        assert result["pushed"] >= 1
+        assert result["last_sync"] is not None
+
+        # Verify mirror tables have data
+        mirror_count = store.conn.execute(
+            "SELECT COUNT(*) FROM ohm_lake.ohm_nodes"
+        ).fetchone()[0]
+        assert mirror_count >= 1
+
+        store.close()
+
+    def test_initial_sync_populates_empty_mirror(self, tmp_path):
+        """Initial sync populates empty mirror tables with all local data."""
+        from ohm.db import connect, attach_ducklake
+
+        db_path = str(tmp_path / "local.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test_agent")
+
+        catalog_path = str(tmp_path / "ohm_lake.ducklake")
+        data_path = str(tmp_path / "ohm_lake_data")
+
+        attached = store.attach_ducklake(catalog_path=catalog_path, data_path=data_path)
+        if not attached:
+            pytest.skip("DuckLake extension not available")
+
+        # Create 5 nodes before sync
+        for i in range(5):
+            store.write_node(f"init_node_{i}", f"Init Node {i}", "concept")
+
+        # Sync — should do initial sync since mirror tables are empty
+        result = store.sync_to_ducklake(alias="ohm_lake")
+        assert result >= 5
+
+        # Verify all 5 nodes in mirror
+        mirror_count = store.conn.execute(
+            "SELECT COUNT(*) FROM ohm_lake.ohm_nodes"
+        ).fetchone()[0]
+        assert mirror_count >= 5
+
+        store.close()
+
+    def test_incremental_sync_updates_changed_rows(self, tmp_path):
+        """Incremental sync updates rows that changed since last sync."""
+        from ohm.db import connect, attach_ducklake
+
+        db_path = str(tmp_path / "local.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test_agent")
+
+        catalog_path = str(tmp_path / "ohm_lake.ducklake")
+        data_path = str(tmp_path / "ohm_lake_data")
+
+        attached = store.attach_ducklake(catalog_path=catalog_path, data_path=data_path)
+        if not attached:
+            pytest.skip("DuckLake extension not available")
+
+        # Create and sync initial data
+        store.write_node("inc_node", "Original Label", "concept")
+        store.sync_to_ducklake(alias="ohm_lake")
+
+        # Verify initial label in mirror
+        label = store.conn.execute(
+            "SELECT label FROM ohm_lake.ohm_nodes WHERE id = 'inc_node'"
+        ).fetchone()
+        assert label is not None
+        assert label[0] == "Original Label"
+
+        # Update the node locally
+        store.write_node("inc_node", "Updated Label", "concept")
+
+        # Sync again — should update the mirror
+        result = store.sync_to_ducklake(alias="ohm_lake")
+        assert result >= 1  # At least the updated node
+
+        # Verify updated label in mirror
+        updated_label = store.conn.execute(
+            "SELECT label FROM ohm_lake.ohm_nodes WHERE id = 'inc_node'"
+        ).fetchone()
+        assert updated_label is not None
+        assert updated_label[0] == "Updated Label"
+
+        store.close()
