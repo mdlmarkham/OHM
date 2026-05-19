@@ -6,8 +6,10 @@ and connection configuration.
 
 from __future__ import annotations
 
+import json
 import os
 import pathlib
+import shutil
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -52,11 +54,16 @@ def connect(db_path: str | pathlib.Path | None = None) -> "duckdb.DuckDBPyConnec
         # Check if this is a WAL corruption error
         error_msg = str(e)
         if "WAL" in error_msg or "wal" in error_msg.lower():
-            # WAL corruption — delete WAL and retry
-            wal_path = db_path_str + ".wal"
-            if os.path.exists(wal_path):
-                os.remove(wal_path)
-            conn = duckdb.connect(db_path_str)
+            # Try DuckLake recovery first (OHM-kdk.4)
+            restored = _try_ducklake_recovery(db_path_str)
+            if restored:
+                conn = duckdb.connect(db_path_str)
+            else:
+                # Fall back to WAL deletion (OHM-b5a)
+                wal_path = db_path_str + ".wal"
+                if os.path.exists(wal_path):
+                    os.remove(wal_path)
+                conn = duckdb.connect(db_path_str)
         else:
             raise
 
@@ -104,6 +111,17 @@ def _load_extensions(conn: "duckdb.DuckDBPyConnection") -> None:
     except Exception:
         pass  # DuckLake not available — lakehouse features disabled
 
+    # Try to load VSS extension (optional, for semantic search)
+    # VSS provides HNSW index for fast vector similarity search.
+    # Required for semantic search (OHM-o9f). Gracefully degrades if
+    # unavailable — embedding column still works without the index.
+    try:
+        conn.execute("INSTALL vss; LOAD vss;")
+        # Enable HNSW index persistence so it survives DB restarts
+        conn.execute("SET hnsw_enable_experimental_persistence = true;")
+    except Exception:
+        pass  # VSS not available — semantic search falls back to brute-force
+
 
 def close(conn: "duckdb.DuckDBPyConnection") -> None:
     """Close a DuckDB connection safely."""
@@ -111,6 +129,137 @@ def close(conn: "duckdb.DuckDBPyConnection") -> None:
         conn.close()
     except Exception:
         pass
+
+
+def _try_ducklake_recovery(db_path_str: str) -> bool:
+    """Try to restore from DuckLake snapshot after WAL corruption (OHM-kdk.4).
+
+    If DuckLake is configured and has snapshots, exports the graph state
+    from the latest snapshot and imports it into a fresh DuckDB database.
+    This preserves data that would otherwise be lost when deleting the WAL.
+
+    Returns True if recovery succeeded, False if DuckLake is not available.
+    """
+    import duckdb
+    import shutil
+    import tempfile
+
+    ducklake_path = os.environ.get("OHM_DUCKLAKE_PATH")
+    if not ducklake_path:
+        return False
+
+    # Create a temp connection to load DuckLake and check snapshots
+    tmp_conn = None
+    try:
+        tmp_conn = duckdb.connect(":memory:")
+        # Load DuckLake extension
+        try:
+            tmp_conn.execute("INSTALL ducklake FROM core; LOAD ducklake;")
+        except Exception:
+            return False
+
+        # Attach DuckLake catalog
+        try:
+            tmp_conn.execute(f"ATTACH 'ducklake:{ducklake_path}' AS ohm_lake")
+        except Exception:
+            return False
+
+        # Get latest snapshot
+        snapshots = tmp_conn.execute(
+            "SELECT snapshot_id FROM ducklake_snapshots('ohm_lake') "
+            "ORDER BY snapshot_time DESC LIMIT 1"
+        ).fetchone()
+        if not snapshots:
+            return False
+
+        snapshot_id = snapshots[0]
+
+        # Export nodes and edges from snapshot
+        nodes = tmp_conn.execute(
+            f"SELECT * FROM ohm_lake.ohm_nodes AT (VERSION => {snapshot_id})"
+        ).fetchall()
+        edges = tmp_conn.execute(
+            f"SELECT * FROM ohm_lake.ohm_edges AT (VERSION => {snapshot_id})"
+        ).fetchall()
+
+        node_cols = [d[0] for d in tmp_conn.description]
+        edge_cols = [d[0] for d in tmp_conn.description]
+
+        if not nodes and not edges:
+            return False
+
+        # Backup corrupted DB and create fresh one
+        backup_path = db_path_str + ".corrupted"
+        shutil.move(db_path_str, backup_path)
+        # Also remove WAL if present
+        wal_path = db_path_str + ".wal"
+        if os.path.exists(wal_path):
+            os.remove(wal_path)
+
+        # Create fresh DB with OHM schema
+        fresh_conn = duckdb.connect(db_path_str)
+        from ohm.schema import initialize_schema
+        initialize_schema(fresh_conn)
+
+        # Import nodes
+        for node in nodes:
+            node_dict = dict(zip(node_cols, node))
+            cols = [c for c in node_cols if c in node_dict]
+            placeholders = ", ".join(["?"] * len(cols))
+            col_names = ", ".join(cols)
+            values = [node_dict[c] for c in cols]
+            try:
+                fresh_conn.execute(
+                    f"INSERT INTO ohm_nodes ({col_names}) VALUES ({placeholders})",
+                    values,
+                )
+            except Exception:
+                pass  # Skip duplicates
+
+        # Import edges
+        for edge in edges:
+            edge_dict = dict(zip(edge_cols, edge))
+            cols = [c for c in edge_cols if c in edge_dict]
+            placeholders = ", ".join(["?"] * len(cols))
+            col_names = ", ".join(cols)
+            values = [edge_dict[c] for c in cols]
+            try:
+                fresh_conn.execute(
+                    f"INSERT INTO ohm_edges ({col_names}) VALUES ({placeholders})",
+                    values,
+                )
+            except Exception:
+                pass  # Skip duplicates
+
+        # Log recovery
+        fresh_conn.execute(
+            """INSERT INTO ohm_change_feed
+               (table_name, row_id, operation, agent_name, new_data)
+               VALUES (?, ?, ?, ?, ?)""",
+            [
+                "ohm_meta", "recovery",
+                "RECOVERY",
+                "ohmd",
+                json.dumps({
+                    "snapshot_id": snapshot_id,
+                    "nodes_restored": len(nodes),
+                    "edges_restored": len(edges),
+                    "corrupted_db": backup_path,
+                }),
+            ],
+        )
+
+        fresh_conn.close()
+        return True
+
+    except Exception:
+        return False
+    finally:
+        if tmp_conn:
+            try:
+                tmp_conn.close()
+            except Exception:
+                pass
 
 
 def attach_ducklake(
