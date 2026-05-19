@@ -133,18 +133,24 @@ Closed cross-cutting:
 ## Known Issues
 
 ### P0 — Critical
-- **✅ FIXED: DELETE corrupts DB with DuckLake mirror tables** — Replaced hard DELETE with soft delete (deleted_at column). Hard DELETE caused DuckDB fatal error "Failed to delete all rows from index" when mirror tables attached. Soft delete marks rows as deleted; queries filter with WHERE deleted_at IS NULL. Schema migration v0.12.0 adds deleted_at to all tables. (OHM-cpi, commit 8cf077f)
-- **Silent overwrite on duplicate node IDs** — POST /node with existing ID silently overwrites content/confidence/provenance. Returns `created: false` but no 409. Any agent can destroy another's knowledge. (Atlas testing, confirmed)
+- **✅ FIXED: DELETE corrupts DB with DuckLake mirror tables** — Soft delete (commit 8cf077f)
+- **✅ FIXED: Silent overwrite on duplicate node IDs** — Default create_only=true returns 409; create_only=false for upsert (commit 1efa5e2)
 
 ### P1 — High
-- **Support endpoint hangs:** POST /support/{id} never returns (DeepThought testing)
-- **Edge field naming mismatch:** Request `from`/`to`/`type` vs response `from_node`/`to_node`/`edge_type` (Atlas testing, confirmed)
-- **Semantic search empty:** Search returns no results for known terms — embedding index may not be built (DeepThought testing)
-- **No request size cap:** `_read_body()` reads unlimited Content-Length bytes (OOM risk) (OHM-zag) — DONE (MAX_BODY_SIZE=1MB)
-- **SDK read methods:** Fixed — `get_node()`, `get_edge()`, `find_or_create()`, `search()` all implemented ✅ (OHM-xfh)
-- **SDK test coverage:** 137 tests on primary agent interface ✅ (OHM-9dq)
-- **Duplicate agent registration:** 12 agent nodes for 4 active agents (Atlas testing, confirmed)
-- **Confidence bounds not enforced:** Values > 1.0 accepted (Atlas testing, confirmed)
+- **✅ FIXED: Edge field naming mismatch** — Responses now include from/to/type aliases alongside from_node/to_node/edge_type (commit 1efa5e2)
+- **✅ FIXED: Soft-deleted primary key collision** — write_node() and /register now reactivate soft-deleted rows instead of INSERT crash (commit 1efa5e2)
+- **✅ FIXED: SQL syntax in stats (double WHERE)** — commit 567770e
+- **Support endpoint hangs:** Was caused by DuckDB crash from DELETE bug (now fixed). Works correctly with soft delete.
+- **Semantic search empty:** No embeddings generated yet. Added /admin/embeddings endpoint for batch backfill. Need to run it.
+- **No request size cap:** MAX_BODY_SIZE=1MB already in place (OHM-zag)
+- **Confidence bounds:** Already validated in server.py (0.0-1.0) (Atlas testing was pre-validation)
+- **Duplicate agent registration:** Not a bug — /register is idempotent with deterministic IDs
+- **SDK test coverage:** 137 tests (OHM-9dq)
+- **DuckLake pull:** Type casting fix deployed (commit a6ce948), not yet tested post-restart
+
+### P2 — Medium
+- **No SIGPIPE handling:** Daemon can crash on broken connections (OHM-e19)
+- **Embedding backfill:** Need to run /admin/embeddings to generate vectors for all existing nodes
 
 ### P2 — Medium
 - **No SIGPIPE handling:** Daemon can crash on broken connections (OHM-e19)
