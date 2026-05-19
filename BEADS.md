@@ -133,8 +133,8 @@ Closed cross-cutting:
 ## Known Issues
 
 ### P0 — Critical
-- **DELETE on nodes corrupts DB when DuckLake mirror tables exist:** DuckDB index deletion fails ("Only deleted 0 out of 1 rows"), invalidates database, corrupts WAL. Do NOT use DELETE until fixed. (Found May 19, unfixed)
-- **Silent overwrite on duplicate node IDs:** POST /node with existing ID silently overwrites content/confidence/provenance. Returns `created: false` but no 409. Any agent can destroy another's knowledge. (Atlas testing, confirmed)
+- **✅ FIXED: DELETE corrupts DB with DuckLake mirror tables** — Replaced hard DELETE with soft delete (deleted_at column). Hard DELETE caused DuckDB fatal error "Failed to delete all rows from index" when mirror tables attached. Soft delete marks rows as deleted; queries filter with WHERE deleted_at IS NULL. Schema migration v0.12.0 adds deleted_at to all tables. (OHM-cpi, commit 8cf077f)
+- **Silent overwrite on duplicate node IDs** — POST /node with existing ID silently overwrites content/confidence/provenance. Returns `created: false` but no 409. Any agent can destroy another's knowledge. (Atlas testing, confirmed)
 
 ### P1 — High
 - **Support endpoint hangs:** POST /support/{id} never returns (DeepThought testing)
