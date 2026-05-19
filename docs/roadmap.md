@@ -104,4 +104,4 @@
 | OHM-e19 | P2 | No SIGPIPE handling in daemon | Open |
 | OHM-pfk | P1 | Comprehensive doc update for multi-scenario architecture | Open |
 | OHM-c8i | P1 | ADRs for probability/confidence, NEGATES, urgency/priority | Done (ADR-008/009/010) |
-| OHM-5di | P2 | ADR for observation type extensibility | Open |
+| OHM-5di | P2 | ADR for observation type extensibility | Done (ADR-011) |

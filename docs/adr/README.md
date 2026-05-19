@@ -253,3 +253,35 @@ Priority and urgency are advisory by default (ADR-006) — they are validated wh
 - `escalate()` correctly updates both dimensions
 - Query patterns: "show me all P0 nodes" (priority filter) vs. "show me all critical-urgency edges" (urgency filter) vs. "show me P0 nodes with critical-urgency edges" (intersection)
 - Future: priority could be derived from composite scoring; urgency could be auto-set by temporal decay
+
+---
+
+## ADR-011: Observation Type Extensibility
+
+**Date:** 2026-05-19
+**Status:** Decided
+
+### Context
+
+OHM's `observe()` method records observations against nodes with a required `obs_type` field. The base schema defines `VALID_OBSERVATION_TYPES = {anomaly, measurement, pattern, challenge, support, sentiment}`. As OHM expands to new domains (industrial monitoring, financial analysis, environmental tracking), each domain needs domain-specific observation types: vibration/temperature/pressure for TOPO, volatility/spread for finance, pH/dissolved_oxygen for environmental.
+
+The question is: should observation types be an open string (any value accepted), a closed set (only registered types), or extensible with validation?
+
+### Decision
+
+Observation types follow the same graduated enforcement model as node types and edge types (ADR-006/007):
+
+1. **Advisory (default)** — `VALID_OBSERVATION_TYPES` is defined in `schema.py` as a `frozenset`. The `observe()` SDK method validates against it, raising `ValueError` for unknown types. This prevents typos and ensures query consistency.
+2. **Domain extension via `SchemaConfig`** — Each `SchemaConfig` instance can define its own `observation_types` set. The TOPO schema extends the base with `{vibration, temperature, pressure, flow_rate, voltage, current, rpm, level}`. Custom domains add their own types the same way.
+3. **Three-stage lifecycle** (per ADR-007) — experimental types are added to a domain's `SchemaConfig` (advisory), registered types are validated in lenient mode, canonical types require a schema migration to add to `VALID_OBSERVATION_TYPES`.
+
+The `observation_sources` field follows the same pattern with `VALID_OBSERVATION_SOURCES` and `SchemaConfig.observation_sources`.
+
+### Consequences
+
+- Observation types are validated, preventing typos and ensuring downstream queries can group by type
+- Domains extend observation types through `SchemaConfig`, not by modifying the base schema
+- The TOPO schema demonstrates the extension pattern with 8 industrial observation types
+- Adding a new base observation type (e.g., "forecast") requires updating `VALID_OBSERVATION_TYPES` and a schema migration
+- The `observe()` SDK method and CLI validate against the active `SchemaConfig`, not the global constant
+- Future: observation types could be stored in a database table for runtime registration (currently compile-time only)
