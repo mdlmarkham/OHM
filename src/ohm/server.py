@@ -2005,6 +2005,15 @@ def main(schema_config: SchemaConfig | None = None):
         return
 
     # Initialize store
+    # Set DuckLake paths as env vars for OhmStore recovery
+    ducklake_config = config.get("ducklake", {})
+    ducklake_path = ducklake_config.get("path", "")
+    if ducklake_path:
+        os.environ["OHM_DUCKLAKE_PATH"] = ducklake_path
+        data_path = ducklake_config.get("data_path", "")
+        if data_path:
+            os.environ["OHM_DUCKLAKE_DATA"] = data_path
+
     store = OhmStore(db_path=config["db_path"], agent_name="ohmd")
     print(f"OHM database: {config['db_path']}", file=sys.stderr)
     print(f"Status: {store.status()}", file=sys.stderr)

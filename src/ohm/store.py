@@ -55,15 +55,146 @@ class OhmStore:
         if db_path is None:
             db_path = os.environ.get("OHM_DB_PATH", str(Path.home() / ".ohm" / "ohm.duckdb"))
 
+        # DuckLake path for recovery (set by server.py from config)
+        self.ducklake_path = os.environ.get("OHM_DUCKLAKE_PATH", "")
+        self.ducklake_data_path = os.environ.get("OHM_DUCKLAKE_DATA", "")
+
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
-        self.conn = self._connect_with_wal_recovery(str(self.db_path), readonly)
+        try:
+            self.conn = self._connect_with_wal_recovery(str(self.db_path), readonly)
+        except (duckdb.FatalException, duckdb.IOException, duckdb.InternalException) as e:
+            logger.error(f"DB connection failed: {e}. Attempting DuckLake recovery.")
+            self._recover_from_ducklake(str(self.db_path))
+            self.conn = self._connect_with_wal_recovery(str(self.db_path), readonly)
         self._init_schema()
 
         # Start Quack server if requested and available
         if self.quack and not self.readonly:
             self._start_quack()
+
+    def _recover_from_ducklake(self, db_path_str: str) -> None:
+        """Attempt to recover from a corrupted DB by rebuilding from DuckLake.
+
+        When DuckDB raises FatalException (uncatchable abort at C level),
+        the local DB file is corrupted and must be recreated. This method
+        deletes the corrupted DB and WAL, then rebuilds from DuckLake mirror
+        data if available.
+
+        Args:
+            db_path_str: Path to the corrupted DB file.
+        """
+        import shutil
+        from datetime import datetime
+
+        logger.warning("Recovering from corrupted DB: %s", db_path_str)
+
+        # Back up the corrupted DB
+        backup_path = f"{db_path_str}.corrupted.{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        try:
+            shutil.copy2(db_path_str, backup_path)
+            logger.info("Backed up corrupted DB to: %s", backup_path)
+        except Exception:
+            logger.warning("Could not back up corrupted DB")
+
+        # Remove corrupted DB and WAL
+        for path in [db_path_str, db_path_str + ".wal"]:
+            if os.path.exists(path):
+                os.remove(path)
+                logger.info("Removed: %s", path)
+
+        # Connect to fresh DB and rebuild from DuckLake
+        try:
+            conn = duckdb.connect(db_path_str)
+            from .schema import initialize_schema
+            initialize_schema(conn)
+            logger.info("Initialized fresh schema")
+
+            # Attach DuckLake if configured
+            ducklake_path = self.ducklake_path
+            if ducklake_path and os.path.exists(ducklake_path):
+                try:
+                    conn.execute(
+                        f"ATTACH IF NOT EXISTS '{ducklake_path}' AS ohm_lake (TYPE ducklake)"
+                    )
+                    logger.info("DuckLake attached for recovery")
+
+                    # Column mapping for DuckLake mirror -> local schema
+                    NODE_COLS = {
+                        'id': 'id', 'label': 'label', 'type': 'type',
+                        'content': 'content', 'url': 'url',
+                        'created_by': 'created_by', 'created_at': 'created_at',
+                        'updated_at': 'updated_at', 'updated_by': 'updated_by',
+                        'confidence': 'confidence', 'visibility': 'visibility',
+                        'provenance': 'provenance', 'tags': 'tags',
+                        'metadata': 'metadata', 'priority': 'priority',
+                    }
+                    EDGE_COLS = {
+                        'id': 'id', 'from_node': 'from_node', 'to_node': 'to_node',
+                        'edge_type': 'edge_type', 'layer': 'layer',
+                        'confidence': 'confidence', 'condition': 'condition',
+                        'probability': 'probability', 'urgency': 'urgency',
+                        'challenge_of': 'challenge_of', 'challenge_type': 'challenge_type',
+                        'provenance': 'provenance', 'created_by': 'created_by',
+                        'created_at': 'created_at', 'updated_at': 'updated_at',
+                        'updated_by': 'updated_by', 'metadata': 'metadata',
+                    }
+
+                    for table, col_map in [('ohm_nodes', NODE_COLS), ('ohm_edges', EDGE_COLS)]:
+                        try:
+                            # Build SELECT with type casts
+                            cast_parts = []
+                            for dl_col, local_col in col_map.items():
+                                if local_col in ('confidence', 'probability', 'baseline', 'value', 'sigma'):
+                                    cast_parts.append(f"CAST({dl_col} AS FLOAT) AS {local_col}")
+                                elif local_col in ('created_at', 'updated_at'):
+                                    cast_parts.append(f"CAST({dl_col} AS TIMESTAMP) AS {local_col}")
+                                elif local_col == 'metadata':
+                                    cast_parts.append(f"CAST({dl_col} AS JSON) AS {local_col}")
+                                else:
+                                    cast_parts.append(f'"{dl_col}" AS {local_col}')
+                            select_str = ', '.join(cast_parts)
+                            local_cols = ', '.join(col_map.values())
+
+                            # Only pull non-deleted rows
+                            conn.execute(
+                                f"INSERT INTO {table} ({local_cols}, deleted_at) "
+                                f"SELECT {select_str}, NULL::TIMESTAMP "
+                                f"FROM ohm_lake.{table} "
+                                f"WHERE deleted_at IS NULL OR CAST(deleted_at AS VARCHAR) = ''"
+                            )
+                            count = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]
+                            logger.info("Recovered %d %s from DuckLake", count, table)
+                        except Exception as e:
+                            logger.warning("Failed to recover %s from DuckLake: %s", table, e)
+
+                    # Detach DuckLake
+                    try:
+                        conn.execute("DETACH ohm_lake")
+                    except Exception:
+                        pass
+
+                    # Checkpoint
+                    conn.execute("CHECKPOINT")
+                    logger.info("Recovery checkpoint complete")
+                except Exception as e:
+                    logger.warning("DuckLake recovery failed: %s", e)
+            else:
+                logger.warning("No DuckLake path configured, skipping mirror recovery")
+
+            conn.close()
+            logger.info("DB recovery complete")
+        except Exception as e:
+            logger.error("DB recovery failed: %s", e)
+            # Last resort: just start with empty DB
+            if os.path.exists(db_path_str):
+                os.remove(db_path_str)
+            conn = duckdb.connect(db_path_str)
+            from .schema import initialize_schema
+            initialize_schema(conn)
+            conn.close()
+            logger.info("Started with empty DB as fallback")
 
     def _init_schema(self):
         """Initialize the schema if not already present, including migrations."""
