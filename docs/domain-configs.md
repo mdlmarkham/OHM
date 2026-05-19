@@ -281,7 +281,7 @@ The key design decision: a task in OHM is not a separate entity from the knowled
 
 4. **Tasks appear in change feed**: `/listen?since=2026-05-19T12:00:00Z` shows task creation, status changes, and assignments.
 
-5. **Domain-specific**: A beef ranch task uses the same `task` type whether it's "Treat Pen 3 BRD" or "Develop drought contingency plan" — the domain context comes from the linked concepts, not the task itself.
+5. **Content depth matters**: OHM nodes with 500-800 char summaries produce significantly better semantic search results than 200-char summaries. The embedding model (mxbai-embed-large) supports ~2000 chars of input; use 800 chars for the best balance of semantic richness and performance.
 
 ## Adoption Path
 
