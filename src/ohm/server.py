@@ -1098,9 +1098,10 @@ class OhmHandler(BaseHTTPRequestHandler):
             label = qs.get("label", [None])[0]
             label_contains = qs.get("label_contains", [None])[0]
             label_prefix = qs.get("label_prefix", [None])[0]
+            created_by = qs.get("created_by", [None])[0]
             limit = int(qs.get("limit", [100])[0])
             offset = int(qs.get("offset", [0])[0])
-            conditions = ["1=1"]
+            conditions = ["deleted_at IS NULL"]
             params = []
             if node_type:
                 conditions.append("type = ?")
@@ -1114,6 +1115,9 @@ class OhmHandler(BaseHTTPRequestHandler):
             if label_prefix:
                 conditions.append("label ILIKE ?")
                 params.append(f"{label_prefix}%")
+            if created_by:
+                conditions.append("created_by = ?")
+                params.append(created_by)
             params.append(limit)
             params.append(offset)
             sql = (
@@ -1155,14 +1159,18 @@ class OhmHandler(BaseHTTPRequestHandler):
         elif path == "/search":
             query_text = qs.get("q", [""])[0]
             node_type = qs.get("type", [None])[0]
+            created_by = qs.get("created_by", [None])[0]
             limit = int(qs.get("limit", [20])[0])
             if not query_text:
                 raise ValidationError("Search requires ?q=QUERY")
-            conditions = ["(label ILIKE ? OR content ILIKE ?)"]
+            conditions = ["deleted_at IS NULL", "(label ILIKE ? OR content ILIKE ?)"]
             params = [f"%{query_text}%", f"%{query_text}%"]
             if node_type:
                 conditions.append("type = ?")
                 params.append(node_type)
+            if created_by:
+                conditions.append("created_by = ?")
+                params.append(created_by)
             params.append(limit)
             # Column names hardcoded, values parameterized
             sql = (

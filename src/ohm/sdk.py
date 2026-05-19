@@ -2406,6 +2406,12 @@ def connect_remote(
 ) -> Graph:
     """Connect to a remote OHM graph via Quack protocol.
 
+    .. deprecated::
+        Use :func:`connect_http` instead — it connects to the ohmd daemon
+        via HTTP REST API and does not require the DuckDB Quack extension.
+        Quack is not available in most DuckDB builds, causing
+        connect_remote() to fail or silently fall back to stale local data.
+
     Creates a local in-memory DuckDB connection and attaches the remote
     Quack server as a catalog. All graph operations are sent to the
     remote server through Quack.
@@ -2462,6 +2468,7 @@ def connect_remote(
         raise ConnectionError(
             f"Quack is not available in this DuckDB installation. "
             f"Cannot connect to remote server at {uri}. "
+            "Use connect_http() instead to connect via the ohmd REST API. "
             "Set strict=False to fall back to direct file connection, "
             "or install DuckDB with Quack extension support."
         )
@@ -2485,6 +2492,13 @@ def connect_http(
     token: str | None = None,
 ) -> Graph:
     """Connect to an OHM daemon via HTTP REST API.
+
+    This is the **recommended** way to connect to a running ohmd daemon.
+    Unlike connect_remote(), this does not require the DuckDB Quack extension
+    and works with any standard DuckDB installation.
+
+    For the shared convenience client used by Olympus agents, see
+    ``ohm_client.OHMClient`` (at /root/olympus/shared/ohm_client.py).
 
     Creates a local in-memory DuckDB connection for query caching and
     wraps HTTP calls to the ohmd REST API for write operations.
