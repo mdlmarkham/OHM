@@ -160,6 +160,39 @@ This design reflects OHM's core principle: shared awareness, individual judgment
 4. **Promotion from private to shared is per-agent.** No global confidence threshold.
 5. **The change feed carries intent, not just data.** "Clio researched X and found evidence weak" is more useful than "Clio wrote note Y."
 
+## Multi-Scenario Architecture
+
+OHM serves multiple domains with the same core engine. The schema, layer model, and challenge semantics are universal; domain-specific types and SDK methods extend the base without modifying it.
+
+| Domain | Key Features | Scenario Doc |
+|--------|-------------|--------------|
+| Geopolitical intelligence | Challenge edges, confidence audit, change feed | [scenarios.md](docs/scenarios.md) |
+| Medical diagnosis | `NEGATES` edges, `differential_diagnosis()`, `compound_confidence()` with correlation | [medical-scenario.md](docs/medical-scenario.md) |
+| Cybersecurity incident response | `threat_cluster()`, `record_outcome()`, `source_reliability()`, urgency filtering | [cybersecurity-scenario.md](docs/cybersecurity-scenario.md) |
+| Supply chain disruption | `probability` on edges, `cascade_scenario()`, `what_if()`, Monte Carlo | [supply-chain-scenario.md](docs/supply-chain-scenario.md) |
+| Customer support | `handoff()`, `escalate()`, priority/urgency, sentiment observations | [customer-support-scenario.md](docs/customer-support-scenario.md) |
+| Cattle operations | Composite scoring, temporal decay, batch expiry | [cattle-scenario.md](docs/cattle-scenario.md) |
+| Retail inventory | `BATCH_EXPIRES_BEFORE`, demand forecasting, SSE filtering | [retail-scenario.md](docs/retail-scenario.md) |
+
+### Domain Extension Pattern
+
+Each domain extends OHM through `SchemaConfig` — adding node types, edge types, and observation types without modifying the base schema:
+
+```python
+from ohm.schema import SchemaConfig
+
+# TOPO (industrial) extends the base with equipment types and sensor observations
+topo = SchemaConfig.topo()
+
+# Custom domain
+custom = SchemaConfig(
+    name="finance",
+    observation_types={"anomaly", "measurement", "volatility", "spread"},
+)
+```
+
+See [ADR-006](docs/adr/README.md#adr-006-advisory-schema-with-graduated-enforcement) (graduated enforcement), [ADR-007](docs/adr/README.md#adr-007-schema-evolution-and-type-governance-for-domain-expansion) (type governance), and [ADR-011](docs/adr/README.md#adr-011-observation-type-extensibility) (observation type extensibility).
+
 ## Technology Stack
 
 - **DuckDB** — local cache per agent (working memory)

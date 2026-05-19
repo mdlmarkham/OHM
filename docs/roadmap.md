@@ -102,6 +102,6 @@
 | OHM-9dq | P1 | SDK tests — zero coverage on primary agent interface | Done (137 tests) |
 | OHM-zag | P1 | No request size cap on POST bodies — OOM risk | Done (MAX_BODY_SIZE=1MB) |
 | OHM-e19 | P2 | No SIGPIPE handling in daemon | Open |
-| OHM-pfk | P1 | Comprehensive doc update for multi-scenario architecture | Open |
+| OHM-pfk | P1 | Comprehensive doc update for multi-scenario architecture | Done |
 | OHM-c8i | P1 | ADRs for probability/confidence, NEGATES, urgency/priority | Done (ADR-008/009/010) |
 | OHM-5di | P2 | ADR for observation type extensibility | Done (ADR-011) |
