@@ -357,7 +357,8 @@ class OhmStore:
         self.conn.execute(
             """
             INSERT INTO ohm_observations
-                (node_id, edge_id, type, value, baseline, sigma, source, created_by, created_at, notes, source_name, source_url)
+                (node_id, edge_id, type, value, baseline, sigma, source,
+                 created_by, created_at, notes, source_name, source_url)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [node_id, edge_id, type, value, baseline, sigma, source, actor, now, notes, source_name, source_url],
