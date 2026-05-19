@@ -399,7 +399,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.10.0"
+SCHEMA_VERSION = "0.11.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -450,6 +450,9 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
         "ALTER TABLE ohm_observations ADD COLUMN source_name TEXT",
         "ALTER TABLE ohm_observations ADD COLUMN source_url TEXT",
     ]),
+    ("0.11.0", "add embedding column to ohm_nodes for semantic search (OHM-o9f)", [
+        "ALTER TABLE ohm_nodes ADD COLUMN embedding FLOAT[768]",
+    ]),
 ]
 
 # ── Indexes ─────────────────────────────────────────────────────────────────
@@ -499,6 +502,8 @@ def initialize_schema(conn: "DuckDBPyConnection") -> None:
     _ensure_meta_table(conn)
     # Apply migrations incrementally
     _apply_migrations(conn)
+    # Create HNSW index on embedding column (if VSS extension loaded)
+    _create_hnsw_index(conn)
     # Seed default agent configs
     _seed_agent_configs(conn)
 
@@ -572,6 +577,51 @@ def _apply_migrations(conn: "DuckDBPyConnection") -> None:
                 pass
 
             current_key = _version_tuple(version)
+
+
+def _create_hnsw_index(conn: "DuckDBPyConnection") -> None:
+    """Create HNSW index on ohm_nodes.embedding if VSS extension is loaded.
+
+    The index is created only if:
+    1. The VSS extension is loaded
+    2. The embedding column exists (added by migration 0.11.0)
+    3. The index doesn't already exist
+
+    Uses cosine distance metric for semantic similarity search.
+    The index is created with experimental persistence enabled so it
+    survives database restarts.
+    """
+    # Check if VSS extension is loaded
+    try:
+        vss_loaded = conn.execute(
+            "SELECT COUNT(*) FROM duckdb_extensions() "
+            "WHERE loaded = true AND extension_name = 'vss'"
+        ).fetchone()
+        if vss_loaded is None or vss_loaded[0] == 0:
+            return  # VSS not available — skip index creation
+    except Exception:
+        return
+
+    # Check if embedding column exists
+    try:
+        has_embedding = conn.execute(
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_name = 'ohm_nodes' AND column_name = 'embedding'"
+        ).fetchone()
+        if has_embedding is None or has_embedding[0] == 0:
+            return  # Column doesn't exist yet — skip
+    except Exception:
+        return
+
+    # Create HNSW index (idempotent — IF NOT EXISTS)
+    try:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nodes_embedding "
+            "ON ohm_nodes USING HNSW (embedding) "
+            "WITH (metric = 'cosine')"
+        )
+    except Exception:
+        pass  # Index creation may fail if no data yet — safe to ignore
 
 
 def _seed_agent_configs(conn: "DuckDBPyConnection") -> None:

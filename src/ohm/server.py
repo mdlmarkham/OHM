@@ -791,6 +791,8 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "/register": {"method": "POST", "description": "Register a new agent"},
                     "/heartbeat": {"method": "POST", "description": "Agent heartbeat with sync"},
                     "/webhook/{agent}": {"method": "POST", "description": "Register a webhook callback"},
+                    "/search": {"method": "GET", "description": "ILIKE text search (?q=QUERY)"},
+                    "/semantic_search": {"method": "GET", "description": "Semantic vector search via embeddings (?q=QUERY, requires Ollama)"},
                 },
                 "links": {
                     "schema": "/schema",
@@ -837,6 +839,8 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "/register": {"post": {"summary": "Register agent"}},
                     "/heartbeat": {"post": {"summary": "Agent heartbeat"}},
                     "/webhook/{agent}": {"post": {"summary": "Register webhook"}},
+                    "/search": {"get": {"summary": "ILIKE text search", "parameters": [{"name": "q", "in": "query", "required": True, "schema": {"type": "string"}}]}},
+                    "/semantic_search": {"get": {"summary": "Semantic vector search (requires Ollama)", "parameters": [{"name": "q", "in": "query", "required": True, "schema": {"type": "string"}}, {"name": "type", "in": "query", "required": False, "schema": {"type": "string"}}, {"name": "limit", "in": "query", "required": False, "schema": {"type": "integer"}}, {"name": "min_confidence", "in": "query", "required": False, "schema": {"type": "number"}}], "responses": {"200": {"description": "Search results"}, "503": {"description": "Ollama not available"}}}},
                 },
             })
             return
@@ -1103,6 +1107,35 @@ class OhmHandler(BaseHTTPRequestHandler):
             )
             results = self.store.execute(sql, params)
             self._json_response(200, results)
+        elif path == "/semantic_search":
+            # Semantic search via VSS/HNSW index (OHM-o9f)
+            query_text = qs.get("q", [""])[0]
+            if not query_text:
+                raise ValidationError("Semantic search requires ?q=QUERY")
+            node_type = qs.get("type", [None])[0]
+            limit = int(qs.get("limit", [10])[0])
+            min_confidence = qs.get("min_confidence", [None])[0]
+            if min_confidence is not None:
+                try:
+                    min_confidence = float(min_confidence)
+                except ValueError:
+                    raise ValidationError("?min_confidence must be a number")
+            try:
+                from .queries import semantic_search
+                results = semantic_search(
+                    self.store.conn,
+                    query=query_text,
+                    limit=limit,
+                    node_type=node_type,
+                    min_confidence=min_confidence,
+                )
+                self._json_response(200, {"results": results, "count": len(results)})
+            except ValueError as e:
+                # Ollama not available
+                self._json_response(503, {
+                    "error": "service_unavailable",
+                    "message": str(e),
+                })
         elif path == "/health/graph":
             from .queries import query_graph_health
             result = query_graph_health(self.store.conn)

@@ -1851,3 +1851,40 @@ class TestIdempotentRegistration:
             [agent_id],
         )
         assert len(values_edges) == 2
+
+
+@pytest.mark.xdist_group("server")
+class TestSemanticSearchEndpoint:
+    """Tests for /semantic_search endpoint (OHM-o9f)."""
+
+    def test_semantic_search_endpoint_requires_query(self, test_server):
+        """GET /semantic_search without ?q= returns 400."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/semantic_search")
+        assert status == 400
+
+    def test_semantic_search_endpoint_returns_503_without_ollama(self, test_server):
+        """GET /semantic_search?q=test returns 503 when Ollama is not available."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/semantic_search?q=test+query")
+        # Either 503 (Ollama not running) or 200 (Ollama available)
+        assert status in (200, 503)
+        if status == 503:
+            assert "service_unavailable" in data.get("error", "")
+
+    def test_semantic_search_endpoint_in_discovery(self, test_server):
+        """Root discovery endpoint includes /semantic_search."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/")
+        assert status == 200
+        assert "/semantic_search" in data.get("endpoints", {})
+
+    def test_search_endpoint_still_works(self, test_server):
+        """GET /search?q= still works (ILIKE search unchanged)."""
+        port, _ = test_server
+        # Create a node
+        _request("POST", port, "/node", body={
+            "id": "search-test-node", "label": "Machine Learning", "type": "concept",
+        })
+        status, data = _request("GET", port, "/search?q=Machine")
+        assert status == 200

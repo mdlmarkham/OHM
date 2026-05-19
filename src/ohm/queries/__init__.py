@@ -2395,3 +2395,164 @@ def query_ticket_provenance(
     """
     result = conn.execute(query, [ticket_node, ticket_node])
     return _rows_to_dicts(result)
+
+
+# ── Semantic Search ─────────────────────────────────────────────────────────
+
+def generate_embedding(
+    text: str,
+    model: str = "nomic-embed-text",
+    ollama_url: str = "http://localhost:11434",
+) -> list[float] | None:
+    """Generate an embedding vector using Ollama.
+
+    Calls the Ollama API to generate an embedding for the given text.
+    Returns None if Ollama is unavailable or the request fails.
+
+    Args:
+        text: Text to embed.
+        model: Ollama model name (default: nomic-embed-text, 768 dimensions).
+        ollama_url: Ollama API base URL.
+
+    Returns:
+        List of floats (embedding vector) or None on failure.
+    """
+    if not text or not text.strip():
+        return None
+
+    try:
+        import urllib.request
+        import json as _json
+
+        url = f"{ollama_url.rstrip('/')}/api/embed"
+        payload = _json.dumps({"model": model, "input": text}).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = _json.loads(resp.read().decode("utf-8"))
+            embeddings = data.get("embeddings", [])
+            if embeddings and isinstance(embeddings[0], list):
+                return embeddings[0]
+        return None
+    except Exception:
+        return None
+
+
+def semantic_search(
+    conn: "DuckDBPyConnection",
+    query: str,
+    limit: int = 10,
+    node_type: str | None = None,
+    min_confidence: float | None = None,
+) -> list[dict[str, Any]]:
+    """Search nodes by semantic similarity using embedding vectors.
+
+    Generates an embedding for the query text, then finds the most
+    similar nodes using cosine distance on the embedding column.
+
+    Requires:
+    - Ollama running locally with an embedding model loaded
+    - VSS extension loaded for HNSW index acceleration
+    - embedding column on ohm_nodes (migration 0.11.0)
+
+    Args:
+        conn: Database connection.
+        query: Natural language search query.
+        limit: Maximum number of results (default 10).
+        node_type: Optional filter by node type.
+        min_confidence: Optional minimum confidence threshold.
+
+    Returns:
+        List of dicts with node_id, label, type, distance, and confidence.
+    """
+    if not query or not query.strip():
+        return []
+
+    embedding = generate_embedding(query)
+    if embedding is None:
+        raise ValueError(
+            "Ollama is not available. Start Ollama with an embedding model "
+            "(e.g., 'ollama pull nomic-embed-text') to use semantic search."
+        )
+
+    # Build query with optional filters
+    where_clauses = ["embedding IS NOT NULL"]
+    params: list[Any] = []
+
+    if node_type is not None:
+        where_clauses.append("type = ?")
+        params.append(node_type)
+
+    if min_confidence is not None:
+        where_clauses.append("confidence >= ?")
+        params.append(min_confidence)
+
+    where_sql = " AND ".join(where_clauses)
+
+    sql = f"""
+        SELECT
+            id AS node_id,
+            label,
+            type,
+            confidence,
+            array_cosine_distance(embedding, ?::FLOAT[768]) AS distance
+        FROM ohm_nodes
+        WHERE {where_sql}
+        ORDER BY distance ASC
+        LIMIT ?
+    """
+    params.append(embedding)
+    params.append(limit)
+
+    result = conn.execute(sql, params)
+    return _rows_to_dicts(result)
+
+
+def update_node_embedding(
+    conn: "DuckDBPyConnection",
+    node_id: str,
+    text: str | None = None,
+) -> bool:
+    """Generate and store an embedding for a node.
+
+    Generates an embedding from the node's label (or custom text)
+    and updates the embedding column. Returns False if Ollama is
+    unavailable or the node doesn't exist.
+
+    Args:
+        conn: Database connection.
+        node_id: ID of the node to update.
+        text: Optional custom text to embed. Defaults to node label.
+
+    Returns:
+        True if embedding was updated, False otherwise.
+    """
+    from ohm.validation import validate_identifier
+
+    node_id = validate_identifier(node_id, name="node_id")
+
+    # Get node label if no custom text provided
+    if text is None:
+        result = conn.execute(
+            "SELECT label FROM ohm_nodes WHERE id = ?", [node_id]
+        ).fetchone()
+        if result is None:
+            return False
+        text = result[0]
+
+    if not text:
+        return False
+
+    embedding = generate_embedding(text)
+    if embedding is None:
+        return False
+
+    conn.execute(
+        "UPDATE ohm_nodes SET embedding = ?::FLOAT[768] WHERE id = ?",
+        [embedding, node_id],
+    )
+    return True
