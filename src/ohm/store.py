@@ -1082,6 +1082,8 @@ class OhmStore:
                     f"WHERE l.id IS NULL"
                 ).fetchall()
 
+                logger.info("DuckLake pull: %s has %d new rows in mirror", table, len(new_rows))
+
                 if new_rows:
                     # Get common columns
                     local_cols = self.conn.execute(
@@ -1100,22 +1102,49 @@ class OhmStore:
                     common_cols = [c for c in local_col_names if c in mirror_col_names]
                     if not common_cols:
                         continue
-                    common_str = ", ".join(common_cols)
+
+                    # Get local column types for casting DuckLake VARCHAR values
+                    local_col_types = {}
+                    type_rows = self.conn.execute(
+                        f"SELECT column_name, data_type FROM information_schema.columns "
+                        f"WHERE table_name = '{table}' ORDER BY ordinal_position"
+                    ).fetchall()
+                    for col_name, col_type in type_rows:
+                        local_col_types[col_name] = col_type
 
                     new_ids = [r[0] for r in new_rows]
                     id_list = ", ".join([f"'{i}'" for i in new_ids])
 
-                    # Insert new rows from DuckLake into local table
+                    # Build SELECT with explicit casts from DuckLake VARCHAR to local types
+                    select_cols = []
+                    for col in common_cols:
+                        ltype = local_col_types.get(col, "VARCHAR")
+                        if ltype.upper() in ("FLOAT", "DOUBLE", "REAL"):
+                            select_cols.append(f"CAST(dl.{col} AS {ltype}) AS {col}")
+                        elif ltype.upper() in ("TIMESTAMP", "TIMESTAMPTZ"):
+                            select_cols.append(f"CAST(dl.{col} AS {ltype}) AS {col}")
+                        elif ltype.upper() == "INTEGER" or ltype.upper().startswith("BIGINT"):
+                            select_cols.append(f"CAST(dl.{col} AS {ltype}) AS {col}")
+                        else:
+                            select_cols.append(f"dl.{col} AS {col}")
+
+                    common_str = ", ".join(common_cols)
+                    select_str = ", ".join(select_cols)
+
+                    # Insert new rows from DuckLake into local table with type casting
                     self.conn.execute(
                         f"INSERT INTO {table} ({common_str}) "
-                        f"SELECT {common_str} FROM {alias}.{table} dl "
+                        f"SELECT {select_str} FROM {alias}.{table} dl "
                         f"WHERE dl.id IN ({id_list})"
                     )
                     pulled += len(new_ids)
 
-            except Exception:
-                # Table may not exist in DuckLake — skip
-                pass
+            except Exception as exc:
+                # Log the actual error instead of silently swallowing it
+                import logging
+                logging.getLogger("ohm").warning(
+                    "DuckLake pull failed for %s: %s", table, exc
+                )
 
         # Record pull timestamp
         from datetime import datetime, timezone

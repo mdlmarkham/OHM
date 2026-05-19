@@ -802,6 +802,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "/webhook/{agent}": {"method": "POST", "description": "Register a webhook callback"},
                     "/search": {"method": "GET", "description": "ILIKE text search (?q=QUERY)"},
                     "/semantic_search": {"method": "GET", "description": "Semantic vector search (requires Ollama)"},
+                    "/admin/checkpoint": {"method": "POST", "description": "Force DuckDB CHECKPOINT (flush WAL to main DB)"},
                     "/admin/snapshots": {"method": "GET", "description": "List DuckLake snapshots (time-travel)"},
                     "/graph/at": {"method": "GET", "description": "Query graph at snapshot version (?version=N)"},
                     "/graph/changes": {"method": "GET", "description": "Changes between snapshots"},
@@ -878,8 +879,8 @@ class OhmHandler(BaseHTTPRequestHandler):
                                                 "200": {"description": "Search results"},
                                                 "503": {"description": "Ollama not available"},
                                             }}},
-                    "/admin/snapshots": {"get": {"summary": "List DuckLake snapshots",
-                                           "responses": {"200": {"description": "Snapshots list"}}}},
+                    "/admin/checkpoint": {"post": {"summary": "Force CHECKPOINT",
+                                           "responses": {"200": {"description": "WAL flushed to main DB"}}}},
                     "/graph/at": {"get": {"summary": "Graph at snapshot version",
                                       "responses": {"200": {"description": "Historical graph state"}}}},
                     "/graph/changes": {"get": {"summary": "Changes between snapshots",
@@ -1273,6 +1274,13 @@ class OhmHandler(BaseHTTPRequestHandler):
             from .methods import compute_confidence_calibration
             result = compute_confidence_calibration(self.store.conn, agent_name)
             self._json_response(200, result)
+        elif path == "/admin/checkpoint":
+            # Force DuckDB CHECKPOINT to flush WAL to main DB file
+            try:
+                self.store.conn.execute("CHECKPOINT")
+                self._json_response(200, {"status": "ok", "message": "WAL flushed to main database"})
+            except Exception as e:
+                self._json_response(500, {"error": "checkpoint_failed", "message": str(e)})
         elif path == "/admin/snapshots":
             # DuckLake time-travel: list available snapshots (OHM-kdk.3)
             snapshots = self.store.list_snapshots()
