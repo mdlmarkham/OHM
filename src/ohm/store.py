@@ -900,11 +900,21 @@ class OhmStore:
             return 0
         common_str = ", ".join(common_cols)
 
-        # Insert all local rows into mirror
-        self.conn.execute(
-            f"INSERT INTO {alias}.{table} ({common_str}) "
-            f"SELECT {common_str} FROM {table}"
-        )
+        # Delete any existing rows from mirror (handles re-sync after crash/restart)
+        # then INSERT all active (non-soft-deleted) local rows
+        self.conn.execute(f"DELETE FROM {alias}.{table}")
+
+        # Filter out soft-deleted rows from sync
+        if "deleted_at" in local_col_names:
+            self.conn.execute(
+                f"INSERT INTO {alias}.{table} ({common_str}) "
+                f"SELECT {common_str} FROM {table} WHERE deleted_at IS NULL"
+            )
+        else:
+            self.conn.execute(
+                f"INSERT INTO {alias}.{table} ({common_str}) "
+                f"SELECT {common_str} FROM {table}"
+            )
 
         count = self.conn.execute(
             f"SELECT COUNT(*) FROM {alias}.{table}"
@@ -948,16 +958,19 @@ class OhmStore:
             return 0
         common_str = ", ".join(common_cols)
 
+        # Build WHERE clause: filter soft-deleted rows + timestamp filter
+        deleted_filter = " AND deleted_at IS NULL" if "deleted_at" in col_names else ""
+
         if last_push:
-            # Find rows changed since last push
+            # Find rows changed since last push (excluding soft-deleted)
             changed_rows = self.conn.execute(
-                f"SELECT id FROM {table} WHERE {ts_col} > ?::TIMESTAMP",
+                f"SELECT id FROM {table} WHERE {ts_col} > ?::TIMESTAMP{deleted_filter}",
                 [last_push],
             ).fetchall()
         else:
-            # No last push — sync everything
+            # No last push — sync everything (excluding soft-deleted)
             changed_rows = self.conn.execute(
-                f"SELECT id FROM {table}"
+                f"SELECT id FROM {table} WHERE 1=1{deleted_filter}"
             ).fetchall()
 
         if not changed_rows:

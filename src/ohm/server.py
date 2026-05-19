@@ -803,7 +803,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "/search": {"method": "GET", "description": "ILIKE text search (?q=QUERY)"},
                     "/semantic_search": {"method": "GET", "description": "Semantic vector search (requires Ollama)"},
                     "/admin/checkpoint": {"method": "POST", "description": "Force DuckDB CHECKPOINT (flush WAL to main DB)"},
-                    "/admin/embeddings": {"method": "POST", "description": "Batch generate embeddings for nodes missing them"},
+                    "/admin/embeddings": {"method": "GET", "description": "Batch generate embeddings for nodes missing them (?batch_size=N&delay_ms=M)"},
                     "/admin/snapshots": {"method": "GET", "description": "List DuckLake snapshots (time-travel)"},
                     "/graph/at": {"method": "GET", "description": "Query graph at snapshot version (?version=N)"},
                     "/graph/changes": {"method": "GET", "description": "Changes between snapshots"},
@@ -1291,16 +1291,54 @@ class OhmHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._json_response(500, {"error": "checkpoint_failed", "message": str(e)})
         elif path == "/admin/embeddings":
-            # Batch generate embeddings for all nodes missing them (OHM-emb)
+            # Batch generate embeddings for nodes missing them (OHM-emb)
+            # Processes in small batches with delays to avoid OOM/timeout crashes
             try:
                 from .queries import update_node_embedding
+
+                # Parse optional batch_size and delay_ms query params
+                batch_size = 5  # Process N nodes per request (small to avoid OOM)
+                delay_ms = 200  # Pause between each embedding (ms) to reduce memory pressure
+                if qs.get("batch_size"):
+                    try:
+                        batch_size = int(qs["batch_size"][0])
+                        if batch_size < 1:
+                            batch_size = 1
+                        elif batch_size > 50:
+                            batch_size = 50
+                    except ValueError:
+                        pass
+                if qs.get("delay_ms"):
+                    try:
+                        delay_ms = int(qs["delay_ms"][0])
+                        if delay_ms < 0:
+                            delay_ms = 0
+                        elif delay_ms > 5000:
+                            delay_ms = 5000
+                    except ValueError:
+                        pass
+
                 # Find all nodes without embeddings
                 rows = self.store.execute(
                     "SELECT id, label FROM ohm_nodes WHERE embedding IS NULL AND deleted_at IS NULL"
                 )
+                if not rows:
+                    self._json_response(200, {
+                        "status": "ok",
+                        "updated": 0,
+                        "failed": 0,
+                        "total": 0,
+                        "message": "All nodes already have embeddings",
+                    })
+                    return
+
                 updated = 0
                 failed = 0
+                processed = 0
                 for row in rows:
+                    # Stop after batch_size nodes — client can re-call for more
+                    if processed >= batch_size:
+                        break
                     try:
                         if update_node_embedding(self.store.conn, row["id"]):
                             updated += 1
@@ -1308,12 +1346,21 @@ class OhmHandler(BaseHTTPRequestHandler):
                             failed += 1
                     except Exception:
                         failed += 1
+                    processed += 1
+                    # Small delay between embeddings to reduce memory pressure
+                    if delay_ms > 0:
+                        time.sleep(delay_ms / 1000.0)
+
+                total_missing = len(rows)
+                remaining = total_missing - processed
                 self._json_response(200, {
-                    "status": "ok",
+                    "status": "ok" if remaining == 0 else "partial",
                     "updated": updated,
                     "failed": failed,
-                    "total": len(rows),
-                    "message": f"Generated {updated} embeddings ({failed} failed)",
+                    "processed": processed,
+                    "total": total_missing,
+                    "remaining": remaining,
+                    "message": f"Generated {updated} embeddings ({failed} failed). {remaining} remaining — re-call to continue.",
                 })
             except Exception as e:
                 self._json_response(500, {"error": "embedding_backfill_failed", "message": str(e)})

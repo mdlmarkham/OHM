@@ -42,6 +42,7 @@ ignore_missing_imports = true
 [project.scripts]
 ohm = "ohm.cli:main"
 ohmd = "ohm.server:main"
+ohm-mcp = "ohm.mcp.server:cli_main"
 topo = "ohm.cli:topo_main"
 topod = "ohm.server:topod_main"
 
