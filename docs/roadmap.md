@@ -56,31 +56,39 @@
 - [x] 6 scenario docs with runnable code examples
 - [x] 603+ tests passing
 
-## Phase 3: Agent Integration (Next)
+## Phase 3: Agent Integration (In Progress)
 
 **Goal:** Each Olympus agent uses OHM as its knowledge graph
 
 - [x] Métis integration — zettelkasten notes → OHM nodes, wikilinks → OHM edges
 - [ ] Clio integration — research findings → OHM L3 edges with source attribution
-- [ ] Hephaestus integration — audit findings → OHM observations
+- [ ] Hephaestus integration — audit findings → OHM observations (1 pattern node + CHALLENGED_BY edge written)
 - [ ] Socrates integration — challenges → OHM CHALLENGED_BY edges
-- [x] SDK tests (OHM-9dq) — zero coverage on primary agent interface
+- [x] SDK tests (OHM-9dq) — 137 tests on primary agent interface
+- [ ] DeepThought integration — registered (May 19), zero nodes/edges written yet
 - [ ] marimo-pair integration — OHM queries in notebooks via Quack
 
-**Deliverable:** All agents reading/writing via OHM. Shared graph accumulates perspectives.
+**Deliverable:** Métis and Hephaestus writing. DeepThought registered. Others pending.
 
-## Phase 4: DuckLake + Time Travel (Later)
+## Phase 4: DuckLake + Time Travel (Partially Complete)
 
 **Goal:** DuckLake shared backend with change feed and time travel
 
-- [ ] DuckLake integration for shared data storage
-- [ ] `ohm snapshot <timestamp>` — query graph state at any historical point
-- [ ] `ohm diff <date1> <date2>` — what changed between timestamps
-- [ ] Change feed with intent (not just data)
-- [ ] Local DuckDB cache sync on heartbeat
+- [x] DuckLake integration for shared data storage (mirror tables: ohm_nodes, ohm_edges, ohm_observations, ohm_change_feed)
+- [x] DuckLake WAL corruption recovery (OHM-kdk.4: snapshot fallback, OHM-b5a: WAL deletion)
+- [x] `attach_ducklake()` in db.py and store.py
+- [x] `sync_heartbeat()` — push/pull local ↔ DuckLake on agent heartbeat
+- [x] `/admin/snapshots` endpoint — list DuckLake snapshots
+- [x] `/graph/at?version=N` endpoint — query graph at historical snapshot
+- [x] `/graph/changes?from_version=M&to_version=N` — diff between versions
+- [x] OHM_DUCKLAKE_PATH and OHM_DUCKLAKE_DATA environment variables
+- [ ] `ohm snapshot <timestamp>` CLI command (wraps /graph/at)
+- [ ] `ohm diff <date1> <date2>` CLI command
+- [ ] Change feed with intent (not just data — who/why, not just what)
+- [ ] Local DuckDB per-agent cache sync on heartbeat (currently single daemon-owned DuckDB)
 - [ ] Data versioning and cleanup policies
 
-**Deliverable:** Change feed works across agents. Time travel queries return historical state.
+**Deliverable:** DuckLake is live with 56 snapshots. Time-travel queries work via HTTP API. CLI commands and per-agent local caches remain.
 
 ## Phase 5: Advanced Queries + TOPO (Later)
 

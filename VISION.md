@@ -47,21 +47,26 @@ This is Popperian epistemology as database schema. Knowledge grows through refut
 - 6 scenario docs with runnable code examples
 - 603+ tests passing
 
-### Phase 3: Agent Integration (next)
+### Phase 3: Agent Integration (in progress)
 
 - Each Olympus agent uses OHM as its knowledge graph
-- Métis zettelkasten → OHM nodes/edges
+- Métis zettelkasten → OHM nodes/edges ✅
+- Hephaestus audit findings → OHM observations (1 pattern, 1 CHALLENGED_BY edge) ✅
+- DeepThought registered May 19, zero content yet
 - Clio research findings → OHM L3 edges
-- Hephaestus audit findings → OHM observations
 - Socrates challenges → OHM CHALLENGED_BY edges
 - Change feed enables reactive behavior
 
-### Phase 4: DuckLake + Time Travel (later)
+### Phase 4: DuckLake + Time Travel (partially complete)
 
-- Shared DuckLake backend
-- `ohm snapshot <timestamp>` — historical graph state
-- `ohm diff <t1> <t2>` — change comparison
-- Agent heartbeat sync
+- Shared DuckLake backend ✅ (mirror tables, 56 snapshots, Parquet data)
+- `GET /admin/snapshots` — list time-travel versions ✅
+- `GET /graph/at?version=N` — historical graph state ✅
+- `GET /graph/changes?from_version=M&to_version=N` — diff ✅
+- WAL corruption recovery (DuckLake snapshot → WAL deletion) ✅
+- `ohm snapshot <timestamp>` CLI
+- `ohm diff <t1> <t2>` CLI
+- Agent heartbeat sync (per-agent local DuckDB caches)
 
 ### Phase 5: Advanced + TOPO
 

@@ -76,15 +76,12 @@ Two codepaths exist for the same operations. This is intentional:
 - **Never** add to `store.py` without also adding to `queries/`
 
 **Key design decisions** (see [docs/adr/](docs/adr/README.md)):
-- **ADR-001**: Recursive CTEs over DuckPGQ for graph traversal (zero-dependency, survives DuckDB upgrades)
-- **ADR-002**: Quack protocol for concurrent multi-agent access (requires `ohmd` daemon)
-- **ADR-003**: Agent-owned edges with challenge semantics (no overwrites, CHALLENGED_BY/SUPPORTS edges)
-- **ADR-004**: Three-layer data architecture (local DuckDB cache → DuckLake shared backend → private)
-- **ADR-005**: Self-documenting CLI as agent interface (agents call `ohm`, not raw SQL)
-- **ADR-006**: Advisory Schema with Graduated Enforcement (advisory → lenient → strict via SchemaConfig)
-- **ADR-007**: Probability and Confidence as separate edge attributes (confidence = belief, probability = likelihood)
-- **ADR-008**: NEGATES edge type for negative evidence (semantically distinct from CHALLENGED_BY)
-- **ADR-009**: Observation Type Extensibility (domain-specific types without DDL migrations)
+- **ADR-0001**: Architecture decisions compendium (DuckDB local cache, challenge edges, JSON arrays, timestamps, CLI-first, advisory schema)
+- **ADR-0007**: Schema evolution and type governance for domain expansion
+- **ADR-008** (inline): Probability and Confidence as separate edge attributes (confidence = belief, probability = likelihood)
+- **ADR-009** (inline): NEGATES edge type for negative evidence (semantically distinct from CHALLENGED_BY)
+- **ADR-010** (inline): Urgency ≠ priority (urgency = time-sensitivity on edges, priority = importance on nodes)
+- **ADR-011** (inline): Observation type extensibility (domain-specific types without DDL migrations)
 
 ## Conventions
 

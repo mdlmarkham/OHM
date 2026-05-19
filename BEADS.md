@@ -26,29 +26,32 @@ bd sync               # Push issue state to git
 ## Architecture
 
 ```
-OHM-y2i    P0: Production Daemon — ohmd with Quack, auth, error handling
-├── OHM-y2i.1  Error handling (exit codes, correlation IDs)
-├── OHM-y2i.2  Token auth (Bearer tokens, per-agent roles)
-├── OHM-y2i.3  Health check + status endpoints
-├── OHM-y2i.4  Quack protocol integration
-├── OHM-y2i.5  Systemd unit file + daemon lifecycle
-├── OHM-654     Server tests — 17 HTTP endpoints, zero coverage
-├── OHM-4w7     Remove dead queries.py top-level module
-├── OHM-n16     Document store.py vs queries/ boundaries
-└── OHM-ad3     Update AGENTS.md with module boundaries
+OHM-y2i    P0: Production Daemon — ohmd with Quack, auth, error handling ✅
+├── OHM-y2i.1  Error handling (exit codes, correlation IDs) ✅
+├── OHM-y2i.2  Token auth (Bearer tokens, per-agent roles) ✅
+├── OHM-y2i.3  Health check + status endpoints ✅
+├── OHM-y2i.4  Quack protocol integration ✅
+├── OHM-y2i.5  Systemd unit file + daemon lifecycle ✅
+├── OHM-654     Server tests — 17 HTTP endpoints ✅
+├── OHM-4w7     Remove dead queries.py top-level module ✅
+├── OHM-n16     Document store.py vs queries/ boundaries ✅
+└── OHM-ad3     Update AGENTS.md with module boundaries ✅
 
-OHM-xgm    P1: DuckLake + Time Travel
-├── OHM-xgm.1  DuckLake shared backend (WAL, snapshots, change feed)
-├── OHM-xgm.2  ohm snapshot (historical graph state)
-├── OHM-xgm.3  ohm diff (change comparison)
-└── OHM-xgm.4  Agent heartbeat sync (local ↔ DuckLake)
+OHM-xgm    P1: DuckLake + Time Travel (partially complete)
+├── OHM-xgm.1  DuckLake shared backend (mirror tables, sync) ✅
+├── OHM-xgm.2  /admin/snapshots + /graph/at endpoints ✅
+├── OHM-xgm.3  /graph/changes diff endpoint ✅
+├── OHM-xgm.4  WAL corruption recovery (DuckLake fallback → WAL deletion) ✅
+├── OHM-xgm.5  ohm snapshot CLI command
+└── OHM-xgm.6  ohm diff CLI command
 
-OHM-a35     P1: Agent Integration
-├── OHM-a35.1  Métis — zettelkasten → OHM nodes/edges
-├── OHM-a35.2  Clio — research findings → L3 edges
-├── OHM-a35.3  Hephaestus — audit findings → observations
+OHM-a35     P1: Agent Integration (in progress)
+├── OHM-a35.1  Métis — zettelkasten → OHM nodes/edges ✅
+├── OHM-a35.2  Hephaestus — audit findings → observations ✅ (1 pattern + CHALLENGED_BY)
+├── OHM-a35.3  Clio — research findings → L3 edges
 ├── OHM-a35.4  Socrates — challenges → CHALLENGED_BY edges
-└── OHM-a35.5  Agent values and goals config
+├── OHM-a35.5  DeepThought — registered May 19, content pending
+└── OHM-a35.6  Agent values and goals config ✅ (9 agents registered)
 
 OHM-3w1     P2: TOPO — Industrial Knowledge Graph
 ├── OHM-3w1.1  TOPO schema (equipment, system, area, site)
@@ -110,25 +113,27 @@ Closed cross-cutting:
 
 ## Current State
 
-- **180 tests passing** (schema, store, graph, boundary, queries, CLI, integration, exceptions, validation, server)
+- **603+ tests passing** (schema, store, graph, boundary, queries, CLI, integration, exceptions, validation, server)
 - **Phase 0 (Foundation):** Schema, CLI, recursive CTEs, boundary enforcement ✅
 - **Phase 1 (Core Operations):** All read/write/challenge/support/observe/listen/state commands ✅
 - **Phase 2 (Daemon):** Scaffold + error handling + health endpoints + auth + Quack ✅
-- **P0 Security:** Parameterized queries (OHM-y2i.6), auth fail-closed (OHM-y2i.7), path traversal fix (OHM-y2i.9) ✅
+- **Phase 2 (Domain Flexibility):** Multi-scenario schema v0.5.0, 6 scenario docs ✅
+- **P0 Security:** Parameterized queries, auth fail-closed, path traversal fix ✅
 - **SDK:** Python SDK (`ohm.sdk`) for programmatic agent access ✅
 - **Validation:** Input validation module (SQL injection prevention for CTE identifiers) ✅
-- **Phase 3 (DuckLake):** Not started
-- **Phase 4 (Agent Integration):** Blocked by SDK gaps (OHM-xfh, OHM-9dq)
+- **Phase 3 (Agent Integration):** Métis ✅, Hephaestus partial, DeepThought registered, others pending
+- **Phase 4 (DuckLake):** Mirror tables ✅, /admin/snapshots ✅, /graph/at ✅, /graph/changes ✅, WAL recovery ✅. CLI commands pending.
+- **Live stats:** 103 nodes, 91 edges, 3 observations, 56 DuckLake snapshots, daemon uptime ~7h
 
 ## Known Issues
 
 ### P0 — Critical
-- **store.py boundary bypass:** `challenge_edge()` in store.py doesn't call `enforce_challenge_boundary()`, allowing L1/L2 challenges through the daemon path (OHM-hsf)
+- (none currently known)
 
 ### P1 — High
-- **No request size cap:** `_read_body()` reads unlimited Content-Length bytes (OOM risk) (OHM-zag)
-- **SDK missing read methods:** No `get_node()`, `get_edge()`, `find_or_create()`, `search()` — blocks all agent integrations (OHM-xfh)
-- **SDK zero test coverage:** Primary agent interface has no tests (OHM-9dq)
+- **No request size cap:** `_read_body()` reads unlimited Content-Length bytes (OOM risk) (OHM-zag) — DONE (MAX_BODY_SIZE=1MB)
+- **SDK read methods:** Fixed — `get_node()`, `get_edge()`, `find_or_create()`, `search()` all implemented ✅ (OHM-xfh)
+- **SDK test coverage:** 137 tests on primary agent interface ✅ (OHM-9dq)
 
 ### P2 — Medium
 - **No SIGPIPE handling:** Daemon can crash on broken connections (OHM-e19)

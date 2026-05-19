@@ -10,35 +10,35 @@ Named for the unit of resistance — in electrical circuits, resistance preserve
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    DuckLake (shared truth)                   │
+│                         ohmd                                │
+│              (HTTP daemon, port 8710)                       │
 │                                                              │
-│  L1: Structure  — Fully shared, all agents read/write       │
-│  L2: Flow       — Shared with attribution                   │
-│  L3: Knowledge  — Agent-owned, challengeable                 │
-│  L4: Prospect   — Agent-owned, visible                        │
-│  Private        — Agent-only, not shared                      │
-│                                                              │
-│  Change feed: who wrote what when (awareness)                 │
-│  Time travel: what did the graph know at time T?              │
-│  Agent state: what is each agent thinking?                    │
-└──────────────────────────┬──────────────────────────────────┘
-                           │
-                      Quack (HTTP)
-                           │
-     ┌─────────────────────┼─────────────────────┐
-     │                     │                       │
-┌────▼─────┐        ┌──────▼──────┐        ┌──────▼──────┐
-│  Métis   │        │   Clio      │        │ Hephaestus  │
-│ Local    │        │ Local       │        │ Local       │
-│ DuckDB   │        │ DuckDB      │        │ DuckDB      │
-│ cache    │        │ cache       │        │ cache      │
-│          │        │             │        │             │
-│ Working  │        │ Research    │        │ Audit       │
-│ memory   │        │ notes       │        │ findings    │
-│          │        │             │        │             │
-│ marimo   │        │ marimo      │        │ marimo      │
-│ notebook │        │ notebook    │        │ notebook    │
-└──────────┘        └─────────────┘        └─────────────┘
+│  ┌──────────────┐    ┌──────────────────────────────────────┐ │
+│  │   DuckDB     │    │         DuckLake (mirror)          │ │
+│  │  (local db)  │◄──►│  ohm_lake.ducklake + Parquet data  │ │
+│  │              │    │  Time travel, snapshots, change    │ │
+│  │  ohm_nodes   │    │  feed                              │ │
+│  │  ohm_edges   │    │                                    │ │
+│  │  ohm_obs     │    │  /admin/snapshots                  │ │
+│  │  agent_state │    │  /graph/at?version=N              │ │
+│  └──────┬───────┘    └──────────────────────────────────────┘ │
+│         │                                                    │
+│    store.py + boundary.py                                    │
+│         │                                                    │
+└─────────┼────────────────────────────────────────────────────┘
+          │
+     HTTP API (33 endpoints)
+          │
+     ┌────┼──────────────────┬────────────────┐
+     │    │                  │                │
+┌────▼──┐ ┌▼──────┐ ┌───────▼──────┐ ┌──────▼──────┐
+│ Métis │ │ Clio  │ │ Hephaestus   │ │ Socrates    │
+│ SDK/  │ │ SDK/  │ │ SDK/         │ │ SDK/        │
+│ HTTP  │ │ HTTP  │ │ HTTP         │ │ HTTP        │
+└───────┘ └───────┘ └──────────────┘ └─────────────┘
+
+Future: per-agent local DuckDB caches syncing to DuckLake on heartbeat.
+Current: all agents connect to ohmd via HTTP API; ohmd owns the single DuckDB.
 ```
 
 ## Design Philosophy
@@ -195,11 +195,12 @@ See [ADR-006](docs/adr/README.md#adr-006-advisory-schema-with-graduated-enforcem
 
 ## Technology Stack
 
-- **DuckDB** — local cache per agent (working memory)
-- **DuckLake** — shared backend (canonical truth, time travel, change feed)
-- **Quack** — concurrent access (multi-agent reads/writes via HTTP)
+- **DuckDB** — embedded database owned by ohmd daemon (schema, queries, boundary enforcement)
+- **DuckLake** — shared mirror backend (canonical truth, time travel, change feed, Parquet storage)
+- **Quack** — DuckDB extension for concurrent access (loaded optionally; currently not active in production)
 - **Recursive CTEs** — graph traversal (zero-dependency, standard SQL)
-- **ohmd** — persistent daemon (owns the DuckDB file, runs Quack server)
+- **ohmd** — persistent daemon (owns the DuckDB file, runs HTTP server on port 8710)
+- **ohm.sdk** — Python SDK for programmatic agent access (connect_remote for daemon, connect for direct reads)
 
 ## Status
 

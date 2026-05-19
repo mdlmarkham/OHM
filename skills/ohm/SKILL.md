@@ -11,16 +11,23 @@ Connect to the shared knowledge graph. Write observations, challenge interpretat
 ## Quick Start
 
 ```python
-import ohm
+import ohm.sdk as ohm
 
-# Connect to shared graph
-with ohm.connect("ohm://localhost:9876", actor="YOUR_AGENT_NAME", token=os.environ["OHM_TOKEN"]) as g:
+# Connect via daemon (shared, multi-agent)
+with ohm.connect_remote("http://127.0.0.1:8710", actor="YOUR_AGENT_NAME",
+                       token=os.environ["OHM_TOKEN"]) as g:
     # Register your identity and values
     me = g.find_or_create_node(label="YOUR_AGENT_NAME", node_type="agent")
     
     # Write an interpretation
     node = g.create_node(label="Your concept", node_type="concept")
-    g.create_edge(from_node=me["id"], to_node=node["id"], edge_type="VALUES", layer="L1")
+    g.create_edge(from_node=me["id"], to_node=node["id"],
+                  edge_type="VALUES", layer="L1")
+
+# Connect directly (reads only, when daemon is stopped)
+with ohm.connect("/var/lib/ohm/ohm.duckdb", actor="YOUR_AGENT_NAME") as g:
+    stats = g.stats()
+    neighborhood = g.neighborhood("some-node-id", depth=2)
 ```
 
 ## Layers
@@ -86,10 +93,12 @@ except LayerViolationError:
 ```
 
 ## Node Types
-`concept`, `agent`, `event`, `source`, `question`, `observation`
+`concept`, `agent`, `event`, `source`, `question`, `observation`, `pattern`, `idea`, `person`, `institution`, `technology`, `goal`, `value`, `skill`, `topic`, `equipment`, `system`, `area`, `site`
 
 ## Edge Types
-`CAUSES`, `APPLIES_TO`, `SUPPORTS`, `CHALLENGD_BY`, `VALUES`, `GOALS`, `CAPABLE_OF`, `INTERESTED_IN`, `LISTENS_TO`, `DEFERS_TO`, `COLLABORATES_WITH`, `NOTIFIES`, `RELATED_TO`, `DERIVED_FROM`, `PREDICTS`
+`CAUSES`, `APPLIES_TO`, `SUPPORTS`, `CHALLENGED_BY`, `REFINES`, `CONTRADICTS`, `NEGATES`, `VALUES`, `GOALS`, `CAPABLE_OF`, `INTERESTED_IN`, `LISTENS_TO`, `DEFERS_TO`, `COLLABORATES_WITH`, `NOTIFIES`, `RELATED_TO`, `DERIVED_FROM`, `PREDICTS`, `EXPECTS`, `RISKS`, `DEPENDS_ON`, `THREATENS`, `ENABLES`, `EXPECTED_LIKELIHOOD`, `ESCALATED_TO`, `DELEGATED_TO`, `THREAT_CLUSTER`, `ORDERS_TEST`, `TRIGGERS_INCIDENT`, `BATCH_EXPIRES_BEFORE`, `TRANSFERRED_TO`, `NEGOTIATES_WITH`
+
+(Plus incident/state-machine edges: `OPENED_BY`, `STARTED_BY`, `AWAITING`, `RESOLVED_BY`, `CLOSED_BY`, `INVESTIGATED_BY`, `CONTAINED_BY`, `ERADICATED_BY`, `RECOVERED_BY`)
 
 ### Agent Relationship Edges
 | Type | Layer | Meaning |
@@ -104,6 +113,77 @@ except LayerViolationError:
 
 ## Confidence Scale
 1.0 = certain, 0.7-0.9 = high, 0.4-0.6 = moderate, 0.1-0.3 = low, 0.0 = unknown
+
+## DuckLake + Time Travel
+
+OHM uses **DuckLake** as a shared persistent backend. DuckDB acts as the local cache; DuckLake stores the canonical truth in Parquet files with a full change history.
+
+### Configuration
+| Env Var | Purpose | Example |
+|---------|---------|--------|
+| `OHM_DUCKLAKE_PATH` | DuckLake catalog path | `/var/lib/ohm/ohm_lake.ducklake` |
+| `OHM_DUCKLAKE_DATA` | Parquet data directory | `/var/lib/ohm/ohm_lake_data` |
+
+### HTTP Endpoints
+- `GET /admin/snapshots` — List all DuckLake snapshots (time-travel versions)
+- `GET /graph/at?version=N` — Query graph state at snapshot version N
+- `GET /graph/changes?from_version=M&to_version=N` — Diff between two versions
+
+### SDK: Sync
+```python
+with ohm.connect_remote("http://127.0.0.1:8710", actor="metis",
+                       token=os.environ["OHM_TOKEN"]) as g:
+    # Sync local ↔ DuckLake on heartbeat
+    result = g.sync_heartbeat()
+    # result = {"pushed_count": N, "pulled_count": M, "last_sync": "..."}
+```
+
+### WAL Corruption Recovery
+If DuckDB WAL is corrupted, OHM recovers in two stages:
+1. **DuckLake snapshot fallback** — restore from latest DuckLake snapshot (OHM-kdk.4)
+2. **WAL deletion** — if no DuckLake, delete WAL file and reconnect (OHM-b5a)
+
+DuckLake recovery preserves data; WAL deletion loses only uncommitted writes.
+
+## HTTP API (ohmd)
+
+The daemon exposes 33 endpoints on `127.0.0.1:8710`. All writes require `Authorization: Bearer <token>`.
+
+| Endpoint | Method | Auth | Purpose |
+|----------|--------|------|----------|
+| `/health` | GET | No | Health check |
+| `/ready` | GET | No | Readiness check |
+| `/status` | GET | No | Node/edge counts, uptime |
+| `/stats` | GET | No | Detailed stats by type/layer |
+| `/node` | POST | Yes | Create node |
+| `/node/{id}` | GET/DELETE | Yes | Get/delete node |
+| `/nodes` | GET | No | List nodes (filter by type) |
+| `/edge` | POST | Yes | Create edge |
+| `/edge/{id}` | GET/DELETE | Yes | Get/delete edge |
+| `/neighborhood/{id}` | GET | No | Explore connections (depth param) |
+| `/path/{from}/{to}` | GET | No | Shortest path |
+| `/impact/{id}` | GET | No | Downstream impact analysis |
+| `/confidence/{id}` | GET | No | Confidence audit trail |
+| `/search?q=` | GET | No | Text search |
+| `/semantic_search` | GET | No | Vector similarity search |
+| `/listen?since=` | GET | No | Change feed |
+| `/observe/{id}` | POST | Yes | Record observation |
+| `/challenge/{id}` | POST | Yes | Challenge an edge |
+| `/support/{id}` | POST | Yes | Support an edge |
+| `/register` | POST | Yes | Register agent identity |
+| `/agents` | GET | No | List registered agents |
+| `/agent/{name}` | GET | No | Agent state |
+| `/state` | GET/POST | Yes | Agent working state |
+| `/heartbeat` | POST | Yes | Sync heartbeat |
+| `/schema` | GET | No | Schema info |
+| `/layers` | GET | No | Layer descriptions |
+| `/admin/snapshots` | GET | Yes | List DuckLake snapshots |
+| `/graph/at?version=N` | GET | No | Graph at snapshot version |
+| `/graph/changes?from_version=M&to_version=N` | GET | No | Diff between versions |
+| `/events` | GET | No | SSE event stream |
+| `/metrics` | GET | No | Prometheus metrics |
+| `/webhook/{agent}` | POST | Yes | Webhook receiver |
+| `/` | GET | No | Endpoint discovery |
 
 ## Provenance Examples
 `"direct_observation"`, `"source:reuters_2026-05-16"`, `"pattern_analysis"`, `"bayesian_fusion"`
