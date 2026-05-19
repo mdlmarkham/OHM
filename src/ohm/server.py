@@ -803,6 +803,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "/search": {"method": "GET", "description": "ILIKE text search (?q=QUERY)"},
                     "/semantic_search": {"method": "GET", "description": "Semantic vector search (requires Ollama)"},
                     "/admin/checkpoint": {"method": "POST", "description": "Force DuckDB CHECKPOINT (flush WAL to main DB)"},
+                    "/admin/embeddings": {"method": "POST", "description": "Batch generate embeddings for nodes missing them"},
                     "/admin/snapshots": {"method": "GET", "description": "List DuckLake snapshots (time-travel)"},
                     "/graph/at": {"method": "GET", "description": "Query graph at snapshot version (?version=N)"},
                     "/graph/changes": {"method": "GET", "description": "Changes between snapshots"},
@@ -1281,6 +1282,33 @@ class OhmHandler(BaseHTTPRequestHandler):
                 self._json_response(200, {"status": "ok", "message": "WAL flushed to main database"})
             except Exception as e:
                 self._json_response(500, {"error": "checkpoint_failed", "message": str(e)})
+        elif path == "/admin/embeddings":
+            # Batch generate embeddings for all nodes missing them (OHM-emb)
+            try:
+                from .queries import update_node_embedding
+                # Find all nodes without embeddings
+                rows = self.store.execute(
+                    "SELECT id, label FROM ohm_nodes WHERE embedding IS NULL AND deleted_at IS NULL"
+                )
+                updated = 0
+                failed = 0
+                for row in rows:
+                    try:
+                        if update_node_embedding(self.store.conn, row["id"]):
+                            updated += 1
+                        else:
+                            failed += 1
+                    except Exception:
+                        failed += 1
+                self._json_response(200, {
+                    "status": "ok",
+                    "updated": updated,
+                    "failed": failed,
+                    "total": len(rows),
+                    "message": f"Generated {updated} embeddings ({failed} failed)",
+                })
+            except Exception as e:
+                self._json_response(500, {"error": "embedding_backfill_failed", "message": str(e)})
         elif path == "/admin/snapshots":
             # DuckLake time-travel: list available snapshots (OHM-kdk.3)
             snapshots = self.store.list_snapshots()
@@ -1334,11 +1362,11 @@ class OhmHandler(BaseHTTPRequestHandler):
         body = self._validate_body(path, body)
 
         if path == "/node":
-            # Support ?create_only=true to reject overwrites
-            create_only = qs.get("create_only", ["false"])[0].lower() in ("true", "1", "yes")
+            # Support ?create_only=false to allow overwrites (default: reject overwrites)
+            create_only = qs.get("create_only", ["true"])[0].lower() in ("true", "1", "yes")
             if create_only:
                 existing = self.store.conn.execute(
-                    "SELECT id FROM ohm_nodes WHERE id = ?", [body["id"]],
+                    "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [body["id"]],
                 ).fetchone()
                 if existing:
                     self._json_response(409, {
@@ -1571,23 +1599,43 @@ class OhmHandler(BaseHTTPRequestHandler):
             import re
             agent_id = "agent_" + re.sub(r'[^a-zA-Z0-9]+', '_', agent_label.lower()).strip('_')
 
-            # Check if agent node already exists
-            existing = self.store.conn.execute(
-                "SELECT id FROM ohm_nodes WHERE id = ?", [agent_id]
+            # Check if agent node already exists (including soft-deleted)
+            existing_active = self.store.conn.execute(
+                "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [agent_id]
+            ).fetchone()
+            existing_soft_deleted = self.store.conn.execute(
+                "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NOT NULL", [agent_id]
             ).fetchone()
 
-            if existing:
+            if existing_active:
                 # Update existing agent node (description may have changed)
                 self.store.conn.execute(
                     "UPDATE ohm_nodes SET content = ?, updated_at = CURRENT_TIMESTAMP, updated_by = ? WHERE id = ?",
                     [body.get("description"), agent, agent_id],
                 )
-                me = self.store.execute("SELECT * FROM ohm_nodes WHERE id = ?", [agent_id])[0]
-                # Delete old registration edges for this agent (VALUES, GOALS, CAPABLE_OF, INTERESTED_IN, LISTENS_TO)
+                me = self.store.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [agent_id])[0]
+                # Soft-delete old registration edges
                 reg_edge_types = ("VALUES", "GOALS", "CAPABLE_OF", "INTERESTED_IN", "LISTENS_TO")
                 placeholders = ",".join(["?"] * len(reg_edge_types))
                 self.store.conn.execute(
-                    f"DELETE FROM ohm_edges WHERE from_node = ? AND edge_type IN ({placeholders})",
+                    f"UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE from_node = ? AND edge_type IN ({placeholders}) AND deleted_at IS NULL",
+                    [agent_id] + list(reg_edge_types),
+                )
+            elif existing_soft_deleted:
+                # Reactivate soft-deleted agent node
+                self.store.conn.execute(
+                    """UPDATE ohm_nodes SET
+                        content = ?, updated_at = CURRENT_TIMESTAMP, updated_by = ?,
+                        deleted_at = NULL
+                    WHERE id = ?""",
+                    [body.get("description"), agent, agent_id],
+                )
+                me = self.store.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [agent_id])[0]
+                # Soft-delete old registration edges
+                reg_edge_types = ("VALUES", "GOALS", "CAPABLE_OF", "INTERESTED_IN", "LISTENS_TO")
+                placeholders = ",".join(["?"] * len(reg_edge_types))
+                self.store.conn.execute(
+                    f"UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE from_node = ? AND edge_type IN ({placeholders}) AND deleted_at IS NULL",
                     [agent_id] + list(reg_edge_types),
                 )
             else:
@@ -1598,7 +1646,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                        VALUES (?, ?, 'agent', ?, ?, 1.0, 'team', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
                     [agent_id, agent_label, body.get("description"), agent],
                 )
-                me = self.store.execute("SELECT * FROM ohm_nodes WHERE id = ?", [agent_id])[0]
+                me = self.store.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [agent_id])[0]
 
             created_edges = []
             for v in body.get("values", []):

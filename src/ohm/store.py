@@ -138,12 +138,25 @@ class OhmStore:
 
         columns = [desc[0] for desc in result.description]
         rows = result.fetchall()
-        return [dict(zip(columns, row)) for row in rows]
+        results = [dict(zip(columns, row)) for row in rows]
+        # Add convenience aliases for edge fields
+        for row in results:
+            if "from_node" in row:
+                row["from"] = row["from_node"]
+                row["to"] = row["to_node"]
+                row["type"] = row["edge_type"]
+        return results
 
     def execute_one(self, sql: str, params: Optional[list] = None) -> Optional[dict[str, Any]]:
         """Execute a query and return a single result or None."""
         results = self.execute(sql, params)
-        return results[0] if results else None
+        row = results[0] if results else None
+        # Add convenience aliases for edge fields
+        if row and "from_node" in row:
+            row["from"] = row["from_node"]
+            row["to"] = row["to_node"]
+            row["type"] = row["edge_type"]
+        return row
 
     def _now(self) -> str:
         """Return current timestamp as ISO string."""
@@ -182,7 +195,7 @@ class OhmStore:
         tags_json = json.dumps(tag_list) if tag_list else None
         now = self._now()
 
-        # Check if node exists
+        # Check if node exists (active)
         existing = self.get_node(id)
         if existing:
             self.conn.execute(
@@ -200,20 +213,44 @@ class OhmStore:
             result = self.get_node(id) or {}
             result["created"] = False
             return result
-        else:
+
+        # Check if node exists but is soft-deleted (primary key collision avoidance)
+        soft_deleted = self.conn.execute(
+            "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NOT NULL", [id]
+        ).fetchone()
+        if soft_deleted:
+            # Reactivate: update the soft-deleted row with new data and clear deleted_at
             self.conn.execute(
                 """
-                INSERT INTO ohm_nodes (id, label, type, content, created_by, confidence,
-                                       visibility, provenance, tags, metadata, priority, url, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                UPDATE ohm_nodes SET
+                    label = ?, type = ?, content = ?, confidence = ?,
+                    visibility = ?, provenance = ?, tags = ?, metadata = ?,
+                    priority = ?, url = ?, created_by = ?, updated_at = ?, updated_by = ?,
+                    deleted_at = NULL
+                WHERE id = ?
                 """,
-                [id, label, type, content, actor, confidence,
-                 visibility, provenance, tags_json, metadata_json, priority, url, now, now],
+                [label, type, content, confidence, visibility, provenance,
+                 tags_json, metadata_json, priority, url, actor, now, actor, id],
             )
-            self._log_change("ohm_nodes", id, "INSERT", None, agent_name=actor)
+            self._log_change("ohm_nodes", id, "UPDATE", None, agent_name=actor)
             result = self.get_node(id) or {}
-            result["created"] = True
+            result["created"] = False
             return result
+
+        # New node
+        self.conn.execute(
+            """
+            INSERT INTO ohm_nodes (id, label, type, content, created_by, confidence,
+                                   visibility, provenance, tags, metadata, priority, url, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [id, label, type, content, actor, confidence,
+             visibility, provenance, tags_json, metadata_json, priority, url, now, now],
+        )
+        self._log_change("ohm_nodes", id, "INSERT", None, agent_name=actor)
+        result = self.get_node(id) or {}
+        result["created"] = True
+        return result
 
     def write_edge(
         self,
