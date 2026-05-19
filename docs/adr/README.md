@@ -154,3 +154,102 @@ Domain types are isolated through `SchemaConfig` instances. Each domain extends 
 - Domain autonomy — each domain controls its own type lifecycle
 - Cross-domain visibility — all domains share the same physical tables
 - Migration audit trail — every type promotion is recorded in `MIGRATIONS`
+
+---
+
+## ADR-008: Probability and Confidence Model
+
+**Date:** 2026-05-19
+**Status:** Decided
+
+### Context
+
+OHM edges carry a `confidence` field (0–1) representing how certain the creating agent is about the relationship. Nodes accumulate `observations` with their own confidence values. Multiple agents may create independent edges about the same relationship, and a single node may have many observations from different sources. The system needs a principled way to combine these values — especially when observations are correlated (e.g., two blood tests from the same lab) versus independent (e.g., imaging + blood work).
+
+Naive averaging destroys agent individuality (ADR-003). Simple multiplication over-counts correlated evidence. The system must support both medical diagnosis (where correlation between findings matters) and general knowledge graphs (where independent evidence compounds).
+
+### Decision
+
+Three-tier confidence model:
+
+1. **Edge confidence** — single value per edge, owned by the creating agent (ADR-003). Not averaged or merged.
+2. **Compound confidence** — combines multiple confidence values with explicit `correlation` parameter:
+   - `correlation=0.0` (independent): P(at least one) = 1 − Π(1 − pᵢ). Evidence compounds multiplicatively.
+   - `correlation=1.0` (perfectly correlated): result = max(pᵢ). Only the strongest evidence matters.
+   - `0.0 < correlation < 1.0`: linear interpolation between independent and correlated results.
+3. **Composite score** — per-node aggregate combining observation scores and evidence-chain confidence, with configurable weights (`observation_weight`, `evidence_weight`). Supports arithmetic (default, backwards-compatible) and geometric mean methods.
+
+The `probability` column on edges (added in schema v0.5.0) is distinct from `confidence`: probability represents the likelihood of the described relationship occurring in the world (e.g., "70% chance this supplier fails"), while confidence represents the agent's certainty about the claim (e.g., "I'm 90% sure this probability estimate is correct").
+
+### Consequences
+
+- Agents retain ownership of their individual confidence judgments
+- Correlated observations don't artificially inflate compound confidence
+- Medical diagnosis can model same-modality correlation vs. cross-modality independence
+- `probability` and `confidence` serve different analytical purposes and should not be conflated
+- The interpolation formula is simple and auditable, but not Bayesian — future work could add prior-based updating
+
+---
+
+## ADR-009: NEGATES Edge Type for Ruling Out Conditions
+
+**Date:** 2026-05-19
+**Status:** Decided
+
+### Context
+
+In medical diagnosis, a finding can *rule out* a condition (e.g., "normal WBC count rules out bacterial infection"). In cybersecurity, a forensic result can eliminate a threat hypothesis. In supply chain, a confirmed delivery negates a "delayed" claim. These are not challenges (which question confidence) or contradictions (which assert the opposite) — they *remove a candidate from consideration entirely*.
+
+OHM already has CHALLENGED_BY (questions confidence) and CONTRADICTS (asserts opposite). Neither captures the "ruled out" semantics cleanly. Using CONTRADICTS for this purpose conflates "I believe the opposite" with "this is eliminated from consideration."
+
+### Decision
+
+Add `NEGATES` as an L3 edge type. Semantics:
+
+- `A —NEGATES→ B` means "the existence/truth of A eliminates B from consideration"
+- Confidence on the NEGATES edge represents how certain the agent is that A rules out B
+- NEGATES is agent-owned (ADR-003): multiple agents can independently negate or not
+- `differential_diagnosis()` uses NEGATES edges to exclude ruled-out candidates from results
+- Ruled-out candidates appear in results with `ruled_out=True` and `ruled_out_by=[edge_ids]` — they are not deleted, just flagged
+
+NEGATES is placed in L3 (Knowledge) because it represents an agent's judgment about the relationship between two concepts, not a structural or flow relationship.
+
+### Consequences
+
+- Clean separation: CHALLENGED_BY questions confidence, CONTRADICTS asserts opposite, NEGATES eliminates from consideration
+- `differential_diagnosis()` returns ruled-out candidates with provenance, not silently filtered
+- Works across domains: medical (findings rule out conditions), cybersecurity (forensics eliminate hypotheses), supply chain (confirmations negate delay claims)
+- NEGATES edges are challengeable — another agent can CHALLENGED_BY a NEGATES edge if they disagree with the ruling-out
+
+---
+
+## ADR-010: Urgency on Edges and Priority on Nodes
+
+**Date:** 2026-05-19
+**Status:** Decided
+
+### Context
+
+OHM needs temporal reasoning for time-sensitive domains: customer support (SLA breaches), cybersecurity (incident response), medical (deteriorating conditions), supply chain (expiring inventory). These domains need to distinguish "how important is this thing?" (priority) from "how urgently does this relationship need attention?" (urgency).
+
+Priority is an intrinsic property of a node — a P0 incident is always P0 regardless of which edge you approach it from. Urgency is a property of the relationship — "this ticket was escalated TO tier-2" carries urgency independent of the ticket's priority. A P3 ticket can have a critical-urgency escalation edge.
+
+### Decision
+
+Separate priority and urgency into different entities:
+
+- **`priority`** on `ohm_nodes` — intrinsic importance of the node itself. Values: P0 (critical), P1 (high), P2 (medium), P3 (low), P4 (informational). Validated against `VALID_PRIORITY`.
+- **`urgency`** on `ohm_edges` — time-sensitivity of the relationship. Values: low, normal, high, critical. Validated against `VALID_URGENCY`.
+- `escalate()` sets `urgency="high"` on the ESCALATED_TO edge AND sets `priority="P1"` on the ticket node — both the relationship and the node reflect the escalation.
+- `urgent_changes()` filters the change feed for edges with urgency ≥ the specified threshold.
+
+Priority and urgency are advisory by default (ADR-006) — they are validated when provided but not required.
+
+### Consequences
+
+- Priority and urgency serve distinct analytical purposes and can evolve independently
+- A node can be high-priority without any urgent edges (important but stable)
+- An edge can be critical-urgency between low-priority nodes (time-sensitive but not important)
+- `escalate()` correctly updates both dimensions
+- Query patterns: "show me all P0 nodes" (priority filter) vs. "show me all critical-urgency edges" (urgency filter) vs. "show me P0 nodes with critical-urgency edges" (intersection)
+- Future: priority could be derived from composite scoring; urgency could be auto-set by temporal decay
