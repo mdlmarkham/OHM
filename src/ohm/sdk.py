@@ -2977,6 +2977,35 @@ def connect_http(
             path = "/inference?" + "&".join(params)
             return self._http_request("GET", path)
 
+        def lint(
+            self,
+            *,
+            node_types: list[str] | None = None,
+            limit: int = 1000,
+        ) -> dict[str, Any]:
+            """Lint the graph against the contract.
+
+            Validates all nodes and edges for naming conventions, required fields,
+            confidence bounds, and type validity.
+
+            Args:
+                node_types: Filter to specific node types (e.g., ["concept", "task"]).
+                limit: Maximum entities to check per type.
+
+            Returns:
+                Dict with violations, summary, and contract info.
+            """
+            import urllib.parse
+            params = [f"limit={limit}"]
+            if node_types:
+                params.append(f"node_types={urllib.parse.quote(','.join(node_types))}")
+            path = "/lint?" + "&".join(params)
+            return self._http_request("GET", path)
+
+        def contract(self) -> dict[str, Any]:
+            """Return the current contract configuration."""
+            return self._http_request("GET", "/contract")
+
     graph = HttpGraph(conn, actor, base_url, resolved_token)
     graph.token = resolved_token
     return graph

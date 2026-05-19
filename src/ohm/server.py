@@ -802,6 +802,8 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "/metrics": {"method": "GET", "description": "Prometheus-style metrics"},
                     "/stats": {"method": "GET", "description": "Graph statistics (nodes, edges, layers)"},
                     "/inference": {"method": "GET", "description": "Bayesian inference: compute posterior probabilities given evidence (optional: requires pgmpy)"},
+                    "/lint": {"method": "GET", "description": "Contract layer linting: validate graph against naming conventions and required fields"},
+                    "/contract": {"method": "GET", "description": "Current contract configuration (naming conventions, required fields, schema)"},
                     "/status": {"method": "GET", "description": "Daemon status and configuration"},
                     "/schema": {"method": "GET", "description": "Node types, edge types, layers"},
                     "/layers": {"method": "GET", "description": "L1-L4 layer descriptions"},
@@ -1402,6 +1404,20 @@ class OhmHandler(BaseHTTPRequestHandler):
             from .methods import graph_stats
             result = graph_stats(self.store.conn)
             self._json_response(200, result)
+        elif path == "/lint":
+            # Contract layer linting: validate graph against naming conventions and required fields
+            from .contract import ContractConfig, lint_graph
+            node_type_filter = qs.get("node_types", [None])[0]
+            node_types = node_type_filter.split(",") if node_type_filter else None
+            limit = int(qs.get("limit", ["1000"])[0])
+            contract = ContractConfig()
+            result = lint_graph(self.store.conn, contract, limit=limit, node_types=node_types)
+            self._json_response(200, result)
+        elif path == "/contract":
+            # Return the current contract configuration
+            from .contract import ContractConfig
+            contract = ContractConfig()
+            self._json_response(200, contract.to_dict())
         elif path == "/inference":
             # Bayesian inference: compute posterior probabilities given evidence
             # Uses pgmpy Variable Elimination (optional dependency)

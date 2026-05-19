@@ -43,6 +43,8 @@ VALID_VISIBILITIES = frozenset({"private", "team", "public"})
 
 VALID_PROVENANCES = frozenset({
     "conversation", "research", "bookmark", "observation", "feed-ingest",
+    "metis-research", "metis-synthesis", "metis-review-request",
+    "socrates-curriculum", "clio-research",
 })
 
 # ── Edge Types by Layer ─────────────────────────────────────────────────────
