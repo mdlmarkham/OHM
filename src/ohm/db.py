@@ -51,10 +51,14 @@ def connect(db_path: str | pathlib.Path | None = None) -> "duckdb.DuckDBPyConnec
 
     try:
         conn = duckdb.connect(db_path_str)
-    except duckdb.IOException as e:
+    except (duckdb.IOException, duckdb.InternalException) as e:
         # Check if this is a WAL corruption error
+        # DuckDB raises InternalException for WAL replay failures
+        # (e.g., "Calling DatabaseManager::GetDefaultDatabase with no
+        # default database set"), not just IOException. Both must be
+        # caught for reliable recovery.
         error_msg = str(e)
-        if "WAL" in error_msg or "wal" in error_msg.lower():
+        if "WAL" in error_msg or "wal" in error_msg.lower() or "replay" in error_msg.lower():
             # Try DuckLake recovery first (OHM-kdk.4)
             restored = _try_ducklake_recovery(db_path_str)
             if restored:

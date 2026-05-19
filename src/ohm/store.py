@@ -78,12 +78,17 @@ class OhmStore:
         If DuckDB fails to open due to WAL replay errors, deletes the
         WAL file and retries. The WAL contains only uncommitted writes,
         so this is safe — the main DB file is intact.
+
+        DuckDB raises InternalException (not IOException) for WAL
+        replay failures (e.g., "Calling DatabaseManager::GetDefaultDatabase
+        with no default database set"). Both exception types must be
+        caught for reliable recovery.
         """
         try:
             return duckdb.connect(db_path_str, read_only=readonly)
-        except duckdb.IOException as e:
+        except (duckdb.IOException, duckdb.InternalException) as e:
             error_msg = str(e)
-            if "WAL" in error_msg or "wal" in error_msg.lower():
+            if "WAL" in error_msg or "wal" in error_msg.lower() or "replay" in error_msg.lower():
                 wal_path = db_path_str + ".wal"
                 if os.path.exists(wal_path):
                     os.remove(wal_path)
