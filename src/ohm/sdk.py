@@ -437,7 +437,7 @@ class Graph:
         self,
         node_id: str,
         *,
-        obs_type: str,
+        obs_type: str = "measurement",
         value: float | None = None,
         baseline: float | None = None,
         sigma: float | None = None,
@@ -446,7 +446,20 @@ class Graph:
         source_name: str | None = None,
         source_url: str | None = None,
     ) -> dict[str, Any]:
-        """Record an observation on a node. Returns the full observation record."""
+        """Record an observation on a node. Returns the full observation record.
+
+        Args:
+            node_id: Node to observe.
+            obs_type: Type of observation (measurement, anomaly, pattern, etc.).
+                Defaults to 'measurement' to match REST API default.
+            value: Numeric observation value.
+            baseline: Expected/baseline value for comparison.
+            sigma: Standard deviation/confidence in the observation.
+            source: Observation source (analysis, research, conversation, signal).
+            notes: Free-text notes about the observation.
+            source_name: Name of the source agent or system.
+            source_url: URL reference for the observation source.
+        """
         from ohm.queries import create_observation
 
         return create_observation(
@@ -1306,14 +1319,14 @@ class Graph:
 
     def batch_create_nodes(
         self,
-        *,
         nodes: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         """Create multiple nodes at once. All succeed or all fail.
 
         Args:
-            nodes: List of dicts with: label, node_type, content, visibility,
-                   provenance, confidence.
+            nodes: List of dicts with: label (required), id, type, content,
+                visibility, provenance, confidence, priority, url, tags,
+                metadata, task_status, assigned_to, due_date.
 
         Returns:
             List of created node records.
@@ -1324,14 +1337,13 @@ class Graph:
 
     def batch_create_edges(
         self,
-        *,
         edges: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         """Create multiple edges at once. All succeed or all fail.
 
         Args:
-            edges: List of dicts with: from_node, to_node, edge_type, layer,
-                   confidence, condition, provenance.
+            edges: List of dicts with: from, to, type (required),
+                layer, confidence, condition, provenance.
 
         Returns:
             List of created edge records.
@@ -2673,6 +2685,71 @@ def connect_http(
             if challenge_type:
                 body["challenge_type"] = challenge_type
             return self._http_request("POST", f"/challenge/{node_id}", body)
+
+        def observe(
+            self,
+            node_id: str,
+            *,
+            obs_type: str = "measurement",
+            value: float | None = None,
+            baseline: float | None = None,
+            sigma: float | None = None,
+            source: str = "analysis",
+            notes: str | None = None,
+            source_name: str | None = None,
+            source_url: str | None = None,
+        ) -> dict[str, Any]:
+            """Record an observation on a node.
+
+            Args:
+                node_id: Node to observe.
+                obs_type: Type (measurement/anomaly/pattern/challenge/support/sentiment).
+                value: Numeric observation value.
+                baseline: Expected/baseline value.
+                sigma: Standard deviation/confidence.
+                source: Source (analysis/research/conversation/signal).
+                notes: Free-text notes.
+                source_name: Name of the source agent/system.
+                source_url: URL reference.
+            """
+            body = {"type": obs_type}
+            if value is not None:
+                body["value"] = value
+            if baseline is not None:
+                body["baseline"] = baseline
+            if sigma is not None:
+                body["sigma"] = sigma
+            if source:
+                body["source"] = source
+            if notes:
+                body["notes"] = notes
+            if source_name:
+                body["source_name"] = source_name
+            if source_url:
+                body["source_url"] = source_url
+            return self._http_request("POST", f"/observe/{node_id}", body)
+
+        def compound_confidence(
+            self,
+            observations: list[dict],
+            *,
+            correlation: float = 0.0,
+        ) -> dict[str, Any]:
+            """Combine multiple confidence values accounting for correlation.
+
+            Computed client-side from observation dicts.
+            When observations are independent (correlation=0.0), confidences compound
+            multiplicatively. When perfectly correlated (1.0), only the strongest matters.
+
+            Args:
+                observations: List of dicts with 'confidence' key (0-1).
+                correlation: 0.0 = independent, 1.0 = perfectly correlated.
+
+            Returns:
+                Dict with compound_confidence, method, correlation, observation_count.
+            """
+            from ohm.methods import compound_confidence as _cc
+            return _cc(observations, correlation=correlation)
 
         # ── Task management ──────────────────────────────────────────────
 

@@ -1140,8 +1140,15 @@ def compound_confidence(
 
     # Clamp correlation to [0, 1]
     correlation = max(0.0, min(1.0, correlation))
-    confidences = [obs.get("confidence", 0.0) for obs in observations]
-    confidences = [max(0.0, min(1.0, c)) for c in confidences]
+    # Coerce confidence values to float (handles string values from API)
+    confidences = []
+    for obs in observations:
+        c = obs.get("confidence", 0.0)
+        try:
+            c = float(c)
+        except (TypeError, ValueError):
+            c = 0.0
+        confidences.append(max(0.0, min(1.0, c)))
 
     n = len(confidences)
 

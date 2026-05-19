@@ -493,6 +493,8 @@ class OhmHandler(BaseHTTPRequestHandler):
         "/challenge": [],
         "/support": [],
         "/observe": [],
+        "/outcome": [],
+        "/reliability": [],
         "/webhook": [],
     }
 
@@ -811,6 +813,8 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "/challenge/{id}": {"method": "POST", "description": "Challenge an existing edge"},
                     "/support/{id}": {"method": "POST", "description": "Support an existing edge"},
                     "/observe/{id}": {"method": "POST", "description": "Record an observation on a node"},
+                    "/outcome": {"method": "POST", "description": "Record whether a source agent's claim was correct"},
+                    "/reliability/{source}": {"method": "GET", "description": "Compute source reliability metrics from historical outcomes"},
                     "/state": {"method": "POST", "description": "Update agent state/focus"},
                     "/register": {"method": "POST", "description": "Register a new agent"},
                     "/heartbeat": {"method": "POST", "description": "Agent heartbeat with sync"},
@@ -1449,6 +1453,14 @@ class OhmHandler(BaseHTTPRequestHandler):
                 raise ValidationError("?from_version and ?to_version must be integers")
             result = self.store.graph_changes(from_int, to_int)
             self._json_response(200, result)
+        elif path.startswith("/reliability/"):
+            # Compute source reliability metrics from historical outcomes
+            source_agent = path[14:]  # strip /reliability/
+            from .validation import validate_identifier
+            source_agent = validate_identifier(source_agent, name="source_agent")
+            from .queries import query_source_reliability
+            result = query_source_reliability(self.store.conn, source_agent)
+            self._json_response(200, result)
         else:
             self._json_response(404, {"error": f"Unknown endpoint: {path}"})
 
@@ -1614,6 +1626,25 @@ class OhmHandler(BaseHTTPRequestHandler):
             })
             self._json_response(201, result)
 
+        elif path == "/outcome":
+            # Record whether a source agent's claim was correct
+            source_agent = body.get("source_agent")
+            claim_node = body.get("claim_node")
+            outcome = body.get("outcome")
+            notes = body.get("notes")
+            if not source_agent or not claim_node or outcome is None:
+                raise ValidationError("outcome requires source_agent, claim_node, and outcome fields")
+            from .queries import query_record_outcome
+            result = query_record_outcome(
+                self.store.conn,
+                source_agent=source_agent,
+                claim_node=claim_node,
+                outcome=bool(outcome),
+                recorded_by=agent,
+                notes=notes,
+            )
+            self._json_response(201, result)
+
         elif path == "/batch":
             # Batch node and edge creation — all-or-nothing transaction
             nodes = body.get("nodes", [])
@@ -1649,6 +1680,9 @@ class OhmHandler(BaseHTTPRequestHandler):
                         metadata=node.get("metadata"),
                         priority=node.get("priority"),
                         url=node.get("url"),
+                        task_status=node.get("task_status"),
+                        assigned_to=node.get("assigned_to"),
+                        due_date=node.get("due_date"),
                         agent_name=agent,
                     )
                     nodes_created += 1
