@@ -801,7 +801,8 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "/ready": {"method": "GET", "description": "Readiness check (no auth required)"},
                     "/metrics": {"method": "GET", "description": "Prometheus-style metrics"},
                     "/stats": {"method": "GET", "description": "Graph statistics (nodes, edges, layers)"},
-                    "/inference": {"method": "GET", "description": "Bayesian inference: compute posterior probabilities given evidence (optional: requires pgmpy)"},
+                    "/inference": {"method": "GET", "description": "Bayesian inference: compute posterior probabilities given evidence (observation, includes confounders)"},
+                    "/intervene": {"method": "GET", "description": "Causal intervention using Pearl's do-operator: sever incoming edges to target, set value externally, propagate direct causal effect (no confounders)"},
                     "/lint": {"method": "GET", "description": "Contract layer linting: validate graph against naming conventions and required fields"},
                     "/contract": {"method": "GET", "description": "Current contract configuration (naming conventions, required fields, schema)"},
                     "/status": {"method": "GET", "description": "Daemon status and configuration"},
@@ -1438,6 +1439,39 @@ class OhmHandler(BaseHTTPRequestHandler):
                         evidence[validate_identifier(node_id.strip(), name="evidence_node")] = int(state.strip())
             from .bayesian import bayesian_inference
             result = bayesian_inference(self.store.conn, target, evidence, leak_probability=leak_probability)
+            self._json_response(200, result)
+        elif path == "/intervene":
+            # Causal intervention using Pearl's do-operator (graph surgery)
+            # Differs from /inference: severs incoming edges to target, sets value externally
+            # This isolates direct causal effect by removing confounder influence
+            target = qs.get("target", [None])[0]
+            if not target:
+                self._json_response(400, {"error": "missing_parameter", "message": "?target=node_id required"})
+                return
+            from .validation import validate_identifier
+            target = validate_identifier(target, name="target")
+            # Parse intervention state: ?state=0 (force bad) or ?state=1 (force good)
+            state_str = qs.get("state", [None])[0]
+            if state_str is None:
+                self._json_response(400, {"error": "missing_parameter", "message": "?state=0 (bad) or ?state=1 (good) required"})
+                return
+            try:
+                intervention_state = int(state_str)
+            except ValueError:
+                self._json_response(400, {"error": "invalid_parameter", "message": "state must be 0 or 1"})
+                return
+            # Parse optional query nodes: ?query=node1,node2
+            query_str = qs.get("query", [""])[0]
+            query_nodes = None
+            if query_str:
+                query_nodes = [validate_identifier(q.strip(), name="query_node") for q in query_str.split(",") if q.strip()]
+            leak_probability = float(qs.get("leak", ["0.15"])[0])
+            from .bayesian import causal_intervention
+            result = causal_intervention(
+                self.store.conn, target, intervention_state,
+                query_nodes=query_nodes,
+                leak_probability=leak_probability,
+            )
             self._json_response(200, result)
         elif path == "/admin/checkpoint":
             # Force DuckDB CHECKPOINT to flush WAL to main DB file

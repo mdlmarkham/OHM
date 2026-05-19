@@ -2977,6 +2977,47 @@ def connect_http(
             path = "/inference?" + "&".join(params)
             return self._http_request("GET", path)
 
+        def causal_intervention(
+            self,
+            target: str,
+            intervention_state: int,
+            *,
+            query_nodes: list[str] | None = None,
+            leak_probability: float = 0.15,
+        ) -> dict[str, Any]:
+            """Run causal intervention using Pearl's do-operator (graph surgery).
+
+            Differs from bayesian_inference (observation) in a critical way:
+            - Observation: P(Y | X=x) includes confounder effects
+            - Intervention: P(Y | do(X=x)) isolates the direct causal effect
+
+            Implementation: sever all incoming edges to target, set target to
+            intervention_state deterministically, propagate through remaining DAG.
+            Then compare with observation-based inference to quantify confounding bias.
+
+            Args:
+                target: Node ID to intervene on.
+                intervention_state: State to set the target to.
+                    0 = "bad" (force failure), 1 = "good" (force normal).
+                query_nodes: Optional list of downstream nodes to compute posteriors for.
+                    If None, computes posteriors for all reachable descendants.
+                leak_probability: Baseline probability of bad outcome when all
+                    parents are good (default 0.15).
+
+            Returns:
+                Dict with posteriors for each downstream node, comparison with
+                observation-based inference (confounding bias), and network info.
+            """
+            import urllib.parse
+            params = [f"target={urllib.parse.quote(target)}"]
+            params.append(f"state={intervention_state}")
+            if query_nodes:
+                query_str = ",".join(query_nodes)
+                params.append(f"query={urllib.parse.quote(query_str)}")
+            params.append(f"leak={leak_probability}")
+            path = "/intervene?" + "&".join(params)
+            return self._http_request("GET", path)
+
         def lint(
             self,
             *,

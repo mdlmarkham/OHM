@@ -446,3 +446,315 @@ def bayesian_inference(
             "evidence": evidence,
             "error": str(e),
         }
+
+
+def causal_intervention(
+    conn,
+    target: str,
+    intervention_state: int,
+    *,
+    query_nodes: list[str] | None = None,
+    edge_types: list[str] | None = None,
+    leak_probability: float = 0.15,
+) -> dict[str, Any]:
+    """Run causal intervention using Pearl's do-operator (graph surgery).
+
+    Implements the do-operator by surgically modifying the causal graph:
+    1. Sever all incoming edges to the target node (remove parent dependencies)
+    2. Set the target node to the intervention state externally
+    3. Propagate the effect through the remaining DAG
+
+    This differs from Bayesian conditioning (observation) in a critical way:
+    - Observation (conditioning): P(Y | X=x) includes confounder effects
+    - Intervention (do-operator): P(Y | do(X=x)) isolates the direct causal effect
+
+    When confounders exist (common causes of both X and Y), observation picks
+    up the confounder's influence; intervention removes it by severing X's
+    incoming edges, so only X's outgoing causal paths remain active.
+
+    For the Hormuz example: if economic pressure causes both Hormuz closure
+    AND Fed rate changes, then:
+    - Observation P(FedRate=bad | Hormuz=closed) includes economic pressure effect
+    - Intervention P(FedRate=bad | do(Hormuz=closed)) isolates only the direct
+      causal path Hormuz→Oil→Inflation→FedRate
+
+    Args:
+        conn: DuckDB connection.
+        target: Node ID to intervene on.
+        intervention_state: State to set the target to.
+            0 = "bad" (force failure), 1 = "good" (force normal).
+        query_nodes: Optional list of downstream nodes to compute posteriors for.
+            If None, computes posteriors for all reachable descendants.
+        edge_types: Edge types to include in the network.
+        leak_probability: Baseline probability of bad outcome when all
+            parents are good (default 0.15).
+
+    Returns:
+        Dict with posterior probabilities for each query node, comparison
+        with observation-based inference, and network info.
+    """
+    target = validate_identifier(target, name="target")
+
+    if not PGMPY_AVAILABLE:
+        return {
+            "method": "none",
+            "pgmpy_available": False,
+            "target": target,
+            "intervention_state": intervention_state,
+            "error": "pgmpy not available — causal intervention requires pgmpy",
+        }
+
+    if intervention_state not in (0, 1):
+        return {
+            "method": "error",
+            "target": target,
+            "error": f"intervention_state must be 0 or 1, got {intervention_state}",
+        }
+
+    # Step 1: Build the original Bayesian network
+    scope_nodes = [target]
+    if query_nodes:
+        scope_nodes.extend(query_nodes)
+    network = build_bayesian_network(
+        conn, edge_types=edge_types,
+        root_nodes=scope_nodes,
+        leak_probability=leak_probability,
+    )
+
+    if network is None:
+        return {
+            "method": "none",
+            "pgmpy_available": True,
+            "target": target,
+            "intervention_state": intervention_state,
+            "error": "No probability-bearing edges found in graph",
+        }
+
+    safe_names = network["safe_names"]
+    safe_target = _safe_node_id(target)
+
+    if safe_target not in network["variables"]:
+        return {
+            "method": "none",
+            "pgmpy_available": True,
+            "target": target,
+            "intervention_state": intervention_state,
+            "error": f"Target {target} not in Bayesian network",
+        }
+
+    # Step 2: Graph surgery — remove incoming edges to target
+    # This is the do-operator: do(X=x) means X is set externally,
+    # so we remove all edges INTO X (its parents no longer influence it)
+    model = network["model"]
+    original_edges = list(model.edges())
+
+    # Identify incoming edges to the target
+    incoming_edges = [(u, v) for u, v in original_edges if v == safe_target]
+
+    # Remove incoming edges (graph surgery)
+    model_do = model.copy()
+    for edge in incoming_edges:
+        if model_do.has_edge(*edge):
+            model_do.remove_edge(*edge)
+
+    # Step 3: Rebuild CPTs for the mutilated graph
+    # Target becomes a root node with deterministic CPT (set to intervention_state)
+    # Other CPTs remain the same (they don't depend on target's parents)
+    from pgmpy.factors.discrete import TabularCPD as _TabularCPD
+
+    new_cpds = []
+
+    # Set target's CPT to deterministic (intervention_state)
+    if intervention_state == 0:  # force "bad"
+        target_cpd = _TabularCPD(safe_target, 2, [[1.0], [0.0]])
+    else:  # force "good"
+        target_cpd = _TabularCPD(safe_target, 2, [[0.0], [1.0]])
+    new_cpds.append(target_cpd)
+
+    # Copy over all other CPTs (unchanged by graph surgery)
+    for cpd in model.get_cpds():
+        if cpd.variable != safe_target:
+            # Check if this CPD's evidence includes the target's removed parents
+            # If so, we need to rebuild it as a marginal
+            cpd_evidence = getattr(cpd, 'evidence', None)
+            cpd_evidence_card = getattr(cpd, 'evidence_card', None)
+            if cpd_evidence:
+                # Check if any evidence variable was removed (target's former parents)
+                removed_parents = set()
+                for edge in incoming_edges:
+                    removed_parents.add(edge[0])
+                still_valid = [v for v in cpd_evidence if v not in removed_parents]
+                if len(still_valid) != len(cpd_evidence):
+                    # Some evidence was removed — need to marginalize
+                    if len(still_valid) == 0:
+                        # All parents removed — use marginal (average over states)
+                        # Sum over all evidence configurations weighted equally
+                        n_configs = 1
+                        for card in cpd_evidence_card:
+                            n_configs *= card
+                        n_states = cpd.variable_card
+                        values = cpd.get_values()
+                        # Average across all evidence configurations
+                        marginal = values.mean(axis=1)
+                        new_cpd = _TabularCPD(cpd.variable, n_states,
+                                             [[marginal[s]] for s in range(n_states)])
+                        new_cpds.append(new_cpd)
+                    else:
+                        # Some but not all parents removed — marginalize over removed ones
+                        # This is complex; for now, skip and let model check fail gracefully
+                        logger.warning(f"Cannot marginalize partially-removed parents for {cpd.variable}")
+                        new_cpds.append(cpd)
+                else:
+                    new_cpds.append(cpd)
+            else:
+                new_cpds.append(cpd)
+
+    model_do.cpds = []  # Clear existing CPDs
+    try:
+        model_do.add_cpds(*new_cpds)
+        assert model_do.check_model()
+    except Exception as e:
+        logger.error(f"Mutilated graph model check failed: {e}")
+        # Fallback: rebuild network excluding target's parents
+        return {
+            "method": "error",
+            "pgmpy_available": True,
+            "target": target,
+            "intervention_state": intervention_state,
+            "error": f"Graph surgery failed: {e}",
+            "incoming_edges_severed": len(incoming_edges),
+        }
+
+    # Step 4: Run inference on the mutilated graph
+    # The target is set to intervention_state deterministically
+    # We query downstream nodes to see the causal effect
+    safe_query_nodes = []
+    if query_nodes:
+        for qn in query_nodes:
+            safe_qn = _safe_node_id(validate_identifier(qn, name="query_node"))
+            if safe_qn in network["variables"]:
+                safe_query_nodes.append(safe_qn)
+
+    # If no explicit query nodes, find all descendants of target
+    if not safe_query_nodes:
+        try:
+            import networkx as nx
+            descendants = nx.descendants(model_do, safe_target)
+            safe_query_nodes = list(descendants)
+        except Exception:
+            safe_query_nodes = [v for v in network["variables"] if v != safe_target]
+
+    if not safe_query_nodes:
+        # Target has no descendants — intervention only affects target itself
+        return {
+            "method": "causal_intervention",
+            "pgmpy_available": True,
+            "target": target,
+            "intervention_state": intervention_state,
+            "posterior": {
+                target: {
+                    "good": 1.0 if intervention_state == 1 else 0.0,
+                    "bad": 1.0 if intervention_state == 0 else 0.0,
+                }
+            },
+            "downstream_nodes": [],
+            "incoming_edges_severed": len(incoming_edges),
+            "network_info": {
+                "n_nodes": network["n_nodes"],
+                "n_edges": network["n_edges"],
+            },
+        }
+
+    # Run inference with target as evidence (deterministic)
+    try:
+        infer = VariableElimination(model_do)
+        result = infer.query(safe_query_nodes, evidence={safe_target: intervention_state})
+
+        # Extract posteriors for each query node
+        posteriors = {}
+        if len(safe_query_nodes) == 1:
+            # Single query node — result is a single factor
+            qn = safe_query_nodes[0]
+            qn_original = None
+            for orig, safe in safe_names.items():
+                if safe == qn:
+                    qn_original = orig
+                    break
+            posteriors[qn_original or qn] = {
+                "good": round(float(result.values[1]), 4),
+                "bad": round(float(result.values[0]), 4),
+            }
+        else:
+            # Multiple query nodes — result may be joint or per-variable
+            # pgmpy VariableElimination.query with multiple variables returns a factor
+            # We need to marginalize to get per-variable posteriors
+            for qn in safe_query_nodes:
+                qn_original = None
+                for orig, safe in safe_names.items():
+                    if safe == qn:
+                        qn_original = orig
+                        break
+                try:
+                    result_single = infer.query([qn], evidence={safe_target: intervention_state})
+                    posteriors[qn_original or qn] = {
+                        "good": round(float(result_single.values[1]), 4),
+                        "bad": round(float(result_single.values[0]), 4),
+                    }
+                except Exception:
+                    posteriors[qn_original or qn] = {"error": "inference failed for this node"}
+
+    except Exception as e:
+        logger.error(f"Intervention inference failed: {e}")
+        return {
+            "method": "error",
+            "pgmpy_available": True,
+            "target": target,
+            "intervention_state": intervention_state,
+            "error": str(e),
+        }
+
+    # Step 5: Compare with observation-based inference for the same evidence
+    # This shows the confounder effect: difference = confounding bias
+    observation_result = bayesian_inference(
+        conn, target, {target: intervention_state},
+        edge_types=edge_types,
+        leak_probability=leak_probability,
+    )
+
+    comparison = {}
+    for node_id, post in posteriors.items():
+        if isinstance(post, dict) and "error" not in post:
+            obs_post = observation_result.get("posterior", {})
+            # Observation posterior is for target only; we need to query each node
+            obs_result = bayesian_inference(
+                conn, node_id, {target: intervention_state},
+                edge_types=edge_types,
+                leak_probability=leak_probability,
+            )
+            obs_bad = obs_result.get("posterior", {}).get("bad", None)
+            int_bad = post.get("bad", None)
+            if obs_bad is not None and int_bad is not None:
+                comparison[node_id] = {
+                    "intervention_bad": int_bad,
+                    "observation_bad": obs_bad,
+                    "confounding_bias": round(obs_bad - int_bad, 4),
+                    "interpretation": "positive bias = observation overestimates causal effect (confounders inflate)" if obs_bad > int_bad else "negative bias = observation underestimates causal effect (confounders suppress)",
+                }
+
+    return {
+        "method": "causal_intervention",
+        "pgmpy_available": True,
+        "target": target,
+        "intervention_state": intervention_state,
+        "state_labels": {
+            "0": "bad/failure/closed/negative",
+            "1": "good/normal/open/positive",
+        },
+        "posterior": posteriors,
+        "comparison_with_observation": comparison,
+        "incoming_edges_severed": len(incoming_edges),
+        "network_info": {
+            "n_nodes": network["n_nodes"],
+            "n_edges": network["n_edges"],
+        },
+    }
