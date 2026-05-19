@@ -13,9 +13,23 @@ Connect to the shared knowledge graph. Write observations, challenge interpretat
 ```python
 import ohm.sdk as ohm
 
-# Connect via daemon (shared, multi-agent)
-with ohm.connect_remote("http://127.0.0.1:8710", actor="YOUR_AGENT_NAME",
-                       token=os.environ["OHM_TOKEN"]) as g:
+# Option 1: Per-agent local DB (recommended for multi-agent)
+# Each agent gets its own local DuckDB for zero-latency reads/writes.
+# Syncs to shared DuckLake on heartbeat.
+from ohm.store import OhmStore
+store = OhmStore.for_agent(
+    agent_name="YOUR_AGENT_NAME",
+    ducklake_path="/var/lib/ohm/ohm_lake.ducklake",
+)
+# Read/write locally (zero latency, no HTTP)
+store.write_node(id="concept-x", label="X", type="concept", confidence=0.9)
+node = store.get_node("concept-x")
+# Sync with other agents on heartbeat
+result = store.sync_heartbeat()  # → {"pushed": 3, "pulled": 7}
+
+# Option 2: Connect via daemon (shared, multi-agent)
+with ohm.connect_http("http://127.0.0.1:8710", actor="YOUR_AGENT_NAME",
+                     token=os.environ["OHM_TOKEN"]) as g:
     # Register your identity and values
     me = g.find_or_create_node(label="YOUR_AGENT_NAME", node_type="agent")
     
@@ -24,7 +38,7 @@ with ohm.connect_remote("http://127.0.0.1:8710", actor="YOUR_AGENT_NAME",
     g.create_edge(from_node=me["id"], to_node=node["id"],
                   edge_type="VALUES", layer="L1")
 
-# Connect directly (reads only, when daemon is stopped)
+# Option 3: Connect directly (reads only, when daemon is stopped)
 with ohm.connect("/var/lib/ohm/ohm.duckdb", actor="YOUR_AGENT_NAME") as g:
     stats = g.stats()
     neighborhood = g.neighborhood("some-node-id", depth=2)

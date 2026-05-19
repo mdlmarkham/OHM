@@ -67,7 +67,8 @@ Every L3/L4 edge has a single owner (`created_by`). Other agents can create CHAL
 
 ---
 
-## ADR-004: Three-Layer Data Architecture
+## ADR-004: Three-Layer Data Architecture — per-agent local cache, shared DuckLake, private scratch
+- ADR-012: Per-Agent Local DuckDB Cache — `OhmStore.for_agent()` with zero-latency local access
 
 **Date:** 2026-05-16
 **Status:** Decided
@@ -285,3 +286,29 @@ The `observation_sources` field follows the same pattern with `VALID_OBSERVATION
 - Adding a new base observation type (e.g., "forecast") requires updating `VALID_OBSERVATION_TYPES` and a schema migration
 - The `observe()` SDK method and CLI validate against the active `SchemaConfig`, not the global constant
 - Future: observation types could be stored in a database table for runtime registration (currently compile-time only)
+
+---
+
+## ADR-012: Per-Agent Local DuckDB Cache
+
+**Date:** 2026-05-19
+**Status:** Accepted
+
+### Context
+
+OHM uses a single `ohmd` daemon that owns the DuckDB file and serves all agents via HTTP REST API. This creates a single-writer bottleneck — every read and write goes through HTTP, adding latency and creating a single point of failure. Each agent needs fast local access to the knowledge graph for neighborhood queries, semantic search, graph analytics, and deep content retrieval.
+
+### Decision
+
+Each agent gets its own local DuckDB file for zero-latency reads and writes, with periodic sync to a shared DuckLake mirror. `OhmStore.for_agent(agent_name, ducklake_path=...)` creates a per-agent store at `~/.ohm/agents/{name}/ohm.duckdb`. Agents read/write locally (no HTTP, no network) and sync with DuckLake on heartbeat via `sync_heartbeat()`.
+
+### Consequences
+
+- **Zero-latency reads**: All queries are local DuckDB operations (microseconds, not milliseconds)
+- **No single point of failure**: If ohmd crashes, agents continue working locally
+- **No daemon dependency**: Agents can read/write without ohmd running
+- **Offline capability**: Agent works disconnected, syncs when reconnected
+- **Same API**: `OhmStore.for_agent()` returns the same `OhmStore` object
+- **Eventual consistency**: Changes from other agents visible only after sync_heartbeat()
+- **DuckLake lock**: Only one process writes to DuckLake at a time; agents sync through daemon or take turns
+- **ohmd becomes optional**: Still useful for HTTP-only clients and change feed

@@ -209,6 +209,18 @@ ohm = SchemaConfig()               # 18 node types — general knowledge graph (
 from ohm.store import OhmStore
 store = OhmStore(db_path="~/.ohm/ohm.duckdb", schema=SchemaConfig.topo())
 
+# Agent mode: per-agent local DuckDB with DuckLake sync
+store = OhmStore.for_agent(
+    agent_name="metis",
+    ducklake_path="/var/lib/ohm/ohm_lake.ducklake",
+    schema=SchemaConfig(),
+)
+# Read/write locally (zero latency, no HTTP)
+store.write_node(id="concept-x", label="X", type="concept", ...)
+node = store.get_node("concept-x")
+# Sync with other agents on heartbeat
+result = store.sync_heartbeat()  # → {"pushed": 3, "pulled": 7}
+
 # Custom domain
 custom = SchemaConfig(
     name="finance",
@@ -224,8 +236,9 @@ See [ADR-006](docs/adr/README.md#adr-006-advisory-schema-with-graduated-enforcem
 - **DuckLake** — shared mirror backend (canonical truth, time travel, change feed, Parquet storage)
 - **Quack** — DuckDB extension for concurrent access (loaded optionally; currently not active in production)
 - **Recursive CTEs** — graph traversal (zero-dependency, standard SQL)
-- **ohmd** — persistent daemon (owns the DuckDB file, runs HTTP server on port 8710)
-- **ohm.sdk** — Python SDK for programmatic agent access (connect_remote for daemon, connect for direct reads)
+- **ohmd** — persistent daemon (owns the shared DuckDB file, runs HTTP server on port 8710)
+- **ohm.sdk** — Python SDK for programmatic agent access (connect_http for daemon, for_agent for local DB, connect for direct reads)
+- **Per-agent mode** — each agent gets its own local DuckDB (OhmStore.for_agent) with DuckLake sync for multi-agent coordination (ADR-012)
 
 ## Status
 

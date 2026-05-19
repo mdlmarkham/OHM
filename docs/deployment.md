@@ -172,3 +172,55 @@ server {
 - [ ] Config file permissions: `600` (contains plaintext tokens)
 - [ ] Firewall allows only 443 (HTTPS), not 8710 (ohmd direct)
 - [ ] systemd service runs as unprivileged `ohm` user
+
+## Per-Agent Local DuckDB
+
+Each agent can run its own local DuckDB for zero-latency reads/writes,
+syncing to the shared DuckLake on heartbeat. This eliminates the
+single-writer bottleneck of the centralized daemon.
+
+### Setup
+
+```python
+from ohm.store import OhmStore
+from ohm.schema import SchemaConfig
+
+# Each agent creates its own store
+store = OhmStore.for_agent(
+    agent_name="metis",
+    ducklake_path="/var/lib/ohm/ohm_lake.ducklake",
+)
+
+# Read/write locally (zero latency, no HTTP)
+store.write_node(id="concept-x", label="X", type="concept", ...)
+node = store.get_node("concept-x")
+
+# Sync with other agents on heartbeat
+result = store.sync_heartbeat()
+# → {"pushed": 3, "pulled": 7, "last_sync": "..."}
+```
+
+### Architecture
+
+```
+Agent (local DuckDB)  ←→  DuckLake (shared Parquet)  ←→  Agent (local DuckDB)
+
+Each agent:
+  - Owns ~/.ohm/agents/{name}/ohm.duckdb
+  - Reads/writes locally (microsecond latency)
+  - Syncs to DuckLake on heartbeat (push + pull)
+  - No daemon required for local operations
+
+ohmd:
+  - Still useful for HTTP-only clients
+  - Provides /listen, /suggest, /deep endpoints
+  - Optional for agents using OhmStore.for_agent()
+```
+
+### Conflict Resolution
+
+- Last-write-wins by `updated_at` timestamp
+- Conflicts are rare in knowledge graphs (agents write different perspectives, not competing updates)
+- Challenge edges handle disagreements without conflict
+
+See [ADR-012](adr/0012-per-agent-local-cache.md) for full details.

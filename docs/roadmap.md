@@ -85,10 +85,10 @@
 - [ ] `ohm snapshot <timestamp>` CLI command (wraps /graph/at)
 - [ ] `ohm diff <date1> <date2>` CLI command
 - [ ] Change feed with intent (not just data — who/why, not just what)
-- [ ] Local DuckDB per-agent cache sync on heartbeat (currently single daemon-owned DuckDB)
+- [x] Local DuckDB per-agent cache sync on heartbeat — `OhmStore.for_agent()` (ADR-012)
 - [ ] Data versioning and cleanup policies
 
-**Deliverable:** DuckLake is live with 56 snapshots. Time-travel queries work via HTTP API. CLI commands and per-agent local caches remain.
+**Deliverable:** DuckLake is live with 56 snapshots. Time-travel queries work via HTTP API. CLI commands and per-agent local caches implemented.
 
 ## Phase 5: Advanced Queries + TOPO (Later)
 
