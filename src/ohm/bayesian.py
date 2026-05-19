@@ -989,3 +989,356 @@ def compute_sensitivity(
         "overturn_confounder_strength": overturn_strength,
         "interpretation": f"An unmeasured confounder would need RR>={round(e_value, 2)} with both {cause} and {effect} to explain away the observed effect (ATE={ate:.4f})",
     }
+
+
+def find_adjustment_sets(
+    conn,
+    cause: str,
+    effect: str,
+    *,
+    edge_types: list[str] | None = None,
+    leak_probability: float = 0.15,
+    max_network_size: int = 10,
+) -> dict[str, Any]:
+    """Find valid backdoor and frontdoor adjustment sets for causal identification.
+
+    Pearl's backdoor criterion: A set Z satisfies the backdoor criterion
+    relative to (X, Y) if:
+    1. No node in Z is a descendant of X
+    2. Z blocks every path from X to Y that has an arrow into X
+
+    Pearl's frontdoor criterion: A set Z satisfies the frontdoor criterion
+    relative to (X, Y) if:
+    1. Z intercepts all directed paths from X to Y
+    2. No unblocked path from X to Z has an arrow into Z
+    3. All unblocked paths from Z to Y are blocked by X
+
+    For efficiency, only the minimal adjustment set is computed for networks
+    larger than max_network_size nodes.
+
+    Args:
+        conn: DuckDB connection.
+        cause: Node ID for the treatment variable (X).
+        effect: Node ID for the outcome variable (Y).
+        edge_types: Edge types to include in the network.
+        leak_probability: Baseline probability of bad outcome.
+        max_network_size: Only enumerate all adjustment sets for networks
+            with this many nodes or fewer.
+
+    Returns:
+        Dict with backdoor sets, frontdoor sets, minimal adjustment set,
+        identification method, and adjusted estimates.
+    """
+    import networkx as nx
+    import signal
+
+    cause = validate_identifier(cause, name="cause")
+    effect = validate_identifier(effect, name="effect")
+
+    if not PGMPY_AVAILABLE:
+        return {
+            "method": "none",
+            "pgmpy_available": False,
+            "cause": cause,
+            "effect": effect,
+            "error": "pgmpy not available — adjustment sets require pgmpy",
+        }
+
+    # Build the Bayesian network
+    network = build_bayesian_network(
+        conn,
+        edge_types=edge_types,
+        leak_probability=leak_probability,
+    )
+    if network is None:
+        return {
+            "method": "none",
+            "cause": cause,
+            "effect": effect,
+            "error": "No probability-bearing edges found — cannot build network",
+        }
+
+    bn = network["model"]
+    safe_cause = _safe_node_id(cause)
+    safe_effect = _safe_node_id(effect)
+
+    # Check if both nodes exist in the network
+    if safe_cause not in bn.nodes():
+        return {"method": "none", "cause": cause, "effect": effect,
+                "error": f"Node {cause} not found in Bayesian network"}
+    if safe_effect not in bn.nodes():
+        return {"method": "none", "cause": cause, "effect": effect,
+                "error": f"Node {effect} not found in Bayesian network"}
+
+    # Use pgmpy's CausalInference to find adjustment sets
+    from pgmpy.inference import CausalInference
+
+    ci = CausalInference(bn)
+    n_nodes = len(bn.nodes())
+    result = {
+        "method": "adjustment_sets",
+        "pgmpy_available": True,
+        "cause": cause,
+        "effect": effect,
+        "network_info": {
+            "n_nodes": network["n_nodes"],
+            "n_edges": network["n_edges"],
+        },
+    }
+
+    # --- Minimal adjustment set (always fast) ---
+    try:
+        minimal = ci.get_minimal_adjustment_set(safe_cause, safe_effect)
+        if minimal is not None:
+            ohm_minimal = [s.replace("_", "-") for s in minimal]
+            result["minimal_adjustment_set"] = ohm_minimal
+        else:
+            result["minimal_adjustment_set"] = None
+    except Exception as e:
+        logger.warning(f"Minimal adjustment set computation failed: {e}")
+        result["minimal_adjustment_set"] = None
+
+    # --- Backdoor criterion check ---
+    # Check if the empty set satisfies the backdoor criterion (no confounders)
+    # Use a simple graph-based check: are there any non-causal paths from cause to effect?
+    # This is O(V+E) rather than exponential
+    try:
+        import networkx as nx
+        # Build the underlying graph from the BN
+        G = nx.DiGraph(bn.edges())
+        # If cause has no parents in the DAG, there are no backdoor paths
+        cause_parents = list(bn.get_parents(safe_cause))
+        result["empty_set_satisfies_backdoor"] = len(cause_parents) == 0
+        result["cause_has_parents"] = len(cause_parents) > 0
+        if cause_parents:
+            result["cause_parents"] = [p.replace("_", "-") for p in cause_parents]
+        else:
+            result["cause_parents"] = []
+    except Exception as e:
+        logger.warning(f"Backdoor criterion check failed: {e}")
+        result["empty_set_satisfies_backdoor"] = None
+        result["cause_parents"] = []
+
+    # --- Frontdoor identification via graph structure ---
+    # A node Z is a frontdoor criterion node if:
+    # 1. X → Z (all causal paths go through Z)
+    # 2. Z → Y (Z causes Y)
+    # 3. No unblocked X ← Z path (X doesn't confound Z)
+    # For efficiency, check children of cause that are also parents of effect
+    try:
+        cause_children = set(bn.get_children(safe_cause))
+        effect_parents = set(bn.get_parents(safe_effect))
+        frontdoor_candidates = cause_children & effect_parents
+        result["frontdoor_nodes"] = [n.replace("_", "-") for n in frontdoor_candidates]
+        result["n_frontdoor_nodes"] = len(frontdoor_candidates)
+    except Exception as e:
+        logger.warning(f"Frontdoor check failed: {e}")
+        result["frontdoor_nodes"] = []
+        result["n_frontdoor_nodes"] = 0
+
+    # --- Instrumental variables ---
+    try:
+        ivs = ci.get_ivs(safe_cause, safe_effect)
+        if ivs:
+            result["instrumental_variables"] = [s.replace("_", "-") for s in ivs]
+        else:
+            result["instrumental_variables"] = []
+    except Exception as e:
+        logger.warning(f"Instrumental variable computation failed: {e}")
+        result["instrumental_variables"] = []
+
+    # --- Identification method ---
+    # Determine identification method from graph structure (fast, no exponential enumeration)
+    cause_parents = result.get("cause_parents", [])
+    frontdoor_nodes = result.get("frontdoor_nodes", [])
+    instrumental = result.get("instrumental_variables", [])
+
+    if result.get("empty_set_satisfies_backdoor"):
+        result["identification_method"] = "direct"  # No confounders
+    elif result.get("minimal_adjustment_set"):
+        result["identification_method"] = "backdoor_adjustment"
+    elif frontdoor_nodes:
+        result["identification_method"] = "frontdoor"
+    elif instrumental:
+        result["identification_method"] = "instrumental_variable"
+    else:
+        result["identification_method"] = "unidentified"  # Can't identify the causal effect
+
+    # --- Adjusted estimates using backdoor ---
+    if result.get("minimal_adjustment_set"):
+        try:
+            adj_set_safe = set(_safe_node_id(n) for n in result["minimal_adjustment_set"])
+            posterior = ci.query(
+                variables=[safe_effect],
+                do={safe_cause: 0},  # do(cause=bad)
+                adjustment_set=adj_set_safe,
+                show_progress=False,
+            )
+            # Extract posterior
+            p_bad = float(posterior.values[0])  # state 0 = bad
+            p_good = float(posterior.values[1])  # state 1 = good
+            result["adjusted_estimate"] = {
+                "method": "backdoor_adjustment",
+                "adjustment_set": result["minimal_adjustment_set"],
+                "P_effect_bad_do_cause_bad": round(p_bad, 4),
+                "P_effect_good_do_cause_bad": round(p_good, 4),
+            }
+        except Exception as e:
+            logger.warning(f"Adjusted estimate computation failed: {e}")
+            result["adjusted_estimate"] = {"error": str(e)}
+    else:
+        result["adjusted_estimate"] = None
+
+    # --- Interpretation ---
+    min_adj = result.get("minimal_adjustment_set")
+    n_iv = len(result.get("instrumental_variables", []))
+    n_fd = result.get("n_frontdoor_nodes", 0)
+    empty_valid = result.get("empty_set_satisfies_backdoor")
+
+    if empty_valid:
+        interp = f"No confounders detected between {cause} and {effect} — the do-operator result is unbiased. No adjustment needed."
+    elif min_adj:
+        interp = f"Adjusting for {min_adj} blocks all backdoor paths from {cause} to {effect}, giving a valid causal estimate"
+    elif n_fd > 0:
+        interp = f"No backdoor adjustment sets, but {n_fd} frontdoor node(s) found — causal effect can be identified via intermediate mechanisms"
+    elif n_iv > 0:
+        interp = f"No backdoor/frontdoor sets, but {n_iv} instrumental variable(s) found — causal effect can be bounded but not point-identified"
+    else:
+        interp = f"No adjustment sets found — {cause} and {effect} may not be causally connected, or identification is not possible with observed variables"
+
+    result["interpretation"] = interp
+
+    return result
+
+
+def suggest_causes(
+    conn,
+    *,
+    edge_types: list[str] | None = None,
+    min_confidence: float = 0.5,
+) -> dict[str, Any]:
+    """Suggest candidate CAUSES edges from existing non-causal relationships.
+
+    Scans DEPENDS_ON, APPLIES_TO, REFINES, INFLUENCES, and EXPECTED_LIKELIHOOD
+    edges for node pairs that are connected but lack a CAUSES edge. These are
+    candidates for causal relationships that should be evaluated by agents.
+
+    Also identifies nodes with high centrality that lack causal parents —
+    these may have unmeasured causes (latent confounders).
+
+    Args:
+        conn: DuckDB connection.
+        edge_types: Edge types to consider as causal candidates.
+        min_confidence: Minimum confidence threshold for candidate suggestions.
+
+    Returns:
+        Dict with candidate_causes (pairs missing CAUSES) and
+        unmeasured_causes (nodes with no causal parents but high centrality).
+    """
+    import networkx as nx
+
+    # Candidate edge types that might indicate causal relationships
+    candidate_types = ["DEPENDS_ON", "APPLIES_TO", "REFINES", "INFLUENCES", "EXPECTED_LIKELIHOOD"]
+
+    # Find all edges of candidate types
+    placeholders = ",".join(["?"] * len(candidate_types))
+    query = f"""
+        SELECT from_node, to_node, edge_type, confidence
+        FROM ohm_edges
+        WHERE edge_type IN ({placeholders})
+        AND deleted_at IS NULL
+        AND confidence IS NOT NULL
+        ORDER BY confidence DESC
+    """
+    candidate_edges = conn.execute(query, candidate_types).fetchall()
+
+    # Find all existing CAUSES edges
+    causes_query = """
+        SELECT from_node, to_node
+        FROM ohm_edges
+        WHERE edge_type = 'CAUSES'
+        AND deleted_at IS NULL
+    """
+    causes_edges = set(
+        (r[0], r[1]) for r in conn.execute(causes_query).fetchall()
+    )
+
+    # Find candidate pairs that don't have a CAUSES edge yet
+    candidates = []
+    for from_node, to_node, edge_type, confidence in candidate_edges:
+        if confidence >= min_confidence and (from_node, to_node) not in causes_edges:
+            # Also check if reverse CAUSES exists
+            reverse_exists = (to_node, from_node) in causes_edges
+            candidates.append({
+                "from": from_node,
+                "to": to_node,
+                "existing_edge_type": edge_type,
+                "confidence": float(confidence) if confidence else None,
+                "reverse_causes_exists": reverse_exists,
+                "suggestion": f"Consider adding CAUSES edge from {from_node} to {to_node} (currently: {edge_type})",
+            })
+
+    # Find nodes with no causal parents but high centrality
+    # These may have unmeasured causes (latent confounders)
+    # Build a NetworkX graph from CAUSES edges
+    causes_rows = conn.execute("""
+        SELECT from_node, to_node, probability, confidence
+        FROM ohm_edges
+        WHERE edge_type = 'CAUSES'
+        AND deleted_at IS NULL
+    """).fetchall()
+
+    G = nx.DiGraph()
+    node_set = set()
+    for from_n, to_n, prob, conf in causes_rows:
+        G.add_edge(from_n, to_n)
+        node_set.add(from_n)
+        node_set.add(to_n)
+
+    # Find nodes that are NOT in CAUSES edges at all (no causal parents, no causal children)
+    # And nodes that are in CAUSES but have no parents (root nodes)
+    all_nodes_query = """
+        SELECT id, label, type FROM ohm_nodes WHERE deleted_at IS NULL
+    """
+    all_nodes = {r[0]: {"label": r[1], "type": r[2]} for r in conn.execute(all_nodes_query).fetchall()}
+
+    # Nodes with CAUSES children but no CAUSES parents = root cause candidates
+    root_causes = []
+    for node in node_set:
+        if G.in_degree(node) == 0 and G.out_degree(node) > 0:
+            node_info = all_nodes.get(node, {})
+            root_causes.append({
+                "id": node,
+                "label": node_info.get("label", node),
+                "type": node_info.get("type", "unknown"),
+                "out_degree": G.out_degree(node),
+                "suggestion": f"{node} is a root cause with {G.out_degree(node)} causal children — verify no unmeasured confounders",
+            })
+
+    # Nodes not in any CAUSES edge = potentially missing causal structure
+    disconnected = []
+    for node_id, node_info in all_nodes.items():
+        if node_id not in node_set:
+            disconnected.append({
+                "id": node_id,
+                "label": node_info.get("label", node_id),
+                "type": node_info.get("type", "unknown"),
+                "suggestion": f"{node_id} has no CAUSES edges — consider adding causal relationships",
+            })
+
+    return {
+        "method": "suggest_causes",
+        "candidate_causes_edges": candidates[:20],  # Top 20 by confidence
+        "n_candidates": len(candidates),
+        "root_causes": root_causes,
+        "n_root_causes": len(root_causes),
+        "disconnected_from_causal": disconnected[:20],  # Top 20
+        "n_disconnected": len(disconnected),
+        "causal_edge_count": len(causes_edges),
+        "interpretation": (
+            f"Found {len(candidates)} candidate CAUSES relationships from non-causal edges. "
+            f"{len(root_causes)} root cause nodes and {len(disconnected)} nodes disconnected "
+            f"from the causal graph. Review candidates and add CAUSES edges where "
+            f"appropriate."
+        ),
+    }

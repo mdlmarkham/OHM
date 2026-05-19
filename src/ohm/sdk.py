@@ -3075,6 +3075,55 @@ def connect_http(
             path = "/sensitivity?" + "&".join(params)
             return self._http_request("GET", path)
 
+        def adjustment(
+            self,
+            cause: str,
+            effect: str,
+            *,
+            leak_probability: float = 0.15,
+        ) -> dict[str, Any]:
+            """Find valid backdoor/frontdoor adjustment sets for causal identification.
+
+            Uses Pearl's criteria to identify which variables to condition on
+            to get an unbiased estimate of the causal effect of cause on effect.
+
+            Args:
+                cause: Node ID for the treatment variable.
+                effect: Node ID for the outcome variable.
+                leak_probability: Baseline probability of bad outcome.
+
+            Returns:
+                Dict with backdoor sets, frontdoor sets, minimal adjustment set,
+                instrumental variables, and adjusted estimates.
+            """
+            import urllib.parse
+            params = [f"cause={urllib.parse.quote(cause)}"]
+            params.append(f"effect={urllib.parse.quote(effect)}")
+            params.append(f"leak={leak_probability}")
+            path = "/adjustment?" + "&".join(params)
+            return self._http_request("GET", path)
+
+        def suggest_causes(
+            self,
+            *,
+            min_confidence: float = 0.5,
+        ) -> dict[str, Any]:
+            """Suggest candidate CAUSES edges from existing non-causal relationships.
+
+            Scans DEPENDS_ON, APPLIES_TO, REFINES, INFLUENCES, and EXPECTED_LIKELIHOOD
+            edges for pairs that lack CAUSES edges. Also identifies root cause nodes
+            and nodes disconnected from the causal graph.
+
+            Args:
+                min_confidence: Minimum confidence threshold for candidates.
+
+            Returns:
+                Dict with candidate_causes, root_causes, and disconnected nodes.
+            """
+            import urllib.parse
+            path = f"/suggest_causes?min_confidence={min_confidence}"
+            return self._http_request("GET", path)
+
         def lint(
             self,
             *,
