@@ -1043,7 +1043,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             else:
                 raise EdgeNotFoundError(f"Edge {edge_id} not found")
         elif path.startswith("/neighborhood/"):
-            node_id = path[13:]
+            node_id = path[14:]  # strip "/neighborhood/"
             from .validation import validate_identifier
             node_id = validate_identifier(node_id, name="node_id")
             depth = int(qs.get("depth", [3])[0])

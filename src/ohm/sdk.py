@@ -2751,6 +2751,30 @@ def connect_http(
             from ohm.methods import compound_confidence as _cc
             return _cc(observations, correlation=correlation)
 
+        def record_outcome(
+            self,
+            *,
+            source_agent: str,
+            claim_node: str,
+            outcome: bool,
+        ) -> dict[str, Any]:
+            """Record whether a source agent's claim was correct or incorrect via HTTP."""
+            body = {
+                "source_agent": source_agent,
+                "claim_node": claim_node,
+                "outcome": outcome,
+            }
+            return self._http_request("POST", "/outcome", body)
+
+        def source_reliability(
+            self,
+            source_agent: str,
+        ) -> dict[str, Any]:
+            """Compute source reliability metrics from historical outcomes via HTTP."""
+            import urllib.parse
+            path = f"/reliability/{urllib.parse.quote(source_agent)}"
+            return self._http_request("GET", path)
+
         # ── Task management ──────────────────────────────────────────────
 
         def create_task(
