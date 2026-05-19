@@ -674,8 +674,8 @@ def query_stats(conn: DuckDBPyConnection) -> dict[str, Any]:
     """).fetchone()
     total_l3_l4 = l3_l4_row[0] if l3_l4_row else 0
     challenged_row = conn.execute("""
-        SELECT COUNT(DISTINCT challenge_of) FROM ohm_edges WHERE deleted_at IS NULL
-        WHERE challenge_of IS NOT NULL
+        SELECT COUNT(DISTINCT challenge_of) FROM ohm_edges
+        WHERE deleted_at IS NULL AND challenge_of IS NOT NULL
     """).fetchone()
     challenged = challenged_row[0] if challenged_row else 0
     stats["challenge_ratio"] = round(challenged / total_l3_l4, 4) if total_l3_l4 > 0 else 0.0
