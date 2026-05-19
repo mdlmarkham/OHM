@@ -936,9 +936,8 @@ class OhmStore:
     def list_snapshots(self, alias: str = "ohm_lake") -> list[dict[str, Any]]:
         """List available DuckLake snapshots.
 
-        Queries the DuckLake snapshots() function to return all
-        historical snapshots with their IDs, timestamps, and commit
-        messages.
+        Queries DuckLake snapshots metadata to return all historical
+        snapshots with their IDs, timestamps, and commit messages.
 
         Args:
             alias: Database alias for the attached DuckLake catalog.
@@ -961,12 +960,22 @@ class OhmStore:
 
         try:
             rows = self.conn.execute(
-                f"SELECT * FROM {alias}.snapshots() ORDER BY snapshot_id ASC"
+                "SELECT * FROM ducklake_snapshots(?) ORDER BY snapshot_id ASC",
+                [alias],
             ).fetchall()
             columns = [desc[0] for desc in self.conn.description]
             return [dict(zip(columns, row)) for row in rows]
-        except Exception as e:
-            raise OHMError(f"Failed to list DuckLake snapshots: {e}") from e
+        except Exception:
+            # Fallback for older DuckLake builds that expose snapshots() on
+            # the attached alias rather than ducklake_snapshots(alias).
+            try:
+                rows = self.conn.execute(
+                    f"SELECT * FROM {alias}.snapshots() ORDER BY snapshot_id ASC"
+                ).fetchall()
+                columns = [desc[0] for desc in self.conn.description]
+                return [dict(zip(columns, row)) for row in rows]
+            except Exception as e:
+                raise OHMError(f"Failed to list DuckLake snapshots: {e}") from e
 
     def graph_at_version(
         self,
