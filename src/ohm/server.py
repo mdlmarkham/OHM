@@ -1028,7 +1028,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             else:
                 raise EdgeNotFoundError(f"Edge {edge_id} not found")
         elif path.startswith("/neighborhood/"):
-            node_id = path[14:]
+            node_id = path[13:]
             from .validation import validate_identifier
             node_id = validate_identifier(node_id, name="node_id")
             depth = int(qs.get("depth", [3])[0])
@@ -1455,7 +1455,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             self._json_response(200, result)
         elif path.startswith("/reliability/"):
             # Compute source reliability metrics from historical outcomes
-            source_agent = path[14:]  # strip /reliability/
+            source_agent = path[13:]  # strip /reliability/
             from .validation import validate_identifier
             source_agent = validate_identifier(source_agent, name="source_agent")
             from .queries import query_source_reliability

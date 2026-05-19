@@ -172,17 +172,42 @@ OHM serves multiple domains with the same core engine. The schema, layer model, 
 | Supply chain disruption | `probability` on edges, `cascade_scenario()`, `what_if()`, Monte Carlo | [supply-chain-scenario.md](docs/supply-chain-scenario.md) |
 | Customer support | `handoff()`, `escalate()`, priority/urgency, sentiment observations | [customer-support-scenario.md](docs/customer-support-scenario.md) |
 | Cattle operations | Composite scoring, temporal decay, batch expiry | [cattle-scenario.md](docs/cattle-scenario.md) |
+| Beef herd management | AND-gate analysis, drought response, disease cascades, PLF adoption | [beef-herd-scenario.md](docs/beef-herd-scenario.md) |
 | Retail inventory | `BATCH_EXPIRES_BEFORE`, demand forecasting, SSE filtering | [retail-scenario.md](docs/retail-scenario.md) |
+
+### Task Management
+
+All domains include `task` as a first-class node type. Tasks have status (`open`/`in_progress`/`blocked`/`review`/`done`/`cancelled`), assignment (`assigned_to`), priority (`P0`–`P4`), and due dates. They link to concepts via `REFERENCES` edges, to agents via `DELEGATED_TO` edges, and to other tasks via `DEPENDS_ON`/`BLOCKS` edges.
+
+A task in OHM isn't just "do X" — it's "do X *because* of these concepts, *assigned to* this agent, *depending on* these other tasks." The graph context makes every task intelligible to any agent.
+
+```bash
+# REST API
+GET /tasks?status=open&assigned_to=socrates&priority=P1
+
+# SDK
+task = graph.create_task(id="task-1", label="Validate pattern", ...)
+graph.list_tasks(status="open", assigned_to="socrates")
+graph.update_task_status("task-1", "in_progress")
+```
+
+See [domain-configs.md](docs/domain-configs.md) for full task management documentation.
 
 ### Domain Extension Pattern
 
-Each domain extends OHM through `SchemaConfig` — adding node types, edge types, and observation types without modifying the base schema:
+Each domain extends OHM through `SchemaConfig` — adding node types, edge types, and observation types without modifying the base schema. OHM is the engine; domains are the configuration.
 
 ```python
 from ohm.schema import SchemaConfig
 
-# TOPO (industrial) extends the base with equipment types and sensor observations
-topo = SchemaConfig.topo()
+# Built-in domain configs
+topo = SchemaConfig.topo()          # 36 node types — industrial process plants
+beef = SchemaConfig.beef_herd()    # 30 node types — cattle ranching, drought, markets
+ohm = SchemaConfig()               # 18 node types — general knowledge graph (default)
+
+# Library mode: use OHM without running a daemon
+from ohm.store import OhmStore
+store = OhmStore(db_path="~/.ohm/ohm.duckdb", schema=SchemaConfig.topo())
 
 # Custom domain
 custom = SchemaConfig(
@@ -204,9 +229,20 @@ See [ADR-006](docs/adr/README.md#adr-006-advisory-schema-with-graduated-enforcem
 
 ## Status
 
-OHM is in early design. The architecture is informed by:
+OHM v0.13.0. Production use by 7 agents (Atlas, Métis, Clio, Socrates, Hephaestus, DeepThought, Hera). All P0+P1 bugs resolved. Features:
+
+- Task management (first-class `task` node type with status, assignment, due dates)
+- Domain configurations (`SchemaConfig.topo()`, `SchemaConfig.beef_herd()`, custom)
+- Auto-embedding on node creation (Ollama mxbai-embed-large)
+- Auto-recovery from DuckDB FatalException (rebuilds from DuckLake mirror)
+- Soft delete (no more DB corruption from hard DELETE)
+- Schema migration framework (ohm_meta version tracking)
+- 260+ nodes, 330+ edges, semantic search, confidence/challenge audit
+
+The architecture is informed by:
 - **TOPO** — industrial knowledge graph (L1-L4 layer model, confidence scores, challenge edges)
 - **Quack** — DuckDB client-server protocol (concurrent access, token auth)
+- **Agent governance convergence** — identity stability, actuarial gaps, authorization gaps (Sakimura/EIC 2026)
 - **DuckLake** — production lakehouse format (change feed, time travel, data inlining)
 - **marimo-pair** — agent co-creation interface (shared notebook, reactive graph)
 
