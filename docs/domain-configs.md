@@ -8,11 +8,13 @@ OHM is a knowledge graph **engine**, not an application. The engine provides:
 - Schema validation (node types, edge types, layers)
 - Write operations (nodes, edges, observations, challenges)
 - Query operations (search, neighborhood, path, semantic search)
+- Graph analytics (orphans, hubs, dead ends, suggestions, stats)
 - Change feed (listen for mutations)
 - Confidence tracking (compound confidence, challenge audit)
 - Task management (first-class task nodes)
 - Crash recovery (WAL recovery, DuckLake rebuild)
 - Embedding-based semantic search (with local Ollama)
+- Deep content retrieval (follows node URLs to full source files)
 
 Applications configure the engine for their domain via `SchemaConfig` and build their own business logic on top.
 
@@ -282,6 +284,73 @@ The key design decision: a task in OHM is not a separate entity from the knowled
 4. **Tasks appear in change feed**: `/listen?since=2026-05-19T12:00:00Z` shows task creation, status changes, and assignments.
 
 5. **Content depth matters**: OHM nodes with 500-800 char summaries produce significantly better semantic search results than 200-char summaries. The embedding model (mxbai-embed-large) supports ~2000 chars of input; use 800 chars for the best balance of semantic richness and performance.
+
+## Deep Content Retrieval
+
+OHM stores **summaries** in the `content` field (500-800 chars) for fast semantic search. Full content lives elsewhere — in markdown files, web pages, or external databases — and the `url` field links to it.
+
+The `/deep/{node_id}` endpoint follows that link:
+
+```bash
+# Retrieve full content for a node
+GET /deep/concept-and-or-conversion
+```
+
+**How it works:**
+
+1. If the node has a `url` pointing to a local `.md` file:
+   - **With DuckDB markdown extension**: Parses the markdown, extracts frontmatter metadata, converts to plain text with `md_to_text()`. Returns structured content with metadata.
+   - **Without markdown extension**: Reads the file as plain text. Still works, just no parsing.
+
+2. If the node has no `url`: Returns the `content` field as-is.
+
+3. If the `url` is remote (http/https): Returns the `content` field with a note that the source is remote.
+
+**The DuckDB markdown extension is optional.** OHM works fully without it — the extension is an accelerator that provides structured parsing of local markdown files. If it's not available, OHM falls back to plain text reads.
+
+**Architecture pattern: OHM as index, Zettelkasten as archive.**
+
+```
+Zettelkasten (5,000+ chars)          OHM (500-800 chars)
+┌─────────────────────┐             ┌─────────────────────┐
+│ # AND→OR Conversion │───url──────▶│ AND→OR Conversion   │
+│                     │             │                     │
+│ Full argumentation, │             │ Summary for search  │
+│ examples, sources, │             │ + semantic embedding │
+│ cross-references    │             │ + graph connections  │
+└─────────────────────┘             └─────────────────────┘
+         ▲                                    │
+         │                                    │
+         └──── /deep/{id} follows url ────────┘
+```
+
+Semantic search finds the concept in OHM. `/deep/{id}` retrieves the full content from the archive. The graph provides the connections between concepts.
+
+## Graph Analytics
+
+OHM provides Zettelkasten-style discovery endpoints:
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /orphans` | Nodes with zero edges — disconnected from the graph |
+| `GET /hubs` | Most-connected nodes — anchors of the graph |
+| `GET /dead_ends` | Nodes with only incoming edges — sinks that don't lead anywhere |
+| `GET /suggest` | Suggested connections between unconnected nodes (shared_provenance, shared_type, semantic) |
+| `GET /graph/stats` | Extended statistics (density, orphan/hub/dead-end counts, avg confidence) |
+
+```bash
+# Find nodes needing connections
+GET /orphans?exclude_system=true
+
+# Find the most-connected concepts
+GET /hubs?type=concept&min_connections=5
+
+# Get connection suggestions
+GET /suggest?method=semantic&limit=10
+
+# Full graph statistics
+GET /graph/stats
+```
 
 ## Adoption Path
 
