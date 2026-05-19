@@ -2532,7 +2532,7 @@ def connect_http(
             self._token = token
 
         def _http_request(self, method: str, path: str, body: dict | None = None) -> dict:
-            """Make an HTTP request to the ohmd daemon."""
+            """Make an HTTP request to the ohmd daemon with timeout."""
             url = f"{self._base_url}{path}"
             data = json.dumps(body).encode() if body else None
             headers = {"Content-Type": "application/json"}
@@ -2541,11 +2541,15 @@ def connect_http(
 
             req = urllib.request.Request(url, data=data, headers=headers, method=method)
             try:
-                with urllib.request.urlopen(req) as resp:
+                with urllib.request.urlopen(req, timeout=30) as resp:
                     return json.loads(resp.read())
             except urllib.error.HTTPError as e:
                 error_body = e.read().decode() if e.fp else str(e)
                 raise ConnectionError(f"HTTP {e.code} from {method} {path}: {error_body}") from e
+            except urllib.error.URLError as e:
+                raise ConnectionError(f"Connection failed for {method} {path}: {e.reason}") from e
+            except TimeoutError as e:
+                raise ConnectionError(f"Timeout for {method} {path}: request took longer than 30s") from e
 
         def create_node(self, label: str, *, node_type: str = "concept", **kwargs) -> dict[str, Any]:
             """Create a node via HTTP API. Auto-generates ID from label."""
@@ -2594,7 +2598,7 @@ def connect_http(
             return self._http_request("GET", path)
 
         def search(self, query: str, *, node_type: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
-            """Search nodes via the daemon's /search endpoint.
+            """Search nodes via the daemon's /search endpoint (ILIKE text search).
 
             Args:
                 query: Text to search for in labels and content.
@@ -2604,11 +2608,71 @@ def connect_http(
             Returns:
                 List of matching node records.
             """
-            params = [f"q={query}", f"limit={limit}"]
+            import urllib.parse
+            params = [f"q={urllib.parse.quote(query)}", f"limit={limit}"]
             if node_type:
                 params.append(f"type={node_type}")
             path = "/search?" + "&".join(params)
             return self._http_request("GET", path)
+
+        def semantic_search(self, query: str, *, node_type: str | None = None,
+                           limit: int = 10, min_confidence: float | None = None) -> list[dict[str, Any]]:
+            """Search nodes via semantic similarity using embeddings.
+
+            Args:
+                query: Natural language text to search for.
+                node_type: Optional type filter.
+                limit: Maximum results (default 10).
+                min_confidence: Minimum confidence threshold.
+
+            Returns:
+                List of dicts with node_id, label, type, confidence, distance.
+            """
+            import urllib.parse
+            params = [f"q={urllib.parse.quote(query)}", f"limit={limit}"]
+            if node_type:
+                params.append(f"type={node_type}")
+            if min_confidence is not None:
+                params.append(f"min_confidence={min_confidence}")
+            path = "/semantic_search?" + "&".join(params)
+            return self._http_request("GET", path)
+
+        def neighborhood(self, node_id: str, *, depth: int = 1) -> list[dict[str, Any]]:
+            """Get edges in the neighborhood of a node.
+
+            Args:
+                node_id: The center node ID.
+                depth: How many hops to explore (default 1).
+
+            Returns:
+                List of edge records in the neighborhood.
+            """
+            path = f"/neighborhood/{node_id}?depth={depth}"
+            return self._http_request("GET", path)
+
+        def delete_node(self, node_id: str) -> dict[str, Any]:
+            """Delete a node via HTTP API."""
+            return self._http_request("DELETE", f"/node/{node_id}")
+
+        def get_node(self, node_id: str) -> dict[str, Any] | None:
+            """Get a node by ID."""
+            try:
+                return self._http_request("GET", f"/node/{node_id}")
+            except ConnectionError as e:
+                if "404" in str(e):
+                    return None
+                raise
+
+        def challenge(self, node_id: str, *, value: float | None = None, 
+                      sigma: float = 0.5, notes: str | None = None,
+                      challenge_type: str | None = None) -> dict[str, Any]:
+            """Challenge a node with an observation."""
+            body = {"value": value, "sigma": sigma}
+            if notes:
+                body["notes"] = notes
+            if challenge_type:
+                body["challenge_type"] = challenge_type
+            return self._http_request("POST", f"/challenge/{node_id}", body)
 
     graph = HttpGraph(conn, actor, base_url, resolved_token)
     graph.token = resolved_token
