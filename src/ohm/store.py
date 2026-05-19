@@ -75,6 +75,17 @@ class OhmStore:
             self.conn = self._connect_with_wal_recovery(str(self.db_path), readonly)
         self._init_schema()
 
+        # Try to load DuckDB markdown extension (optional)
+        # Enables rich content features: read_markdown, md_to_text, etc.
+        self.markdown_available = False
+        try:
+            self.conn.execute("INSTALL markdown FROM community")
+            self.conn.execute("LOAD markdown")
+            self.markdown_available = True
+            logger.info("DuckDB markdown extension loaded — rich content features available")
+        except Exception:
+            logger.info("DuckDB markdown extension not available — rich content features disabled, OHM works fine without it")
+
         # Start Quack server if requested and available
         if self.quack and not self.readonly:
             self._start_quack()
@@ -435,6 +446,106 @@ class OhmStore:
         except Exception as e:
             # Best-effort: never fail node creation because of embedding issues
             logger.debug("Auto-embed failed for node %s: %s", node_id, e)
+
+    def deep_content(self, node_id: str) -> dict[str, Any]:
+        """Retrieve deep content for a node.
+
+        If the node has a URL pointing to a local markdown file and the
+        DuckDB markdown extension is available, reads the full file and
+        returns parsed content. Otherwise, returns the node's content field.
+
+        This is the bridge between OHM as index and Zettelkasten as archive:
+        - OHM stores 500-800 char summaries for semantic search
+        - The url field points to the full note
+        - deep_content() follows the link and returns the full note
+
+        Args:
+            node_id: The node to retrieve deep content for.
+
+        Returns:
+            Dict with node data plus 'deep_content' (full file content)
+            and 'deep_content_type' ('markdown', 'text', or 'none').
+        """
+        # Get the node
+        node = self.get_node(node_id)
+        if not node:
+            raise NodeNotFoundError(f"Node not found: {node_id}")
+
+        result = dict(node)
+        result["deep_content"] = None
+        result["deep_content_type"] = "none"
+        result["deep_content_source"] = None
+
+        url = node.get("url")
+        if not url:
+            # No URL — just return the content as-is
+            result["deep_content"] = node.get("content", "")
+            result["deep_content_type"] = "text"
+            return result
+
+        # Try to read local file
+        file_path = None
+        if url.startswith("file://"):
+            file_path = url[7:]
+        elif url.startswith("/"):
+            file_path = url
+        else:
+            # Not a local file — return content as-is
+            result["deep_content"] = node.get("content", "")
+            result["deep_content_type"] = "text"
+            result["deep_content_source"] = url
+            return result
+
+        # Check if file exists
+        if not os.path.exists(file_path):
+            result["deep_content"] = node.get("content", "")
+            result["deep_content_type"] = "text"
+            result["deep_content_source"] = f"file not found: {file_path}"
+            return result
+
+        # If markdown extension is available and file is .md, parse it
+        if self.markdown_available and file_path.endswith(".md"):
+            try:
+                # Read full content
+                full_content = Path(file_path).read_text(encoding="utf-8")
+
+                # Try to extract plain text for embeddings/search
+                plain_text = self.conn.execute(
+                    "SELECT md_to_text(?)",
+                    [full_content]
+                ).fetchone()
+                plain_text = plain_text[0] if plain_text else full_content
+
+                # Try to extract frontmatter metadata
+                try:
+                    metadata = self.conn.execute(
+                        "SELECT md_extract_metadata(?)",
+                        [full_content]
+                    ).fetchone()
+                    result["frontmatter"] = metadata[0] if metadata else None
+                except Exception:
+                    result["frontmatter"] = None
+
+                result["deep_content"] = plain_text
+                result["deep_content_type"] = "markdown"
+                result["deep_content_source"] = file_path
+                return result
+            except Exception as e:
+                logger.debug("Markdown extension parsing failed for %s: %s", file_path, e)
+                # Fall through to plain text read
+
+        # Plain text fallback
+        try:
+            full_content = Path(file_path).read_text(encoding="utf-8")
+            result["deep_content"] = full_content
+            result["deep_content_type"] = "text"
+            result["deep_content_source"] = file_path
+            return result
+        except Exception as e:
+            result["deep_content"] = node.get("content", "")
+            result["deep_content_type"] = "text"
+            result["deep_content_source"] = f"read error: {e}"
+            return result
 
     def write_edge(
         self,

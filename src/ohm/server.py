@@ -1021,6 +1021,18 @@ class OhmHandler(BaseHTTPRequestHandler):
                 self._json_response(200, node)
             else:
                 raise NodeNotFoundError(f"Node {node_id} not found")
+        elif path.startswith("/deep/"):
+            # Deep content retrieval — follows node URL to full source
+            node_id = path[6:]
+            from .validation import validate_identifier
+            node_id = validate_identifier(node_id, name="node_id")
+            try:
+                result = self.store.deep_content(node_id)
+                self._json_response(200, result)
+            except NodeNotFoundError:
+                raise
+            except Exception as e:
+                self._json_response(500, {"error": "deep_content_failed", "message": str(e)})
         elif path.startswith("/edge/"):
             edge_id = path[6:]
             from .validation import validate_identifier
