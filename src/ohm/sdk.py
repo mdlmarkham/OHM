@@ -2530,26 +2530,16 @@ def connect_http(
     """
     import json
     import os
-    import http.client
-    from urllib.parse import urlparse
+    import urllib.request
+    import urllib.error
 
     from ohm.db import connect as db_connect
 
     resolved_token = token or os.environ.get("OHM_TOKEN")
     conn = db_connect(":memory:")
 
-    # Connection pool for HTTP requests (reuse TCP connections)
-    _parsed_url = urlparse(base_url)
-    _pool_host = _parsed_url.hostname or "127.0.0.1"
-    _pool_port = _parsed_url.port or 8710
-    _pool_scheme = _parsed_url.scheme or "http"
-    if _pool_scheme == "https":
-        _connection_pool = http.client.HTTPSConnection(_pool_host, _pool_port, timeout=30)
-    else:
-        _connection_pool = http.client.HTTPConnection(_pool_host, _pool_port, timeout=30)
-
     class HttpGraph(Graph):
-        """Graph subclass that routes all requests through HTTP API with connection pooling."""
+        """Graph subclass that routes all requests through HTTP API."""
 
         def __init__(self, conn, actor, base_url, token):
             super().__init__(conn, actor=actor)
@@ -2557,32 +2547,24 @@ def connect_http(
             self._token = token
 
         def _http_request(self, method: str, path: str, body: dict | None = None) -> dict:
-            """Make an HTTP request using persistent connection pool."""
+            """Make an HTTP request to the ohmd daemon with timeout."""
+            url = f"{self._base_url}{path}"
+            data = json.dumps(body).encode() if body else None
             headers = {"Content-Type": "application/json"}
             if self._token:
                 headers["Authorization"] = f"Bearer {self._token}"
-            data = json.dumps(body).encode() if body else None
 
+            req = urllib.request.Request(url, data=data, headers=headers, method=method)
             try:
-                _connection_pool.request(method, path, body=data, headers=headers)
-                response = _connection_pool.getresponse()
-                response_body = response.read().decode()
-                if 200 <= response.status < 300:
-                    if response_body:
-                        return json.loads(response_body)
-                    return {}
-                else:
-                    raise ConnectionError(f"HTTP {response.status} from {method} {path}: {response_body}")
-            except (ConnectionError, json.JSONDecodeError):
-                raise
-            except Exception as e:
-                # Reconnect on connection errors
-                try:
-                    _connection_pool.close()
-                    _connection_pool.connect()
-                except Exception:
-                    pass
-                raise ConnectionError(f"Connection failed for {method} {path}: {e}") from e
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    return json.loads(resp.read())
+            except urllib.error.HTTPError as e:
+                error_body = e.read().decode() if e.fp else str(e)
+                raise ConnectionError(f"HTTP {e.code} from {method} {path}: {error_body}") from e
+            except urllib.error.URLError as e:
+                raise ConnectionError(f"Connection failed for {method} {path}: {e.reason}") from e
+            except TimeoutError as e:
+                raise ConnectionError(f"Timeout for {method} {path}: request took longer than 30s") from e
 
         def create_node(self, label: str, *, node_type: str = "concept", **kwargs) -> dict[str, Any]:
             """Create a node via HTTP API. Auto-generates ID from label."""
