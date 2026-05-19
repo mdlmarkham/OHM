@@ -16,6 +16,7 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
 from pathlib import Path
 from typing import Any, Optional
 
@@ -240,6 +241,11 @@ def _map_exception_to_http(exc: Exception) -> tuple[int, str]:
 
 
 # ── HTTP Handler ───────────────────────────────────────────
+
+class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+    """Handle requests in separate threads for concurrent access."""
+    daemon_threads = True
+
 
 class OhmHandler(BaseHTTPRequestHandler):
     """HTTP request handler for OHM daemon."""
@@ -2078,7 +2084,7 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
         else:
             print("Quack extension not available — using HTTP-only mode", file=sys.stderr)
 
-    server = HTTPServer((config["host"], config["port"]), OhmHandler)
+    server = ThreadedHTTPServer((config["host"], config["port"]), OhmHandler)
     print(f"OHM daemon listening on {config['host']}:{config['port']}", file=sys.stderr)
     print(f"Schema: {schema_config.name}", file=sys.stderr)
     if quack_info:

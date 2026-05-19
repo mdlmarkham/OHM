@@ -765,6 +765,7 @@ class Graph:
         source_agent: str,
         claim_node: str,
         outcome: bool,
+        notes: str | None = None,
     ) -> dict[str, Any]:
         """Record whether a source agent's claim was correct or incorrect.
 
@@ -783,6 +784,7 @@ class Graph:
             source_agent: Agent node ID that made the claim.
             claim_node: Node ID of the claim being evaluated.
             outcome: True if the claim was correct, False if incorrect.
+            notes: Optional context about the outcome.
 
         Returns:
             Dict with source_agent, claim_node, outcome, and recorded_by.
@@ -795,6 +797,7 @@ class Graph:
             claim_node=claim_node,
             outcome=outcome,
             recorded_by=self.actor,
+            notes=notes,
         )
 
     def source_reliability(
@@ -2527,16 +2530,26 @@ def connect_http(
     """
     import json
     import os
-    import urllib.request
-    import urllib.error
+    import http.client
+    from urllib.parse import urlparse
 
     from ohm.db import connect as db_connect
 
     resolved_token = token or os.environ.get("OHM_TOKEN")
     conn = db_connect(":memory:")
 
+    # Connection pool for HTTP requests (reuse TCP connections)
+    _parsed_url = urlparse(base_url)
+    _pool_host = _parsed_url.hostname or "127.0.0.1"
+    _pool_port = _parsed_url.port or 8710
+    _pool_scheme = _parsed_url.scheme or "http"
+    if _pool_scheme == "https":
+        _connection_pool = http.client.HTTPSConnection(_pool_host, _pool_port, timeout=30)
+    else:
+        _connection_pool = http.client.HTTPConnection(_pool_host, _pool_port, timeout=30)
+
     class HttpGraph(Graph):
-        """Graph subclass that routes writes through HTTP API with field name mapping."""
+        """Graph subclass that routes all requests through HTTP API with connection pooling."""
 
         def __init__(self, conn, actor, base_url, token):
             super().__init__(conn, actor=actor)
@@ -2544,24 +2557,32 @@ def connect_http(
             self._token = token
 
         def _http_request(self, method: str, path: str, body: dict | None = None) -> dict:
-            """Make an HTTP request to the ohmd daemon with timeout."""
-            url = f"{self._base_url}{path}"
-            data = json.dumps(body).encode() if body else None
+            """Make an HTTP request using persistent connection pool."""
             headers = {"Content-Type": "application/json"}
             if self._token:
                 headers["Authorization"] = f"Bearer {self._token}"
+            data = json.dumps(body).encode() if body else None
 
-            req = urllib.request.Request(url, data=data, headers=headers, method=method)
             try:
-                with urllib.request.urlopen(req, timeout=30) as resp:
-                    return json.loads(resp.read())
-            except urllib.error.HTTPError as e:
-                error_body = e.read().decode() if e.fp else str(e)
-                raise ConnectionError(f"HTTP {e.code} from {method} {path}: {error_body}") from e
-            except urllib.error.URLError as e:
-                raise ConnectionError(f"Connection failed for {method} {path}: {e.reason}") from e
-            except TimeoutError as e:
-                raise ConnectionError(f"Timeout for {method} {path}: request took longer than 30s") from e
+                _connection_pool.request(method, path, body=data, headers=headers)
+                response = _connection_pool.getresponse()
+                response_body = response.read().decode()
+                if 200 <= response.status < 300:
+                    if response_body:
+                        return json.loads(response_body)
+                    return {}
+                else:
+                    raise ConnectionError(f"HTTP {response.status} from {method} {path}: {response_body}")
+            except (ConnectionError, json.JSONDecodeError):
+                raise
+            except Exception as e:
+                # Reconnect on connection errors
+                try:
+                    _connection_pool.close()
+                    _connection_pool.connect()
+                except Exception:
+                    pass
+                raise ConnectionError(f"Connection failed for {method} {path}: {e}") from e
 
         def create_node(self, label: str, *, node_type: str = "concept", **kwargs) -> dict[str, Any]:
             """Create a node via HTTP API. Auto-generates ID from label."""
@@ -2678,13 +2699,48 @@ def connect_http(
         def challenge(self, node_id: str, *, value: float | None = None, 
                       sigma: float = 0.5, notes: str | None = None,
                       challenge_type: str | None = None) -> dict[str, Any]:
-            """Challenge a node with an observation."""
+            """Challenge a node with an observation (records observation on node)."""
             body = {"value": value, "sigma": sigma}
             if notes:
                 body["notes"] = notes
             if challenge_type:
                 body["challenge_type"] = challenge_type
             return self._http_request("POST", f"/challenge/{node_id}", body)
+
+        def challenge_edge(self, edge_id: str, *, reason: str = "",
+                          confidence: float = 0.5,
+                          challenge_type: str = "CHALLENGED_BY") -> dict[str, Any]:
+            """Challenge an existing edge (creates CHALLENGED_BY edge).
+
+            This is the proper way to challenge an interpretation — it creates
+            a CHALLENGED_BY edge that shows up in confidence audits.
+
+            Args:
+                edge_id: The edge ID to challenge.
+                reason: Why you're challenging this edge.
+                confidence: Your confidence in the challenge (0-1).
+                challenge_type: Type of challenge (CHALLENGED_BY, CONTRADICTS).
+
+            Returns:
+                The challenge edge record.
+            """
+            body = {"reason": reason, "confidence": confidence, "challenge_type": challenge_type}
+            return self._http_request("POST", f"/challenge/{edge_id}", body)
+
+        def support_edge(self, edge_id: str, *, reason: str = "",
+                        confidence: float = 0.8) -> dict[str, Any]:
+            """Support an existing edge (creates SUPPORTS edge).
+
+            Args:
+                edge_id: The edge ID to support.
+                reason: Why you support this edge.
+                confidence: Your confidence in the support (0-1).
+
+            Returns:
+                The support edge record.
+            """
+            body = {"reason": reason, "confidence": confidence}
+            return self._http_request("POST", f"/support/{edge_id}", body)
 
         def observe(
             self,
@@ -2757,6 +2813,7 @@ def connect_http(
             source_agent: str,
             claim_node: str,
             outcome: bool,
+            notes: str | None = None,
         ) -> dict[str, Any]:
             """Record whether a source agent's claim was correct or incorrect via HTTP."""
             body = {
@@ -2764,6 +2821,8 @@ def connect_http(
                 "claim_node": claim_node,
                 "outcome": outcome,
             }
+            if notes:
+                body["notes"] = notes
             return self._http_request("POST", "/outcome", body)
 
         def source_reliability(
