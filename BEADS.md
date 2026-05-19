@@ -87,7 +87,7 @@ Cross-cutting (security/review findings):
   OHM-9dq  P1: SDK tests — zero coverage on primary agent interface
   OHM-7e4  P1: SDK source_reliability() + record_outcome() — needed for OHM-af8.4
   OHM-3yo  P1: SDK handoff() + escalate() — needed for OHM-af8.5
-  OHM-e19  P2: No SIGPIPE handling in daemon
+  OHM-e19  ✅ P2: SIGPIPE handling (signal.SIG_IGN)
 
 Documentation:
   OHM-pfk  P1: Update all docs for multi-scenario architecture (VISION, roadmap, scenarios, schema, onboarding)
