@@ -269,7 +269,8 @@ DDL_STATEMENTS: list[str] = [
         provenance    VARCHAR,
         tags          JSON,
         metadata      JSON,
-        priority      VARCHAR
+        priority      VARCHAR,
+        deleted_at    TIMESTAMP          -- Soft delete: NULL = active, set = deleted
     );
     """,
     # ── Edges ────────────────────────────────────────────────────────────
@@ -291,7 +292,8 @@ DDL_STATEMENTS: list[str] = [
         updated_by      VARCHAR,
         challenge_of    VARCHAR,
         challenge_type  VARCHAR,
-        metadata        JSON
+        metadata        JSON,
+        deleted_at      TIMESTAMP          -- Soft delete: NULL = active, set = deleted
     );
     """,
     # ── Observations ─────────────────────────────────────────────────────
@@ -310,7 +312,8 @@ DDL_STATEMENTS: list[str] = [
         metadata    JSON,
         notes       TEXT,
         source_name TEXT,
-        source_url  TEXT
+        source_url  TEXT,
+        deleted_at  TIMESTAMP          -- Soft delete: NULL = active, set = deleted
     );
     """,
     # ── Agent State ──────────────────────────────────────────────────────
@@ -452,6 +455,11 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
     ]),
     ("0.11.0", "add embedding column to ohm_nodes for semantic search (OHM-o9f)", [
         "ALTER TABLE ohm_nodes ADD COLUMN embedding FLOAT[768]",
+    ]),
+    ("0.12.0", "add deleted_at column to ohm_nodes, ohm_edges, ohm_observations for soft delete (OHM-cpi)", [
+        "ALTER TABLE ohm_nodes ADD COLUMN deleted_at TIMESTAMP",
+        "ALTER TABLE ohm_edges ADD COLUMN deleted_at TIMESTAMP",
+        "ALTER TABLE ohm_observations ADD COLUMN deleted_at TIMESTAMP",
     ]),
 ]
 

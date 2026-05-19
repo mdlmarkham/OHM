@@ -345,7 +345,8 @@ def _create_ducklake_tables(conn: "DuckDBPyConnection", alias: str) -> None:
                 provenance    VARCHAR,
                 tags          VARCHAR,
                 metadata      VARCHAR,
-                priority      VARCHAR
+                priority      VARCHAR,
+                deleted_at    VARCHAR
             )
         """,
         "ohm_edges": """
@@ -366,7 +367,8 @@ def _create_ducklake_tables(conn: "DuckDBPyConnection", alias: str) -> None:
                 updated_by      VARCHAR,
                 challenge_of    VARCHAR,
                 challenge_type  VARCHAR,
-                metadata        VARCHAR
+                metadata        VARCHAR,
+                deleted_at      VARCHAR
             )
         """,
         "ohm_observations": """
@@ -384,7 +386,8 @@ def _create_ducklake_tables(conn: "DuckDBPyConnection", alias: str) -> None:
                 metadata    VARCHAR,
                 notes       VARCHAR,
                 source_name VARCHAR,
-                source_url  VARCHAR
+                source_url  VARCHAR,
+                deleted_at  VARCHAR
             )
         """,
         "ohm_change_feed": """

@@ -257,7 +257,7 @@ class OhmStore:
 
         edge = self.execute_one(
             "SELECT * FROM ohm_edges WHERE from_node = ? AND to_node = ? "
-            "AND edge_type = ? AND created_by = ? ORDER BY created_at DESC LIMIT 1",
+            "AND edge_type = ? AND created_by = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1",
             [from_node, to_node, edge_type, actor],
         )
 
@@ -373,7 +373,7 @@ class OhmStore:
         )
 
         obs = self.execute_one(
-            "SELECT * FROM ohm_observations WHERE node_id = ? AND created_by = ? ORDER BY created_at DESC LIMIT 1",
+            "SELECT * FROM ohm_observations WHERE node_id = ? AND created_by = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1",
             [node_id, actor],
         )
         if obs:
@@ -425,17 +425,21 @@ class OhmStore:
 
     def get_node(self, node_id: str) -> Optional[dict[str, Any]]:
         """Get a node by ID."""
-        return self.execute_one("SELECT * FROM ohm_nodes WHERE id = ?", [node_id])
+        return self.execute_one("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node_id])
 
     def get_edge(self, edge_id: str) -> Optional[dict[str, Any]]:
         """Get an edge by ID."""
-        return self.execute_one("SELECT * FROM ohm_edges WHERE id = ?", [edge_id])
+        return self.execute_one("SELECT * FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [edge_id])
 
     def delete_node(self, node_id: str, deleted_by: str) -> dict[str, Any]:
-        """Delete a node and all its associated edges and observations.
+        """Soft-delete a node and all its associated edges and observations.
 
-        Splits edge deletion into two statements to avoid DuckDB index
-        issues with OR conditions (OHM-cpi).
+        Marks the node and its edges as deleted (deleted_at IS NOT NULL)
+        rather than hard-deleting, because DuckDB index deletion fails when
+        DuckLake mirror tables are attached ("Failed to delete all rows from
+        index. Only deleted 0 out of 1 rows").
+
+        Soft-deleted nodes are excluded from queries by default.
 
         Raises NodeNotFoundError if the node doesn't exist.
         """
@@ -445,24 +449,34 @@ class OhmStore:
         if not node:
             raise NodeNotFoundError(f"Node not found: {node_id}")
 
-        # Delete edges in two statements to avoid DuckDB index issues
+        now = self._now()
+
+        # Soft-delete edges (mark as deleted)
         edges_from = self.conn.execute(
-            "DELETE FROM ohm_edges WHERE from_node = ?", [node_id]
+            "UPDATE ohm_edges SET deleted_at = ?, updated_at = ?, updated_by = ? "
+            "WHERE from_node = ? AND deleted_at IS NULL",
+            [now, now, deleted_by, node_id]
         ).fetchone()
         edges_to = self.conn.execute(
-            "DELETE FROM ohm_edges WHERE to_node = ?", [node_id]
+            "UPDATE ohm_edges SET deleted_at = ?, updated_at = ?, updated_by = ? "
+            "WHERE to_node = ? AND deleted_at IS NULL",
+            [now, now, deleted_by, node_id]
         ).fetchone()
         edges_deleted = (edges_from[0] if edges_from else 0) + (edges_to[0] if edges_to else 0)
 
-        # Delete observations
+        # Soft-delete observations
         obs_result = self.conn.execute(
-            "DELETE FROM ohm_observations WHERE node_id = ?", [node_id]
+            "UPDATE ohm_observations SET deleted_at = ? WHERE node_id = ? AND deleted_at IS NULL",
+            [now, node_id]
         )
         obs_deleted = obs_result.fetchone()
         obs_count = obs_deleted[0] if obs_deleted else 0
 
-        # Delete the node
-        self.conn.execute("DELETE FROM ohm_nodes WHERE id = ?", [node_id])
+        # Soft-delete the node
+        self.conn.execute(
+            "UPDATE ohm_nodes SET deleted_at = ?, updated_at = ?, updated_by = ? WHERE id = ?",
+            [now, now, deleted_by, node_id]
+        )
         self._log_change("ohm_nodes", node_id, "DELETE", deleted_by)
 
         return {
@@ -470,10 +484,14 @@ class OhmStore:
             "type": "node",
             "edges_removed": edges_deleted,
             "observations_removed": obs_count,
+            "soft_delete": True,
         }
 
     def delete_edge(self, edge_id: str, deleted_by: str) -> dict[str, Any]:
-        """Delete an edge by ID.
+        """Soft-delete an edge by ID.
+
+        Marks the edge as deleted rather than hard-deleting, because DuckDB
+        index deletion fails with DuckLake mirror tables attached.
 
         Raises EdgeNotFoundError if the edge doesn't exist.
         """
@@ -483,16 +501,25 @@ class OhmStore:
         if not edge:
             raise EdgeNotFoundError(f"Edge not found: {edge_id}")
 
-        # Delete observations referencing this edge
-        self.conn.execute("DELETE FROM ohm_observations WHERE edge_id = ?", [edge_id])
+        now = self._now()
 
-        # Delete the edge
-        self.conn.execute("DELETE FROM ohm_edges WHERE id = ?", [edge_id])
+        # Soft-delete observations referencing this edge
+        self.conn.execute(
+            "UPDATE ohm_observations SET deleted_at = ? WHERE edge_id = ? AND deleted_at IS NULL",
+            [now, edge_id]
+        )
+
+        # Soft-delete the edge
+        self.conn.execute(
+            "UPDATE ohm_edges SET deleted_at = ?, updated_at = ?, updated_by = ? WHERE id = ?",
+            [now, now, deleted_by, edge_id]
+        )
         self._log_change("ohm_edges", edge_id, "DELETE", deleted_by)
 
         return {
             "deleted": edge_id,
             "type": "edge",
+            "soft_delete": True,
         }
 
     def get_agent_state(self, agent_name: str) -> Optional[dict[str, Any]]:
@@ -510,9 +537,9 @@ class OhmStore:
 
     def status(self) -> dict[str, Any]:
         """Get graph status: node count, edge count, agent count, last sync."""
-        nc = self.execute_one("SELECT COUNT(*) AS cnt FROM ohm_nodes")
-        ec = self.execute_one("SELECT COUNT(*) AS cnt FROM ohm_edges")
-        oc = self.execute_one("SELECT COUNT(*) AS cnt FROM ohm_observations")
+        nc = self.execute_one("SELECT COUNT(*) AS cnt FROM ohm_nodes WHERE deleted_at IS NULL")
+        ec = self.execute_one("SELECT COUNT(*) AS cnt FROM ohm_edges WHERE deleted_at IS NULL")
+        oc = self.execute_one("SELECT COUNT(*) AS cnt FROM ohm_observations WHERE deleted_at IS NULL")
         ac = self.execute_one("SELECT COUNT(*) AS cnt FROM ohm_agent_state")
         node_count = nc["cnt"] if nc else 0
         edge_count = ec["cnt"] if ec else 0
@@ -520,7 +547,7 @@ class OhmStore:
         agent_count = ac["cnt"] if ac else 0
 
         edges_by_layer = self.execute(
-            "SELECT layer, COUNT(*) AS cnt FROM ohm_edges GROUP BY layer ORDER BY layer"
+            "SELECT layer, COUNT(*) AS cnt FROM ohm_edges WHERE deleted_at IS NULL GROUP BY layer ORDER BY layer"
         )
 
         return {

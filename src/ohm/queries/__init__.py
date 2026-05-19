@@ -375,7 +375,7 @@ def query_change_feed(
         node_id = validate_identifier(node_id, name="node_id")
         conditions.append(
             "(row_id = ? OR row_id IN ("
-            "  SELECT e.id FROM ohm_edges e WHERE e.from_node = ? OR e.to_node = ?"
+            "  SELECT e.id FROM ohm_edges e WHERE (e.from_node = ? OR e.to_node = ?) AND e.deleted_at IS NULL"
             "))"
         )
         params.extend([node_id, node_id, node_id])
@@ -386,11 +386,11 @@ def query_change_feed(
         node_type = validate_identifier(node_type, name="node_type")
         conditions.append(
             """(
-                row_id IN (SELECT id FROM ohm_nodes WHERE type = ?)
+                row_id IN (SELECT id FROM ohm_nodes WHERE type = ? AND deleted_at IS NULL)
                 OR row_id IN (
                     SELECT e.id FROM ohm_edges e
-                    WHERE e.from_node IN (SELECT id FROM ohm_nodes WHERE type = ?)
-                       OR e.to_node IN (SELECT id FROM ohm_nodes WHERE type = ?)
+                    WHERE e.from_node IN (SELECT id FROM ohm_nodes WHERE type = ? AND deleted_at IS NULL)
+                       OR e.to_node IN (SELECT id FROM ohm_nodes WHERE type = ? AND deleted_at IS NULL)
                 )
             )"""
         )
@@ -421,7 +421,7 @@ def query_change_feed(
             row_id = entry.get("row_id")
             if table == "ohm_nodes" and row_id:
                 node = conn.execute(
-                    "SELECT label, type, content, created_by FROM ohm_nodes WHERE id = ?",
+                    "SELECT label, type, content, created_by FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
                     [row_id],
                 ).fetchone()
                 if node:
@@ -433,7 +433,7 @@ def query_change_feed(
                     }
             elif table == "ohm_edges" and row_id:
                 edge = conn.execute(
-                    "SELECT from_node, to_node, edge_type, layer FROM ohm_edges WHERE id = ?",
+                    "SELECT from_node, to_node, edge_type, layer FROM ohm_edges WHERE id = ? AND deleted_at IS NULL",
                     [row_id],
                 ).fetchone()
                 if edge:
@@ -661,20 +661,20 @@ def query_stats(conn: DuckDBPyConnection) -> dict[str, Any]:
     stats["nodes_by_type"] = {row[0]: row[1] for row in result.fetchall()}
 
     # Total counts
-    total_nodes_row = conn.execute("SELECT COUNT(*) FROM ohm_nodes").fetchone()
+    total_nodes_row = conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL").fetchone()
     stats["total_nodes"] = total_nodes_row[0] if total_nodes_row else 0
-    total_edges_row = conn.execute("SELECT COUNT(*) FROM ohm_edges").fetchone()
+    total_edges_row = conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE deleted_at IS NULL").fetchone()
     stats["total_edges"] = total_edges_row[0] if total_edges_row else 0
-    total_obs_row = conn.execute("SELECT COUNT(*) FROM ohm_observations").fetchone()
+    total_obs_row = conn.execute("SELECT COUNT(*) FROM ohm_observations WHERE deleted_at IS NULL").fetchone()
     stats["total_observations"] = total_obs_row[0] if total_obs_row else 0
 
     # Challenge ratio
     l3_l4_row = conn.execute("""
-        SELECT COUNT(*) FROM ohm_edges WHERE layer IN ('L3', 'L4')
+        SELECT COUNT(*) FROM ohm_edges WHERE deleted_at IS NULL AND layer IN ('L3', 'L4')
     """).fetchone()
     total_l3_l4 = l3_l4_row[0] if l3_l4_row else 0
     challenged_row = conn.execute("""
-        SELECT COUNT(DISTINCT challenge_of) FROM ohm_edges
+        SELECT COUNT(DISTINCT challenge_of) FROM ohm_edges WHERE deleted_at IS NULL
         WHERE challenge_of IS NOT NULL
     """).fetchone()
     challenged = challenged_row[0] if challenged_row else 0
@@ -772,7 +772,7 @@ def create_node(
     _log_change(conn, "ohm_nodes", node_id, "INSERT", created_by)
     # Return full node record
     return _rows_to_dicts(
-        conn.execute("SELECT * FROM ohm_nodes WHERE id = ?", [node_id])
+        conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node_id])
     )[0]
 
 
@@ -798,7 +798,7 @@ def find_or_create_node(
     """
     # Try to find an existing node with matching label and type (case-insensitive)
     existing = _rows_to_dicts(conn.execute(
-        "SELECT * FROM ohm_nodes WHERE LOWER(label) = LOWER(?) AND type = ? LIMIT 1",
+        "SELECT * FROM ohm_nodes WHERE LOWER(label) = LOWER(?) AND type = ? AND deleted_at IS NULL LIMIT 1",
         [label, node_type],
     ))
     if existing:
@@ -865,7 +865,7 @@ def create_edge(
     _log_change(conn, "ohm_edges", edge_id, "INSERT", created_by)
     # Return full edge record
     return _rows_to_dicts(
-        conn.execute("SELECT * FROM ohm_edges WHERE id = ?", [edge_id])
+        conn.execute("SELECT * FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [edge_id])
     )[0]
 
 
@@ -891,7 +891,7 @@ def create_challenge(
     enforce_challenge_boundary(conn, created_by, edge_id)
 
     target = conn.execute(
-        "SELECT id, from_node, to_node, layer FROM ohm_edges WHERE id = ?",
+        "SELECT id, from_node, to_node, layer FROM ohm_edges WHERE id = ? AND deleted_at IS NULL",
         [edge_id],
     ).fetchone()
     if target is None:
@@ -909,7 +909,7 @@ def create_challenge(
     _log_change(conn, "ohm_edges", challenge_id, "INSERT", created_by)
     # Return full edge record
     return _rows_to_dicts(
-        conn.execute("SELECT * FROM ohm_edges WHERE id = ?", [challenge_id])
+        conn.execute("SELECT * FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [challenge_id])
     )[0]
 
 
@@ -935,7 +935,7 @@ def create_support(
     enforce_support_boundary(conn, created_by, edge_id)
 
     target = conn.execute(
-        "SELECT id, from_node, to_node, layer FROM ohm_edges WHERE id = ?",
+        "SELECT id, from_node, to_node, layer FROM ohm_edges WHERE id = ? AND deleted_at IS NULL",
         [edge_id],
     ).fetchone()
     if target is None:
@@ -953,7 +953,7 @@ def create_support(
     _log_change(conn, "ohm_edges", support_id, "INSERT", created_by)
     # Return full edge record
     return _rows_to_dicts(
-        conn.execute("SELECT * FROM ohm_edges WHERE id = ?", [support_id])
+        conn.execute("SELECT * FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [support_id])
     )[0]
 
 
@@ -977,7 +977,7 @@ def delete_node(
 
     # Verify node exists
     node = _rows_to_dicts(
-        conn.execute("SELECT * FROM ohm_nodes WHERE id = ?", [node_id])
+        conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node_id])
     )
     if not node:
         from ohm.exceptions import NodeNotFoundError
@@ -985,17 +985,17 @@ def delete_node(
 
     # Delete associated edges — split into two statements to avoid DuckDB
     # index issues with OR conditions (OHM-cpi)
-    edges_from = conn.execute("DELETE FROM ohm_edges WHERE from_node = ?", [node_id]).fetchone()
-    edges_to = conn.execute("DELETE FROM ohm_edges WHERE to_node = ?", [node_id]).fetchone()
+    edges_from = conn.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE from_node = ? AND deleted_at IS NULL", [node_id]).fetchone()
+    edges_to = conn.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE to_node = ? AND deleted_at IS NULL", [node_id]).fetchone()
     edges_deleted = (edges_from[0] if edges_from else 0) + (edges_to[0] if edges_to else 0)
 
     # Delete observations
-    obs_result = conn.execute("DELETE FROM ohm_observations WHERE node_id = ?", [node_id])
+    obs_result = conn.execute("UPDATE ohm_observations SET deleted_at = CURRENT_TIMESTAMP WHERE node_id = ? AND deleted_at IS NULL", [node_id])
     obs_deleted = obs_result.fetchone()
     obs_count = obs_deleted[0] if obs_deleted else 0
 
     # Delete the node itself
-    conn.execute("DELETE FROM ohm_nodes WHERE id = ?", [node_id])
+    conn.execute("UPDATE ohm_nodes SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?", [node_id])
     _log_change(conn, "ohm_nodes", node_id, "DELETE", deleted_by)
 
     return {
@@ -1023,7 +1023,7 @@ def delete_edge(
 
     # Verify edge exists
     edge = _rows_to_dicts(
-        conn.execute("SELECT * FROM ohm_edges WHERE id = ?", [edge_id])
+        conn.execute("SELECT * FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [edge_id])
     )
     if not edge:
         from ohm.exceptions import EdgeNotFoundError
@@ -1032,10 +1032,10 @@ def delete_edge(
     edge[0].get("layer")
 
     # Delete observations referencing this edge
-    conn.execute("DELETE FROM ohm_observations WHERE edge_id = ?", [edge_id])
+    conn.execute("UPDATE ohm_observations SET deleted_at = CURRENT_TIMESTAMP WHERE edge_id = ? AND deleted_at IS NULL", [edge_id])
 
     # Delete the edge
-    conn.execute("DELETE FROM ohm_edges WHERE id = ?", [edge_id])
+    conn.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?", [edge_id])
     _log_change(conn, "ohm_edges", edge_id, "DELETE", deleted_by)
 
     return {
@@ -1118,13 +1118,13 @@ def create_observation(
 
 def node_exists(conn: DuckDBPyConnection, node_id: str) -> bool:
     """Check if a node exists."""
-    result = conn.execute("SELECT 1 FROM ohm_nodes WHERE id = ?", [node_id]).fetchone()
+    result = conn.execute("SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node_id]).fetchone()
     return result is not None
 
 
 def edge_exists(conn: DuckDBPyConnection, edge_id: str) -> bool:
     """Check if an edge exists."""
-    result = conn.execute("SELECT 1 FROM ohm_edges WHERE id = ?", [edge_id]).fetchone()
+    result = conn.execute("SELECT 1 FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [edge_id]).fetchone()
     return result is not None
 
 
@@ -1219,7 +1219,7 @@ def query_graph_health(
     """
     # Orphan nodes
     orphan_row = conn.execute("""
-        SELECT COUNT(*) FROM ohm_nodes n
+        SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL n
         WHERE NOT EXISTS (
             SELECT 1 FROM ohm_edges e
             WHERE e.from_node = n.id OR e.to_node = n.id
@@ -1258,7 +1258,7 @@ def query_graph_health(
     stale_count = stale[0] if stale else 0
 
     # Total counts
-    total_nodes_row = conn.execute("SELECT COUNT(*) FROM ohm_nodes").fetchone()
+    total_nodes_row = conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL").fetchone()
     total_nodes = total_nodes_row[0] if total_nodes_row else 0
     total_edges_row = conn.execute("SELECT COUNT(*) FROM ohm_edges").fetchone()
     total_edges = total_edges_row[0] if total_edges_row else 0
