@@ -63,8 +63,11 @@ with ohm.connect("/var/lib/ohm/ohm.duckdb", actor="YOUR_AGENT_NAME") as g:
 - `create_edge(from_node, to_node, edge_type, layer, confidence)` — Connect nodes
   - **HTTP API note:** The `/edge` POST endpoint uses field names `from`, `to`, `type` (not `from_node`, `to_node`, `edge_type`)
 - `observe(node_id, obs_type, value, baseline, sigma)` — Record a measurement
-- `challenge(edge_id, reason, confidence)` — Disagree (creates new edge, original stays)
-- `support(edge_id, reason, confidence)` — Agree with evidence
+- `challenge(node_id, value, sigma, notes)` — Record a challenge observation on a node
+- `challenge_edge(edge_id, reason, confidence, challenge_type)` — Create CHALLENGED_BY edge (shows up in confidence audits)
+- `support_edge(edge_id, reason, confidence)` — Create SUPPORTS edge
+
+**Important:** `challenge()` creates an observation on a node. `challenge_edge()` creates a CHALLENGED_BY edge on an edge. Use `challenge_edge()` to challenge interpretations — it shows up in confidence audits.
 
 ### Read
 - `get_node(id)` / `get_edge(id)` — Retrieve single record
@@ -101,7 +104,7 @@ with ohm.connect("/var/lib/ohm/ohm.duckdb", actor="YOUR_AGENT_NAME") as g:
 from ohm.exceptions import LayerViolationError, PermissionDeniedError
 
 try:
-    g.challenge(l1_edge, reason="disagree")
+    g.challenge_edge(l1_edge, reason="disagree", confidence=0.7)
 except LayerViolationError:
     # L1/L2 cannot be challenged — write your own L3 interpretation instead
     pass
@@ -183,8 +186,9 @@ The daemon exposes 33 endpoints on `127.0.0.1:8710`. All writes require `Authori
 | `/semantic_search` | GET | No | Vector similarity search |
 | `/listen?since=` | GET | No | Change feed |
 | `/observe/{id}` | POST | Yes | Record observation |
-| `/challenge/{id}` | POST | Yes | Challenge an edge |
-| `/support/{id}` | POST | Yes | Support an edge |
+| `/challenge/{edge_id}` | POST | Yes | Challenge an edge (creates CHALLENGED_BY edge) |
+| `/support/{edge_id}` | POST | Yes | Support an edge (creates SUPPORTS edge) |
+| `/challenge/{node_id}` | POST | Yes | Record challenge observation on a node |
 | `/register` | POST | Yes | Register agent identity |
 | `/agents` | GET | No | List registered agents |
 | `/agent/{name}` | GET | No | Agent state |
