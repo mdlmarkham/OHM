@@ -424,7 +424,7 @@ class OhmStore:
             # Prefer label + content for richer embeddings
             text = label
             if content:
-                text = f"{label}: {content[:200]}"  # Truncate to avoid long embedding calls
+                text = f"{label}: {content[:800]}"  # Use up to 800 chars for richer embeddings (model supports ~2000)
             embedding = generate_embedding(text)
             if embedding:
                 self.conn.execute(
