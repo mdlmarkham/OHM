@@ -335,7 +335,7 @@ OHM provides Zettelkasten-style discovery endpoints:
 | `GET /orphans` | Nodes with zero edges — disconnected from the graph |
 | `GET /hubs` | Most-connected nodes — anchors of the graph |
 | `GET /dead_ends` | Nodes with only incoming edges — sinks that don't lead anywhere |
-| `GET /suggest` | Suggested connections between unconnected nodes (shared_provenance, shared_type, semantic) |
+| `GET /suggest` | Suggested connections between unconnected nodes (shared_provenance, shared_type, shared_tags, semantic) |
 | `GET /graph/stats` | Extended statistics (density, orphan/hub/dead-end counts, avg confidence) |
 
 ```bash
@@ -345,11 +345,32 @@ GET /orphans?exclude_system=true
 # Find the most-connected concepts
 GET /hubs?type=concept&min_connections=5
 
-# Get connection suggestions
+# Get connection suggestions by shared tags
+GET /suggest?method=shared_tags&min_shared=2&limit=10
+
+# Get connection suggestions by semantic similarity
 GET /suggest?method=semantic&limit=10
 
 # Full graph statistics
 GET /graph/stats
+```
+
+### Tags
+
+Tags are stored as JSON arrays in the `tags` column. They enable tag-based discovery — finding concepts that share themes but aren't yet connected by edges.
+
+```python
+# Add tags to a node
+graph.create_node(
+    id="concept-and-or-conversion",
+    label="AND→OR Conversion",
+    tags=["and-or", "boolean-logic", "trap-pattern", "governance", "security"],
+)
+
+# Find unconnected nodes sharing 2+ tags
+results = graph.suggest(method="shared_tags", min_shared=2)
+# → Agent Authorization Gap --?--> Least Privilege as AND-Gate (Shared 4 tags)
+# → Invisible Asymmetry --?--> Self-Reinforcing Trap Pattern (Shared 2 tags)
 ```
 
 ## Adoption Path
