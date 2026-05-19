@@ -1,10 +1,33 @@
 """
 OHM Store — DuckDB connection management for local cache and shared backend.
 
-Supports three modes:
+Supports four modes:
 1. Local mode: single DuckDB file for development or single-agent use
-2. Quack mode: DuckDB connection with Quack server for concurrent multi-writer access
-3. Remote mode: HTTP connection to ohmd daemon for multi-agent shared access
+2. Agent mode: per-agent local DuckDB with DuckLake sync (recommended for multi-agent)
+3. Quack mode: DuckDB connection with Quack server for concurrent multi-writer access
+4. Remote mode: HTTP connection to ohmd daemon for multi-agent shared access
+
+In agent mode, each agent owns a local DuckDB file for zero-latency reads/writes,
+then syncs to a shared DuckLake mirror on heartbeat. This eliminates the single-writer
+bottleneck of the centralized daemon.
+
+Usage (agent mode):
+    from ohm.store import OhmStore
+    from ohm.schema import SchemaConfig
+
+    # Each agent creates its own store
+    store = OhmStore.for_agent(
+        agent_name="metis",
+        ducklake_path="/var/lib/ohm/ohm_lake.ducklake",
+    )
+
+    # Read/write locally (zero latency, no HTTP)
+    store.write_node(id="concept-x", label="X", type="concept", ...)
+    node = store.get_node("concept-x")
+
+    # Sync with other agents on heartbeat
+    result = store.sync_heartbeat()
+    # → {"pushed": 3, "pulled": 7, "last_sync": "..."}
 """
 
 import json
@@ -24,6 +47,85 @@ logger = logging.getLogger(__name__)
 
 class OhmStore:
     """Manages the OHM knowledge graph in DuckDB."""
+
+    @classmethod
+    def for_agent(
+        cls,
+        agent_name: str,
+        ducklake_path: Optional[str] = None,
+        ducklake_data_path: Optional[str] = None,
+        schema: Optional['SchemaConfig'] = None,
+        base_dir: Optional[str] = None,
+    ) -> 'OhmStore':
+        """Create a per-agent local DuckDB with DuckLake sync.
+
+        Each agent gets its own local DuckDB file for zero-latency reads/writes.
+        On sync_heartbeat(), local changes are pushed to the shared DuckLake
+        mirror and other agents' changes are pulled back.
+
+        This eliminates the single-writer bottleneck of the centralized daemon.
+        Each agent can read and write locally without any HTTP calls.
+
+        Args:
+            agent_name: Agent name (e.g., "metis", "clio", "socrates").
+                Used for attribution and to name the local DB file.
+            ducklake_path: Path to the shared DuckLake catalog file.
+                Defaults to OHM_DUCKLAKE_PATH env var, then
+                /var/lib/ohm/ohm_lake.ducklake.
+            ducklake_data_path: Path to DuckLake data directory.
+                Defaults to OHM_DUCKLAKE_DATA env var, then
+                /var/lib/ohm/ohm_lake_data/.
+            schema: SchemaConfig for domain-specific validation.
+            base_dir: Base directory for agent DB files.
+                Defaults to ~/.ohm/agents/
+
+        Returns:
+            OhmStore instance with local DB and DuckLake configured.
+        """
+        if base_dir is None:
+            base_dir = os.environ.get("OHM_AGENTS_DIR", str(Path.home() / ".ohm" / "agents"))
+
+        # Per-agent DB path
+        db_path = os.path.join(base_dir, agent_name, "ohm.duckdb")
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+
+        # DuckLake paths
+        if ducklake_path is None:
+            ducklake_path = os.environ.get("OHM_DUCKLAKE_PATH", "/var/lib/ohm/ohm_lake.ducklake")
+        if ducklake_data_path is None:
+            ducklake_data_path = os.environ.get("OHM_DUCKLAKE_DATA", "/var/lib/ohm/ohm_lake_data/")
+
+        # Create the store
+        store = cls(
+            db_path=db_path,
+            agent_name=agent_name,
+            schema=schema,
+        )
+
+        # Configure DuckLake paths for sync
+        store.ducklake_path = ducklake_path
+        store.ducklake_data_path = ducklake_data_path
+
+        # Attach DuckLake if available
+        if os.path.exists(ducklake_path):
+            try:
+                store.conn.execute(
+                    f"ATTACH IF NOT EXISTS '{ducklake_path}' AS ohm_lake (TYPE ducklake)"
+                )
+                logger.info("DuckLake attached for agent %s at %s", agent_name, ducklake_path)
+            except Exception as e:
+                logger.warning("DuckLake attach failed for agent %s: %s", agent_name, e)
+
+        # Pull any existing data from DuckLake
+        if os.path.exists(ducklake_path):
+            try:
+                pulled = store.pull_from_ducklake(ducklake_path)
+                logger.info("Agent %s: pulled %d rows from DuckLake", agent_name, pulled)
+            except Exception as e:
+                logger.warning("DuckLake pull failed for agent %s: %s", agent_name, e)
+
+        logger.info("Agent %s: local DB at %s, DuckLake at %s", agent_name, db_path, ducklake_path)
+        return store
 
     def __init__(
         self,
