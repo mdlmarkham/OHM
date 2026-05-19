@@ -211,6 +211,15 @@ def _try_ducklake_recovery(db_path_str: str) -> bool:
             placeholders = ", ".join(["?"] * len(cols))
             col_names = ", ".join(cols)
             values = [node_dict[c] for c in cols]
+            # Check if already exists (including soft-deleted) to avoid PK violation
+            # which causes DuckDB FatalException (uncatchable abort)
+            node_id = node_dict.get("id")
+            if node_id:
+                existing = fresh_conn.execute(
+                    "SELECT id FROM ohm_nodes WHERE id = ?", [node_id]
+                ).fetchone()
+                if existing:
+                    continue  # Skip duplicates
             try:
                 fresh_conn.execute(
                     f"INSERT INTO ohm_nodes ({col_names}) VALUES ({placeholders})",
@@ -226,6 +235,14 @@ def _try_ducklake_recovery(db_path_str: str) -> bool:
             placeholders = ", ".join(["?"] * len(cols))
             col_names = ", ".join(cols)
             values = [edge_dict[c] for c in cols]
+            # Check if already exists to avoid PK violation (DuckDB FatalException)
+            edge_id = edge_dict.get("id")
+            if edge_id:
+                existing = fresh_conn.execute(
+                    "SELECT id FROM ohm_edges WHERE id = ?", [edge_id]
+                ).fetchone()
+                if existing:
+                    continue
             try:
                 fresh_conn.execute(
                     f"INSERT INTO ohm_edges ({col_names}) VALUES ({placeholders})",

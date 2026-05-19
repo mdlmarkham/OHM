@@ -762,6 +762,27 @@ def create_node(
         raise ValueError(f"Invalid priority: {priority}. Must be one of: {sorted(VALID_PRIORITY)}")
 
     node_id = generate_node_id(label)
+
+    # Check for soft-deleted row with same ID (primary key collision avoidance)
+    soft_deleted = conn.execute(
+        "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NOT NULL", [node_id]
+    ).fetchone()
+    if soft_deleted:
+        # Reactivate soft-deleted row with new data
+        conn.execute(
+            """UPDATE ohm_nodes SET
+                label = ?, type = ?, content = ?, created_by = ?,
+                visibility = ?, provenance = ?, confidence = ?, priority = ?, url = ?,
+                deleted_at = NULL, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?""",
+            [label, node_type, content, created_by, visibility, provenance,
+             confidence, priority, url, node_id],
+        )
+        _log_change(conn, "ohm_nodes", node_id, "UPDATE", created_by)
+        return _rows_to_dicts(
+            conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node_id])
+        )[0]
+
     conn.execute(
         """INSERT INTO ohm_nodes
            (id, label, type, content, created_by, visibility, provenance, confidence, priority, url)

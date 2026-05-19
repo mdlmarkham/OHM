@@ -2026,6 +2026,13 @@ class Graph:
             if existing and merge:
                 import_count["skipped"] += 1
                 continue
+            # Check for soft-deleted rows too (PK collision would crash DuckDB)
+            soft_deleted = self._conn.execute(
+                "SELECT id FROM ohm_edges WHERE id = ? AND deleted_at IS NOT NULL", [edge["id"]]
+            ).fetchone()
+            if soft_deleted:
+                import_count["skipped"] += 1
+                continue
             try:
                 cols = [k for k in node.keys() if k not in ("id",)]
                 vals = [node[k] for k in node.keys() if k not in ("id",)]
@@ -2048,6 +2055,13 @@ class Graph:
                     [edge["id"]],
                 ).fetchone()
             if existing and merge:
+                import_count["skipped"] += 1
+                continue
+            # Check for soft-deleted rows too (PK collision would crash DuckDB)
+            soft_deleted = self._conn.execute(
+                "SELECT id FROM ohm_edges WHERE id = ? AND deleted_at IS NOT NULL", [edge["id"]]
+            ).fetchone()
+            if soft_deleted:
                 import_count["skipped"] += 1
                 continue
             try:

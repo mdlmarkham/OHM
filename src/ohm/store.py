@@ -1292,9 +1292,12 @@ class OhmStore:
 
         if table_name == "ohm_nodes":
             if operation == "INSERT":
-                # Check if already exists
+                # Check if already exists (including soft-deleted)
                 existing = self.get_node(row_id)
-                if not existing:
+                soft_deleted = self.conn.execute(
+                    "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NOT NULL", [row_id]
+                ).fetchone() if not existing else None
+                if not existing and not soft_deleted:
                     self.conn.execute(
                         """
                         INSERT INTO ohm_nodes (id, label, type, content, created_by, confidence,
@@ -1327,9 +1330,12 @@ class OhmStore:
 
         elif table_name == "ohm_edges":
             if operation == "INSERT":
-                # Check if already exists
+                # Check if already exists (including soft-deleted)
                 existing = self.get_edge(row_id)
-                if not existing:
+                soft_deleted = self.conn.execute(
+                    "SELECT id FROM ohm_edges WHERE id = ? AND deleted_at IS NOT NULL", [row_id]
+                ).fetchone() if not existing else None
+                if not existing and not soft_deleted:
                     self.conn.execute(
                         """
                         INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, confidence,
