@@ -2940,6 +2940,43 @@ def connect_http(
             }
             return self._http_request("POST", "/node?create_only=false", body)
 
+        def bayesian_inference(
+            self,
+            target: str,
+            evidence: dict[str, int] | None = None,
+            *,
+            edge_types: list[str] | None = None,
+            leak_probability: float = 0.15,
+        ) -> dict[str, Any]:
+            """Run Bayesian inference on the graph.
+
+            Given observed evidence (node states), compute posterior probabilities
+            for the target node using Variable Elimination. Requires pgmpy.
+
+            Args:
+                target: Node ID to compute posterior for.
+                evidence: Dict mapping node IDs to observed states.
+                    State 0 = "bad" (failure, closed, negative).
+                    State 1 = "good" (normal, open, positive).
+                    Pass empty dict or None for prior (no evidence).
+                edge_types: Edge types to include (default: CAUSES, DEPENDS_ON,
+                    THREATENS, EXPECTED_LIKELIHOOD).
+                leak_probability: Baseline probability of bad outcome when all
+                    parents are good (default 0.15). Critical for realistic priors.
+
+            Returns:
+                Dict with posterior probabilities, method, and network info.
+                Falls back to heuristic cascade if pgmpy is unavailable.
+            """
+            import urllib.parse
+            params = [f"target={urllib.parse.quote(target)}"]
+            if evidence:
+                evidence_str = ",".join(f"{k}:{v}" for k, v in evidence.items())
+                params.append(f"evidence={urllib.parse.quote(evidence_str)}")
+            params.append(f"leak={leak_probability}")
+            path = "/inference?" + "&".join(params)
+            return self._http_request("GET", path)
+
     graph = HttpGraph(conn, actor, base_url, resolved_token)
     graph.token = resolved_token
     return graph

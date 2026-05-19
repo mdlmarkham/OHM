@@ -801,6 +801,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "/ready": {"method": "GET", "description": "Readiness check (no auth required)"},
                     "/metrics": {"method": "GET", "description": "Prometheus-style metrics"},
                     "/stats": {"method": "GET", "description": "Graph statistics (nodes, edges, layers)"},
+                    "/inference": {"method": "GET", "description": "Bayesian inference: compute posterior probabilities given evidence (optional: requires pgmpy)"},
                     "/status": {"method": "GET", "description": "Daemon status and configuration"},
                     "/schema": {"method": "GET", "description": "Node types, edge types, layers"},
                     "/layers": {"method": "GET", "description": "L1-L4 layer descriptions"},
@@ -1400,6 +1401,27 @@ class OhmHandler(BaseHTTPRequestHandler):
             # Extended graph statistics (orphans, hubs, density, etc.)
             from .methods import graph_stats
             result = graph_stats(self.store.conn)
+            self._json_response(200, result)
+        elif path == "/inference":
+            # Bayesian inference: compute posterior probabilities given evidence
+            # Uses pgmpy Variable Elimination (optional dependency)
+            target = qs.get("target", [None])[0]
+            if not target:
+                self._json_response(400, {"error": "missing_parameter", "message": "?target=node_id required"})
+                return
+            from .validation import validate_identifier
+            target = validate_identifier(target, name="target")
+            # Parse evidence from query params: ?evidence=node1:0,node2:1
+            evidence_str = qs.get("evidence", [""])[0]
+            leak_probability = float(qs.get("leak", ["0.15"])[0])
+            evidence = {}
+            if evidence_str:
+                for pair in evidence_str.split(","):
+                    if ":" in pair:
+                        node_id, state = pair.split(":", 1)
+                        evidence[validate_identifier(node_id.strip(), name="evidence_node")] = int(state.strip())
+            from .bayesian import bayesian_inference
+            result = bayesian_inference(self.store.conn, target, evidence, leak_probability=leak_probability)
             self._json_response(200, result)
         elif path == "/admin/checkpoint":
             # Force DuckDB CHECKPOINT to flush WAL to main DB file

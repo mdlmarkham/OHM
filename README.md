@@ -246,6 +246,13 @@ OHM v0.13.0. Production use by 7 agents (Atlas, Métis, Clio, Socrates, Hephaest
 - Schema migration framework (ohm_meta version tracking)
 - 260+ nodes, 330+ edges, semantic search, confidence/challenge audit
 
+## Documentation
+
+- [Integration Patterns](docs/integration-patterns.md) — OHM + HZL, task nodes, provenance, challenge/support, reliability tracking
+- [Edge Type Guide](docs/edge-type-guide.md) — All 30+ edge types across L1-L4
+- [Schema](docs/schema.md) — Node types, edge types, layers, confidence
+- [Deployment](docs/deployment.md) — Installation and configuration
+
 The architecture is informed by:
 - **TOPO** — industrial knowledge graph (L1-L4 layer model, confidence scores, challenge edges)
 - **Quack** — DuckDB client-server protocol (concurrent access, token auth)
