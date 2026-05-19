@@ -1170,26 +1170,6 @@ def _handle_events(args: argparse.Namespace) -> None:
     except Exception as e:
         print(f"Error: {e}")
 
-    conn = _get_db(args)
-    try:
-        results = query_impact(conn, args.node_id, depth=args.depth)
-        if args.format == "json":
-            import json
-            print(json.dumps(results, indent=2, default=str))
-        elif getattr(args, "mermaid", False):
-            from ohm.visualization import to_mermaid
-            print(to_mermaid(results, title=f"Impact of {args.node_id}"))
-        else:
-            if not results:
-                print(f"No downstream impact found for '{args.node_id}'")
-                return
-            print(f"Impact analysis for '{args.node_id}' (depth ≤ {args.depth}):")
-            for r in results:
-                print(f"  [depth {r['depth']}] [{r['layer']}] {r['edge_type']}: "
-                      f"{r['from_node']} → {r['to_node']} (conf: {r.get('confidence', '?')})")
-    finally:
-        conn.close()
-
 
 def _handle_path(args: argparse.Namespace) -> None:
     """Handle shortest path query."""
@@ -1587,7 +1567,7 @@ def _handle_escalate(args: argparse.Namespace) -> None:
         else:
             edge = result["edge"]
             ticket = result.get("ticket", {})
-            print(f"── Escalation ──")
+            print("── Escalation ──")
             print(f"  Edge ID:     {edge['id']}")
             print(f"  Ticket:      {args.ticket}")
             if ticket:
@@ -1653,7 +1633,7 @@ def _handle_record_outcome(args: argparse.Namespace) -> None:
             print(json.dumps(result, indent=2, default=str))
         else:
             status = "correct" if outcome else "incorrect"
-            print(f"── Outcome Recorded ──")
+            print("── Outcome Recorded ──")
             print(f"  Source:     {result['source_agent']}")
             print(f"  Claim:      {result['claim_node']}")
             print(f"  Outcome:    {status}")

@@ -16,7 +16,6 @@ from typing import Any, Optional
 import duckdb
 
 from .exceptions import OHMError
-from .schema import SCHEMA_SQL
 
 
 class OhmStore:

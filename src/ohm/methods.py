@@ -257,7 +257,11 @@ def agent_heartbeat(
         "SELECT * FROM ohm_agent_state WHERE agent_name = ?", [agent_name]
     ).fetchone()
     if result:
-        columns = [desc[0] for desc in conn.execute("SELECT * FROM ohm_agent_state WHERE agent_name = ?", [agent_name]).description]
+        columns = [
+            desc[0] for desc in conn.execute(
+                "SELECT * FROM ohm_agent_state WHERE agent_name = ?", [agent_name]
+            ).description
+        ]
         return dict(zip(columns, result))
     return {}
 
@@ -1052,7 +1056,7 @@ def detect_trend(
     # Simple linear regression: value = slope * x + intercept
     # x = days since first observation
     values = [o[0] for o in observations]
-    timestamps = [o[1] for o in observations]
+    [o[1] for o in observations]
     epoch_secs = [o[2] for o in observations]
 
     # Use epoch seconds for precision, convert slope to per-day
@@ -1196,7 +1200,6 @@ def differential_diagnosis(
         List of dicts with node_id, label, composite_score, ruled_out (bool),
         ruled_out_by (list of NEGATES edge ids if applicable).
     """
-    from ohm.queries import query_confidence_chain
 
     # Find candidate conditions: nodes that have evidence edges pointing to
     # or from this node (CAUSES, PREDICTS, CORRELATES_WITH, SUPPORTS, etc.)

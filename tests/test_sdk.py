@@ -193,7 +193,6 @@ class TestConnect:
 
     def test_connect_remote_non_strict_succeeds(self, monkeypatch):
         """connect_remote with strict=False falls back to in-memory DB."""
-        import os
         from ohm.sdk import connect_remote
 
         # Force in-memory fallback to avoid file path issues
@@ -1108,7 +1107,7 @@ class TestEvolveIdentity:
 
     def test_evolve_identity_creates_new_edge(self, graph):
         """evolve_identity() creates a new edge and marks old as superseded."""
-        agent = graph.register_agent(description="Test agent")
+        graph.register_agent(description="Test agent")
         # Find the VALUES edge created by register_agent
         edges = graph.search_edges(edge_type="VALUES")
         if edges:

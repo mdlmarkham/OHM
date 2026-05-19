@@ -6,11 +6,9 @@ result.get("created", True) and raises ConflictError. The database is modified
 but the client receives a 409 error response.
 """
 
-import os
 import pytest
 
 from ohm.store import OhmStore
-from ohm.exceptions import ConflictError
 
 
 class TestNodeUpsertConflictBug:

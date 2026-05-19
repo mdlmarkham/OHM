@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import duckdb
+    from duckdb import DuckDBPyConnection
 
 
 def get_default_db_path() -> pathlib.Path:
@@ -141,8 +142,6 @@ def _try_ducklake_recovery(db_path_str: str) -> bool:
     Returns True if recovery succeeded, False if DuckLake is not available.
     """
     import duckdb
-    import shutil
-    import tempfile
 
     ducklake_path = os.environ.get("OHM_DUCKLAKE_PATH")
     if not ducklake_path:
@@ -289,7 +288,10 @@ def attach_ducklake(
     """
     # Check if DuckLake extension is loaded
     try:
-        conn.execute("SELECT extension_name FROM duckdb_extensions() WHERE loaded = true AND extension_name = 'ducklake'").fetchone()
+        conn.execute(
+            "SELECT extension_name FROM duckdb_extensions()"
+            " WHERE loaded = true AND extension_name = 'ducklake'"
+        ).fetchone()
     except Exception:
         return False
 

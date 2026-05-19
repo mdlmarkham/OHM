@@ -169,7 +169,6 @@ class TestDuckLakeExtension:
 
     def test_attach_ducklake_creates_catalog(self, tmp_path):
         """attach_ducklake creates a DuckLake catalog with mirror tables."""
-        import duckdb
         from ohm.db import connect, attach_ducklake
 
         db_path = str(tmp_path / "test.duckdb")
@@ -196,7 +195,6 @@ class TestDuckLakeExtension:
 
     def test_attach_ducklake_no_pks(self, tmp_path):
         """DuckLake mirror tables have no PRIMARY KEY constraints."""
-        import duckdb
         from ohm.db import connect, attach_ducklake
 
         db_path = str(tmp_path / "test.duckdb")
@@ -223,7 +221,6 @@ class TestDuckLakeExtension:
 
     def test_attach_ducklake_varchar_columns(self, tmp_path):
         """DuckLake mirror tables use VARCHAR for all columns."""
-        import duckdb
         from ohm.db import connect, attach_ducklake
 
         db_path = str(tmp_path / "test.duckdb")
@@ -249,7 +246,6 @@ class TestDuckLakeExtension:
 
     def test_attach_ducklake_idempotent(self, tmp_path):
         """Attaching DuckLake twice does not error (idempotent)."""
-        import duckdb
         from ohm.db import connect, attach_ducklake
 
         db_path = str(tmp_path / "test.duckdb")
@@ -319,7 +315,6 @@ class TestDuckLakeExtension:
 
     def test_ducklake_write_to_mirror_table(self, tmp_path):
         """Can write to DuckLake mirror tables after attachment."""
-        import duckdb
         from ohm.db import connect, attach_ducklake
 
         db_path = str(tmp_path / "test.duckdb")

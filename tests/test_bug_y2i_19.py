@@ -7,15 +7,9 @@ completely disabled in production — every edge belongs to "ohmd".
 """
 
 import os
-import tempfile
 import pytest
 
 from ohm.store import OhmStore
-from ohm.boundary import (
-    check_can_update_edge,
-    check_can_delete_edge,
-    enforce_challenge_boundary,
-)
 
 
 class TestAgentAttributionBug:
@@ -103,8 +97,8 @@ class TestAgentAttributionBug:
         with pytest.raises(Exception) as exc_info:
             store_b.update_edge_confidence(edge["id"], new_confidence=0.1)
         assert "PermissionDeniedError" in type(exc_info.value).__name__ or "cannot update" in str(exc_info.value).lower(), (
-            f"Agent B should NOT be able to update Agent A's edge, but no error was raised. "
-            f"Boundary enforcement is broken."
+            "Agent B should NOT be able to update Agent A's edge, but no error was raised. "
+            "Boundary enforcement is broken."
         )
 
         store_a.close()

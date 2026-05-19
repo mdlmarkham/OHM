@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import sys
 import tempfile
 from pathlib import Path
@@ -484,7 +483,6 @@ def t_vec_bad_dim():
 
 @_test("Vector: upsert and brute-force search")
 def t_vec_search():
-    import random
     DIM = 8
     with _mem_db() as db:
         db.create_vector_table("emb", dim=DIM, extra_cols={"content": "VARCHAR"})
@@ -688,7 +686,6 @@ def t_quack_uri_scheme():
 @_test("Quack: valid token accepted")
 def t_quack_token_valid():
     from scripts.duckdb_helper import _validate_quack_token
-    import logging
     with _mem_db():  # just to load module
         pass
     # suppress short-token warning for this test
@@ -769,7 +766,7 @@ def main():
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.WARNING)
-    print(f"DuckDB skill v3.0 — test suite")
+    print("DuckDB skill v3.0 — test suite")
     print(f"{'='*60}")
 
     ok = _run_all(filter_str=args.filter, verbose=args.verbose)

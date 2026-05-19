@@ -468,7 +468,7 @@ class DuckDBSession:
     ) -> None:
         """Configure S3/GCS/ADLS via CREATE SECRET (credentials never logged)."""
         self.load_extensions("httpfs")
-        parts = [f"TYPE s3", f"REGION '{_sql_str_escape(region)}'"]
+        parts = ["TYPE s3", f"REGION '{_sql_str_escape(region)}'"]
         if access_key_id:
             parts.append(f"KEY_ID '{_sql_str_escape(access_key_id)}'")
         if secret_access_key:
@@ -545,7 +545,7 @@ class DuckDBSession:
         safe_table = _require_identifier(table, "table")
         if not (1 <= dim <= 65535):
             raise ValueError(f"dim must be 1–65535, got {dim}")
-        cols = [f"id VARCHAR PRIMARY KEY", f"embedding FLOAT[{dim}]"]
+        cols = ["id VARCHAR PRIMARY KEY", f"embedding FLOAT[{dim}]"]
         if extra_cols:
             for col_name, col_type in extra_cols.items():
                 safe_col = _require_identifier(col_name, "extra_cols key")
@@ -1086,7 +1086,7 @@ class DuckDBSession:
         if tok:
             _validate_quack_token(tok, context="quack_query")
 
-        params = [_sql_str_escape(uri), sql]
+        [_sql_str_escape(uri), sql]
         token_clause = f", token := '{_sql_str_escape(tok)}'" if tok else ""
         ssl_clause = ", disable_ssl := true" if disable_ssl else ""
 

@@ -315,8 +315,8 @@ class TestDeleteNodeStore:
 
     def test_delete_node_removes_edges(self, store):
         """delete_node removes all edges referencing the node."""
-        a = store.write_node("del-a", "Node A", "concept")
-        b = store.write_node("del-b", "Node B", "concept")
+        store.write_node("del-a", "Node A", "concept")
+        store.write_node("del-b", "Node B", "concept")
         store.write_edge("del-a", "del-b", "CAUSES", "L3", confidence=0.8)
 
         result = store.delete_node("del-a", deleted_by="test_agent")
@@ -329,8 +329,8 @@ class TestDeleteNodeStore:
 
     def test_delete_node_removes_incoming_edges(self, store):
         """delete_node removes edges where node is the target."""
-        a = store.write_node("src-a", "Source", "concept")
-        b = store.write_node("tgt-b", "Target", "concept")
+        store.write_node("src-a", "Source", "concept")
+        store.write_node("tgt-b", "Target", "concept")
         store.write_edge("src-a", "tgt-b", "CAUSES", "L3", confidence=0.8)
 
         result = store.delete_node("tgt-b", deleted_by="test_agent")
@@ -355,8 +355,8 @@ class TestDeleteEdgeStore:
 
     def test_delete_edge(self, store):
         """delete_edge removes an edge by ID."""
-        a = store.write_node("e-a", "A", "concept")
-        b = store.write_node("e-b", "B", "concept")
+        store.write_node("e-a", "A", "concept")
+        store.write_node("e-b", "B", "concept")
         edge = store.write_edge("e-a", "e-b", "CAUSES", "L3", confidence=0.8)
 
         result = store.delete_edge(edge["id"], deleted_by="test_agent")

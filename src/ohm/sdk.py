@@ -508,7 +508,8 @@ class Graph:
             value_node = self.find_or_create_node(label=v, node_type="value")
             # Check if edge already exists
             existing = self._conn.execute(
-                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = 'VALUES' AND created_by = ?",
+                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ?"
+                " AND edge_type = 'VALUES' AND created_by = ?",
                 [me["id"], value_node["id"], self.actor],
             ).fetchone()
             if not existing:
@@ -522,7 +523,8 @@ class Graph:
         for g in (goals or []):
             goal_node = self.find_or_create_node(label=g, node_type="goal")
             existing = self._conn.execute(
-                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = 'GOALS' AND created_by = ?",
+                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ?"
+                " AND edge_type = 'GOALS' AND created_by = ?",
                 [me["id"], goal_node["id"], self.actor],
             ).fetchone()
             if not existing:
@@ -536,7 +538,8 @@ class Graph:
         for c in (capabilities or []):
             cap_node = self.find_or_create_node(label=c, node_type="skill")
             existing = self._conn.execute(
-                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = 'CAPABLE_OF' AND created_by = ?",
+                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ?"
+                " AND edge_type = 'CAPABLE_OF' AND created_by = ?",
                 [me["id"], cap_node["id"], self.actor],
             ).fetchone()
             if not existing:
@@ -550,7 +553,8 @@ class Graph:
         for i in (interests or []):
             topic_node = self.find_or_create_node(label=i, node_type="topic")
             existing = self._conn.execute(
-                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = 'INTERESTED_IN' AND created_by = ?",
+                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ?"
+                " AND edge_type = 'INTERESTED_IN' AND created_by = ?",
                 [me["id"], topic_node["id"], self.actor],
             ).fetchone()
             if not existing:
@@ -564,7 +568,8 @@ class Graph:
         for a in (listens_to or []):
             other_agent = self.find_or_create_node(label=a, node_type="agent")
             existing = self._conn.execute(
-                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = 'LISTENS_TO' AND created_by = ?",
+                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ?"
+                " AND edge_type = 'LISTENS_TO' AND created_by = ?",
                 [me["id"], other_agent["id"], self.actor],
             ).fetchone()
             if not existing:
@@ -1512,9 +1517,13 @@ class Graph:
             WHERE n.type = 'agent'
               AND n.id != ?
               AND (
-                (e.edge_type = 'VALUES' AND e.to_node IN (SELECT to_node FROM ohm_edges WHERE from_node = ? AND edge_type = 'VALUES' AND layer = 'L1'))
+                (e.edge_type = 'VALUES' AND e.to_node IN (
+                    SELECT to_node FROM ohm_edges
+                    WHERE from_node = ? AND edge_type = 'VALUES' AND layer = 'L1'))
                 OR
-                (e.edge_type = 'INTERESTED_IN' AND e.to_node IN (SELECT to_node FROM ohm_edges WHERE from_node = ? AND edge_type = 'INTERESTED_IN' AND layer = 'L1'))
+                (e.edge_type = 'INTERESTED_IN' AND e.to_node IN (
+                    SELECT to_node FROM ohm_edges
+                    WHERE from_node = ? AND edge_type = 'INTERESTED_IN' AND layer = 'L1'))
               )
             GROUP BY n.id, n.label
             ORDER BY overlap_count DESC
@@ -1720,7 +1729,8 @@ class Graph:
         if edge_ids:
             placeholders = ",".join(["?"] * len(edge_ids))
             rows = self._conn.execute(
-                f"SELECT id FROM ohm_edges WHERE id IN ({placeholders}) AND urgency IN ({','.join(['?'] * len(urgency_filter))})",
+                f"SELECT id FROM ohm_edges WHERE id IN ({placeholders})"
+                f" AND urgency IN ({','.join(['?'] * len(urgency_filter))})",
                 edge_ids + list(urgency_filter),
             ).fetchall()
             urgent_edge_ids = {row[0] for row in rows}

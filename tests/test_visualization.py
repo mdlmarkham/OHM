@@ -1,6 +1,5 @@
 """Tests for the OHM visualization module (Mermaid diagram export)."""
 
-import pytest
 
 from ohm.visualization import to_mermaid, to_mermaid_path, _sanitize, _edge_style
 

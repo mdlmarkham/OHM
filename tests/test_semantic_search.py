@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 
 class TestVSSExtension:
@@ -162,7 +161,7 @@ class TestSemanticSearch:
 
     def test_semantic_search_with_mock_embedding(self, test_db):
         """semantic_search works with pre-populated embeddings."""
-        from ohm.queries import semantic_search, create_node
+        from ohm.queries import create_node
 
         # Create nodes with embeddings
         node_a = create_node(test_db, label="Machine Learning", node_type="concept", created_by="test")

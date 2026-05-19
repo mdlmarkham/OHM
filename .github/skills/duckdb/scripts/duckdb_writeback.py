@@ -8,7 +8,12 @@ Credentials via --pg-password-env ENV_VAR (preferred over --pg-password).
 Usage examples in SKILL.md Write-Back section.
 """
 from __future__ import annotations
-import argparse, logging, os, shutil, sys, tempfile
+import argparse
+import logging
+import os
+import shutil
+import sys
+import tempfile
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -16,7 +21,8 @@ LARGE_WRITE_THRESHOLD = int(os.getenv("LARGE_WRITE_THRESHOLD", "10000"))
 
 
 def _load_helpers():
-    import importlib.util, sys
+    import importlib.util
+    import sys
     mod_name = "duckdb_helper"
     if mod_name in sys.modules:
         return sys.modules[mod_name]

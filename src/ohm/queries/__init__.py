@@ -1029,7 +1029,7 @@ def delete_edge(
         from ohm.exceptions import EdgeNotFoundError
         raise EdgeNotFoundError(f"Edge not found: {edge_id}")
 
-    layer = edge[0].get("layer")
+    edge[0].get("layer")
 
     # Delete observations referencing this edge
     conn.execute("DELETE FROM ohm_observations WHERE edge_id = ?", [edge_id])
@@ -1622,7 +1622,8 @@ def query_diff(
     ))
 
     nodes_updated = _rows_to_dicts(conn.execute(
-        f"SELECT * FROM ohm_nodes WHERE updated_at >= ? AND updated_at <= ? AND updated_at != created_at {node_agent_clause} ORDER BY updated_at",
+        f"SELECT * FROM ohm_nodes WHERE updated_at >= ? AND updated_at <= ?"
+        f" AND updated_at != created_at {node_agent_clause} ORDER BY updated_at",
         node_params,
     ))
 
@@ -1642,7 +1643,8 @@ def query_diff(
     ))
 
     edges_updated = _rows_to_dicts(conn.execute(
-        f"SELECT * FROM ohm_edges WHERE updated_at >= ? AND updated_at <= ? AND updated_at != created_at {edge_clauses} ORDER BY updated_at",
+        f"SELECT * FROM ohm_edges WHERE updated_at >= ? AND updated_at <= ?"
+        f" AND updated_at != created_at {edge_clauses} ORDER BY updated_at",
         edge_params,
     ))
 
@@ -1654,7 +1656,8 @@ def query_diff(
         obs_params.append(agent_name)
 
     observations_added = _rows_to_dicts(conn.execute(
-        f"SELECT * FROM ohm_observations WHERE created_at >= ? AND created_at <= ? {obs_agent_clause} ORDER BY created_at",
+        f"SELECT * FROM ohm_observations WHERE created_at >= ? AND created_at <= ?"
+        f" {obs_agent_clause} ORDER BY created_at",
         obs_params,
     ))
 
@@ -2083,7 +2086,7 @@ def query_what_if(
     Returns:
         Dict with edge details and downstream cascade results.
     """
-    from ohm.validation import validate_depth, validate_identifier
+    from ohm.validation import validate_identifier
 
     edge_id = validate_identifier(edge_id, name="edge_id")
 

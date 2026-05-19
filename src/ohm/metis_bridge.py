@@ -210,7 +210,6 @@ def project_zettelkasten(
         create_observation,
         create_edge,
         find_or_create_node,
-        node_exists,
     )
 
     if metis_conn is None:

@@ -315,7 +315,6 @@ class OhmHandler(BaseHTTPRequestHandler):
         - node_id: filter to changes for a specific node (optional)
         - topics: comma-separated topic labels (optional)
         """
-        from urllib.parse import parse_qs
 
         # Auth for SSE (respects require_read_auth setting)
         agent = self._authenticate()
@@ -372,7 +371,7 @@ class OhmHandler(BaseHTTPRequestHandler):
 
         # Send initial subscription event
         self.wfile.write(f"id: {sub_id}\n".encode())
-        self.wfile.write(f"event: subscribed\n".encode())
+        self.wfile.write("event: subscribed\n".encode())
         self.wfile.write(f"data: {json.dumps({'subscription_id': sub_id, 'since': since})}\n\n".encode())
         self.wfile.flush()
 
@@ -397,7 +396,7 @@ class OhmHandler(BaseHTTPRequestHandler):
 
                 if not changes:
                     # No new events — send heartbeat and wait
-                    self.wfile.write(f": heartbeat\n\n".encode())
+                    self.wfile.write(": heartbeat\n\n".encode())
                     self.wfile.flush()
                     time.sleep(0.5)
                     continue
@@ -591,7 +590,10 @@ class OhmHandler(BaseHTTPRequestHandler):
             except ValueError as e:
                 raise ValidationError(str(e))
             if "type" in body and body["type"] not in self.schema_config.node_types:
-                raise ValidationError(f"Invalid node type: '{body['type']}' — must be one of: {', '.join(sorted(self.schema_config.node_types))}")
+                raise ValidationError(
+                    f"Invalid node type: '{body['type']}'"
+                    f" — must be one of: {', '.join(sorted(self.schema_config.node_types))}"
+                )
             if "visibility" in body and body["visibility"] not in VALID_VISIBILITIES:
                 raise ValidationError(f"Invalid visibility: '{body['visibility']}' — must be private, team, or public")
             if "confidence" in body:
@@ -609,7 +611,10 @@ class OhmHandler(BaseHTTPRequestHandler):
             except ValueError as e:
                 raise ValidationError(str(e))
             if body["type"] not in self.schema_config.all_edge_types:
-                raise ValidationError(f"Invalid edge type: '{body['type']}' — must be one of: {', '.join(sorted(self.schema_config.all_edge_types))}")
+                raise ValidationError(
+                    f"Invalid edge type: '{body['type']}'"
+                    f" — must be one of: {', '.join(sorted(self.schema_config.all_edge_types))}"
+                )
             if "layer" in body:
                 try:
                     validate_layer(body["layer"])
@@ -1643,7 +1648,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         Requires auth. Agents can only delete their own nodes/edges.
         Idempotent: returns 404 on second call (not 500).
         """
-        from urllib.parse import urlparse, parse_qs
+        from urllib.parse import urlparse
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
 
