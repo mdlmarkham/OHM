@@ -41,7 +41,9 @@ OHM-xgm    P1: DuckLake + Time Travel (partially complete)
 ├── OHM-xgm.1  DuckLake shared backend (mirror tables, sync) ✅
 ├── OHM-xgm.2  /admin/snapshots + /graph/at endpoints ✅
 ├── OHM-xgm.3  /graph/changes diff endpoint ✅
-├── OHM-xgm.4  WAL corruption recovery (DuckLake fallback → WAL deletion) ✅
+├── OHM-xgm.4  WAL corruption recovery (InternalException + IOException, DuckLake fallback → WAL deletion) ✅
+├── OHM-xgm.4a DuckLake pull type casting (VARCHAR→FLOAT/TIMESTAMP in mirror→local sync) ✅
+├── OHM-xgm.4b /admin/checkpoint endpoint (force WAL flush to main DB) ✅
 ├── OHM-xgm.5  ohm snapshot CLI command
 └── OHM-xgm.6  ohm diff CLI command
 
@@ -49,8 +51,8 @@ OHM-a35     P1: Agent Integration (in progress)
 ├── OHM-a35.1  Métis — zettelkasten → OHM nodes/edges ✅
 ├── OHM-a35.2  Hephaestus — audit findings → observations ✅ (1 pattern + CHALLENGED_BY)
 ├── OHM-a35.3  Clio — research findings → L3 edges
-├── OHM-a35.4  Socrates — challenges → CHALLENGED_BY edges
-├── OHM-a35.5  DeepThought — registered May 19, content pending
+├── OHM-a35.4  Socrates — challenges → CHALLENGED_BY edges ✅ (6 challenges, 8 manipulation patterns, 4 domains)
+├── OHM-a35.5  DeepThought — registered May 19, content pending ✅ (5 concept nodes + REFINES edges, feedback: support hangs, search empty)
 └── OHM-a35.6  Agent values and goals config ✅ (9 agents registered)
 
 OHM-3w1     P2: TOPO — Industrial Knowledge Graph
@@ -121,24 +123,34 @@ Closed cross-cutting:
 - **P0 Security:** Parameterized queries, auth fail-closed, path traversal fix ✅
 - **SDK:** Python SDK (`ohm.sdk`) for programmatic agent access ✅
 - **Validation:** Input validation module (SQL injection prevention for CTE identifiers) ✅
-- **Phase 3 (Agent Integration):** Métis ✅, Hephaestus partial, DeepThought registered, others pending
-- **Phase 4 (DuckLake):** Mirror tables ✅, /admin/snapshots ✅, /graph/at ✅, /graph/changes ✅, WAL recovery ✅. CLI commands pending.
-- **Live stats:** 103 nodes, 91 edges, 3 observations, 56 DuckLake snapshots, daemon uptime ~7h
+- **Phase 3 (Agent Integration):** Métis ✅, Hephaestus partial, Socrates ✅ (6 CHALLENGED_BY), DeepThought ✅ (content + feedback), others pending
+- **Phase 4 (DuckLake):** Mirror tables ✅, /admin/snapshots ✅, /graph/at ✅, /graph/changes ✅, WAL recovery ✅ (InternalException fix), pull type casting ✅, /admin/checkpoint ✅. CLI commands pending.
+- **Persistence workflow:** write → DuckLake sync → checkpoint → WAL flushed → durable
+- **Live stats:** 146 nodes, 132 edges, 44 L3 edges, 9 CHALLENGED_BY, ~200 DuckLake snapshots, daemon uptime ~5min
 
 ## Known Issues
 
 ### P0 — Critical
-- (none currently known)
+- **DELETE on nodes corrupts DB when DuckLake mirror tables exist:** DuckDB index deletion fails ("Only deleted 0 out of 1 rows"), invalidates database, corrupts WAL. Do NOT use DELETE until fixed. (Found May 19, unfixed)
+- **Silent overwrite on duplicate node IDs:** POST /node with existing ID silently overwrites content/confidence/provenance. Returns `created: false` but no 409. Any agent can destroy another's knowledge. (Atlas testing, confirmed)
 
 ### P1 — High
+- **Support endpoint hangs:** POST /support/{id} never returns (DeepThought testing)
+- **Edge field naming mismatch:** Request `from`/`to`/`type` vs response `from_node`/`to_node`/`edge_type` (Atlas testing, confirmed)
+- **Semantic search empty:** Search returns no results for known terms — embedding index may not be built (DeepThought testing)
 - **No request size cap:** `_read_body()` reads unlimited Content-Length bytes (OOM risk) (OHM-zag) — DONE (MAX_BODY_SIZE=1MB)
 - **SDK read methods:** Fixed — `get_node()`, `get_edge()`, `find_or_create()`, `search()` all implemented ✅ (OHM-xfh)
 - **SDK test coverage:** 137 tests on primary agent interface ✅ (OHM-9dq)
+- **Duplicate agent registration:** 12 agent nodes for 4 active agents (Atlas testing, confirmed)
+- **Confidence bounds not enforced:** Values > 1.0 accepted (Atlas testing, confirmed)
 
 ### P2 — Medium
 - **No SIGPIPE handling:** Daemon can crash on broken connections (OHM-e19)
 
 ### Closed/Resolved
+- **WAL InternalException not caught:** DuckDB throws InternalException (not IOException) for WAL replay failures. Fixed: catch both + check "replay" keyword. (bb663a7) ✅
+- **DuckLake pull silently fails on type mismatch:** Mirror VARCHAR → local FLOAT/TIMESTAMP caused silent INSERT failures. Fixed: explicit CAST during pull. (a6ce948) ✅
+- **No WAL flush mechanism:** Added /admin/checkpoint GET endpoint. (a6ce948) ✅
 - **Dead code removed:** queries.py top-level, query.py NLP parser ✅
 - **Module boundaries documented:** store.py vs queries/ ✅
 - **Server tests:** 17 HTTP endpoints now covered ✅
