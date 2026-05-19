@@ -60,11 +60,11 @@
 
 **Goal:** Each Olympus agent uses OHM as its knowledge graph
 
-- [ ] Métis integration — zettelkasten notes → OHM nodes, wikilinks → OHM edges
+- [x] Métis integration — zettelkasten notes → OHM nodes, wikilinks → OHM edges
 - [ ] Clio integration — research findings → OHM L3 edges with source attribution
 - [ ] Hephaestus integration — audit findings → OHM observations
 - [ ] Socrates integration — challenges → OHM CHALLENGED_BY edges
-- [ ] SDK tests (OHM-9dq) — zero coverage on primary agent interface
+- [x] SDK tests (OHM-9dq) — zero coverage on primary agent interface
 - [ ] marimo-pair integration — OHM queries in notebooks via Quack
 
 **Deliverable:** All agents reading/writing via OHM. Shared graph accumulates perspectives.
