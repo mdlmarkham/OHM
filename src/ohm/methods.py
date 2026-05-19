@@ -1283,3 +1283,411 @@ def differential_diagnosis(
     results.sort(key=lambda r: (r["ruled_out"], -(r["composite_score"] or 0)))
 
     return results
+
+
+def find_orphans(
+    conn: DuckDBPyConnection,
+    *,
+    node_type: str | None = None,
+    exclude_system: bool = True,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Find nodes with zero edges — completely disconnected from the graph.
+
+    Orphans are notes that need connections. They're stored but not integrated.
+    Every orphan is a missed opportunity for discovery.
+
+    Args:
+        node_type: Filter to a specific node type (e.g., 'concept').
+        exclude_system: Exclude system nodes (agents, skills, values, goals).
+        limit: Maximum results.
+
+    Returns:
+        List of orphan node dicts with id, label, type, provenance.
+    """
+    excluded_types = ["agent", "skill", "value", "goal"] if exclude_system else []
+    type_clause = "AND n.type = ?" if node_type else ""
+    exclude_clause = "AND n.type NOT IN ({})".format(",".join("?" * len(excluded_types))) if excluded_types else ""
+
+    params: list[Any] = []
+    if node_type:
+        params.append(node_type)
+    params.extend(excluded_types)
+    params.append(limit)
+
+    query = f"""
+        SELECT n.id, n.label, n.type, n.provenance, n.confidence
+        FROM ohm_nodes n
+        LEFT JOIN ohm_edges e ON (e.from_node = n.id OR e.to_node = n.id)
+        WHERE e.id IS NULL
+        AND n.deleted_at IS NULL
+        {type_clause}
+        {exclude_clause}
+        ORDER BY n.confidence DESC NULLS LAST
+        LIMIT ?
+    """
+    rows = conn.execute(query, params).fetchall()
+
+    return [
+        {
+            "id": row[0],
+            "label": row[1],
+            "type": row[2],
+            "provenance": row[3],
+            "confidence": round(row[4], 2) if row[4] is not None else None,
+        }
+        for row in rows
+    ]
+
+
+def find_hubs(
+    conn: DuckDBPyConnection,
+    *,
+    node_type: str | None = None,
+    min_connections: int = 3,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """Find the most-connected nodes — hubs that anchor the graph.
+
+    Hubs are the opposite of orphans: nodes that many other nodes connect to.
+    They're the concepts that tie everything together.
+
+    Args:
+        node_type: Filter to a specific node type.
+        min_connections: Minimum number of connections to be considered a hub.
+        limit: Maximum results.
+
+    Returns:
+        List of hub node dicts sorted by connection count descending.
+    """
+    type_clause = "AND n.type = ?" if node_type else ""
+    params: list[Any] = []
+    if node_type:
+        params.append(node_type)
+    params.extend([min_connections, limit])
+
+    query = f"""
+        SELECT n.id, n.label, n.type, n.confidence,
+               COUNT(e.id) AS connections
+        FROM ohm_nodes n
+        JOIN ohm_edges e ON (e.from_node = n.id OR e.to_node = n.id)
+        WHERE n.deleted_at IS NULL
+        AND e.deleted_at IS NULL
+        {type_clause}
+        GROUP BY n.id, n.label, n.type, n.confidence
+        HAVING COUNT(e.id) >= ?
+        ORDER BY connections DESC
+        LIMIT ?
+    """
+    rows = conn.execute(query, params).fetchall()
+
+    return [
+        {
+            "id": row[0],
+            "label": row[1],
+            "type": row[2],
+            "confidence": round(row[3], 2) if row[3] is not None else None,
+            "connections": row[4],
+        }
+        for row in rows
+    ]
+
+
+def find_dead_ends(
+    conn: DuckDBPyConnection,
+    *,
+    node_type: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Find nodes with only incoming edges — dead ends that don't lead anywhere.
+
+    A dead end has edges pointing TO it but none FROM it. It's a sink.
+    In a knowledge graph, dead ends mean you can reach this concept but
+    can't follow it further. They need outgoing connections.
+
+    Args:
+        node_type: Filter to a specific node type.
+        limit: Maximum results.
+
+    Returns:
+        List of dead-end node dicts.
+    """
+    type_clause = "AND n.type = ?" if node_type else ""
+    params: list[Any] = []
+    if node_type:
+        params.append(node_type)
+    params.append(limit)
+
+    query = f"""
+        SELECT n.id, n.label, n.type, n.confidence,
+               incoming.incoming
+        FROM ohm_nodes n
+        JOIN (
+            SELECT to_node, COUNT(*) AS incoming
+            FROM ohm_edges
+            WHERE deleted_at IS NULL
+            GROUP BY to_node
+        ) incoming ON incoming.to_node = n.id
+        WHERE n.deleted_at IS NULL
+        AND NOT EXISTS (
+            SELECT 1 FROM ohm_edges e2
+            WHERE e2.from_node = n.id
+            AND e2.deleted_at IS NULL
+        )
+        {type_clause}
+        ORDER BY incoming.incoming DESC
+        LIMIT ?
+    """
+    rows = conn.execute(query, params).fetchall()
+
+    return [
+        {
+            "id": row[0],
+            "label": row[1],
+            "type": row[2],
+            "confidence": round(row[3], 2) if row[3] is not None else None,
+            "incoming": row[4],
+        }
+        for row in rows
+    ]
+
+
+def suggest_connections(
+    conn: DuckDBPyConnection,
+    *,
+    method: str = "shared_provenance",
+    min_shared: int = 2,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """Suggest connections between nodes that should be linked but aren't.
+
+    In the Zettelkasten tradition, this is the most valuable discovery:
+    finding notes that share context (provenance, type, overlapping content)
+    but have no edge connecting them. Each suggestion is a missed connection.
+
+    Methods:
+    - shared_provenance: Nodes with same provenance prefix but no edge.
+    - shared_type: Nodes of same type that might be related.
+    - semantic: Use embedding similarity (slower, more accurate).
+
+    Args:
+        method: Discovery method ('shared_provenance', 'shared_type', 'semantic').
+        min_shared: Minimum shared context score to suggest a connection.
+        limit: Maximum results.
+
+    Returns:
+        List of suggested connection dicts with from_id, to_id, reason, score.
+    """
+    if method == "shared_provenance":
+        # Find node pairs with same provenance prefix that aren't connected
+        query = """
+            SELECT
+                a.id AS from_id,
+                a.label AS from_label,
+                b.id AS to_id,
+                b.label AS to_label,
+                a.type AS shared_type,
+                a.provenance AS shared_provenance,
+                COUNT(*) OVER (PARTITION BY a.provenance) AS cohort_size
+            FROM ohm_nodes a
+            JOIN ohm_nodes b ON a.provenance = b.provenance
+                AND a.id < b.id
+                AND a.deleted_at IS NULL
+                AND b.deleted_at IS NULL
+            WHERE NOT EXISTS (
+                SELECT 1 FROM ohm_edges e
+                WHERE (e.from_node = a.id AND e.to_node = b.id)
+                OR (e.from_node = b.id AND e.to_node = a.id)
+                AND e.deleted_at IS NULL
+            )
+            ORDER BY cohort_size DESC
+            LIMIT ?
+        """
+        rows = conn.execute(query, [limit]).fetchall()
+        return [
+            {
+                "from_id": row[0],
+                "from_label": row[1],
+                "to_id": row[2],
+                "to_label": row[3],
+                "shared_type": row[4],
+                "shared_provenance": row[5],
+                "reason": f"Same provenance: {row[5]}",
+                "score": 0.7,
+            }
+            for row in rows
+        ]
+
+    elif method == "shared_type":
+        # Find concept nodes of same type that aren't connected
+        query = """
+            SELECT
+                a.id AS from_id,
+                a.label AS from_label,
+                b.id AS to_id,
+                b.label AS to_label,
+                a.type AS shared_type
+            FROM ohm_nodes a
+            JOIN ohm_nodes b ON a.type = b.type
+                AND a.id < b.id
+                AND a.deleted_at IS NULL
+                AND b.deleted_at IS NULL
+            WHERE NOT EXISTS (
+                SELECT 1 FROM ohm_edges e
+                WHERE (e.from_node = a.id AND e.to_node = b.id)
+                OR (e.from_node = b.id AND e.to_node = a.id)
+                AND e.deleted_at IS NULL
+            )
+            AND a.type = 'concept'
+            ORDER BY a.label, b.label
+            LIMIT ?
+        """
+        rows = conn.execute(query, [limit]).fetchall()
+        return [
+            {
+                "from_id": row[0],
+                "from_label": row[1],
+                "to_id": row[2],
+                "to_label": row[3],
+                "shared_type": row[4],
+                "reason": f"Both {row[4]}s, not connected",
+                "score": 0.5,
+            }
+            for row in rows
+        ]
+
+    elif method == "semantic":
+        # Use embedding similarity to find unconnected nodes
+        # This is expensive — only for small graphs or targeted queries
+        query = """
+            SELECT
+                a.id AS from_id,
+                a.label AS from_label,
+                b.id AS to_id,
+                b.label AS to_label,
+                array_cosine_similarity(a.embedding, b.embedding) AS similarity
+            FROM ohm_nodes a
+            JOIN ohm_nodes b ON a.id < b.id
+            WHERE a.embedding IS NOT NULL
+            AND b.embedding IS NOT NULL
+            AND a.deleted_at IS NULL
+            AND b.deleted_at IS NULL
+            AND NOT EXISTS (
+                SELECT 1 FROM ohm_edges e
+                WHERE (e.from_node = a.id AND e.to_node = b.id)
+                OR (e.from_node = b.id AND e.to_node = a.id)
+                AND e.deleted_at IS NULL
+            )
+            ORDER BY similarity DESC
+            LIMIT ?
+        """
+        rows = conn.execute(query, [limit]).fetchall()
+        return [
+            {
+                "from_id": row[0],
+                "from_label": row[1],
+                "to_id": row[2],
+                "to_label": row[3],
+                "reason": "Semantic similarity",
+                "score": round(row[4], 4) if row[4] is not None else 0,
+            }
+            for row in rows
+        ]
+
+    else:
+        raise ValueError(f"Unknown method: {method}. Use 'shared_provenance', 'shared_type', or 'semantic'.")
+
+
+def graph_stats(
+    conn: DuckDBPyConnection,
+) -> dict[str, Any]:
+    """Compute graph-level statistics beyond the basic /stats endpoint.
+
+    Includes density, connectivity, orphan/hub/dead-end counts,
+    and type distribution useful for Zettelkasten-style discovery.
+
+    Returns:
+        Dict with graph statistics.
+    """
+    # Total counts
+    total_nodes = conn.execute(
+        "SELECT count(*) FROM ohm_nodes WHERE deleted_at IS NULL"
+    ).fetchone()[0]
+    total_edges = conn.execute(
+        "SELECT count(*) FROM ohm_edges WHERE deleted_at IS NULL"
+    ).fetchone()[0]
+
+    # Orphan count
+    orphan_count = conn.execute("""
+        SELECT count(*) FROM ohm_nodes n
+        LEFT JOIN ohm_edges e ON (e.from_node = n.id OR e.to_node = n.id)
+        WHERE e.id IS NULL AND n.deleted_at IS NULL
+    """).fetchone()[0]
+
+    # Dead end count
+    dead_end_count = conn.execute("""
+        SELECT count(*) FROM ohm_nodes n
+        WHERE NOT EXISTS (
+            SELECT 1 FROM ohm_edges e
+            WHERE e.from_node = n.id AND e.deleted_at IS NULL
+        )
+        AND EXISTS (
+            SELECT 1 FROM ohm_edges e2
+            WHERE e2.to_node = n.id AND e2.deleted_at IS NULL
+        )
+        AND n.deleted_at IS NULL
+    """).fetchone()[0]
+
+    # Hub count (nodes with 5+ connections)
+    hub_count = conn.execute(f"""
+        SELECT count(*) FROM (
+            SELECT n.id
+            FROM ohm_nodes n
+            JOIN ohm_edges e ON (e.from_node = n.id OR e.to_node = n.id)
+            WHERE n.deleted_at IS NULL AND e.deleted_at IS NULL
+            GROUP BY n.id
+            HAVING COUNT(e.id) >= 5
+        )
+    """).fetchone()[0]
+
+    # Density
+    density = total_edges / total_nodes if total_nodes > 0 else 0
+
+    # Average confidence
+    avg_conf = conn.execute(
+        "SELECT AVG(confidence) FROM ohm_nodes WHERE deleted_at IS NULL AND confidence IS NOT NULL"
+    ).fetchone()[0]
+
+    # Type distribution
+    type_dist = conn.execute("""
+        SELECT type, count(*) as cnt
+        FROM ohm_nodes WHERE deleted_at IS NULL
+        GROUP BY type ORDER BY cnt DESC
+    """).fetchall()
+
+    # Edge type distribution
+    edge_dist = conn.execute("""
+        SELECT edge_type, count(*) as cnt
+        FROM ohm_edges WHERE deleted_at IS NULL
+        GROUP BY edge_type ORDER BY cnt DESC
+    """).fetchall()
+
+    # Layer distribution
+    layer_dist = conn.execute("""
+        SELECT layer, count(*) as cnt
+        FROM ohm_edges WHERE deleted_at IS NULL
+        GROUP BY layer ORDER BY cnt DESC
+    """).fetchall()
+
+    return {
+        "total_nodes": total_nodes,
+        "total_edges": total_edges,
+        "density": round(density, 2),
+        "orphan_count": orphan_count,
+        "dead_end_count": dead_end_count,
+        "hub_count": hub_count,
+        "avg_confidence": round(avg_conf, 2) if avg_conf else None,
+        "nodes_by_type": {row[0]: row[1] for row in type_dist},
+        "edges_by_type": {row[0]: row[1] for row in edge_dist},
+        "edges_by_layer": {row[0]: row[1] for row in layer_dist},
+    }

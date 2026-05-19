@@ -493,6 +493,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         "/challenge": [],
         "/support": [],
         "/observe": [],
+        "/observations": [],
         "/outcome": [],
         "/reliability": [],
         "/webhook": [],
@@ -813,6 +814,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "/challenge/{id}": {"method": "POST", "description": "Challenge an existing edge"},
                     "/support/{id}": {"method": "POST", "description": "Support an existing edge"},
                     "/observe/{id}": {"method": "POST", "description": "Record an observation on a node"},
+                    "/observations": {"method": "GET", "description": "List observations with filtering by type, source, node_id"},
                     "/outcome": {"method": "POST", "description": "Record whether a source agent's claim was correct"},
                     "/reliability/{source}": {"method": "GET", "description": "Compute source reliability metrics from historical outcomes"},
                     "/state": {"method": "POST", "description": "Update agent state/focus"},
@@ -876,6 +878,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "/challenge/{id}": {"post": {"summary": "Challenge edge"}},
                     "/support/{id}": {"post": {"summary": "Support edge"}},
                     "/observe/{id}": {"post": {"summary": "Record observation"}},
+                    "/observations": {"get": {"summary": "List observations"}},
                     "/state": {"post": {"summary": "Update agent state"}},
                     "/register": {"post": {"summary": "Register agent"}},
                     "/heartbeat": {"post": {"summary": "Agent heartbeat"}},
@@ -1344,6 +1347,42 @@ class OhmHandler(BaseHTTPRequestHandler):
             from .methods import compute_confidence_calibration
             result = compute_confidence_calibration(self.store.conn, agent_name)
             self._json_response(200, result)
+        elif path == "/orphans":
+            # Find nodes with zero edges — completely disconnected from the graph
+            from .methods import find_orphans
+            node_type = qs.get("type", [None])[0]
+            exclude_system = qs.get("exclude_system", ["true"][0]).lower() == "true"
+            limit = int(qs.get("limit", [50])[0])
+            result = find_orphans(self.store.conn, node_type=node_type, exclude_system=exclude_system, limit=limit)
+            self._json_response(200, result)
+        elif path == "/hubs":
+            # Find most-connected nodes — anchors of the graph
+            from .methods import find_hubs
+            node_type = qs.get("type", [None])[0]
+            min_connections = int(qs.get("min_connections", [3])[0])
+            limit = int(qs.get("limit", [20])[0])
+            result = find_hubs(self.store.conn, node_type=node_type, min_connections=min_connections, limit=limit)
+            self._json_response(200, result)
+        elif path == "/dead_ends":
+            # Find nodes with only incoming edges — sinks that don't lead anywhere
+            from .methods import find_dead_ends
+            node_type = qs.get("type", [None])[0]
+            limit = int(qs.get("limit", [50])[0])
+            result = find_dead_ends(self.store.conn, node_type=node_type, limit=limit)
+            self._json_response(200, result)
+        elif path == "/suggest":
+            # Suggest connections between nodes that share context but aren't linked
+            from .methods import suggest_connections
+            method = qs.get("method", ["shared_provenance"])[0]
+            min_shared = int(qs.get("min_shared", [2])[0])
+            limit = int(qs.get("limit", [20])[0])
+            result = suggest_connections(self.store.conn, method=method, min_shared=min_shared, limit=limit)
+            self._json_response(200, result)
+        elif path == "/graph/stats":
+            # Extended graph statistics (orphans, hubs, density, etc.)
+            from .methods import graph_stats
+            result = graph_stats(self.store.conn)
+            self._json_response(200, result)
         elif path == "/admin/checkpoint":
             # Force DuckDB CHECKPOINT to flush WAL to main DB file
             try:
@@ -1461,6 +1500,42 @@ class OhmHandler(BaseHTTPRequestHandler):
             from .queries import query_source_reliability
             result = query_source_reliability(self.store.conn, source_agent)
             self._json_response(200, result)
+        elif path == "/observations":
+            # List observations with optional filtering
+            obs_type = qs.get("type", [None])[0]
+            source = qs.get("source", [None])[0]
+            node_id = qs.get("node_id", [None])[0]
+            created_by = qs.get("created_by", [None])[0]
+            limit = int(qs.get("limit", [100])[0])
+            offset = int(qs.get("offset", [0])[0])
+            conditions = ["deleted_at IS NULL"]
+            params = []
+            if obs_type:
+                conditions.append("type = ?")
+                params.append(obs_type)
+            if source:
+                conditions.append("source = ?")
+                params.append(source)
+            if node_id:
+                conditions.append("node_id = ?")
+                params.append(node_id)
+            if created_by:
+                conditions.append("created_by = ?")
+                params.append(created_by)
+            params.append(limit)
+            params.append(offset)
+            sql = (
+                "SELECT * FROM ohm_observations WHERE "
+                + " AND ".join(conditions)
+                + " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            )
+            results = self.store.execute(sql, params)
+            # Count query
+            count_sql = "SELECT COUNT(*) as cnt FROM ohm_observations WHERE " + " AND ".join(conditions)
+            count_params = params[:-2]
+            total_result = self.store.execute(count_sql, count_params)
+            total = total_result[0]["cnt"] if total_result else len(results)
+            self._json_response(200, {"observations": results, "total": total, "limit": limit, "offset": offset})
         else:
             self._json_response(404, {"error": f"Unknown endpoint: {path}"})
 
