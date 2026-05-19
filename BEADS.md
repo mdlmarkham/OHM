@@ -51,9 +51,11 @@ OHM-a35     P1: Agent Integration (in progress)
 ├── OHM-a35.1  Métis — zettelkasten → OHM nodes/edges ✅
 ├── OHM-a35.2  Hephaestus — audit findings → observations ✅ (1 pattern + CHALLENGED_BY)
 ├── OHM-a35.3  Clio — research findings → L3 edges
-├── OHM-a35.4  Socrates — challenges → CHALLENGED_BY edges ✅ (6 challenges, 8 manipulation patterns, 4 domains)
-├── OHM-a35.5  DeepThought — registered May 19, content pending ✅ (5 concept nodes + REFINES edges, feedback: support hangs, search empty)
+├── OHM-a35.4  Socrates — tested: 6 CHALLENGED_BY, 8 patterns, 4 domains written to graph ✅ (learnings incorporated, no agent-specific code paths)
+├── OHM-a35.5  DeepThought — tested: 5 concepts + REFINES written to graph ✅ (learnings incorporated: support hangs, search empty, edge naming, quack:// URI)
 └── OHM-a35.6  Agent values and goals config ✅ (9 agents registered)
+
+Note: Agent content lives in the graph, not in code. Integrations.py provides thin SDK wrappers; no agent-specific logic in the codebase.
 
 OHM-3w1     P2: TOPO — Industrial Knowledge Graph
 ├── OHM-3w1.1  TOPO schema (equipment, system, area, site)
