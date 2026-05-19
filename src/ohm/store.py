@@ -15,6 +15,7 @@ from typing import Any, Optional
 
 import duckdb
 
+from .exceptions import OHMError
 from .schema import SCHEMA_SQL
 
 
@@ -929,3 +930,166 @@ class OhmStore:
             """,
             [f"{self.agent_name}_last_pull", ts_str],
         )
+
+    # ── DuckLake Time Travel ──────────────────────────────────────────
+
+    def list_snapshots(self, alias: str = "ohm_lake") -> list[dict[str, Any]]:
+        """List available DuckLake snapshots.
+
+        Queries the DuckLake snapshots() function to return all
+        historical snapshots with their IDs, timestamps, and commit
+        messages.
+
+        Args:
+            alias: Database alias for the attached DuckLake catalog.
+
+        Returns:
+            List of dicts with snapshot_id, snapshot_time, and
+            commit_message. Empty list if DuckLake is not attached.
+        """
+        # Check if DuckLake alias is attached
+        try:
+            attached = self.conn.execute(
+                "SELECT database_name FROM duckdb_databases() WHERE database_name = ?",
+                [alias],
+            ).fetchone()
+        except Exception:
+            attached = None
+
+        if not attached:
+            return []
+
+        try:
+            rows = self.conn.execute(
+                f"SELECT * FROM {alias}.snapshots() ORDER BY snapshot_id ASC"
+            ).fetchall()
+            columns = [desc[0] for desc in self.conn.description]
+            return [dict(zip(columns, row)) for row in rows]
+        except Exception as e:
+            raise OHMError(f"Failed to list DuckLake snapshots: {e}") from e
+
+    def graph_at_version(
+        self,
+        version: int,
+        alias: str = "ohm_lake",
+    ) -> dict[str, Any]:
+        """Query graph state at a specific DuckLake snapshot version.
+
+        Uses DuckLake's AT (VERSION => N) syntax to read nodes and
+        edges as they existed at snapshot N.
+
+        Args:
+            version: DuckLake snapshot version number.
+            alias: Database alias for the attached DuckLake catalog.
+
+        Returns:
+            Dict with 'nodes' and 'edges' lists representing the
+            graph state at that snapshot version.
+
+        Raises:
+            OHMError: If DuckLake is not attached or query fails.
+        """
+        # Check if DuckLake alias is attached
+        try:
+            attached = self.conn.execute(
+                "SELECT database_name FROM duckdb_databases() WHERE database_name = ?",
+                [alias],
+            ).fetchone()
+        except Exception:
+            attached = None
+
+        if not attached:
+            raise OHMError("DuckLake is not attached — cannot query historical state")
+
+        try:
+            nodes = self.conn.execute(
+                f"SELECT * FROM {alias}.ohm_nodes AT (VERSION => {int(version)})"
+            ).fetchall()
+            node_columns = [desc[0] for desc in self.conn.description]
+            nodes_dicts = [dict(zip(node_columns, row)) for row in nodes]
+        except Exception as e:
+            raise OHMError(f"Failed to query nodes at version {version}: {e}") from e
+
+        try:
+            edges = self.conn.execute(
+                f"SELECT * FROM {alias}.ohm_edges AT (VERSION => {int(version)})"
+            ).fetchall()
+            edge_columns = [desc[0] for desc in self.conn.description]
+            edges_dicts = [dict(zip(edge_columns, row)) for row in edges]
+        except Exception as e:
+            raise OHMError(f"Failed to query edges at version {version}: {e}") from e
+
+        return {
+            "version": version,
+            "nodes": nodes_dicts,
+            "edges": edges_dicts,
+            "node_count": len(nodes_dicts),
+            "edge_count": len(edges_dicts),
+        }
+
+    def graph_changes(
+        self,
+        from_version: int,
+        to_version: int,
+        alias: str = "ohm_lake",
+    ) -> dict[str, Any]:
+        """Query changes between two DuckLake snapshot versions.
+
+        Uses DuckLake's table_changes() function to return insertions
+        and deletions between two snapshots for both nodes and edges.
+
+        Args:
+            from_version: Starting snapshot version (exclusive).
+            to_version: Ending snapshot version (inclusive).
+            alias: Database alias for the attached DuckLake catalog.
+
+        Returns:
+            Dict with 'node_changes' and 'edge_changes' lists, each
+            containing rows with snapshot_id, rowid, change_type, and
+            the data columns.
+
+        Raises:
+            OHMError: If DuckLake is not attached or query fails.
+        """
+        # Check if DuckLake alias is attached
+        try:
+            attached = self.conn.execute(
+                "SELECT database_name FROM duckdb_databases() WHERE database_name = ?",
+                [alias],
+            ).fetchone()
+        except Exception:
+            attached = None
+
+        if not attached:
+            raise OHMError("DuckLake is not attached — cannot query changes")
+
+        try:
+            node_changes = self.conn.execute(
+                f"SELECT * FROM {alias}.table_changes('ohm_nodes', {int(from_version)}, {int(to_version)})"
+            ).fetchall()
+            nc_columns = [desc[0] for desc in self.conn.description]
+            node_changes_dicts = [dict(zip(nc_columns, row)) for row in node_changes]
+        except Exception as e:
+            raise OHMError(
+                f"Failed to query node changes between versions {from_version} and {to_version}: {e}"
+            ) from e
+
+        try:
+            edge_changes = self.conn.execute(
+                f"SELECT * FROM {alias}.table_changes('ohm_edges', {int(from_version)}, {int(to_version)})"
+            ).fetchall()
+            ec_columns = [desc[0] for desc in self.conn.description]
+            edge_changes_dicts = [dict(zip(ec_columns, row)) for row in edge_changes]
+        except Exception as e:
+            raise OHMError(
+                f"Failed to query edge changes between versions {from_version} and {to_version}: {e}"
+            ) from e
+
+        return {
+            "from_version": from_version,
+            "to_version": to_version,
+            "node_changes": node_changes_dicts,
+            "edge_changes": edge_changes_dicts,
+            "node_change_count": len(node_changes_dicts),
+            "edge_change_count": len(edge_changes_dicts),
+        }

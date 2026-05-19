@@ -249,6 +249,7 @@ class OhmHandler(BaseHTTPRequestHandler):
     tokens: dict = {}  # token -> agent_name
     roles: dict = {}    # agent_name -> role (read-write, read-only)
     no_auth: bool = False  # --no-auth flag: bypass all auth (dev mode)
+    require_read_auth: bool = False  # OHM-gwg: require auth for reads (default: public reads)
     schema_config: SchemaConfig = DEFAULT_SCHEMA  # configurable schema (OHM or TOPO)
 
     def log_message(self, format, *args):
@@ -316,13 +317,15 @@ class OhmHandler(BaseHTTPRequestHandler):
         """
         from urllib.parse import parse_qs
 
-        # Auth required for SSE
+        # Auth for SSE (respects require_read_auth setting)
         agent = self._authenticate()
         if agent is None:
             if self.no_auth or not self.tokens:
                 agent = "ohm"
-            else:
+            elif self.require_read_auth:
                 raise AuthenticationError("Authentication required — provide Bearer token")
+            else:
+                agent = "ohm"
 
         # Parse parameters
         since = qs.get("since", [None])[0]
@@ -762,6 +765,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                 "version": "0.2.0",
                 "schema": self.schema_config.name,
                 "description": "Multi-agent knowledge graph daemon",
+                "auth_model": "public-read" if not self.require_read_auth else "authenticated",
                 "endpoints": {
                     "/": {"method": "GET", "description": "This discovery index (no auth required)"},
                     "/health": {"method": "GET", "description": "Health check (no auth required)"},
@@ -793,6 +797,9 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "/webhook/{agent}": {"method": "POST", "description": "Register a webhook callback"},
                     "/search": {"method": "GET", "description": "ILIKE text search (?q=QUERY)"},
                     "/semantic_search": {"method": "GET", "description": "Semantic vector search via embeddings (?q=QUERY, requires Ollama)"},
+                    "/admin/snapshots": {"method": "GET", "description": "List DuckLake snapshots (time-travel)"},
+                    "/graph/at": {"method": "GET", "description": "Query graph at snapshot version (?version=N)"},
+                    "/graph/changes": {"method": "GET", "description": "Changes between snapshots (?from_version=M&to_version=N)"},
                 },
                 "links": {
                     "schema": "/schema",
@@ -841,6 +848,9 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "/webhook/{agent}": {"post": {"summary": "Register webhook"}},
                     "/search": {"get": {"summary": "ILIKE text search", "parameters": [{"name": "q", "in": "query", "required": True, "schema": {"type": "string"}}]}},
                     "/semantic_search": {"get": {"summary": "Semantic vector search (requires Ollama)", "parameters": [{"name": "q", "in": "query", "required": True, "schema": {"type": "string"}}, {"name": "type", "in": "query", "required": False, "schema": {"type": "string"}}, {"name": "limit", "in": "query", "required": False, "schema": {"type": "integer"}}, {"name": "min_confidence", "in": "query", "required": False, "schema": {"type": "number"}}], "responses": {"200": {"description": "Search results"}, "503": {"description": "Ollama not available"}}}},
+                    "/admin/snapshots": {"get": {"summary": "List DuckLake snapshots", "responses": {"200": {"description": "Snapshots list"}}}},
+                    "/graph/at": {"get": {"summary": "Graph at snapshot version", "responses": {"200": {"description": "Historical graph state"}}}},
+                    "/graph/changes": {"get": {"summary": "Changes between snapshots", "responses": {"200": {"description": "Insertions/deletions"}}}},
                 },
             })
             return
@@ -892,16 +902,20 @@ class OhmHandler(BaseHTTPRequestHandler):
             return
 
         # Auth for all other GET endpoints
-        # Fail-closed design:
+        # OHM-gwg: Public-read model (default) vs. require-read-auth
         #   - --no-auth: all requests allowed (dev mode)
-        #   - tokens configured: all requests require valid Bearer token
-        #   - no tokens, no --no-auth: GET allowed (transition mode for fresh installs)
+        #   - require_read_auth=True: all requests require valid Bearer token
+        #   - require_read_auth=False (default): reads are public, writes need auth
+        #   - no tokens configured: GET allowed (transition mode for fresh installs)
         agent = self._authenticate()
         if agent is None:
             if self.no_auth or not self.tokens:
                 agent = "ohm"
-            else:
+            elif self.require_read_auth:
                 raise AuthenticationError("Authentication required — provide Bearer token")
+            else:
+                # Public-read model: unauthenticated reads allowed
+                agent = "ohm"
 
         if path == "/status":
             status = self.store.status()
@@ -1209,6 +1223,34 @@ class OhmHandler(BaseHTTPRequestHandler):
             agent_name = validate_identifier(agent_name, name="agent_name")
             from .methods import compute_confidence_calibration
             result = compute_confidence_calibration(self.store.conn, agent_name)
+            self._json_response(200, result)
+        elif path == "/admin/snapshots":
+            # DuckLake time-travel: list available snapshots (OHM-kdk.3)
+            snapshots = self.store.list_snapshots()
+            self._json_response(200, {"snapshots": snapshots, "count": len(snapshots)})
+        elif path == "/graph/at":
+            # DuckLake time-travel: query graph at specific snapshot version (OHM-kdk.3)
+            version = qs.get("version", [None])[0]
+            if not version:
+                raise ValidationError("?version=N is required for /graph/at")
+            try:
+                version_int = int(version)
+            except ValueError:
+                raise ValidationError("?version must be an integer snapshot ID")
+            result = self.store.graph_at_version(version_int)
+            self._json_response(200, result)
+        elif path == "/graph/changes":
+            # DuckLake time-travel: changes between two snapshot versions (OHM-kdk.3)
+            from_version = qs.get("from_version", [None])[0]
+            to_version = qs.get("to_version", [None])[0]
+            if not from_version or not to_version:
+                raise ValidationError("?from_version=M&to_version=N are required for /graph/changes")
+            try:
+                from_int = int(from_version)
+                to_int = int(to_version)
+            except ValueError:
+                raise ValidationError("?from_version and ?to_version must be integers")
+            result = self.store.graph_changes(from_int, to_int)
             self._json_response(200, result)
         else:
             self._json_response(404, {"error": f"Unknown endpoint: {path}"})
@@ -1670,6 +1712,7 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     OhmHandler.tokens = token_hashes
     OhmHandler.roles = config_roles if config_roles else config.get("roles", {})
     OhmHandler.no_auth = config.get("no_auth", False)
+    OhmHandler.require_read_auth = config.get("require_read_auth", False)
     OhmHandler.schema_config = schema_config
 
     # ── Quack integration ──────────────────────────────────────────────
@@ -1735,6 +1778,10 @@ def main(schema_config: SchemaConfig | None = None):
     parser.add_argument("--init-token", default=None, help="Create a token for an agent (agent_name)")
     parser.add_argument("--no-auth", action="store_true", help="Disable authentication (dev mode)")
     parser.add_argument(
+        "--require-read-auth", action="store_true",
+        help="Require authentication for read endpoints (default: public reads)",
+    )
+    parser.add_argument(
         "--schema", choices=["ohm", "topo"], default=None,
         help="Schema configuration (default: determined by entry point)",
     )
@@ -1768,6 +1815,8 @@ def main(schema_config: SchemaConfig | None = None):
         config["db_path"] = args.db
     if args.no_auth or os.environ.get("OHM_NO_AUTH", "").lower() in ("1", "true", "yes"):
         config["no_auth"] = True
+    if args.require_read_auth or os.environ.get("OHM_REQUIRE_READ_AUTH", "").lower() in ("1", "true", "yes"):
+        config["require_read_auth"] = True
 
     # Quack configuration
     if args.quack or os.environ.get("OHM_QUACK", "").lower() in ("1", "true", "yes"):

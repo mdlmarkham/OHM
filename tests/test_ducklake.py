@@ -1,6 +1,6 @@
 """Tests for DuckLake shared backend sync (OHM-xgm.1)."""
 
-
+import pytest
 
 from ohm.store import OhmStore
 
@@ -370,3 +370,80 @@ class TestDuckLakeExtension:
 
         assert config["ducklake"]["path"] == "/tmp/test_lake.ducklake"
         assert config["ducklake"]["data_path"] == "/tmp/test_lake_data"
+
+
+class TestDuckLakeTimeTravel:
+    """Tests for DuckLake time-travel store methods (OHM-kdk.3)."""
+
+    def test_list_snapshots_without_ducklake(self, tmp_path):
+        """list_snapshots returns empty list when DuckLake is not attached."""
+        db_path = str(tmp_path / "local.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test_agent")
+        result = store.list_snapshots()
+        assert result == []
+        store.close()
+
+    def test_graph_at_version_without_ducklake_raises(self, tmp_path):
+        """graph_at_version raises OHMError when DuckLake is not attached."""
+        from ohm.exceptions import OHMError
+        db_path = str(tmp_path / "local.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test_agent")
+        with pytest.raises(OHMError, match="DuckLake is not attached"):
+            store.graph_at_version(1)
+        store.close()
+
+    def test_graph_changes_without_ducklake_raises(self, tmp_path):
+        """graph_changes raises OHMError when DuckLake is not attached."""
+        from ohm.exceptions import OHMError
+        db_path = str(tmp_path / "local.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test_agent")
+        with pytest.raises(OHMError, match="DuckLake is not attached"):
+            store.graph_changes(1, 2)
+        store.close()
+
+    def test_list_snapshots_with_ducklake(self, tmp_path):
+        """list_snapshots returns snapshots when DuckLake is attached."""
+        from ohm.db import connect, attach_ducklake
+        db_path = str(tmp_path / "local.duckdb")
+        conn = connect(db_path)
+        catalog_path = str(tmp_path / "ohm_lake.ducklake")
+        data_path = str(tmp_path / "ohm_lake_data")
+        attached = attach_ducklake(conn, catalog_path=catalog_path, data_path=data_path)
+        if not attached:
+            pytest.skip("DuckLake extension not available")
+        store = OhmStore(db_path=db_path, agent_name="test_agent")
+        store.attach_ducklake(catalog_path=catalog_path, data_path=data_path)
+        store.conn.execute(
+            "INSERT INTO ohm_lake.ohm_nodes (id, label, type, created_by, created_at, updated_at) "
+            "VALUES ('n1', 'Test', 'concept', 'test', '2026-01-01', '2026-01-01')"
+        )
+        snapshots = store.list_snapshots()
+        assert isinstance(snapshots, list)
+        assert len(snapshots) >= 1
+        assert "snapshot_id" in snapshots[0]
+        store.close()
+
+    def test_graph_at_version_with_ducklake(self, tmp_path):
+        """graph_at_version returns graph state at a specific snapshot."""
+        from ohm.db import connect, attach_ducklake
+        db_path = str(tmp_path / "local.duckdb")
+        conn = connect(db_path)
+        catalog_path = str(tmp_path / "ohm_lake.ducklake")
+        data_path = str(tmp_path / "ohm_lake_data")
+        attached = attach_ducklake(conn, catalog_path=catalog_path, data_path=data_path)
+        if not attached:
+            pytest.skip("DuckLake extension not available")
+        store = OhmStore(db_path=db_path, agent_name="test_agent")
+        store.attach_ducklake(catalog_path=catalog_path, data_path=data_path)
+        store.conn.execute(
+            "INSERT INTO ohm_lake.ohm_nodes (id, label, type, created_by, created_at, updated_at) "
+            "VALUES ('n1', 'Test', 'concept', 'test', '2026-01-01', '2026-01-01')"
+        )
+        snapshots = store.list_snapshots()
+        latest_version = snapshots[-1]["snapshot_id"]
+        result = store.graph_at_version(latest_version)
+        assert result["version"] == latest_version
+        assert result["node_count"] >= 1
+        assert len(result["nodes"]) >= 1
+        assert result["edge_count"] >= 0
+        store.close()

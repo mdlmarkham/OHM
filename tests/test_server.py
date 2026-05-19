@@ -19,7 +19,7 @@ from ohm.schema import DEFAULT_SCHEMA, TOPO_SCHEMA
 from ohm.store import OhmStore
 
 
-def _start_test_server(store, tokens=None, roles=None, no_auth=False, schema_config=None):
+def _start_test_server(store, tokens=None, roles=None, no_auth=False, schema_config=None, require_read_auth=False):
     """Start a test HTTP server on a random port and return (port, thread).
 
     tokens can be:
@@ -27,6 +27,7 @@ def _start_test_server(store, tokens=None, roles=None, no_auth=False, schema_con
       - dict of {hash: agent_name} — used directly (for testing hashed mode)
 
     schema_config: SchemaConfig instance (default: DEFAULT_SCHEMA)
+    require_read_auth: If True, all endpoints require auth (OHM-gwg)
     """
     import socketserver
 
@@ -43,6 +44,7 @@ def _start_test_server(store, tokens=None, roles=None, no_auth=False, schema_con
         OhmHandler.tokens = {}
     OhmHandler.roles = roles or {}
     OhmHandler.no_auth = no_auth
+    OhmHandler.require_read_auth = require_read_auth
 
     # Use TCPServer to get a random port
     server = socketserver.TCPServer(
@@ -59,10 +61,12 @@ def _start_test_server(store, tokens=None, roles=None, no_auth=False, schema_con
     return port, server, thread
 
 
-def _request(method, port, path, body=None, headers=None):
+def _request(method, port, path, body=None, headers=None, token=None):
     """Make an HTTP request to the test server."""
     conn = HTTPConnection(f"127.0.0.1:{port}", timeout=5)
     hdrs = headers or {}
+    if token:
+        hdrs["Authorization"] = f"Bearer {token}"
     if body is not None:
         hdrs["Content-Type"] = "application/json"
         body_bytes = json.dumps(body).encode()
@@ -1888,3 +1892,124 @@ class TestSemanticSearchEndpoint:
         })
         status, data = _request("GET", port, "/search?q=Machine")
         assert status == 200
+
+
+@pytest.mark.xdist_group("server")
+class TestDuckLakeTimeTravel:
+    """Tests for DuckLake time-travel endpoints (OHM-kdk.3)."""
+
+    def test_admin_snapshots_without_ducklake(self, test_server):
+        """GET /admin/snapshots returns empty list when DuckLake is not attached."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/admin/snapshots")
+        assert status == 200
+        assert data["snapshots"] == []
+        assert data["count"] == 0
+
+    def test_graph_at_without_version_returns_400(self, test_server):
+        """GET /graph/at without ?version=N returns validation error."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/graph/at")
+        assert status == 400
+
+    def test_graph_at_with_invalid_version_returns_400(self, test_server):
+        """GET /graph/at?version=abc returns validation error."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/graph/at?version=abc")
+        assert status == 400
+
+    def test_graph_at_without_ducklake_returns_error(self, test_server):
+        """GET /graph/at?version=1 without DuckLake attached returns error."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/graph/at?version=1")
+        assert status in (400, 500)
+
+    def test_graph_changes_without_params_returns_400(self, test_server):
+        """GET /graph/changes without required params returns validation error."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/graph/changes")
+        assert status == 400
+
+    def test_graph_changes_missing_to_version_returns_400(self, test_server):
+        """GET /graph/changes?from_version=1 without to_version returns 400."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/graph/changes?from_version=1")
+        assert status == 400
+
+    def test_graph_changes_invalid_version_returns_400(self, test_server):
+        """GET /graph/changes?from_version=abc&to_version=2 returns 400."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/graph/changes?from_version=abc&to_version=2")
+        assert status == 400
+
+    def test_discovery_index_includes_time_travel(self, test_server):
+        """Root discovery endpoint includes time-travel endpoints."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/")
+        assert status == 200
+        endpoints = data["endpoints"]
+        assert "/admin/snapshots" in endpoints
+        assert "/graph/at" in endpoints
+        assert "/graph/changes" in endpoints
+
+
+@pytest.mark.xdist_group("server")
+class TestPublicReadAuthModel:
+    """Tests for public-read auth model (OHM-gwg).
+
+    Default behavior: reads are public (no token needed), writes require auth.
+    With --require-read-auth: all endpoints require auth.
+    """
+
+    def test_public_read_allows_unauthenticated_get(self, test_server):
+        """GET /stats works without a token (public-read model)."""
+        port, _ = test_server
+        # test_server fixture uses no_auth=True, so reads are always allowed
+        status, data = _request("GET", port, "/stats")
+        assert status == 200
+
+    def test_auth_model_in_discovery(self, test_server):
+        """Root discovery includes auth_model field."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/")
+        assert status == 200
+        # no_auth mode should report "public-read" or "authenticated"
+        assert "auth_model" in data
+
+    def test_require_read_auth_blocks_unauthenticated_reads(self, tmp_path):
+        """With require_read_auth=True, unauthenticated reads return 401."""
+        from ohm.store import OhmStore
+        db_path = str(tmp_path / "test_auth_read.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test_agent")
+        tokens = {"read-auth-token": "test_agent"}
+        port, server, thread = _start_test_server(store, tokens=tokens, require_read_auth=True)
+        try:
+            # Unauthenticated read should fail
+            status, data = _request("GET", port, "/stats")
+            assert status == 401
+            # Authenticated read should succeed
+            status, data = _request("GET", port, "/stats", token="read-auth-token")
+            assert status == 200
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+            store.close()
+
+    def test_default_allows_unauthenticated_reads_with_tokens(self, tmp_path):
+        """With tokens configured but require_read_auth=False, reads are public."""
+        from ohm.store import OhmStore
+        db_path = str(tmp_path / "test_public_read.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test_agent")
+        tokens = {"pub-read-token": "test_agent"}
+        port, server, thread = _start_test_server(store, tokens=tokens)
+        try:
+            # Unauthenticated read should succeed (public-read model)
+            status, data = _request("GET", port, "/stats")
+            assert status == 200
+            # Authenticated read should also succeed
+            status, data = _request("GET", port, "/stats", token="pub-read-token")
+            assert status == 200
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+            store.close()
