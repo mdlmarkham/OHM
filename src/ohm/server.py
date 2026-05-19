@@ -602,6 +602,21 @@ class OhmHandler(BaseHTTPRequestHandler):
                     validate_confidence(float(body["confidence"]))
                 except ValueError as e:
                     raise ValidationError(str(e))
+            # Task-specific field validation
+            if "task_status" in body and body["task_status"] is not None:
+                from .schema import VALID_TASK_STATUSES
+                if body["task_status"] not in VALID_TASK_STATUSES:
+                    raise ValidationError(
+                        f"Invalid task_status: '{body['task_status']}'"
+                        f" — must be one of: {', '.join(sorted(VALID_TASK_STATUSES))}"
+                    )
+            if "priority" in body and body["priority"] is not None:
+                from .schema import VALID_PRIORITY
+                if body["priority"] not in VALID_PRIORITY:
+                    raise ValidationError(
+                        f"Invalid priority: '{body['priority']}'"
+                        f" — must be one of: {', '.join(sorted(VALID_PRIORITY))}"
+                    )
 
         elif validation_path == "/edge":
             from .validation import validate_identifier, validate_layer
@@ -1137,6 +1152,48 @@ class OhmHandler(BaseHTTPRequestHandler):
                 "limit": limit,
                 "offset": offset,
             })
+        elif path == "/tasks":
+            # List task nodes with status/assignment filtering
+            # Tasks are nodes of type='task' with optional filters
+            task_status = qs.get("status", [None])[0]
+            assigned_to = qs.get("assigned_to", [None])[0]
+            priority = qs.get("priority", [None])[0]
+            created_by = qs.get("created_by", [None])[0]
+            limit = int(qs.get("limit", [100])[0])
+            offset = int(qs.get("offset", [0])[0])
+            conditions = ["deleted_at IS NULL", "type = 'task'"]
+            params = []
+            if task_status:
+                conditions.append("task_status = ?")
+                params.append(task_status)
+            if assigned_to:
+                conditions.append("assigned_to = ?")
+                params.append(assigned_to)
+            if priority:
+                conditions.append("priority = ?")
+                params.append(priority)
+            if created_by:
+                conditions.append("created_by = ?")
+                params.append(created_by)
+            params.append(limit)
+            params.append(offset)
+            sql = (
+                "SELECT * FROM ohm_nodes WHERE "
+                + " AND ".join(conditions)
+                + " ORDER BY CASE priority WHEN 'P0' THEN 0 WHEN 'P1' THEN 1 WHEN 'P2' THEN 2 WHEN 'P3' THEN 3 WHEN 'P4' THEN 4 ELSE 5 END, due_date ASC NULLS LAST, created_at DESC LIMIT ? OFFSET ?"
+            )
+            results = self.store.execute(sql, params)
+            # Also return total count
+            count_sql = "SELECT COUNT(*) as cnt FROM ohm_nodes WHERE " + " AND ".join(conditions)
+            count_params = params[:-2]
+            total_result = self.store.execute(count_sql, count_params)
+            total = total_result[0]["cnt"] if total_result else len(results)
+            self._json_response(200, {
+                "tasks": results,
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            })
         elif path == "/listen":
             since = qs.get("since", [None])[0]
             agent_name = qs.get("agent", [agent or "ohm"])[0]
@@ -1442,6 +1499,9 @@ class OhmHandler(BaseHTTPRequestHandler):
                 metadata=body.get("metadata"),
                 priority=body.get("priority"),
                 url=body.get("url"),
+                task_status=body.get("task_status"),
+                assigned_to=body.get("assigned_to"),
+                due_date=body.get("due_date"),
                 agent_name=agent,
             )
             event_type = "node.created" if result.get("created") else "node.updated"

@@ -307,6 +307,9 @@ class OhmStore:
         metadata: Optional[dict] = None,
         priority: Optional[str] = None,
         url: Optional[str] = None,
+        task_status: Optional[str] = None,
+        assigned_to: Optional[str] = None,
+        due_date: Optional[str] = None,
         agent_name: Optional[str] = None,
     ) -> dict[str, Any]:
         """Create or update a node. Attributed to the given agent.
@@ -315,6 +318,9 @@ class OhmStore:
             agent_name: Agent to attribute the write to. Defaults to self.agent_name.
             priority: Node priority (P0-P3).
             url: External URL reference for this node.
+            task_status: For task nodes: open/in_progress/blocked/review/done/cancelled.
+            assigned_to: For task nodes: agent assigned to this task.
+            due_date: For task nodes: ISO 8601 due date string.
 
         Returns a dict with the node record and a 'created' key
         indicating whether this was a new creation (True) or an
@@ -334,11 +340,13 @@ class OhmStore:
                 UPDATE ohm_nodes SET
                     label = ?, type = ?, content = ?, confidence = ?,
                     visibility = ?, provenance = ?, tags = ?, metadata = ?,
-                    priority = ?, url = ?, updated_at = ?, updated_by = ?
+                    priority = ?, url = ?, task_status = ?, assigned_to = ?,
+                    due_date = ?, updated_at = ?, updated_by = ?
                 WHERE id = ?
                 """,
                 [label, type, content, confidence, visibility, provenance,
-                 tags_json, metadata_json, priority, url, now, actor, id],
+                 tags_json, metadata_json, priority, url, task_status, assigned_to,
+                 due_date, now, actor, id],
             )
             self._log_change("ohm_nodes", id, "UPDATE", None, agent_name=actor)
             result = self.get_node(id) or {}
@@ -360,12 +368,14 @@ class OhmStore:
                 UPDATE ohm_nodes SET
                     label = ?, type = ?, content = ?, confidence = ?,
                     visibility = ?, provenance = ?, tags = ?, metadata = ?,
-                    priority = ?, url = ?, created_by = ?, updated_at = ?, updated_by = ?,
+                    priority = ?, url = ?, created_by = ?, task_status = ?,
+                    assigned_to = ?, due_date = ?, updated_at = ?, updated_by = ?,
                     deleted_at = NULL
                 WHERE id = ?
                 """,
                 [label, type, content, confidence, visibility, provenance,
-                 tags_json, metadata_json, priority, url, actor, now, actor, id],
+                 tags_json, metadata_json, priority, url, actor, task_status,
+                 assigned_to, due_date, now, actor, id],
             )
             self._log_change("ohm_nodes", id, "UPDATE", None, agent_name=actor)
             result = self.get_node(id) or {}
@@ -380,11 +390,13 @@ class OhmStore:
         self.conn.execute(
             """
             INSERT INTO ohm_nodes (id, label, type, content, created_by, confidence,
-                                   visibility, provenance, tags, metadata, priority, url, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                   visibility, provenance, tags, metadata, priority, url,
+                                   task_status, assigned_to, due_date, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [id, label, type, content, actor, confidence,
-             visibility, provenance, tags_json, metadata_json, priority, url, now, now],
+             visibility, provenance, tags_json, metadata_json, priority, url,
+             task_status, assigned_to, due_date, now, now],
         )
         self._log_change("ohm_nodes", id, "INSERT", None, agent_name=actor)
         result = self.get_node(id) or {}

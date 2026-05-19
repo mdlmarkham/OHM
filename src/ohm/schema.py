@@ -36,6 +36,7 @@ VALID_NODE_TYPES = frozenset({
     "event", "institution", "technology", "equipment",
     "system", "area", "site",
     "agent", "skill", "value", "goal", "topic",
+    "task",  # Action items with status, priority, assignment
 })
 
 VALID_VISIBILITIES = frozenset({"private", "team", "public"})
@@ -77,6 +78,8 @@ LAYER_EDGE_TYPES: dict[str, frozenset[str]] = {
                       # ── Multi-scenario additions (OHM-af8.6) ──
                       "ORDERS_TEST",       # medical: trigger diagnostic test
                       "TRIGGERS_INCIDENT", # cybersecurity: finding triggers incident
+                      # ── Task management additions ──
+                      "BLOCKS",            # task blocks another task
                       }),
 }
 
@@ -100,6 +103,15 @@ VALID_OBSERVATION_SOURCES = frozenset({
 VALID_URGENCY = frozenset({"low", "normal", "high", "critical"})
 
 VALID_PRIORITY = frozenset({"P0", "P1", "P2", "P3", "P4"})
+
+VALID_TASK_STATUSES = frozenset({
+    "open",           # New task, not yet started
+    "in_progress",    # Agent is actively working on it
+    "blocked",        # Waiting on dependency or external input
+    "review",         # Awaiting review by another agent
+    "done",           # Completed
+    "cancelled",      # No longer needed
+})
 
 # ── Layer Descriptions ──────────────────────────────────────────────────────
 
@@ -270,6 +282,9 @@ DDL_STATEMENTS: list[str] = [
         tags          JSON,
         metadata      JSON,
         priority      VARCHAR,
+        task_status   VARCHAR,          -- Task status: open/in_progress/blocked/review/done/cancelled
+        assigned_to   VARCHAR,          -- Agent assigned to this task
+        due_date      TIMESTAMP,        -- Task due date
         deleted_at    TIMESTAMP          -- Soft delete: NULL = active, set = deleted
     );
     """,
@@ -402,7 +417,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.11.0"
+SCHEMA_VERSION = "0.13.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -460,6 +475,14 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
         "ALTER TABLE ohm_nodes ADD COLUMN deleted_at TIMESTAMP",
         "ALTER TABLE ohm_edges ADD COLUMN deleted_at TIMESTAMP",
         "ALTER TABLE ohm_observations ADD COLUMN deleted_at TIMESTAMP",
+    ]),
+    ("0.13.0", "add task_status column and task-related indexes for action item tracking", [
+        "ALTER TABLE ohm_nodes ADD COLUMN task_status VARCHAR",
+        "ALTER TABLE ohm_nodes ADD COLUMN due_date TIMESTAMP",
+        "ALTER TABLE ohm_nodes ADD COLUMN assigned_to VARCHAR",
+        "CREATE INDEX IF NOT EXISTS idx_nodes_task_status ON ohm_nodes(task_status) WHERE task_status IS NOT NULL",
+        "CREATE INDEX IF NOT EXISTS idx_nodes_assigned_to ON ohm_nodes(assigned_to) WHERE assigned_to IS NOT NULL",
+        "CREATE INDEX IF NOT EXISTS idx_nodes_due_date ON ohm_nodes(due_date) WHERE due_date IS NOT NULL",
     ]),
 ]
 

@@ -2674,6 +2674,130 @@ def connect_http(
                 body["challenge_type"] = challenge_type
             return self._http_request("POST", f"/challenge/{node_id}", body)
 
+        # ── Task management ──────────────────────────────────────────────
+
+        def create_task(
+            self,
+            id: str,
+            label: str,
+            content: str | None = None,
+            *,
+            priority: str = "P2",
+            task_status: str = "open",
+            assigned_to: str | None = None,
+            due_date: str | None = None,
+            confidence: float = 1.0,
+            visibility: str = "team",
+            provenance: str | None = None,
+        ) -> dict[str, Any]:
+            """Create a task node in the graph.
+
+            Tasks are first-class nodes (type='task') that can be linked
+            to concepts, patterns, and agents via edges. This enables
+            context-rich task management where every task inherits the
+            graph's relationship structure.
+
+            Args:
+                id: Unique task identifier.
+                label: Human-readable task title.
+                content: Task description / acceptance criteria.
+                priority: P0-P4 (default P2).
+                task_status: open/in_progress/blocked/review/done/cancelled.
+                assigned_to: Agent name assigned to this task.
+                due_date: ISO 8601 due date string.
+                confidence: Confidence in task necessity (0.0-1.0).
+                visibility: private/team/public.
+                provenance: Source attribution.
+
+            Returns:
+                Node record with 'created' key.
+            """
+            from .schema import VALID_TASK_STATUSES, VALID_PRIORITY
+            if task_status not in VALID_TASK_STATUSES:
+                raise ValueError(f"Invalid task_status: {task_status} — must be one of: {', '.join(sorted(VALID_TASK_STATUSES))}")
+            if priority not in VALID_PRIORITY:
+                raise ValueError(f"Invalid priority: {priority} — must be one of: {', '.join(sorted(VALID_PRIORITY))}")
+            body = {
+                "id": id,
+                "label": label,
+                "type": "task",
+                "content": content,
+                "priority": priority,
+                "task_status": task_status,
+                "assigned_to": assigned_to,
+                "due_date": due_date,
+                "confidence": confidence,
+                "visibility": visibility,
+                "provenance": provenance,
+            }
+            return self._http_request("POST", "/node?create_only=false", body)
+
+        def list_tasks(
+            self,
+            *,
+            status: str | None = None,
+            assigned_to: str | None = None,
+            priority: str | None = None,
+            limit: int = 100,
+            offset: int = 0,
+        ) -> dict[str, Any]:
+            """List task nodes with optional filtering.
+
+            Args:
+                status: Filter by task_status (open/in_progress/blocked/review/done/cancelled).
+                assigned_to: Filter by assigned agent.
+                priority: Filter by priority (P0-P4).
+                limit: Maximum results (default 100).
+                offset: Pagination offset.
+
+            Returns:
+                Dict with 'tasks' list, 'total', 'limit', 'offset'.
+            """
+            import urllib.parse
+            params = [f"limit={limit}", f"offset={offset}"]
+            if status:
+                params.append(f"status={urllib.parse.quote(status)}")
+            if assigned_to:
+                params.append(f"assigned_to={urllib.parse.quote(assigned_to)}")
+            if priority:
+                params.append(f"priority={urllib.parse.quote(priority)}")
+            path = "/tasks?" + "&".join(params)
+            return self._http_request("GET", path)
+
+        def update_task_status(self, task_id: str, status: str) -> dict[str, Any]:
+            """Update a task's status.
+
+            Args:
+                task_id: The task node ID.
+                status: New status (open/in_progress/blocked/review/done/cancelled).
+
+            Returns:
+                Updated node record.
+            """
+            from .schema import VALID_TASK_STATUSES
+            if status not in VALID_TASK_STATUSES:
+                raise ValueError(f"Invalid status: {status} — must be one of: {', '.join(sorted(VALID_TASK_STATUSES))}")
+            # Get current node to preserve other fields
+            node = self.get_node(task_id)
+            if node is None:
+                raise ValueError(f"Task {task_id} not found")
+            if node.get("type") != "task":
+                raise ValueError(f"Node {task_id} is not a task (type={node.get('type')})")
+            body = {
+                "id": task_id,
+                "label": node.get("label", ""),
+                "type": "task",
+                "content": node.get("content"),
+                "priority": node.get("priority"),
+                "task_status": status,
+                "assigned_to": node.get("assigned_to"),
+                "due_date": node.get("due_date"),
+                "confidence": node.get("confidence", 1.0),
+                "visibility": node.get("visibility", "team"),
+                "provenance": node.get("provenance"),
+            }
+            return self._http_request("POST", "/node?create_only=false", body)
+
     graph = HttpGraph(conn, actor, base_url, resolved_token)
     graph.token = resolved_token
     return graph
