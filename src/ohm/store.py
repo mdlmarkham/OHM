@@ -663,11 +663,23 @@ class OhmStore:
         pulled = 0
         last_sync = None
 
-        if ducklake_path:
+        # Check if DuckLake is attached on this connection (OHM-0ku fix)
+        # Even without ducklake_path, if the catalog is attached, we can sync.
+        ducklake_attached = False
+        try:
+            attached = self.conn.execute(
+                "SELECT database_name FROM duckdb_databases() WHERE database_name = ?",
+                [alias],
+            ).fetchone()
+            ducklake_attached = attached is not None
+        except Exception:
+            pass
+
+        if ducklake_path or ducklake_attached:
             # Push local changes to DuckLake
-            pushed = self.push_to_ducklake(ducklake_path, alias=alias)
+            pushed = self.push_to_ducklake(ducklake_path or "", alias=alias)
             # Pull remote changes from DuckLake
-            pulled = self.pull_from_ducklake(ducklake_path, alias=alias)
+            pulled = self.pull_from_ducklake(ducklake_path or "", alias=alias)
 
         # Update last_sync timestamp — ensure agent row exists
         existing = self.conn.execute(
