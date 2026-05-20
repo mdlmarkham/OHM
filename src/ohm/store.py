@@ -719,6 +719,12 @@ class OhmStore:
         actor = agent_name or self.agent_name
         now = self._now()
 
+        # Compute PERT mean when PERT triple is provided but probability is not
+        if probability is None and probability_p50 is not None:
+            p05 = probability_p05 if probability_p05 is not None else probability_p50
+            p95 = probability_p95 if probability_p95 is not None else probability_p50
+            probability = (p05 + 4.0 * probability_p50 + p95) / 6.0
+
         # Deduplication: if an active edge with the same (from, to, type, layer)
         # already exists, update it instead of creating a duplicate
         if deduplicate and challenge_of is None:

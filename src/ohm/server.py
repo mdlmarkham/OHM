@@ -6,12 +6,15 @@ token-based authentication and per-agent role enforcement.
 """
 
 import argparse
+import collections
 import hashlib
+import ipaddress
 import json
 import os
 import secrets
 import signal
 import sys
+import threading
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -61,6 +64,7 @@ RATE_LIMIT_MAX_REQUESTS = 1000  # per window per IP
 
 # Simple in-memory rate limiter: {ip: [(timestamp, ...)]}
 _rate_limit_store: dict[str, list[float]] = {}
+_rate_limit_lock = threading.Lock()
 
 # ── Metrics ────────────────────────────────────────────────
 
@@ -73,14 +77,15 @@ _metrics: dict[str, int] = {
     "errors_5xx": 0,
     "rate_limited": 0,
 }
-_request_latencies: list[float] = []  # last 1000 latencies in ms
-_MAX_LATENCY_SAMPLES = 1000
+_metrics_lock = threading.Lock()
+_request_latencies: collections.deque = collections.deque(maxlen=1000)
 
 # ── Webhook Registry ──────────────────────────────────────
 
 # In-memory registry: {agent_name: {"url": str, "events": list[str]}}
 # Agents register their callback URL and the event types they want to receive.
 _webhook_registry: dict[str, dict] = {}
+_webhook_lock = threading.Lock()
 
 
 # ── SSE Subscriber Registry ──────────────────────────────────────────────────
@@ -88,7 +93,46 @@ _webhook_registry: dict[str, dict] = {}
 # In-memory registry: {subscription_id: {"agent_name": str, "since": str, "last_event_id": str}}
 # SSE subscribers receive real-time change feed events as they occur.
 _sse_subscribers: dict[str, dict] = {}
-_sse_lock: str = ""  # dummy lock for thread-safety (single-thread HTTPServer)
+_sse_lock = threading.Lock()
+
+
+_PRIVATE_NETWORKS = [
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("169.254.0.0/16"),  # link-local
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("fe80::/10"),
+]
+
+
+def _validate_webhook_url(url: str) -> None:
+    """Reject webhook URLs that could enable SSRF attacks.
+
+    Raises ValidationError for non-http(s) schemes and private/loopback targets.
+    """
+    import socket
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValidationError(f"Webhook URL must use http or https scheme, got: {parsed.scheme!r}")
+    host = parsed.hostname
+    if not host:
+        raise ValidationError("Webhook URL missing host")
+    try:
+        addr = socket.getaddrinfo(host, None)[0][4][0]
+        ip = ipaddress.ip_address(addr)
+        for net in _PRIVATE_NETWORKS:
+            if ip in net:
+                raise ValidationError(
+                    f"Webhook URL targets a private/loopback address ({addr}) — SSRF not allowed"
+                )
+    except ValidationError:
+        raise
+    except Exception:
+        raise ValidationError(f"Cannot resolve webhook host: {host!r}")
 
 
 def _deliver_webhook(url: str, event: dict, timeout: float = 5.0) -> bool:
@@ -131,9 +175,11 @@ def _trigger_webhooks(event: dict) -> None:
         if url and (event_type in events or "*" in events):
             _deliver_webhook(url, event)
 
-    # Deliver in parallel using a thread pool
+    # Snapshot registry under lock, then deliver without holding the lock
+    with _webhook_lock:
+        registry_snapshot = dict(_webhook_registry)
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        for agent_name, config in _webhook_registry.items():
+        for agent_name, config in registry_snapshot.items():
             executor.submit(deliver_to_agent, agent_name, config)
 
 
@@ -260,10 +306,13 @@ class OhmHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format, *args):
         """Structured request logging with correlation ID."""
+        import re
         corr_id = getattr(self, "_correlation_id", "-")
         timestamp = datetime.now(timezone.utc).isoformat()
+        message = format % args
+        message = re.sub(r'([?&]token=)[^&\s]+', r'\1[REDACTED]', message)
         sys.stderr.write(
-            f"[{timestamp}] [{corr_id}] {format % args}\n"
+            f"[{timestamp}] [{corr_id}] {message}\n"
         )
         sys.stderr.flush()
 
@@ -300,6 +349,12 @@ class OhmHandler(BaseHTTPRequestHandler):
                 f"Agent '{agent}' has read-only access — writes are not permitted"
             )
         return None
+
+    def _require_write_auth(self) -> str:
+        """Authenticate and verify write access. Returns agent name or raises."""
+        agent = self._require_auth()
+        self._check_write_access(agent)
+        return agent
 
     def _json_response(self, code: int, data):
         """Send a JSON response."""
@@ -356,16 +411,17 @@ class OhmHandler(BaseHTTPRequestHandler):
         # Register subscription
         import uuid
         sub_id = str(uuid.uuid4())[:8]
-        _sse_subscribers[sub_id] = {
-            "agent_name": agent,
-            "since": since,
-            "last_event_id": sub_id,
-            "topics": topics,
-            "filter_agent": filter_agent,
-            "filter_layer": filter_layer,
-            "filter_node_type": filter_node_type,
-            "filter_node_id": filter_node_id,
-        }
+        with _sse_lock:
+            _sse_subscribers[sub_id] = {
+                "agent_name": agent,
+                "since": since,
+                "last_event_id": sub_id,
+                "topics": topics,
+                "filter_agent": filter_agent,
+                "filter_layer": filter_layer,
+                "filter_node_type": filter_node_type,
+                "filter_node_id": filter_node_id,
+            }
 
         # Send SSE headers
         self.send_response(200)
@@ -435,8 +491,8 @@ class OhmHandler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass  # Client disconnected
         finally:
-            # Cleanup subscription
-            _sse_subscribers.pop(sub_id, None)
+            with _sse_lock:
+                _sse_subscribers.pop(sub_id, None)
 
     def _error_response(self, exc: Exception):
         """Send a structured error response with correlation ID."""
@@ -459,21 +515,22 @@ class OhmHandler(BaseHTTPRequestHandler):
         """Check if the requesting IP is within rate limits. Returns True if allowed."""
         client_ip = self.client_address[0]
         now = time.time()
-        if client_ip not in _rate_limit_store:
-            _rate_limit_store[client_ip] = [now]
+        with _rate_limit_lock:
+            if client_ip not in _rate_limit_store:
+                _rate_limit_store[client_ip] = [now]
+                return True
+
+            # Prune old entries
+            window_start = now - RATE_LIMIT_WINDOW
+            _rate_limit_store[client_ip] = [
+                ts for ts in _rate_limit_store[client_ip] if ts > window_start
+            ]
+
+            if len(_rate_limit_store[client_ip]) >= RATE_LIMIT_MAX_REQUESTS:
+                return False
+
+            _rate_limit_store[client_ip].append(now)
             return True
-
-        # Prune old entries
-        window_start = now - RATE_LIMIT_WINDOW
-        _rate_limit_store[client_ip] = [
-            ts for ts in _rate_limit_store[client_ip] if ts > window_start
-        ]
-
-        if len(_rate_limit_store[client_ip]) >= RATE_LIMIT_MAX_REQUESTS:
-            return False
-
-        _rate_limit_store[client_ip].append(now)
-        return True
 
     def _read_body(self):
         """Read and parse JSON request body. Enforces size limit."""
@@ -671,11 +728,13 @@ class OhmHandler(BaseHTTPRequestHandler):
         """Handle GET requests with error mapping and correlation IDs."""
         self._correlation_id = str(uuid.uuid4())
         start = time.time()
-        _metrics["requests_total"] += 1
-        _metrics["requests_get"] += 1
+        with _metrics_lock:
+            _metrics["requests_total"] += 1
+            _metrics["requests_get"] += 1
         try:
             if not self._check_rate_limit():
-                _metrics["rate_limited"] += 1
+                with _metrics_lock:
+                    _metrics["rate_limited"] += 1
                 self._json_response(429, {
                     "error": "rate_limited",
                     "message": "Too many requests. Try again later.",
@@ -692,13 +751,12 @@ class OhmHandler(BaseHTTPRequestHandler):
         finally:
             elapsed = (time.time() - start) * 1000
             code = getattr(self, "_response_code", 0)
-            if 400 <= code < 500:
-                _metrics["errors_4xx"] += 1
-            elif code >= 500:
-                _metrics["errors_5xx"] += 1
-            _request_latencies.append(elapsed)
-            if len(_request_latencies) > _MAX_LATENCY_SAMPLES:
-                _request_latencies.pop(0)
+            with _metrics_lock:
+                if 400 <= code < 500:
+                    _metrics["errors_4xx"] += 1
+                elif code >= 500:
+                    _metrics["errors_5xx"] += 1
+                _request_latencies.append(elapsed)
             self.log_message(
                 "GET %s → %s (%.1fms)", self.path, code, elapsed,
             )
@@ -707,11 +765,13 @@ class OhmHandler(BaseHTTPRequestHandler):
         """Handle POST requests with error mapping and correlation IDs."""
         self._correlation_id = str(uuid.uuid4())
         start = time.time()
-        _metrics["requests_total"] += 1
-        _metrics["requests_post"] += 1
+        with _metrics_lock:
+            _metrics["requests_total"] += 1
+            _metrics["requests_post"] += 1
         try:
             if not self._check_rate_limit():
-                _metrics["rate_limited"] += 1
+                with _metrics_lock:
+                    _metrics["rate_limited"] += 1
                 self._json_response(429, {
                     "error": "rate_limited",
                     "message": "Too many requests. Try again later.",
@@ -728,13 +788,12 @@ class OhmHandler(BaseHTTPRequestHandler):
         finally:
             elapsed = (time.time() - start) * 1000
             code = getattr(self, "_response_code", 0)
-            if 400 <= code < 500:
-                _metrics["errors_4xx"] += 1
-            elif code >= 500:
-                _metrics["errors_5xx"] += 1
-            _request_latencies.append(elapsed)
-            if len(_request_latencies) > _MAX_LATENCY_SAMPLES:
-                _request_latencies.pop(0)
+            with _metrics_lock:
+                if 400 <= code < 500:
+                    _metrics["errors_4xx"] += 1
+                elif code >= 500:
+                    _metrics["errors_5xx"] += 1
+                _request_latencies.append(elapsed)
             self.log_message(
                 "POST %s → %s (%.1fms)", self.path, code, elapsed,
             )
@@ -743,10 +802,12 @@ class OhmHandler(BaseHTTPRequestHandler):
         """Handle DELETE requests with error mapping and correlation IDs."""
         self._correlation_id = str(uuid.uuid4())
         start = time.time()
-        _metrics["requests_total"] += 1
+        with _metrics_lock:
+            _metrics["requests_total"] += 1
         try:
             if not self._check_rate_limit():
-                _metrics["rate_limited"] += 1
+                with _metrics_lock:
+                    _metrics["rate_limited"] += 1
                 self._json_response(429, {
                     "error": "rate_limited",
                     "message": "Too many requests. Try again later.",
@@ -763,13 +824,12 @@ class OhmHandler(BaseHTTPRequestHandler):
         finally:
             elapsed = (time.time() - start) * 1000
             code = getattr(self, "_response_code", 0)
-            if 400 <= code < 500:
-                _metrics["errors_4xx"] += 1
-            elif code >= 500:
-                _metrics["errors_5xx"] += 1
-            _request_latencies.append(elapsed)
-            if len(_request_latencies) > _MAX_LATENCY_SAMPLES:
-                _request_latencies.pop(0)
+            with _metrics_lock:
+                if 400 <= code < 500:
+                    _metrics["errors_4xx"] += 1
+                elif code >= 500:
+                    _metrics["errors_5xx"] += 1
+                _request_latencies.append(elapsed)
             self.log_message(
                 "DELETE %s → %s (%.1fms)", self.path, code, elapsed,
             )
@@ -948,12 +1008,13 @@ class OhmHandler(BaseHTTPRequestHandler):
                 })
             return
         elif path == "/metrics":
-            latencies = _request_latencies
-            sorted_lats = sorted(latencies) if latencies else [0]
+            with _metrics_lock:
+                metrics_snapshot = dict(_metrics)
+                sorted_lats = sorted(_request_latencies) if _request_latencies else [0]
             n = len(sorted_lats)
             self._json_response(200, {
                 "uptime_seconds": round(time.time() - _START_TIME, 1),
-                "requests": dict(_metrics),
+                "requests": metrics_snapshot,
                 "latency_ms": {
                     "p50": sorted_lats[n // 2] if n > 0 else 0,
                     "p95": sorted_lats[int(n * 0.95)] if n > 1 else sorted_lats[0] if n > 0 else 0,
@@ -1328,6 +1389,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             result = query_stale_edges(self.store.conn, stale_threshold=threshold)
             self._json_response(200, result)
         elif path == "/decay":
+            self._require_write_auth()
             from .queries import apply_confidence_decay
             threshold = float(qs.get("threshold", [0.1])[0])
             layer = qs.get("layer", [None])[0]
@@ -1571,6 +1633,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             self._json_response(200, result)
         elif path == "/deduplicate":
             # Remove duplicate edges (same from→to, type, layer), keeping most recent
+            self._require_write_auth()
             layer = qs.get("layer", [None])[0]
             if layer:
                 from .validation import validate_layer
@@ -1605,6 +1668,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             self._json_response(200, result)
         elif path == "/admin/checkpoint":
             # Force DuckDB CHECKPOINT to flush WAL to main DB file
+            self._require_write_auth()
             try:
                 self.store.conn.execute("CHECKPOINT")
                 self._json_response(200, {"status": "ok", "message": "WAL flushed to main database"})
@@ -2032,7 +2096,9 @@ class OhmHandler(BaseHTTPRequestHandler):
             events = body.get("events", ["node.created", "node.updated", "edge.created"])
             if not url:
                 raise ValidationError("Webhook requires a 'url' field")
-            _webhook_registry[agent] = {"url": url, "events": events}
+            _validate_webhook_url(url)
+            with _webhook_lock:
+                _webhook_registry[agent] = {"url": url, "events": events}
             self._json_response(200, {
                 "status": "registered",
                 "agent": agent,

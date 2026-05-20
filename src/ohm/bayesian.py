@@ -795,50 +795,20 @@ def causal_intervention(
 
     new_cpds = []
 
-    # Set target's CPT to deterministic (intervention_state)
+    # Set target's CPT to deterministic (intervention_state).
+    # do-calculus graph surgery severs edges INTO the target only — no other
+    # node's CPT changes because no other node had the target as a *parent*.
     if intervention_state == 0:  # force "bad"
         target_cpd = _TabularCPD(safe_target, 2, [[1.0], [0.0]])
     else:  # force "good"
         target_cpd = _TabularCPD(safe_target, 2, [[0.0], [1.0]])
     new_cpds.append(target_cpd)
 
-    # Copy over all other CPTs (unchanged by graph surgery)
+    # All other CPTs are unchanged — they condition on their own parents, none
+    # of which were modified by severing edges that pointed TO the target.
     for cpd in model.get_cpds():
         if cpd.variable != safe_target:
-            # Check if this CPD's evidence includes the target's removed parents
-            # If so, we need to rebuild it as a marginal
-            cpd_evidence = getattr(cpd, 'evidence', None)
-            cpd_evidence_card = getattr(cpd, 'evidence_card', None)
-            if cpd_evidence:
-                # Check if any evidence variable was removed (target's former parents)
-                removed_parents = set()
-                for edge in incoming_edges:
-                    removed_parents.add(edge[0])
-                still_valid = [v for v in cpd_evidence if v not in removed_parents]
-                if len(still_valid) != len(cpd_evidence):
-                    # Some evidence was removed — need to marginalize
-                    if len(still_valid) == 0:
-                        # All parents removed — use marginal (average over states)
-                        # Sum over all evidence configurations weighted equally
-                        n_configs = 1
-                        for card in cpd_evidence_card:
-                            n_configs *= card
-                        n_states = cpd.variable_card
-                        values = cpd.get_values()
-                        # Average across all evidence configurations
-                        marginal = values.mean(axis=1)
-                        new_cpd = _TabularCPD(cpd.variable, n_states,
-                                             [[marginal[s]] for s in range(n_states)])
-                        new_cpds.append(new_cpd)
-                    else:
-                        # Some but not all parents removed — marginalize over removed ones
-                        # This is complex; for now, skip and let model check fail gracefully
-                        logger.warning(f"Cannot marginalize partially-removed parents for {cpd.variable}")
-                        new_cpds.append(cpd)
-                else:
-                    new_cpds.append(cpd)
-            else:
-                new_cpds.append(cpd)
+            new_cpds.append(cpd)
 
     model_do.cpds = []  # Clear existing CPDs
     try:
@@ -1966,13 +1936,19 @@ def generate_voi_tasks(
             "message": voi_result.get("message", "No VoI rankings available."),
         }
 
-    # Step 2: Get agent expertise tags (if agent specified)
+    import json as _json
+
+    # Step 2: Get agent expertise profile (if agent specified)
     agent_tags: set[str] = set()
+    agent_capable_types: set[str] = set()   # node types the agent can handle
+    agent_capable_nodes: set[str] = set()   # specific nodes agent is CAPABLE_OF
+    agent_workload: int = 0                 # open tasks already assigned to agent
     if agent:
         from .validation import validate_identifier
         safe_agent = validate_identifier(agent, name="agent")
 
-        # Get CAPABLE_OF, VALUES, GOALS edges for this agent
+        # Capability edges: CAPABLE_OF targets contribute both as tags and as
+        # type hints (if the target is a node whose type we can look up)
         agent_edges = conn.execute(
             "SELECT to_node, edge_type FROM ohm_edges "
             "WHERE from_node = ? AND edge_type IN ('CAPABLE_OF', 'VALUES', 'GOALS', 'INTERESTED_IN') "
@@ -1981,20 +1957,38 @@ def generate_voi_tasks(
         ).fetchall()
         for row in agent_edges:
             agent_tags.add(row[0].lower())
+            if row[1] == "CAPABLE_OF":
+                agent_capable_nodes.add(row[0])
 
-        # Also check node tags JSON column
+        # Resolve node types for CAPABLE_OF targets
+        if agent_capable_nodes:
+            placeholders = ", ".join(["?"] * len(agent_capable_nodes))
+            type_rows = conn.execute(
+                f"SELECT node_type FROM ohm_nodes WHERE id IN ({placeholders}) AND deleted_at IS NULL",
+                list(agent_capable_nodes),
+            ).fetchall()
+            agent_capable_types = {r[0].lower() for r in type_rows if r[0]}
+
+        # Agent node tags
         agent_node = conn.execute(
             "SELECT tags FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
             [safe_agent],
         ).fetchone()
         if agent_node and agent_node[0]:
-            import json
             try:
-                tags_list = json.loads(agent_node[0]) if isinstance(agent_node[0], str) else agent_node[0]
+                tags_list = _json.loads(agent_node[0]) if isinstance(agent_node[0], str) else agent_node[0]
                 if isinstance(tags_list, list):
                     agent_tags.update(t.lower() for t in tags_list if isinstance(t, str))
-            except (json.JSONDecodeError, TypeError):
+            except (ValueError, TypeError):
                 pass
+
+        # Workload: count open tasks assigned to this agent
+        workload_row = conn.execute(
+            "SELECT COUNT(*) FROM ohm_edges "
+            "WHERE to_node = ? AND edge_type = 'ASSIGNED_TO' AND deleted_at IS NULL",
+            [safe_agent],
+        ).fetchone()
+        agent_workload = workload_row[0] if workload_row else 0
 
     # Step 3: Build research tasks from VoI rankings
     tasks = []
@@ -2008,25 +2002,25 @@ def generate_voi_tasks(
         obs_count = ranking.get("observation_count", 0)
         downstream = ranking.get("downstream_decisions", [])
 
-        # Gap score: how much room for improvement × how much it matters
-        gap_score = uncertainty * sensitivity
+        # Confidence-weighted gap score: accounts for how poorly-known the node is
+        gap_score = uncertainty * sensitivity * (1.0 - confidence)
 
-        # Get node tags for matching
-        node_tags: set[str] = set()
+        # Retrieve node metadata for capability matching
         node_row = conn.execute(
-            "SELECT tags FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+            "SELECT node_type, tags FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
             [node_id],
         ).fetchone()
-        if node_row and node_row[0]:
-            import json
+        node_type = (node_row[0] or "").lower() if node_row else ""
+        node_tags: set[str] = set()
+        if node_row and node_row[1]:
             try:
-                tags_list = json.loads(node_row[0]) if isinstance(node_row[0], str) else node_row[0]
+                tags_list = _json.loads(node_row[1]) if isinstance(node_row[1], str) else node_row[1]
                 if isinstance(tags_list, list):
                     node_tags = {t.lower() for t in tags_list if isinstance(t, str)}
-            except (json.JSONDecodeError, TypeError):
+            except (ValueError, TypeError):
                 pass
 
-        # Also get labels of connected concepts for matching
+        # Connected concept labels for tag broadening
         concept_edges = conn.execute(
             "SELECT to_node FROM ohm_edges WHERE from_node = ? "
             "AND edge_type IN ('CAUSES', 'INFLUENCES', 'ENABLES', 'DEPENDS_ON') "
@@ -2035,14 +2029,28 @@ def generate_voi_tasks(
         ).fetchall()
         concept_labels = {r[0].lower() for r in concept_edges}
 
-        # Compute tag overlap
-        all_node_tags = node_tags | concept_labels | {label.lower()}
-        matched_tags = list(agent_tags & all_node_tags) if agent_tags else []
-        tag_overlap = len(matched_tags) / max(len(agent_tags), 1) if agent_tags else 1.0
+        # Multi-signal capability match score (0.0–1.0)
+        all_node_tokens = node_tags | concept_labels | {label.lower(), node_id.lower()}
+        if agent_tags:
+            matched_tags = list(agent_tags & all_node_tokens)
+            tag_overlap = len(matched_tags) / max(len(agent_tags), 1)
+        else:
+            matched_tags = []
+            tag_overlap = 1.0
 
-        # Skip if agent filter and no tag overlap
-        if agent and tag_overlap == 0:
+        # Bonus: direct type match via CAPABLE_OF
+        type_match = node_type in agent_capable_types if agent_capable_types else False
+        node_match = node_id in agent_capable_nodes if agent_capable_nodes else False
+        capability_score = min(1.0, tag_overlap + (0.3 if type_match else 0.0) + (0.2 if node_match else 0.0))
+
+        # Skip if agent filter and no capability signal at all
+        if agent and capability_score == 0.0:
             continue
+
+        # Workload penalty: reduce score slightly for heavily-loaded agents
+        workload_factor = max(0.5, 1.0 - agent_workload * 0.05) if agent else 1.0
+
+        final_score = gap_score * capability_score * workload_factor
 
         # Suggest research action
         if obs_count == 0:
@@ -2061,6 +2069,7 @@ def generate_voi_tasks(
             "label": label,
             "voi_score": voi_score,
             "gap_score": round(gap_score, 4),
+            "final_score": round(final_score, 4),
             "uncertainty": uncertainty,
             "sensitivity": sensitivity,
             "confidence": confidence,
@@ -2069,11 +2078,14 @@ def generate_voi_tasks(
             "n_downstream_decisions": len(downstream),
             "matched_tags": matched_tags,
             "tag_overlap": round(tag_overlap, 4),
+            "capability_score": round(capability_score, 4),
+            "type_match": type_match,
+            "agent_workload": agent_workload if agent else None,
             "suggested_research": suggested_research,
         })
 
-    # Sort by gap_score descending (highest impact first)
-    tasks.sort(key=lambda t: t["gap_score"], reverse=True)
+    # Sort by final_score descending (highest value + capability + availability first)
+    tasks.sort(key=lambda t: t["final_score"], reverse=True)
 
     # Limit to top N
     tasks = tasks[:top]
