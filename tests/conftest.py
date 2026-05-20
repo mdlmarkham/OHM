@@ -103,17 +103,28 @@ def create_sample_edge(
     confidence: float = 0.9,
     challenge_of: str | None = None,
     challenge_type: str | None = None,
+    probability: float | None = None,
+    probability_p05: float | None = None,
+    probability_p50: float | None = None,
+    probability_p95: float | None = None,
+    confidence_p05: float | None = None,
+    confidence_p50: float | None = None,
+    confidence_p95: float | None = None,
 ) -> str:
     """Insert a sample edge and return its ID."""
     edge_id = str(uuid.uuid4())
     conn.execute(
         """
         INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type,
-                               created_by, confidence, challenge_of, challenge_type)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                               created_by, confidence, challenge_of, challenge_type,
+                               probability, probability_p05, probability_p50, probability_p95,
+                               confidence_p05, confidence_p50, confidence_p95)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [edge_id, from_node, to_node, layer, edge_type,
-         created_by, confidence, challenge_of, challenge_type],
+         created_by, confidence, challenge_of, challenge_type,
+         probability, probability_p05, probability_p50, probability_p95,
+         confidence_p05, confidence_p50, confidence_p95],
     )
     return edge_id
 

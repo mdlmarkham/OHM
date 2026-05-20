@@ -381,6 +381,12 @@ DDL_STATEMENTS: list[str] = [
         edge_type       VARCHAR NOT NULL,
         confidence      FLOAT,
         probability     FLOAT,
+        probability_p05 FLOAT,
+        probability_p50 FLOAT,
+        probability_p95 FLOAT,
+        confidence_p05  FLOAT,
+        confidence_p50  FLOAT,
+        confidence_p95  FLOAT,
         urgency         VARCHAR,
         condition       TEXT,
         provenance      VARCHAR,
@@ -500,7 +506,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.14.0"
+SCHEMA_VERSION = "0.15.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -569,6 +575,14 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
     ]),
     ("0.14.0", "add graph_generation counter to ohm_meta for cache invalidation (OHM-omr)", [
         "INSERT INTO ohm_meta (key, value) SELECT 'graph_generation', '0' WHERE NOT EXISTS (SELECT 1 FROM ohm_meta WHERE key = 'graph_generation')",
+    ]),
+    ("0.15.0", "add PERT distribution columns to ohm_edges for VoI (OHM-6mv.3)", [
+        "ALTER TABLE ohm_edges ADD COLUMN probability_p05 FLOAT",
+        "ALTER TABLE ohm_edges ADD COLUMN probability_p50 FLOAT",
+        "ALTER TABLE ohm_edges ADD COLUMN probability_p95 FLOAT",
+        "ALTER TABLE ohm_edges ADD COLUMN confidence_p05 FLOAT",
+        "ALTER TABLE ohm_edges ADD COLUMN confidence_p50 FLOAT",
+        "ALTER TABLE ohm_edges ADD COLUMN confidence_p95 FLOAT",
     ]),
 ]
 

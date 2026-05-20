@@ -204,22 +204,20 @@ def build_bayesian_network(
 
     # Build query — include edges with or without probability/confidence
     # ADR-008: probability and confidence are semantically distinct.
-    #   probability = P(effect|cause), the causal strength
-    #   confidence = belief in the edge's existence; modulates effective probability
-    #
-    #   When probability is NULL: fall back to default_probability ONLY.
-    #   We do NOT use confidence as a probability substitute.
-    #   The formula probability * confidence is applied in Python after the query.
-    #
-    #   When both are NULL: use default_probability.
-    #   When both are set: effective_prob = probability * confidence.
+    # ADR-013: PERT three-point estimation for probability distributions.
+    #   When PERT values (p05/p50/p95) are provided:
+    #     - probability = (p05 + 4*p50 + p95) / 6  (PERT mean)
+    #     - variance = ((p95 - p05) / 6)^2          (PERT variance for VoI)
+    #   When PERT values are not provided:
+    #     - probability and confidence are used as-is (backward compatible)
     placeholders = ",".join(["?"] * len(edge_types))
     if layers:
         layer_placeholders = ",".join(["?"] * len(layers))
         query = f"""
             SELECT from_node, to_node, edge_type,
-                   COALESCE(probability, {default_probability}) as probability,
-                   COALESCE(confidence, {default_probability}) as confidence
+                   probability, confidence,
+                   probability_p05, probability_p50, probability_p95,
+                   confidence_p05, confidence_p50, confidence_p95
             FROM ohm_edges
             WHERE edge_type IN ({placeholders})
             AND layer IN ({layer_placeholders})
@@ -230,8 +228,9 @@ def build_bayesian_network(
     else:
         query = f"""
             SELECT from_node, to_node, edge_type,
-                   COALESCE(probability, {default_probability}) as probability,
-                   COALESCE(confidence, {default_probability}) as confidence
+                   probability, confidence,
+                   probability_p05, probability_p50, probability_p95,
+                   confidence_p05, confidence_p50, confidence_p95
             FROM ohm_edges
             WHERE edge_type IN ({placeholders})
             AND deleted_at IS NULL
@@ -246,23 +245,50 @@ def build_bayesian_network(
     # Collect all involved nodes and edges, deduplicating by (from, to) pair
     # ADR-008: probability and confidence are distinct attributes.
     # ADR-009: NEGATES edges have inverted probability semantics.
+    # ADR-013: PERT three-point estimation for probability distributions.
     #
-    # Effective probability computation (ADR-008):
-    #   Both set:  effective_prob = probability * confidence
-    #   Only prob: effective_prob = probability
-    #   Only conf: effective_prob = confidence * default_probability
-    #   Neither:   effective_prob = default_probability
+    # Effective probability computation:
+    #   PERT available: probability = (p05 + 4*p50 + p95) / 6
+    #   PERT unavailable, both set:  effective_prob = probability * confidence
+    #   PERT unavailable, only prob: effective_prob = probability
+    #   PERT unavailable, only conf: effective_prob = confidence * default_probability
+    #   PERT unavailable, neither:   effective_prob = default_probability
     node_ids = set()
     seen_edges: dict[tuple[str, str], dict] = {}
     for row in rows:
-        from_node, to_node, edge_type, raw_probability, raw_confidence = row
+        (from_node, to_node, edge_type,
+         raw_probability, raw_confidence,
+         prob_p05, prob_p50, prob_p95,
+         conf_p05, conf_p50, conf_p95) = row
         node_ids.add(from_node)
         node_ids.add(to_node)
 
-        # Compute effective probability per ADR-008
-        has_explicit_probability = raw_probability is not None
-        has_explicit_confidence = raw_confidence is not None
+        # ADR-013: PERT three-point estimation
+        # When PERT values are provided, derive probability from PERT mean
+        has_pert_probability = prob_p50 is not None
+        has_pert_confidence = conf_p50 is not None
 
+        if has_pert_probability:
+            # PERT mean: μ = (O + 4M + P) / 6
+            p05 = float(prob_p05) if prob_p05 is not None else float(prob_p50) * 0.8
+            p50 = float(prob_p50)
+            p95 = float(prob_p95) if prob_p95 is not None else min(1.0, float(prob_p50) * 1.2)
+            raw_probability = (p05 + 4 * p50 + p95) / 6.0
+            has_explicit_probability = True
+        else:
+            has_explicit_probability = raw_probability is not None
+
+        if has_pert_confidence:
+            # PERT mean for confidence
+            c05 = float(conf_p05) if conf_p05 is not None else float(conf_p50) * 0.8
+            c50 = float(conf_p50)
+            c95 = float(conf_p95) if conf_p95 is not None else min(1.0, float(conf_p50) * 1.2)
+            raw_confidence = (c05 + 4 * c50 + c95) / 6.0
+            has_explicit_confidence = True
+        else:
+            has_explicit_confidence = raw_confidence is not None
+
+        # Compute effective probability per ADR-008
         if has_explicit_probability and has_explicit_confidence:
             # Both set: effective_prob = probability * confidence
             prob_val = float(raw_probability) * float(raw_confidence)
@@ -1580,6 +1606,44 @@ def suggest_causes(
             f"appropriate."
         ),
     }
+
+
+def pert_mean(p05: float, p50: float, p95: float) -> float:
+    """Compute PERT (Program Evaluation and Review Technique) mean estimate.
+
+    ADR-013: PERT three-point estimation for probability distributions.
+    The PERT beta distribution approximation derives:
+        μ = (O + 4M + P) / 6
+
+    where O = optimistic (P05), M = most likely (P50), P = pessimistic (P95).
+
+    Args:
+        p05: Optimistic estimate (5th percentile).
+        p50: Most likely estimate (median).
+        p95: Pessimistic estimate (95th percentile).
+
+    Returns:
+        PERT mean estimate.
+    """
+    return (p05 + 4 * p50 + p95) / 6.0
+
+
+def pert_variance(p05: float, p95: float) -> float:
+    """Compute PERT variance estimate.
+
+    ADR-013: PERT variance for Value of Information calculations.
+        σ² = ((P - O) / 6)²
+
+    High variance = high uncertainty = high VoI if downstream decision impact is also high.
+
+    Args:
+        p05: Optimistic estimate (5th percentile).
+        p95: Pessimistic estimate (95th percentile).
+
+    Returns:
+        PERT variance estimate.
+    """
+    return ((p95 - p05) / 6.0) ** 2
 
 
 class BayesianContext:

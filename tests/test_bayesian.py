@@ -18,6 +18,8 @@ from ohm.bayesian import (
     build_bayesian_network,
     _safe_node_id,
     _find_acyclic_subgraph,
+    pert_mean,
+    pert_variance,
 )
 from tests.conftest import create_test_db, create_sample_node, create_sample_edge
 
@@ -609,3 +611,229 @@ class TestComputeAte:
         )
         assert result is not None
         assert "method" in result
+
+
+# ── PERT Distribution Tests (OHM-6mv.3) ─────────────────────────────────
+
+class TestPERTMean:
+    """Test the pert_mean helper function."""
+
+    def test_pert_mean_symmetric(self):
+        """PERT mean of a symmetric distribution should equal the median."""
+        # (0.2 + 4*0.5 + 0.8) / 6 = 3.0 / 6 = 0.5
+        assert pert_mean(0.2, 0.5, 0.8) == pytest.approx(0.5)
+
+    def test_pert_mean_skewed_right(self):
+        """PERT mean of a right-skewed distribution should be above the median."""
+        # Right-skewed: p05 close to p50, p95 far above
+        # (0.4 + 4*0.5 + 0.95) / 6 = 3.35/6 ≈ 0.558
+        result = pert_mean(0.4, 0.5, 0.95)
+        assert result == pytest.approx(3.35 / 6.0)
+        # For a truly right-skewed distribution, mean > median
+        # (0.1 + 4*0.3 + 0.9) / 6 = 2.2/6 ≈ 0.367 > 0.3
+        result2 = pert_mean(0.1, 0.3, 0.9)
+        assert result2 > 0.3
+
+    def test_pert_mean_skewed_left(self):
+        """PERT mean of a left-skewed distribution should be below the median."""
+        # (0.1 + 4*0.3 + 0.5) / 6 = 1.8 / 6 = 0.3
+        result = pert_mean(0.1, 0.3, 0.5)
+        assert result == pytest.approx(1.8 / 6.0)
+
+    def test_pert_mean_extreme_values(self):
+        """PERT mean with extreme values should still compute correctly."""
+        # (0.0 + 4*0.5 + 1.0) / 6 = 3.0 / 6 = 0.5
+        assert pert_mean(0.0, 0.5, 1.0) == pytest.approx(0.5)
+
+    def test_pert_mean_weights_median_most(self):
+        """The P50 (median) should have 4x weight in PERT mean."""
+        # PERT mean = (p05 + 4*p50 + p95) / 6
+        # With p05=0, p50=1, p95=0: mean = 4/6 ≈ 0.667
+        assert pert_mean(0.0, 1.0, 0.0) == pytest.approx(4.0 / 6.0)
+
+
+class TestPERTVariance:
+    """Test the pert_variance helper function."""
+
+    def test_pert_variance_wide_range(self):
+        """Wide P05-P95 range should produce high variance."""
+        # ((0.9 - 0.1) / 6)^2 = (0.8/6)^2 ≈ 0.0178
+        result = pert_variance(0.1, 0.9)
+        assert result == pytest.approx((0.8 / 6.0) ** 2)
+
+    def test_pert_variance_narrow_range(self):
+        """Narrow P05-P95 range should produce low variance."""
+        # ((0.51 - 0.49) / 6)^2 = (0.02/6)^2 ≈ 0.0000111
+        result = pert_variance(0.49, 0.51)
+        assert result == pytest.approx((0.02 / 6.0) ** 2)
+
+    def test_pert_variance_zero_range(self):
+        """Identical P05 and P95 should produce zero variance."""
+        assert pert_variance(0.5, 0.5) == pytest.approx(0.0)
+
+    def test_pert_variance_extreme_range(self):
+        """Full 0-1 range should produce maximum variance."""
+        # ((1.0 - 0.0) / 6)^2 = (1/6)^2 ≈ 0.0278
+        result = pert_variance(0.0, 1.0)
+        assert result == pytest.approx((1.0 / 6.0) ** 2)
+
+
+class TestPERTInBuildBayesianNetwork:
+    """Test PERT distribution integration in build_bayesian_network."""
+
+    def _find_edge(self, result, from_label: str, to_label: str) -> dict:
+        """Helper to find an edge in the result by from/to node IDs."""
+        from_id = _safe_node_id(from_label)
+        to_id = _safe_node_id(to_label)
+        for edge in result["edges"]:
+            if edge["from"] == from_id and edge["to"] == to_id:
+                return edge
+        return None
+
+    def test_pert_probability_overrides_point_estimate(self, db):
+        """When PERT p50 is set, PERT mean should override raw probability."""
+        a = create_sample_node(db, label="pert_a")
+        b = create_sample_node(db, label="pert_b")
+
+        # Edge with PERT probability: p05=0.2, p50=0.5, p95=0.8
+        # PERT mean = (0.2 + 4*0.5 + 0.8) / 6 = 3.0/6 = 0.5
+        create_sample_edge(
+            db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3",
+            confidence=0.9,
+            probability_p05=0.2, probability_p50=0.5, probability_p95=0.8,
+        )
+
+        result = build_bayesian_network(db)
+        assert result is not None
+        # The edge should use PERT-derived probability * confidence
+        # PERT prob = 0.5, confidence = 0.9, effective = 0.5 * 0.9 = 0.45
+        edge = self._find_edge(result, a, b)
+        assert edge is not None
+        assert edge["probability"] == pytest.approx(0.45, abs=0.01)
+
+    def test_pert_confidence_overrides_point_confidence(self, db):
+        """When PERT conf_p50 is set, PERT mean should override raw confidence."""
+        a = create_sample_node(db, label="pert_conf_a")
+        b = create_sample_node(db, label="pert_conf_b")
+
+        # Edge with PERT confidence: c05=0.6, c50=0.8, c95=0.95
+        # PERT mean = (0.6 + 4*0.8 + 0.95) / 6 = 4.75/6 ≈ 0.792
+        create_sample_edge(
+            db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3",
+            probability=0.7,
+            confidence_p05=0.6, confidence_p50=0.8, confidence_p95=0.95,
+        )
+
+        result = build_bayesian_network(db)
+        assert result is not None
+        edge = self._find_edge(result, a, b)
+        assert edge is not None
+        # PERT conf ≈ 0.792, probability = 0.7, effective = 0.7 * 0.792 ≈ 0.554
+        expected_conf = (0.6 + 4 * 0.8 + 0.95) / 6.0
+        expected_prob = 0.7 * expected_conf
+        assert edge["probability"] == pytest.approx(expected_prob, abs=0.01)
+
+    def test_pert_p50_only_uses_defaults(self, db):
+        """When only p50 is set, p05 and p95 should default to 0.8× and 1.2×."""
+        a = create_sample_node(db, label="pert_p50_only_a")
+        b = create_sample_node(db, label="pert_p50_only_b")
+
+        # Edge with only p50=0.5 set
+        # Defaults: p05 = 0.5 * 0.8 = 0.4, p95 = min(1.0, 0.5 * 1.2) = 0.6
+        # PERT mean = (0.4 + 4*0.5 + 0.6) / 6 = 3.0/6 = 0.5
+        create_sample_edge(
+            db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3",
+            confidence=0.9,
+            probability_p50=0.5,
+        )
+
+        result = build_bayesian_network(db)
+        assert result is not None
+        edge = self._find_edge(result, a, b)
+        assert edge is not None
+        # PERT prob = 0.5, confidence = 0.9, effective = 0.5 * 0.9 = 0.45
+        assert edge["probability"] == pytest.approx(0.45, abs=0.01)
+
+    def test_pert_p50_only_confidence_defaults(self, db):
+        """When only conf_p50 is set, c05/c95 should default to 0.8×/1.2×."""
+        a = create_sample_node(db, label="pert_conf_p50_only_a")
+        b = create_sample_node(db, label="pert_conf_p50_only_b")
+
+        # Edge with only conf_p50=0.8 set
+        # Defaults: c05 = 0.8 * 0.8 = 0.64, c95 = min(1.0, 0.8 * 1.2) = 0.96
+        # PERT mean = (0.64 + 4*0.8 + 0.96) / 6 = 4.8/6 = 0.8
+        create_sample_edge(
+            db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3",
+            probability=0.6,
+            confidence_p50=0.8,
+        )
+
+        result = build_bayesian_network(db)
+        assert result is not None
+        edge = self._find_edge(result, a, b)
+        assert edge is not None
+        # PERT conf = 0.8, probability = 0.6, effective = 0.6 * 0.8 = 0.48
+        assert edge["probability"] == pytest.approx(0.48, abs=0.01)
+
+    def test_pert_backward_compatibility(self, db):
+        """Edges without PERT values should work exactly as before."""
+        a = create_sample_node(db, label="compat_a")
+        b = create_sample_node(db, label="compat_b")
+
+        # Edge with only probability and confidence (no PERT)
+        create_sample_edge(
+            db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3",
+            probability=0.7, confidence=0.8,
+        )
+
+        result = build_bayesian_network(db)
+        assert result is not None
+        edge = self._find_edge(result, a, b)
+        assert edge is not None
+        # effective = probability * confidence = 0.7 * 0.8 = 0.56
+        assert edge["probability"] == pytest.approx(0.56, abs=0.01)
+
+    def test_pert_both_probability_and_confidence(self, db):
+        """Both PERT probability and PERT confidence should combine correctly."""
+        a = create_sample_node(db, label="pert_both_a")
+        b = create_sample_node(db, label="pert_both_b")
+
+        # PERT probability: p05=0.3, p50=0.6, p95=0.9
+        # PERT mean = (0.3 + 4*0.6 + 0.9) / 6 = 3.6/6 = 0.6
+        # PERT confidence: c05=0.5, c50=0.7, c95=0.9
+        # PERT mean = (0.5 + 4*0.7 + 0.9) / 6 = 4.2/6 = 0.7
+        # effective = 0.6 * 0.7 = 0.42
+        create_sample_edge(
+            db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3",
+            probability_p05=0.3, probability_p50=0.6, probability_p95=0.9,
+            confidence_p05=0.5, confidence_p50=0.7, confidence_p95=0.9,
+        )
+
+        result = build_bayesian_network(db)
+        assert result is not None
+        edge = self._find_edge(result, a, b)
+        assert edge is not None
+        assert edge["probability"] == pytest.approx(0.42, abs=0.01)
+
+    def test_pert_p95_capped_at_one(self, db):
+        """When p50 * 1.2 > 1.0, p95 should be capped at 1.0."""
+        a = create_sample_node(db, label="pert_cap_a")
+        b = create_sample_node(db, label="pert_cap_b")
+
+        # p50=0.9 → p95 default = min(1.0, 0.9 * 1.2) = min(1.0, 1.08) = 1.0
+        # p05 default = 0.9 * 0.8 = 0.72
+        # PERT mean = (0.72 + 4*0.9 + 1.0) / 6 = 5.32/6 ≈ 0.887
+        create_sample_edge(
+            db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3",
+            confidence=0.8,
+            probability_p50=0.9,
+        )
+
+        result = build_bayesian_network(db)
+        assert result is not None
+        edge = self._find_edge(result, a, b)
+        assert edge is not None
+        # PERT prob ≈ 0.887, confidence = 0.8, effective ≈ 0.887 * 0.8 ≈ 0.709
+        expected_pert = (0.72 + 4 * 0.9 + 1.0) / 6.0
+        expected_prob = expected_pert * 0.8
+        assert edge["probability"] == pytest.approx(expected_prob, abs=0.01)
