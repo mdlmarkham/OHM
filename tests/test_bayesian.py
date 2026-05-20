@@ -838,3 +838,167 @@ class TestPERTInBuildBayesianNetwork:
         expected_pert = (0.72 + 4 * 0.9 + 1.0) / 6.0
         expected_prob = expected_pert * 0.8
         assert edge["probability"] == pytest.approx(expected_prob, abs=0.01)
+
+
+# ── VoI Tests ────────────────────────────────────────────────────────────
+
+
+class TestComputeVoI:
+    """Test Value of Information computation (OHM-6mv.1)."""
+
+    def test_voi_no_decision_nodes(self, db):
+        """When no decision nodes exist, should return empty rankings."""
+        result = compute_voi(db)
+        assert result["method"] == "value_of_information"
+        assert result["rankings"] == []
+        assert result["n_candidates"] == 0
+
+    def test_voi_with_explicit_decision_nodes(self, db):
+        """When decision_nodes are specified, use them even if no 'decision' type nodes exist."""
+        a = create_sample_node(db, label="root_cause", confidence=0.3)
+        b = create_sample_node(db, label="mediator", confidence=0.6)
+        d = create_sample_node(db, label="my_decision")
+
+        create_sample_edge(db, from_node=a, to_node=b, edge_type="CAUSES",
+                           layer="L3", confidence=0.8)
+        create_sample_edge(db, from_node=b, to_node=d, edge_type="CAUSES",
+                           layer="L3", confidence=0.7)
+
+        result = compute_voi(db, decision_nodes=[d])
+        assert result["method"] == "value_of_information"
+        assert d in result["decision_nodes"]
+        # Should find 'a' and 'b' as ancestors of 'd'
+        assert result["n_candidates"] >= 1
+        # Root cause 'a' should have higher VoI than mediator 'b'
+        # because 'a' has lower confidence (higher uncertainty)
+        rankings = result["rankings"]
+        assert len(rankings) > 0
+
+    def test_voi_auto_detects_decision_nodes(self, db):
+        """Should auto-detect nodes with type='decision' and utility_scale > 0."""
+        a = create_sample_node(db, label="uncertain_root", confidence=0.2)
+        d = create_sample_node(db, label="my_decision", node_type="decision")
+
+        # Set utility_scale on the decision node
+        db.execute(
+            "UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d]
+        )
+
+        create_sample_edge(db, from_node=a, to_node=d, edge_type="CAUSES",
+                           layer="L3", confidence=0.8)
+
+        result = compute_voi(db)
+        assert result["method"] == "value_of_information"
+        assert d in result["decision_nodes"]
+        assert len(result["rankings"]) >= 1
+
+    def test_voi_ranking_order(self, db):
+        """Nodes with higher uncertainty should rank higher (all else equal)."""
+        # Two root causes with different confidence levels
+        low_conf = create_sample_node(db, label="uncertain", confidence=0.1)
+        high_conf = create_sample_node(db, label="certain", confidence=0.9)
+        d = create_sample_node(db, label="decision_node", node_type="decision")
+        db.execute("UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d])
+
+        create_sample_edge(db, from_node=low_conf, to_node=d, edge_type="CAUSES",
+                           layer="L3", confidence=0.8)
+        create_sample_edge(db, from_node=high_conf, to_node=d, edge_type="CAUSES",
+                           layer="L3", confidence=0.8)
+
+        result = compute_voi(db)
+        rankings = result["rankings"]
+        assert len(rankings) == 2
+        # The uncertain node should rank higher
+        assert rankings[0]["node_id"] == low_conf
+        assert rankings[0]["uncertainty"] > rankings[1]["uncertainty"]
+
+    def test_voi_top_parameter(self, db):
+        """The 'top' parameter should limit the number of results."""
+        nodes = []
+        for i in range(5):
+            n = create_sample_node(db, label=f"cause_{i}", confidence=0.1 + i * 0.15)
+            nodes.append(n)
+        d = create_sample_node(db, label="decision_node", node_type="decision")
+        db.execute("UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d])
+
+        for n in nodes:
+            create_sample_edge(db, from_node=n, to_node=d, edge_type="CAUSES",
+                               layer="L3", confidence=0.7)
+
+        result = compute_voi(db, top=3)
+        assert len(result["rankings"]) == 3
+
+    def test_voi_layers_filter(self, db):
+        """The 'layers' parameter should scope the analysis to specific layers."""
+        a = create_sample_node(db, label="l3_cause", confidence=0.3)
+        b = create_sample_node(db, label="l4_cause", confidence=0.3)
+        d = create_sample_node(db, label="decision_node", node_type="decision")
+        db.execute("UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d])
+
+        create_sample_edge(db, from_node=a, to_node=d, edge_type="CAUSES",
+                           layer="L3", confidence=0.8)
+        create_sample_edge(db, from_node=b, to_node=d, edge_type="CAUSES",
+                           layer="L4", confidence=0.8)
+
+        # Only L3 edges
+        result_l3 = compute_voi(db, layers=["L3"])
+        l3_ids = [r["node_id"] for r in result_l3["rankings"]]
+        assert a in l3_ids
+        assert b not in l3_ids
+
+        # Only L4 edges
+        result_l4 = compute_voi(db, layers=["L4"])
+        l4_ids = [r["node_id"] for r in result_l4["rankings"]]
+        assert b in l4_ids
+        assert a not in l4_ids
+
+    def test_voi_no_causal_ancestors(self, db):
+        """Decision node with no ancestors should return empty rankings."""
+        d = create_sample_node(db, label="isolated_decision", node_type="decision")
+        db.execute("UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d])
+
+        result = compute_voi(db)
+        assert result["rankings"] == []
+        assert "No causal ancestors" in result.get("message", "")
+
+    def test_voi_includes_observation_count(self, db):
+        """VoI rankings should include observation counts for each node."""
+        a = create_sample_node(db, label="observed_cause", confidence=0.3)
+        d = create_sample_node(db, label="decision_node", node_type="decision")
+        db.execute("UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d])
+
+        create_sample_edge(db, from_node=a, to_node=d, edge_type="CAUSES",
+                           layer="L3", confidence=0.8)
+
+        # Add an observation for node 'a'
+        db.execute(
+            "INSERT INTO ohm_observations (id, node_id, value, source, created_by) "
+            "VALUES (?, ?, 0.5, 'test', 'test_agent')",
+            [str(uuid.uuid4()), a],
+        )
+
+        result = compute_voi(db)
+        assert len(result["rankings"]) >= 1
+        ranking = result["rankings"][0]
+        assert ranking["observation_count"] >= 1
+
+    def test_voi_downstream_decisions_field(self, db):
+        """Each ranking should list which decision nodes it affects."""
+        a = create_sample_node(db, label="shared_cause", confidence=0.3)
+        d1 = create_sample_node(db, label="decision_1", node_type="decision")
+        d2 = create_sample_node(db, label="decision_2", node_type="decision")
+        db.execute("UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d1])
+        db.execute("UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d2])
+
+        create_sample_edge(db, from_node=a, to_node=d1, edge_type="CAUSES",
+                           layer="L3", confidence=0.8)
+        create_sample_edge(db, from_node=a, to_node=d2, edge_type="CAUSES",
+                           layer="L3", confidence=0.7)
+
+        result = compute_voi(db)
+        # 'a' should appear in rankings and affect both decisions
+        a_ranking = next((r for r in result["rankings"] if r["node_id"] == a), None)
+        assert a_ranking is not None
+        assert d1 in a_ranking["downstream_decisions"]
+        assert d2 in a_ranking["downstream_decisions"]
+        assert a_ranking["n_downstream_decisions"] == 2

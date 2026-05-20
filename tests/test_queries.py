@@ -1040,13 +1040,23 @@ class TestDeleteNode:
         assert result["type"] == "node"
         assert result["edges_removed"] >= 1
 
-        # Node should be gone
-        rows = test_db.execute("SELECT * FROM ohm_nodes WHERE id = ?", [a["id"]]).fetchall()
+        # Node should be soft-deleted (not findable without deleted_at filter)
+        rows = test_db.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [a["id"]]).fetchall()
         assert len(rows) == 0
 
-        # Edge should be gone
-        rows = test_db.execute("SELECT * FROM ohm_edges WHERE from_node = ?", [a["id"]]).fetchall()
-        assert len(rows) == 0
+        # But the node row should still exist (soft delete)
+        row = test_db.execute("SELECT id, deleted_at FROM ohm_nodes WHERE id = ?", [a["id"]]).fetchone()
+        assert row is not None
+        assert row[1] is not None  # deleted_at is set
+
+        # Edges should be soft-deleted
+        edge_rows = test_db.execute("SELECT * FROM ohm_edges WHERE from_node = ? AND deleted_at IS NULL", [a["id"]]).fetchall()
+        assert len(edge_rows) == 0
+
+        # But the edge row should still exist
+        edge_row = test_db.execute("SELECT id, deleted_at FROM ohm_edges WHERE from_node = ?", [a["id"]]).fetchone()
+        assert edge_row is not None
+        assert edge_row[1] is not None  # deleted_at is set
 
     def test_delete_node_removes_incoming_edges(self, test_db):
         """delete_node removes edges where node is the target."""
@@ -1060,9 +1070,14 @@ class TestDeleteNode:
         result = delete_node(test_db, node_id=b["id"], deleted_by="test")
         assert result["edges_removed"] >= 1
 
-        # Edge should be gone (b was the target)
-        rows = test_db.execute("SELECT * FROM ohm_edges WHERE to_node = ?", [b["id"]]).fetchall()
+        # Edges should be soft-deleted (not findable without deleted_at filter)
+        rows = test_db.execute("SELECT * FROM ohm_edges WHERE to_node = ? AND deleted_at IS NULL", [b["id"]]).fetchall()
         assert len(rows) == 0
+
+        # But the edge row should still exist (soft delete)
+        edge_row = test_db.execute("SELECT id, deleted_at FROM ohm_edges WHERE to_node = ?", [b["id"]]).fetchone()
+        assert edge_row is not None
+        assert edge_row[1] is not None  # deleted_at is set
 
     def test_delete_node_removes_observations(self, test_db):
         """delete_node removes observations on the node."""
@@ -1077,9 +1092,14 @@ class TestDeleteNode:
         result = delete_node(test_db, node_id=node["id"], deleted_by="test")
         assert result["observations_removed"] >= 1
 
-        # Observation should be gone
-        rows = test_db.execute("SELECT * FROM ohm_observations WHERE node_id = ?", [node["id"]]).fetchall()
+        # Observation should be soft-deleted (not findable without deleted_at filter)
+        rows = test_db.execute("SELECT * FROM ohm_observations WHERE node_id = ? AND deleted_at IS NULL", [node["id"]]).fetchall()
         assert len(rows) == 0
+
+        # But the observation row should still exist (soft delete)
+        obs_row = test_db.execute("SELECT id, deleted_at FROM ohm_observations WHERE node_id = ?", [node["id"]]).fetchone()
+        assert obs_row is not None
+        assert obs_row[1] is not None  # deleted_at is set
 
     def test_delete_node_not_found(self, test_db):
         """delete_node raises NodeNotFoundError for nonexistent node."""
@@ -1115,9 +1135,15 @@ class TestDeleteEdge:
         assert result["deleted"] == edge["id"]
         assert result["type"] == "edge"
 
-        # Edge should be gone
-        rows = test_db.execute("SELECT * FROM ohm_edges WHERE id = ?", [edge["id"]]).fetchall()
+        # Edge should be soft-deleted (not findable without deleted_at filter)
+        rows = test_db.execute("SELECT * FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [edge["id"]]).fetchall()
         assert len(rows) == 0
+
+        # But the row should still exist in the database (soft delete)
+        row = test_db.execute("SELECT id, deleted_at FROM ohm_edges WHERE id = ?", [edge["id"]]).fetchone()
+        assert row is not None
+        assert row[0] == edge["id"]
+        assert row[1] is not None  # deleted_at is set
 
     def test_delete_edge_not_found(self, test_db):
         """delete_edge raises EdgeNotFoundError for nonexistent edge."""
