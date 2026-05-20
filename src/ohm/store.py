@@ -719,6 +719,12 @@ class OhmStore:
         actor = agent_name or self.agent_name
         now = self._now()
 
+        # Compute PERT mean when PERT triple is provided but probability is not
+        if probability is None and probability_p50 is not None:
+            p05 = probability_p05 if probability_p05 is not None else probability_p50
+            p95 = probability_p95 if probability_p95 is not None else probability_p50
+            probability = (p05 + 4.0 * probability_p50 + p95) / 6.0
+
         # Deduplication: if an active edge with the same (from, to, type, layer)
         # already exists, update it instead of creating a duplicate
         if deduplicate and challenge_of is None:
@@ -1105,7 +1111,7 @@ class OhmStore:
             "UPDATE ohm_nodes SET deleted_at = ?, updated_at = ?, updated_by = ? WHERE id = ?",
             [now, now, deleted_by, node_id]
         )
-        self._log_change("ohm_nodes", node_id, "DELETE", deleted_by)
+        self._log_change("ohm_nodes", node_id, "DELETE", None, agent_name=deleted_by)
 
         return {
             "deleted": node_id,
@@ -1142,7 +1148,7 @@ class OhmStore:
             "UPDATE ohm_edges SET deleted_at = ?, updated_at = ?, updated_by = ? WHERE id = ?",
             [now, now, deleted_by, edge_id]
         )
-        self._log_change("ohm_edges", edge_id, "DELETE", deleted_by)
+        self._log_change("ohm_edges", edge_id, "DELETE", None, agent_name=deleted_by)
         self._increment_graph_generation()
 
         return {

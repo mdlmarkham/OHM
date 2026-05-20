@@ -1,6 +1,6 @@
 # ADR-013: Value of Information for Knowledge Graphs
 
-**Status:** Proposed
+**Status:** Accepted
 
 **Date:** 2026-05-20
 

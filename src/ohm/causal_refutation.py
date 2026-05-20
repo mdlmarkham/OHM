@@ -120,7 +120,7 @@ def refute_causal_effect(
                 leak_probability=leak_probability,
             )
             if prior_result and "posterior" in prior_result:
-                p_bad_prior = prior_result["posterior"].get("0", 0)
+                p_bad_prior = prior_result["posterior"].get("bad", 0)
                 p_bad_do_bad = original_ate.get("p_effect_bad_do_cause_bad", 0)
                 placebo_effect = p_bad_do_bad - p_bad_prior  # Should be less than ATE
                 results["refutation_results"]["placebo_treatment"] = {
