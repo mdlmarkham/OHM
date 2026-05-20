@@ -217,3 +217,78 @@ class TestValidateDepth:
     def test_custom_max_depth_rejects(self):
         with pytest.raises(ValueError, match="Invalid depth"):
             validate_depth(51, max_depth=50)
+
+
+class TestValidatePERTTriple:
+    """Tests for validate_pert_triple — PERT three-point estimation validation."""
+
+    def test_all_none_is_valid(self):
+        """No PERT values provided is valid (no PERT data)."""
+        validate_pert_triple(None, None, None)
+
+    def test_valid_symmetric_triple(self):
+        """Symmetric PERT triple p05=0.2, p50=0.5, p95=0.8 is valid."""
+        validate_pert_triple(0.2, 0.5, 0.8)
+
+    def test_valid_equal_triple(self):
+        """All equal PERT triple p05=0.5, p50=0.5, p95=0.5 is valid."""
+        validate_pert_triple(0.5, 0.5, 0.5)
+
+    def test_valid_p50_only(self):
+        """Only p50 provided with p05 and p95 as None is valid."""
+        validate_pert_triple(None, 0.5, None)
+
+    def test_valid_p05_p50_only(self):
+        """p05 and p50 provided with p95 as None is valid."""
+        validate_pert_triple(0.2, 0.5, None)
+
+    def test_valid_p50_p95_only(self):
+        """p50 and p95 provided with p05 as None is valid."""
+        validate_pert_triple(None, 0.5, 0.8)
+
+    def test_rejects_p05_greater_than_p50(self):
+        """p05 > p50 should be rejected."""
+        with pytest.raises(ValueError, match="p05.*must be <= p50"):
+            validate_pert_triple(0.6, 0.5, 0.9)
+
+    def test_rejects_p50_greater_than_p95(self):
+        """p50 > p95 should be rejected."""
+        with pytest.raises(ValueError, match="p50.*must be <= p95"):
+            validate_pert_triple(0.2, 0.8, 0.5)
+
+    def test_rejects_p50_missing(self):
+        """p50 is required when any PERT value is provided."""
+        with pytest.raises(ValueError, match="p50 is required"):
+            validate_pert_triple(0.2, None, 0.8)
+
+    def test_rejects_p05_out_of_range(self):
+        """p05 < 0 should be rejected."""
+        with pytest.raises(ValueError, match="p05.*must be between"):
+            validate_pert_triple(-0.1, 0.5, 0.8)
+
+    def test_rejects_p50_out_of_range(self):
+        """p50 > 1 should be rejected."""
+        with pytest.raises(ValueError, match="p50.*must be between"):
+            validate_pert_triple(0.2, 1.5, 0.8)
+
+    def test_rejects_p95_out_of_range(self):
+        """p95 > 1 should be rejected."""
+        with pytest.raises(ValueError, match="p95.*must be between"):
+            validate_pert_triple(0.2, 0.5, 1.5)
+
+    def test_custom_name_in_error(self):
+        """Custom name should appear in error messages."""
+        with pytest.raises(ValueError, match="confidence PERT"):
+            validate_pert_triple(0.6, 0.5, 0.9, name="confidence PERT")
+
+    def test_boundary_values(self):
+        """Boundary values 0.0 and 1.0 should be valid."""
+        validate_pert_triple(0.0, 0.5, 1.0)
+
+    def test_all_zeros(self):
+        """All zeros should be valid (degenerate case)."""
+        validate_pert_triple(0.0, 0.0, 0.0)
+
+    def test_all_ones(self):
+        """All ones should be valid (degenerate case)."""
+        validate_pert_triple(1.0, 1.0, 1.0)

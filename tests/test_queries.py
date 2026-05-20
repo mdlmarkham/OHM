@@ -1250,3 +1250,102 @@ class TestPERTFields:
         assert edge.get("confidence_p05") is None
         assert edge.get("confidence_p50") is None
         assert edge.get("confidence_p95") is None
+
+    def test_create_edge_rejects_p05_greater_than_p50(self, test_db):
+        """create_edge rejects PERT probability where p05 > p50."""
+        from ohm.queries import create_edge, create_node
+
+        create_node(test_db, label="Cause I", node_type="concept", created_by="test")
+        create_node(test_db, label="Effect J", node_type="concept", created_by="test")
+        with pytest.raises(ValueError, match="p05.*must be <= p50"):
+            create_edge(
+                test_db,
+                from_node="Cause I",
+                to_node="Effect J",
+                layer="L3",
+                edge_type="CAUSES",
+                created_by="test",
+                confidence=0.7,
+                probability_p05=0.6,
+                probability_p50=0.3,
+                probability_p95=0.9,
+            )
+
+    def test_create_edge_rejects_p50_greater_than_p95(self, test_db):
+        """create_edge rejects PERT probability where p50 > p95."""
+        from ohm.queries import create_edge, create_node
+
+        create_node(test_db, label="Cause K", node_type="concept", created_by="test")
+        create_node(test_db, label="Effect L", node_type="concept", created_by="test")
+        with pytest.raises(ValueError, match="p50.*must be <= p95"):
+            create_edge(
+                test_db,
+                from_node="Cause K",
+                to_node="Effect L",
+                layer="L3",
+                edge_type="CAUSES",
+                created_by="test",
+                confidence=0.7,
+                probability_p05=0.1,
+                probability_p50=0.8,
+                probability_p95=0.5,
+            )
+
+    def test_create_edge_rejects_p50_missing(self, test_db):
+        """create_edge rejects PERT values when p50 is missing."""
+        from ohm.queries import create_edge, create_node
+
+        create_node(test_db, label="Cause M", node_type="concept", created_by="test")
+        create_node(test_db, label="Effect N", node_type="concept", created_by="test")
+        with pytest.raises(ValueError, match="p50 is required"):
+            create_edge(
+                test_db,
+                from_node="Cause M",
+                to_node="Effect N",
+                layer="L3",
+                edge_type="CAUSES",
+                created_by="test",
+                confidence=0.7,
+                probability_p05=0.1,
+                probability_p95=0.9,
+            )
+
+    def test_create_edge_rejects_pert_out_of_range(self, test_db):
+        """create_edge rejects PERT values outside [0, 1]."""
+        from ohm.queries import create_edge, create_node
+
+        create_node(test_db, label="Cause O", node_type="concept", created_by="test")
+        create_node(test_db, label="Effect P", node_type="concept", created_by="test")
+        with pytest.raises(ValueError, match="must be between"):
+            create_edge(
+                test_db,
+                from_node="Cause O",
+                to_node="Effect P",
+                layer="L3",
+                edge_type="CAUSES",
+                created_by="test",
+                confidence=0.7,
+                probability_p05=-0.1,
+                probability_p50=0.5,
+                probability_p95=0.9,
+            )
+
+    def test_create_edge_rejects_confidence_pert_p05_greater_than_p50(self, test_db):
+        """create_edge rejects PERT confidence where c05 > c50."""
+        from ohm.queries import create_edge, create_node
+
+        create_node(test_db, label="Cause Q", node_type="concept", created_by="test")
+        create_node(test_db, label="Effect R", node_type="concept", created_by="test")
+        with pytest.raises(ValueError, match="confidence PERT.*p05.*must be <= p50"):
+            create_edge(
+                test_db,
+                from_node="Cause Q",
+                to_node="Effect R",
+                layer="L3",
+                edge_type="CAUSES",
+                created_by="test",
+                confidence=0.7,
+                confidence_p05=0.9,
+                confidence_p50=0.5,
+                confidence_p95=0.95,
+            )

@@ -1058,6 +1058,31 @@ class TestPERTInBuildBayesianNetwork:
         expected_prob = expected_pert * 0.8
         assert edge["probability"] == pytest.approx(expected_prob, abs=0.01)
 
+    def test_pert_cpt_construction_known_values(self, db):
+        """OHM-yar: Edge with p05=0.1, p50=0.3, p95=0.7 produces CPT weight = PERT mean * confidence.
+
+        PERT mean = (0.1 + 4*0.3 + 0.7) / 6 = 2.0/6 ≈ 0.333
+        With confidence = 0.8: effective = 0.333 * 0.8 ≈ 0.267
+        """
+        a = create_sample_node(db, label="pert_cpt_a")
+        b = create_sample_node(db, label="pert_cpt_b")
+
+        create_sample_edge(
+            db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3",
+            confidence=0.8,
+            probability_p05=0.1, probability_p50=0.3, probability_p95=0.7,
+        )
+
+        result = build_bayesian_network(db)
+        assert result is not None
+        edge = self._find_edge(result, a, b)
+        assert edge is not None
+        # PERT mean = (0.1 + 4*0.3 + 0.7) / 6 = 0.333...
+        # effective = 0.333 * 0.8 = 0.267
+        expected_pert_mean = (0.1 + 4 * 0.3 + 0.7) / 6.0
+        expected_effective = expected_pert_mean * 0.8
+        assert edge["probability"] == pytest.approx(expected_effective, abs=0.01)
+
 
 # ── VoI Tests ────────────────────────────────────────────────────────────
 
