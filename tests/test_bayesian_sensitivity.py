@@ -11,12 +11,11 @@ from __future__ import annotations
 import pytest
 
 from ohm.bayesian import (
-    build_bayesian_network,
     compute_sensitivity,
     find_adjustment_sets,
     suggest_causes,
 )
-from tests.conftest import create_test_db, create_sample_node, create_sample_edge
+from tests.conftest import create_sample_node, create_sample_edge
 
 
 @pytest.fixture
@@ -90,7 +89,7 @@ class TestComputeSensitivity:
     def test_sensitivity_returns_e_value(self, db, causal_chain):
         """Sensitivity analysis should return E-value and robustness assessment."""
         try:
-            from pgmpy.models import DiscreteBayesianNetwork
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
         except ImportError:
             pytest.skip("pgmpy not available")
 
@@ -115,7 +114,7 @@ class TestComputeSensitivity:
     def test_sensitivity_e_value_interpretation(self, db, causal_chain):
         """E-value should have a valid robustness interpretation."""
         try:
-            from pgmpy.models import DiscreteBayesianNetwork
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
         except ImportError:
             pytest.skip("pgmpy not available")
 
@@ -137,7 +136,7 @@ class TestComputeSensitivity:
         """Confounder perturbation (VanderWeele & Ding bounding) should show
         decreasing ATE as confounder strength grows (s >= 1.0)."""
         try:
-            from pgmpy.models import DiscreteBayesianNetwork
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
         except ImportError:
             pytest.skip("pgmpy not available")
 
@@ -173,7 +172,7 @@ class TestComputeSensitivity:
     def test_sensitivity_with_layers(self, db, causal_chain):
         """Sensitivity analysis should accept layers parameter."""
         try:
-            from pgmpy.models import DiscreteBayesianNetwork
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
         except ImportError:
             pytest.skip("pgmpy not available")
 
@@ -199,7 +198,7 @@ class TestFindAdjustmentSets:
     def test_adjustment_sets_simple_chain(self, db, causal_chain):
         """Simple causal chain A→B→C should have empty backdoor set (no confounders)."""
         try:
-            from pgmpy.models import DiscreteBayesianNetwork
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
         except ImportError:
             pytest.skip("pgmpy not available")
 
@@ -222,7 +221,7 @@ class TestFindAdjustmentSets:
     def test_adjustment_sets_confounded(self, db, confounded_graph):
         """Confounded graph should identify confounder in adjustment set."""
         try:
-            from pgmpy.models import DiscreteBayesianNetwork
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
         except ImportError:
             pytest.skip("pgmpy not available")
 
@@ -247,7 +246,7 @@ class TestFindAdjustmentSets:
     def test_adjustment_sets_returns_network_info(self, db, causal_chain):
         """Adjustment sets should include network info."""
         try:
-            from pgmpy.models import DiscreteBayesianNetwork
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
         except ImportError:
             pytest.skip("pgmpy not available")
 
@@ -274,7 +273,7 @@ class TestFindAdjustmentSets:
     def test_adjustment_sets_with_layers(self, db, causal_chain):
         """Adjustment sets should accept layers parameter."""
         try:
-            from pgmpy.models import DiscreteBayesianNetwork
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
         except ImportError:
             pytest.skip("pgmpy not available")
 

@@ -454,7 +454,6 @@ class TestDuckLakeMirrorSync:
 
     def test_sync_to_ducklake_populates_mirror_tables(self, tmp_path):
         """sync_to_ducklake copies local data to DuckLake mirror tables."""
-        from ohm.db import connect, attach_ducklake
 
         db_path = str(tmp_path / "local.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test_agent")
@@ -485,7 +484,6 @@ class TestDuckLakeMirrorSync:
 
     def test_sync_to_ducklake_includes_edges(self, tmp_path):
         """sync_to_ducklake copies edges to mirror tables."""
-        from ohm.db import connect, attach_ducklake
 
         db_path = str(tmp_path / "local.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test_agent")
@@ -516,7 +514,6 @@ class TestDuckLakeMirrorSync:
 
     def test_sync_to_ducklake_includes_observations(self, tmp_path):
         """sync_to_ducklake copies observations to mirror tables."""
-        from ohm.db import connect, attach_ducklake
 
         db_path = str(tmp_path / "local.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test_agent")
@@ -546,7 +543,6 @@ class TestDuckLakeMirrorSync:
 
     def test_push_to_ducklake_uses_attached_alias(self, tmp_path):
         """push_to_ducklake uses attached DuckLake alias when available."""
-        from ohm.db import connect, attach_ducklake
 
         db_path = str(tmp_path / "local.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test_agent")
@@ -578,7 +574,6 @@ class TestDuckLakeMirrorSync:
 
     def test_sync_heartbeat_with_attached_ducklake(self, tmp_path):
         """sync_heartbeat uses attached DuckLake for sync when available."""
-        from ohm.db import connect, attach_ducklake
 
         db_path = str(tmp_path / "local.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test_agent")
@@ -611,7 +606,6 @@ class TestDuckLakeMirrorSync:
 
     def test_initial_sync_populates_empty_mirror(self, tmp_path):
         """Initial sync populates empty mirror tables with all local data."""
-        from ohm.db import connect, attach_ducklake
 
         db_path = str(tmp_path / "local.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test_agent")
@@ -641,7 +635,6 @@ class TestDuckLakeMirrorSync:
 
     def test_incremental_sync_updates_changed_rows(self, tmp_path):
         """Incremental sync updates rows that changed since last sync."""
-        from ohm.db import connect, attach_ducklake
 
         db_path = str(tmp_path / "local.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test_agent")

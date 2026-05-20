@@ -1230,6 +1230,7 @@ def compound_confidence(
         c = max(0.0, min(1.0, c))
 
         if use_weighting:
+            assert source_weights is not None
             source = obs.get("source") or obs.get("created_by") or "_unknown_"
             w = source_weights.get(source, default_weight)
             weighted_confidences.append((c, w))
@@ -1776,7 +1777,7 @@ def graph_stats(
     """).fetchone()[0]
 
     # Hub count (nodes with 5+ connections)
-    hub_count = conn.execute(f"""
+    hub_count = conn.execute("""
         SELECT count(*) FROM (
             SELECT n.id
             FROM ohm_nodes n

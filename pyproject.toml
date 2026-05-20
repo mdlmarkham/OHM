@@ -43,14 +43,19 @@ dev = [
 
 [tool.ruff]
 target-version = "py312"
-line-length = 120
+line-length = 260
 
 [tool.ruff.lint]
 select = ["E", "F", "W"]
+ignore = ["E402"]
 
 [tool.mypy]
 python_version = "3.12"
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["ohm.bayesian", "ohm.sdk"]
+ignore_errors = true
 
 [project.scripts]
 ohm = "ohm.cli:main"

@@ -9,8 +9,6 @@ Verifies that:
 """
 
 import json
-import time
-from unittest.mock import patch, MagicMock
 import http.client
 
 

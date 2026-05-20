@@ -224,25 +224,25 @@ def lint_node(
     elif node_type == "source":
         required_fields = required_fields | contract.required.source_required
 
-    for field in required_fields:
-        value = node.get(field)
+    for req_field in required_fields:
+        value = node.get(req_field)
         if value is None or value == "":
             violations.append(LintViolation(
                 entity_type="node", entity_id=node_id,
                 rule="required_field", severity="error",
-                message=f"Missing required field: {field}",
-                field=field,
+                message=f"Missing required field: {req_field}",
+                field=req_field,
             ))
 
     # 2. Recommended fields (warnings only)
-    for field in contract.required.node_recommended:
-        value = node.get(field)
+    for rec_field in contract.required.node_recommended:
+        value = node.get(rec_field)
         if value is None or value == "":
             violations.append(LintViolation(
                 entity_type="node", entity_id=node_id,
                 rule="recommended_field", severity="warning",
-                message=f"Missing recommended field: {field}",
-                field=field,
+                message=f"Missing recommended field: {rec_field}",
+                field=rec_field,
             ))
 
     # 3. Node ID naming convention
@@ -343,25 +343,25 @@ def lint_edge(
     if edge_type in ("CAUSES", "DEPENDS_ON", "THREATENS", "EXPECTED_LIKELIHOOD"):
         required_fields = required_fields | contract.required.causal_edge_required
 
-    for field in required_fields:
-        value = edge.get(field)
+    for req_field in required_fields:
+        value = edge.get(req_field)
         if value is None or value == "":
             violations.append(LintViolation(
                 entity_type="edge", entity_id=edge_id,
                 rule="required_field", severity="error",
-                message=f"Missing required field: {field}",
-                field=field,
+                message=f"Missing required field: {req_field}",
+                field=req_field,
             ))
 
     # 2. Recommended fields
-    for field in contract.required.edge_recommended:
-        value = edge.get(field)
+    for rec_field in contract.required.edge_recommended:
+        value = edge.get(rec_field)
         if value is None or value == "":
             violations.append(LintViolation(
                 entity_type="edge", entity_id=edge_id,
                 rule="recommended_field", severity="warning",
-                message=f"Missing recommended field: {field}",
-                field=field,
+                message=f"Missing recommended field: {rec_field}",
+                field=rec_field,
             ))
 
     # 3. Valid edge type for layer

@@ -464,7 +464,6 @@ class TestServerQuackIntegration:
         import json
         import socketserver
         import threading
-        import time
         from http.client import HTTPConnection
         from ohm.server import OhmHandler
         from ohm.store import OhmStore

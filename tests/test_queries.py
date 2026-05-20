@@ -858,8 +858,8 @@ class TestMonteCarloCascade:
         result1 = monte_carlo_cascade(test_db, a["id"], trials=500)
         result2 = monte_carlo_cascade(test_db, a["id"], trials=500)
 
-        b_result1 = next(r for r in result1["results"] if r["node_id"] == b["id"])
-        b_result2 = next(r for r in result2["results"] if r["node_id"] == b["id"])
+        next(r for r in result1["results"] if r["node_id"] == b["id"])
+        next(r for r in result2["results"] if r["node_id"] == b["id"])
 
         # They may or may not be equal by chance, but we verify seed is None
         assert result1["seed"] is None

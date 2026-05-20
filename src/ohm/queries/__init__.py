@@ -1105,7 +1105,7 @@ def delete_edge(
     obs_result = conn.execute("UPDATE ohm_observations SET deleted_at = CURRENT_TIMESTAMP WHERE edge_id = ? AND deleted_at IS NULL", [edge_id])
 
     # Delete the edge
-    edge_result = conn.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?", [edge_id])
+    conn.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?", [edge_id])
     _log_change(conn, "ohm_edges", edge_id, "DELETE", deleted_by)
 
     return {

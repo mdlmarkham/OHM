@@ -41,7 +41,7 @@ from typing import Any, Optional
 
 import duckdb
 
-from .exceptions import OHMError
+from .exceptions import NodeNotFoundError, OHMError
 
 logger = logging.getLogger(__name__)
 
@@ -836,8 +836,8 @@ class OhmStore:
             if existing:
                 # Update the existing edge with new values
                 edge_id = existing[0]
-                update_fields = []
-                update_params = []
+                update_fields: list[str] = []
+                update_params: list[Any] = []
                 if confidence is not None:
                     update_fields.append("confidence = ?")
                     update_params.append(confidence)

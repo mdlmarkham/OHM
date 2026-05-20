@@ -1585,7 +1585,7 @@ def _handle_voi(args: argparse.Namespace) -> None:
             decision_nodes = [d.strip() for d in args.decision.split(",") if d.strip()]
         layers = None
         if args.layers:
-            layers = [l.strip() for l in args.layers.split(",") if l.strip()]
+            layers = [lyr.strip() for lyr in args.layers.split(",") if lyr.strip()]
         edge_types = None
         if args.edge_types:
             edge_types = [e.strip() for e in args.edge_types.split(",") if e.strip()]
@@ -1631,7 +1631,7 @@ def _handle_voi_tasks(args: argparse.Namespace) -> None:
             decision_nodes = [d.strip() for d in args.decision.split(",") if d.strip()]
         layers = None
         if args.layers:
-            layers = [l.strip() for l in args.layers.split(",") if l.strip()]
+            layers = [lyr.strip() for lyr in args.layers.split(",") if lyr.strip()]
         result = generate_voi_tasks(
             conn,
             agent=args.agent,

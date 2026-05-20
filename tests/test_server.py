@@ -9,7 +9,6 @@ and must run sequentially. They are grouped with xdist_group("server").
 
 import json
 import threading
-import time
 from http.client import HTTPConnection
 
 import pytest

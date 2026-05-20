@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import pytest
 
-from ohm.bayesian import BayesianContext, build_bayesian_network
-from tests.conftest import create_test_db, create_sample_node, create_sample_edge
+from ohm.bayesian import BayesianContext
+from tests.conftest import create_sample_node, create_sample_edge
 
 
 @pytest.fixture
@@ -55,8 +55,8 @@ class TestBayesianContext:
             )
 
             # Multiple method calls should NOT rebuild the network
-            result1 = ctx.inference(causal_chain["c"], {causal_chain["a"]: 1})
-            result2 = ctx.inference(causal_chain["b"], {causal_chain["a"]: 0})
+            ctx.inference(causal_chain["c"], {causal_chain["a"]: 1})
+            ctx.inference(causal_chain["b"], {causal_chain["a"]: 0})
             # Still only 1 build call
             assert call_count["count"] == 1, (
                 f"Expected 1 build call after inference, got {call_count['count']}"

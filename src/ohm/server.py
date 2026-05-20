@@ -259,7 +259,8 @@ def load_config(config_path: Optional[str] = None) -> dict:
         config["db_path"] = os.environ["OHM_DB_PATH"]
 
     # DuckLake config overrides (OHM-kdk.1)
-    ducklake_config = config.setdefault("ducklake", {})
+    config.setdefault("ducklake", {})
+    ducklake_config: dict[str, Any] = config["ducklake"]  # type: ignore[assignment]
     if "OHM_DUCKLAKE_PATH" in os.environ:
         ducklake_config["path"] = os.environ["OHM_DUCKLAKE_PATH"]
     if "OHM_DUCKLAKE_DATA" in os.environ:
@@ -400,6 +401,7 @@ class OhmHandler(BaseHTTPRequestHandler):
 
         # Resolve 'since' from agent state if not provided
         if not since:
+            assert self.store is not None
             state = self.store.get_agent_state(agent)
             if state and state.get("last_sync"):
                 since = state["last_sync"]
@@ -447,6 +449,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         batch_size = 50  # Batch events for efficiency
 
         try:
+            assert self.store is not None
             while event_count < max_events:
                 # Query for new changes since last event
                 changes = query_change_feed(
@@ -1657,7 +1660,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                         evidence[validate_identifier(node_id.strip(), name="evidence_node")] = int(state.strip())
             # Parse optional layers filter: ?layers=L3,L4
             layers_str = qs.get("layers", [""])[0]
-            layers = [l.strip() for l in layers_str.split(",") if l.strip()] if layers_str else None
+            layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
             from .bayesian import bayesian_inference
             result = bayesian_inference(self.store.conn, target, evidence, edge_types=None, layers=layers, leak_probability=leak_probability)
             self._json_response(200, result)
@@ -1689,7 +1692,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             leak_probability = float(qs.get("leak", ["0.15"])[0])
             # Parse optional layers filter: ?layers=L3,L4
             layers_str = qs.get("layers", [""])[0]
-            layers = [l.strip() for l in layers_str.split(",") if l.strip()] if layers_str else None
+            layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
             from .bayesian import causal_intervention
             result = causal_intervention(
                 self.store.conn, target, intervention_state,
@@ -1712,7 +1715,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             leak_probability = float(qs.get("leak", ["0.15"])[0])
             # Parse optional layers filter: ?layers=L3,L4
             layers_str = qs.get("layers", [""])[0]
-            layers = [l.strip() for l in layers_str.split(",") if l.strip()] if layers_str else None
+            layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
             from .bayesian import compute_ate
             result = compute_ate(self.store.conn, cause, effect, layers=layers, leak_probability=leak_probability)
             self._json_response(200, result)
@@ -1730,7 +1733,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             leak_probability = float(qs.get("leak", ["0.15"])[0])
             # Parse optional layers filter: ?layers=L3,L4
             layers_str = qs.get("layers", [""])[0]
-            layers = [l.strip() for l in layers_str.split(",") if l.strip()] if layers_str else None
+            layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
             from .bayesian import compute_sensitivity
             result = compute_sensitivity(self.store.conn, cause, effect, layers=layers, leak_probability=leak_probability)
             self._json_response(200, result)
@@ -1748,7 +1751,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             leak_probability = float(qs.get("leak", ["0.15"])[0])
             # Parse optional layers filter: ?layers=L3,L4
             layers_str = qs.get("layers", [""])[0]
-            layers = [l.strip() for l in layers_str.split(",") if l.strip()] if layers_str else None
+            layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
             from .bayesian import find_adjustment_sets
             result = find_adjustment_sets(self.store.conn, cause, effect, layers=layers, leak_probability=leak_probability)
             self._json_response(200, result)
@@ -1766,7 +1769,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             root_prior = float(qs.get("root_prior", ["0.3"])[0])
             # Parse optional layers filter: ?layers=L3,L4
             layers_str = qs.get("layers", [""])[0]
-            layers = [l.strip() for l in layers_str.split(",") if l.strip()] if layers_str else None
+            layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
             # Parse optional edge_types filter: ?edge_types=CAUSES,DEPENDS_ON
             edge_types_str = qs.get("edge_types", [""])[0]
             edge_types = [e.strip() for e in edge_types_str.split(",") if e.strip()] if edge_types_str else None
@@ -1830,7 +1833,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             leak_probability = float(qs.get("leak", ["0.15"])[0])
             root_prior = float(qs.get("root_prior", ["0.3"])[0])
             layers_str = qs.get("layers", [""])[0]
-            layers = [l.strip() for l in layers_str.split(",") if l.strip()] if layers_str else None
+            layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
             from .bayesian import generate_voi_tasks
             result = generate_voi_tasks(
                 self.store.conn,

@@ -187,7 +187,6 @@ class TestVoIValidation:
 
         # Step 5: Verify that at least one decision node's confidence improved
         # or stayed the same (observations should not decrease confidence)
-        improvements = 0
         for dec_id in initial_confidence:
             if dec_id in updated_confidence:
                 # Confidence might not change directly (it's a node property),

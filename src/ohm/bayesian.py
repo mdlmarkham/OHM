@@ -373,7 +373,7 @@ def build_bayesian_network(
 
     # Remove cycles to form valid DAG
     try:
-        import networkx as nx  # type: ignore
+        import networkx as nx  # type: ignore  # noqa: F401
         has_nx = True
     except ImportError:
         has_nx = False
@@ -622,7 +622,7 @@ def bayesian_inference(
         }
 
     model = network["model"]
-    safe_names = network["safe_names"]
+    network["safe_names"]
 
     # Convert evidence to safe names
     safe_evidence = {}
@@ -1271,7 +1271,6 @@ def find_adjustment_sets(
         identification method, and adjusted estimates.
     """
     import networkx as nx
-    import signal
 
     cause = validate_identifier(cause, name="cause")
     effect = validate_identifier(effect, name="effect")
@@ -1317,7 +1316,7 @@ def find_adjustment_sets(
     from pgmpy.inference import CausalInference
 
     ci = CausalInference(bn)
-    n_nodes = len(bn.nodes())
+    len(bn.nodes())
     result = {
         "method": "adjustment_sets",
         "pgmpy_available": True,
@@ -1348,7 +1347,7 @@ def find_adjustment_sets(
     try:
         import networkx as nx
         # Build the underlying graph from the BN
-        G = nx.DiGraph(bn.edges())
+        nx.DiGraph(bn.edges())
         # If cause has no parents in the DAG, there are no backdoor paths
         cause_parents = list(bn.get_parents(safe_cause))
         result["empty_set_satisfies_backdoor"] = len(cause_parents) == 0
@@ -1665,7 +1664,7 @@ def compute_voi(
     edge_type_list = ", ".join(f"'{t}'" for t in edge_types)
     layer_filter = ""
     if layers:
-        layer_list = ", ".join(f"'{l}'" for l in layers)
+        layer_list = ", ".join(f"'{lyr}'" for lyr in layers)
         layer_filter = f"AND layer IN ({layer_list})"
 
     edges = conn.execute(
@@ -2262,7 +2261,7 @@ class BayesianContext:
             }
 
         target = validate_identifier(target, name="target")
-        safe_names = self._network["safe_names"]
+        self._network["safe_names"]
         safe_target = _safe_node_id(target)
 
         if safe_target not in self._network["variables"]:
@@ -2387,7 +2386,7 @@ class BayesianContext:
         for cpd in model.get_cpds():
             if cpd.variable != safe_target:
                 cpd_evidence = getattr(cpd, 'evidence', None)
-                cpd_evidence_card = getattr(cpd, 'evidence_card', None)
+                getattr(cpd, 'evidence_card', None)
                 if cpd_evidence:
                     removed_parents = set(e[0] for e in incoming_edges)
                     still_valid = [v for v in cpd_evidence if v not in removed_parents]
