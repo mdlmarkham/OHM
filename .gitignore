@@ -40,3 +40,9 @@ venv/
 .beads/daemon.*
 .beads/*.lock
 .beads/*.corrupt.backup/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
