@@ -34,6 +34,12 @@ from ohm.validation import validate_identifier
 
 logger = logging.getLogger(__name__)
 
+# Module-level cache for Bayesian network construction (OHM-omr)
+# Key: (tuple(sorted(edge_types)), tuple(sorted(layers)) if layers else None, max_nodes)
+# Value: (generation_at_cache_time, result_dict)
+# Invalidated when graph_generation counter increments.
+_bayesian_network_cache: dict[tuple, tuple[int, dict[str, Any]]] = {}
+
 try:
     from pgmpy.models import DiscreteBayesianNetwork as BayesianNetwork
     from pgmpy.factors.discrete import TabularCPD
@@ -169,6 +175,27 @@ def build_bayesian_network(
     if not PGMPY_AVAILABLE:
         logger.warning("pgmpy not available — cannot build Bayesian network")
         return None
+
+    # Cache key based on query parameters (OHM-omr)
+    cache_key = (
+        tuple(sorted(edge_types)) if edge_types else None,
+        tuple(sorted(layers)) if layers else None,
+        max_nodes,
+        root_prior,  # root_prior affects CPT values, must be part of cache key
+    )
+
+    # Check cache — invalidate if graph_generation has changed
+    if cache_key in _bayesian_network_cache:
+        cached_generation, cached_result = _bayesian_network_cache[cache_key]
+        current_generation = conn.execute(
+            "SELECT CAST(value AS INTEGER) FROM ohm_meta WHERE key = 'graph_generation'"
+        ).fetchone()
+        current_gen = current_generation[0] if current_generation else 0
+        if current_gen == cached_generation:
+            logger.debug("Bayesian network cache hit for key=%s", cache_key)
+            return cached_result
+        else:
+            logger.debug("Cache invalidated: generation %d -> %d", cached_generation, current_gen)
 
     if edge_types is None:
         # ADR-009: NEGATES edges have inverted probability semantics
@@ -479,7 +506,7 @@ def build_bayesian_network(
         # Try with just root nodes as fallback
         return None
 
-    return {
+    result = {
         "model": model,
         "nodes": list(node_ids),
         "edges": edges,
@@ -489,6 +516,15 @@ def build_bayesian_network(
         "n_nodes": len(node_ids),
         "n_edges": len(model_edge_tuples),
     }
+
+    # Store in module-level cache with current generation (OHM-omr)
+    current_gen_result = conn.execute(
+        "SELECT CAST(value AS INTEGER) FROM ohm_meta WHERE key = 'graph_generation'"
+    ).fetchone()
+    current_gen = current_gen_result[0] if current_gen_result else 0
+    _bayesian_network_cache[cache_key] = (current_gen, result)
+    logger.debug("Cached Bayesian network for key=%s at generation %d", cache_key, current_gen)
+    return result
 
 
 def bayesian_inference(

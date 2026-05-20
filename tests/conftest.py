@@ -51,6 +51,14 @@ def _clear_rate_limits():
     srv._rate_limit_store.clear()
 
 
+@pytest.fixture(autouse=True)
+def _clear_bayesian_cache():
+    """Clear the Bayesian network cache between tests to prevent cross-test pollution (OHM-omr)."""
+    import ohm.bayesian as bay
+
+    bay._bayesian_network_cache.clear()
+
+
 def create_test_db() -> "duckdb.DuckDBPyConnection":
     """Create an in-memory DuckDB with the OHM schema initialized."""
     import duckdb
