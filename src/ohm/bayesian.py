@@ -51,11 +51,19 @@ def _safe_node_id(node_id: str) -> str:
 
 def _find_acyclic_subgraph(
     edges: list[tuple[str, str]],
+    edge_probabilities: dict[tuple[str, str], float] | None = None,
 ) -> list[tuple[str, str]]:
     """Remove edges that create cycles using topological sort.
 
     Iteratively removes the edge whose removal breaks the most cycles,
-    until the remaining edges form a DAG.
+    preferring to remove low-probability edges when probability data is
+    available (ADR-008: probability reflects causal strength).
+
+    Args:
+        edges: List of (from, to) node pairs.
+        edge_probabilities: Optional mapping of (from, to) -> probability.
+            When provided, edges in cycles are removed by lowest probability
+            first. When not provided, the edge in the most cycles is removed.
     """
     # Build adjacency and try topological sort
     import networkx as nx  # type: ignore
@@ -69,7 +77,7 @@ def _find_acyclic_subgraph(
         pass
 
     # Remove minimum feedback arc set (greedy approximation)
-    # Remove edges that are in the most cycles
+    # Prefer removing low-probability edges when probability data is available
     edges_list = list(edges)
     while True:
         G = nx.DiGraph()
@@ -80,7 +88,6 @@ def _find_acyclic_subgraph(
         except nx.NetworkXUnfeasible:
             pass
         # Find edges in cycles and remove the one with lowest probability
-        # (we don't have probability here, so remove the one that breaks most cycles)
         try:
             cycles = list(nx.simple_cycles(G))
             if not cycles:
@@ -91,8 +98,14 @@ def _find_acyclic_subgraph(
                 for i in range(len(cycle)):
                     e = (cycle[i], cycle[(i + 1) % len(cycle)])
                     edge_cycle_count[e] = edge_cycle_count.get(e, 0) + 1
-            # Remove edge in most cycles
-            worst = max(edge_cycle_count, key=edge_cycle_count.get)  # type: ignore
+            # Choose which edge to remove
+            cycle_edges = [e for e in edge_cycle_count if e in set(edges_list)]
+            if edge_probabilities:
+                # Prefer removing the lowest-probability edge among cycle edges
+                worst = min(cycle_edges, key=lambda e: edge_probabilities.get(e, 0.5))
+            else:
+                # Fall back to removing the edge in the most cycles
+                worst = max(cycle_edges, key=edge_cycle_count.get)  # type: ignore
             edges_list.remove(worst)
         except (nx.NetworkXError, StopIteration):
             break
@@ -288,7 +301,14 @@ def build_bayesian_network(
         has_nx = False
 
     if has_nx and len(model_edge_tuples) > 0:
-        model_edge_tuples = _find_acyclic_subgraph(model_edge_tuples)
+        # Build probability map for cycle-breaking: prefer removing low-probability edges
+        edge_prob_map: dict[tuple[str, str], float] = {}
+        for e in edges:
+            sf = safe_names.get(e["from"])
+            st = safe_names.get(e["to"])
+            if sf and st:
+                edge_prob_map[(sf, st)] = e.get("probability", default_probability)
+        model_edge_tuples = _find_acyclic_subgraph(model_edge_tuples, edge_probabilities=edge_prob_map)
 
     if not model_edge_tuples:
         # Single-node network (no edges) — still valid for priors

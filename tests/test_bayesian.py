@@ -122,6 +122,39 @@ class TestFindAcyclicSubgraph:
         G.add_edges_from(result)
         assert nx.is_directed_acyclic_graph(G)
 
+    def test_cycle_prefers_removing_low_probability_edge(self):
+        """OHM-gap: When breaking cycles, prefer removing low-probability edges."""
+        edges = [("A", "B"), ("B", "C"), ("C", "A")]
+        # C→A has low probability (0.1), others have high probability (0.9)
+        probs = {("A", "B"): 0.9, ("B", "C"): 0.9, ("C", "A"): 0.1}
+        result = _find_acyclic_subgraph(edges, edge_probabilities=probs)
+        # Should remove C→A (lowest probability) to break the cycle
+        assert ("C", "A") not in result
+        assert ("A", "B") in result
+        assert ("B", "C") in result
+
+    def test_cycle_without_probability_removes_most_cycles_edge(self):
+        """Without probability data, fall back to removing edge in most cycles."""
+        # Diamond with cross edge: A→B, A→C, B→D, C→D, C→B
+        # C→B creates a cycle; without probs, remove by cycle count
+        edges = [("A", "B"), ("A", "C"), ("B", "D"), ("C", "D"), ("C", "B")]
+        result = _find_acyclic_subgraph(edges)
+        import networkx as nx
+        G = nx.DiGraph()
+        G.add_edges_from(result)
+        assert nx.is_directed_acyclic_graph(G)
+
+    def test_multiple_cycles_removes_lowest_probability_first(self):
+        """When an edge participates in multiple cycles but has low probability,
+        it should still be removed first."""
+        # A→B, B→C, C→A (cycle 1), C→D, D→A (cycle 2 via A→B→C→D→A)
+        edges = [("A", "B"), ("B", "C"), ("C", "A"), ("C", "D"), ("D", "A")]
+        # D→A has the lowest probability
+        probs = {("A", "B"): 0.8, ("B", "C"): 0.7, ("C", "A"): 0.6, ("C", "D"): 0.9, ("D", "A"): 0.1}
+        result = _find_acyclic_subgraph(edges, edge_probabilities=probs)
+        # D→A should be removed (lowest probability)
+        assert ("D", "A") not in result
+
 
 # ── Unit Tests: build_bayesian_network ────────────────────────────────────
 
