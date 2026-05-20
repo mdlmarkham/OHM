@@ -12,10 +12,9 @@ Prove that VoI methodology works on OHM itself:
 """
 
 import pytest
-import duckdb
-from ohm.schema import initialize_schema
 from ohm.queries import create_node, create_edge, create_observation
 from ohm.bayesian import compute_voi
+from tests.conftest import create_test_db
 
 
 @pytest.fixture
@@ -24,8 +23,7 @@ def voi_graph():
 
     Returns (conn, ids) where ids maps label names to generated node IDs.
     """
-    conn = duckdb.connect(":memory:")
-    initialize_schema(conn)
+    conn = create_test_db()
 
     # Root causes (low confidence = high uncertainty)
     create_node(conn, label="Root Cause A", node_type="concept", created_by="test",
@@ -254,8 +252,7 @@ class TestVoIDependsOnInclusion:
           Root B --DEPENDS_ON--> Decision 1  (prerequisite)
           Root C --CAUSES--> Decision 2
         """
-        conn = duckdb.connect(":memory:")
-        initialize_schema(conn)
+        conn = create_test_db()
 
         # Create nodes
         create_node(conn, label="Root A", node_type="concept",
@@ -318,8 +315,7 @@ class TestVoIDependsOnInclusion:
         Verify by calling compute_voi with no edge_types and checking
         that DEPENDS_ON edges are included.
         """
-        conn = duckdb.connect(":memory:")
-        initialize_schema(conn)
+        conn = create_test_db()
         create_node(conn, label="Prereq", node_type="concept",
                     created_by="test", confidence=0.3)
         create_node(conn, label="Action", node_type="decision",
@@ -375,8 +371,7 @@ class TestVoIAdjacencyDirection:
         an ancestor via correct backward traversal too. So we need a
         more specific test: a diamond graph where direction matters.
         """
-        conn = duckdb.connect(":memory:")
-        initialize_schema(conn)
+        conn = create_test_db()
 
         # Diamond graph:
         #   Root → Mid1 → Decision
@@ -477,8 +472,7 @@ class TestVoISensitivityATE:
 
         Graph: Root → Decision
         """
-        conn = duckdb.connect(":memory:")
-        initialize_schema(conn)
+        conn = create_test_db()
 
         create_node(conn, label="Root", node_type="concept",
                     created_by="test", confidence=0.3)

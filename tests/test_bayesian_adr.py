@@ -22,8 +22,6 @@ from ohm.bayesian import (
 from tests.conftest import create_test_db, create_sample_node, create_sample_edge
 
 
-# ── Fixtures ──────────────────────────────────────────────────────────────
-
 @pytest.fixture
 def db():
     """Create an in-memory test database with schema."""

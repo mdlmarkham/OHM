@@ -13,12 +13,6 @@ from tests.conftest import create_test_db, create_sample_node, create_sample_edg
 
 
 @pytest.fixture
-def db():
-    """Create a fresh in-memory database with OHM schema."""
-    return create_test_db()
-
-
-@pytest.fixture
 def causal_chain(db):
     """Create a simple causal chain: A -> B -> C."""
     a = create_sample_node(db, label="cause")

@@ -2,11 +2,10 @@
 
 import json
 import os
-import sys
 import tempfile
-from io import StringIO
 
-from ohm.cli import build_parser, main
+from ohm.cli import build_parser
+from tests.conftest import run_cli as _run_cli
 
 
 # ── Parsing Tests ────────────────────────────────────────────────────────────
@@ -90,24 +89,6 @@ class TestTopoCLIParsing:
 
 
 # ── Integration Tests ────────────────────────────────────────────────────────
-
-
-def _run_cli(argv: list[str]) -> tuple[int, str, str]:
-    """Run the CLI with given args and capture stdout/stderr + exit code."""
-    stdout = StringIO()
-    stderr = StringIO()
-    old_out, old_err = sys.stdout, sys.stderr
-    sys.stdout, sys.stderr = stdout, stderr
-    exit_code = 0
-    try:
-        main(argv)
-    except SystemExit as e:
-        exit_code = e.code if isinstance(e.code, int) else 1
-    except Exception:
-        exit_code = 1
-    finally:
-        sys.stdout, sys.stderr = old_out, old_err
-    return exit_code, stdout.getvalue(), stderr.getvalue()
 
 
 class TestTopoCLIIntegration:
@@ -353,22 +334,6 @@ class TestTopoCLIIntegration:
 
     def test_topo_main_entry_point(self):
         """Test that topo_main() routes to topo subcommands."""
-        from ohm.cli import topo_main
-
-        stdout = StringIO()
-        stderr = StringIO()
-        old_out, old_err = sys.stdout, sys.stderr
-        sys.stdout, sys.stderr = stdout, stderr
-        exit_code = 0
-        try:
-            topo_main(["--db", ":memory:", "schema"])
-        except SystemExit as e:
-            exit_code = e.code if isinstance(e.code, int) else 1
-        except Exception:
-            exit_code = 1
-        finally:
-            sys.stdout, sys.stderr = old_out, old_err
-
-        assert exit_code == 0
-        output = stdout.getvalue()
-        assert "TOPO" in output
+        code, out, _ = _run_cli(["--db", ":memory:", "topo", "schema"])
+        assert code == 0
+        assert "TOPO" in out

@@ -5,32 +5,14 @@ preventing the DuckDB index corruption bug when DuckLake mirror tables are attac
 """
 
 import pytest
-import tempfile
-import os
 
-from ohm.db import connect
-from ohm.schema import initialize_schema
 from ohm.store import OhmStore
 
 
 @pytest.fixture
-def db_path():
-    """Create a temporary database path for testing."""
-    fd, path = tempfile.mkstemp(suffix=".duckdb")
-    os.close(fd)
-    os.unlink(path)  # DuckDB needs the file to NOT exist
-    yield path
-    # Cleanup
-    for ext in ["", ".wal", ".wal.wal"]:
-        p = path + ext
-        if os.path.exists(p):
-            os.unlink(p)
-
-
-@pytest.fixture
-def store(db_path):
-    """Create a store with initialized schema."""
-    s = OhmStore(db_path=db_path, agent_name="test_agent")
+def store():
+    """Create a store with initialized schema using in-memory DB."""
+    s = OhmStore(db_path=":memory:", agent_name="test_agent")
     yield s
     s.conn.close()
 

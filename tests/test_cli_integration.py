@@ -2,29 +2,9 @@
 
 import json
 import os
-import sys
 import tempfile
-from io import StringIO
 
-from ohm.cli import main
-
-
-def _run_cli(argv: list[str]) -> tuple[int, str, str]:
-    """Run the CLI with given args and capture stdout/stderr + exit code."""
-    stdout = StringIO()
-    stderr = StringIO()
-    old_out, old_err = sys.stdout, sys.stderr
-    sys.stdout, sys.stderr = stdout, stderr
-    exit_code = 0
-    try:
-        main(argv)
-    except SystemExit as e:
-        exit_code = e.code if isinstance(e.code, int) else 1
-    except Exception:
-        exit_code = 1
-    finally:
-        sys.stdout, sys.stderr = old_out, old_err
-    return exit_code, stdout.getvalue(), stderr.getvalue()
+from tests.conftest import run_cli as _run_cli
 
 
 class TestCLIIntegration:

@@ -17,6 +17,7 @@ Usage:
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -842,9 +843,6 @@ class Graph:
             Dict with P(accurate), false_positive_rate, total_outcomes,
             accurate_count, false_positive_count.
         """
-        from ohm.queries import query_source_reliability
-
-        return query_source_reliability(self._conn, source_agent)
         from ohm.queries import query_source_reliability
 
         return query_source_reliability(self._conn, source_agent)
@@ -2157,7 +2155,7 @@ class Graph:
                         "SELECT value FROM ohm_meta WHERE key = 'schema_version'",
                     ).fetchone()) else "unknown"
                 ),
-                "exported_at": __import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat(),
+                "exported_at": datetime.now(timezone.utc).isoformat(),
                 "node_count": len(nodes_json),
                 "edge_count": len(edges_json),
                 "observation_count": len(obs_json),

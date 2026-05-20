@@ -471,6 +471,44 @@ class TestTicketProvenance:
         types = [step["edge_type"] for step in chain]
         assert "OPENED_BY" in types
 
+    def test_full_customer_support_workflow(self, graph):
+        """End-to-end customer support: open → handoff → escalate → resolve."""
+        agent_a = graph.create_node(label="Agent A", node_type="agent")
+        agent_b = graph.create_node(label="Agent B", node_type="agent")
+        tier2 = graph.create_node(label="Tier 2", node_type="agent")
+        ticket = graph.create_node(label="Support Ticket", node_type="event")
+
+        graph.create_edge(
+            from_node=agent_a["id"], to_node=ticket["id"],
+            edge_type="OPENED_BY", layer="L2", confidence=1.0,
+        )
+
+        graph.handoff(
+            ticket_node=ticket["id"],
+            from_agent=agent_a["id"],
+            to_agent=agent_b["id"],
+            reason="Skill mismatch",
+        )
+
+        graph.escalate(
+            ticket_node=ticket["id"],
+            from_agent=agent_b["id"],
+            to_tier=tier2["id"],
+            reason="Exceeded authority",
+        )
+
+        graph.create_edge(
+            from_node=tier2["id"], to_node=ticket["id"],
+            edge_type="RESOLVED_BY", layer="L2", confidence=1.0,
+        )
+
+        chain = graph.ticket_provenance(ticket["id"])
+        types = [step["edge_type"] for step in chain]
+        assert "OPENED_BY" in types
+        assert "TRANSFERRED_TO" in types
+        assert "ESCALATED_TO" in types
+        assert "RESOLVED_BY" in types
+
 
 # ===== Cybersecurity SDK Tests (OHM-af8.4) =====
 
@@ -1265,6 +1303,35 @@ class TestCompositeScore:
         result = graph.composite_score(a, observation_weight=0.3, evidence_weight=0.7)
         assert result["weights"]["observation"] == 0.3
         assert result["weights"]["evidence"] == 0.7
+
+    def test_composite_score_arithmetic_vs_geometric_differ(self, graph):
+        """Arithmetic and geometric composite scores differ with evidence."""
+        a = graph.create_node(label="A")["id"]
+        b = graph.create_node(label="B")["id"]
+        graph.observe(a, obs_type="measurement", value=0.8, sigma=0.1)
+        graph.create_edge(from_node=b, to_node=a, edge_type="SUPPORTS", layer="L3", confidence=0.9)
+        result_arith = graph.composite_score(a, method="arithmetic")
+        result_geom = graph.composite_score(a, method="geometric")
+        assert result_arith["composite_score"] != result_geom["composite_score"]
+
+    def test_composite_score_geometric_with_both_scores(self, graph):
+        """Geometric composite with both observation and evidence scores."""
+        a = graph.create_node(label="A")["id"]
+        b = graph.create_node(label="B")["id"]
+        graph.observe(a, obs_type="measurement", value=0.8, sigma=0.1)
+        graph.create_edge(from_node=b, to_node=a, edge_type="SUPPORTS", layer="L3", confidence=0.9)
+        result = graph.composite_score(a, method="geometric")
+        assert result["method"] == "geometric"
+        assert result["composite_score"] is not None
+        assert result["observation_score"] is not None
+        assert result["evidence_score"] is not None
+
+    def test_composite_score_geometric_fallback_on_zero(self, graph):
+        """Geometric mean falls back to arithmetic when values include zero."""
+        a = graph.create_node(label="A")["id"]
+        graph.observe(a, obs_type="measurement", value=0.0, sigma=0.1)
+        result = graph.composite_score(a, method="geometric")
+        assert result["composite_score"] is not None
 
 
 class TestContradictions:

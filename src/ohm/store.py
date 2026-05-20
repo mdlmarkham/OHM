@@ -931,28 +931,46 @@ class OhmStore:
 
         # Find duplicate groups: same (from_node, to_node, edge_type, layer)
         # with more than one active edge. Keep the most recently created one.
-        layer_clause = f"AND layer = '{layer}'" if layer else ""
+        # OHM-s0g: Use parameterized queries instead of f-string SQL for layer.
 
-        # Find IDs of edges to keep (most recently created per group)
-        keep_ids = self.conn.execute(f"""
-            SELECT keep_id FROM (
-                SELECT id as keep_id, from_node, to_node, edge_type, layer, ROW_NUMBER() OVER (
-                    PARTITION BY from_node, to_node, edge_type, layer
-                    ORDER BY created_at DESC
-                ) as rn
-                FROM ohm_edges
-                WHERE deleted_at IS NULL
-                  {layer_clause}
-            ) WHERE rn = 1
-              AND (from_node, to_node, edge_type, layer) IN (
-                  SELECT from_node, to_node, edge_type, layer
-                  FROM ohm_edges
-                  WHERE deleted_at IS NULL
-                    {layer_clause}
-                  GROUP BY from_node, to_node, edge_type, layer
-                  HAVING COUNT(*) > 1
-              )
-        """).fetchall()
+        if layer:
+            keep_ids = self.conn.execute("""
+                SELECT keep_id FROM (
+                    SELECT id as keep_id, from_node, to_node, edge_type, layer, ROW_NUMBER() OVER (
+                        PARTITION BY from_node, to_node, edge_type, layer
+                        ORDER BY created_at DESC
+                    ) as rn
+                    FROM ohm_edges
+                    WHERE deleted_at IS NULL
+                      AND layer = ?
+                ) WHERE rn = 1
+                  AND (from_node, to_node, edge_type, layer) IN (
+                      SELECT from_node, to_node, edge_type, layer
+                      FROM ohm_edges
+                      WHERE deleted_at IS NULL
+                        AND layer = ?
+                      GROUP BY from_node, to_node, edge_type, layer
+                      HAVING COUNT(*) > 1
+                  )
+            """, [layer, layer]).fetchall()
+        else:
+            keep_ids = self.conn.execute("""
+                SELECT keep_id FROM (
+                    SELECT id as keep_id, from_node, to_node, edge_type, layer, ROW_NUMBER() OVER (
+                        PARTITION BY from_node, to_node, edge_type, layer
+                        ORDER BY created_at DESC
+                    ) as rn
+                    FROM ohm_edges
+                    WHERE deleted_at IS NULL
+                ) WHERE rn = 1
+                  AND (from_node, to_node, edge_type, layer) IN (
+                      SELECT from_node, to_node, edge_type, layer
+                      FROM ohm_edges
+                      WHERE deleted_at IS NULL
+                      GROUP BY from_node, to_node, edge_type, layer
+                      HAVING COUNT(*) > 1
+                  )
+            """).fetchall()
 
         if not keep_ids:
             return 0
@@ -961,20 +979,35 @@ class OhmStore:
 
         # Find all duplicate edges that are NOT in the keep list
         placeholders = ", ".join(["?"] * len(keep_id_list))
-        duplicates = self.conn.execute(f"""
-            SELECT id FROM ohm_edges
-            WHERE deleted_at IS NULL
-              {layer_clause}
-              AND (from_node, to_node, edge_type, layer) IN (
-                  SELECT from_node, to_node, edge_type, layer
-                  FROM ohm_edges
-                  WHERE deleted_at IS NULL
-                    {layer_clause}
-                  GROUP BY from_node, to_node, edge_type, layer
-                  HAVING COUNT(*) > 1
-              )
-              AND id NOT IN ({placeholders})
-        """, keep_id_list).fetchall()
+        if layer:
+            params = [layer, layer] + keep_id_list
+            duplicates = self.conn.execute(f"""
+                SELECT id FROM ohm_edges
+                WHERE deleted_at IS NULL
+                  AND layer = ?
+                  AND (from_node, to_node, edge_type, layer) IN (
+                      SELECT from_node, to_node, edge_type, layer
+                      FROM ohm_edges
+                      WHERE deleted_at IS NULL
+                        AND layer = ?
+                      GROUP BY from_node, to_node, edge_type, layer
+                      HAVING COUNT(*) > 1
+                  )
+                  AND id NOT IN ({placeholders})
+            """, params).fetchall()
+        else:
+            duplicates = self.conn.execute(f"""
+                SELECT id FROM ohm_edges
+                WHERE deleted_at IS NULL
+                  AND (from_node, to_node, edge_type, layer) IN (
+                      SELECT from_node, to_node, edge_type, layer
+                      FROM ohm_edges
+                      WHERE deleted_at IS NULL
+                      GROUP BY from_node, to_node, edge_type, layer
+                      HAVING COUNT(*) > 1
+                  )
+                  AND id NOT IN ({placeholders})
+            """, keep_id_list).fetchall()
 
         if not duplicates:
             return 0

@@ -7,7 +7,9 @@ pre-initialized, plus sample data factories.
 from __future__ import annotations
 
 import pathlib
+import sys
 import uuid
+from io import StringIO
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -68,6 +70,26 @@ def create_test_db() -> "duckdb.DuckDBPyConnection":
 
     initialize_schema(conn)
     return conn
+
+
+def run_cli(argv: list[str]) -> tuple[int, str, str]:
+    """Run the CLI with given args and capture stdout/stderr + exit code."""
+    from ohm.cli import main
+
+    stdout = StringIO()
+    stderr = StringIO()
+    old_out, old_err = sys.stdout, sys.stderr
+    sys.stdout, sys.stderr = stdout, stderr
+    exit_code = 0
+    try:
+        main(argv)
+    except SystemExit as e:
+        exit_code = e.code if isinstance(e.code, int) else 1
+    except Exception:
+        exit_code = 1
+    finally:
+        sys.stdout, sys.stderr = old_out, old_err
+    return exit_code, stdout.getvalue(), stderr.getvalue()
 
 
 def create_sample_node(
@@ -159,6 +181,12 @@ def test_db():
     conn = create_test_db()
     yield conn
     conn.close()
+
+
+@pytest.fixture
+def db():
+    """Create an in-memory test database with OHM schema for Bayesian tests."""
+    return create_test_db()
 
 
 @pytest.fixture
