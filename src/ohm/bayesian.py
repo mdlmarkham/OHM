@@ -1544,3 +1544,227 @@ def suggest_causes(
             f"appropriate."
         ),
     }
+
+
+class BayesianContext:
+    """Context manager that builds a Bayesian network once and reuses it.
+
+    OHM-7bc: Instead of rebuilding the network for every inference call,
+    BayesianContext builds it once and exposes methods that reuse the cached
+    network. This avoids redundant database queries and network construction
+    when performing multiple analyses on the same graph.
+
+    Usage:
+        with BayesianContext(conn, edge_types=["CAUSES"], layers=["L3"]) as ctx:
+            result1 = ctx.inference("outcome", {"cause": 1})
+            result2 = ctx.intervention("cause", 0)
+            ate = ctx.ate("cause", "outcome")
+
+    Args:
+        conn: DuckDB connection.
+        edge_types: Edge types to include in the network.
+        layers: Optional list of layers to include.
+        root_nodes: Optional list of root node IDs to scope the network.
+        max_nodes: Maximum number of nodes to include.
+        leak_probability: Baseline probability of bad outcome when all
+            parents are good (default 0.15).
+        default_probability: Probability for edges without values (default 0.5).
+        root_prior: Default prior for root nodes (default 0.3).
+    """
+
+    def __init__(
+        self,
+        conn,
+        *,
+        edge_types: list[str] | None = None,
+        layers: list[str] | None = None,
+        root_nodes: list[str] | None = None,
+        max_nodes: int = 50,
+        leak_probability: float = 0.15,
+        default_probability: float = 0.5,
+        root_prior: float = 0.3,
+    ):
+        self._conn = conn
+        self._edge_types = edge_types
+        self._layers = layers
+        self._leak_probability = leak_probability
+        self._default_probability = default_probability
+        self._root_prior = root_prior
+
+        # Build the network once
+        self._network = build_bayesian_network(
+            conn,
+            root_nodes=root_nodes,
+            edge_types=edge_types,
+            layers=layers,
+            max_nodes=max_nodes,
+            leak_probability=leak_probability,
+            default_probability=default_probability,
+            root_prior=root_prior,
+        )
+
+    @property
+    def network(self) -> dict[str, Any] | None:
+        """The cached Bayesian network dict, or None if no edges found."""
+        return self._network
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return False
+
+    def inference(self, target: str, evidence: dict[str, int]) -> dict[str, Any]:
+        """Run Bayesian inference reusing the cached network.
+
+        Args:
+            target: Node ID to compute posterior for.
+            evidence: Dict mapping node IDs to observed states (0=bad, 1=good).
+
+        Returns:
+            Dict with posterior probabilities, network info, and method.
+        """
+        if self._network is None:
+            return {
+                "method": "none",
+                "pgmpy_available": PGMPY_AVAILABLE,
+                "target": target,
+                "evidence": evidence,
+                "error": "No probability-bearing edges found in graph",
+            }
+
+        target = validate_identifier(target, name="target")
+        safe_names = self._network["safe_names"]
+        safe_target = _safe_node_id(target)
+
+        if safe_target not in self._network["variables"]:
+            return {
+                "method": "none",
+                "pgmpy_available": PGMPY_AVAILABLE,
+                "target": target,
+                "evidence": evidence,
+                "error": f"Target node {target} not in Bayesian network",
+            }
+
+        # Convert evidence to safe names
+        safe_evidence = {}
+        for node_id, state in evidence.items():
+            safe = _safe_node_id(validate_identifier(node_id, name="evidence_node"))
+            if safe in self._network["variables"]:
+                safe_evidence[safe] = int(state)
+
+        model = self._network["model"]
+
+        try:
+            infer = VariableElimination(model)
+            result = infer.query([safe_target], evidence=safe_evidence)
+
+            p_bad = float(result.values[0])
+            p_good = float(result.values[1])
+
+            return {
+                "method": "bayesian_variable_elimination",
+                "pgmpy_available": True,
+                "target": target,
+                "evidence": evidence,
+                "posterior": {
+                    "good": round(p_good, 4),
+                    "bad": round(p_bad, 4),
+                },
+                "network_info": {
+                    "n_nodes": self._network["n_nodes"],
+                    "n_edges": self._network["n_edges"],
+                    "root_nodes": self._network["root_nodes"],
+                },
+                "target_states": {
+                    "0": "bad/failure/closed/negative",
+                    "1": "good/normal/open/positive",
+                },
+            }
+        except Exception as e:
+            logger.error(f"Bayesian inference failed: {e}")
+            return {
+                "method": "error",
+                "pgmpy_available": PGMPY_AVAILABLE,
+                "target": target,
+                "evidence": evidence,
+                "error": str(e),
+            }
+
+    def intervention(self, target: str, intervention_state: int,
+                     *, query_nodes: list[str] | None = None) -> dict[str, Any]:
+        """Run causal intervention reusing the cached network.
+
+        Args:
+            target: Node ID to intervene on.
+            intervention_state: State to set the target to (0=bad, 1=good).
+            query_nodes: Optional list of downstream nodes to query.
+
+        Returns:
+            Dict with posterior probabilities and comparison with observation.
+        """
+        return causal_intervention(
+            self._conn, target, intervention_state,
+            query_nodes=query_nodes,
+            edge_types=self._edge_types,
+            layers=self._layers,
+            leak_probability=self._leak_probability,
+            root_prior=self._root_prior,
+        )
+
+    def ate(self, cause: str, effect: str) -> dict[str, Any]:
+        """Compute Average Treatment Effect reusing the cached network.
+
+        Args:
+            cause: Node ID for the treatment variable.
+            effect: Node ID for the outcome variable.
+
+        Returns:
+            Dict with ATE, risk ratio, and network info.
+        """
+        return compute_ate(
+            self._conn, cause, effect,
+            edge_types=self._edge_types,
+            layers=self._layers,
+            leak_probability=self._leak_probability,
+            root_prior=self._root_prior,
+        )
+
+    def sensitivity(self, cause: str, effect: str) -> dict[str, Any]:
+        """Compute sensitivity analysis (E-value) reusing the cached network.
+
+        Args:
+            cause: Node ID for the treatment variable.
+            effect: Node ID for the outcome variable.
+
+        Returns:
+            Dict with E-value, risk ratio, and robustness assessment.
+        """
+        return compute_sensitivity(
+            self._conn, cause, effect,
+            edge_types=self._edge_types,
+            layers=self._layers,
+            leak_probability=self._leak_probability,
+            root_prior=self._root_prior,
+        )
+
+    def adjustment_sets(self, cause: str, effect: str,
+                        *, max_network_size: int = 10) -> dict[str, Any]:
+        """Find valid backdoor/frontdoor adjustment sets reusing the cached network.
+
+        Args:
+            cause: Node ID for the treatment variable.
+            effect: Node ID for the outcome variable.
+            max_network_size: Maximum network size for adjustment set search.
+
+        Returns:
+            Dict with adjustment sets and network info.
+        """
+        return find_adjustment_sets(
+            self._conn, cause, effect,
+            edge_types=self._edge_types,
+            layers=self._layers,
+            leak_probability=self._leak_probability,
+            root_prior=self._root_prior,
+            max_network_size=max_network_size,
+        )
