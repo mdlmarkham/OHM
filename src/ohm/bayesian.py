@@ -1964,7 +1964,7 @@ def generate_voi_tasks(
         if agent_capable_nodes:
             placeholders = ", ".join(["?"] * len(agent_capable_nodes))
             type_rows = conn.execute(
-                f"SELECT node_type FROM ohm_nodes WHERE id IN ({placeholders}) AND deleted_at IS NULL",
+                f"SELECT type FROM ohm_nodes WHERE id IN ({placeholders}) AND deleted_at IS NULL",
                 list(agent_capable_nodes),
             ).fetchall()
             agent_capable_types = {r[0].lower() for r in type_rows if r[0]}
@@ -2007,7 +2007,7 @@ def generate_voi_tasks(
 
         # Retrieve node metadata for capability matching
         node_row = conn.execute(
-            "SELECT node_type, tags FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+            "SELECT type, tags FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
             [node_id],
         ).fetchone()
         node_type = (node_row[0] or "").lower() if node_row else ""

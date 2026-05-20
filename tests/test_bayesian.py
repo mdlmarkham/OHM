@@ -1415,6 +1415,7 @@ class TestGenerateVoITasks:
         result = generate_voi_tasks(db, top=5)
         assert len(result["tasks"]) >= 1
         task = result["tasks"][0]
-        # gap_score should equal uncertainty × sensitivity
-        expected_gap = round(task["uncertainty"] * task["sensitivity"], 4)
+        # gap_score should equal uncertainty × sensitivity × (1 - confidence)
+        # Confidence-weighted gap score: higher-value for uncertain + low-confidence nodes
+        expected_gap = round(task["uncertainty"] * task["sensitivity"] * (1 - task["confidence"]), 4)
         assert task["gap_score"] == expected_gap
