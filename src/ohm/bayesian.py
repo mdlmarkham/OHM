@@ -421,7 +421,7 @@ def build_bayesian_network(
     return {
         "model": model,
         "nodes": list(node_ids),
-        "edges": edges,
+        "edges": edges,  # Each edge dict now includes effective_prob = probability * confidence
         "variables": list(safe_names.values()),
         "safe_names": safe_names,
         "root_nodes": list(root_safe_names),
