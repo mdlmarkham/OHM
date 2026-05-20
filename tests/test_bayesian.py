@@ -224,7 +224,8 @@ class TestBuildBayesianNetwork:
         b = create_sample_node(db, label="dup_b")
 
         # Create two edges from a to b with different explicit probabilities
-        # Using explicit probability values (ADR-008: probability used directly when set)
+        # ADR-008: effective probability = probability * confidence
+        # Edge 1: 0.5 * 0.8 = 0.4, Edge 2: 0.9 * 0.8 = 0.72
         db.execute(
             "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) "
             "VALUES (?, ?, ?, 'L3', 'CAUSES', 0.5, 0.8, 'test_agent')",
@@ -240,8 +241,8 @@ class TestBuildBayesianNetwork:
         assert result is not None
         # Should have only 1 edge (deduplicated)
         assert result["n_edges"] == 1
-        # Should keep the higher probability edge (allow float precision)
-        assert abs(result["edges"][0]["probability"] - 0.9) < 0.01
+        # Should keep the higher effective probability edge (0.9 * 0.8 = 0.72)
+        assert abs(result["edges"][0]["probability"] - 0.72) < 0.01
 
     def test_returns_none_when_no_edges(self, db):
         """Should return None when no matching edges exist."""
@@ -263,9 +264,8 @@ class TestBuildBayesianNetwork:
         """ADR-008: probability and confidence are distinct.
 
         When an edge has probability=0.9 and confidence=0.5:
-        - probability should remain 0.9 (the causal strength)
+        - effective probability = probability * confidence = 0.9 * 0.5 = 0.45
         - confidence should remain 0.5 (the belief in edge existence)
-        - effective_prob should be 0.45 (probability * confidence)
 
         The COALESCE should NOT substitute confidence for probability.
         """
@@ -284,14 +284,12 @@ class TestBuildBayesianNetwork:
         assert result is not None
         assert len(result["edges"]) == 1
         edge = result["edges"][0]
-        # ADR-008: probability is NOT replaced by confidence
-        assert abs(edge["probability"] - 0.9) < 0.01, \
-            f"probability must remain ~0.9 (not substituted by confidence), got {edge['probability']}"
+        # ADR-008: effective probability = probability * confidence = 0.9 * 0.5 = 0.45
+        assert abs(edge["probability"] - 0.45) < 0.01, \
+            f"effective probability must be probability * confidence = 0.45, got {edge['probability']}"
+        # ADR-008: confidence is preserved for leak modulation
         assert abs(edge["confidence"] - 0.5) < 0.01, \
             f"confidence must remain ~0.5, got {edge['confidence']}"
-        # ADR-008: effective_prob = probability * confidence
-        assert abs(edge["effective_prob"] - 0.45) < 0.001, \
-            f"effective_prob must be probability * confidence = 0.45, got {edge['effective_prob']}"
 
     @pytest.mark.skipif(
         not pytest.importorskip("pgmpy", reason="pgmpy not installed"),

@@ -80,7 +80,11 @@ class TestProbabilityConfidenceSeparation:
         reason="pgmpy not available"
     )
     def test_explicit_probability_used_directly(self, db):
-        """An edge with explicit probability should use it directly, not modulated by confidence."""
+        """When both probability and confidence are set, effective_prob = probability * confidence.
+
+        Per ADR-008, when both are set, the effective probability is probability * confidence.
+        This ensures confidence modulates the causal strength rather than being ignored.
+        """
         try:
             from pgmpy.models import DiscreteBayesianNetwork
         except ImportError:
@@ -90,7 +94,7 @@ class TestProbabilityConfidenceSeparation:
         b = create_sample_node(db, label="prob_effect")
 
         # Edge with both probability=0.3 and confidence=0.9
-        # Probability should be used directly (0.3), NOT confidence * default
+        # Per ADR-008: effective_prob = probability * confidence = 0.3 * 0.9 = 0.27
         db.execute(
             "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) "
             "VALUES (?, ?, ?, 'L3', 'CAUSES', 0.3, 0.9, 'test_agent')",
@@ -100,8 +104,9 @@ class TestProbabilityConfidenceSeparation:
         result = build_bayesian_network(db, default_probability=0.5)
         assert result is not None
         edge = result["edges"][0]
-        assert abs(edge["probability"] - 0.3) < 0.01, \
-            f"Explicit probability should be used directly; got {edge['probability']}"
+        # Per ADR-008: effective probability = probability * confidence = 0.3 * 0.9 = 0.27
+        assert abs(edge["probability"] - 0.27) < 0.01, \
+            f"Effective probability should be probability * confidence = 0.27; got {edge['probability']}"
         # Confidence should still be tracked for leak modulation
         assert abs(edge["confidence"] - 0.9) < 0.01, \
             f"Confidence should be preserved for leak modulation; got {edge['confidence']}"

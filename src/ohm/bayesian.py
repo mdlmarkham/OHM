@@ -202,18 +202,40 @@ def build_bayesian_network(
     # Collect all involved nodes and edges, deduplicating by (from, to) pair
     # ADR-008: probability and confidence are distinct attributes.
     # ADR-009: NEGATES edges have inverted probability semantics.
+    #
+    # Effective probability computation (ADR-008):
+    #   Both set:  effective_prob = probability * confidence
+    #   Only prob: effective_prob = probability
+    #   Only conf: effective_prob = confidence * default_probability
+    #   Neither:   effective_prob = default_probability
     node_ids = set()
     seen_edges: dict[tuple[str, str], dict] = {}
     for row in rows:
-        from_node, to_node, edge_type, prob, confidence = row
+        from_node, to_node, edge_type, raw_probability, raw_confidence = row
         node_ids.add(from_node)
         node_ids.add(to_node)
-        prob_val = float(prob) if prob is not None else default_probability
-        conf_val = float(confidence) if confidence is not None else default_probability
-        # ADR-008: effective_prob = probability * confidence.
-        # Confidence modulates how much the causal probability influences the CPT.
-        # This is NOT a fallback chain — both attributes contribute multiplicatively.
-        effective_prob = prob_val * conf_val
+
+        # Compute effective probability per ADR-008
+        has_explicit_probability = raw_probability is not None
+        has_explicit_confidence = raw_confidence is not None
+
+        if has_explicit_probability and has_explicit_confidence:
+            # Both set: effective_prob = probability * confidence
+            prob_val = float(raw_probability) * float(raw_confidence)
+            conf_val = float(raw_confidence)
+        elif has_explicit_probability:
+            # Only probability: use it directly
+            prob_val = float(raw_probability)
+            conf_val = float(raw_probability)  # confidence defaults to probability
+        elif has_explicit_confidence:
+            # Only confidence: confidence modulates default_probability
+            prob_val = float(raw_confidence) * default_probability
+            conf_val = float(raw_confidence)
+        else:
+            # Neither: use default
+            prob_val = default_probability
+            conf_val = default_probability
+
         key = (from_node, to_node)
         edge_dict = {
             "from": from_node,
@@ -221,11 +243,11 @@ def build_bayesian_network(
             "type": edge_type,
             "probability": prob_val,
             "confidence": conf_val,
-            "effective_prob": effective_prob,
+            "has_explicit_probability": has_explicit_probability,
             "is_negates": edge_type == "NEGATES",
         }
-        # Keep highest effective_prob edge per (from, to) pair
-        if key not in seen_edges or effective_prob > seen_edges[key]["effective_prob"]:
+        # Keep highest probability edge per (from, to) pair
+        if key not in seen_edges or prob_val > seen_edges[key]["probability"]:
             seen_edges[key] = edge_dict
 
     edges = list(seen_edges.values())
@@ -290,7 +312,7 @@ def build_bayesian_network(
             existing = parent_edges[safe_child]
             for i, ex in enumerate(existing):
                 if safe_names.get(ex["from"]) == safe_parent:
-                    if e["probability"] > existing[i]["effective_prob"]:
+                    if e["probability"] > existing[i]["probability"]:
                         existing[i] = e
                     break
         else:
@@ -374,11 +396,11 @@ def build_bayesian_network(
             # Noisy-OR with leak: P(bad) = 1 - (1-leak) * Π(1 - p_i * I(parent=bad))
             # ADR-009: NEGATES edges invert the parent state check.
             survival = 1.0  # P(child survives = stays good)
-            # ADR-008: Use effective_prob (probability * confidence) in CPT construction.
+                # ADR-008: Use probability (effective probability per ADR-008) in CPT construction.
             # This properly models that confidence modulates the causal strength.
             for i, e in enumerate(pedges):
                 parent_state = (config >> (n_parents - 1 - i)) & 1
-                edge_prob = e["effective_prob"]  # probability modulated by confidence
+                edge_prob = e["probability"]  # effective probability per ADR-008
                 is_negates = e.get("is_negates", False)
 
                 if is_negates:
@@ -421,7 +443,7 @@ def build_bayesian_network(
     return {
         "model": model,
         "nodes": list(node_ids),
-        "edges": edges,  # Each edge dict now includes effective_prob = probability * confidence
+        "edges": edges,
         "variables": list(safe_names.values()),
         "safe_names": safe_names,
         "root_nodes": list(root_safe_names),
