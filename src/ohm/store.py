@@ -287,7 +287,7 @@ class OhmStore:
                                 f"FROM ohm_lake.{table} "
                                 f"WHERE deleted_at IS NULL OR CAST(deleted_at AS VARCHAR) = ''"
                             )
-                            count = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]
+                            count = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]  # type: ignore[index]
                             logger.info("Recovered %d %s from DuckLake", count, table)
                         except Exception as e:
                             logger.warning("Failed to recover %s from DuckLake: %s", table, e)

@@ -171,12 +171,12 @@ def _get_zettelkasten_notes(
         where_sql = "WHERE " + " AND ".join(where_parts)
 
     try:
-        result = metis_conn.execute(
+        cursor = metis_conn.execute(
             f"SELECT {select_sql} FROM {table_name} {where_sql}",
             params,
         )
-        columns = [desc[0] for desc in result.description]
-        rows = result.fetchall()
+        columns = [desc[0] for desc in cursor.description]
+        rows = cursor.fetchall()
         return [dict(zip(columns, row)) for row in rows]
     except Exception:
         return []

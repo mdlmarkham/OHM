@@ -319,7 +319,7 @@ def _auto_restore_if_empty(conn: "duckdb.DuckDBPyConnection", db_path_str: str) 
     try:
         node_count = conn.execute(
             "SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL"
-        ).fetchone()[0]
+        ).fetchone()[0]  # type: ignore[index]
     except Exception:
         return
 
