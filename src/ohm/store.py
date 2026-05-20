@@ -663,6 +663,7 @@ class OhmStore:
         urgency: Optional[str] = None,
         probability: Optional[float] = None,
         agent_name: Optional[str] = None,
+        deduplicate: bool = True,
     ) -> Optional[dict[str, Any]]:
         """Create an edge. Attributed to the given agent.
 
@@ -670,6 +671,9 @@ class OhmStore:
             agent_name: Agent to attribute the write to. Defaults to self.agent_name.
             urgency: Edge urgency (critical, high, medium, low).
             probability: Objective likelihood of the outcome (0.0-1.0).
+            deduplicate: If True, check for an existing non-deleted edge with the
+                same (from_node, to_node, edge_type, layer) and update it instead
+                of creating a duplicate. Default True.
 
         Enforces boundary rules:
         - L1/L2: any agent can write
@@ -678,6 +682,54 @@ class OhmStore:
         """
         actor = agent_name or self.agent_name
         now = self._now()
+
+        # Deduplication: if an active edge with the same (from, to, type, layer)
+        # already exists, update it instead of creating a duplicate
+        if deduplicate and challenge_of is None:
+            existing = self.conn.execute(
+                "SELECT id FROM ohm_edges "
+                "WHERE from_node = ? AND to_node = ? AND edge_type = ? AND layer = ? "
+                "AND deleted_at IS NULL LIMIT 1",
+                [from_node, to_node, edge_type, layer],
+            ).fetchone()
+            if existing:
+                # Update the existing edge with new values
+                edge_id = existing[0]
+                update_fields = []
+                update_params = []
+                if confidence is not None:
+                    update_fields.append("confidence = ?")
+                    update_params.append(confidence)
+                if condition is not None:
+                    update_fields.append("condition = ?")
+                    update_params.append(condition)
+                if provenance is not None:
+                    update_fields.append("provenance = ?")
+                    update_params.append(provenance)
+                if urgency is not None:
+                    update_fields.append("urgency = ?")
+                    update_params.append(urgency)
+                if probability is not None:
+                    update_fields.append("probability = ?")
+                    update_params.append(probability)
+                update_fields.append("updated_at = ?")
+                update_params.append(now)
+                update_fields.append("updated_by = ?")
+                update_params.append(actor)
+
+                if update_fields:
+                    update_params.append(edge_id)
+                    self.conn.execute(
+                        f"UPDATE ohm_edges SET {', '.join(update_fields)} WHERE id = ?",
+                        update_params,
+                    )
+                    self._log_change("ohm_edges", edge_id, "UPDATE", layer, agent_name=actor)
+
+                edge = self.execute_one(
+                    "SELECT * FROM ohm_edges WHERE id = ?", [edge_id],
+                )
+                return edge
+
         self.conn.execute(
             """
             INSERT INTO ohm_edges (from_node, to_node, layer, edge_type, confidence,
@@ -698,6 +750,83 @@ class OhmStore:
         if edge:
             self._log_change("ohm_edges", edge["id"], "INSERT", layer, agent_name=actor)
         return edge
+
+    def deduplicate_edges(self, layer: str | None = None) -> int:
+        """Remove duplicate edges, keeping the most recent one per unique combination.
+
+        Two edges are considered duplicates if they share the same
+        (from_node, to_node, edge_type, layer) and neither is deleted.
+
+        Args:
+            layer: Optional layer filter. If provided, only deduplicate edges
+                in the specified layer.
+
+        Returns:
+            Number of duplicate edges removed (soft-deleted).
+        """
+        now = self._now()
+
+        # Find duplicate groups: same (from_node, to_node, edge_type, layer)
+        # with more than one active edge. Keep the most recently created one.
+        layer_clause = f"AND layer = '{layer}'" if layer else ""
+
+        # Find IDs of edges to keep (most recently created per group)
+        keep_ids = self.conn.execute(f"""
+            SELECT keep_id FROM (
+                SELECT id as keep_id, from_node, to_node, edge_type, layer, ROW_NUMBER() OVER (
+                    PARTITION BY from_node, to_node, edge_type, layer
+                    ORDER BY created_at DESC
+                ) as rn
+                FROM ohm_edges
+                WHERE deleted_at IS NULL
+                  {layer_clause}
+            ) WHERE rn = 1
+              AND (from_node, to_node, edge_type, layer) IN (
+                  SELECT from_node, to_node, edge_type, layer
+                  FROM ohm_edges
+                  WHERE deleted_at IS NULL
+                    {layer_clause}
+                  GROUP BY from_node, to_node, edge_type, layer
+                  HAVING COUNT(*) > 1
+              )
+        """).fetchall()
+
+        if not keep_ids:
+            return 0
+
+        keep_id_list = [row[0] for row in keep_ids]
+
+        # Find all duplicate edges that are NOT in the keep list
+        placeholders = ", ".join(["?"] * len(keep_id_list))
+        duplicates = self.conn.execute(f"""
+            SELECT id FROM ohm_edges
+            WHERE deleted_at IS NULL
+              {layer_clause}
+              AND (from_node, to_node, edge_type, layer) IN (
+                  SELECT from_node, to_node, edge_type, layer
+                  FROM ohm_edges
+                  WHERE deleted_at IS NULL
+                    {layer_clause}
+                  GROUP BY from_node, to_node, edge_type, layer
+                  HAVING COUNT(*) > 1
+              )
+              AND id NOT IN ({placeholders})
+        """, keep_id_list).fetchall()
+
+        if not duplicates:
+            return 0
+
+        dup_ids = [row[0] for row in duplicates]
+        del_placeholders = ", ".join(["?"] * len(dup_ids))
+        self.conn.execute(
+            f"UPDATE ohm_edges SET deleted_at = ?, updated_at = ? WHERE id IN ({del_placeholders})",
+            [now, now] + dup_ids,
+        )
+
+        for dup_id in dup_ids:
+            self._log_change("ohm_edges", str(dup_id), "DELETE", layer=None, agent_name=self.agent_name)
+
+        return len(dup_ids)
 
     def challenge_edge(
         self,

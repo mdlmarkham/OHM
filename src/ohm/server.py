@@ -807,6 +807,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "/sensitivity": {"method": "GET", "description": "Sensitivity analysis: E-value quantifying how much unmeasured confounding would overturn a causal conclusion. ?layers=L3,L4 to scope by layer"},
                     "/adjustment": {"method": "GET", "description": "Find valid backdoor/frontdoor adjustment sets for causal identification (Pearl's criteria). ?layers=L3,L4 to scope by layer"},
                     "/suggest_causes": {"method": "GET", "description": "Suggest candidate CAUSES edges from existing non-causal relationships (DEPENDS_ON, APPLIES_TO, etc.)"},
+                    "/deduplicate": {"method": "POST", "description": "Remove duplicate edges (same from→to, type, layer), keeping the most recent"},
                     "/refute": {"method": "GET", "description": "Test robustness of causal conclusions using DoWhy refutation methods (random common cause, placebo, data subset, unobserved confounder)"},
                     "/lint": {"method": "GET", "description": "Contract layer linting: validate graph against naming conventions and required fields"},
                     "/contract": {"method": "GET", "description": "Current contract configuration (naming conventions, required fields, schema)"},
@@ -1546,6 +1547,11 @@ class OhmHandler(BaseHTTPRequestHandler):
             from .bayesian import suggest_causes
             result = suggest_causes(self.store.conn, min_confidence=min_confidence)
             self._json_response(200, result)
+        elif path == "/deduplicate":
+            # Remove duplicate edges (same from→to, type, layer), keeping most recent
+            layer = qs.get("layer", [None])[0]
+            removed = self.store.deduplicate_edges(layer=layer)
+            self._json_response(200, {"removed": removed, "layer": layer})
         elif path == "/refute":
             # Causal refutation: test robustness of causal conclusions
             # Uses DoWhy refutation methods (requires dowhy package)

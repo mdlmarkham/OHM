@@ -371,3 +371,111 @@ class TestDeleteEdgeStore:
         from ohm.exceptions import EdgeNotFoundError
         with pytest.raises(EdgeNotFoundError):
             store.delete_edge("nonexistent_edge_xyz", deleted_by="test_agent")
+
+
+class TestEdgeDeduplication:
+    """Tests for edge deduplication (OHM-b5c)."""
+
+    def test_write_edge_deduplicates_by_default(self, store):
+        """write_edge should update existing edge instead of creating duplicate."""
+        store.write_node("dedup-a", "A", "concept")
+        store.write_node("dedup-b", "B", "concept")
+
+        # Create first edge
+        edge1 = store.write_edge("dedup-a", "dedup-b", "CAUSES", "L3", confidence=0.5)
+        assert edge1 is not None
+
+        # Create duplicate edge — should update, not create new
+        edge2 = store.write_edge("dedup-a", "dedup-b", "CAUSES", "L3", confidence=0.9)
+        assert edge2 is not None
+        assert abs(edge2["confidence"] - 0.9) < 0.01
+
+        # Should only have one edge
+        count = store.conn.execute(
+            "SELECT COUNT(*) FROM ohm_edges WHERE from_node = 'dedup-a' "
+            "AND to_node = 'dedup-b' AND edge_type = 'CAUSES' AND deleted_at IS NULL"
+        ).fetchone()[0]
+        assert count == 1
+
+    def test_write_edge_allows_duplicate_when_disabled(self, store):
+        """write_edge with deduplicate=False should create a second edge."""
+        store.write_node("dedup-c", "C", "concept")
+        store.write_node("dedup-d", "D", "concept")
+
+        # Create first edge
+        store.write_edge("dedup-c", "dedup-d", "CAUSES", "L3", confidence=0.5)
+
+        # Create second edge with deduplicate=False
+        store.write_edge("dedup-c", "dedup-d", "CAUSES", "L3", confidence=0.9, deduplicate=False)
+
+        # Should have two edges
+        count = store.conn.execute(
+            "SELECT COUNT(*) FROM ohm_edges WHERE from_node = 'dedup-c' "
+            "AND to_node = 'dedup-d' AND edge_type = 'CAUSES' AND deleted_at IS NULL"
+        ).fetchone()[0]
+        assert count == 2
+
+    def test_write_edge_different_types_not_deduplicated(self, store):
+        """Edges with different edge_type should not be deduplicated."""
+        store.write_node("dedup-e", "E", "concept")
+        store.write_node("dedup-f", "F", "concept")
+
+        store.write_edge("dedup-e", "dedup-f", "CAUSES", "L3", confidence=0.8)
+        store.write_edge("dedup-e", "dedup-f", "DEPENDS_ON", "L4", confidence=0.7)
+
+        count = store.conn.execute(
+            "SELECT COUNT(*) FROM ohm_edges WHERE from_node = 'dedup-e' "
+            "AND to_node = 'dedup-f' AND deleted_at IS NULL"
+        ).fetchone()[0]
+        assert count == 2
+
+    def test_deduplicate_edges_removes_duplicates(self, store):
+        """deduplicate_edges should remove duplicate edges, keeping most recent."""
+        store.write_node("dedup-g", "G", "concept")
+        store.write_node("dedup-h", "H", "concept")
+
+        # Create duplicate edges (with deduplicate=False)
+        store.write_edge("dedup-g", "dedup-h", "CAUSES", "L3", confidence=0.5, deduplicate=False)
+        store.write_edge("dedup-g", "dedup-h", "CAUSES", "L3", confidence=0.9, deduplicate=False)
+
+        # Should have 2 edges
+        count_before = store.conn.execute(
+            "SELECT COUNT(*) FROM ohm_edges WHERE from_node = 'dedup-g' "
+            "AND to_node = 'dedup-h' AND edge_type = 'CAUSES' AND deleted_at IS NULL"
+        ).fetchone()[0]
+        assert count_before == 2
+
+        # Deduplicate
+        removed = store.deduplicate_edges()
+        assert removed >= 1
+
+        # Should have 1 edge remaining
+        count_after = store.conn.execute(
+            "SELECT COUNT(*) FROM ohm_edges WHERE from_node = 'dedup-g' "
+            "AND to_node = 'dedup-h' AND edge_type = 'CAUSES' AND deleted_at IS NULL"
+        ).fetchone()[0]
+        assert count_after == 1
+
+    def test_deduplicate_edges_with_layer_filter(self, store):
+        """deduplicate_edges with layer filter should only affect that layer."""
+        store.write_node("dedup-i", "I", "concept")
+        store.write_node("dedup-j", "J", "concept")
+
+        # Create duplicates in L3
+        store.write_edge("dedup-i", "dedup-j", "CAUSES", "L3", confidence=0.5, deduplicate=False)
+        store.write_edge("dedup-i", "dedup-j", "CAUSES", "L3", confidence=0.9, deduplicate=False)
+
+        # Create duplicates in L4
+        store.write_edge("dedup-i", "dedup-j", "DEPENDS_ON", "L4", confidence=0.5, deduplicate=False)
+        store.write_edge("dedup-i", "dedup-j", "DEPENDS_ON", "L4", confidence=0.7, deduplicate=False)
+
+        # Deduplicate only L3
+        removed = store.deduplicate_edges(layer="L3")
+        assert removed >= 1
+
+        # L4 should still have duplicates
+        l4_count = store.conn.execute(
+            "SELECT COUNT(*) FROM ohm_edges WHERE from_node = 'dedup-i' "
+            "AND to_node = 'dedup-j' AND edge_type = 'DEPENDS_ON' AND deleted_at IS NULL"
+        ).fetchone()[0]
+        assert l4_count == 2
