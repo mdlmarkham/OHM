@@ -888,6 +888,141 @@ class TestFindOrCreateNode:
         assert found["id"] == original["id"]
 
 
+class TestDecisionNode:
+    """Tests for decision node type with utility function (OHM-6mv.2)."""
+
+    def test_decision_node_type_is_valid(self):
+        """The 'decision' node type should be in VALID_NODE_TYPES."""
+        from ohm.schema import VALID_NODE_TYPES
+        assert "decision" in VALID_NODE_TYPES
+
+    def test_validate_decision_node_type(self):
+        """validate_node_type should accept 'decision'."""
+        from ohm.schema import validate_node_type
+        assert validate_node_type("decision") is True
+
+    def test_create_decision_node(self, test_db):
+        """Creating a node with type='decision' should succeed."""
+        from ohm.queries import create_node
+        node = create_node(
+            test_db,
+            label="Hormuz Response Strategy",
+            node_type="decision",
+            created_by="metis",
+        )
+        assert node["type"] == "decision"
+        assert node["label"] == "Hormuz Response Strategy"
+
+    def test_create_decision_node_with_utility(self, test_db):
+        """Decision nodes should accept utility_scale, current_best_action, and action_alternatives."""
+        from ohm.queries import create_node
+        node = create_node(
+            test_db,
+            label="Agent Governance Standard",
+            node_type="decision",
+            created_by="metis",
+            utility_scale=0.9,
+            current_best_action="Adopt current standard",
+            action_alternatives=["Revise standard", "Wait for more data"],
+        )
+        assert node["type"] == "decision"
+        assert node["utility_scale"] == pytest.approx(0.9)
+        assert node["current_best_action"] == "Adopt current standard"
+        # action_alternatives is stored as JSON list
+        import json
+        alternatives = json.loads(node["action_alternatives"]) if isinstance(node["action_alternatives"], str) else node["action_alternatives"]
+        assert "Revise standard" in alternatives
+        assert "Wait for more data" in alternatives
+
+    def test_utility_scale_validation(self, test_db):
+        """utility_scale must be between 0 and 1."""
+        from ohm.queries import create_node
+        with pytest.raises(ValueError, match="utility_scale"):
+            create_node(
+                test_db,
+                label="Bad Decision",
+                node_type="decision",
+                created_by="metis",
+                utility_scale=1.5,
+            )
+
+    def test_utility_scale_negative_rejected(self, test_db):
+        """Negative utility_scale should be rejected."""
+        from ohm.queries import create_node
+        with pytest.raises(ValueError, match="utility_scale"):
+            create_node(
+                test_db,
+                label="Bad Decision",
+                node_type="decision",
+                created_by="metis",
+                utility_scale=-0.1,
+            )
+
+    def test_utility_scale_zero_accepted(self, test_db):
+        """utility_scale=0 should be accepted (being wrong doesn't matter)."""
+        from ohm.queries import create_node
+        node = create_node(
+            test_db,
+            label="Low Stakes Decision",
+            node_type="decision",
+            created_by="metis",
+            utility_scale=0.0,
+        )
+        assert node["utility_scale"] == pytest.approx(0.0)
+
+    def test_utility_scale_one_accepted(self, test_db):
+        """utility_scale=1.0 should be accepted (being wrong matters a lot)."""
+        from ohm.queries import create_node
+        node = create_node(
+            test_db,
+            label="High Stakes Decision",
+            node_type="decision",
+            created_by="metis",
+            utility_scale=1.0,
+        )
+        assert node["utility_scale"] == pytest.approx(1.0)
+
+    def test_decision_node_without_utility(self, test_db):
+        """Decision nodes can be created without utility fields (they default to NULL)."""
+        from ohm.queries import create_node
+        node = create_node(
+            test_db,
+            label="Decision Without Utility",
+            node_type="decision",
+            created_by="metis",
+        )
+        assert node["type"] == "decision"
+        assert node["utility_scale"] is None
+        assert node["current_best_action"] is None
+        assert node["action_alternatives"] is None
+
+    def test_utility_fields_on_non_decision_node(self, test_db):
+        """Utility fields can be set on any node type, not just decision."""
+        from ohm.queries import create_node
+        node = create_node(
+            test_db,
+            label="Important Concept",
+            node_type="concept",
+            created_by="metis",
+            utility_scale=0.5,
+            current_best_action="Research more",
+        )
+        assert node["type"] == "concept"
+        assert node["utility_scale"] == pytest.approx(0.5)
+        assert node["current_best_action"] == "Research more"
+
+    def test_schema_migration_adds_utility_columns(self, test_db):
+        """Migration v0.16.0 should add utility columns to ohm_nodes."""
+        from ohm.schema import get_schema_version, SCHEMA_VERSION
+        version = get_schema_version(test_db)
+        assert version == SCHEMA_VERSION
+        # Verify columns exist
+        columns = [row[0] for row in test_db.execute("DESCRIBE ohm_nodes").fetchall()]
+        assert "utility_scale" in columns
+        assert "current_best_action" in columns
+        assert "action_alternatives" in columns
+
+
 class TestDeleteNode:
     """Tests for delete_node() — cascading edge deletion (OHM-cpi)."""
 

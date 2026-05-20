@@ -748,8 +748,12 @@ def create_node(
     confidence: float = 1.0,
     priority: str | None = None,
     url: str | None = None,
+    utility_scale: float | None = None,
+    current_best_action: str | None = None,
+    action_alternatives: list[str] | None = None,
 ) -> dict[str, Any]:
     """Create a new node and return its full record."""
+    import json
     from ohm.schema import generate_node_id, validate_node_type, VALID_PRIORITY
     from ohm.validation import validate_confidence
 
@@ -760,6 +764,11 @@ def create_node(
     confidence = validate_confidence(confidence)
     if priority is not None and priority not in VALID_PRIORITY:
         raise ValueError(f"Invalid priority: {priority}. Must be one of: {sorted(VALID_PRIORITY)}")
+    if utility_scale is not None and not (0.0 <= utility_scale <= 1.0):
+        raise ValueError(f"utility_scale must be between 0 and 1, got {utility_scale}")
+
+    # Serialize action_alternatives to JSON if provided
+    alternatives_json = json.dumps(action_alternatives) if action_alternatives is not None else None
 
     node_id = generate_node_id(label)
 
@@ -773,10 +782,13 @@ def create_node(
             """UPDATE ohm_nodes SET
                 label = ?, type = ?, content = ?, created_by = ?,
                 visibility = ?, provenance = ?, confidence = ?, priority = ?, url = ?,
+                utility_scale = ?, current_best_action = ?, action_alternatives = ?,
                 deleted_at = NULL, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?""",
             [label, node_type, content, created_by, visibility, provenance,
-             confidence, priority, url, node_id],
+             confidence, priority, url,
+             utility_scale, current_best_action, alternatives_json,
+             node_id],
         )
         _log_change(conn, "ohm_nodes", node_id, "UPDATE", created_by)
         return _rows_to_dicts(
@@ -785,10 +797,11 @@ def create_node(
 
     conn.execute(
         """INSERT INTO ohm_nodes
-           (id, label, type, content, created_by, visibility, provenance, confidence, priority, url)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           (id, label, type, content, created_by, visibility, provenance, confidence, priority, url,
+            utility_scale, current_best_action, action_alternatives)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [node_id, label, node_type, content, created_by, visibility, provenance, confidence,
-         priority, url],
+         priority, url, utility_scale, current_best_action, alternatives_json],
     )
     _log_change(conn, "ohm_nodes", node_id, "INSERT", created_by)
     # Return full node record

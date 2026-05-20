@@ -316,12 +316,18 @@ class Graph:
         confidence: float = 1.0,
         priority: str | None = None,
         url: str | None = None,
+        utility_scale: float | None = None,
+        current_best_action: str | None = None,
+        action_alternatives: list[str] | None = None,
     ) -> dict[str, Any]:
         """Create a node and return its full record.
 
         The node ID is auto-generated from the label (lowercased, spaces→underscores,
         with a short unique suffix). Returns the complete node record including
         all fields (id, label, type, content, created_by, created_at, etc.).
+
+        For decision nodes (node_type='decision'), set utility_scale (0-1),
+        current_best_action, and action_alternatives to enable VoI analysis.
         """
         from ohm.queries import create_node
 
@@ -336,6 +342,9 @@ class Graph:
             confidence=confidence,
             priority=priority,
             url=url,
+            utility_scale=utility_scale,
+            current_best_action=current_best_action,
+            action_alternatives=action_alternatives,
         )
 
     def create_edge(
@@ -2579,6 +2588,9 @@ def connect_http(
                 "visibility": kwargs.get("visibility", "team"),
                 "provenance": kwargs.get("provenance"),
                 "priority": kwargs.get("priority"),
+                "utility_scale": kwargs.get("utility_scale"),
+                "current_best_action": kwargs.get("current_best_action"),
+                "action_alternatives": kwargs.get("action_alternatives"),
             }
             return self._http_request("POST", "/node", body)
 

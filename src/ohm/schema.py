@@ -37,6 +37,7 @@ VALID_NODE_TYPES = frozenset({
     "system", "area", "site",
     "agent", "skill", "value", "goal", "topic",
     "task",  # Action items with status, priority, assignment
+    "decision",  # Decision nodes with utility function (OHM-6mv.2)
 })
 
 VALID_VISIBILITIES = frozenset({"private", "team", "public"})
@@ -368,6 +369,9 @@ DDL_STATEMENTS: list[str] = [
         task_status   VARCHAR,          -- Task status: open/in_progress/blocked/review/done/cancelled
         assigned_to   VARCHAR,          -- Agent assigned to this task
         due_date      TIMESTAMP,        -- Task due date
+        utility_scale FLOAT,            -- Decision node: how much does being wrong matter? (0-1)
+        current_best_action VARCHAR,    -- Decision node: what we'd do with current info
+        action_alternatives JSON,       -- Decision node: what we'd do if we knew more
         deleted_at    TIMESTAMP          -- Soft delete: NULL = active, set = deleted
     );
     """,
@@ -506,7 +510,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.15.0"
+SCHEMA_VERSION = "0.16.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -583,6 +587,11 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
         "ALTER TABLE ohm_edges ADD COLUMN confidence_p05 FLOAT",
         "ALTER TABLE ohm_edges ADD COLUMN confidence_p50 FLOAT",
         "ALTER TABLE ohm_edges ADD COLUMN confidence_p95 FLOAT",
+    ]),
+    ("0.16.0", "add decision node type with utility function fields (OHM-6mv.2)", [
+        "ALTER TABLE ohm_nodes ADD COLUMN utility_scale FLOAT",
+        "ALTER TABLE ohm_nodes ADD COLUMN current_best_action VARCHAR",
+        "ALTER TABLE ohm_nodes ADD COLUMN action_alternatives JSON",
     ]),
 ]
 
