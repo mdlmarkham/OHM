@@ -57,7 +57,8 @@ def _start_test_server(store, tokens=None, roles=None, no_auth=False, schema_con
 
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    time.sleep(0.3)  # Let server start (longer for xdist parallel mode)
+    from tests.conftest import wait_for_port
+    wait_for_port("127.0.0.1", port)
     return port, server, thread
 
 
@@ -946,36 +947,22 @@ class TestTokenSecurity:
 
     def test_auth_with_hashed_tokens(self, tmp_path):
         """Authentication should work with hashed tokens."""
-        import time
-        time.sleep(0.5)  # Ensure previous server cleanup is complete (xdist)
         db_path = str(tmp_path / "test_hashed_auth.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test_agent")
-        # Use plaintext tokens — _start_test_server will hash them
         tokens = {"hashed-token-abc": "metis", "hashed-token-xyz": "observer"}
         roles = {"metis": "read-write", "observer": "read-only"}
         port, server, thread = _start_test_server(store, tokens=tokens, roles=roles)
         try:
-            # Retry loop for first request (server may still be starting under xdist)
-            for attempt in range(3):
-                status, data = _request("POST", port, "/node", body={
-                    "id": "auth_ok", "label": "AuthOK", "type": "concept",
-                }, headers={"Authorization": "Bearer hashed-token-abc"})
-                if status == 201:
-                    break
-                time.sleep(0.2)
+            status, data = _request("POST", port, "/node", body={
+                "id": "auth_ok", "label": "AuthOK", "type": "concept",
+            }, headers={"Authorization": "Bearer hashed-token-abc"})
             assert status == 201, f"Expected 201, got {status}: {data}"
 
-            time.sleep(0.05)  # Small delay to avoid connection race on Windows
-
-            # Invalid token → 401
             status, data = _request("POST", port, "/node", body={
                 "id": "bad", "label": "Bad", "type": "concept",
             }, headers={"Authorization": "Bearer wrong-token"})
             assert status == 401
 
-            time.sleep(0.05)
-
-            # Read-only token → 403
             status, data = _request("POST", port, "/node", body={
                 "id": "ro_test", "label": "RO", "type": "concept",
             }, headers={"Authorization": "Bearer hashed-token-xyz"})
