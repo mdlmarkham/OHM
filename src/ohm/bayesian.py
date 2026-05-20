@@ -1807,6 +1807,7 @@ def compute_voi(
         obs_counts[node_id] = count
 
     # Compute VoI for each candidate node
+    # Track whether we used ATE or path-confidence fallback for each ranking
     rankings = []
     for node_id in candidate_nodes:
         info = node_info.get(node_id, {"label": node_id, "confidence": 0.5, "utility_scale": None})
@@ -1816,19 +1817,32 @@ def compute_voi(
         uncertainty = 1.0 - confidence
 
         # Sensitivity: how much does this node affect decisions?
-        # Sum of |ATE| across all decision nodes this node is an ancestor of
+        # Per ADR-013: use |ATE(ancestor → decision)| when possible,
+        # falling back to path-weighted confidence product when ATE is unavailable.
         sensitivity = 0.0
+        sensitivity_method = "path_confidence"  # default fallback
         downstream_decisions = []
         for decision in decision_nodes:
             if node_id in all_ancestors.get(decision, set()):
-                # Use edge confidence along the path as a proxy for sensitivity
-                # (Full ATE computation would be too expensive for all pairs)
-                # Walk the path and take the minimum edge confidence
-                path_conf = _path_confidence(node_id, decision, forward_adj, edge_confidences)
-                if path_conf is not None:
-                    sensitivity += path_conf * (info.get("utility_scale") or 0.5)
+                # Try ATE first (model-based causal effect)
+                ate_result = compute_ate(
+                    conn, node_id, decision,
+                    edge_types=edge_types,
+                    layers=layers,
+                    leak_probability=leak_probability,
+                    root_prior=root_prior,
+                )
+                if ate_result.get("method") == "model_based_ate":
+                    ate_value = ate_result["ate"]
+                    sensitivity += abs(ate_value) * (info.get("utility_scale") or 0.5)
+                    sensitivity_method = "ate"
                 else:
-                    sensitivity += 0.1 * (info.get("utility_scale") or 0.5)
+                    # Fallback: path confidence (minimum edge confidence along best path)
+                    path_conf = _path_confidence(node_id, decision, forward_adj, edge_confidences)
+                    if path_conf is not None:
+                        sensitivity += path_conf * (info.get("utility_scale") or 0.5)
+                    else:
+                        sensitivity += 0.1 * (info.get("utility_scale") or 0.5)
                 downstream_decisions.append(decision)
 
         # VoI = uncertainty × sensitivity
@@ -1840,6 +1854,7 @@ def compute_voi(
             "voi_score": round(voi_score, 4),
             "uncertainty": round(uncertainty, 4),
             "sensitivity": round(sensitivity, 4),
+            "sensitivity_method": sensitivity_method,
             "confidence": round(confidence, 4),
             "observation_count": obs_counts.get(node_id, 0),
             "downstream_decisions": downstream_decisions,
