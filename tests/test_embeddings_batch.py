@@ -9,9 +9,25 @@ Verifies that:
 """
 
 import json
-import time
-from unittest.mock import patch, MagicMock
 import http.client
+import socket
+
+import pytest
+
+
+def _ohmd_running(host: str = "127.0.0.1", port: int = 8710) -> bool:
+    try:
+        s = socket.create_connection((host, port), timeout=0.5)
+        s.close()
+        return True
+    except OSError:
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not _ohmd_running(),
+    reason="ohmd not running on 127.0.0.1:8710 — integration test requires a live server",
+)
 
 
 def _request(method, path, token="ohm-test-token"):

@@ -1230,6 +1230,7 @@ def compound_confidence(
         c = max(0.0, min(1.0, c))
 
         if use_weighting:
+            assert source_weights is not None
             source = obs.get("source") or obs.get("created_by") or "_unknown_"
             w = source_weights.get(source, default_weight)
             weighted_confidences.append((c, w))
@@ -1749,17 +1750,17 @@ def graph_stats(
     # Total counts
     total_nodes = conn.execute(
         "SELECT count(*) FROM ohm_nodes WHERE deleted_at IS NULL"
-    ).fetchone()[0]
+    ).fetchone()[0]  # type: ignore[index]
     total_edges = conn.execute(
         "SELECT count(*) FROM ohm_edges WHERE deleted_at IS NULL"
-    ).fetchone()[0]
+    ).fetchone()[0]  # type: ignore[index]
 
     # Orphan count
     orphan_count = conn.execute("""
         SELECT count(*) FROM ohm_nodes n
         LEFT JOIN ohm_edges e ON (e.from_node = n.id OR e.to_node = n.id)
         WHERE e.id IS NULL AND n.deleted_at IS NULL
-    """).fetchone()[0]
+    """).fetchone()[0]  # type: ignore[index]
 
     # Dead end count
     dead_end_count = conn.execute("""
@@ -1773,10 +1774,10 @@ def graph_stats(
             WHERE e2.to_node = n.id AND e2.deleted_at IS NULL
         )
         AND n.deleted_at IS NULL
-    """).fetchone()[0]
+    """).fetchone()[0]  # type: ignore[index]
 
     # Hub count (nodes with 5+ connections)
-    hub_count = conn.execute(f"""
+    hub_count = conn.execute("""
         SELECT count(*) FROM (
             SELECT n.id
             FROM ohm_nodes n
@@ -1785,7 +1786,7 @@ def graph_stats(
             GROUP BY n.id
             HAVING COUNT(e.id) >= 5
         )
-    """).fetchone()[0]
+    """).fetchone()[0]  # type: ignore[index]
 
     # Density
     density = total_edges / total_nodes if total_nodes > 0 else 0
@@ -1793,7 +1794,7 @@ def graph_stats(
     # Average confidence
     avg_conf = conn.execute(
         "SELECT AVG(confidence) FROM ohm_nodes WHERE deleted_at IS NULL AND confidence IS NOT NULL"
-    ).fetchone()[0]
+    ).fetchone()[0]  # type: ignore[index]
 
     # Type distribution
     type_dist = conn.execute("""

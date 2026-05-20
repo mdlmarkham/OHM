@@ -2688,7 +2688,13 @@ def connect_http(
             data = json.dumps(body).encode() if body else None
             headers = {"Content-Type": "application/json"}
             if self._token:
-                headers["Authorization"] = f"Bearer {self._token}"
+                token_header = f"Bearer {self._token}"
+                try:
+                    token_header.encode('latin-1')
+                except UnicodeEncodeError:
+                    from urllib.parse import quote
+                    token_header = f"Bearer {quote(self._token, safe='-._~')}"
+                headers["Authorization"] = token_header
 
             req = urllib.request.Request(url, data=data, headers=headers, method=method)
             try:
@@ -2832,7 +2838,7 @@ def connect_http(
                     return None
                 raise
 
-        def challenge(self, node_id: str, *, value: float | None = None, 
+        def challenge(self, node_id: str, *, value: float | None = None,
                       sigma: float = 0.5, notes: str | None = None,
                       challenge_type: str | None = None) -> dict[str, Any]:
             """Challenge a node with an observation (records observation on node)."""
@@ -3283,7 +3289,6 @@ def connect_http(
             Returns:
                 Dict with candidate_causes, root_causes, and disconnected nodes.
             """
-            import urllib.parse
             path = f"/suggest_causes?min_confidence={min_confidence}"
             return self._http_request("GET", path)
 

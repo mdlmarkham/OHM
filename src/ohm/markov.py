@@ -15,7 +15,6 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    import duckdb
     from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger(__name__)
@@ -224,9 +223,9 @@ def markov_absorbing_risk(
     R = matrix[np.ix_(transient_idx, absorbing_idx)]
 
     n_t = len(transient)
-    I = np.eye(n_t)
+    eye_n = np.eye(n_t)
     try:
-        N = np.linalg.inv(I - Q)
+        N = np.linalg.inv(eye_n - Q)
     except np.linalg.LinAlgError:
         return {
             "method": "markov_absorbing_risk",
@@ -355,9 +354,9 @@ def markov_expected_steps(
     Q = matrix[np.ix_(transient_idx, transient_idx)]
 
     n_t = len(transient)
-    I = np.eye(n_t)
+    eye_n = np.eye(n_t)
     try:
-        N = np.linalg.inv(I - Q)
+        N = np.linalg.inv(eye_n - Q)
     except np.linalg.LinAlgError:
         return {
             "method": "markov_expected_steps",

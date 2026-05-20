@@ -21,8 +21,8 @@ from ohm.validation import validate_identifier
 logger = logging.getLogger(__name__)
 
 try:
-    import dowhy
-    from dowhy import CausalModel
+    import dowhy  # noqa: F401
+    from dowhy import CausalModel  # noqa: F401
     DOWHY_AVAILABLE = True
 except ImportError:
     DOWHY_AVAILABLE = False
@@ -64,11 +64,8 @@ def refute_causal_effect(
         Dict with refutation results for each method.
     """
     from ohm.bayesian import (
-        build_bayesian_network,
-        causal_intervention,
         compute_ate,
         compute_sensitivity,
-        _safe_node_id,
         PGMPY_AVAILABLE,
     )
 

@@ -130,6 +130,8 @@ class TestWALRecoveryDbPy:
 
         db_path = str(tmp_path / "test.db")
         mock_conn = MagicMock()
+        # fetchone()[0] must return a real int so _auto_restore_if_empty can compare it
+        mock_conn.execute.return_value.fetchone.return_value = (1,)
         call_count = 0
 
         def mock_connect(path):
@@ -143,11 +145,13 @@ class TestWALRecoveryDbPy:
 
         with patch("duckdb.connect", side_effect=mock_connect):
             with patch("ohm.db._try_ducklake_recovery", return_value=False):
-                with patch("os.path.exists", return_value=True):
-                    with patch("os.remove"):
-                        from ohm.db import connect
-                        result = connect(str(db_path))
-                        assert result is mock_conn
+                with patch("ohm.db._auto_restore_if_empty"):
+                    with patch("ohm.schema.initialize_schema"):
+                        with patch("os.path.exists", return_value=True):
+                            with patch("os.remove"):
+                                from ohm.db import connect
+                                result = connect(str(db_path))
+                                assert result is mock_conn
 
     def test_internal_exception_wal_ducklake_recovery_succeeds(self, tmp_path):
         """When DuckLake recovery works, WAL deletion is skipped."""
@@ -155,6 +159,8 @@ class TestWALRecoveryDbPy:
 
         db_path = str(tmp_path / "test.db")
         mock_conn = MagicMock()
+        # fetchone()[0] must return a real int so _auto_restore_if_empty can compare it
+        mock_conn.execute.return_value.fetchone.return_value = (1,)
         call_count = 0
 
         def mock_connect(path):
@@ -168,6 +174,8 @@ class TestWALRecoveryDbPy:
 
         with patch("duckdb.connect", side_effect=mock_connect):
             with patch("ohm.db._try_ducklake_recovery", return_value=True):
-                from ohm.db import connect
-                result = connect(str(db_path))
-                assert result is mock_conn
+                with patch("ohm.db._auto_restore_if_empty"):
+                    with patch("ohm.schema.initialize_schema"):
+                        from ohm.db import connect
+                        result = connect(str(db_path))
+                        assert result is mock_conn

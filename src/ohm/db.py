@@ -7,14 +7,33 @@ and connection configuration.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import pathlib
 import shutil
 from typing import TYPE_CHECKING
 
+logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
     import duckdb
     from duckdb import DuckDBPyConnection
+
+
+def _get_ducklake_path() -> str:
+    """Return the DuckLake catalog path, env var first then config file fallback."""
+    path = os.environ.get("OHM_DUCKLAKE_PATH", "")
+    if path:
+        return path
+    config_file = pathlib.Path(os.environ.get("OHM_CONFIG", str(pathlib.Path.home() / ".ohm" / "ohmd.json")))
+    if config_file.exists():
+        try:
+            with open(config_file) as f:
+                cfg = json.load(f)
+            path = cfg.get("ducklake", {}).get("path", "")
+        except Exception as e:
+            logger.debug("Failed to read ducklake path from config %s: %s", config_file, e, exc_info=True)
+    return path
 
 
 def get_default_db_path() -> pathlib.Path:
@@ -101,8 +120,8 @@ def _load_extensions(conn: "duckdb.DuckDBPyConnection") -> None:
     for ext in extensions:
         try:
             conn.execute(f"INSTALL {ext}; LOAD {ext};")
-        except Exception:
-            pass  # Extension may already be installed
+        except Exception as e:
+            logger.debug("Extension %s not available: %s", ext, e, exc_info=True)
 
     # Try to load Quack extension (optional, for concurrent access)
     # Use INSTALL (not FORCE INSTALL) to avoid re-downloading on every call.
@@ -110,16 +129,16 @@ def _load_extensions(conn: "duckdb.DuckDBPyConnection") -> None:
     # calls skip the download entirely.
     try:
         conn.execute("INSTALL quack FROM core_nightly; LOAD quack;")
-    except Exception:
-        pass  # Quack not available — fall back to single-writer mode
+    except Exception as e:
+        logger.debug("Quack extension not available — single-writer mode: %s", e, exc_info=True)
 
     # Try to load DuckLake extension (optional, for lakehouse sync)
     # DuckLake provides ACID multi-table transactions, time travel, and
     # Parquet-based storage. Required for OHM-kdk (DuckLake shared backend).
     try:
         conn.execute("INSTALL ducklake FROM core; LOAD ducklake;")
-    except Exception:
-        pass  # DuckLake not available — lakehouse features disabled
+    except Exception as e:
+        logger.debug("DuckLake extension not available — lakehouse features disabled: %s", e, exc_info=True)
 
     # Try to load VSS extension (optional, for semantic search)
     # VSS provides HNSW index for fast vector similarity search.
@@ -129,16 +148,16 @@ def _load_extensions(conn: "duckdb.DuckDBPyConnection") -> None:
         conn.execute("INSTALL vss; LOAD vss;")
         # Enable HNSW index persistence so it survives DB restarts
         conn.execute("SET hnsw_enable_experimental_persistence = true;")
-    except Exception:
-        pass  # VSS not available — semantic search falls back to brute-force
+    except Exception as e:
+        logger.debug("VSS extension not available — semantic search uses brute-force: %s", e, exc_info=True)
 
 
 def close(conn: "duckdb.DuckDBPyConnection") -> None:
     """Close a DuckDB connection safely."""
     try:
         conn.close()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Error closing DuckDB connection: %s", e, exc_info=True)
 
 
 def _try_ducklake_recovery(db_path_str: str) -> bool:
@@ -152,7 +171,7 @@ def _try_ducklake_recovery(db_path_str: str) -> bool:
     """
     import duckdb
 
-    ducklake_path = os.environ.get("OHM_DUCKLAKE_PATH")
+    ducklake_path = _get_ducklake_path()
     if not ducklake_path:
         return False
 
@@ -163,13 +182,15 @@ def _try_ducklake_recovery(db_path_str: str) -> bool:
         # Load DuckLake extension
         try:
             tmp_conn.execute("INSTALL ducklake FROM core; LOAD ducklake;")
-        except Exception:
+        except Exception as e:
+            logger.debug("DuckLake extension unavailable during recovery: %s", e, exc_info=True)
             return False
 
         # Attach DuckLake catalog
         try:
             tmp_conn.execute(f"ATTACH 'ducklake:{ducklake_path}' AS ohm_lake")
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to attach DuckLake catalog %s: %s", ducklake_path, e, exc_info=True)
             return False
 
         # Get latest snapshot
@@ -230,8 +251,8 @@ def _try_ducklake_recovery(db_path_str: str) -> bool:
                     f"INSERT INTO ohm_nodes ({col_names}) VALUES ({placeholders})",
                     values,
                 )
-            except Exception:
-                pass  # Skip duplicates
+            except Exception as e:
+                logger.debug("Skipping duplicate node %s during recovery: %s", node_id, e, exc_info=True)
 
         # Import edges
         for edge in edges:
@@ -253,8 +274,8 @@ def _try_ducklake_recovery(db_path_str: str) -> bool:
                     f"INSERT INTO ohm_edges ({col_names}) VALUES ({placeholders})",
                     values,
                 )
-            except Exception:
-                pass  # Skip duplicates
+            except Exception as e:
+                logger.debug("Skipping duplicate edge %s during recovery: %s", edge_id, e, exc_info=True)
 
         # Log recovery
         fresh_conn.execute(
@@ -277,14 +298,15 @@ def _try_ducklake_recovery(db_path_str: str) -> bool:
         fresh_conn.close()
         return True
 
-    except Exception:
+    except Exception as e:
+        logger.debug("DuckLake recovery failed: %s", e, exc_info=True)
         return False
     finally:
         if tmp_conn:
             try:
                 tmp_conn.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Error closing temp connection: %s", e, exc_info=True)
 
 
 def _auto_restore_if_empty(conn: "duckdb.DuckDBPyConnection", db_path_str: str) -> None:
@@ -297,14 +319,14 @@ def _auto_restore_if_empty(conn: "duckdb.DuckDBPyConnection", db_path_str: str) 
     try:
         node_count = conn.execute(
             "SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL"
-        ).fetchone()[0]
+        ).fetchone()[0]  # type: ignore[index]
     except Exception:
         return
 
     if node_count > 0:
         return
 
-    ducklake_path = os.environ.get("OHM_DUCKLAKE_PATH")
+    ducklake_path = _get_ducklake_path()
     if not ducklake_path:
         return
 
@@ -315,12 +337,14 @@ def _auto_restore_if_empty(conn: "duckdb.DuckDBPyConnection", db_path_str: str) 
         tmp_conn = _duckdb.connect(":memory:")
         try:
             tmp_conn.execute("INSTALL ducklake FROM core; LOAD ducklake;")
-        except Exception:
+        except Exception as e:
+            logger.debug("DuckLake extension unavailable for auto-restore: %s", e, exc_info=True)
             return
 
         try:
             tmp_conn.execute(f"ATTACH 'ducklake:{ducklake_path}' AS ohm_lake")
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to attach DuckLake catalog for auto-restore: %s", e, exc_info=True)
             return
 
         snapshots = tmp_conn.execute(
@@ -362,8 +386,8 @@ def _auto_restore_if_empty(conn: "duckdb.DuckDBPyConnection", db_path_str: str) 
             try:
                 conn.execute(f"INSERT INTO ohm_nodes ({col_names}) VALUES ({placeholders})", values)
                 node_count_restored += 1
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Skipping duplicate node %s during auto-restore: %s", node_id, e, exc_info=True)
 
         edge_count_restored = 0
         for edge in edges:
@@ -381,8 +405,8 @@ def _auto_restore_if_empty(conn: "duckdb.DuckDBPyConnection", db_path_str: str) 
             try:
                 conn.execute(f"INSERT INTO ohm_edges ({col_names}) VALUES ({placeholders})", values)
                 edge_count_restored += 1
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Skipping duplicate edge %s during auto-restore: %s", edge_id, e, exc_info=True)
 
         if node_count_restored > 0 or edge_count_restored > 0:
             conn.execute("CHECKPOINT")
@@ -403,14 +427,14 @@ def _auto_restore_if_empty(conn: "duckdb.DuckDBPyConnection", db_path_str: str) 
                 ],
             )
 
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Auto-restore from DuckLake failed: %s", e, exc_info=True)
     finally:
         if tmp_conn:
             try:
                 tmp_conn.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Error closing temp connection after auto-restore: %s", e, exc_info=True)
 
 
 def attach_ducklake(
@@ -440,11 +464,14 @@ def attach_ducklake(
     """
     # Check if DuckLake extension is loaded
     try:
-        conn.execute(
+        result = conn.execute(
             "SELECT extension_name FROM duckdb_extensions()"
             " WHERE loaded = true AND extension_name = 'ducklake'"
         ).fetchone()
-    except Exception:
+        if result is None:
+            return False  # extension not loaded
+    except Exception as e:
+        logger.debug("DuckLake extension check failed: %s", e, exc_info=True)
         return False
 
     # Build ATTACH statement
@@ -460,7 +487,8 @@ def attach_ducklake(
         err_msg = str(e).lower()
         if "already attached" in err_msg or "already exists" in err_msg:
             return True
-        raise
+        logger.debug("DuckLake ATTACH failed: %s", e, exc_info=True)
+        return False
 
     # Create mirror tables in DuckLake schema (no PKs — DuckLake constraint)
     _create_ducklake_tables(conn, alias)
@@ -555,6 +583,5 @@ def _create_ducklake_tables(conn: "DuckDBPyConnection", alias: str) -> None:
     for table_name, ddl in mirror_tables.items():
         try:
             conn.execute(ddl.format(alias=alias))
-        except Exception:
-            # Table may already exist — safe to ignore
-            pass
+        except Exception as e:
+            logger.debug("Skipping mirror table %s (may already exist): %s", table_name, e, exc_info=True)

@@ -464,7 +464,6 @@ class TestServerQuackIntegration:
         import json
         import socketserver
         import threading
-        import time
         from http.client import HTTPConnection
         from ohm.server import OhmHandler
         from ohm.store import OhmStore
@@ -485,7 +484,8 @@ class TestServerQuackIntegration:
         port = server.server_address[1]
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
-        time.sleep(0.1)
+        from tests.conftest import wait_for_port
+        wait_for_port("127.0.0.1", port)
 
         try:
             conn = HTTPConnection(f"127.0.0.1:{port}", timeout=5)

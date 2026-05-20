@@ -187,8 +187,8 @@ class TestConnect:
         from pytest import raises
         from ohm.sdk import connect_remote
 
-        # Quack not available in test env — should raise
-        with raises(ConnectionError, match="Failed to attach"):
+        # Quack not available in test env — should raise (message varies by failure mode)
+        with raises(ConnectionError, match="Quack is not available|Failed to attach"):
             connect_remote(uri="quack:localhost", actor="test", strict=True)
 
     def test_connect_remote_non_strict_succeeds(self, monkeypatch):

@@ -61,6 +61,22 @@ def _clear_bayesian_cache():
     bay._bayesian_network_cache.clear()
 
 
+def wait_for_port(host: str, port: int, timeout: float = 5.0) -> None:
+    """Poll until a TCP port is accepting connections (replaces blind sleep)."""
+    import socket
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            s = socket.create_connection((host, port), timeout=0.05)
+            s.close()
+            return
+        except OSError:
+            time.sleep(0.005)
+    raise TimeoutError(f"Server at {host}:{port} did not start within {timeout}s")
+
+
 def create_test_db() -> "duckdb.DuckDBPyConnection":
     """Create an in-memory DuckDB with the OHM schema initialized."""
     import duckdb

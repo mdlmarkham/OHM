@@ -196,7 +196,14 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="ohm_create_edge",
-            description="Create an edge between two nodes. Edge types: APPLIES_TO, CAUSES, CHALLENGED_BY, COLLABORATES_WITH, CONTAINS, CORRELATES_WITH, DEFERS_TO, DELEGATED_TO, DEPENDS_ON, DERIVES_FROM, ENABLES, EXPLAINS, FEEDS, FLOWS_TO, GOALS, INFLUENCES, INTERESTED_IN, INVESTIGATED_BY, NEGATES, NOTIFIES, PART_OF, PLANS, PREDICTS, REFERENCES, REFINES, RELATED_TO, RESOLVED_BY, RISKS, SERVES, SUPPORTS, THREATENS, THREAT_CLUSTER, TRIGGERS_INCIDENT, TRUSTS, USES, VALUES, and more.",
+            description=(
+                "Create an edge between two nodes. Edge types: APPLIES_TO, CAUSES, CHALLENGED_BY, "
+                "COLLABORATES_WITH, CONTAINS, CORRELATES_WITH, DEFERS_TO, DELEGATED_TO, DEPENDS_ON, "
+                "DERIVES_FROM, ENABLES, EXPLAINS, FEEDS, FLOWS_TO, GOALS, INFLUENCES, INTERESTED_IN, "
+                "INVESTIGATED_BY, NEGATES, NOTIFIES, PART_OF, PLANS, PREDICTS, REFERENCES, REFINES, "
+                "RELATED_TO, RESOLVED_BY, RISKS, SERVES, SUPPORTS, THREATENS, THREAT_CLUSTER, "
+                "TRIGGERS_INCIDENT, TRUSTS, USES, VALUES, and more."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -358,7 +365,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             return CallToolResult(content=_text(data))
 
         elif name == "ohm_create_edge":
-            body: dict[str, Any] = {
+            body = {
                 "from": arguments["from_node"],
                 "to": arguments["to_node"],
                 "type": arguments["edge_type"],
@@ -372,7 +379,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             return CallToolResult(content=_text(data))
 
         elif name == "ohm_observe":
-            body: dict[str, Any] = {
+            body = {
                 "node_id": arguments["node_id"],
                 "obs_type": arguments["obs_type"],
                 "value": arguments["value"],
@@ -385,7 +392,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             return CallToolResult(content=_text(data))
 
         elif name == "ohm_challenge":
-            body: dict[str, Any] = {
+            body = {
                 "reason": arguments["reason"],
                 "confidence": arguments.get("confidence", 0.5),
             }
@@ -393,7 +400,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             return CallToolResult(content=_text(data))
 
         elif name == "ohm_support":
-            body: dict[str, Any] = {
+            body = {
                 "reason": arguments["reason"],
                 "confidence": arguments.get("confidence", 0.7),
             }
@@ -401,7 +408,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             return CallToolResult(content=_text(data))
 
         elif name == "ohm_update_state":
-            body: dict[str, Any] = {"agent": OHM_AGENT}
+            body = {"agent": OHM_AGENT}
             if arguments.get("focus"):
                 body["focus"] = arguments["focus"]
             if arguments.get("patterns"):

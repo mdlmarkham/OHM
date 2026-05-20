@@ -10,9 +10,12 @@ compute_ate, and related functions with a focus on:
 
 from __future__ import annotations
 
+import importlib.util
 import uuid
 
 import pytest
+
+_NETWORKX_AVAILABLE = importlib.util.find_spec("networkx") is not None
 
 from ohm.bayesian import (
     build_bayesian_network,
@@ -23,7 +26,7 @@ from ohm.bayesian import (
     compute_voi,
     generate_voi_tasks,
 )
-from tests.conftest import create_test_db, create_sample_node, create_sample_edge
+from tests.conftest import create_sample_node, create_sample_edge
 
 
 @pytest.fixture
@@ -104,6 +107,8 @@ class TestSafeNodeId:
 # ── Unit Tests: _find_acyclic_subgraph ────────────────────────────────────
 
 class TestFindAcyclicSubgraph:
+    pytestmark = pytest.mark.skipif(not _NETWORKX_AVAILABLE, reason="networkx not installed")
+
     def test_dag_unchanged(self):
         edges = [("A", "B"), ("B", "C")]
         result = _find_acyclic_subgraph(edges)
@@ -166,7 +171,7 @@ class TestBuildBayesianNetwork:
     def test_builds_network_from_causal_edges(self, db, causal_graph):
         """Network should include nodes connected by CAUSES edges."""
         try:
-            from pgmpy.models import DiscreteBayesianNetwork
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
         except ImportError:
             pytest.skip("pgmpy not available")
 
@@ -186,7 +191,7 @@ class TestBuildBayesianNetwork:
         without probability/confidence values were excluded from the BN.
         """
         try:
-            from pgmpy.models import DiscreteBayesianNetwork
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
         except ImportError:
             pytest.skip("pgmpy not available")
 
@@ -202,7 +207,7 @@ class TestBuildBayesianNetwork:
     def test_default_probability_used(self, db, causal_graph_no_prob):
         """Edges without probability should use default_probability=0.5."""
         try:
-            from pgmpy.models import DiscreteBayesianNetwork
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
         except ImportError:
             pytest.skip("pgmpy not available")
 
@@ -220,7 +225,7 @@ class TestBuildBayesianNetwork:
     def test_layer_filtering(self, db, multi_layer_graph):
         """Layer filter should scope the network to specified layers."""
         try:
-            from pgmpy.models import DiscreteBayesianNetwork
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
         except ImportError:
             pytest.skip("pgmpy not available")
 
@@ -247,7 +252,7 @@ class TestBuildBayesianNetwork:
     def test_edge_deduplication(self, db):
         """Duplicate edges (same from→to) should be deduplicated, keeping highest probability."""
         try:
-            from pgmpy.models import DiscreteBayesianNetwork
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
         except ImportError:
             pytest.skip("pgmpy not available")
 
@@ -329,7 +334,7 @@ class TestBuildBayesianNetwork:
     def test_root_nodes_scoping(self, db, multi_layer_graph):
         """root_nodes should scope the network to nearby nodes."""
         try:
-            from pgmpy.models import DiscreteBayesianNetwork
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
         except ImportError:
             pytest.skip("pgmpy not available")
 
@@ -346,7 +351,7 @@ class TestBuildBayesianNetwork:
     def test_root_prior_configurable(self, db):
         """OHM-2y6: root_prior parameter controls default prior for root nodes."""
         try:
-            from pgmpy.models import DiscreteBayesianNetwork
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
         except ImportError:
             pytest.skip("pgmpy not available")
 
@@ -451,7 +456,7 @@ class TestBayesianInference:
     def test_inference_with_evidence(self, db, causal_graph):
         """Inference should return posterior probabilities."""
         try:
-            from pgmpy.models import DiscreteBayesianNetwork
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
         except ImportError:
             pytest.skip("pgmpy not available")
 
@@ -475,7 +480,7 @@ class TestBayesianInference:
     def test_inference_with_layers(self, db, multi_layer_graph):
         """Inference should accept layers parameter."""
         try:
-            from pgmpy.models import DiscreteBayesianNetwork
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
         except ImportError:
             pytest.skip("pgmpy not available")
 
@@ -512,7 +517,7 @@ class TestCausalIntervention:
     def test_intervention_with_layers(self, db, multi_layer_graph):
         """Intervention should accept layers parameter."""
         try:
-            from pgmpy.models import DiscreteBayesianNetwork
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
         except ImportError:
             pytest.skip("pgmpy not available")
 
@@ -535,7 +540,7 @@ class TestCausalIntervention:
         """OHM-1p8: comparison_with_observation should reuse the built network,
         not call build_bayesian_network per query node."""
         try:
-            from pgmpy.models import DiscreteBayesianNetwork
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
         except ImportError:
             pytest.skip("pgmpy not available")
 
@@ -591,7 +596,7 @@ class TestComputeAte:
     def test_ate_with_layers(self, db, multi_layer_graph):
         """ATE should accept layers parameter."""
         try:
-            from pgmpy.models import DiscreteBayesianNetwork
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
         except ImportError:
             pytest.skip("pgmpy not available")
 

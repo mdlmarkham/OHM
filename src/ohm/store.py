@@ -33,6 +33,7 @@ Usage (agent mode):
 import json
 import logging
 import os
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from .schema import DEFAULT_SCHEMA, SchemaConfig
@@ -40,7 +41,7 @@ from typing import Any, Optional
 
 import duckdb
 
-from .exceptions import OHMError
+from .exceptions import NodeNotFoundError, OHMError
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +152,7 @@ class OhmStore:
             schema: SchemaConfig for domain-specific validation.
                 Defaults to OHM schema if not provided.
         """
+        self._lock = threading.RLock()
         self.agent_name = agent_name
         self.readonly = readonly
         self.quack = quack
@@ -285,7 +287,7 @@ class OhmStore:
                                 f"FROM ohm_lake.{table} "
                                 f"WHERE deleted_at IS NULL OR CAST(deleted_at AS VARCHAR) = ''"
                             )
-                            count = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]
+                            count = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]  # type: ignore[index]
                             logger.info("Recovered %d %s from DuckLake", count, table)
                         except Exception as e:
                             logger.warning("Failed to recover %s from DuckLake: %s", table, e)
@@ -331,7 +333,7 @@ class OhmStore:
         try:
             node_count = self.conn.execute(
                 "SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL"
-            ).fetchone()[0]
+            ).fetchone()[0]  # type: ignore[index]
         except Exception:
             return
 
@@ -393,7 +395,7 @@ class OhmStore:
                     )
                     count = self.conn.execute(
                         f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL"
-                    ).fetchone()[0]
+                    ).fetchone()[0]  # type: ignore[index]
                     logger.info("Auto-restored %d %s from DuckLake", count, table)
                 except Exception as e:
                     logger.warning("Failed to auto-restore %s from DuckLake: %s", table, e)
@@ -474,13 +476,14 @@ class OhmStore:
 
     def execute(self, sql: str, params: Optional[list] = None) -> list[dict[str, Any]]:
         """Execute a SQL query and return results as list of dicts."""
-        if params:
-            result = self.conn.execute(sql, params)
-        else:
-            result = self.conn.execute(sql)
+        with self._lock:
+            if params:
+                result = self.conn.execute(sql, params)
+            else:
+                result = self.conn.execute(sql)
 
-        columns = [desc[0] for desc in result.description]
-        rows = result.fetchall()
+            columns = [desc[0] for desc in result.description]
+            rows = result.fetchall()
         results = [dict(zip(columns, row)) for row in rows]
         # Deserialize known JSON columns
         _json_cols = {"tags", "metadata", "action_alternatives"}
@@ -500,7 +503,8 @@ class OhmStore:
 
     def execute_one(self, sql: str, params: Optional[list] = None) -> Optional[dict[str, Any]]:
         """Execute a query and return a single result or None."""
-        results = self.execute(sql, params)
+        with self._lock:
+            results = self.execute(sql, params)
         row = results[0] if results else None
         # Add convenience aliases for edge fields
         if row and "from_node" in row:
@@ -581,8 +585,8 @@ class OhmStore:
             result = self.get_node(id) or {}
             result["created"] = False
 
-            # Auto-generate embedding for updated nodes (best-effort)
-            self._auto_embed_node(id, label, content)
+            # Auto-generate embedding in background (best-effort, non-blocking)
+            threading.Thread(target=self._auto_embed_node, args=(id, label, content), daemon=True).start()
 
             return result
 
@@ -613,8 +617,8 @@ class OhmStore:
             result = self.get_node(id) or {}
             result["created"] = False
 
-            # Auto-generate embedding for reactivated nodes (best-effort)
-            self._auto_embed_node(id, label, content)
+            # Auto-generate embedding in background (best-effort, non-blocking)
+            threading.Thread(target=self._auto_embed_node, args=(id, label, content), daemon=True).start()
 
             return result
 
@@ -638,8 +642,8 @@ class OhmStore:
         result = self.get_node(id) or {}
         result["created"] = True
 
-        # Auto-generate embedding for new nodes (non-blocking, best-effort)
-        self._auto_embed_node(id, label, content)
+        # Auto-generate embedding in background (best-effort, non-blocking)
+        threading.Thread(target=self._auto_embed_node, args=(id, label, content), daemon=True).start()
 
         return result
 
@@ -832,8 +836,8 @@ class OhmStore:
             if existing:
                 # Update the existing edge with new values
                 edge_id = existing[0]
-                update_fields = []
-                update_params = []
+                update_fields: list[str] = []
+                update_params: list[Any] = []
                 if confidence is not None:
                     update_fields.append("confidence = ?")
                     update_params.append(confidence)
@@ -1600,7 +1604,7 @@ class OhmStore:
                 # Check if mirror table has any data (for initial sync)
                 mirror_count = self.conn.execute(
                     f"SELECT COUNT(*) FROM {alias}.{table}"
-                ).fetchone()[0]
+                ).fetchone()[0]  # type: ignore[index]
 
                 if mirror_count == 0:
                     # Initial sync: copy all rows
@@ -1670,7 +1674,7 @@ class OhmStore:
 
         count = self.conn.execute(
             f"SELECT COUNT(*) FROM {alias}.{table}"
-        ).fetchone()[0]
+        ).fetchone()[0]  # type: ignore[index]
         return count
 
     def _incremental_sync_table(self, table: str, alias: str,

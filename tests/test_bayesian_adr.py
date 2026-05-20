@@ -49,7 +49,7 @@ class TestProbabilityConfidenceSeparation:
         With default_probability=0.5, effective_prob = 0.9 * 0.5 = 0.45.
         """
         try:
-            from pgmpy.models import DiscreteBayesianNetwork
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
         except ImportError:
             pytest.skip("pgmpy not available")
 
@@ -84,7 +84,7 @@ class TestProbabilityConfidenceSeparation:
         This ensures confidence modulates the causal strength rather than being ignored.
         """
         try:
-            from pgmpy.models import DiscreteBayesianNetwork
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
         except ImportError:
             pytest.skip("pgmpy not available")
 
@@ -127,7 +127,7 @@ class TestNegatesEdgeHandling:
     def test_negates_edges_included_in_network(self, db):
         """NEGATES edges should be included in the Bayesian network by default."""
         try:
-            from pgmpy.models import DiscreteBayesianNetwork
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
         except ImportError:
             pytest.skip("pgmpy not available")
 
@@ -159,7 +159,7 @@ class TestNegatesEdgeHandling:
         - When A is "good" (1): P(B=bad) decreases
         """
         try:
-            from pgmpy.models import DiscreteBayesianNetwork
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
         except ImportError:
             pytest.skip("pgmpy not available")
 
@@ -186,7 +186,7 @@ class TestNegatesEdgeHandling:
     def test_negates_excluded_when_edge_types_specified(self, db):
         """NEGATES should be excluded when edge_types explicitly excludes it."""
         try:
-            from pgmpy.models import DiscreteBayesianNetwork
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
         except ImportError:
             pytest.skip("pgmpy not available")
 
@@ -217,7 +217,7 @@ class TestConfidenceModulatedLeak:
     def test_high_confidence_reduces_leak(self, db):
         """When parent edges have high confidence, leak should be lower than default."""
         try:
-            from pgmpy.models import DiscreteBayesianNetwork
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
         except ImportError:
             pytest.skip("pgmpy not available")
 
@@ -254,7 +254,7 @@ class TestConfidenceModulatedLeak:
     def test_low_confidence_increases_leak(self, db):
         """When parent edges have low confidence, leak should be closer to default."""
         try:
-            from pgmpy.models import DiscreteBayesianNetwork
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
         except ImportError:
             pytest.skip("pgmpy not available")
 

@@ -597,9 +597,12 @@ def query_source_reliability(
         [source_agent],
     ).fetchone()
 
-    total = result[0] if result else 0
-    accurate = result[1] or 0
-    false_positives = result[2] or 0
+    if result:
+        total = result[0]
+        accurate = result[1] or 0
+        false_positives = result[2] or 0
+    else:
+        total = accurate = false_positives = 0
 
     p_accurate = round(accurate / total, 4) if total > 0 else None
     fpr = round(false_positives / total, 4) if total > 0 else None
@@ -1105,7 +1108,7 @@ def delete_edge(
     obs_result = conn.execute("UPDATE ohm_observations SET deleted_at = CURRENT_TIMESTAMP WHERE edge_id = ? AND deleted_at IS NULL", [edge_id])
 
     # Delete the edge
-    edge_result = conn.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?", [edge_id])
+    conn.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?", [edge_id])
     _log_change(conn, "ohm_edges", edge_id, "DELETE", deleted_by)
 
     return {
