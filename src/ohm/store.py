@@ -724,6 +724,7 @@ class OhmStore:
                         update_params,
                     )
                     self._log_change("ohm_edges", edge_id, "UPDATE", layer, agent_name=actor)
+                    self._increment_graph_generation()
 
                 edge = self.execute_one(
                     "SELECT * FROM ohm_edges WHERE id = ?", [edge_id],
@@ -749,6 +750,7 @@ class OhmStore:
 
         if edge:
             self._log_change("ohm_edges", edge["id"], "INSERT", layer, agent_name=actor)
+            self._increment_graph_generation()
         return edge
 
     def deduplicate_edges(self, layer: str | None = None) -> int:
@@ -826,6 +828,8 @@ class OhmStore:
         for dup_id in dup_ids:
             self._log_change("ohm_edges", str(dup_id), "DELETE", layer=None, agent_name=self.agent_name)
 
+        if dup_ids:
+            self._increment_graph_generation()
         return len(dup_ids)
 
     def challenge_edge(
@@ -899,6 +903,7 @@ class OhmStore:
         )
 
         self._log_change("ohm_edges", edge_id, "UPDATE", edge["layer"], agent_name=actor)
+        self._increment_graph_generation()
         return self.get_edge(edge_id)
 
     def write_observation(
@@ -1171,6 +1176,24 @@ class OhmStore:
                    VALUES (?, ?, ?)""",
                 [actor, now, now],
             )
+
+    def _increment_graph_generation(self) -> int:
+        """Increment the graph_generation counter and return the new value.
+
+        Called after any edge mutation (insert/update/delete) to invalidate
+        cached Bayesian networks. Returns the new generation number.
+
+        Returns:
+            The new generation number after incrementing.
+        """
+        self.conn.execute(
+            "UPDATE ohm_meta SET value = CAST(CAST(value AS INTEGER) + 1 AS VARCHAR) "
+            "WHERE key = 'graph_generation'"
+        )
+        result = self.conn.execute(
+            "SELECT CAST(value AS INTEGER) FROM ohm_meta WHERE key = 'graph_generation'"
+        ).fetchone()
+        return result[0] if result else 0
 
     def close(self):
         """Close the DuckDB connection. Stops Quack server if running."""

@@ -343,6 +343,43 @@ class TestBuildBayesianNetwork:
         # Should include l3_cause and its neighbors
         assert multi_layer_graph["a"] in result["nodes"]
 
+    @pytest.mark.skipif(
+        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
+        reason="pgmpy not available"
+    )
+    def test_root_prior_configurable(self, db):
+        """OHM-2y6: root_prior parameter controls default prior for root nodes."""
+        try:
+            from pgmpy.models import DiscreteBayesianNetwork
+        except ImportError:
+            pytest.skip("pgmpy not available")
+
+        # Create a simple chain: A -> B
+        a = create_sample_node(db, label="root_prior_a")
+        b = create_sample_node(db, label="root_prior_b")
+        create_sample_edge(db, from_node=a, to_node=b,
+                           edge_type="CAUSES", layer="L3", confidence=0.8)
+
+        # Default root_prior=0.3: root node A should have P(bad) ≈ 0.3
+        result_default = build_bayesian_network(db, root_prior=0.3)
+        assert result_default is not None
+        model_default = result_default["model"]
+        safe_a = result_default["safe_names"][a]
+        cpd_default = model_default.get_cpds(safe_a)
+        # Root prior P(bad) should be 0.3
+        assert abs(float(cpd_default.values[0]) - 0.3) < 0.01, \
+            f"Default root prior should be 0.3, got {cpd_default.values[0]}"
+
+        # Custom root_prior=0.5: root node A should have P(bad) ≈ 0.5
+        result_uniform = build_bayesian_network(db, root_prior=0.5)
+        assert result_uniform is not None
+        model_uniform = result_uniform["model"]
+        safe_a_u = result_uniform["safe_names"][a]
+        cpd_uniform = model_uniform.get_cpds(safe_a_u)
+        # Root prior P(bad) should be 0.5
+        assert abs(float(cpd_uniform.values[0]) - 0.5) < 0.01, \
+            f"Uniform root prior should be 0.5, got {cpd_uniform.values[0]}"
+
 
 # ── Unit Tests: max_nodes truncation (OHM-u60) ──────────────────────────
 

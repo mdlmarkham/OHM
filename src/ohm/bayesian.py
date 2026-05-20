@@ -122,6 +122,7 @@ def build_bayesian_network(
     max_nodes: int = 50,
     leak_probability: float = 0.15,
     default_probability: float = 0.5,
+    root_prior: float = 0.3,
 ) -> dict[str, Any] | None:
     """Build a BayesianNetwork from OHM edges with probability/confidence values.
 
@@ -157,6 +158,9 @@ def build_bayesian_network(
             are good (default 0.15). Modulated by average parent confidence.
         default_probability: Probability to use for edges without probability
             or confidence values (default 0.5).
+        root_prior: Default prior probability for root nodes (P(bad)) when
+            no observations exist (default 0.3). Can be set to 0.5 for
+            uniform priors or derived from domain knowledge.
 
     Returns:
         Dict with 'model', 'nodes', 'edges', 'variables' or None if
@@ -378,14 +382,14 @@ def build_bayesian_network(
                 "SELECT AVG(value) FROM ohm_observations WHERE node_id = ? AND deleted_at IS NULL",
                 [node_id]
             ).fetchone()[0]
-            node_priors[safe] = float(prior) if prior is not None else 0.3  # default prior: 30% "bad"
+            node_priors[safe] = float(prior) if prior is not None else root_prior
 
     # Build CPTs
     cpds = []
 
     # Root node CPTs (no parents)
     for safe_name in root_safe_names:
-        prior = node_priors.get(safe_name, 0.3)
+        prior = node_priors.get(safe_name, root_prior)
         cpd = TabularCPD(safe_name, 2, [[prior], [1 - prior]])
         cpds.append(cpd)
 
@@ -495,6 +499,7 @@ def bayesian_inference(
     edge_types: list[str] | None = None,
     layers: list[str] | None = None,
     leak_probability: float = 0.15,
+    root_prior: float = 0.3,
 ) -> dict[str, Any]:
     """Run Bayesian inference on the OHM graph.
 
@@ -533,7 +538,8 @@ def bayesian_inference(
     scope_nodes = [target] + list(evidence.keys())
     network = build_bayesian_network(conn, edge_types=edge_types,
                                       layers=layers,
-                                      root_nodes=scope_nodes)
+                                      root_nodes=scope_nodes,
+                                      root_prior=root_prior)
 
     if network is None:
         return {
@@ -613,6 +619,7 @@ def causal_intervention(
     edge_types: list[str] | None = None,
     layers: list[str] | None = None,
     leak_probability: float = 0.15,
+    root_prior: float = 0.3,
 ) -> dict[str, Any]:
     """Run causal intervention using Pearl's do-operator (graph surgery).
 
@@ -677,6 +684,7 @@ def causal_intervention(
         layers=layers,
         root_nodes=scope_nodes,
         leak_probability=leak_probability,
+        root_prior=root_prior,
     )
 
     if network is None:
@@ -933,6 +941,7 @@ def compute_ate(
     edge_types: list[str] | None = None,
     layers: list[str] | None = None,
     leak_probability: float = 0.15,
+    root_prior: float = 0.3,
 ) -> dict[str, Any]:
     """Compute Average Treatment Effect (ATE) from the Bayesian model.
 
@@ -973,6 +982,7 @@ def compute_ate(
         edge_types=edge_types,
         layers=layers,
         leak_probability=leak_probability,
+        root_prior=root_prior,
     )
     do_good = causal_intervention(
         conn, cause, 1,
@@ -980,6 +990,7 @@ def compute_ate(
         edge_types=edge_types,
         layers=layers,
         leak_probability=leak_probability,
+        root_prior=root_prior,
     )
 
     # Extract posteriors
@@ -1038,6 +1049,7 @@ def compute_sensitivity(
     edge_types: list[str] | None = None,
     layers: list[str] | None = None,
     leak_probability: float = 0.15,
+    root_prior: float = 0.3,
 ) -> dict[str, Any]:
     """Compute sensitivity analysis (E-value) for a causal effect.
 
@@ -1078,6 +1090,7 @@ def compute_sensitivity(
         edge_types=edge_types,
         layers=layers,
         leak_probability=leak_probability,
+        root_prior=root_prior,
     )
 
     if "error" in ate_result:
@@ -1171,6 +1184,7 @@ def find_adjustment_sets(
     edge_types: list[str] | None = None,
     layers: list[str] | None = None,
     leak_probability: float = 0.15,
+    root_prior: float = 0.3,
     max_network_size: int = 10,
 ) -> dict[str, Any]:
     """Find valid backdoor and frontdoor adjustment sets for causal identification.
@@ -1223,6 +1237,7 @@ def find_adjustment_sets(
         edge_types=edge_types,
         layers=layers,
         leak_probability=leak_probability,
+        root_prior=root_prior,
     )
     if network is None:
         return {

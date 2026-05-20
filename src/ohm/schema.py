@@ -567,6 +567,9 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
         "CREATE INDEX IF NOT EXISTS idx_nodes_assigned_to ON ohm_nodes(assigned_to) WHERE assigned_to IS NOT NULL",
         "CREATE INDEX IF NOT EXISTS idx_nodes_due_date ON ohm_nodes(due_date) WHERE due_date IS NOT NULL",
     ]),
+    ("0.14.0", "add graph_generation counter to ohm_meta for cache invalidation (OHM-omr)", [
+        "INSERT INTO ohm_meta (key, value) SELECT 'graph_generation', '0' WHERE NOT EXISTS (SELECT 1 FROM ohm_meta WHERE key = 'graph_generation')",
+    ]),
 ]
 
 # ── Indexes ─────────────────────────────────────────────────────────────────
