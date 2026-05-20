@@ -35,4 +35,4 @@ jobs:
         run: python -m mypy src/
 
       - name: Test with pytest
-        run: python -m pytest tests/ -v --tb=short
+        run: python -m pytest tests/ -v --tb=short --benchmark-disable
