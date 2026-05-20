@@ -420,13 +420,13 @@ class TestMonteCarlo:
             a = g.create_node(label="Root", node_type="concept")
             b = g.create_node(label="Child1", node_type="concept")
             c = g.create_node(label="Child2", node_type="concept")
-            g.create_edge(from_node=a["id"], to_node=b["id"], edge_type="CAUSES", layer="L3", confidence=0.95)
-            g.create_edge(from_node=b["id"], to_node=c["id"], edge_type="CAUSES", layer="L3", confidence=0.8)
+            g.create_edge(from_node=a["id"], to_node=b["id"], edge_type="CAUSES", layer="L3", confidence=0.95, probability=0.95)
+            g.create_edge(from_node=b["id"], to_node=c["id"], edge_type="CAUSES", layer="L3", confidence=0.8, probability=0.8)
 
-            result = g.monte_carlo(a["id"], simulations=1000, depth=3)
+            result = g.monte_carlo(a["id"], simulations=1000, depth=3, seed=42)
             assert result["simulation_count"] == 1000
             assert len(result["affected_nodes"]) >= 1
-            # Child1 should have high impact probability (0.95 confidence edge)
+            # Child1: confidence=0.95 × probability=0.95 ≈ 0.90
             child1 = [n for n in result["affected_nodes"] if n["label"] == "Child1"]
             assert len(child1) >= 1
             assert child1[0]["impact_probability"] > 0.8
@@ -438,6 +438,104 @@ class TestMonteCarlo:
             result = g.monte_carlo(a["id"], simulations=100)
             assert result["mean_affected"] == 0
             assert result["affected_nodes"] == []
+
+
+class TestMonteCarloTwoStage:
+    """Test two-stage sampling: confidence (existence) × probability (propagation).
+
+    ADR-008: probability and confidence are semantically distinct.
+    An edge with confidence=0.9, probability=0.1 should activate ~9% of trials.
+    """
+
+    def test_high_conf_low_prob_activates_at_product_rate(self, tmp_path):
+        """Edge with confidence=0.9, probability=0.1 activates ~9% not 90%."""
+        db = str(tmp_path / "mc_2stage.duckdb")
+        with connect(db, actor="metis") as g:
+            a = g.create_node(label="Root", node_type="concept")
+            b = g.create_node(label="Target", node_type="concept")
+            g.create_edge(
+                from_node=a["id"], to_node=b["id"],
+                edge_type="CAUSES", layer="L3",
+                confidence=0.9, probability=0.1,
+            )
+            result = g.monte_carlo(
+                a["id"], simulations=5000, depth=3, seed=42,
+            )
+            target = [n for n in result["affected_nodes"] if n["label"] == "Target"]
+            assert len(target) == 1
+            # Expected: 0.9 * 0.1 = 0.09, allow ±3% for randomness
+            assert abs(target[0]["impact_probability"] - 0.09) < 0.03
+
+    def test_null_probability_uses_default(self, tmp_path):
+        """Edge with probability=NULL uses default_probability=0.5."""
+        db = str(tmp_path / "mc_null_prob.duckdb")
+        with connect(db, actor="metis") as g:
+            a = g.create_node(label="Root", node_type="concept")
+            b = g.create_node(label="Target", node_type="concept")
+            # Create edge without probability (NULL)
+            g.create_edge(
+                from_node=a["id"], to_node=b["id"],
+                edge_type="CAUSES", layer="L3",
+                confidence=0.8,
+            )
+            result = g.monte_carlo(
+                a["id"], simulations=5000, depth=3,
+                default_probability=0.5, seed=42,
+            )
+            target = [n for n in result["affected_nodes"] if n["label"] == "Target"]
+            assert len(target) == 1
+            # Expected: 0.8 * 0.5 = 0.4, allow ±5% for randomness
+            assert abs(target[0]["impact_probability"] - 0.4) < 0.05
+
+    def test_high_prob_moderate_conf_activates_at_product(self, tmp_path):
+        """Edge with confidence=0.5, probability=0.9 activates ~45%."""
+        db = str(tmp_path / "mc_highprob.duckdb")
+        with connect(db, actor="metis") as g:
+            a = g.create_node(label="Root", node_type="concept")
+            b = g.create_node(label="Target", node_type="concept")
+            g.create_edge(
+                from_node=a["id"], to_node=b["id"],
+                edge_type="CAUSES", layer="L3",
+                confidence=0.5, probability=0.9,
+            )
+            result = g.monte_carlo(
+                a["id"], simulations=5000, depth=3, seed=42,
+            )
+            target = [n for n in result["affected_nodes"] if n["label"] == "Target"]
+            assert len(target) == 1
+            # Expected: 0.5 * 0.9 = 0.45, allow ±5% for randomness
+            assert abs(target[0]["impact_probability"] - 0.45) < 0.05
+
+    def test_cascade_two_stage_propagation(self, tmp_path):
+        """Two-stage sampling through a chain: A→B→C."""
+        db = str(tmp_path / "mc_chain.duckdb")
+        with connect(db, actor="metis") as g:
+            a = g.create_node(label="A", node_type="concept")
+            b = g.create_node(label="B", node_type="concept")
+            c = g.create_node(label="C", node_type="concept")
+            # A→B: high confidence, moderate probability
+            g.create_edge(
+                from_node=a["id"], to_node=b["id"],
+                edge_type="CAUSES", layer="L3",
+                confidence=0.9, probability=0.8,
+            )
+            # B→C: moderate confidence, high probability
+            g.create_edge(
+                from_node=b["id"], to_node=c["id"],
+                edge_type="CAUSES", layer="L3",
+                confidence=0.7, probability=0.9,
+            )
+            result = g.monte_carlo(
+                a["id"], simulations=5000, depth=3, seed=42,
+            )
+            # B impact ≈ 0.9 * 0.8 = 0.72
+            b_node = [n for n in result["affected_nodes"] if n["label"] == "B"]
+            assert len(b_node) == 1
+            assert abs(b_node[0]["impact_probability"] - 0.72) < 0.05
+            # C impact ≈ 0.72 * 0.7 * 0.9 ≈ 0.45
+            c_node = [n for n in result["affected_nodes"] if n["label"] == "C"]
+            assert len(c_node) == 1
+            assert abs(c_node[0]["impact_probability"] - 0.45) < 0.08
 
 
 # ===== Near Duplicate Detection =====

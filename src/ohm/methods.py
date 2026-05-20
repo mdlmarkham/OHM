@@ -416,12 +416,18 @@ def monte_carlo_impact(
     simulations: int = 1000,
     depth: int = 3,
     confidence_threshold: float = 0.5,
+    default_probability: float = 0.5,
+    seed: int | None = None,
 ) -> dict[str, Any]:
     """Monte Carlo simulation of failure propagation from a node.
 
-    Randomly sample edge activation (on/off based on confidence) and
-    trace downstream impact. Runs N simulations and returns the
-    distribution of affected nodes.
+    Two-stage sampling per ADR-008:
+    - Stage 1: Edge existence — sample random() < confidence
+    - Stage 2: Effect propagation — sample random() < probability
+
+    An edge with confidence=0.9 and probability=0.1 activates ~9% of trials,
+    correctly modeling "we're 90% sure this edge exists, but even if it does,
+    the effect only happens 10% of the time."
 
     Same result regardless of which agent calls it — substrate method.
     No domain judgment involved — purely mechanical confidence sampling.
@@ -430,34 +436,44 @@ def monte_carlo_impact(
         node_id: Source node for impact simulation.
         simulations: Number of Monte Carlo trials (default 1000).
         depth: Maximum traversal depth (default 3).
-        confidence_threshold: Minimum confidence to consider an edge active.
+        confidence_threshold: Minimum confidence to consider an edge (default 0.5).
+        default_probability: Default probability when edge has no probability set (default 0.5).
+        seed: Random seed for reproducibility (default None).
 
     Returns:
         Dict with: affected_nodes (list of {id, label, impact_probability}),
         simulation_count, depth, mean_affected, max_affected.
     """
     import random
+
     from ohm.validation import validate_identifier
 
     node_id = validate_identifier(node_id, name="node_id")
 
-    # Build adjacency from the graph
+    if seed is not None:
+        random.seed(seed)
+
+    # Build adjacency from the graph — fetch both confidence AND probability
     edges = conn.execute(
-        """SELECT from_node, to_node, edge_type, confidence, layer
+        """SELECT from_node, to_node, edge_type, confidence, probability, layer
            FROM ohm_edges
            WHERE layer IN ('L1', 'L2', 'L3')
              AND confidence >= ?""",
         [confidence_threshold],
     ).fetchall()
 
-    # Adjacency list: node -> [(target, confidence)]
-    adj: dict[str, list[tuple[str, float]]] = {}
-    for from_node, to_node, edge_type, conf, layer in edges:
+    # Adjacency list: node -> [(target, confidence, probability)]
+    # ADR-008: probability and confidence are semantically distinct.
+    # probability = P(effect|cause), confidence = belief in edge existence.
+    adj: dict[str, list[tuple[str, float, float]]] = {}
+    for from_node, to_node, edge_type, conf, prob, layer in edges:
         if from_node not in adj:
             adj[from_node] = []
-        adj[from_node].append((to_node, conf or 0.7))
+        # Use probability if set, otherwise default_probability
+        effective_prob = float(prob) if prob is not None else default_probability
+        adj[from_node].append((to_node, float(conf or 0.7), effective_prob))
 
-    # Run simulations
+    # Run simulations with two-stage sampling
     impact_counts: dict[str, int] = {}
     total_affected_per_sim = []
 
@@ -471,15 +487,17 @@ def monte_carlo_impact(
             for current in frontier:
                 if current not in adj:
                     continue
-                for target, conf in adj[current]:
+                for target, conf, prob in adj[current]:
                     if target in visited:
                         continue
-                    # Monte Carlo: activate edge with probability = confidence
+                    # Stage 1: Does this edge exist? (confidence)
                     if random.random() < conf:
-                        visited.add(target)
-                        next_frontier.append(target)
-                        impact_counts[target] = impact_counts.get(target, 0) + 1
-                        affected_this_sim += 1
+                        # Stage 2: Does the effect propagate? (probability)
+                        if random.random() < prob:
+                            visited.add(target)
+                            next_frontier.append(target)
+                            impact_counts[target] = impact_counts.get(target, 0) + 1
+                            affected_this_sim += 1
             frontier = next_frontier
             if not frontier:
                 break

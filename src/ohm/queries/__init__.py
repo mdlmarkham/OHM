@@ -2181,60 +2181,57 @@ def monte_carlo_cascade(
     if seed is not None:
         random.seed(seed)
 
-    # Get downstream edges once
+    # Get downstream edges - traverse from node_id following outgoing edges
+    # and collect all edges encountered during traversal
     edges_query = """
-        WITH RECURSIVE cascade AS (
+        WITH RECURSIVE traverse AS (
             SELECT
+                ? AS start_node,
                 ? AS node_id,
                 0 AS depth,
                 list_value(?) AS path
             UNION ALL
             SELECT
+                t.start_node,
                 e.to_node AS node_id,
-                c.depth + 1 AS depth,
-                list_concat(c.path, list_value(e.to_node)) AS path
-            FROM cascade c
-            JOIN ohm_edges e ON e.from_node = c.node_id
-            WHERE c.depth < ?
+                t.depth + 1 AS depth,
+                list_concat(t.path, list_value(e.to_node)) AS path
+            FROM traverse t
+            JOIN ohm_edges e ON e.from_node = t.node_id
+            WHERE t.depth < ?
               AND e.edge_type IN ('CAUSES', 'EXPECTED_LIKELIHOOD', 'DEPENDS_ON', 'THREATENS')
-              AND NOT list_contains(c.path, e.to_node)
+              AND NOT list_contains(t.path, e.to_node)
         )
-        SELECT DISTINCT
-            c.node_id,
-            c.depth,
-            c.path,
-            e.from_node,
+        SELECT
+            t.node_id AS from_node,
+            e.to_node AS to_node,
             e.edge_type,
             e.probability,
-            e.confidence
-        FROM cascade c
-        JOIN ohm_edges e ON e.from_node = c.node_id
-        WHERE c.depth > 0
-        ORDER BY c.depth, c.node_id
+            e.confidence,
+            t.path
+        FROM traverse t
+        JOIN ohm_edges e ON e.from_node = t.node_id
+        WHERE t.depth >= 0
+        ORDER BY t.depth, t.node_id
     """
-    edges_result = conn.execute(edges_query, [node_id, node_id, max_depth])
+    edges_result = conn.execute(edges_query, [node_id, node_id, node_id, max_depth])
     edges = _rows_to_dicts(edges_result)
 
-    # Build adjacency for simulation
-    node_edges = {}
+    # Build adjacency for simulation: from_node -> list of (to_node, prob)
+    node_edges: dict[str, list[dict[str, Any]]] = {}
+    all_nodes = {node_id}
     for edge in edges:
         from_node = edge["from_node"]
+        to_node = edge["to_node"]
         if from_node not in node_edges:
             node_edges[from_node] = []
         node_edges[from_node].append({
-            "to_node": edge["node_id"],
+            "to_node": to_node,
             "prob": edge["probability"] if edge["probability"] is not None else (edge["confidence"] or 0.5),
             "path": edge["path"],
         })
-
-    # All nodes seen
-    all_nodes = set()
-    for edge in edges:
-        all_nodes.add(edge["from_node"])
-        all_nodes.add(edge["node_id"])
-    if node_id in node_edges:
-        for edge in node_edges[node_id]:
-            all_nodes.add(edge["to_node"])
+        all_nodes.add(from_node)
+        all_nodes.add(to_node)
 
     # Run trials
     activated_counts: dict[str, int] = {n: 0 for n in all_nodes}
@@ -2269,17 +2266,17 @@ def monte_carlo_cascade(
 
     # Compute statistics
     results = []
-    for node_id in sorted(all_nodes):
-        count = activated_counts[node_id]
+    for nid in sorted(all_nodes):
+        count = activated_counts[nid]
         activated_pct = count / trials
         results.append({
-            "node_id": node_id,
+            "node_id": nid,
             "activated_count": count,
             "activated_pct": activated_pct,
         })
 
     return {
-        "node_id": node_id,
+        "node_id": node_id,  # starting node (not last in loop)
         "results": results,
         "trials": trials,
         "seed": seed,

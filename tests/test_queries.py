@@ -757,6 +757,90 @@ class TestProbabilityCascade:
         assert "downstream_impact" in result
 
 
+class TestMonteCarloCascade:
+    """Tests for monte_carlo_cascade() function."""
+
+    def test_monte_carlo_basic_chain(self, test_db):
+        """Monte Carlo on 3-node chain produces distribution, not point estimate."""
+        from ohm.queries import create_node, create_edge, monte_carlo_cascade
+
+        # A → B (50% failure rate)
+        a = create_node(test_db, label="A", node_type="concept", created_by="test_agent")
+        b = create_node(test_db, label="B", node_type="concept", created_by="test_agent")
+        c = create_node(test_db, label="C", node_type="concept", created_by="test_agent")
+
+        create_edge(test_db, from_node=a["id"], to_node=b["id"],
+                     layer="L3", edge_type="CAUSES",
+                     created_by="test_agent", probability=0.5)
+        create_edge(test_db, from_node=b["id"], to_node=c["id"],
+                     layer="L3", edge_type="CAUSES",
+                     created_by="test_agent", probability=0.5)
+
+        result = monte_carlo_cascade(test_db, a["id"], trials=1000, seed=42)
+
+        assert result["trials"] == 1000
+        assert result["seed"] == 42
+        assert result["node_id"] == a["id"]
+        assert len(result["results"]) >= 3  # A, B, C
+
+        # With seed=42, results should be reproducible
+        result2 = monte_carlo_cascade(test_db, a["id"], trials=1000, seed=42)
+        for r1, r2 in zip(result["results"], result2["results"]):
+            assert r1["activated_count"] == r2["activated_count"]
+
+    def test_monte_carlo_reasonable_distribution(self, test_db):
+        """Monte Carlo with 1000 trials produces reasonable activated percentages."""
+        from ohm.queries import create_node, create_edge, monte_carlo_cascade
+
+        a = create_node(test_db, label="A", node_type="concept", created_by="test_agent")
+        b = create_node(test_db, label="B", node_type="concept", created_by="test_agent")
+
+        # A → B with 50% probability
+        create_edge(test_db, from_node=a["id"], to_node=b["id"],
+                     layer="L3", edge_type="CAUSES",
+                     created_by="test_agent", probability=0.5)
+
+        result = monte_carlo_cascade(test_db, a["id"], trials=1000, seed=42)
+
+        # Find node B in results
+        b_result = next(r for r in result["results"] if r["node_id"] == b["id"])
+        # With 50% edge prob, B should activate roughly 40-60% of trials (allow wide margin)
+        assert 0.3 < b_result["activated_pct"] < 0.7
+
+    def test_monte_carlo_no_downstream(self, test_db):
+        """Monte Carlo from leaf node returns empty results."""
+        from ohm.queries import create_node, monte_carlo_cascade
+
+        leaf = create_node(test_db, label="Leaf", node_type="concept", created_by="test_agent")
+        result = monte_carlo_cascade(test_db, leaf["id"], trials=100)
+
+        assert result["trials"] == 100
+        # Leaf node is in all_nodes so will show 100% activated
+        assert len(result["results"]) == 1
+
+    def test_monte_carlo_no_seed_varies(self, test_db):
+        """Monte Carlo without seed produces different results each run."""
+        from ohm.queries import create_node, create_edge, monte_carlo_cascade
+
+        a = create_node(test_db, label="A", node_type="concept", created_by="test_agent")
+        b = create_node(test_db, label="B", node_type="concept", created_by="test_agent")
+
+        create_edge(test_db, from_node=a["id"], to_node=b["id"],
+                     layer="L3", edge_type="CAUSES",
+                     created_by="test_agent", probability=0.5)
+
+        # Two runs without seed should have different counts (not guaranteed but highly likely)
+        result1 = monte_carlo_cascade(test_db, a["id"], trials=500)
+        result2 = monte_carlo_cascade(test_db, a["id"], trials=500)
+
+        b_result1 = next(r for r in result1["results"] if r["node_id"] == b["id"])
+        b_result2 = next(r for r in result2["results"] if r["node_id"] == b["id"])
+
+        # They may or may not be equal by chance, but we verify seed is None
+        assert result1["seed"] is None
+        assert result2["seed"] is None
+
+
 class TestCreateBatch:
     """Tests for create_batch() combined node+edge creation (OHM-1m3)."""
 

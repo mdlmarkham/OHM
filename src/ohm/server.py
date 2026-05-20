@@ -1362,7 +1362,15 @@ class OhmHandler(BaseHTTPRequestHandler):
             from .methods import monte_carlo_impact
             sims = int(qs.get("simulations", [1000])[0])
             depth = int(qs.get("depth", [3])[0])
-            result = monte_carlo_impact(self.store.conn, node_id, simulations=sims, depth=depth)
+            default_prob = float(qs.get("default_probability", [0.5])[0])
+            seed_val = qs.get("seed", [None])[0]
+            seed = int(seed_val) if seed_val is not None else None
+            result = monte_carlo_impact(
+                self.store.conn, node_id,
+                simulations=sims, depth=depth,
+                default_probability=default_prob,
+                seed=seed,
+            )
             self._json_response(200, result)
         elif path == "/duplicates":
             from .methods import detect_near_duplicates

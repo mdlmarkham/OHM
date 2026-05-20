@@ -1805,12 +1805,14 @@ class Graph:
         simulations: int = 1000,
         depth: int = 3,
         confidence_threshold: float = 0.5,
+        default_probability: float = 0.5,
+        seed: int | None = None,
     ) -> dict[str, Any]:
         """Monte Carlo simulation of failure propagation from a node.
 
-        Randomly sample edge activation (on/off based on confidence) and
-        trace downstream impact. Runs N simulations and returns the
-        distribution of affected nodes.
+        Two-stage sampling per ADR-008:
+        - Stage 1: Edge existence — sample random() < confidence
+        - Stage 2: Effect propagation — sample random() < probability
 
         Same result regardless of which agent calls it — substrate method.
 
@@ -1818,7 +1820,9 @@ class Graph:
             node_id: Source node for impact simulation.
             simulations: Number of Monte Carlo trials (default 1000).
             depth: Maximum traversal depth (default 3).
-            confidence_threshold: Minimum confidence to consider edge active.
+            confidence_threshold: Minimum confidence to consider edge (default 0.5).
+            default_probability: Default probability when edge has none set (default 0.5).
+            seed: Random seed for reproducibility (default None).
 
         Returns:
             Dict with affected_nodes, simulation_count, mean_affected, max_affected.
@@ -1829,6 +1833,8 @@ class Graph:
             self._conn, node_id,
             simulations=simulations, depth=depth,
             confidence_threshold=confidence_threshold,
+            default_probability=default_probability,
+            seed=seed,
         )
 
     def near_duplicates(
