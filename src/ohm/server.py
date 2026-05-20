@@ -1806,6 +1806,9 @@ class OhmHandler(BaseHTTPRequestHandler):
                 task_status=body.get("task_status"),
                 assigned_to=body.get("assigned_to"),
                 due_date=body.get("due_date"),
+                utility_scale=body.get("utility_scale"),
+                current_best_action=body.get("current_best_action"),
+                action_alternatives=body.get("action_alternatives"),
                 agent_name=agent,
             )
             event_type = "node.created" if result.get("created") else "node.updated"
@@ -1975,6 +1978,9 @@ class OhmHandler(BaseHTTPRequestHandler):
                         task_status=node.get("task_status"),
                         assigned_to=node.get("assigned_to"),
                         due_date=node.get("due_date"),
+                        utility_scale=node.get("utility_scale"),
+                        current_best_action=node.get("current_best_action"),
+                        action_alternatives=node.get("action_alternatives"),
                         agent_name=agent,
                     )
                     nodes_created += 1

@@ -1616,6 +1616,84 @@ class TestNodeUrlField:
 
 
 @pytest.mark.xdist_group("server")
+class TestDecisionNodeFields:
+    """Tests for decision node fields (utility_scale, current_best_action, action_alternatives)
+    passed through POST /node (OHM-6mv.12: utility_scale not passed through POST /node)."""
+
+    def test_post_decision_node_with_utility_scale(self, test_server):
+        """POST /node with utility_scale persists it to the database."""
+        port, store = test_server
+        status, data = _request("POST", port, "/node", body={
+            "id": "decision-util-test",
+            "label": "Choose vendor",
+            "type": "decision",
+            "utility_scale": 0.8,
+        })
+        assert status == 201
+        # Verify via GET
+        status, data = _request("GET", port, "/node/decision-util-test")
+        assert status == 200
+        assert abs(data["utility_scale"] - 0.8) < 0.01
+
+    def test_post_decision_node_with_all_fields(self, test_server):
+        """POST /node with all decision fields persists them."""
+        port, store = test_server
+        status, data = _request("POST", port, "/node", body={
+            "id": "decision-all-fields",
+            "label": "Pick strategy",
+            "type": "decision",
+            "utility_scale": 0.6,
+            "current_best_action": "Strategy A",
+            "action_alternatives": ["Strategy B", "Strategy C"],
+        })
+        assert status == 201
+        # Verify via GET
+        status, data = _request("GET", port, "/node/decision-all-fields")
+        assert status == 200
+        assert abs(data["utility_scale"] - 0.6) < 0.01
+        assert data["current_best_action"] == "Strategy A"
+        assert data["action_alternatives"] == ["Strategy B", "Strategy C"]
+
+    def test_post_decision_node_without_utility_scale(self, test_server):
+        """POST /node for decision type without utility_scale works (backward compatible)."""
+        port, store = test_server
+        status, data = _request("POST", port, "/node", body={
+            "id": "decision-no-util",
+            "label": "Decide later",
+            "type": "decision",
+        })
+        assert status == 201
+        assert data.get("utility_scale") is None
+        assert data.get("current_best_action") is None
+        assert data.get("action_alternatives") is None
+
+    def test_batch_post_decision_node_with_utility_scale(self, test_server):
+        """POST /batch with decision node passes utility_scale through."""
+        port, store = test_server
+        status, data = _request("POST", port, "/batch", body={
+            "nodes": [
+                {
+                    "id": "batch-decision-1",
+                    "label": "Batch Decision",
+                    "type": "decision",
+                    "utility_scale": 0.75,
+                    "current_best_action": "Option A",
+                    "action_alternatives": ["Option B"],
+                },
+            ],
+            "edges": [],
+        })
+        assert status == 201
+        assert data["nodes_created"] == 1
+        # Verify via GET
+        status, data = _request("GET", port, "/node/batch-decision-1")
+        assert status == 200
+        assert abs(data["utility_scale"] - 0.75) < 0.01
+        assert data["current_best_action"] == "Option A"
+        assert data["action_alternatives"] == ["Option B"]
+
+
+@pytest.mark.xdist_group("server")
 class TestObservationNotes:
     """Tests for observation notes persistence (OHM-of8: notes accepted but not persisted)."""
 

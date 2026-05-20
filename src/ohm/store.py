@@ -388,8 +388,16 @@ class OhmStore:
         columns = [desc[0] for desc in result.description]
         rows = result.fetchall()
         results = [dict(zip(columns, row)) for row in rows]
-        # Add convenience aliases for edge fields
+        # Deserialize known JSON columns
+        _json_cols = {"tags", "metadata", "action_alternatives"}
         for row in results:
+            for col in _json_cols & row.keys():
+                if isinstance(row[col], str):
+                    try:
+                        row[col] = json.loads(row[col])
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+            # Add convenience aliases for edge fields
             if "from_node" in row:
                 row["from"] = row["from_node"]
                 row["to"] = row["to_node"]
@@ -428,6 +436,9 @@ class OhmStore:
         task_status: Optional[str] = None,
         assigned_to: Optional[str] = None,
         due_date: Optional[str] = None,
+        utility_scale: Optional[float] = None,
+        current_best_action: Optional[str] = None,
+        action_alternatives: Optional[list[str]] = None,
         agent_name: Optional[str] = None,
     ) -> dict[str, Any]:
         """Create or update a node. Attributed to the given agent.
@@ -439,6 +450,9 @@ class OhmStore:
             task_status: For task nodes: open/in_progress/blocked/review/done/cancelled.
             assigned_to: For task nodes: agent assigned to this task.
             due_date: For task nodes: ISO 8601 due date string.
+            utility_scale: For decision nodes: importance weight 0-1.
+            current_best_action: For decision nodes: currently preferred action.
+            action_alternatives: For decision nodes: list of alternative actions.
 
         Returns a dict with the node record and a 'created' key
         indicating whether this was a new creation (True) or an
@@ -448,6 +462,7 @@ class OhmStore:
         metadata_json = json.dumps(metadata) if metadata else None
         tag_list = tags if tags else []
         tags_json = json.dumps(tag_list) if tag_list else None
+        alternatives_json = json.dumps(action_alternatives) if action_alternatives else None
         now = self._now()
 
         # Check if node exists (active)
@@ -459,12 +474,14 @@ class OhmStore:
                     label = ?, type = ?, content = ?, confidence = ?,
                     visibility = ?, provenance = ?, tags = ?, metadata = ?,
                     priority = ?, url = ?, task_status = ?, assigned_to = ?,
-                    due_date = ?, updated_at = ?, updated_by = ?
+                    due_date = ?, utility_scale = ?, current_best_action = ?,
+                    action_alternatives = ?, updated_at = ?, updated_by = ?
                 WHERE id = ?
                 """,
                 [label, type, content, confidence, visibility, provenance,
                  tags_json, metadata_json, priority, url, task_status, assigned_to,
-                 due_date, now, actor, id],
+                 due_date, utility_scale, current_best_action, alternatives_json,
+                 now, actor, id],
             )
             self._log_change("ohm_nodes", id, "UPDATE", None, agent_name=actor)
             result = self.get_node(id) or {}
@@ -487,13 +504,16 @@ class OhmStore:
                     label = ?, type = ?, content = ?, confidence = ?,
                     visibility = ?, provenance = ?, tags = ?, metadata = ?,
                     priority = ?, url = ?, created_by = ?, task_status = ?,
-                    assigned_to = ?, due_date = ?, updated_at = ?, updated_by = ?,
+                    assigned_to = ?, due_date = ?, utility_scale = ?,
+                    current_best_action = ?, action_alternatives = ?,
+                    updated_at = ?, updated_by = ?,
                     deleted_at = NULL
                 WHERE id = ?
                 """,
                 [label, type, content, confidence, visibility, provenance,
                  tags_json, metadata_json, priority, url, actor, task_status,
-                 assigned_to, due_date, now, actor, id],
+                 assigned_to, due_date, utility_scale, current_best_action,
+                 alternatives_json, now, actor, id],
             )
             self._log_change("ohm_nodes", id, "UPDATE", None, agent_name=actor)
             result = self.get_node(id) or {}
@@ -509,12 +529,16 @@ class OhmStore:
             """
             INSERT INTO ohm_nodes (id, label, type, content, created_by, confidence,
                                    visibility, provenance, tags, metadata, priority, url,
-                                   task_status, assigned_to, due_date, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                   task_status, assigned_to, due_date,
+                                   utility_scale, current_best_action, action_alternatives,
+                                   created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [id, label, type, content, actor, confidence,
              visibility, provenance, tags_json, metadata_json, priority, url,
-             task_status, assigned_to, due_date, now, now],
+             task_status, assigned_to, due_date,
+             utility_scale, current_best_action, alternatives_json,
+             now, now],
         )
         self._log_change("ohm_nodes", id, "INSERT", None, agent_name=actor)
         result = self.get_node(id) or {}
