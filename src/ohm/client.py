@@ -35,12 +35,16 @@ def _find_config() -> dict[str, Any] | None:
     """
     for path_str in _CONFIG_PATHS:
         path = Path(path_str).expanduser()
-        if path.exists():
-            try:
-                with open(path) as f:
-                    return json.load(f)
-            except (json.JSONDecodeError, OSError):
+        try:
+            if not path.exists():
                 continue
+        except OSError:
+            continue  # inaccessible directory (PermissionError on Python 3.13+)
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            continue
     return None
 
 

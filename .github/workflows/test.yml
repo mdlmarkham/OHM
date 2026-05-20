@@ -9,9 +9,6 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
     strategy:
       fail-fast: false
       matrix:
@@ -38,29 +35,4 @@ jobs:
         run: python -m mypy src/
 
       - name: Test with pytest
-        id: pytest
-        run: |
-          set +e
-          python -m pytest tests/ --tb=short --benchmark-disable -q --no-header 2>&1 | tee /tmp/pytest.log
-          status=${PIPESTATUS[0]}
-          echo "## pytest (Python ${{ matrix.python-version }}) exit=$status" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          tail -n 100 /tmp/pytest.log >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          exit $status
-
-      - name: Push failure log to debug branch
-        if: failure()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          BRANCH="ci-debug/py${{ matrix.python-version }}-$(date +%Y%m%d-%H%M%S)"
-          git config user.email "ci@github.com"
-          git config user.name "CI Debug"
-          git checkout -b "$BRANCH"
-          cp /tmp/pytest.log ci-pytest-failure.log
-          git add ci-pytest-failure.log
-          git commit -m "ci: pytest failure log Python ${{ matrix.python-version }}"
-          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
-          git push origin "$BRANCH"
-          echo "Debug log pushed to branch: $BRANCH" >> "$GITHUB_STEP_SUMMARY"
+        run: python -m pytest tests/ -v --tb=short --benchmark-disable
