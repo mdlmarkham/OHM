@@ -14,6 +14,17 @@ State convention:
 
 Noisy-OR gate for multi-parent nodes: P(child=bad) = 1 - Π(1 - p_i)
 where p_i is the edge probability from parent i and the parent is in "bad" state.
+
+ADR-008: Probability and confidence are distinct attributes.
+  - probability = P(effect|cause), the causal strength
+  - confidence = belief in the edge's existence, modulates leak probability
+  - When probability is NULL: use confidence * default_probability
+  - Leak probability is modulated by average parent confidence:
+    leak = leak_probability * (1 - avg_confidence)
+
+ADR-009: NEGATES edges have inverted probability semantics.
+  - A NEGATES edge from A to B means: when A is "bad", P(B=bad) *decreases*
+  - In noisy-OR: NEGATES propagates failure when parent is "good" (state 1)
 """
 
 import logging
@@ -108,16 +119,29 @@ def build_bayesian_network(
     Uses noisy-OR gate with leak probability for multi-parent CPTs:
         P(child=bad | parents) = 1 - (1 - leak) * Π_i(1 - p_i * I(parent_i = bad))
 
+    ADR-008: Probability and confidence are distinct attributes.
+        - probability = P(effect|cause), the causal strength
+        - confidence = belief in the edge's existence, modulates leak probability
+        - When probability is NULL: use confidence * default_probability
+        - When both are NULL: use default_probability
+        - Leak probability is modulated by average parent confidence:
+          leak = leak_probability * (1 - avg_confidence)
+
+    ADR-009: NEGATES edges have inverted probability semantics.
+        - A NEGATES edge from A to B means: when A is "bad", P(B=bad) *decreases*
+        - In noisy-OR: NEGATES propagates failure when parent is "good" (state 1),
+          not when parent is "bad" (state 0)
+
     Args:
         conn: DuckDB connection (daemon's own connection).
         root_nodes: Optional list of root node IDs to scope the network.
         edge_types: Edge types to include (default: CAUSES, DEPENDS_ON,
-            THREATENS, EXPECTED_LIKELIHOOD).
+            THREATENS, EXPECTED_LIKELIHOOD, NEGATES).
         layers: Optional list of layers to include (e.g., ["L3", "L4"]).
             If None, includes all layers.
         max_nodes: Maximum number of nodes to include.
         leak_probability: Baseline probability of bad outcome when all parents
-            are good (default 0.15). Critical for realistic priors.
+            are good (default 0.15). Modulated by average parent confidence.
         default_probability: Probability to use for edges without probability
             or confidence values (default 0.5).
 
@@ -130,16 +154,27 @@ def build_bayesian_network(
         return None
 
     if edge_types is None:
-        edge_types = ["CAUSES", "DEPENDS_ON", "THREATENS", "EXPECTED_LIKELIHOOD"]
+        # ADR-009: NEGATES edges have inverted probability semantics
+        # (negative evidence: parent=bad *reduces* child=bad probability)
+        edge_types = ["CAUSES", "DEPENDS_ON", "THREATENS", "EXPECTED_LIKELIHOOD", "NEGATES"]
 
     # Build query — include edges with or without probability/confidence
-    # Use default_probability when neither is set
+    # ADR-008: probability and confidence are semantically distinct.
+    #   probability = P(effect|cause), the causal strength
+    #   confidence = belief in the edge's existence; modulates effective probability
+    #
+    #   When probability is NULL: fall back to default_probability ONLY.
+    #   We do NOT use confidence as a probability substitute.
+    #   The formula probability * confidence is applied in Python after the query.
+    #
+    #   When both are NULL: use default_probability.
+    #   When both are set: effective_prob = probability * confidence.
     placeholders = ",".join(["?"] * len(edge_types))
     if layers:
         layer_placeholders = ",".join(["?"] * len(layers))
         query = f"""
             SELECT from_node, to_node, edge_type,
-                   COALESCE(probability, confidence, {default_probability}) as prob,
+                   COALESCE(probability, {default_probability}) as probability,
                    COALESCE(confidence, {default_probability}) as confidence
             FROM ohm_edges
             WHERE edge_type IN ({placeholders})
@@ -151,7 +186,7 @@ def build_bayesian_network(
     else:
         query = f"""
             SELECT from_node, to_node, edge_type,
-                   COALESCE(probability, confidence, {default_probability}) as prob,
+                   COALESCE(probability, {default_probability}) as probability,
                    COALESCE(confidence, {default_probability}) as confidence
             FROM ohm_edges
             WHERE edge_type IN ({placeholders})
@@ -165,6 +200,8 @@ def build_bayesian_network(
         return None
 
     # Collect all involved nodes and edges, deduplicating by (from, to) pair
+    # ADR-008: probability and confidence are distinct attributes.
+    # ADR-009: NEGATES edges have inverted probability semantics.
     node_ids = set()
     seen_edges: dict[tuple[str, str], dict] = {}
     for row in rows:
@@ -173,6 +210,10 @@ def build_bayesian_network(
         node_ids.add(to_node)
         prob_val = float(prob) if prob is not None else default_probability
         conf_val = float(confidence) if confidence is not None else default_probability
+        # ADR-008: effective_prob = probability * confidence.
+        # Confidence modulates how much the causal probability influences the CPT.
+        # This is NOT a fallback chain — both attributes contribute multiplicatively.
+        effective_prob = prob_val * conf_val
         key = (from_node, to_node)
         edge_dict = {
             "from": from_node,
@@ -180,9 +221,11 @@ def build_bayesian_network(
             "type": edge_type,
             "probability": prob_val,
             "confidence": conf_val,
+            "effective_prob": effective_prob,
+            "is_negates": edge_type == "NEGATES",
         }
-        # Keep highest probability edge per (from, to) pair
-        if key not in seen_edges or prob_val > seen_edges[key]["probability"]:
+        # Keep highest effective_prob edge per (from, to) pair
+        if key not in seen_edges or effective_prob > seen_edges[key]["effective_prob"]:
             seen_edges[key] = edge_dict
 
     edges = list(seen_edges.values())
@@ -247,7 +290,7 @@ def build_bayesian_network(
             existing = parent_edges[safe_child]
             for i, ex in enumerate(existing):
                 if safe_names.get(ex["from"]) == safe_parent:
-                    if e["probability"] > ex["probability"]:
+                    if e["probability"] > existing[i]["effective_prob"]:
                         existing[i] = e
                     break
         else:
@@ -298,17 +341,29 @@ def build_bayesian_network(
     # Noisy-OR with leak:
     #   P(child=bad | parents) = 1 - (1 - leak) * Π_i(1 - p_i * I(parent_i = bad))
     #
-    # When all parents are "good": P(bad) = leak
-    # When any parent is "bad": P(bad) increases by (1 - leak) * p_i
+    # ADR-008: confidence modulates leak probability.
+    #   Higher confidence → lower leak (more of the probability is explained by parents).
+    #   leak_i = (1 - confidence_i) * leak_probability
+    #   Overall leak = Π_i(leak_i) = Π_i((1 - confidence_i) * leak_probability)
+    #   Simplified: leak = leak_probability * (1 - avg_confidence)
+    #
+    # ADR-009: NEGATES edges have inverted probability semantics.
+    #   A NEGATES edge from A to B means: when A is "bad", P(B=bad) *decreases*.
+    #   In noisy-OR: NEGATES edges propagate failure when the parent is "good" (state 1),
+    #   not when the parent is "bad" (state 0). This is the inverse of CAUSES.
     DEFAULT_LEAK = leak_probability  # Baseline probability of bad outcome when parents are good
 
     for child_safe, pedges in parent_edges.items():
         parents = [safe_names[e["from"]] for e in pedges]
         n_parents = len(parents)
 
-        # Use confidence as leak probability if available, otherwise default
-        # Higher confidence → lower leak (more of the probability is explained by parents)
-        leak = DEFAULT_LEAK
+        # ADR-008: Modulate leak by average parent confidence.
+        # Higher confidence → lower leak (more probability explained by parents).
+        # leak = leak_probability * (1 - avg_confidence)
+        avg_confidence = sum(e["confidence"] for e in pedges) / len(pedges) if pedges else 0.0
+        leak = DEFAULT_LEAK * (1.0 - avg_confidence)
+        # Clamp leak to [0.01, 0.5] to avoid degenerate CPTs
+        leak = max(0.01, min(0.5, leak))
 
         n_configs = 2 ** n_parents
         true_row = []  # P(child=1="good")
@@ -317,14 +372,28 @@ def build_bayesian_network(
         for config in range(n_configs):
             # config bit i = 1 means parent i is "good" (no failure propagated)
             # Noisy-OR with leak: P(bad) = 1 - (1-leak) * Π(1 - p_i * I(parent=bad))
+            # ADR-009: NEGATES edges invert the parent state check.
             survival = 1.0  # P(child survives = stays good)
+            # ADR-008: Use effective_prob (probability * confidence) in CPT construction.
+            # This properly models that confidence modulates the causal strength.
             for i, e in enumerate(pedges):
                 parent_state = (config >> (n_parents - 1 - i)) & 1
-                edge_prob = e["probability"]
-                # Parent in "bad" state (0) propagates failure with probability edge_prob
-                if parent_state == 0:  # parent is "bad"
-                    survival *= (1 - edge_prob)
-                # Parent in "good" state (1) means no failure from this parent
+                edge_prob = e["effective_prob"]  # probability modulated by confidence
+                is_negates = e.get("is_negates", False)
+
+                if is_negates:
+                    # ADR-009: NEGATES — parent in "good" state propagates failure.
+                    # When parent is "good" (1), the negation effect activates:
+                    # the parent being good *reduces* the child's chance of being good.
+                    if parent_state == 1:  # parent is "good" → negation activates
+                        survival *= (1 - edge_prob)
+                    # When parent is "bad" (0), negation doesn't activate → no effect
+                else:
+                    # Standard CAUSES/DEPENDS_ON/THREATENS: parent in "bad" state
+                    # propagates failure with probability edge_prob
+                    if parent_state == 0:  # parent is "bad"
+                        survival *= (1 - edge_prob)
+                    # Parent in "good" state (1) means no failure from this parent
             # Apply leak: even when all parents are good, there's a baseline risk
             p_good = (1 - leak) * survival
             p_bad = 1 - p_good

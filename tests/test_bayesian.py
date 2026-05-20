@@ -223,11 +223,18 @@ class TestBuildBayesianNetwork:
         a = create_sample_node(db, label="dup_a")
         b = create_sample_node(db, label="dup_b")
 
-        # Create two edges from a to b with different probabilities
-        create_sample_edge(db, from_node=a, to_node=b, edge_type="CAUSES",
-                           layer="L3", confidence=0.5)
-        create_sample_edge(db, from_node=a, to_node=b, edge_type="CAUSES",
-                           layer="L3", confidence=0.9)
+        # Create two edges from a to b with different explicit probabilities
+        # Using explicit probability values (ADR-008: probability used directly when set)
+        db.execute(
+            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) "
+            "VALUES (?, ?, ?, 'L3', 'CAUSES', 0.5, 0.8, 'test_agent')",
+            [f"edge_{a}_{b}_1", a, b],
+        )
+        db.execute(
+            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) "
+            "VALUES (?, ?, ?, 'L3', 'CAUSES', 0.9, 0.8, 'test_agent')",
+            [f"edge_{a}_{b}_2", a, b],
+        )
 
         result = build_bayesian_network(db)
         assert result is not None
