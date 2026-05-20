@@ -1152,3 +1152,101 @@ class TestDeleteEdge:
 
         with pytest.raises(EdgeNotFoundError):
             delete_edge(test_db, edge_id="nonexistent_edge_xyz", deleted_by="test")
+
+
+class TestPERTFields:
+    """Tests for PERT distribution columns on edges (OHM-6mv.11)."""
+
+    def test_create_edge_with_pert_probability(self, test_db):
+        """create_edge accepts PERT probability estimates."""
+        from ohm.queries import create_edge, create_node
+
+        create_node(test_db, label="Cause A", node_type="concept", created_by="test")
+        create_node(test_db, label="Effect B", node_type="concept", created_by="test")
+        edge = create_edge(
+            test_db,
+            from_node="Cause A",
+            to_node="Effect B",
+            layer="L3",
+            edge_type="CAUSES",
+            created_by="test",
+            confidence=0.7,
+            probability_p05=0.1,
+            probability_p50=0.5,
+            probability_p95=0.9,
+        )
+        assert abs(edge["probability_p05"] - 0.1) < 0.01
+        assert abs(edge["probability_p50"] - 0.5) < 0.01
+        assert abs(edge["probability_p95"] - 0.9) < 0.01
+
+    def test_create_edge_with_pert_confidence(self, test_db):
+        """create_edge accepts PERT confidence estimates."""
+        from ohm.queries import create_edge, create_node
+
+        create_node(test_db, label="Cause C", node_type="concept", created_by="test")
+        create_node(test_db, label="Effect D", node_type="concept", created_by="test")
+        edge = create_edge(
+            test_db,
+            from_node="Cause C",
+            to_node="Effect D",
+            layer="L3",
+            edge_type="CAUSES",
+            created_by="test",
+            confidence=0.7,
+            confidence_p05=0.3,
+            confidence_p50=0.7,
+            confidence_p95=0.95,
+        )
+        assert abs(edge["confidence_p05"] - 0.3) < 0.01
+        assert abs(edge["confidence_p50"] - 0.7) < 0.01
+        assert abs(edge["confidence_p95"] - 0.95) < 0.01
+
+    def test_create_edge_with_all_pert_fields(self, test_db):
+        """create_edge accepts all PERT fields at once."""
+        from ohm.queries import create_edge, create_node
+
+        create_node(test_db, label="Cause E", node_type="concept", created_by="test")
+        create_node(test_db, label="Effect F", node_type="concept", created_by="test")
+        edge = create_edge(
+            test_db,
+            from_node="Cause E",
+            to_node="Effect F",
+            layer="L3",
+            edge_type="CAUSES",
+            created_by="test",
+            confidence=0.7,
+            probability_p05=0.05,
+            probability_p50=0.4,
+            probability_p95=0.85,
+            confidence_p05=0.2,
+            confidence_p50=0.7,
+            confidence_p95=0.95,
+        )
+        assert abs(edge["probability_p05"] - 0.05) < 0.01
+        assert abs(edge["probability_p50"] - 0.4) < 0.01
+        assert abs(edge["probability_p95"] - 0.85) < 0.01
+        assert abs(edge["confidence_p05"] - 0.2) < 0.01
+        assert abs(edge["confidence_p50"] - 0.7) < 0.01
+        assert abs(edge["confidence_p95"] - 0.95) < 0.01
+
+    def test_create_edge_without_pert_fields(self, test_db):
+        """create_edge works without PERT fields (backward compatible)."""
+        from ohm.queries import create_edge, create_node
+
+        create_node(test_db, label="Cause G", node_type="concept", created_by="test")
+        create_node(test_db, label="Effect H", node_type="concept", created_by="test")
+        edge = create_edge(
+            test_db,
+            from_node="Cause G",
+            to_node="Effect H",
+            layer="L3",
+            edge_type="CAUSES",
+            created_by="test",
+            confidence=0.7,
+        )
+        assert edge.get("probability_p05") is None
+        assert edge.get("probability_p50") is None
+        assert edge.get("probability_p95") is None
+        assert edge.get("confidence_p05") is None
+        assert edge.get("confidence_p50") is None
+        assert edge.get("confidence_p95") is None

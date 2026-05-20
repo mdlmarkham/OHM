@@ -686,6 +686,12 @@ class OhmStore:
         challenge_type: Optional[str] = None,
         urgency: Optional[str] = None,
         probability: Optional[float] = None,
+        probability_p05: Optional[float] = None,
+        probability_p50: Optional[float] = None,
+        probability_p95: Optional[float] = None,
+        confidence_p05: Optional[float] = None,
+        confidence_p50: Optional[float] = None,
+        confidence_p95: Optional[float] = None,
         agent_name: Optional[str] = None,
         deduplicate: bool = True,
     ) -> Optional[dict[str, Any]]:
@@ -695,6 +701,12 @@ class OhmStore:
             agent_name: Agent to attribute the write to. Defaults to self.agent_name.
             urgency: Edge urgency (critical, high, medium, low).
             probability: Objective likelihood of the outcome (0.0-1.0).
+            probability_p05: PERT optimistic estimate for probability.
+            probability_p50: PERT most-likely estimate for probability.
+            probability_p95: PERT pessimistic estimate for probability.
+            confidence_p05: PERT optimistic estimate for confidence.
+            confidence_p50: PERT most-likely estimate for confidence.
+            confidence_p95: PERT pessimistic estimate for confidence.
             deduplicate: If True, check for an existing non-deleted edge with the
                 same (from_node, to_node, edge_type, layer) and update it instead
                 of creating a duplicate. Default True.
@@ -736,6 +748,24 @@ class OhmStore:
                 if probability is not None:
                     update_fields.append("probability = ?")
                     update_params.append(probability)
+                if probability_p05 is not None:
+                    update_fields.append("probability_p05 = ?")
+                    update_params.append(probability_p05)
+                if probability_p50 is not None:
+                    update_fields.append("probability_p50 = ?")
+                    update_params.append(probability_p50)
+                if probability_p95 is not None:
+                    update_fields.append("probability_p95 = ?")
+                    update_params.append(probability_p95)
+                if confidence_p05 is not None:
+                    update_fields.append("confidence_p05 = ?")
+                    update_params.append(confidence_p05)
+                if confidence_p50 is not None:
+                    update_fields.append("confidence_p50 = ?")
+                    update_params.append(confidence_p50)
+                if confidence_p95 is not None:
+                    update_fields.append("confidence_p95 = ?")
+                    update_params.append(confidence_p95)
                 update_fields.append("updated_at = ?")
                 update_params.append(now)
                 update_fields.append("updated_by = ?")
@@ -759,11 +789,17 @@ class OhmStore:
             """
             INSERT INTO ohm_edges (from_node, to_node, layer, edge_type, confidence,
                                     condition, provenance, created_by, challenge_of,
-                                    challenge_type, urgency, probability, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    challenge_type, urgency, probability,
+                                    probability_p05, probability_p50, probability_p95,
+                                    confidence_p05, confidence_p50, confidence_p95,
+                                    created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [from_node, to_node, layer, edge_type, confidence, condition,
-             provenance, actor, challenge_of, challenge_type, urgency, probability, now, now],
+             provenance, actor, challenge_of, challenge_type, urgency, probability,
+             probability_p05, probability_p50, probability_p95,
+             confidence_p05, confidence_p50, confidence_p95,
+             now, now],
         )
 
         edge = self.execute_one(

@@ -872,6 +872,12 @@ def create_edge(
     condition: str | None = None,
     provenance: str | None = None,
     metadata: dict[str, Any] | None = None,
+    probability_p05: float | None = None,
+    probability_p50: float | None = None,
+    probability_p95: float | None = None,
+    confidence_p05: float | None = None,
+    confidence_p50: float | None = None,
+    confidence_p95: float | None = None,
 ) -> dict[str, Any]:
     """Create a new edge and return its full record. Validates layer/type compatibility."""
     import uuid
@@ -891,10 +897,14 @@ def create_edge(
     conn.execute(
         """INSERT INTO ohm_edges
            (id, from_node, to_node, layer, edge_type, created_by,
-            confidence, probability, urgency, condition, provenance, metadata)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            confidence, probability, urgency, condition, provenance, metadata,
+            probability_p05, probability_p50, probability_p95,
+            confidence_p05, confidence_p50, confidence_p95)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [edge_id, from_node, to_node, layer, edge_type, created_by,
-         confidence, probability, urgency, condition, provenance, metadata_json],
+         confidence, probability, urgency, condition, provenance, metadata_json,
+         probability_p05, probability_p50, probability_p95,
+         confidence_p05, confidence_p50, confidence_p95],
     )
     _log_change(conn, "ohm_edges", edge_id, "INSERT", created_by)
     # Return full edge record

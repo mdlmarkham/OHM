@@ -1791,6 +1791,70 @@ class TestSourceAttribution:
 
 
 @pytest.mark.xdist_group("server")
+class TestPERTFields:
+    """Tests for PERT distribution fields on edges (OHM-6mv.11)."""
+
+    def test_post_edge_with_pert_probability(self, test_server):
+        """POST /edge with PERT probability fields persists them."""
+        port, store = test_server
+        # Create nodes first
+        _request("POST", port, "/node", body={"id": "pert-cause-1", "label": "Cause 1", "type": "concept"})
+        _request("POST", port, "/node", body={"id": "pert-effect-1", "label": "Effect 1", "type": "concept"})
+        status, data = _request("POST", port, "/edge", body={
+            "from": "pert-cause-1",
+            "to": "pert-effect-1",
+            "type": "CAUSES",
+            "layer": "L3",
+            "confidence": 0.7,
+            "probability_p05": 0.1,
+            "probability_p50": 0.5,
+            "probability_p95": 0.9,
+        })
+        assert status == 201
+        assert abs(data["probability_p05"] - 0.1) < 0.01
+        assert abs(data["probability_p50"] - 0.5) < 0.01
+        assert abs(data["probability_p95"] - 0.9) < 0.01
+
+    def test_post_edge_with_all_pert_fields(self, test_server):
+        """POST /edge with all PERT fields persists them."""
+        port, store = test_server
+        _request("POST", port, "/node", body={"id": "pert-cause-2", "label": "Cause 2", "type": "concept"})
+        _request("POST", port, "/node", body={"id": "pert-effect-2", "label": "Effect 2", "type": "concept"})
+        status, data = _request("POST", port, "/edge", body={
+            "from": "pert-cause-2",
+            "to": "pert-effect-2",
+            "type": "CAUSES",
+            "layer": "L3",
+            "confidence": 0.7,
+            "probability_p05": 0.05,
+            "probability_p50": 0.4,
+            "probability_p95": 0.85,
+            "confidence_p05": 0.2,
+            "confidence_p50": 0.7,
+            "confidence_p95": 0.95,
+        })
+        assert status == 201
+        assert abs(data["probability_p05"] - 0.05) < 0.01
+        assert abs(data["confidence_p05"] - 0.2) < 0.01
+
+    def test_post_edge_without_pert_fields(self, test_server):
+        """POST /edge without PERT fields works (backward compatible)."""
+        port, store = test_server
+        _request("POST", port, "/node", body={"id": "pert-cause-3", "label": "Cause 3", "type": "concept"})
+        _request("POST", port, "/node", body={"id": "pert-effect-3", "label": "Effect 3", "type": "concept"})
+        status, data = _request("POST", port, "/edge", body={
+            "from": "pert-cause-3",
+            "to": "pert-effect-3",
+            "type": "CAUSES",
+            "layer": "L3",
+            "confidence": 0.7,
+        })
+        assert status == 201
+        assert data.get("probability_p05") is None
+        assert data.get("confidence_p05") is None
+
+
+@pytest.mark.xdist_group("server")
 class TestBatchEndpoint:
     """Tests for POST /batch endpoint (OHM-1m3)."""
 

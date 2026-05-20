@@ -360,6 +360,12 @@ class Graph:
         condition: str | None = None,
         provenance: str | None = None,
         metadata: dict[str, Any] | None = None,
+        probability_p05: float | None = None,
+        probability_p50: float | None = None,
+        probability_p95: float | None = None,
+        confidence_p05: float | None = None,
+        confidence_p50: float | None = None,
+        confidence_p95: float | None = None,
     ) -> dict[str, Any]:
         """Create an edge and return its full record.
 
@@ -381,6 +387,12 @@ class Graph:
             condition=condition,
             provenance=provenance,
             metadata=metadata,
+            probability_p05=probability_p05,
+            probability_p50=probability_p50,
+            probability_p95=probability_p95,
+            confidence_p05=confidence_p05,
+            confidence_p50=confidence_p50,
+            confidence_p95=confidence_p95,
         )
 
     def challenge(self, edge_id: str, *, reason: str, confidence: float = 0.5) -> dict[str, Any]:
@@ -2616,6 +2628,12 @@ def connect_http(
                 "provenance": kwargs.get("provenance"),
                 "urgency": kwargs.get("urgency"),
                 "probability": kwargs.get("probability"),
+                "probability_p05": kwargs.get("probability_p05"),
+                "probability_p50": kwargs.get("probability_p50"),
+                "probability_p95": kwargs.get("probability_p95"),
+                "confidence_p05": kwargs.get("confidence_p05"),
+                "confidence_p50": kwargs.get("confidence_p50"),
+                "confidence_p95": kwargs.get("confidence_p95"),
             }
             return self._http_request("POST", "/edge", body)
 

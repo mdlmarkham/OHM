@@ -1853,6 +1853,12 @@ class OhmHandler(BaseHTTPRequestHandler):
                 challenge_type=body.get("challenge_type"),
                 urgency=body.get("urgency"),
                 probability=body.get("probability"),
+                probability_p05=body.get("probability_p05"),
+                probability_p50=body.get("probability_p50"),
+                probability_p95=body.get("probability_p95"),
+                confidence_p05=body.get("confidence_p05"),
+                confidence_p50=body.get("confidence_p50"),
+                confidence_p95=body.get("confidence_p95"),
                 agent_name=agent,
             )
             _trigger_webhooks({
@@ -1997,6 +2003,12 @@ class OhmHandler(BaseHTTPRequestHandler):
                         challenge_type=edge.get("challenge_type"),
                         urgency=edge.get("urgency"),
                         probability=edge.get("probability"),
+                        probability_p05=edge.get("probability_p05"),
+                        probability_p50=edge.get("probability_p50"),
+                        probability_p95=edge.get("probability_p95"),
+                        confidence_p05=edge.get("confidence_p05"),
+                        confidence_p50=edge.get("confidence_p50"),
+                        confidence_p95=edge.get("confidence_p95"),
                         agent_name=agent,
                     )
                     edges_created += 1
