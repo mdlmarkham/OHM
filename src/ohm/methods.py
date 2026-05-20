@@ -485,6 +485,9 @@ def monte_carlo_impact(
         for _ in range(depth):
             next_frontier = []
             for current in frontier:
+                if current in visited:
+                    continue
+                visited.add(current)
                 if current not in adj:
                     continue
                 for target, conf, prob in adj[current]:
@@ -494,7 +497,6 @@ def monte_carlo_impact(
                     if random.random() < conf:
                         # Stage 2: Does the effect propagate? (probability)
                         if random.random() < prob:
-                            visited.add(target)
                             next_frontier.append(target)
                             impact_counts[target] = impact_counts.get(target, 0) + 1
                             affected_this_sim += 1

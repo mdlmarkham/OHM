@@ -1903,6 +1903,57 @@ class Graph:
             seed=seed,
         )
 
+    def markov_absorbing_risk(
+        self,
+        start_node: str,
+        *,
+        edge_types: list[str] | None = None,
+        state_nodes: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Absorbing Markov chain risk: probability of reaching each absorbing state.
+
+        Args:
+            start_node: Node ID to compute absorption from.
+            edge_types: Edge types to treat as transitions (default CAUSES, TRANSITIONS_TO).
+            state_nodes: Optional restrict to specific node IDs.
+
+        Returns:
+            Dict with absorption_probabilities, transient_states, absorbing_states.
+        """
+        from ohm.markov import markov_absorbing_risk
+
+        return markov_absorbing_risk(
+            self._conn, start_node,
+            edge_types=edge_types, state_nodes=state_nodes,
+        )
+
+    def markov_expected_steps(
+        self,
+        start_node: str,
+        *,
+        target_state: str | None = None,
+        edge_types: list[str] | None = None,
+        state_nodes: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Expected number of steps before absorption from a start node.
+
+        Args:
+            start_node: Node ID to compute from.
+            target_state: Optional target absorbing state for directed step count.
+            edge_types: Edge types to treat as transitions.
+            state_nodes: Optional restrict to specific node IDs.
+
+        Returns:
+            Dict with expected_steps, expected_steps_per_state.
+        """
+        from ohm.markov import markov_expected_steps
+
+        return markov_expected_steps(
+            self._conn, start_node,
+            target_state=target_state, edge_types=edge_types,
+            state_nodes=state_nodes,
+        )
+
     def near_duplicates(
         self,
         *,

@@ -177,6 +177,9 @@ class OhmStore:
             self.conn = self._connect_with_wal_recovery(str(self.db_path), readonly)
         self._init_schema()
 
+        # OHM-8n9/OHM-6cz: Auto-restore from DuckLake if tables are empty.
+        self._auto_restore_if_empty()
+
         # Try to load DuckDB markdown extension (optional)
         # Enables rich content features: read_markdown, md_to_text, etc.
         self.markdown_available = False
@@ -313,6 +316,97 @@ class OhmStore:
             initialize_schema(conn)
             conn.close()
             logger.info("Started with empty DB as fallback")
+
+    def _auto_restore_if_empty(self) -> None:
+        """Auto-restore from DuckLake if ohm_nodes is empty (OHM-8n9/OHM-6cz).
+
+        Handles the case where the DB opened successfully after WAL deletion
+        but contains no data (the WAL had committed-but-not-checkpointed data).
+        Unlike _recover_from_ducklake, this does NOT delete the DB file —
+        it just bulk-inserts from DuckLake into the existing empty tables.
+        """
+        if not self.ducklake_path:
+            return
+
+        try:
+            node_count = self.conn.execute(
+                "SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL"
+            ).fetchone()[0]
+        except Exception:
+            return
+
+        if node_count > 0:
+            return
+
+        logger.info("Graph is empty on startup — attempting DuckLake auto-restore")
+
+        ducklake_path = self.ducklake_path
+        if not ducklake_path or not os.path.exists(ducklake_path):
+            logger.warning("DuckLake path not found, skipping auto-restore")
+            return
+
+        try:
+            self.conn.execute(
+                f"ATTACH IF NOT EXISTS '{ducklake_path}' AS ohm_lake (TYPE ducklake)"
+            )
+
+            NODE_COLS = {
+                'id': 'id', 'label': 'label', 'type': 'type',
+                'content': 'content', 'url': 'url',
+                'created_by': 'created_by', 'created_at': 'created_at',
+                'updated_at': 'updated_at', 'updated_by': 'updated_by',
+                'confidence': 'confidence', 'visibility': 'visibility',
+                'provenance': 'provenance', 'tags': 'tags',
+                'metadata': 'metadata', 'priority': 'priority',
+            }
+            EDGE_COLS = {
+                'id': 'id', 'from_node': 'from_node', 'to_node': 'to_node',
+                'edge_type': 'edge_type', 'layer': 'layer',
+                'confidence': 'confidence', 'condition': 'condition',
+                'probability': 'probability', 'urgency': 'urgency',
+                'challenge_of': 'challenge_of', 'challenge_type': 'challenge_type',
+                'provenance': 'provenance', 'created_by': 'created_by',
+                'created_at': 'created_at', 'updated_at': 'updated_at',
+                'updated_by': 'updated_by', 'metadata': 'metadata',
+            }
+
+            for table, col_map in [('ohm_nodes', NODE_COLS), ('ohm_edges', EDGE_COLS)]:
+                try:
+                    cast_parts = []
+                    for dl_col, local_col in col_map.items():
+                        if local_col in ('confidence', 'probability', 'baseline', 'value', 'sigma'):
+                            cast_parts.append(f"CAST({dl_col} AS FLOAT) AS {local_col}")
+                        elif local_col in ('created_at', 'updated_at'):
+                            cast_parts.append(f"CAST({dl_col} AS TIMESTAMP) AS {local_col}")
+                        elif local_col == 'metadata':
+                            cast_parts.append(f"CAST({dl_col} AS JSON) AS {local_col}")
+                        else:
+                            cast_parts.append(f'"{dl_col}" AS {local_col}')
+                    select_str = ', '.join(cast_parts)
+                    local_cols = ', '.join(col_map.values())
+
+                    self.conn.execute(
+                        f"INSERT INTO {table} ({local_cols}, deleted_at) "
+                        f"SELECT {select_str}, NULL::TIMESTAMP "
+                        f"FROM ohm_lake.{table} "
+                        f"WHERE deleted_at IS NULL OR CAST(deleted_at AS VARCHAR) = ''"
+                    )
+                    count = self.conn.execute(
+                        f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL"
+                    ).fetchone()[0]
+                    logger.info("Auto-restored %d %s from DuckLake", count, table)
+                except Exception as e:
+                    logger.warning("Failed to auto-restore %s from DuckLake: %s", table, e)
+
+            try:
+                self.conn.execute("DETACH ohm_lake")
+            except Exception:
+                pass
+
+            self.conn.execute("CHECKPOINT")
+            logger.info("DuckLake auto-restore completed")
+        except Exception as e:
+            logger.warning("DuckLake auto-restore failed: %s", e)
 
     def _init_schema(self):
         """Initialize the schema if not already present, including migrations."""
@@ -721,9 +815,10 @@ class OhmStore:
 
         # Compute PERT mean when PERT triple is provided but probability is not
         if probability is None and probability_p50 is not None:
+            from .pert import compute_pert_mean
             p05 = probability_p05 if probability_p05 is not None else probability_p50
             p95 = probability_p95 if probability_p95 is not None else probability_p50
-            probability = (p05 + 4.0 * probability_p50 + p95) / 6.0
+            probability = compute_pert_mean(p05, probability_p50, p95)
 
         # Deduplication: if an active edge with the same (from, to, type, layer)
         # already exists, update it instead of creating a duplicate
@@ -1263,8 +1358,16 @@ class OhmStore:
         return result[0] if result else 0
 
     def close(self):
-        """Close the DuckDB connection. Stops Quack server if running."""
+        """Close the DuckDB connection. Stops Quack server if running.
+
+        Runs CHECKPOINT before closing to flush WAL to the main DB file,
+        reducing the risk of data loss on hard shutdown (OHM-8n9).
+        """
         self._stop_quack()
+        try:
+            self.conn.execute("CHECKPOINT")
+        except Exception:
+            pass
         self.conn.close()
 
     def __enter__(self):

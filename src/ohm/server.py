@@ -526,6 +526,21 @@ class OhmHandler(BaseHTTPRequestHandler):
                 ts for ts in _rate_limit_store[client_ip] if ts > window_start
             ]
 
+            # OHM-41g: Prune stale IP keys that have no recent timestamps.
+            # Without this, unique IPs accumulate forever.
+            if not _rate_limit_store[client_ip]:
+                del _rate_limit_store[client_ip]
+                # Periodically prune other stale keys (every ~100 requests)
+                if len(_rate_limit_store) > 100:
+                    stale = [
+                        ip for ip, timestamps in _rate_limit_store.items()
+                        if not timestamps or timestamps[-1] < window_start
+                    ]
+                    for ip in stale:
+                        del _rate_limit_store[ip]
+                _rate_limit_store[client_ip] = [now]
+                return True
+
             if len(_rate_limit_store[client_ip]) >= RATE_LIMIT_MAX_REQUESTS:
                 return False
 
@@ -867,6 +882,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "/sensitivity": {"method": "GET", "description": "Sensitivity analysis: E-value quantifying how much unmeasured confounding would overturn a causal conclusion. ?layers=L3,L4 to scope by layer"},
                     "/adjustment": {"method": "GET", "description": "Find valid backdoor/frontdoor adjustment sets for causal identification (Pearl's criteria). ?layers=L3,L4 to scope by layer"},
                     "/voi": {"method": "GET", "description": "Value of Information: rank nodes by research priority (uncertainty × sensitivity to decision). ?decision=node1,node2&top=10&layers=L3,L4&edge_types=CAUSES,DEPENDS_ON"},
+                    "/voi/tasks": {"method": "GET", "description": "Generate research tasks from VoI rankings, matched to agent expertise. ?agent=metis&decision=node1,node2&top=5&layers=L3,L4"},
                     "/suggest_causes": {"method": "GET", "description": "Suggest candidate CAUSES edges from existing non-causal relationships (DEPENDS_ON, APPLIES_TO, etc.)"},
                     "/deduplicate": {"method": "POST", "description": "Remove duplicate edges (same from→to, type, layer), keeping the most recent"},
                     "/refute": {"method": "GET", "description": "Test robustness of causal conclusions using DoWhy refutation methods (random common cause, placebo, data subset, unobserved confounder)"},
@@ -891,7 +907,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "/challenge/{id}": {"method": "POST", "description": "Challenge an existing edge"},
                     "/support/{id}": {"method": "POST", "description": "Support an existing edge"},
                     "/observe/{id}": {"method": "POST", "description": "Record an observation on a node"},
-                    "/observations": {"method": "GET", "description": "List observations with filtering by type, source, node_id"},
+                    "/observations": {"method": "GET", "description": "List observations with filtering by type, source, node_id. POST for bulk upload: {observations: [{node_id, value, sigma, obs_type, source}]}"},
                     "/outcome": {"method": "POST", "description": "Record whether a source agent's claim was correct"},
                     "/reliability/{source}": {"method": "GET", "description": "Compute source reliability metrics from historical outcomes"},
                     "/state": {"method": "POST", "description": "Update agent state/focus"},
@@ -955,7 +971,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "/challenge/{id}": {"post": {"summary": "Challenge edge"}},
                     "/support/{id}": {"post": {"summary": "Support edge"}},
                     "/observe/{id}": {"post": {"summary": "Record observation"}},
-                    "/observations": {"get": {"summary": "List observations"}},
+                    "/observations": {"get": {"summary": "List observations"}, "post": {"summary": "Bulk upload observations"}},
                     "/state": {"post": {"summary": "Update agent state"}},
                     "/register": {"post": {"summary": "Register agent"}},
                     "/heartbeat": {"post": {"summary": "Agent heartbeat"}},
@@ -984,7 +1000,9 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "/graph/at": {"get": {"summary": "Graph at snapshot version",
                                       "responses": {"200": {"description": "Historical graph state"}}}},
                     "/graph/changes": {"get": {"summary": "Changes between snapshots",
-                                          "responses": {"200": {"description": "Insertions/deletions"}}}},
+                                           "responses": {"200": {"description": "Insertions/deletions"}}}},
+                    "/voi/tasks": {"get": {"summary": "VoI task assignment for agent routing",
+                                       "responses": {"200": {"description": "Research tasks ranked by VoI"}}}},
                 },
             })
             return
@@ -1624,6 +1642,33 @@ class OhmHandler(BaseHTTPRequestHandler):
                 root_prior=root_prior,
             )
             self._json_response(200, result)
+        elif path == "/voi/tasks":
+            # OHM-8w2: Value of Information task assignment for agent routing.
+            # Generates research tasks from VoI rankings, matched to agent expertise.
+            # ?agent=metis to filter by agent
+            # ?decision=node1,node2 to specify decision nodes
+            # ?top=5 to limit results
+            # ?layers=L3,L4 to scope by layer
+            # ?leak=0.15&root_prior=0.3 for Bayesian parameters
+            agent = qs.get("agent", [None])[0]
+            decision_str = qs.get("decision", [None])[0]
+            decision_nodes = [d.strip() for d in decision_str.split(",") if d.strip()] if decision_str else None
+            top = int(qs.get("top", ["5"])[0])
+            leak_probability = float(qs.get("leak", ["0.15"])[0])
+            root_prior = float(qs.get("root_prior", ["0.3"])[0])
+            layers_str = qs.get("layers", [""])[0]
+            layers = [l.strip() for l in layers_str.split(",") if l.strip()] if layers_str else None
+            from .bayesian import generate_voi_tasks
+            result = generate_voi_tasks(
+                self.store.conn,
+                agent=agent,
+                decision_nodes=decision_nodes,
+                layers=layers,
+                top=top,
+                leak_probability=leak_probability,
+                root_prior=root_prior,
+            )
+            self._json_response(200, result)
         elif path == "/suggest_causes":
             # Suggest candidate CAUSES edges from existing non-causal relationships
             # Identifies DEPENDS_ON/APPLIES_TO/REFINES/INFLUENCES edges that might be causal
@@ -1993,6 +2038,52 @@ class OhmHandler(BaseHTTPRequestHandler):
                 "observation": result,
             })
             self._json_response(201, result)
+
+        elif path == "/observations":
+            # OHM-0lf: Bulk observation upload.
+            # Accepts an array of observation objects in the "observations" field.
+            # Each observation: {node_id, value, sigma, obs_type, source}
+            obs_list = body.get("observations", [])
+            if not isinstance(obs_list, list):
+                raise ValidationError("'observations' must be an array")
+            if len(obs_list) > 1000:
+                raise ValidationError(f"Too many observations: {len(obs_list)} (max 1000)")
+
+            results = []
+            errors = []
+            for i, obs in enumerate(obs_list):
+                node_id = obs.get("node_id")
+                if not node_id:
+                    errors.append({"index": i, "error": "missing node_id"})
+                    continue
+                from .validation import validate_identifier
+                try:
+                    node_id = validate_identifier(node_id, name="node_id")
+                except ValueError as e:
+                    errors.append({"index": i, "error": str(e)})
+                    continue
+                try:
+                    result = self.store.write_observation(
+                        node_id=node_id,
+                        type=obs.get("obs_type", obs.get("type", "measurement")),
+                        value=obs.get("value"),
+                        baseline=obs.get("baseline"),
+                        sigma=obs.get("sigma"),
+                        source=obs.get("source"),
+                        notes=obs.get("notes"),
+                        source_name=obs.get("source_name"),
+                        source_url=obs.get("source_url"),
+                        agent_name=agent,
+                    )
+                    results.append(result)
+                except Exception as e:
+                    errors.append({"index": i, "node_id": node_id, "error": str(e)})
+
+            self._json_response(201, {
+                "created": len(results),
+                "errors": errors,
+                "observations": results,
+            })
 
         elif path == "/outcome":
             # Record whether a source agent's claim was correct
@@ -2378,9 +2469,13 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     else:
         print("Concurrent access: HTTP (single-writer)", file=sys.stderr)
 
-    # Graceful shutdown
+    # Graceful shutdown — CHECKPOINT before exit (OHM-8n9)
     def shutdown_handler(signum, frame):
         print("Shutting down...", file=sys.stderr)
+        try:
+            store.conn.execute("CHECKPOINT")
+        except Exception:
+            pass
         server.shutdown()
 
     signal.signal(signal.SIGTERM, shutdown_handler)

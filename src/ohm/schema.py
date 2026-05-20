@@ -75,6 +75,7 @@ LAYER_EDGE_TYPES: dict[str, frozenset[str]] = {
         "ESCALATED_TO",           # support: escalation path
         "DELEGATED_TO",           # support: delegation
         "THREAT_CLUSTER",         # cybersecurity: IOC linkage
+        "TRANSITIONS_TO",         # Markov: state transition edge (OHM-g09)
     }),
     "L4": frozenset({"EXPECTS", "PLANS", "RISKS", "DEPENDS_ON",
                       "THREATENS", "ENABLES", "EXPECTS_FROM", "PREDICTS",
@@ -634,6 +635,13 @@ def initialize_schema(conn: "DuckDBPyConnection") -> None:
     Args:
         conn: An active DuckDB connection.
     """
+    # Safety: checkpoint before DDL to flush any prior WAL state (OHM-8n9).
+    # Without this, stale WAL entries from a prior session could conflict
+    # with the DDL statements below.
+    try:
+        conn.execute("CHECKPOINT")
+    except Exception:
+        pass
     for ddl in DDL_STATEMENTS:
         conn.execute(ddl)
     for idx in INDEX_DDL:

@@ -79,6 +79,11 @@ def connect(db_path: str | pathlib.Path | None = None) -> "duckdb.DuckDBPyConnec
     from ohm.schema import initialize_schema
     initialize_schema(conn)
 
+    # OHM-8n9: Auto-restore from DuckLake if tables are empty.
+    # This handles the case where WAL was deleted after corruption
+    # but the main DB file contained no checkpointed data.
+    _auto_restore_if_empty(conn, db_path_str)
+
     return conn
 
 
@@ -274,6 +279,132 @@ def _try_ducklake_recovery(db_path_str: str) -> bool:
 
     except Exception:
         return False
+    finally:
+        if tmp_conn:
+            try:
+                tmp_conn.close()
+            except Exception:
+                pass
+
+
+def _auto_restore_if_empty(conn: "duckdb.DuckDBPyConnection", db_path_str: str) -> None:
+    """Check if ohm_nodes is empty and auto-restore from DuckLake (OHM-8n9/OHM-6cz).
+
+    If the database opened successfully but contains no nodes (e.g., after
+    WAL deletion that contained committed-but-not-checkpointed data),
+    attempt to restore from the latest DuckLake snapshot.
+    """
+    try:
+        node_count = conn.execute(
+            "SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL"
+        ).fetchone()[0]
+    except Exception:
+        return
+
+    if node_count > 0:
+        return
+
+    ducklake_path = os.environ.get("OHM_DUCKLAKE_PATH")
+    if not ducklake_path:
+        return
+
+    import duckdb as _duckdb
+
+    tmp_conn = None
+    try:
+        tmp_conn = _duckdb.connect(":memory:")
+        try:
+            tmp_conn.execute("INSTALL ducklake FROM core; LOAD ducklake;")
+        except Exception:
+            return
+
+        try:
+            tmp_conn.execute(f"ATTACH 'ducklake:{ducklake_path}' AS ohm_lake")
+        except Exception:
+            return
+
+        snapshots = tmp_conn.execute(
+            "SELECT snapshot_id FROM ducklake_snapshots('ohm_lake') "
+            "ORDER BY snapshot_time DESC LIMIT 1"
+        ).fetchone()
+        if not snapshots:
+            return
+
+        snapshot_id = snapshots[0]
+
+        nodes = tmp_conn.execute(
+            f"SELECT * FROM ohm_lake.ohm_nodes AT (VERSION => {snapshot_id}) "
+            "WHERE deleted_at IS NULL"
+        ).fetchall()
+        node_cols = [d[0] for d in tmp_conn.description]
+        edges = tmp_conn.execute(
+            f"SELECT * FROM ohm_lake.ohm_edges AT (VERSION => {snapshot_id}) "
+            "WHERE deleted_at IS NULL"
+        ).fetchall()
+        edge_cols = [d[0] for d in tmp_conn.description]
+
+        if not nodes and not edges:
+            return
+
+        node_count_restored = 0
+        for node in nodes:
+            node_dict = dict(zip(node_cols, node))
+            node_id = node_dict.get("id")
+            if not node_id:
+                continue
+            existing = conn.execute("SELECT id FROM ohm_nodes WHERE id = ?", [node_id]).fetchone()
+            if existing:
+                continue
+            cols = [c for c in node_cols if c in node_dict and node_dict[c] is not None]
+            placeholders = ", ".join(["?"] * len(cols))
+            col_names = ", ".join(cols)
+            values = [node_dict[c] for c in cols]
+            try:
+                conn.execute(f"INSERT INTO ohm_nodes ({col_names}) VALUES ({placeholders})", values)
+                node_count_restored += 1
+            except Exception:
+                pass
+
+        edge_count_restored = 0
+        for edge in edges:
+            edge_dict = dict(zip(edge_cols, edge))
+            edge_id = edge_dict.get("id")
+            if not edge_id:
+                continue
+            existing = conn.execute("SELECT id FROM ohm_edges WHERE id = ?", [edge_id]).fetchone()
+            if existing:
+                continue
+            cols = [c for c in edge_cols if c in edge_dict and edge_dict[c] is not None]
+            placeholders = ", ".join(["?"] * len(cols))
+            col_names = ", ".join(cols)
+            values = [edge_dict[c] for c in cols]
+            try:
+                conn.execute(f"INSERT INTO ohm_edges ({col_names}) VALUES ({placeholders})", values)
+                edge_count_restored += 1
+            except Exception:
+                pass
+
+        if node_count_restored > 0 or edge_count_restored > 0:
+            conn.execute("CHECKPOINT")
+            conn.execute(
+                """INSERT INTO ohm_change_feed
+                   (table_name, row_id, operation, agent_name, new_data)
+                   VALUES (?, ?, ?, ?, ?)""",
+                [
+                    "ohm_meta", "auto_restore",
+                    "AUTO_RESTORE",
+                    "ohmd",
+                    json.dumps({
+                        "trigger": "empty_graph_on_startup",
+                        "snapshot_id": snapshot_id,
+                        "nodes_restored": node_count_restored,
+                        "edges_restored": edge_count_restored,
+                    }),
+                ],
+            )
+
+    except Exception:
+        pass
     finally:
         if tmp_conn:
             try:

@@ -159,12 +159,15 @@ def refute_causal_effect(
             # Create a random confounder with various strengths
             import random
             random.seed(seed)
-            noise_strengths = [0.1, 0.2, 0.3, 0.5]
+            # OHM-ykg: Proportional perturbation (±10-20% of parameter value).
+            # Previous fixed offsets (±0.5) caused ±330% perturbation for
+            # typical leak_probability=0.15, making refutation trivially pass.
+            perturbation_fractions = [0.1, 0.15, 0.2]
             ate_changes = []
-            for strength in noise_strengths:
-                # Simulate: add noise to leak probability
-                noisy_leak = leak_probability + strength * random.uniform(-1, 1)
-                noisy_leak = max(0.01, min(0.5, noisy_leak))  # Clamp
+            for fraction in perturbation_fractions:
+                noise = fraction * random.uniform(-1, 1)
+                noisy_leak = leak_probability * (1 + noise)
+                noisy_leak = max(1e-6, min(0.5, noisy_leak))
                 noisy_ate = compute_ate(
                     conn, cause, effect,
                     edge_types=edge_types,
@@ -172,7 +175,7 @@ def refute_causal_effect(
                 )
                 if "ate" in noisy_ate:
                     ate_changes.append({
-                        "noise_strength": strength,
+                        "perturbation_fraction": fraction,
                         "leak_probability": round(noisy_leak, 4),
                         "ate": noisy_ate["ate"],
                         "ate_change": round(abs(noisy_ate["ate"] - original_ate["ate"]), 4),

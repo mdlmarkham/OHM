@@ -40,6 +40,9 @@ logger = logging.getLogger(__name__)
 # Invalidated when graph_generation counter increments.
 _bayesian_network_cache: dict[tuple, tuple[int, dict[str, Any]]] = {}
 
+from ohm.pert import compute_pert_mean as _compute_pert_mean
+from ohm.pert import compute_pert_variance as _compute_pert_variance
+
 try:
     from pgmpy.models import DiscreteBayesianNetwork as BayesianNetwork
     from pgmpy.factors.discrete import TabularCPD
@@ -479,8 +482,11 @@ def build_bayesian_network(
         # leak = leak_probability * (1 - avg_confidence)
         avg_confidence = sum(e["confidence"] for e in pedges) / len(pedges) if pedges else 0.0
         leak = DEFAULT_LEAK * (1.0 - avg_confidence)
-        # Clamp leak to [0.01, 0.5] to avoid degenerate CPTs
-        leak = max(0.01, min(0.5, leak))
+        # Clamp leak to [1e-6, 0.5] to avoid degenerate CPTs.
+        # OHM-m0h: Previous floor of 0.01 destroyed confidence modulation —
+        # high-confidence edges (leak ~0.0075) were raised to 0.01, making
+        # them indistinguishable from moderate-confidence edges.
+        leak = max(1e-6, min(0.5, leak))
 
         n_configs = 2 ** n_parents
         true_row = []  # P(child=1="good")
@@ -1582,41 +1588,13 @@ def suggest_causes(
 
 
 def pert_mean(p05: float, p50: float, p95: float) -> float:
-    """Compute PERT (Program Evaluation and Review Technique) mean estimate.
-
-    ADR-013: PERT three-point estimation for probability distributions.
-    The PERT beta distribution approximation derives:
-        μ = (O + 4M + P) / 6
-
-    where O = optimistic (P05), M = most likely (P50), P = pessimistic (P95).
-
-    Args:
-        p05: Optimistic estimate (5th percentile).
-        p50: Most likely estimate (median).
-        p95: Pessimistic estimate (95th percentile).
-
-    Returns:
-        PERT mean estimate.
-    """
-    return (p05 + 4 * p50 + p95) / 6.0
+    """Compute PERT mean estimate. Delegates to ohm.pert.compute_pert_mean."""
+    return _compute_pert_mean(p05, p50, p95)
 
 
 def pert_variance(p05: float, p95: float) -> float:
-    """Compute PERT variance estimate.
-
-    ADR-013: PERT variance for Value of Information calculations.
-        σ² = ((P - O) / 6)²
-
-    High variance = high uncertainty = high VoI if downstream decision impact is also high.
-
-    Args:
-        p05: Optimistic estimate (5th percentile).
-        p95: Pessimistic estimate (95th percentile).
-
-    Returns:
-        PERT variance estimate.
-    """
-    return ((p95 - p05) / 6.0) ** 2
+    """Compute PERT variance estimate. Delegates to ohm.pert.compute_pert_variance."""
+    return _compute_pert_variance(p05, p95)
 
 
 def compute_voi(
