@@ -8,6 +8,7 @@ from ohm.validation import (
     validate_timestamp,
     validate_confidence,
     validate_depth,
+    validate_pert_triple,
 )
 
 

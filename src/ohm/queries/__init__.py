@@ -884,13 +884,17 @@ def create_edge(
     import json
 
     from ohm.schema import validate_edge_type, VALID_URGENCY
-    from ohm.validation import validate_confidence
+    from ohm.validation import validate_confidence, validate_pert_triple
 
     if not validate_edge_type(layer, edge_type):
         raise ValueError(f"Invalid edge type '{edge_type}' for layer '{layer}'")
     confidence = validate_confidence(confidence)
     if urgency is not None and urgency not in VALID_URGENCY:
         raise ValueError(f"Invalid urgency: {urgency}. Must be one of: {sorted(VALID_URGENCY)}")
+
+    # Validate PERT three-point estimates (ADR-013)
+    validate_pert_triple(probability_p05, probability_p50, probability_p95, name="probability PERT")
+    validate_pert_triple(confidence_p05, confidence_p50, confidence_p95, name="confidence PERT")
 
     edge_id = str(uuid.uuid4())
     metadata_json = json.dumps(metadata) if metadata else None

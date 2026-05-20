@@ -1181,22 +1181,21 @@ def compound_confidence(
         else:
             result = max(c for c, _ in weighted_confidences)
     elif correlation <= 0.0:
-        # Independent: compound multiplicatively with weights.
-        # For weighted geometric mean: P(at least one from source i) = 1 - (1-p_i)^w_i
-        # Combined: 1 - Π(1 - p_i)^w_i
+        # Independent: compound multiplicatively with linear weight scaling.
+        # Correct formula: P(combined) = 1 - Π(1 - w_i * c_i)
+        # Weight scales confidence linearly: w*c represents evidence contribution.
+        # Clamp w*c to [0, 1] to avoid negative survival probabilities.
         product = 1.0
         for c, w in weighted_confidences:
-            # (1-p)^w using exp to avoid overflow: exp(w * ln(1-p))
-            if c < 1.0:
-                product *= (1.0 - c) ** w
-            # if c == 1.0, (1-1)^w = 0, product stays 0
+            effective = min(1.0, w * c)  # Clamp to avoid negative probabilities
+            product *= (1.0 - effective)
         result = round(1.0 - product, 4)
     else:
         # Interpolate between independent and correlated
         product = 1.0
         for c, w in weighted_confidences:
-            if c < 1.0:
-                product *= (1.0 - c) ** w
+            effective = min(1.0, w * c)  # Clamp to avoid negative probabilities
+            product *= (1.0 - effective)
         independent = 1.0 - product
         if use_weighting:
             correlated = max(c * w for c, w in weighted_confidences)

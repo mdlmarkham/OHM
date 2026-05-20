@@ -966,19 +966,18 @@ class TestMedicalDiagnosis:
         """Reliable sources count more when source_weights provided."""
         from ohm.methods import compound_confidence
 
-        # Two observations with equal confidence
+        # Two observations with equal confidence (0.8)
         obs = [
             {"confidence": 0.8, "source": "reliable_agent"},
             {"confidence": 0.8, "source": "unreliable_agent"},
         ]
-        # Reliable (0.9) counts 1.8x more than unknown (0.5)
+        # Reliable (0.9) and unreliable (0.5)
         weights = {"reliable_agent": 0.9, "unreliable_agent": 0.5}
 
         result = compound_confidence(obs, correlation=0.0, source_weights=weights)
-        # Independent compound with weights:
-        # P = 1 - (1-0.8)^0.9 * (1-0.8)^0.5 = 1 - (0.2^0.9 * 0.2^0.5)
-        # = 1 - (0.2^1.4) = 1 - 0.0084 = 0.9916
-        assert result["compound_confidence"] > 0.8
+        # Correct formula: P = 1 - Π(1 - w_i * c_i)
+        # = 1 - (1 - 0.9*0.8)(1 - 0.5*0.8) = 1 - (1-0.72)(1-0.4) = 1 - 0.28*0.6 = 1 - 0.168 = 0.832
+        assert result["compound_confidence"] == 0.832
         assert result["weighted"] is True
         assert result["observation_count"] == 2
 
@@ -991,8 +990,8 @@ class TestMedicalDiagnosis:
 
         result = compound_confidence(obs, correlation=0.0, source_weights=weights)
         assert result["weighted"] is True
-        # With default 0.5 weight: P = 1 - (1-0.8)^0.5 = 1 - 0.2^0.5 = 1 - 0.447 = 0.553
-        assert 0.5 < result["compound_confidence"] < 0.8
+        # With default 0.5 weight: P = 1 - (1 - 0.5*0.8) = 1 - 0.6 = 0.4
+        assert result["compound_confidence"] == 0.4
 
     def test_compound_confidence_weighted_correlated(self):
         """Source weighting works with correlated observations (max)."""
@@ -1017,6 +1016,42 @@ class TestMedicalDiagnosis:
         result = compound_confidence(obs, correlation=0.0)
         assert result["weighted"] is False
         assert result["compound_confidence"] > 0.7
+
+    def test_compound_confidence_weighted_bug_fix_example(self):
+        """Bug fix verification: two observations c=0.5, w=[0.5, 0.5] gives 0.4375 (not 0.50)."""
+        from ohm.methods import compound_confidence
+
+        obs = [
+            {"confidence": 0.5},
+            {"confidence": 0.5},
+        ]
+        weights = {"obs0": 0.5, "obs1": 0.5}
+        result = compound_confidence(obs, correlation=0.0, source_weights=weights)
+        # Correct: 1 - (1-0.5*0.5)(1-0.5*0.5) = 1 - 0.75*0.75 = 1 - 0.5625 = 0.4375
+        assert result["compound_confidence"] == 0.4375
+
+    def test_compound_confidence_equal_weights_unchanged(self):
+        """Two observations at c=0.5, w=[1.0, 1.0] gives 0.75 (backward compatible)."""
+        from ohm.methods import compound_confidence
+
+        obs = [
+            {"confidence": 0.5, "source": "obs0"},
+            {"confidence": 0.5, "source": "obs1"},
+        ]
+        weights = {"obs0": 1.0, "obs1": 1.0}
+        result = compound_confidence(obs, correlation=0.0, source_weights=weights)
+        # 1 - (1-0.5)(1-0.5) = 1 - 0.5*0.5 = 0.75
+        assert result["compound_confidence"] == 0.75
+
+    def test_compound_confidence_weight_clamped_at_one(self):
+        """Observation with w*c > 1.0 is clamped to avoid negative probabilities."""
+        from ohm.methods import compound_confidence
+
+        obs = [{"confidence": 1.0, "source": "obs0"}]
+        weights = {"obs0": 1.5}  # w*c = 1.5 > 1, should clamp
+        result = compound_confidence(obs, correlation=0.0, source_weights=weights)
+        # Clamped to 1.0: 1 - (1-1.0) = 1 - 0 = 1.0
+        assert result["compound_confidence"] == 1.0
 
 
 class TestGraphImportExport:

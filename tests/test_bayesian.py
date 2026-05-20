@@ -615,6 +615,224 @@ class TestComputeAte:
         assert "method" in result
 
 
+# ── BayesianContext Tests (OHM-5qk) ────────────────────────────────────
+
+class TestBayesianContextReuse:
+    """Test that BayesianContext methods reuse the cached network.
+
+    OHM-5qk: intervention(), ate(), and sensitivity() were calling standalone
+    functions that rebuild the network each time, defeating the purpose of
+    BayesianContext. Now they use the cached self._network directly.
+    """
+
+    @pytest.mark.skipif(
+        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
+        reason="pgmpy not available"
+    )
+    def test_intervention_reuses_cached_network(self, db):
+        """BayesianContext.intervention() should not call build_bayesian_network."""
+        from unittest.mock import patch
+        from ohm.bayesian import BayesianContext, build_bayesian_network
+
+        # Create a simple chain: A -> B -> C
+        a = create_sample_node(db, label="ctx_a")
+        b = create_sample_node(db, label="ctx_b")
+        c = create_sample_node(db, label="ctx_c")
+        for src, dst, prob in [(a, b, 0.8), (b, c, 0.7)]:
+            db.execute(
+                "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, "
+                "probability, confidence, created_by) "
+                "VALUES (?, ?, ?, 'L3', 'CAUSES', ?, 0.9, 'test')",
+                [str(uuid.uuid4()), src, dst, prob],
+            )
+
+        original_build = build_bayesian_network
+        call_count = {"count": 0}
+
+        def counting_build(*args, **kwargs):
+            call_count["count"] += 1
+            return original_build(*args, **kwargs)
+
+        with patch("ohm.bayesian.build_bayesian_network", side_effect=counting_build):
+            with BayesianContext(db, edge_types=["CAUSES"], layers=["L3"]) as ctx:
+                # Call intervention twice — should use cached network, not rebuild
+                result1 = ctx.intervention(b, 0, query_nodes=[c])
+                result2 = ctx.intervention(b, 1, query_nodes=[c])
+
+        # build_bayesian_network should be called exactly once (in __init__)
+        assert call_count["count"] == 1, (
+            f"Expected 1 call to build_bayesian_network, got {call_count['count']}"
+        )
+        assert result1["method"] == "causal_intervention"
+        assert result2["method"] == "causal_intervention"
+
+    @pytest.mark.skipif(
+        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
+        reason="pgmpy not available"
+    )
+    def test_ate_reuses_cached_network(self, db):
+        """BayesianContext.ate() should not call build_bayesian_network."""
+        from unittest.mock import patch
+        from ohm.bayesian import BayesianContext, build_bayesian_network
+
+        a = create_sample_node(db, label="ctx_ate_a")
+        b = create_sample_node(db, label="ctx_ate_b")
+        db.execute(
+            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, "
+            "probability, confidence, created_by) "
+            "VALUES (?, ?, ?, 'L3', 'CAUSES', 0.8, 0.9, 'test')",
+            [str(uuid.uuid4()), a, b],
+        )
+
+        original_build = build_bayesian_network
+        call_count = {"count": 0}
+
+        def counting_build(*args, **kwargs):
+            call_count["count"] += 1
+            return original_build(*args, **kwargs)
+
+        with patch("ohm.bayesian.build_bayesian_network", side_effect=counting_build):
+            with BayesianContext(db, edge_types=["CAUSES"], layers=["L3"]) as ctx:
+                ate = ctx.ate(a, b)
+
+        # build_bayesian_network should be called exactly once
+        assert call_count["count"] == 1, (
+            f"Expected 1 call to build_bayesian_network, got {call_count['count']}"
+        )
+        assert ate["method"] == "model_based_ate"
+        assert "ate" in ate
+
+    @pytest.mark.skipif(
+        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
+        reason="pgmpy not available"
+    )
+    def test_intervention_result_matches_standalone(self, db):
+        """BayesianContext.intervention() result should match causal_intervention()."""
+        from ohm.bayesian import BayesianContext, causal_intervention
+
+        a = create_sample_node(db, label="ctx_match_a")
+        b = create_sample_node(db, label="ctx_match_b")
+        c = create_sample_node(db, label="ctx_match_c")
+        for src, dst, prob in [(a, b, 0.8), (b, c, 0.7)]:
+            db.execute(
+                "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, "
+                "probability, confidence, created_by) "
+                "VALUES (?, ?, ?, 'L3', 'CAUSES', ?, 0.9, 'test')",
+                [str(uuid.uuid4()), src, dst, prob],
+            )
+
+        with BayesianContext(db, edge_types=["CAUSES"], layers=["L3"]) as ctx:
+            ctx_result = ctx.intervention(b, 0, query_nodes=[c])
+
+        standalone_result = causal_intervention(
+            db, b, 0, query_nodes=[c], edge_types=["CAUSES"], layers=["L3"]
+        )
+
+        # Both should return causal_intervention method
+        assert ctx_result["method"] == "causal_intervention"
+        assert standalone_result["method"] == "causal_intervention"
+
+        # Both should have same posterior keys
+        assert set(ctx_result["posterior"].keys()) == set(standalone_result["posterior"].keys())
+
+        # Posteriors should be numerically close (same graph surgery)
+        for node, post in ctx_result["posterior"].items():
+            standalone_post = standalone_result["posterior"][node]
+            assert abs(post["bad"] - standalone_post["bad"]) < 0.01
+
+    @pytest.mark.skipif(
+        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
+        reason="pgmpy not available"
+    )
+    def test_ate_result_matches_standalone(self, db):
+        """BayesianContext.ate() result should match compute_ate()."""
+        from ohm.bayesian import BayesianContext, compute_ate
+
+        a = create_sample_node(db, label="ctx_ate_match_a")
+        b = create_sample_node(db, label="ctx_ate_match_b")
+        db.execute(
+            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, "
+            "probability, confidence, created_by) "
+            "VALUES (?, ?, ?, 'L3', 'CAUSES', 0.8, 0.9, 'test')",
+            [str(uuid.uuid4()), a, b],
+        )
+
+        with BayesianContext(db, edge_types=["CAUSES"], layers=["L3"]) as ctx:
+            ctx_ate = ctx.ate(a, b)
+
+        standalone_ate = compute_ate(db, a, b, edge_types=["CAUSES"], layers=["L3"])
+
+        assert ctx_ate["method"] == "model_based_ate"
+        assert abs(ctx_ate["ate"] - standalone_ate["ate"]) < 0.01
+        assert abs(ctx_ate["risk_ratio"] - standalone_ate["risk_ratio"]) < 0.01
+
+    @pytest.mark.skipif(
+        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
+        reason="pgmpy not available"
+    )
+    def test_sensitivity_result_matches_standalone(self, db):
+        """BayesianContext.sensitivity() result should match compute_sensitivity()."""
+        from ohm.bayesian import BayesianContext, compute_sensitivity
+
+        a = create_sample_node(db, label="ctx_sens_a")
+        b = create_sample_node(db, label="ctx_sens_b")
+        db.execute(
+            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, "
+            "probability, confidence, created_by) "
+            "VALUES (?, ?, ?, 'L3', 'CAUSES', 0.8, 0.9, 'test')",
+            [str(uuid.uuid4()), a, b],
+        )
+
+        with BayesianContext(db, edge_types=["CAUSES"], layers=["L3"]) as ctx:
+            ctx_sens = ctx.sensitivity(a, b)
+
+        standalone_sens = compute_sensitivity(db, a, b, edge_types=["CAUSES"], layers=["L3"])
+
+        assert ctx_sens["method"] == "e_value_sensitivity"
+        assert abs(ctx_sens["e_value"] - standalone_sens["e_value"]) < 0.01
+
+    @pytest.mark.skipif(
+        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
+        reason="pgmpy not available"
+    )
+    def test_multiple_calls_use_same_network(self, db):
+        """Multiple intervention/ate calls should all reuse the same network."""
+        from unittest.mock import patch
+        from ohm.bayesian import BayesianContext, build_bayesian_network
+
+        a = create_sample_node(db, label="ctx_multi_a")
+        b = create_sample_node(db, label="ctx_multi_b")
+        c = create_sample_node(db, label="ctx_multi_c")
+        for src, dst, prob in [(a, b, 0.8), (b, c, 0.7)]:
+            db.execute(
+                "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, "
+                "probability, confidence, created_by) "
+                "VALUES (?, ?, ?, 'L3', 'CAUSES', ?, 0.9, 'test')",
+                [str(uuid.uuid4()), src, dst, prob],
+            )
+
+        original_build = build_bayesian_network
+        call_count = {"count": 0}
+
+        def counting_build(*args, **kwargs):
+            call_count["count"] += 1
+            return original_build(*args, **kwargs)
+
+        with patch("ohm.bayesian.build_bayesian_network", side_effect=counting_build):
+            with BayesianContext(db, edge_types=["CAUSES"], layers=["L3"]) as ctx:
+                # Make 5 calls across different methods
+                ctx.intervention(b, 0, query_nodes=[c])
+                ctx.intervention(b, 1, query_nodes=[c])
+                ctx.ate(a, c)
+                ctx.sensitivity(a, c)
+                ctx.inference(c, {b: 0})
+
+        # All 5 calls should reuse the same network built in __init__
+        assert call_count["count"] == 1, (
+            f"Expected 1 call to build_bayesian_network, got {call_count['count']}"
+        )
+
+
 # ── PERT Distribution Tests (OHM-6mv.3) ─────────────────────────────────
 
 class TestPERTMean:

@@ -71,3 +71,49 @@ def validate_depth(value: int, *, max_depth: int = 20) -> int:
             f"Invalid depth: {value} — must be between 1 and {max_depth}"
         )
     return value
+
+
+def validate_pert_triple(
+    p05: float | None,
+    p50: float | None,
+    p95: float | None,
+    *,
+    name: str = "PERT",
+) -> None:
+    """Validate PERT three-point estimation values.
+
+    Rules:
+    - If any value is provided, p50 must be provided (it's the most likely estimate)
+    - All values must be in [0, 1]
+    - p05 <= p50 <= p95 (optimistic <= most likely <= pessimistic)
+
+    Raises:
+        ValueError: If PERT values are invalid.
+    """
+    # If no values provided, nothing to validate
+    if p05 is None and p50 is None and p95 is None:
+        return
+
+    # p50 is required when any PERT value is provided
+    if p50 is None:
+        raise ValueError(
+            f"Invalid {name}: p50 is required when any PERT value is provided "
+            f"(got p05={p05}, p50={p50}, p95={p95})"
+        )
+
+    # All values must be in [0, 1]
+    for label, val in [("p05", p05), ("p50", p50), ("p95", p95)]:
+        if val is not None and not (0.0 <= val <= 1.0):
+            raise ValueError(
+                f"Invalid {name} {label}: {val} — must be between 0.0 and 1.0"
+            )
+
+    # Ordering: p05 <= p50 <= p95
+    if p05 is not None and p05 > p50:
+        raise ValueError(
+            f"Invalid {name}: p05 ({p05}) must be <= p50 ({p50})"
+        )
+    if p95 is not None and p50 > p95:
+        raise ValueError(
+            f"Invalid {name}: p50 ({p50}) must be <= p95 ({p95})"
+        )
