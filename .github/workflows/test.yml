@@ -9,6 +9,9 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     strategy:
       fail-fast: false
       matrix:
@@ -38,40 +41,26 @@ jobs:
         id: pytest
         run: |
           set +e
-          python -m pytest tests/ --tb=long --benchmark-disable -r fEsxX --maxfail=10 2>&1 | tee /tmp/pytest.log
+          python -m pytest tests/ --tb=short --benchmark-disable -q --no-header 2>&1 | tee /tmp/pytest.log
           status=${PIPESTATUS[0]}
-          echo "## pytest exit status: $status" >> "$GITHUB_STEP_SUMMARY"
-          echo '<details><summary>Last 200 lines of pytest output</summary>' >> "$GITHUB_STEP_SUMMARY"
-          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo "## pytest (Python ${{ matrix.python-version }}) exit=$status" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          tail -n 200 /tmp/pytest.log >> "$GITHUB_STEP_SUMMARY"
+          tail -n 100 /tmp/pytest.log >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo '</details>' >> "$GITHUB_STEP_SUMMARY"
           exit $status
 
-      - name: Post pytest tail as PR comment on failure
-        if: failure() && github.event_name == 'pull_request'
+      - name: Push failure log to debug branch
+        if: failure()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PY_VERSION: ${{ matrix.python-version }}
-          REPO: ${{ github.repository }}
         run: |
-          {
-            echo "### pytest failure on Python ${PY_VERSION}"
-            echo ""
-            echo "<details><summary>Last 300 lines of pytest output</summary>"
-            echo ""
-            echo '```'
-            tail -n 300 /tmp/pytest.log
-            echo '```'
-            echo "</details>"
-          } > /tmp/comment.md
-          jq -Rs '{body: .}' < /tmp/comment.md > /tmp/comment.json
-          curl -sS -X POST \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            -H "Content-Type: application/json" \
-            --data @/tmp/comment.json \
-            "https://api.github.com/repos/${REPO}/issues/${PR_NUMBER}/comments" \
-            -o /tmp/comment-response.json -w "HTTP %{http_code}\n"
+          BRANCH="ci-debug/py${{ matrix.python-version }}-$(date +%Y%m%d-%H%M%S)"
+          git config user.email "ci@github.com"
+          git config user.name "CI Debug"
+          git checkout -b "$BRANCH"
+          cp /tmp/pytest.log ci-pytest-failure.log
+          git add ci-pytest-failure.log
+          git commit -m "ci: pytest failure log Python ${{ matrix.python-version }}"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+          git push origin "$BRANCH"
+          echo "Debug log pushed to branch: $BRANCH" >> "$GITHUB_STEP_SUMMARY"
