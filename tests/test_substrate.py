@@ -496,6 +496,8 @@ class TestConfidenceCalibration:
             assert result["total_l3_l4_edges"] >= 2
             assert "calibration_by_band" in result
             assert "calibration_score" in result
+            assert "global_challenge_rate" in result
+            assert "base_rate_adjusted" in result
 
     def test_calibration_unregistered(self, tmp_path):
         db = str(tmp_path / "cal_empty.duckdb")
@@ -503,6 +505,60 @@ class TestConfidenceCalibration:
             result = g.calibration("unknown")
             assert result["total_l3_l4_edges"] == 0
             assert result["calibration_score"] is None
+
+    def test_calibration_with_base_rate(self, tmp_path):
+        """OHM-gfh: Calibration accounts for global challenge rate.
+
+        In a low-activity graph with few challenges, the expected rate
+        should be scaled down so agents aren't penalized for having
+        few challenges.
+        """
+        db = str(tmp_path / "cal_base_rate.duckdb")
+        with connect(db, actor="metis") as g:
+            g.register_agent(values=["wisdom"])
+            # Create several edges with high confidence
+            for i in range(5):
+                a = g.create_node(label=f"cause_{i}", node_type="concept")
+                b = g.create_node(label=f"effect_{i}", node_type="concept")
+                g.create_edge(from_node=a["id"], to_node=b["id"],
+                              edge_type="CAUSES", layer="L3", confidence=0.9)
+
+            result = g.calibration("metis")
+            # Global challenge rate should be 0 (no challenges)
+            assert result["global_challenge_rate"] == 0.0
+            # Base rate adjustment should be True (edges exist)
+            assert result["base_rate_adjusted"] is True
+            # With no challenges, expected rates should be near 0
+            for band in result["calibration_by_band"]:
+                if band["total_edges"] > 0:
+                    assert band["expected_rate"] == 0.0
+
+    def test_calibration_high_activity(self, tmp_path):
+        """OHM-gfh: In a high-activity graph, expected rates scale up."""
+        db = str(tmp_path / "cal_high_activity.duckdb")
+        with connect(db, actor="metis") as g:
+            g.register_agent(values=["wisdom"])
+            # Create many edges with varying confidence
+            for i in range(10):
+                a = g.create_node(label=f"cause_{i}", node_type="concept")
+                b = g.create_node(label=f"effect_{i}", node_type="concept")
+                conf = 0.3 + (i * 0.07)  # 0.3 to 0.93
+                g.create_edge(from_node=a["id"], to_node=b["id"],
+                              edge_type="CAUSES", layer="L3", confidence=conf)
+
+            result = g.calibration("metis")
+            assert result["global_challenge_rate"] == 0.0
+            assert result["total_l3_l4_edges"] == 10
+
+    def test_calibration_empty_graph(self, tmp_path):
+        """OHM-gfh: Empty graph returns None calibration score."""
+        db = str(tmp_path / "cal_empty_graph.duckdb")
+        with connect(db, actor="metis") as g:
+            g.register_agent(values=["wisdom"])
+            result = g.calibration("metis")
+            assert result["total_l3_l4_edges"] == 0
+            assert result["calibration_score"] is None
+            assert result["global_challenge_rate"] == 0.0
 
 
 # ===== Connection Discovery =====

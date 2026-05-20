@@ -607,6 +607,10 @@ def compute_confidence_calibration(
     An overconfident agent has high-confidence edges challenged frequently.
     An underconfident agent has low-confidence edges that hold up well.
 
+    Normalizes expected challenge rates by the global challenge rate across
+    all agents, so agents in low-activity graphs aren't penalized for having
+    few challenges.
+
     Same result regardless of which agent calls it — substrate method.
 
     Args:
@@ -614,9 +618,32 @@ def compute_confidence_calibration(
 
     Returns:
         Dict with: agent_name, total_edges, calibration_by_band,
-        overall_calibration_score (0-1, 1 = perfectly calibrated).
+        overall_calibration_score (0-1, 1 = perfectly calibrated),
+        global_challenge_rate, base_rate_adjusted.
     """
-    # Count edges by confidence band
+    # Count total L3/L4 edges globally (for base rate normalization)
+    global_total_row = conn.execute(
+        "SELECT COUNT(*) FROM ohm_edges WHERE layer IN ('L3', 'L4') AND deleted_at IS NULL"
+    ).fetchone()
+    global_total_edges = global_total_row[0] if global_total_row else 0
+
+    # Count globally challenged edges (edges with a CHALLENGED_BY edge pointing to them)
+    global_challenged_row = conn.execute(
+        """
+        SELECT COUNT(DISTINCT e.id)
+        FROM ohm_edges c
+        JOIN ohm_edges e ON c.challenge_of = e.id
+        WHERE c.challenge_type = 'CHALLENGED_BY'
+          AND e.layer IN ('L3', 'L4')
+          AND e.deleted_at IS NULL
+        """
+    ).fetchone()
+    global_challenged_edges = global_challenged_row[0] if global_challenged_row else 0
+
+    # Global challenge rate: what fraction of all L3/L4 edges are challenged?
+    global_challenge_rate = global_challenged_edges / max(global_total_edges, 1)
+
+    # Count edges by confidence band for this agent
     bands = conn.execute(
         """
         SELECT
@@ -652,20 +679,35 @@ def compute_confidence_calibration(
 
     total_edges = sum(b[1] for b in bands)
 
+    # Band midpoints for expected rate calculation
+    band_midpoints = {
+        "0.9-1.0": 0.95, "0.7-0.9": 0.8, "0.5-0.7": 0.6,
+        "0.3-0.5": 0.4, "0.0-0.3": 0.15,
+    }
+
     # Calibration score: higher-confidence bands should have LOWER challenge rates
-    # Perfect calibration: challenge_rate inversely proportional to confidence
+    # Normalize expected rates by global challenge rate to account for graph activity
+    # Base rate assumption: a perfectly calibrated agent at 50% confidence would
+    # have a challenge rate equal to the global rate.
+    # Scale factor: global_rate / 0.5 (since 1 - 0.5 = 0.5 is the midpoint expected rate)
+    # When global rate is 0 (no challenges anywhere), expected rate is 0 for all bands
+    scale_factor = global_challenge_rate / 0.5 if global_challenge_rate > 0 else 0.0
+
     calibration_by_band = []
     weighted_error = 0.0
     total_weight = 0.0
 
     for band_name, total, challenged_in_band in bands:
         challenge_rate = challenged_in_band / max(total, 1)
-        # Expected challenge rate for this band (inverse of midpoint)
-        band_midpoint = {
-            "0.9-1.0": 0.95, "0.7-0.9": 0.8, "0.5-0.7": 0.6,
-            "0.3-0.5": 0.4, "0.0-0.3": 0.15,
-        }.get(band_name, 0.5)
-        expected_rate = 1.0 - band_midpoint  # High confidence → low expected challenge rate
+        band_midpoint = band_midpoints.get(band_name, 0.5)
+
+        # Expected challenge rate: (1 - midpoint) scaled by global activity
+        # High confidence → low expected challenge rate
+        # Low confidence → high expected challenge rate
+        # Scaled by global_challenge_rate / 0.5 to normalize for graph activity
+        expected_rate = (1.0 - band_midpoint) * scale_factor
+        # Clamp to [0, 1]
+        expected_rate = min(1.0, max(0.0, expected_rate))
 
         calibration_by_band.append({
             "band": band_name,
@@ -687,6 +729,8 @@ def compute_confidence_calibration(
         "total_l3_l4_edges": total_edges,
         "challenged_edges": challenged_edges,
         "overall_challenge_rate": round(challenged_edges / max(total_edges, 1), 4),
+        "global_challenge_rate": round(global_challenge_rate, 4),
+        "base_rate_adjusted": global_total_edges > 0,
         "calibration_by_band": calibration_by_band,
         "calibration_score": calibration_score,
         "interpretation": (

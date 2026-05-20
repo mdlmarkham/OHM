@@ -579,7 +579,7 @@ class TestProbabilityCascade:
 
     def test_cascade_scenario_downstream(self, test_db):
         """Cascade scenario computes downstream failure probabilities."""
-        from ohm.queries import create_node, create_edge, query_cascade_scenario
+        from ohm.queries import create_node, create_edge, query_deterministic_cascade
 
         # Build a supply chain: supplier → factory → distributor → retailer
         supplier = create_node(test_db, label="Supplier", node_type="system", created_by="test_agent")
@@ -601,7 +601,7 @@ class TestProbabilityCascade:
                      created_by="test_agent", confidence=0.8)
 
         # Start cascade from supplier with 100% failure
-        results = query_cascade_scenario(test_db, supplier["id"], failure_probability=1.0)
+        results = query_deterministic_cascade(test_db, supplier["id"], failure_probability=1.0)
 
         assert len(results) >= 3  # factory, distributor, retailer
 
@@ -617,7 +617,7 @@ class TestProbabilityCascade:
 
     def test_cascade_scenario_uses_confidence_when_no_probability(self, test_db):
         """When probability is None, cascade uses confidence as fallback."""
-        from ohm.queries import create_node, create_edge, query_cascade_scenario
+        from ohm.queries import create_node, create_edge, query_deterministic_cascade
 
         a = create_node(test_db, label="A", node_type="concept", created_by="test_agent")
         b = create_node(test_db, label="B", node_type="concept", created_by="test_agent")
@@ -627,14 +627,14 @@ class TestProbabilityCascade:
                      layer="L3", edge_type="CAUSES",
                      created_by="test_agent", confidence=0.6)
 
-        results = query_cascade_scenario(test_db, a["id"], failure_probability=1.0)
+        results = query_deterministic_cascade(test_db, a["id"], failure_probability=1.0)
 
         assert len(results) == 1
         assert results[0]["failure_probability"] == pytest.approx(0.6)
 
     def test_cascade_scenario_max_depth(self, test_db):
         """Cascade respects max_depth limit."""
-        from ohm.queries import create_node, create_edge, query_cascade_scenario
+        from ohm.queries import create_node, create_edge, query_deterministic_cascade
 
         # Build a chain of 5 nodes
         nodes = []
@@ -648,18 +648,18 @@ class TestProbabilityCascade:
                          created_by="test_agent", confidence=0.5)
 
         # With max_depth=2, should only reach 2 hops
-        results = query_cascade_scenario(test_db, nodes[0]["id"], failure_probability=1.0, max_depth=2)
+        results = query_deterministic_cascade(test_db, nodes[0]["id"], failure_probability=1.0, max_depth=2)
 
         assert len(results) == 2  # nodes 1 and 2 only
         assert all(r["depth"] <= 2 for r in results)
 
     def test_cascade_scenario_no_downstream(self, test_db):
         """Cascade from a leaf node returns empty."""
-        from ohm.queries import create_node, query_cascade_scenario
+        from ohm.queries import create_node, query_deterministic_cascade
 
         leaf = create_node(test_db, label="Leaf", node_type="concept", created_by="test_agent")
 
-        results = query_cascade_scenario(test_db, leaf["id"], failure_probability=1.0)
+        results = query_deterministic_cascade(test_db, leaf["id"], failure_probability=1.0)
 
         assert len(results) == 0
 
@@ -696,7 +696,7 @@ class TestProbabilityCascade:
 
     def test_cascade_scenario_path_tracking(self, test_db):
         """Cascade results include the path chain to each node."""
-        from ohm.queries import create_node, create_edge, query_cascade_scenario
+        from ohm.queries import create_node, create_edge, query_deterministic_cascade
 
         a = create_node(test_db, label="A", node_type="concept", created_by="test_agent")
         b = create_node(test_db, label="B", node_type="concept", created_by="test_agent")
@@ -709,7 +709,7 @@ class TestProbabilityCascade:
                      layer="L3", edge_type="CAUSES",
                      created_by="test_agent", confidence=0.5)
 
-        results = query_cascade_scenario(test_db, a["id"], failure_probability=1.0)
+        results = query_deterministic_cascade(test_db, a["id"], failure_probability=1.0)
 
         # Node C should have path [a, b, c]
         c_result = next(r for r in results if r["node_id"] == c["id"])

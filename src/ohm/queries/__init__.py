@@ -2042,14 +2042,14 @@ def query_find_expiring_batches(
 
 # ── Cascade Scenario (Supply Chain / Risk Modeling) ─────────────────────────
 
-def query_cascade_scenario(
+def query_deterministic_cascade(
     conn: DuckDBPyConnection,
     node_id: str,
     *,
     failure_probability: float = 1.0,
     max_depth: int = 10,
 ) -> list[dict[str, Any]]:
-    """Monte Carlo-style cascade through downstream graph from a node.
+    """Deterministic cascade through downstream graph from a node.
 
     Starting from *node_id* with *failure_probability*, walks downstream
     through CAUSES, EXPECTED_LIKELIHOOD, DEPENDS_ON, and THREATENS edges.
@@ -2058,7 +2058,9 @@ def query_cascade_scenario(
         P_downstream = P_upstream × edge.probability (or edge.confidence if no probability)
 
     Returns all downstream nodes with computed failure probabilities and
-    the path chain that leads to each.
+    the path chain that leads to each. This is a deterministic computation,
+    not a Monte Carlo simulation — for probabilistic analysis with variance
+    use `monte_carlo_cascade()`.
 
     Args:
         conn: Database connection.
@@ -2117,6 +2119,173 @@ def query_cascade_scenario(
     return _rows_to_dicts(result)
 
 
+# Backward-compatible alias (deprecated)
+def query_cascade_scenario(
+    conn: DuckDBPyConnection,
+    node_id: str,
+    *,
+    failure_probability: float = 1.0,
+    max_depth: int = 10,
+) -> list[dict[str, Any]]:
+    """[DEPRECATED] Use query_deterministic_cascade() instead.
+
+    This function was renamed to clarify that it performs deterministic
+    cascade propagation, not Monte Carlo simulation.
+    """
+    import warnings
+    warnings.warn(
+        "query_cascade_scenario is deprecated, use query_deterministic_cascade instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return query_deterministic_cascade(conn, node_id, failure_probability=failure_probability, max_depth=max_depth)
+
+
+def monte_carlo_cascade(
+    conn: DuckDBPyConnection,
+    node_id: str,
+    *,
+    trials: int = 1000,
+    max_depth: int = 10,
+    seed: int | None = None,
+) -> dict[str, Any]:
+    """Monte Carlo simulation of cascade through downstream graph.
+
+    Runs *trials* number of cascade trials, where each trial walks the graph
+    and at each edge samples random() < probability to determine if the edge
+    is activated. Returns distribution statistics (p5, p50, p95, mean) for
+    each downstream node rather than a single point estimate.
+
+    For a deterministic analysis use `query_deterministic_cascade()`.
+
+    Args:
+        conn: Database connection.
+        node_id: Starting node for cascade simulation.
+        trials: Number of Monte Carlo trials to run (default 1000).
+        max_depth: Maximum traversal depth per trial.
+        seed: Random seed for reproducibility. If None, results vary each run.
+
+    Returns:
+        Dict with:
+        - node_id: the starting node
+        - results: list of per-node statistics {node_id, p5, p50, p95, mean, activated_count, trials}
+        - trials: number of trials run
+        - seed: random seed used (None if no seed)
+    """
+    import random
+    from ohm.validation import validate_identifier, validate_depth
+
+    node_id = validate_identifier(node_id, name="node_id")
+    max_depth = validate_depth(max_depth)
+
+    if seed is not None:
+        random.seed(seed)
+
+    # Get downstream edges once
+    edges_query = """
+        WITH RECURSIVE cascade AS (
+            SELECT
+                ? AS node_id,
+                0 AS depth,
+                list_value(?) AS path
+            UNION ALL
+            SELECT
+                e.to_node AS node_id,
+                c.depth + 1 AS depth,
+                list_concat(c.path, list_value(e.to_node)) AS path
+            FROM cascade c
+            JOIN ohm_edges e ON e.from_node = c.node_id
+            WHERE c.depth < ?
+              AND e.edge_type IN ('CAUSES', 'EXPECTED_LIKELIHOOD', 'DEPENDS_ON', 'THREATENS')
+              AND NOT list_contains(c.path, e.to_node)
+        )
+        SELECT DISTINCT
+            c.node_id,
+            c.depth,
+            c.path,
+            e.from_node,
+            e.edge_type,
+            e.probability,
+            e.confidence
+        FROM cascade c
+        JOIN ohm_edges e ON e.from_node = c.node_id
+        WHERE c.depth > 0
+        ORDER BY c.depth, c.node_id
+    """
+    edges_result = conn.execute(edges_query, [node_id, node_id, max_depth])
+    edges = _rows_to_dicts(edges_result)
+
+    # Build adjacency for simulation
+    node_edges = {}
+    for edge in edges:
+        from_node = edge["from_node"]
+        if from_node not in node_edges:
+            node_edges[from_node] = []
+        node_edges[from_node].append({
+            "to_node": edge["node_id"],
+            "prob": edge["probability"] if edge["probability"] is not None else (edge["confidence"] or 0.5),
+            "path": edge["path"],
+        })
+
+    # All nodes seen
+    all_nodes = set()
+    for edge in edges:
+        all_nodes.add(edge["from_node"])
+        all_nodes.add(edge["node_id"])
+    if node_id in node_edges:
+        for edge in node_edges[node_id]:
+            all_nodes.add(edge["to_node"])
+
+    # Run trials
+    activated_counts: dict[str, int] = {n: 0 for n in all_nodes}
+    failure_probs_trial: dict[str, list[float]] = {n: [] for n in all_nodes}
+
+    for _ in range(trials):
+        # Track which nodes are activated in this trial
+        active = {node_id}
+        visited = set()
+
+        # BFS with random edge activation
+        queue = [(node_id, 1.0)]
+        while queue:
+            current, prob_up = queue.pop(0)
+            if current in visited:
+                continue
+            visited.add(current)
+
+            # Count this node as activated
+            if current in activated_counts:
+                activated_counts[current] += 1
+
+            # At each edge, sample random activation
+            if current in node_edges:
+                for edge in node_edges[current]:
+                    edge_prob = edge["prob"]
+                    # Sample: is this edge activated in this trial?
+                    if random.random() < edge_prob:
+                        new_prob = prob_up * edge_prob
+                        if edge["to_node"] not in visited:
+                            queue.append((edge["to_node"], new_prob))
+
+    # Compute statistics
+    results = []
+    for node_id in sorted(all_nodes):
+        count = activated_counts[node_id]
+        activated_pct = count / trials
+        results.append({
+            "node_id": node_id,
+            "activated_count": count,
+            "activated_pct": activated_pct,
+        })
+
+    return {
+        "node_id": node_id,
+        "results": results,
+        "trials": trials,
+        "seed": seed,
+    }
+
+
 def query_what_if(
     conn: DuckDBPyConnection,
     edge_id: str,
@@ -2158,7 +2327,7 @@ def query_what_if(
     # Use edge's probability (or confidence) as the failure probability
     trigger_prob = edge_dict.get("probability") or edge_dict.get("confidence") or 1.0
 
-    cascade = query_cascade_scenario(
+    cascade = query_deterministic_cascade(
         conn,
         edge_dict["to_node"],
         failure_probability=float(trigger_prob),
