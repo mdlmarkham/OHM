@@ -361,6 +361,31 @@ def build_parser() -> argparse.ArgumentParser:
         help="Minimum observations needed (default: 3)",
     )
 
+    # graph voi
+    voi_parser = graph_sub.add_parser(
+        "voi", help="Value of Information: rank nodes by research priority",
+    )
+    voi_parser.add_argument(
+        "--decision", default=None,
+        help="Comma-separated decision node IDs (auto-detects if omitted)",
+    )
+    voi_parser.add_argument(
+        "--top", type=int, default=10,
+        help="Maximum results to return (default: 10)",
+    )
+    voi_parser.add_argument(
+        "--layers", default=None,
+        help="Comma-separated layer filter (e.g. L3,L4)",
+    )
+    voi_parser.add_argument(
+        "--leak", type=float, default=0.15,
+        help="Leak probability for Bayesian network (default: 0.15)",
+    )
+    voi_parser.add_argument(
+        "--root-prior", type=float, default=0.3,
+        help="Default prior for root nodes (default: 0.3)",
+    )
+
     # ── state ────────────────────────────────────────────────────────────
     state_parser = subparsers.add_parser("state", help="Hive mind awareness")
     state_sub = state_parser.add_subparsers(dest="state_command", help="State commands")
@@ -615,6 +640,8 @@ def _handle_graph(args: argparse.Namespace) -> None:
         _handle_source_reliability(args)
     elif cmd == "trend":
         _handle_trend(args)
+    elif cmd == "voi":
+        _handle_voi(args)
     else:
         print(f"Unknown graph command: {cmd}")
 
@@ -1508,6 +1535,48 @@ def _handle_trend(args: argparse.Namespace) -> None:
             print(f"  R-squared:  {result['r_squared']}")
             print(f"  Obs count:  {result['observation_count']} "
                   f"(window: {result['window_days']}d)")
+    finally:
+        conn.close()
+
+
+def _handle_voi(args: argparse.Namespace) -> None:
+    """Value of Information: rank nodes by research priority."""
+    from ohm.bayesian import compute_voi
+
+    conn = _get_db(args)
+    try:
+        decision_nodes = None
+        if args.decision:
+            decision_nodes = [d.strip() for d in args.decision.split(",") if d.strip()]
+        layers = None
+        if args.layers:
+            layers = [l.strip() for l in args.layers.split(",") if l.strip()]
+        result = compute_voi(
+            conn,
+            decision_nodes=decision_nodes,
+            layers=layers,
+            top=args.top,
+            leak_probability=args.leak,
+            root_prior=args.root_prior,
+        )
+        if args.format == "json":
+            import json
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            print("── Value of Information ──")
+            rankings = result.get("rankings", [])
+            if not rankings:
+                print("  No actionable VoI results found.")
+            else:
+                for i, entry in enumerate(rankings, 1):
+                    node_id = entry.get("node_id", "?")
+                    voi = entry.get("voi", 0)
+                    uncertainty = entry.get("uncertainty", 0)
+                    sensitivity = entry.get("sensitivity", 0)
+                    print(f"  {i}. {node_id}: VoI={voi:.4f} "
+                          f"(uncertainty={uncertainty:.4f}, sensitivity={sensitivity:.4f})")
+            if result.get("decision_nodes"):
+                print(f"  Decision nodes: {', '.join(result['decision_nodes'])}")
     finally:
         conn.close()
 

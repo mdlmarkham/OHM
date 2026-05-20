@@ -1108,12 +1108,18 @@ def compound_confidence(
     observations: list[dict[str, Any]],
     *,
     correlation: float = 0.0,
+    source_weights: dict[str, float] | None = None,
 ) -> dict[str, Any]:
-    """Combine multiple confidence values accounting for correlation.
+    """Combine multiple confidence values accounting for correlation and source reliability.
 
     When observations are independent (correlation=0.0), confidences compound
     multiplicatively: P(all) = 1 - Π(1 - p_i). When perfectly correlated
     (correlation=1.0), only the strongest evidence matters: result = max(p_i).
+
+    When source_weights is provided, observations from reliable sources count
+    more. An observation with weight w contributes w times its confidence to
+    the compound probability. Weights are normalized so they sum to the number
+    of observations (maintaining backward compatibility).
 
     This is critical for medical diagnosis where two findings from the same
     modality (e.g., two blood tests from the same lab) are correlated and
@@ -1122,13 +1128,17 @@ def compound_confidence(
 
     Args:
         observations: List of dicts with 'confidence' key (0-1).
-            May also include 'source' or 'modality' for grouping.
+            May also include 'source' for source reliability weighting.
         correlation: 0.0 = independent (geometric compounding),
             1.0 = perfectly correlated (use max only).
             Values between interpolate between the two extremes.
+        source_weights: Optional dict mapping source_agent -> reliability
+            weight (e.g., {"agent_a": 0.9, "agent_b": 0.5}). Default weight
+            is 0.5 for unknown sources. Higher weights = more influence.
 
     Returns:
-        Dict with compound_confidence, method, correlation, observation_count.
+        Dict with compound_confidence, method, correlation, observation_count,
+        and weighted (bool — True when source_weights was used).
     """
     if not observations:
         return {
@@ -1136,42 +1146,62 @@ def compound_confidence(
             "method": "compound",
             "correlation": correlation,
             "observation_count": 0,
+            "weighted": source_weights is not None,
         }
 
     # Clamp correlation to [0, 1]
     correlation = max(0.0, min(1.0, correlation))
-    # Coerce confidence values to float (handles string values from API)
-    confidences = []
+    # Default weight for unknown sources
+    default_weight = 0.5
+    use_weighting = source_weights is not None
+
+    # Build list of (confidence, weight) tuples
+    weighted_confidences: list[tuple[float, float]] = []
     for obs in observations:
         c = obs.get("confidence", 0.0)
         try:
             c = float(c)
         except (TypeError, ValueError):
             c = 0.0
-        confidences.append(max(0.0, min(1.0, c)))
+        c = max(0.0, min(1.0, c))
 
-    n = len(confidences)
+        if use_weighting:
+            source = obs.get("source") or obs.get("created_by") or "_unknown_"
+            w = source_weights.get(source, default_weight)
+            weighted_confidences.append((c, w))
+        else:
+            weighted_confidences.append((c, 1.0))
+
+    n = len(weighted_confidences)
 
     if correlation >= 1.0:
-        # Perfectly correlated: use maximum only
-        result = max(confidences)
+        # Perfectly correlated: use maximum only (weighted by source)
+        if use_weighting:
+            result = max(c * w for c, w in weighted_confidences)
+        else:
+            result = max(c for c, _ in weighted_confidences)
     elif correlation <= 0.0:
-        # Independent: compound multiplicatively
-        # P(at least one) = 1 - Π(1 - p_i)
+        # Independent: compound multiplicatively with weights.
+        # For weighted geometric mean: P(at least one from source i) = 1 - (1-p_i)^w_i
+        # Combined: 1 - Π(1 - p_i)^w_i
         product = 1.0
-        for c in confidences:
-            product *= (1.0 - c)
+        for c, w in weighted_confidences:
+            # (1-p)^w using exp to avoid overflow: exp(w * ln(1-p))
+            if c < 1.0:
+                product *= (1.0 - c) ** w
+            # if c == 1.0, (1-1)^w = 0, product stays 0
         result = round(1.0 - product, 4)
     else:
         # Interpolate between independent and correlated
-        # independent_result = 1 - Π(1 - p_i)
-        # correlated_result = max(p_i)
-        # blended = correlated * correlation + independent * (1 - correlation)
         product = 1.0
-        for c in confidences:
-            product *= (1.0 - c)
+        for c, w in weighted_confidences:
+            if c < 1.0:
+                product *= (1.0 - c) ** w
         independent = 1.0 - product
-        correlated = max(confidences)
+        if use_weighting:
+            correlated = max(c * w for c, w in weighted_confidences)
+        else:
+            correlated = max(c for c, _ in weighted_confidences)
         result = round(correlated * correlation + independent * (1.0 - correlation), 4)
 
     return {
@@ -1179,6 +1209,7 @@ def compound_confidence(
         "method": "compound",
         "correlation": correlation,
         "observation_count": n,
+        "weighted": use_weighting,
     }
 
 

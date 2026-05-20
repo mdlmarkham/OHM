@@ -20,6 +20,7 @@ from ohm.bayesian import (
     _find_acyclic_subgraph,
     pert_mean,
     pert_variance,
+    compute_voi,
 )
 from tests.conftest import create_test_db, create_sample_node, create_sample_edge
 

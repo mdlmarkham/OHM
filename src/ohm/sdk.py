@@ -1157,8 +1157,13 @@ class Graph:
         observations: list[dict[str, Any]],
         *,
         correlation: float = 0.0,
+        source_weights: dict[str, float] | None = None,
     ) -> dict[str, Any]:
-        """Combine multiple confidence values accounting for correlation.
+        """Combine multiple confidence values accounting for correlation and source reliability.
+
+        When source_weights is provided, observations from reliable sources (higher
+        p_accurate) count more. An observation from a reliable source (0.9) counts
+        1.8× more than one from an unknown source (0.5).
 
         When observations are independent (correlation=0.0), confidences compound
         multiplicatively. When perfectly correlated (correlation=1.0), only the
@@ -1170,14 +1175,18 @@ class Graph:
 
         Args:
             observations: List of dicts with 'confidence' key (0-1).
+                May also include 'source' or 'created_by' for weighting.
             correlation: 0.0 = independent, 1.0 = perfectly correlated.
+            source_weights: Optional dict mapping source -> reliability weight.
+                E.g., {"agent_a": 0.9, "agent_b": 0.5}. Default weight=0.5.
 
         Returns:
-            Dict with compound_confidence, method, correlation, observation_count.
+            Dict with compound_confidence, method, correlation, observation_count,
+            weighted (bool).
         """
         from ohm.methods import compound_confidence as _cc
 
-        return _cc(observations, correlation=correlation)
+        return _cc(observations, correlation=correlation, source_weights=source_weights)
 
     def heartbeat(self, *, focus: str | None = None) -> dict[str, Any]:
         """Send an agent heartbeat. Updates last-seen timestamp.
@@ -2784,8 +2793,13 @@ def connect_http(
             observations: list[dict],
             *,
             correlation: float = 0.0,
+            source_weights: dict[str, float] | None = None,
         ) -> dict[str, Any]:
-            """Combine multiple confidence values accounting for correlation.
+            """Combine multiple confidence values accounting for correlation and source reliability.
+
+            When source_weights is provided, observations from reliable sources (higher
+            p_accurate) count more. An observation from a reliable source (0.9) counts
+            1.8× more than one from an unknown source (0.5).
 
             Computed client-side from observation dicts.
             When observations are independent (correlation=0.0), confidences compound
@@ -2793,13 +2807,17 @@ def connect_http(
 
             Args:
                 observations: List of dicts with 'confidence' key (0-1).
+                    May also include 'source' or 'created_by' for weighting.
                 correlation: 0.0 = independent, 1.0 = perfectly correlated.
+                source_weights: Optional dict mapping source -> reliability weight.
+                    E.g., {"agent_a": 0.9, "agent_b": 0.5}. Default weight=0.5.
 
             Returns:
-                Dict with compound_confidence, method, correlation, observation_count.
+                Dict with compound_confidence, method, correlation, observation_count,
+                weighted (bool).
             """
             from ohm.methods import compound_confidence as _cc
-            return _cc(observations, correlation=correlation)
+            return _cc(observations, correlation=correlation, source_weights=source_weights)
 
         def record_outcome(
             self,

@@ -806,6 +806,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "/ate": {"method": "GET", "description": "Average Treatment Effect: model-based ATE from noisy-OR CPDs (ATE = P(effect=bad|do(cause=bad)) - P(effect=bad|do(cause=good))). ?layers=L3,L4 to scope by layer"},
                     "/sensitivity": {"method": "GET", "description": "Sensitivity analysis: E-value quantifying how much unmeasured confounding would overturn a causal conclusion. ?layers=L3,L4 to scope by layer"},
                     "/adjustment": {"method": "GET", "description": "Find valid backdoor/frontdoor adjustment sets for causal identification (Pearl's criteria). ?layers=L3,L4 to scope by layer"},
+                    "/voi": {"method": "GET", "description": "Value of Information: rank nodes by research priority (uncertainty × sensitivity to decision). ?decision=node1,node2&top=10&layers=L3,L4"},
                     "/suggest_causes": {"method": "GET", "description": "Suggest candidate CAUSES edges from existing non-causal relationships (DEPENDS_ON, APPLIES_TO, etc.)"},
                     "/deduplicate": {"method": "POST", "description": "Remove duplicate edges (same from→to, type, layer), keeping the most recent"},
                     "/refute": {"method": "GET", "description": "Test robustness of causal conclusions using DoWhy refutation methods (random common cause, placebo, data subset, unobserved confounder)"},
@@ -1539,6 +1540,30 @@ class OhmHandler(BaseHTTPRequestHandler):
             layers = [l.strip() for l in layers_str.split(",") if l.strip()] if layers_str else None
             from .bayesian import find_adjustment_sets
             result = find_adjustment_sets(self.store.conn, cause, effect, layers=layers, leak_probability=leak_probability)
+            self._json_response(200, result)
+        elif path == "/voi":
+            # Value of Information: rank nodes by research priority
+            # VoI = uncertainty × sensitivity_to_decision
+            # ?decision=node1,node2 to specify decision nodes (auto-detects if omitted)
+            # ?top=10 to limit results
+            # ?layers=L3,L4 to scope by layer
+            decision_str = qs.get("decision", [None])[0]
+            decision_nodes = [d.strip() for d in decision_str.split(",") if d.strip()] if decision_str else None
+            top = int(qs.get("top", ["10"])[0])
+            leak_probability = float(qs.get("leak", ["0.15"])[0])
+            root_prior = float(qs.get("root_prior", ["0.3"])[0])
+            # Parse optional layers filter: ?layers=L3,L4
+            layers_str = qs.get("layers", [""])[0]
+            layers = [l.strip() for l in layers_str.split(",") if l.strip()] if layers_str else None
+            from .bayesian import compute_voi
+            result = compute_voi(
+                self.store.conn,
+                decision_nodes=decision_nodes,
+                layers=layers,
+                top=top,
+                leak_probability=leak_probability,
+                root_prior=root_prior,
+            )
             self._json_response(200, result)
         elif path == "/suggest_causes":
             # Suggest candidate CAUSES edges from existing non-causal relationships

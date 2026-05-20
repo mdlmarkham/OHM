@@ -1019,14 +1019,13 @@ def delete_node(
 
     # Delete associated edges — split into two statements to avoid DuckDB
     # index issues with OR conditions (OHM-cpi)
-    edges_from = conn.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE from_node = ? AND deleted_at IS NULL", [node_id]).fetchone()
-    edges_to = conn.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE to_node = ? AND deleted_at IS NULL", [node_id]).fetchone()
-    edges_deleted = (edges_from[0] if edges_from else 0) + (edges_to[0] if edges_to else 0)
+    edges_from = conn.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE from_node = ? AND deleted_at IS NULL", [node_id])
+    edges_to = conn.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE to_node = ? AND deleted_at IS NULL", [node_id])
+    edges_deleted = (edges_from.rowcount or 0) + (edges_to.rowcount or 0)
 
     # Delete observations
     obs_result = conn.execute("UPDATE ohm_observations SET deleted_at = CURRENT_TIMESTAMP WHERE node_id = ? AND deleted_at IS NULL", [node_id])
-    obs_deleted = obs_result.fetchone()
-    obs_count = obs_deleted[0] if obs_deleted else 0
+    obs_count = obs_result.rowcount or 0
 
     # Delete the node itself
     conn.execute("UPDATE ohm_nodes SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?", [node_id])
@@ -1066,15 +1065,16 @@ def delete_edge(
     edge[0].get("layer")
 
     # Delete observations referencing this edge
-    conn.execute("UPDATE ohm_observations SET deleted_at = CURRENT_TIMESTAMP WHERE edge_id = ? AND deleted_at IS NULL", [edge_id])
+    obs_result = conn.execute("UPDATE ohm_observations SET deleted_at = CURRENT_TIMESTAMP WHERE edge_id = ? AND deleted_at IS NULL", [edge_id])
 
     # Delete the edge
-    conn.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?", [edge_id])
+    edge_result = conn.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?", [edge_id])
     _log_change(conn, "ohm_edges", edge_id, "DELETE", deleted_by)
 
     return {
         "deleted": edge_id,
         "type": "edge",
+        "observations_removed": obs_result.rowcount or 0,
     }
 
 

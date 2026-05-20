@@ -1646,6 +1646,263 @@ def pert_variance(p05: float, p95: float) -> float:
     return ((p95 - p05) / 6.0) ** 2
 
 
+def compute_voi(
+    conn,
+    decision_nodes: list[str] | None = None,
+    *,
+    edge_types: list[str] | None = None,
+    layers: list[str] | None = None,
+    top: int | None = None,
+    leak_probability: float = 0.15,
+    root_prior: float = 0.3,
+) -> dict[str, Any]:
+    """Compute Value of Information (VoI) for research prioritization.
+
+    OHM-6mv.1: For each decision node (where being wrong matters), traverse
+    causal paths backward to find root cause ancestors. For each ancestor,
+    compute: VoI = uncertainty × sensitivity_to_decision.
+
+    uncertainty = 1 - mean_confidence (how uncertain are we about this node?)
+    sensitivity = |ATE| (how much does this node affect the decision?)
+
+    Nodes with high VoI are the best targets for research: reducing their
+    uncertainty would most improve downstream decision quality.
+
+    Args:
+        conn: DuckDB connection.
+        decision_nodes: List of decision node IDs. If None, auto-detect
+            nodes with type='decision' and utility_scale > 0.
+        edge_types: Edge types to include (default: CAUSES, INFLUENCES, ENABLES).
+        layers: Optional list of layers to include (e.g., ["L3", "L4"]).
+        top: Return only the top N nodes by VoI score. None = all.
+        leak_probability: Baseline probability for Bayesian inference.
+        root_prior: Prior probability for root nodes.
+
+    Returns:
+        Dict with:
+        - method: "value_of_information"
+        - decision_nodes: list of decision node IDs used
+        - rankings: list of {node_id, label, voi_score, uncertainty, sensitivity,
+          downstream_decisions} sorted by voi_score descending
+        - n_candidates: total number of candidate nodes
+    """
+    if edge_types is None:
+        edge_types = ["CAUSES", "INFLUENCES", "ENABLES"]
+
+    # Find decision nodes if not specified
+    if decision_nodes is None:
+        decision_rows = conn.execute(
+            "SELECT id FROM ohm_nodes WHERE type = 'decision' "
+            "AND (utility_scale IS NULL OR utility_scale > 0) "
+            "AND deleted_at IS NULL"
+        ).fetchall()
+        decision_nodes = [r[0] for r in decision_rows]
+
+    if not decision_nodes:
+        return {
+            "method": "value_of_information",
+            "decision_nodes": [],
+            "rankings": [],
+            "n_candidates": 0,
+            "message": "No decision nodes found. Create nodes with type='decision' or specify decision_nodes.",
+        }
+
+    # Get all CAUSES/INFLUENCES/ENABLES edges for causal traversal
+    edge_type_list = ", ".join(f"'{t}'" for t in edge_types)
+    layer_filter = ""
+    if layers:
+        layer_list = ", ".join(f"'{l}'" for l in layers)
+        layer_filter = f"AND layer IN ({layer_list})"
+
+    edges = conn.execute(
+        f"SELECT from_node, to_node, confidence, probability, "
+        f"probability_p05, probability_p50, probability_p95, "
+        f"confidence_p05, confidence_p50, confidence_p95 "
+        f"FROM ohm_edges WHERE edge_type IN ({edge_type_list}) "
+        f"AND deleted_at IS NULL {layer_filter}"
+    ).fetchall()
+
+    # Build adjacency: child -> parents (backward traversal)
+    parents: dict[str, list[str]] = {}
+    edge_confidences: dict[tuple[str, str], float] = {}
+    for row in edges:
+        from_node, to_node, raw_conf, raw_prob, *pert_cols = row
+        if from_node not in parents:
+            parents[from_node] = []
+        parents[from_node].append(to_node)
+
+        # Compute effective confidence
+        _, conf_p50 = pert_cols[3], pert_cols[4]
+        if conf_p50 is not None:
+            c05 = float(pert_cols[3]) if pert_cols[3] is not None else float(conf_p50) * 0.8
+            c50 = float(conf_p50)
+            c95 = float(pert_cols[5]) if pert_cols[5] is not None else min(1.0, float(conf_p50) * 1.2)
+            eff_conf = (c05 + 4 * c50 + c95) / 6.0
+        elif raw_conf is not None:
+            eff_conf = float(raw_conf)
+        else:
+            eff_conf = 0.7  # default
+
+        edge_confidences[(from_node, to_node)] = eff_conf
+
+    # Build forward adjacency: parent -> children
+    children: dict[str, list[str]] = {}
+    for parent, child_list in parents.items():
+        for child in child_list:
+            if child not in children:
+                children[child] = []
+            children[child].append(parent)
+
+    # For each decision node, find causal ancestors via BFS backward
+    all_ancestors: dict[str, set[str]] = {}
+    for decision in decision_nodes:
+        visited: set[str] = set()
+        queue = [decision]
+        while queue:
+            node = queue.pop(0)
+            if node in visited:
+                continue
+            visited.add(node)
+            for parent in children.get(node, []):
+                if parent not in visited:
+                    queue.append(parent)
+        visited.discard(decision)  # Don't include the decision itself
+        all_ancestors[decision] = visited
+
+    # Collect all candidate nodes (union of all ancestors)
+    candidate_nodes = set()
+    for ancestors in all_ancestors.values():
+        candidate_nodes.update(ancestors)
+
+    if not candidate_nodes:
+        return {
+            "method": "value_of_information",
+            "decision_nodes": decision_nodes,
+            "rankings": [],
+            "n_candidates": 0,
+            "message": "No causal ancestors found for the specified decision nodes.",
+        }
+
+    # Get node labels and confidence for each candidate
+    node_id_list = ", ".join(f"'{n}'" for n in candidate_nodes)
+    node_info = {}
+    rows = conn.execute(
+        f"SELECT id, label, confidence, utility_scale FROM ohm_nodes "
+        f"WHERE id IN ({node_id_list}) AND deleted_at IS NULL"
+    ).fetchall()
+    for row in rows:
+        node_info[row[0]] = {
+            "label": row[1],
+            "confidence": row[2] if row[2] is not None else 0.5,
+            "utility_scale": row[3],
+        }
+
+    # Get observation counts for each candidate (proxy for information quality)
+    obs_counts: dict[str, int] = {}
+    for node_id in candidate_nodes:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM ohm_observations WHERE node_id = ? AND deleted_at IS NULL",
+            [node_id],
+        ).fetchone()[0]
+        obs_counts[node_id] = count
+
+    # Compute VoI for each candidate node
+    rankings = []
+    for node_id in candidate_nodes:
+        info = node_info.get(node_id, {"label": node_id, "confidence": 0.5, "utility_scale": None})
+        confidence = info["confidence"]
+
+        # Uncertainty: how uncertain are we? (1 - confidence)
+        uncertainty = 1.0 - confidence
+
+        # Sensitivity: how much does this node affect decisions?
+        # Sum of |ATE| across all decision nodes this node is an ancestor of
+        sensitivity = 0.0
+        downstream_decisions = []
+        for decision in decision_nodes:
+            if node_id in all_ancestors.get(decision, set()):
+                # Use edge confidence along the path as a proxy for sensitivity
+                # (Full ATE computation would be too expensive for all pairs)
+                # Walk the path and take the minimum edge confidence
+                path_conf = _path_confidence(node_id, decision, children, edge_confidences)
+                if path_conf is not None:
+                    sensitivity += path_conf * (info.get("utility_scale") or 0.5)
+                else:
+                    sensitivity += 0.1 * (info.get("utility_scale") or 0.5)
+                downstream_decisions.append(decision)
+
+        # VoI = uncertainty × sensitivity
+        voi_score = uncertainty * sensitivity
+
+        rankings.append({
+            "node_id": node_id,
+            "label": info["label"],
+            "voi_score": round(voi_score, 4),
+            "uncertainty": round(uncertainty, 4),
+            "sensitivity": round(sensitivity, 4),
+            "confidence": round(confidence, 4),
+            "observation_count": obs_counts.get(node_id, 0),
+            "downstream_decisions": downstream_decisions,
+            "n_downstream_decisions": len(downstream_decisions),
+        })
+
+    # Sort by VoI score descending
+    rankings.sort(key=lambda r: r["voi_score"], reverse=True)
+
+    if top is not None:
+        rankings = rankings[:top]
+
+    return {
+        "method": "value_of_information",
+        "decision_nodes": decision_nodes,
+        "rankings": rankings,
+        "n_candidates": len(candidate_nodes),
+    }
+
+
+def _path_confidence(
+    source: str,
+    target: str,
+    children: dict[str, list[str]],
+    edge_confidences: dict[tuple[str, str], float],
+) -> float | None:
+    """Find the minimum edge confidence along the best path from source to target.
+
+    Uses BFS to find a path, then returns the minimum edge confidence
+    along that path. Returns None if no path exists.
+    """
+    from collections import deque
+
+    # BFS from source to target following parent->child edges
+    # children dict maps: child -> [parents], so we need forward: parent -> [children]
+    forward: dict[str, list[str]] = {}
+    for child, parent_list in children.items():
+        for parent in parent_list:
+            if parent not in forward:
+                forward[parent] = []
+            forward[parent].append(child)
+
+    queue = deque([(source, [source])])
+    visited = {source}
+
+    while queue:
+        node, path = queue.popleft()
+        for neighbor in forward.get(node, []):
+            if neighbor == target:
+                full_path = path + [neighbor]
+                # Compute minimum edge confidence along path
+                min_conf = float("inf")
+                for i in range(len(full_path) - 1):
+                    edge_conf = edge_confidences.get((full_path[i], full_path[i + 1]), 0.5)
+                    min_conf = min(min_conf, edge_conf)
+                return min_conf if min_conf != float("inf") else 0.5
+            if neighbor not in visited:
+                visited.add(neighbor)
+                queue.append((neighbor, path + [neighbor]))
+
+    return None  # No path found
+
+
 class BayesianContext:
     """Context manager that builds a Bayesian network once and reuses it.
 

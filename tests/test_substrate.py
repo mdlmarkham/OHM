@@ -962,6 +962,62 @@ class TestMedicalDiagnosis:
         assert result_05["compound_confidence"] >= result_1["compound_confidence"]
         assert result_05["compound_confidence"] <= result_0["compound_confidence"]
 
+    def test_compound_confidence_source_weighting(self):
+        """Reliable sources count more when source_weights provided."""
+        from ohm.methods import compound_confidence
+
+        # Two observations with equal confidence
+        obs = [
+            {"confidence": 0.8, "source": "reliable_agent"},
+            {"confidence": 0.8, "source": "unreliable_agent"},
+        ]
+        # Reliable (0.9) counts 1.8x more than unknown (0.5)
+        weights = {"reliable_agent": 0.9, "unreliable_agent": 0.5}
+
+        result = compound_confidence(obs, correlation=0.0, source_weights=weights)
+        # Independent compound with weights:
+        # P = 1 - (1-0.8)^0.9 * (1-0.8)^0.5 = 1 - (0.2^0.9 * 0.2^0.5)
+        # = 1 - (0.2^1.4) = 1 - 0.0084 = 0.9916
+        assert result["compound_confidence"] > 0.8
+        assert result["weighted"] is True
+        assert result["observation_count"] == 2
+
+    def test_compound_confidence_unknown_source_default_weight(self):
+        """Unknown sources use default weight of 0.5."""
+        from ohm.methods import compound_confidence
+
+        obs = [{"confidence": 0.8, "source": "unknown_agent"}]
+        weights = {"known_agent": 0.9}  # unknown_agent not in weights
+
+        result = compound_confidence(obs, correlation=0.0, source_weights=weights)
+        assert result["weighted"] is True
+        # With default 0.5 weight: P = 1 - (1-0.8)^0.5 = 1 - 0.2^0.5 = 1 - 0.447 = 0.553
+        assert 0.5 < result["compound_confidence"] < 0.8
+
+    def test_compound_confidence_weighted_correlated(self):
+        """Source weighting works with correlated observations (max)."""
+        from ohm.methods import compound_confidence
+
+        obs = [
+            {"confidence": 0.6, "source": "good"},
+            {"confidence": 0.9, "source": "bad"},
+        ]
+        weights = {"good": 0.9, "bad": 0.5}
+
+        result = compound_confidence(obs, correlation=1.0, source_weights=weights)
+        # Correlated: max(c*w) = max(0.6*0.9, 0.9*0.5) = max(0.54, 0.45) = 0.54
+        assert result["compound_confidence"] == 0.54
+        assert result["weighted"] is True
+
+    def test_compound_confidence_no_weights_backward_compat(self):
+        """Without source_weights, behavior unchanged (weighted=False)."""
+        from ohm.methods import compound_confidence
+
+        obs = [{"confidence": 0.6}, {"confidence": 0.7}]
+        result = compound_confidence(obs, correlation=0.0)
+        assert result["weighted"] is False
+        assert result["compound_confidence"] > 0.7
+
 
 class TestGraphImportExport:
     def test_export_contains_all_tables(self, tmp_path):
