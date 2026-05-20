@@ -35,4 +35,15 @@ jobs:
         run: python -m mypy src/
 
       - name: Test with pytest
-        run: python -m pytest tests/ -v --tb=short --benchmark-disable
+        run: |
+          set +e
+          python -m pytest tests/ --tb=long --benchmark-disable -r fEsxX --maxfail=10 2>&1 | tee /tmp/pytest.log
+          status=${PIPESTATUS[0]}
+          echo "## pytest exit status: $status" >> "$GITHUB_STEP_SUMMARY"
+          echo '<details><summary>Last 200 lines of pytest output</summary>' >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -n 200 /tmp/pytest.log >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo '</details>' >> "$GITHUB_STEP_SUMMARY"
+          exit $status
