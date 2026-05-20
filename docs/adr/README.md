@@ -312,3 +312,25 @@ Each agent gets its own local DuckDB file for zero-latency reads and writes, wit
 - **Eventual consistency**: Changes from other agents visible only after sync_heartbeat()
 - **DuckLake lock**: Only one process writes to DuckLake at a time; agents sync through daemon or take turns
 - **ohmd becomes optional**: Still useful for HTTP-only clients and change feed
+---
+
+## ADR-013: Value of Information for Knowledge Graphs
+
+**Date:** 2026-05-20
+**Status:** Proposed
+
+### Context
+
+OHM knows which nodes are uncertain but not which uncertainties matter for decisions. Edge probability fields are unpopulated, making the Bayesian inference stack return empty results. The elicitation problem — how to get principled probability estimates from subjective judgment — needs a protocol.
+
+### Decision
+
+Use PERT three-point estimation (P05/P50/P95) as the elicitation protocol for edge probabilities. The derived PERT mean populates `probability` for Bayesian CPTs; the derived variance feeds VoI ranking (uncertainty × decision sensitivity = research priority). Add decision nodes with utility metadata. Implement `/voi` endpoint that traces causal paths backward from decision nodes to identify which observations would most reduce decision uncertainty.
+
+### Consequences
+
+- Bayesian inference works with PERT-derived CPTs
+- VoI prioritizes research by decision impact, not just gap size
+- Decision nodes encode "how much does being wrong matter?"
+- Agents can self-optimize: research what matters, not what's easy
+- GIGO risk mitigated by conservative initial ranges and observation updates
