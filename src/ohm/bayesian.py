@@ -1725,11 +1725,14 @@ def compute_voi(
     # Build adjacency maps with clear naming:
     # forward_adj: cause → effects (parent → children)
     # reverse_adj: effect → causes (child → parents)
+    # edge_pert_variance: stores PERT variance for each edge for VoI uncertainty
     forward_adj: dict[str, list[str]] = {}
     reverse_adj: dict[str, list[str]] = {}
     edge_confidences: dict[tuple[str, str], float] = {}
+    edge_pert_variance: dict[tuple[str, str], float] = {}
+
     for row in edges:
-        from_node, to_node, raw_conf, raw_prob, *pert_cols = row
+        from_node, to_node, raw_conf, raw_prob, prob_p05, prob_p50, prob_p95, conf_p05, conf_p50, conf_p95 = row
         # from_node CAUSES/INFLUENCES to_node → forward: from_node → to_node
         if from_node not in forward_adj:
             forward_adj[from_node] = []
@@ -1739,19 +1742,37 @@ def compute_voi(
             reverse_adj[to_node] = []
         reverse_adj[to_node].append(from_node)
 
-        # Compute effective confidence
-        _, conf_p50 = pert_cols[3], pert_cols[4]
+        # Compute effective confidence using PERT if available
+        eff_conf = 0.7  # default
         if conf_p50 is not None:
-            c05 = float(pert_cols[3]) if pert_cols[3] is not None else float(conf_p50) * 0.8
-            c50 = float(conf_p50)
-            c95 = float(pert_cols[5]) if pert_cols[5] is not None else min(1.0, float(conf_p50) * 1.2)
-            eff_conf = (c05 + 4 * c50 + c95) / 6.0
+            c05_val = float(conf_p05) if conf_p05 is not None else float(conf_p50) * 0.8
+            c50_val = float(conf_p50)
+            c95_val = float(conf_p95) if conf_p95 is not None else min(1.0, float(conf_p50) * 1.2)
+            eff_conf = (c05_val + 4 * c50_val + c95_val) / 6.0
         elif raw_conf is not None:
             eff_conf = float(raw_conf)
-        else:
-            eff_conf = 0.7  # default
 
         edge_confidences[(from_node, to_node)] = eff_conf
+
+        # Compute PERT variance for uncertainty signal (ADR-013)
+        # If PERT columns exist, use variance as uncertainty; else None
+        p05 = None
+        p95 = None
+        if prob_p05 is not None and prob_p95 is not None:
+            p05 = float(prob_p05)
+            p95 = float(prob_p95)
+        elif conf_p05 is not None and conf_p95 is not None:
+            p05 = float(conf_p05)
+            p95 = float(conf_p95)
+
+        if p05 is not None and p95 is not None:
+            pert_variance = ((p95 - p05) / 6.0) ** 2
+            # Scale to [0,1] range: max theoretical variance ≈ 0.0278 (p05=0, p95=1)
+            # Use min() to cap at 1.0
+            scaled_variance = min(1.0, pert_variance * 36.0)  # scale factor 36 maps 0.0278 → ~1
+            edge_pert_variance[(from_node, to_node)] = scaled_variance
+        else:
+            edge_pert_variance[(from_node, to_node)] = None
 
     # For each decision node, find causal ancestors via BFS backward (following reverse_adj)
     all_ancestors: dict[str, set[str]] = {}
@@ -1813,8 +1834,23 @@ def compute_voi(
         info = node_info.get(node_id, {"label": node_id, "confidence": 0.5, "utility_scale": None})
         confidence = info["confidence"]
 
-        # Uncertainty: how uncertain are we? (1 - confidence)
-        uncertainty = 1.0 - confidence
+        # Uncertainty: how uncertain are we about this node?
+        # Per ADR-013: use max PERT variance across edges from this node toward decisions.
+        # If any edge has PERT data, use the max variance. If no PERT data on any edge,
+        # fall back to 1 - confidence.
+        node_uncertainties = []
+        for decision in decision_nodes:
+            if node_id in all_ancestors.get(decision, set()):
+                path_variance = _max_edge_pert_variance_toward(
+                    node_id, decision, forward_adj, edge_pert_variance
+                )
+                if path_variance is not None:
+                    node_uncertainties.append(path_variance)
+                else:
+                    node_uncertainties.append(1.0 - confidence)
+
+        # Use maximum uncertainty across all paths (conservative estimate)
+        uncertainty = max(node_uncertainties) if node_uncertainties else (1.0 - confidence)
 
         # Sensitivity: how much does this node affect decisions?
         # Per ADR-013: use |ATE(ancestor → decision)| when possible,
@@ -2047,6 +2083,59 @@ def generate_voi_tasks(
     }
 
 
+def _max_edge_pert_variance_toward(
+    source: str,
+    target: str,
+    forward_adj: dict[str, list[str]],
+    edge_pert_variance: dict[tuple[str, str], float],
+) -> float | None:
+    """Find the maximum PERT variance among edges along any path from source to target.
+
+    Uses BFS to explore paths from source to target following forward adjacency
+    (cause → effect). For each path, takes the max PERT variance across all edges.
+    Returns the maximum across all valid paths, or None if no path has any PERT data.
+
+    A path only contributes if ALL edges on it have PERT variance (otherwise
+    the uncertainty falls back to 1 - confidence).
+    """
+    from collections import deque
+
+    queue = deque([(source, [source], True)])  # (node, path, all_edges_have_pert)
+    visited: set[str] = {source}
+    best_variance: float | None = None
+
+    while queue:
+        node, path, all_have_pert = queue.popleft()
+        if node == target:
+            if all_have_pert and best_variance is not None:
+                # path has PERT on all edges - could be None if no edges had pert
+                pass
+            continue
+
+        for neighbor in forward_adj.get(node, []):
+            edge_var = edge_pert_variance.get((node, neighbor), None)
+            new_all_have_pert = all_have_pert and (edge_var is not None)
+
+            if neighbor == target:
+                if new_all_have_pert and edge_var is not None:
+                    # Collect PERT variances for all edges on path + final edge
+                    path_edges = []
+                    for i in range(len(path) - 1):
+                        e = edge_pert_variance.get((path[i], path[i + 1]), None)
+                        if e is not None:
+                            path_edges.append(e)
+                    path_edges.append(edge_var)  # Final edge to target
+                    if path_edges:
+                        path_max = max(path_edges)
+                        if best_variance is None or path_max > best_variance:
+                            best_variance = path_max
+            elif neighbor not in visited:
+                visited.add(neighbor)
+                queue.append((neighbor, path + [neighbor], new_all_have_pert))
+
+    return best_variance
+
+
 def _path_confidence(
     source: str,
     target: str,
@@ -2239,14 +2328,221 @@ class BayesianContext:
         Returns:
             Dict with posterior probabilities and comparison with observation.
         """
-        return causal_intervention(
-            self._conn, target, intervention_state,
-            query_nodes=query_nodes,
-            edge_types=self._edge_types,
-            layers=self._layers,
-            leak_probability=self._leak_probability,
-            root_prior=self._root_prior,
-        )
+        if self._network is None:
+            return {
+                "method": "none",
+                "pgmpy_available": PGMPY_AVAILABLE,
+                "target": target,
+                "intervention_state": intervention_state,
+                "error": "No probability-bearing edges found in graph",
+            }
+
+        if intervention_state not in (0, 1):
+            return {
+                "method": "error",
+                "target": target,
+                "error": f"intervention_state must be 0 or 1, got {intervention_state}",
+            }
+
+        target = validate_identifier(target, name="target")
+        safe_names = self._network["safe_names"]
+        safe_target = _safe_node_id(target)
+
+        if safe_target not in self._network["variables"]:
+            return {
+                "method": "none",
+                "pgmpy_available": True,
+                "target": target,
+                "intervention_state": intervention_state,
+                "error": f"Target {target} not in Bayesian network",
+            }
+
+        network = self._network
+        model = network["model"]
+        original_edges = list(model.edges())
+
+        # Identify and sever incoming edges to target (do-operator)
+        incoming_edges = [(u, v) for u, v in original_edges if v == safe_target]
+        model_do = model.copy()
+        for edge in incoming_edges:
+            if model_do.has_edge(*edge):
+                model_do.remove_edge(*edge)
+
+        # Rebuild CPDs for the mutilated graph
+        from pgmpy.factors.discrete import TabularCPD as _TabularCPD
+
+        new_cpds = []
+
+        # Set target's CPT to deterministic (intervention_state)
+        if intervention_state == 0:
+            target_cpd = _TabularCPD(safe_target, 2, [[1.0], [0.0]])
+        else:
+            target_cpd = _TabularCPD(safe_target, 2, [[0.0], [1.0]])
+        new_cpds.append(target_cpd)
+
+        # Copy over all other CPTs (unchanged by graph surgery)
+        for cpd in model.get_cpds():
+            if cpd.variable != safe_target:
+                cpd_evidence = getattr(cpd, 'evidence', None)
+                cpd_evidence_card = getattr(cpd, 'evidence_card', None)
+                if cpd_evidence:
+                    removed_parents = set(e[0] for e in incoming_edges)
+                    still_valid = [v for v in cpd_evidence if v not in removed_parents]
+                    if len(still_valid) != len(cpd_evidence):
+                        if len(still_valid) == 0:
+                            n_states = cpd.variable_card
+                            values = cpd.get_values()
+                            marginal = values.mean(axis=1)
+                            new_cpd = _TabularCPD(cpd.variable, n_states,
+                                                 [[marginal[s]] for s in range(n_states)])
+                            new_cpds.append(new_cpd)
+                        else:
+                            logger.warning(f"Cannot marginalize partially-removed parents for {cpd.variable}")
+                            new_cpds.append(cpd)
+                    else:
+                        new_cpds.append(cpd)
+                else:
+                    new_cpds.append(cpd)
+
+        model_do.cpds = []
+        try:
+            model_do.add_cpds(*new_cpds)
+            assert model_do.check_model()
+        except Exception as e:
+            logger.error(f"Mutilated graph model check failed: {e}")
+            return {
+                "method": "error",
+                "pgmpy_available": True,
+                "target": target,
+                "intervention_state": intervention_state,
+                "error": f"Graph surgery failed: {e}",
+                "incoming_edges_severed": len(incoming_edges),
+            }
+
+        # Determine query nodes
+        safe_query_nodes = []
+        if query_nodes:
+            for qn in query_nodes:
+                safe_qn = _safe_node_id(validate_identifier(qn, name="query_node"))
+                if safe_qn in network["variables"]:
+                    safe_query_nodes.append(safe_qn)
+
+        if not safe_query_nodes:
+            try:
+                import networkx as nx
+                descendants = nx.descendants(model_do, safe_target)
+                safe_query_nodes = list(descendants)
+            except Exception:
+                safe_query_nodes = [v for v in network["variables"] if v != safe_target]
+
+        if not safe_query_nodes:
+            return {
+                "method": "causal_intervention",
+                "pgmpy_available": True,
+                "target": target,
+                "intervention_state": intervention_state,
+                "posterior": {
+                    target: {
+                        "good": 1.0 if intervention_state == 1 else 0.0,
+                        "bad": 1.0 if intervention_state == 0 else 0.0,
+                    }
+                },
+                "downstream_nodes": [],
+                "incoming_edges_severed": len(incoming_edges),
+                "network_info": {
+                    "n_nodes": network["n_nodes"],
+                    "n_edges": network["n_edges"],
+                },
+            }
+
+        # Run inference on the mutilated graph
+        try:
+            infer = VariableElimination(model_do)
+            result = infer.query(safe_query_nodes, evidence={safe_target: intervention_state})
+
+            posteriors = {}
+            if len(safe_query_nodes) == 1:
+                qn = safe_query_nodes[0]
+                qn_original = None
+                for orig, safe in safe_names.items():
+                    if safe == qn:
+                        qn_original = orig
+                        break
+                posteriors[qn_original or qn] = {
+                    "good": round(float(result.values[1]), 4),
+                    "bad": round(float(result.values[0]), 4),
+                }
+            else:
+                for i, qn in enumerate(safe_query_nodes):
+                    qn_original = None
+                    for orig, safe in safe_names.items():
+                        if safe == qn:
+                            qn_original = orig
+                            break
+                    val = result.values[i] if i < len(result.values) else 0.5
+                    posteriors[qn_original or qn] = {
+                        "good": round(float(val[1]), 4),
+                        "bad": round(float(val[0]), 4),
+                    }
+
+            # Observation comparison using original model
+            comparison = {}
+            try:
+                obs_model = network["model"]
+                obs_infer = VariableElimination(obs_model)
+                for node_id, post in posteriors.items():
+                    if isinstance(post, dict) and "error" not in post:
+                        safe_qn = None
+                        for orig, safe in safe_names.items():
+                            if orig == node_id:
+                                safe_qn = safe
+                                break
+                        if not safe_qn:
+                            continue
+                        try:
+                            obs_result = obs_infer.query(
+                                [safe_qn], evidence={safe_target: intervention_state}
+                            )
+                            obs_bad = round(float(obs_result.values[0]), 4)
+                            int_bad = post.get("bad", None)
+                            if int_bad is not None:
+                                comparison[node_id] = {
+                                    "intervention_bad": int_bad,
+                                    "observation_bad": obs_bad,
+                                    "confounding_bias": round(obs_bad - int_bad, 4),
+                                    "interpretation": "positive bias = observation overestimates causal effect" if obs_bad > int_bad else "negative bias = observation underestimates causal effect",
+                                }
+                        except Exception:
+                            pass
+            except Exception as e:
+                logger.warning(f"Observation comparison failed: {e}")
+
+            return {
+                "method": "causal_intervention",
+                "pgmpy_available": True,
+                "target": target,
+                "intervention_state": intervention_state,
+                "state_labels": {
+                    "0": "bad/failure/closed/negative",
+                    "1": "good/normal/open/positive",
+                },
+                "posterior": posteriors,
+                "comparison_with_observation": comparison,
+                "incoming_edges_severed": len(incoming_edges),
+                "network_info": {
+                    "n_nodes": network["n_nodes"],
+                    "n_edges": network["n_edges"],
+                },
+            }
+        except Exception as e:
+            logger.error(f"Causal intervention failed: {e}")
+            return {
+                "method": "error",
+                "pgmpy_available": True,
+                "target": target,
+                "intervention_state": intervention_state,
+                "error": str(e),
+            }
 
     def ate(self, cause: str, effect: str) -> dict[str, Any]:
         """Compute Average Treatment Effect reusing the cached network.
@@ -2258,13 +2554,68 @@ class BayesianContext:
         Returns:
             Dict with ATE, risk ratio, and network info.
         """
-        return compute_ate(
-            self._conn, cause, effect,
-            edge_types=self._edge_types,
-            layers=self._layers,
-            leak_probability=self._leak_probability,
-            root_prior=self._root_prior,
-        )
+        if self._network is None:
+            return {
+                "method": "none",
+                "pgmpy_available": PGMPY_AVAILABLE,
+                "cause": cause,
+                "effect": effect,
+                "error": "No probability-bearing edges found in graph",
+            }
+
+        # Use intervention() twice instead of calling compute_ate() which
+        # would rebuild the network each time
+        do_bad = self.intervention(cause, 0, query_nodes=[effect])
+        do_good = self.intervention(cause, 1, query_nodes=[effect])
+
+        # Extract posteriors
+        p_bad_do_bad = do_bad.get("posterior", {}).get(effect, {}).get("bad")
+        p_bad_do_good = do_good.get("posterior", {}).get(effect, {}).get("bad")
+
+        if p_bad_do_bad is None or p_bad_do_good is None:
+            error_msg = do_bad.get("error") or do_good.get("error") or "Unknown error"
+            return {
+                "method": "error",
+                "cause": cause,
+                "effect": effect,
+                "error": error_msg,
+            }
+
+        ate = p_bad_do_bad - p_bad_do_good
+        risk_ratio = p_bad_do_bad / p_bad_do_good if p_bad_do_good > 0 else float("inf")
+
+        if abs(ate) < 0.05:
+            interpretation = "negligible causal effect"
+        elif abs(ate) < 0.10:
+            interpretation = "small causal effect"
+        elif abs(ate) < 0.20:
+            interpretation = "moderate causal effect"
+        else:
+            interpretation = "large causal effect"
+
+        direction = "increases" if ate > 0 else "decreases"
+
+        return {
+            "method": "model_based_ate",
+            "pgmpy_available": True,
+            "cause": cause,
+            "effect": effect,
+            "ate": round(ate, 4),
+            "p_effect_bad_do_cause_bad": p_bad_do_bad,
+            "p_effect_bad_do_cause_good": p_bad_do_good,
+            "risk_ratio": round(risk_ratio, 4),
+            "effect_size": interpretation,
+            "interpretation": f"Setting {cause} to bad {direction} P({effect}=bad) by {abs(ate):.2%} (ATE={ate:.4f})",
+            "state_labels": {
+                "0": "bad/failure/closed/negative",
+                "1": "good/normal/open/positive",
+            },
+            "network_info": {
+                "n_nodes": self._network["n_nodes"],
+                "n_edges": self._network["n_edges"],
+                "uses_cached_network": True,
+            },
+        }
 
     def sensitivity(self, cause: str, effect: str) -> dict[str, Any]:
         """Compute sensitivity analysis (E-value) reusing the cached network.
@@ -2276,13 +2627,109 @@ class BayesianContext:
         Returns:
             Dict with E-value, risk ratio, and robustness assessment.
         """
-        return compute_sensitivity(
-            self._conn, cause, effect,
-            edge_types=self._edge_types,
-            layers=self._layers,
-            leak_probability=self._leak_probability,
-            root_prior=self._root_prior,
-        )
+        import math
+
+        if self._network is None:
+            return {
+                "method": "none",
+                "pgmpy_available": PGMPY_AVAILABLE,
+                "cause": cause,
+                "effect": effect,
+                "error": "No probability-bearing edges found in graph",
+            }
+
+        cause = validate_identifier(cause, name="cause")
+        effect = validate_identifier(effect, name="effect")
+
+        # Use self.ate() which now uses cached network
+        ate_result = self.ate(cause, effect)
+
+        if "error" in ate_result:
+            return ate_result
+
+        risk_ratio = ate_result.get("risk_ratio", 1.0)
+        ate = ate_result.get("ate", 0.0)
+        p_bad_do_bad = ate_result.get("p_effect_bad_do_cause_bad", 0.0)
+        p_bad_do_good = ate_result.get("p_effect_bad_do_cause_good", 0.0)
+
+        # Compute E-value
+        if risk_ratio >= 1.0:
+            rr = risk_ratio
+        else:
+            rr = 1.0 / risk_ratio if risk_ratio > 0 else float("inf")
+
+        if rr > 1.0 and math.isfinite(rr):
+            e_value = rr + math.sqrt(rr * (rr - 1))
+        elif rr == 1.0:
+            e_value = 1.0
+        else:
+            e_value = float("inf")
+
+        # Robustness interpretation
+        if e_value <= 1.0:
+            robustness = "none"
+            robustness_desc = "No causal effect detected — E-value=1.0"
+        elif e_value < 1.5:
+            robustness = "weak"
+            robustness_desc = "Weak robustness — small confounding could explain away result"
+        elif e_value < 2.0:
+            robustness = "moderate"
+            robustness_desc = f"Moderate robustness — confounder needs RR>={e_value:.2f} with both cause and effect"
+        elif e_value < 3.0:
+            robustness = "strong"
+            robustness_desc = f"Strong robustness — confounder needs RR>={e_value:.2f} with both cause and effect"
+        else:
+            robustness = "very_strong"
+            robustness_desc = f"Very strong robustness — confounder needs RR>={e_value:.2f} with both cause and effect"
+
+        # Perturbation analysis
+        perturbation_levels = [1.0, 1.2, 1.5, 2.0, 3.0, 5.0, 10.0]
+        perturbation_results = []
+        for conf_strength in perturbation_levels:
+            if conf_strength == 1.0:
+                adjusted_ate = round(ate, 4)
+            elif risk_ratio > 0 and conf_strength > 1.0:
+                adjusted_rr = risk_ratio / conf_strength
+                if p_bad_do_good > 0:
+                    adjusted_p_bad_do_bad = min(1.0, p_bad_do_good * adjusted_rr)
+                    adjusted_ate = round(adjusted_p_bad_do_bad - p_bad_do_good, 4)
+                else:
+                    adjusted_ate = round(ate, 4)
+            else:
+                adjusted_ate = round(ate, 4)
+
+            perturbation_results.append({
+                "confounder_strength": conf_strength,
+                "adjusted_ate": adjusted_ate,
+                "ate_zero": abs(adjusted_ate) < 1e-6,
+            })
+
+        overturn_strength = None
+        for pr in perturbation_results:
+            if pr["ate_zero"]:
+                overturn_strength = pr["confounder_strength"]
+                break
+
+        return {
+            "method": "e_value_sensitivity",
+            "cause": cause,
+            "effect": effect,
+            "ate": ate,
+            "risk_ratio": round(risk_ratio, 4),
+            "e_value": round(e_value, 4),
+            "robustness": robustness,
+            "robustness_description": robustness_desc,
+            "p_effect_bad_do_cause_bad": p_bad_do_bad,
+            "p_effect_bad_do_cause_good": p_bad_do_good,
+            "confounder_perturbation": perturbation_results,
+            "overturn_confounder_strength": overturn_strength,
+            "interpretation": f"An unmeasured confounder would need RR>={round(e_value, 2)} with both {cause} and {effect} to explain away the observed effect (ATE={ate:.4f})",
+            "network_info": {
+                "n_nodes": self._network["n_nodes"],
+                "n_edges": self._network["n_edges"],
+                "uses_cached_network": True,
+            },
+        }
 
     def adjustment_sets(self, cause: str, effect: str,
                         *, max_network_size: int = 10) -> dict[str, Any]:

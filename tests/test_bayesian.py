@@ -1004,6 +1004,77 @@ class TestComputeVoI:
         assert d2 in a_ranking["downstream_decisions"]
         assert a_ranking["n_downstream_decisions"] == 2
 
+    def test_voi_pert_uncertainty_wide_bounds_rank_higher(self, db):
+        """VoI: node with wide PERT bounds (high variance) ranks higher than tight bounds.
+
+        ADR-013: uncertainty should use PERT variance. Wide bounds = more uncertainty = higher VoI.
+        """
+        # Node A: tight PERT bounds (p05=0.48, p95=0.52) → low variance
+        a_tight = create_sample_node(db, label="tight_bound_node", confidence=0.5)
+        # Node B: wide PERT bounds (p05=0.1, p95=0.9) → high variance
+        a_wide = create_sample_node(db, label="wide_bound_node", confidence=0.5)
+        d = create_sample_node(db, label="decision_node", node_type="decision")
+        db.execute("UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d])
+
+        # Edge A → decision with tight PERT
+        db.execute(
+            "INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, confidence, "
+            "probability_p05, probability_p50, probability_p95, created_by) "
+            "VALUES (?, ?, ?, 'CAUSES', 'L3', 0.7, 0.48, 0.50, 0.52, 'test')",
+            [str(uuid.uuid4()), a_tight, d],
+        )
+        # Edge B → decision with wide PERT
+        db.execute(
+            "INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, confidence, "
+            "probability_p05, probability_p50, probability_p95, created_by) "
+            "VALUES (?, ?, ?, 'CAUSES', 'L3', 0.7, 0.10, 0.50, 0.90, 'test')",
+            [str(uuid.uuid4()), a_wide, d],
+        )
+
+        result = compute_voi(db)
+        rankings = {r["node_id"]: r for r in result["rankings"]}
+
+        # Wide-bound node should rank higher (higher uncertainty due to PERT variance)
+        assert a_wide in rankings
+        assert a_tight in rankings
+        assert rankings[a_wide]["uncertainty"] > rankings[a_tight]["uncertainty"]
+        assert rankings[a_wide]["voi_score"] > rankings[a_tight]["voi_score"]
+
+    def test_voi_uncertainty_fallback_without_pert(self, db):
+        """VoI: node without PERT data falls back to 1 - confidence."""
+        a = create_sample_node(db, label="no_pert_node", confidence=0.3)
+        d = create_sample_node(db, label="decision_node", node_type="decision")
+        db.execute("UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d])
+
+        # Edge without PERT columns
+        create_sample_edge(db, from_node=a, to_node=d, edge_type="CAUSES",
+                           layer="L3", confidence=0.8)
+
+        result = compute_voi(db)
+        ranking = result["rankings"][0]
+        # Should fall back to 1 - confidence = 0.7
+        assert ranking["uncertainty"] == 0.7
+
+    def test_voi_uncertainty_zero_when_pert_tight(self, db):
+        """VoI: uncertainty should be near 0 when p05 ≈ p95 (perfect knowledge)."""
+        a = create_sample_node(db, label="perfect_knowledge_node", confidence=0.9)
+        d = create_sample_node(db, label="decision_node", node_type="decision")
+        db.execute("UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d])
+
+        # Edge with very tight PERT bounds (p05=0.49, p95=0.51)
+        db.execute(
+            "INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, confidence, "
+            "probability_p05, probability_p50, probability_p95, created_by) "
+            "VALUES (?, ?, ?, 'CAUSES', 'L3', 0.9, 0.49, 0.50, 0.51, 'test')",
+            [str(uuid.uuid4()), a, d],
+        )
+
+        result = compute_voi(db)
+        ranking = result["rankings"][0]
+        # Variance = ((0.51-0.49)/6)^2 = (0.02/6)^2 ≈ 0.000011
+        # Scaled: 0.000011 * 36 ≈ 0.0004 — very low uncertainty
+        assert ranking["uncertainty"] < 0.01
+
 
 # ── VoI Tasks Tests ──────────────────────────────────────────────────────
 
