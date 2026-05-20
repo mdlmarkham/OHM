@@ -1259,7 +1259,29 @@ class Graph:
         failure_probability: float = 1.0,
         max_depth: int = 10,
     ) -> list[dict[str, Any]]:
-        """Monte Carlo-style cascade through downstream graph from a node.
+        """[DEPRECATED] Use deterministic_cascade() instead.
+
+        This method was renamed to clarify that it performs deterministic
+        cascade propagation, not Monte Carlo simulation.
+        """
+        import warnings
+        warnings.warn(
+            "cascade_scenario is deprecated, use deterministic_cascade instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.deterministic_cascade(
+            node_id, failure_probability=failure_probability, max_depth=max_depth,
+        )
+
+    def deterministic_cascade(
+        self,
+        node_id: str,
+        *,
+        failure_probability: float = 1.0,
+        max_depth: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Deterministic cascade through downstream graph from a node.
 
         Starting from *node_id* with *failure_probability*, walks downstream
         through CAUSES, EXPECTED_LIKELIHOOD, DEPENDS_ON, and THREATENS edges.
@@ -1270,8 +1292,11 @@ class Graph:
         Returns all downstream nodes with computed failure probabilities and
         the path chain that leads to each.
 
+        For a probabilistic simulation with variance estimates, use
+        monte_carlo_cascade() instead.
+
         Example:
-            g.cascade_scenario(supplier_node, failure_probability=0.3)
+            g.deterministic_cascade(supplier_node, failure_probability=0.3)
             → {node: 'factory_a', failure_probability: 0.28, path: ['supplier_a']}
             → {node: 'distribution_b', failure_probability: 0.19, path: [...]}
 
@@ -1284,13 +1309,54 @@ class Graph:
             List of dicts with node_id, node_label, node_type, failure_probability,
             depth, and path.
         """
-        from ohm.queries import query_cascade_scenario
+        from ohm.queries import query_deterministic_cascade
 
-        return query_cascade_scenario(
+        return query_deterministic_cascade(
             self._conn,
             node_id,
             failure_probability=failure_probability,
             max_depth=max_depth,
+        )
+
+    def monte_carlo_cascade(
+        self,
+        node_id: str,
+        *,
+        trials: int = 1000,
+        max_depth: int = 10,
+        seed: int | None = None,
+        default_probability: float = 0.5,
+    ) -> dict[str, Any]:
+        """Monte Carlo simulation of cascade through downstream graph.
+
+        Runs *trials* number of cascade trials with two-stage sampling per ADR-008:
+        - Stage 1: Edge existence — sample random() < confidence
+        - Stage 2: Effect propagation — sample random() < probability
+
+        Returns distribution statistics (p5, p50, p95, mean) for each
+        downstream node rather than a single point estimate.
+
+        For a deterministic analysis use deterministic_cascade().
+
+        Args:
+            node_id: Starting node for cascade simulation.
+            trials: Number of Monte Carlo trials to run (default 1000).
+            max_depth: Maximum traversal depth per trial.
+            seed: Random seed for reproducibility. If None, results vary each run.
+            default_probability: Default probability when edge has none set (default 0.5).
+
+        Returns:
+            Dict with node_id, results (per-node statistics), trials, and seed.
+        """
+        from ohm.queries import monte_carlo_cascade
+
+        return monte_carlo_cascade(
+            self._conn,
+            node_id,
+            trials=trials,
+            max_depth=max_depth,
+            seed=seed,
+            default_probability=default_probability,
         )
 
     def what_if(
@@ -2072,16 +2138,9 @@ class Graph:
         # Import nodes
         for node in data.get("nodes", []):
             existing = self._conn.execute(
-                "SELECT id FROM ohm_nodes WHERE id = ?", [node["id"]]
+                "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node["id"]]
             ).fetchone()
             if existing and merge:
-                import_count["skipped"] += 1
-                continue
-            # Check for soft-deleted rows too (PK collision would crash DuckDB)
-            soft_deleted = self._conn.execute(
-                "SELECT id FROM ohm_edges WHERE id = ? AND deleted_at IS NOT NULL", [edge["id"]]
-            ).fetchone()
-            if soft_deleted:
                 import_count["skipped"] += 1
                 continue
             try:
@@ -2102,17 +2161,9 @@ class Graph:
             existing = None
             if merge:
                 existing = self._conn.execute(
-                    "SELECT id FROM ohm_edges WHERE id = ?",
-                    [edge["id"]],
+                    "SELECT id FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [edge["id"]]
                 ).fetchone()
-            if existing and merge:
-                import_count["skipped"] += 1
-                continue
-            # Check for soft-deleted rows too (PK collision would crash DuckDB)
-            soft_deleted = self._conn.execute(
-                "SELECT id FROM ohm_edges WHERE id = ? AND deleted_at IS NOT NULL", [edge["id"]]
-            ).fetchone()
-            if soft_deleted:
+            if existing:
                 import_count["skipped"] += 1
                 continue
             try:

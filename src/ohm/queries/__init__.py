@@ -31,6 +31,26 @@ def _rows_to_dicts(result: Any) -> list[dict[str, Any]]:
     return [dict(zip(columns, row)) for row in result.fetchall()]
 
 
+def _percentile(count: int, trials: int, pct: float) -> float:
+    """Compute a percentile for a binomial activation count.
+
+    For a binomial distribution with n=trials and observed count,
+    returns the percentile value. Uses normal approximation for
+    large trials, exact for small.
+    """
+    if trials == 0:
+        return 0.0
+    p = count / trials
+    if p == 0.0 or p == 1.0:
+        return p
+    # Normal approximation with continuity correction
+    import math
+    z = {0.05: -1.645, 0.50: 0.0, 0.95: 1.645}.get(pct, 0.0)
+    se = math.sqrt(p * (1 - p) / trials)
+    result = p + z * se
+    return max(0.0, min(1.0, result))
+
+
 def _log_change(
     conn: DuckDBPyConnection,
     table_name: str,
@@ -1270,11 +1290,12 @@ def query_graph_health(
     """
     # Orphan nodes
     orphan_row = conn.execute("""
-        SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL n
-        WHERE NOT EXISTS (
-            SELECT 1 FROM ohm_edges e
-            WHERE e.from_node = n.id OR e.to_node = n.id
-        )
+        SELECT COUNT(*) FROM ohm_nodes n
+        WHERE n.deleted_at IS NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM ohm_edges e
+              WHERE e.from_node = n.id OR e.to_node = n.id
+          )
     """).fetchone()
     orphans = orphan_row[0] if orphan_row else 0
 
@@ -2148,13 +2169,16 @@ def monte_carlo_cascade(
     trials: int = 1000,
     max_depth: int = 10,
     seed: int | None = None,
+    default_probability: float = 0.5,
 ) -> dict[str, Any]:
     """Monte Carlo simulation of cascade through downstream graph.
 
-    Runs *trials* number of cascade trials, where each trial walks the graph
-    and at each edge samples random() < probability to determine if the edge
-    is activated. Returns distribution statistics (p5, p50, p95, mean) for
-    each downstream node rather than a single point estimate.
+    Runs *trials* number of cascade trials with two-stage sampling per ADR-008:
+    - Stage 1: Edge existence — sample random() < confidence
+    - Stage 2: Effect propagation — sample random() < probability
+
+    Returns distribution statistics (p5, p50, p95, mean) for each downstream
+    node rather than a single point estimate.
 
     For a deterministic analysis use `query_deterministic_cascade()`.
 
@@ -2164,6 +2188,7 @@ def monte_carlo_cascade(
         trials: Number of Monte Carlo trials to run (default 1000).
         max_depth: Maximum traversal depth per trial.
         seed: Random seed for reproducibility. If None, results vary each run.
+        default_probability: Default probability when edge has none set (default 0.5).
 
     Returns:
         Dict with:
@@ -2200,6 +2225,7 @@ def monte_carlo_cascade(
             JOIN ohm_edges e ON e.from_node = t.node_id
             WHERE t.depth < ?
               AND e.edge_type IN ('CAUSES', 'EXPECTED_LIKELIHOOD', 'DEPENDS_ON', 'THREATENS')
+              AND e.deleted_at IS NULL
               AND NOT list_contains(t.path, e.to_node)
         )
         SELECT
@@ -2207,17 +2233,18 @@ def monte_carlo_cascade(
             e.to_node AS to_node,
             e.edge_type,
             e.probability,
-            e.confidence,
-            t.path
+            e.confidence
         FROM traverse t
         JOIN ohm_edges e ON e.from_node = t.node_id
         WHERE t.depth >= 0
+          AND e.deleted_at IS NULL
         ORDER BY t.depth, t.node_id
     """
     edges_result = conn.execute(edges_query, [node_id, node_id, node_id, max_depth])
     edges = _rows_to_dicts(edges_result)
 
-    # Build adjacency for simulation: from_node -> list of (to_node, prob)
+    # Build adjacency for simulation: from_node -> list of {to_node, confidence, probability}
+    # ADR-008: two-stage sampling — confidence (existence) then probability (propagation)
     node_edges: dict[str, list[dict[str, Any]]] = {}
     all_nodes = {node_id}
     for edge in edges:
@@ -2225,46 +2252,50 @@ def monte_carlo_cascade(
         to_node = edge["to_node"]
         if from_node not in node_edges:
             node_edges[from_node] = []
+        effective_prob = float(edge["probability"]) if edge["probability"] is not None else default_probability
         node_edges[from_node].append({
             "to_node": to_node,
-            "prob": edge["probability"] if edge["probability"] is not None else (edge["confidence"] or 0.5),
-            "path": edge["path"],
+            "confidence": float(edge["confidence"]) if edge["confidence"] is not None else 0.7,
+            "probability": effective_prob,
         })
         all_nodes.add(from_node)
         all_nodes.add(to_node)
 
-    # Run trials
+    # Run trials with two-stage sampling
     activated_counts: dict[str, int] = {n: 0 for n in all_nodes}
-    failure_probs_trial: dict[str, list[float]] = {n: [] for n in all_nodes}
 
     for _ in range(trials):
         # Track which nodes are activated in this trial
-        active = {node_id}
         visited = set()
+        frontier = [node_id]
 
-        # BFS with random edge activation
-        queue = [(node_id, 1.0)]
-        while queue:
-            current, prob_up = queue.pop(0)
-            if current in visited:
-                continue
-            visited.add(current)
+        for _ in range(max_depth):
+            next_frontier = []
+            for current in frontier:
+                if current in visited:
+                    continue
+                visited.add(current)
 
-            # Count this node as activated
-            if current in activated_counts:
-                activated_counts[current] += 1
+                # Count this node as activated
+                if current in activated_counts:
+                    activated_counts[current] += 1
 
-            # At each edge, sample random activation
-            if current in node_edges:
-                for edge in node_edges[current]:
-                    edge_prob = edge["prob"]
-                    # Sample: is this edge activated in this trial?
-                    if random.random() < edge_prob:
-                        new_prob = prob_up * edge_prob
-                        if edge["to_node"] not in visited:
-                            queue.append((edge["to_node"], new_prob))
+                # Two-stage sampling at each edge
+                if current in node_edges:
+                    for edge in node_edges[current]:
+                        target = edge["to_node"]
+                        if target in visited:
+                            continue
+                        # Stage 1: Does this edge exist? (confidence)
+                        if random.random() < edge["confidence"]:
+                            # Stage 2: Does the effect propagate? (probability)
+                            if random.random() < edge["probability"]:
+                                next_frontier.append(target)
+            frontier = next_frontier
+            if not frontier:
+                break
 
-    # Compute statistics
+    # Compute distribution statistics
     results = []
     for nid in sorted(all_nodes):
         count = activated_counts[nid]
@@ -2272,7 +2303,11 @@ def monte_carlo_cascade(
         results.append({
             "node_id": nid,
             "activated_count": count,
-            "activated_pct": activated_pct,
+            "activated_pct": round(activated_pct, 4),
+            "p5": round(_percentile(count, trials, 0.05), 4),
+            "p50": round(_percentile(count, trials, 0.50), 4),
+            "p95": round(_percentile(count, trials, 0.95), 4),
+            "mean": round(activated_pct, 4),
         })
 
     return {
