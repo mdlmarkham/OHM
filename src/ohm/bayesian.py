@@ -94,8 +94,10 @@ def build_bayesian_network(
     *,
     root_nodes: list[str] | None = None,
     edge_types: list[str] | None = None,
+    layers: list[str] | None = None,
     max_nodes: int = 50,
     leak_probability: float = 0.15,
+    default_probability: float = 0.5,
 ) -> dict[str, Any] | None:
     """Build a BayesianNetwork from OHM edges with probability/confidence values.
 
@@ -111,13 +113,17 @@ def build_bayesian_network(
         root_nodes: Optional list of root node IDs to scope the network.
         edge_types: Edge types to include (default: CAUSES, DEPENDS_ON,
             THREATENS, EXPECTED_LIKELIHOOD).
+        layers: Optional list of layers to include (e.g., ["L3", "L4"]).
+            If None, includes all layers.
         max_nodes: Maximum number of nodes to include.
         leak_probability: Baseline probability of bad outcome when all parents
             are good (default 0.15). Critical for realistic priors.
+        default_probability: Probability to use for edges without probability
+            or confidence values (default 0.5).
 
     Returns:
         Dict with 'model', 'nodes', 'edges', 'variables' or None if
-        pgmpy is unavailable or no probability edges exist.
+        pgmpy is unavailable or no edges found.
     """
     if not PGMPY_AVAILABLE:
         logger.warning("pgmpy not available — cannot build Bayesian network")
@@ -126,39 +132,60 @@ def build_bayesian_network(
     if edge_types is None:
         edge_types = ["CAUSES", "DEPENDS_ON", "THREATENS", "EXPECTED_LIKELIHOOD"]
 
-    # Find edges with probability/confidence values
+    # Build query — include edges with or without probability/confidence
+    # Use default_probability when neither is set
     placeholders = ",".join(["?"] * len(edge_types))
-    query = f"""
-        SELECT from_node, to_node, edge_type,
-               COALESCE(probability, confidence) as prob,
-               confidence
-        FROM ohm_edges
-        WHERE edge_type IN ({placeholders})
-        AND deleted_at IS NULL
-        AND COALESCE(probability, confidence) IS NOT NULL
-        ORDER BY from_node, to_node
-    """
-    rows = conn.execute(query, edge_types).fetchall()
+    if layers:
+        layer_placeholders = ",".join(["?"] * len(layers))
+        query = f"""
+            SELECT from_node, to_node, edge_type,
+                   COALESCE(probability, confidence, {default_probability}) as prob,
+                   COALESCE(confidence, {default_probability}) as confidence
+            FROM ohm_edges
+            WHERE edge_type IN ({placeholders})
+            AND layer IN ({layer_placeholders})
+            AND deleted_at IS NULL
+            ORDER BY from_node, to_node
+        """
+        rows = conn.execute(query, edge_types + layers).fetchall()
+    else:
+        query = f"""
+            SELECT from_node, to_node, edge_type,
+                   COALESCE(probability, confidence, {default_probability}) as prob,
+                   COALESCE(confidence, {default_probability}) as confidence
+            FROM ohm_edges
+            WHERE edge_type IN ({placeholders})
+            AND deleted_at IS NULL
+            ORDER BY from_node, to_node
+        """
+        rows = conn.execute(query, edge_types).fetchall()
 
     if not rows:
-        logger.info("No probability-bearing edges found — cannot build Bayesian network")
+        logger.info("No edges found — cannot build Bayesian network")
         return None
 
-    # Collect all involved nodes and edges
+    # Collect all involved nodes and edges, deduplicating by (from, to) pair
     node_ids = set()
-    edges = []
+    seen_edges: dict[tuple[str, str], dict] = {}
     for row in rows:
         from_node, to_node, edge_type, prob, confidence = row
         node_ids.add(from_node)
         node_ids.add(to_node)
-        prob_val = float(prob) if prob is not None else float(confidence) if confidence is not None else 0.5
-        edges.append({
+        prob_val = float(prob) if prob is not None else default_probability
+        conf_val = float(confidence) if confidence is not None else default_probability
+        key = (from_node, to_node)
+        edge_dict = {
             "from": from_node,
             "to": to_node,
             "type": edge_type,
             "probability": prob_val,
-            "confidence": float(confidence) if confidence is not None else 0.5,
-        })
+            "confidence": conf_val,
+        }
+        # Keep highest probability edge per (from, to) pair
+        if key not in seen_edges or prob_val > seen_edges[key]["probability"]:
+            seen_edges[key] = edge_dict
+
+    edges = list(seen_edges.values())
 
     # Scope to root_nodes if specified
     if root_nodes:
@@ -340,6 +367,7 @@ def bayesian_inference(
     evidence: dict[str, int],
     *,
     edge_types: list[str] | None = None,
+    layers: list[str] | None = None,
     leak_probability: float = 0.15,
 ) -> dict[str, Any]:
     """Run Bayesian inference on the OHM graph.
@@ -354,6 +382,7 @@ def bayesian_inference(
             State 0 = "bad" (failure, closed, negative).
             State 1 = "good" (normal, open, positive).
         edge_types: Edge types to include in the network.
+        layers: Optional list of layers to include (e.g., ["L3", "L4"]).
         leak_probability: Baseline probability of bad outcome when all
             parents are good (default 0.15). Critical for realistic priors.
 
@@ -377,6 +406,7 @@ def bayesian_inference(
     # Build the Bayesian network scoped around target and evidence nodes
     scope_nodes = [target] + list(evidence.keys())
     network = build_bayesian_network(conn, edge_types=edge_types,
+                                      layers=layers,
                                       root_nodes=scope_nodes)
 
     if network is None:
@@ -455,6 +485,7 @@ def causal_intervention(
     *,
     query_nodes: list[str] | None = None,
     edge_types: list[str] | None = None,
+    layers: list[str] | None = None,
     leak_probability: float = 0.15,
 ) -> dict[str, Any]:
     """Run causal intervention using Pearl's do-operator (graph surgery).
@@ -517,6 +548,7 @@ def causal_intervention(
         scope_nodes.extend(query_nodes)
     network = build_bayesian_network(
         conn, edge_types=edge_types,
+        layers=layers,
         root_nodes=scope_nodes,
         leak_probability=leak_probability,
     )
@@ -766,6 +798,7 @@ def compute_ate(
     effect: str,
     *,
     edge_types: list[str] | None = None,
+    layers: list[str] | None = None,
     leak_probability: float = 0.15,
 ) -> dict[str, Any]:
     """Compute Average Treatment Effect (ATE) from the Bayesian model.
@@ -781,6 +814,7 @@ def compute_ate(
         cause: Node ID for the treatment variable.
         effect: Node ID for the outcome variable.
         edge_types: Edge types to include in the network.
+        layers: Optional list of layers to include (e.g., ["L3", "L4"]).
         leak_probability: Baseline probability of bad outcome when all
             parents are good (default 0.15).
 
@@ -804,12 +838,14 @@ def compute_ate(
         conn, cause, 0,
         query_nodes=[effect],
         edge_types=edge_types,
+        layers=layers,
         leak_probability=leak_probability,
     )
     do_good = causal_intervention(
         conn, cause, 1,
         query_nodes=[effect],
         edge_types=edge_types,
+        layers=layers,
         leak_probability=leak_probability,
     )
 
@@ -867,6 +903,7 @@ def compute_sensitivity(
     effect: str,
     *,
     edge_types: list[str] | None = None,
+    layers: list[str] | None = None,
     leak_probability: float = 0.15,
 ) -> dict[str, Any]:
     """Compute sensitivity analysis (E-value) for a causal effect.
@@ -890,6 +927,7 @@ def compute_sensitivity(
         cause: Node ID for the treatment variable.
         effect: Node ID for the outcome variable.
         edge_types: Edge types to include in the network.
+        layers: Optional list of layers to include (e.g., ["L3", "L4"]).
         leak_probability: Baseline probability of bad outcome when all
             parents are good (default 0.15).
 
@@ -905,6 +943,7 @@ def compute_sensitivity(
     ate_result = compute_ate(
         conn, cause, effect,
         edge_types=edge_types,
+        layers=layers,
         leak_probability=leak_probability,
     )
 
@@ -997,6 +1036,7 @@ def find_adjustment_sets(
     effect: str,
     *,
     edge_types: list[str] | None = None,
+    layers: list[str] | None = None,
     leak_probability: float = 0.15,
     max_network_size: int = 10,
 ) -> dict[str, Any]:
@@ -1048,6 +1088,7 @@ def find_adjustment_sets(
     network = build_bayesian_network(
         conn,
         edge_types=edge_types,
+        layers=layers,
         leak_probability=leak_probability,
     )
     if network is None:

@@ -801,11 +801,11 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "/ready": {"method": "GET", "description": "Readiness check (no auth required)"},
                     "/metrics": {"method": "GET", "description": "Prometheus-style metrics"},
                     "/stats": {"method": "GET", "description": "Graph statistics (nodes, edges, layers)"},
-                    "/inference": {"method": "GET", "description": "Bayesian inference: compute posterior probabilities given evidence (observation, includes confounders)"},
-                    "/intervene": {"method": "GET", "description": "Causal intervention using Pearl's do-operator: sever incoming edges to target, set value externally, propagate direct causal effect (no confounders)"},
-                    "/ate": {"method": "GET", "description": "Average Treatment Effect: model-based ATE from noisy-OR CPDs (ATE = P(effect=bad|do(cause=bad)) - P(effect=bad|do(cause=good)))"},
-                    "/sensitivity": {"method": "GET", "description": "Sensitivity analysis: E-value quantifying how much unmeasured confounding would overturn a causal conclusion"},
-                    "/adjustment": {"method": "GET", "description": "Find valid backdoor/frontdoor adjustment sets for causal identification (Pearl's criteria)"},
+                    "/inference": {"method": "GET", "description": "Bayesian inference: compute posterior probabilities given evidence (observation, includes confounders). ?layers=L3,L4 to scope by layer"},
+                    "/intervene": {"method": "GET", "description": "Causal intervention using Pearl's do-operator: sever incoming edges to target, set value externally, propagate direct causal effect (no confounders). ?layers=L3,L4 to scope by layer"},
+                    "/ate": {"method": "GET", "description": "Average Treatment Effect: model-based ATE from noisy-OR CPDs (ATE = P(effect=bad|do(cause=bad)) - P(effect=bad|do(cause=good))). ?layers=L3,L4 to scope by layer"},
+                    "/sensitivity": {"method": "GET", "description": "Sensitivity analysis: E-value quantifying how much unmeasured confounding would overturn a causal conclusion. ?layers=L3,L4 to scope by layer"},
+                    "/adjustment": {"method": "GET", "description": "Find valid backdoor/frontdoor adjustment sets for causal identification (Pearl's criteria). ?layers=L3,L4 to scope by layer"},
                     "/suggest_causes": {"method": "GET", "description": "Suggest candidate CAUSES edges from existing non-causal relationships (DEPENDS_ON, APPLIES_TO, etc.)"},
                     "/refute": {"method": "GET", "description": "Test robustness of causal conclusions using DoWhy refutation methods (random common cause, placebo, data subset, unobserved confounder)"},
                     "/lint": {"method": "GET", "description": "Contract layer linting: validate graph against naming conventions and required fields"},
@@ -1442,8 +1442,11 @@ class OhmHandler(BaseHTTPRequestHandler):
                     if ":" in pair:
                         node_id, state = pair.split(":", 1)
                         evidence[validate_identifier(node_id.strip(), name="evidence_node")] = int(state.strip())
+            # Parse optional layers filter: ?layers=L3,L4
+            layers_str = qs.get("layers", [""])[0]
+            layers = [l.strip() for l in layers_str.split(",") if l.strip()] if layers_str else None
             from .bayesian import bayesian_inference
-            result = bayesian_inference(self.store.conn, target, evidence, leak_probability=leak_probability)
+            result = bayesian_inference(self.store.conn, target, evidence, edge_types=None, layers=layers, leak_probability=leak_probability)
             self._json_response(200, result)
         elif path == "/intervene":
             # Causal intervention using Pearl's do-operator (graph surgery)
@@ -1471,10 +1474,14 @@ class OhmHandler(BaseHTTPRequestHandler):
             if query_str:
                 query_nodes = [validate_identifier(q.strip(), name="query_node") for q in query_str.split(",") if q.strip()]
             leak_probability = float(qs.get("leak", ["0.15"])[0])
+            # Parse optional layers filter: ?layers=L3,L4
+            layers_str = qs.get("layers", [""])[0]
+            layers = [l.strip() for l in layers_str.split(",") if l.strip()] if layers_str else None
             from .bayesian import causal_intervention
             result = causal_intervention(
                 self.store.conn, target, intervention_state,
                 query_nodes=query_nodes,
+                layers=layers,
                 leak_probability=leak_probability,
             )
             self._json_response(200, result)
@@ -1490,8 +1497,11 @@ class OhmHandler(BaseHTTPRequestHandler):
             cause = validate_identifier(cause, name="cause")
             effect = validate_identifier(effect, name="effect")
             leak_probability = float(qs.get("leak", ["0.15"])[0])
+            # Parse optional layers filter: ?layers=L3,L4
+            layers_str = qs.get("layers", [""])[0]
+            layers = [l.strip() for l in layers_str.split(",") if l.strip()] if layers_str else None
             from .bayesian import compute_ate
-            result = compute_ate(self.store.conn, cause, effect, leak_probability=leak_probability)
+            result = compute_ate(self.store.conn, cause, effect, layers=layers, leak_probability=leak_probability)
             self._json_response(200, result)
         elif path == "/sensitivity":
             # Sensitivity analysis: E-value for causal robustness
@@ -1505,8 +1515,11 @@ class OhmHandler(BaseHTTPRequestHandler):
             cause = validate_identifier(cause, name="cause")
             effect = validate_identifier(effect, name="effect")
             leak_probability = float(qs.get("leak", ["0.15"])[0])
+            # Parse optional layers filter: ?layers=L3,L4
+            layers_str = qs.get("layers", [""])[0]
+            layers = [l.strip() for l in layers_str.split(",") if l.strip()] if layers_str else None
             from .bayesian import compute_sensitivity
-            result = compute_sensitivity(self.store.conn, cause, effect, leak_probability=leak_probability)
+            result = compute_sensitivity(self.store.conn, cause, effect, layers=layers, leak_probability=leak_probability)
             self._json_response(200, result)
         elif path == "/adjustment":
             # Find valid backdoor/frontdoor adjustment sets for causal identification
@@ -1520,8 +1533,11 @@ class OhmHandler(BaseHTTPRequestHandler):
             cause = validate_identifier(cause, name="cause")
             effect = validate_identifier(effect, name="effect")
             leak_probability = float(qs.get("leak", ["0.15"])[0])
+            # Parse optional layers filter: ?layers=L3,L4
+            layers_str = qs.get("layers", [""])[0]
+            layers = [l.strip() for l in layers_str.split(",") if l.strip()] if layers_str else None
             from .bayesian import find_adjustment_sets
-            result = find_adjustment_sets(self.store.conn, cause, effect, leak_probability=leak_probability)
+            result = find_adjustment_sets(self.store.conn, cause, effect, layers=layers, leak_probability=leak_probability)
             self._json_response(200, result)
         elif path == "/suggest_causes":
             # Suggest candidate CAUSES edges from existing non-causal relationships
