@@ -344,6 +344,68 @@ class TestBuildBayesianNetwork:
         assert multi_layer_graph["a"] in result["nodes"]
 
 
+# ── Unit Tests: max_nodes truncation (OHM-u60) ──────────────────────────
+
+class TestMaxNodesTruncation:
+    """Test that max_nodes truncation is deterministic and preserves high-degree nodes."""
+
+    def test_truncation_preserves_high_degree_nodes(self, db):
+        """Nodes with more edges should be kept over nodes with fewer edges."""
+        # Create a hub node with many connections and a peripheral node with one
+        hub = create_sample_node(db, label="hub")
+        periph = create_sample_node(db, label="peripheral")
+        targets = []
+        for i in range(10):
+            n = create_sample_node(db, label=f"target_{i}")
+            targets.append(n)
+            create_sample_edge(db, from_node=hub, to_node=n, edge_type="CAUSES",
+                               layer="L3", confidence=0.8)
+        # Peripheral node has only one edge
+        create_sample_edge(db, from_node=periph, to_node=targets[0],
+                           edge_type="CAUSES", layer="L3", confidence=0.5)
+
+        # With max_nodes=5, hub should be kept (degree 10) over peripheral (degree 1)
+        result = build_bayesian_network(db, max_nodes=5)
+        assert result is not None
+        assert hub in result["nodes"]
+        # Hub has 10 edges, peripheral has 1 — hub must survive truncation
+
+    def test_truncation_is_deterministic(self, db):
+        """Repeated calls with same data should produce the same network nodes."""
+        # Create a star: hub → many targets
+        hub = create_sample_node(db, label="det_hub")
+        for i in range(10):
+            t = create_sample_node(db, label=f"det_target_{i}")
+            create_sample_edge(db, from_node=hub, to_node=t,
+                              edge_type="CAUSES", layer="L3", confidence=0.7)
+
+        result1 = build_bayesian_network(db, max_nodes=5)
+        result2 = build_bayesian_network(db, max_nodes=5)
+        assert result1 is not None
+        assert result2 is not None
+        assert set(result1["nodes"]) == set(result2["nodes"])
+
+    def test_truncation_preserves_root_nodes(self, db):
+        """Root nodes should always be kept even if they have low degree."""
+        # Create a high-degree node and a low-degree root node
+        hub = create_sample_node(db, label="hub")
+        root = create_sample_node(db, label="root_low_degree")
+        targets = []
+        for i in range(10):
+            n = create_sample_node(db, label=f"target_{i}")
+            targets.append(n)
+            create_sample_edge(db, from_node=hub, to_node=n,
+                              edge_type="CAUSES", layer="L3", confidence=0.8)
+        # Root has only one edge
+        create_sample_edge(db, from_node=root, to_node=hub,
+                           edge_type="CAUSES", layer="L3", confidence=0.5)
+
+        # With max_nodes=3, root should still be included because it's a root_node
+        result = build_bayesian_network(db, root_nodes=[root], max_nodes=3)
+        assert result is not None
+        assert root in result["nodes"]
+
+
 # ── Integration Tests: bayesian_inference ─────────────────────────────────
 
 class TestBayesianInference:

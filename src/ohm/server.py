@@ -1753,8 +1753,8 @@ class OhmHandler(BaseHTTPRequestHandler):
         body = self._validate_body(path, body)
 
         if path == "/node":
-            # Support ?create_only=false to allow overwrites (default: reject overwrites)
-            create_only = qs.get("create_only", ["true"])[0].lower() in ("true", "1", "yes")
+            # Support ?create_only=true to reject updates (upsert is the default — OHM-y2i.20)
+            create_only = qs.get("create_only", ["false"])[0].lower() in ("true", "1", "yes")
             if create_only:
                 existing = self.store.conn.execute(
                     "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [body["id"]],

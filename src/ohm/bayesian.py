@@ -281,7 +281,22 @@ def build_bayesian_network(
 
     if len(node_ids) > max_nodes:
         logger.warning(f"Network too large ({len(node_ids)} nodes > {max_nodes}). Truncating.")
-        node_ids = set(list(node_ids)[:max_nodes])
+        # OHM-u60: deterministic truncation — keep nodes with highest degree
+        # (most connections), always preserving root_nodes if specified.
+        # Sort by degree descending, then by node ID ascending for tiebreaking.
+        root_set = set(root_nodes) if root_nodes else set()
+        degree: dict[str, int] = {}
+        for e in edges:
+            degree[e["from"]] = degree.get(e["from"], 0) + 1
+            degree[e["to"]] = degree.get(e["to"], 0) + 1
+        # Root nodes are always kept (degree doesn't matter)
+        kept = {n for n in root_set if n in node_ids}
+        remaining = sorted(
+            (n for n in node_ids if n not in kept),
+            key=lambda n: (-degree.get(n, 0), n),
+        )
+        kept |= set(remaining[: max_nodes - len(kept)])
+        node_ids = kept
         edges = [e for e in edges if e["from"] in node_ids and e["to"] in node_ids]
 
     # Convert to safe variable names
