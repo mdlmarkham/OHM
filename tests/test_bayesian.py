@@ -10,9 +10,12 @@ compute_ate, and related functions with a focus on:
 
 from __future__ import annotations
 
+import importlib.util
 import uuid
 
 import pytest
+
+_NETWORKX_AVAILABLE = importlib.util.find_spec("networkx") is not None
 
 from ohm.bayesian import (
     build_bayesian_network,
@@ -104,6 +107,8 @@ class TestSafeNodeId:
 # ── Unit Tests: _find_acyclic_subgraph ────────────────────────────────────
 
 class TestFindAcyclicSubgraph:
+    pytestmark = pytest.mark.skipif(not _NETWORKX_AVAILABLE, reason="networkx not installed")
+
     def test_dag_unchanged(self):
         edges = [("A", "B"), ("B", "C")]
         result = _find_acyclic_subgraph(edges)
