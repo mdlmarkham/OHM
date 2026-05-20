@@ -1722,14 +1722,22 @@ def compute_voi(
         f"AND deleted_at IS NULL {layer_filter}"
     ).fetchall()
 
-    # Build adjacency: child -> parents (backward traversal)
-    parents: dict[str, list[str]] = {}
+    # Build adjacency maps with clear naming:
+    # forward_adj: cause → effects (parent → children)
+    # reverse_adj: effect → causes (child → parents)
+    forward_adj: dict[str, list[str]] = {}
+    reverse_adj: dict[str, list[str]] = {}
     edge_confidences: dict[tuple[str, str], float] = {}
     for row in edges:
         from_node, to_node, raw_conf, raw_prob, *pert_cols = row
-        if from_node not in parents:
-            parents[from_node] = []
-        parents[from_node].append(to_node)
+        # from_node CAUSES/INFLUENCES to_node → forward: from_node → to_node
+        if from_node not in forward_adj:
+            forward_adj[from_node] = []
+        forward_adj[from_node].append(to_node)
+
+        if to_node not in reverse_adj:
+            reverse_adj[to_node] = []
+        reverse_adj[to_node].append(from_node)
 
         # Compute effective confidence
         _, conf_p50 = pert_cols[3], pert_cols[4]
@@ -1745,15 +1753,7 @@ def compute_voi(
 
         edge_confidences[(from_node, to_node)] = eff_conf
 
-    # Build forward adjacency: parent -> children
-    children: dict[str, list[str]] = {}
-    for parent, child_list in parents.items():
-        for child in child_list:
-            if child not in children:
-                children[child] = []
-            children[child].append(parent)
-
-    # For each decision node, find causal ancestors via BFS backward
+    # For each decision node, find causal ancestors via BFS backward (following reverse_adj)
     all_ancestors: dict[str, set[str]] = {}
     for decision in decision_nodes:
         visited: set[str] = set()
@@ -1763,9 +1763,9 @@ def compute_voi(
             if node in visited:
                 continue
             visited.add(node)
-            for parent in children.get(node, []):
-                if parent not in visited:
-                    queue.append(parent)
+            for cause in reverse_adj.get(node, []):
+                if cause not in visited:
+                    queue.append(cause)
         visited.discard(decision)  # Don't include the decision itself
         all_ancestors[decision] = visited
 
@@ -1824,7 +1824,7 @@ def compute_voi(
                 # Use edge confidence along the path as a proxy for sensitivity
                 # (Full ATE computation would be too expensive for all pairs)
                 # Walk the path and take the minimum edge confidence
-                path_conf = _path_confidence(node_id, decision, children, edge_confidences)
+                path_conf = _path_confidence(node_id, decision, forward_adj, edge_confidences)
                 if path_conf is not None:
                     sensitivity += path_conf * (info.get("utility_scale") or 0.5)
                 else:
@@ -2035,31 +2035,23 @@ def generate_voi_tasks(
 def _path_confidence(
     source: str,
     target: str,
-    children: dict[str, list[str]],
+    forward_adj: dict[str, list[str]],
     edge_confidences: dict[tuple[str, str], float],
 ) -> float | None:
     """Find the minimum edge confidence along the best path from source to target.
 
-    Uses BFS to find a path, then returns the minimum edge confidence
-    along that path. Returns None if no path exists.
+    Uses BFS to find a path from source to target following forward adjacency
+    (cause → effect), then returns the minimum edge confidence along that path.
+    Returns None if no path exists.
     """
     from collections import deque
-
-    # BFS from source to target following parent->child edges
-    # children dict maps: child -> [parents], so we need forward: parent -> [children]
-    forward: dict[str, list[str]] = {}
-    for child, parent_list in children.items():
-        for parent in parent_list:
-            if parent not in forward:
-                forward[parent] = []
-            forward[parent].append(child)
 
     queue = deque([(source, [source])])
     visited = {source}
 
     while queue:
         node, path = queue.popleft()
-        for neighbor in forward.get(node, []):
+        for neighbor in forward_adj.get(node, []):
             if neighbor == target:
                 full_path = path + [neighbor]
                 # Compute minimum edge confidence along path

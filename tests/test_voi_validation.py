@@ -353,3 +353,111 @@ class TestVoIDependsOnInclusion:
             "Root A (CAUSES only) should NOT appear when only DEPENDS_ON is considered"
         assert ids["Root C"] not in ranked_ids, \
             "Root C (CAUSES only) should NOT appear when only DEPENDS_ON is considered"
+
+
+class TestVoIAdjacencyDirection:
+    """OHM-3k6: Verify compute_voi builds adjacency correctly (cause → effect).
+
+    The bug was that parents/children dicts were named opposite to their content:
+    - parents[from_node] = [to_nodes] was actually forward adjacency (cause → effects)
+    - children[to_node] = [from_nodes] was actually reverse adjacency (effect → causes)
+
+    This test verifies that the adjacency direction is correct by checking that
+    VoI finds ancestors of decision nodes by traversing backward along causal edges.
+    """
+
+    @pytest.fixture
+    def chain_graph(self):
+        """Create a simple causal chain: A → B → C (decision).
+
+        If adjacency is reversed, VoI would find C's "ancestors" as A
+        (traversing forward from C), which would be wrong — A is already
+        an ancestor via correct backward traversal too. So we need a
+        more specific test: a diamond graph where direction matters.
+        """
+        conn = duckdb.connect(":memory:")
+        initialize_schema(conn)
+
+        # Diamond graph:
+        #   Root → Mid1 → Decision
+        #   Root → Mid2 → Decision
+        # Plus a non-ancestor: Unrelated → Decision (should NOT be ancestor of Root)
+        create_node(conn, label="Root", node_type="concept",
+                    created_by="test", confidence=0.3)
+        create_node(conn, label="Mid1", node_type="concept",
+                    created_by="test", confidence=0.5)
+        create_node(conn, label="Mid2", node_type="concept",
+                    created_by="test", confidence=0.6)
+        create_node(conn, label="Decision", node_type="decision",
+                    created_by="test", confidence=0.7, utility_scale=0.9)
+        # Unrelated node — not an ancestor of Decision
+        create_node(conn, label="Unrelated", node_type="concept",
+                    created_by="test", confidence=0.4)
+
+        ids = {}
+        for label in ["Root", "Mid1", "Mid2", "Decision", "Unrelated"]:
+            row = conn.execute(
+                "SELECT id FROM ohm_nodes WHERE label = ? AND deleted_at IS NULL LIMIT 1",
+                [label],
+            ).fetchone()
+            ids[label] = row[0]
+
+        # Root CAUSES Mid1 and Mid2 (forward: Root → Mid1, Root → Mid2)
+        create_edge(conn, from_node=ids["Root"], to_node=ids["Mid1"],
+                    layer="L3", edge_type="CAUSES", created_by="test", confidence=0.8)
+        create_edge(conn, from_node=ids["Root"], to_node=ids["Mid2"],
+                    layer="L3", edge_type="CAUSES", created_by="test", confidence=0.7)
+        # Mid1 and Mid2 CAUSES Decision (forward: Mid1 → Decision, Mid2 → Decision)
+        create_edge(conn, from_node=ids["Mid1"], to_node=ids["Decision"],
+                    layer="L3", edge_type="CAUSES", created_by="test", confidence=0.8)
+        create_edge(conn, from_node=ids["Mid2"], to_node=ids["Decision"],
+                    layer="L3", edge_type="CAUSES", created_by="test", confidence=0.6)
+        # Unrelated has no edge to Decision — should NOT appear in VoI rankings
+        # (it's not an ancestor of any decision node)
+
+        yield conn, ids
+        conn.close()
+
+    def test_ancestors_found_correctly(self, chain_graph):
+        """VoI finds causal ancestors by traversing backward from decisions."""
+        conn, ids = chain_graph
+        result = compute_voi(conn, decision_nodes=[ids["Decision"]])
+
+        ranked_ids = {r["node_id"] for r in result["rankings"]}
+
+        # Root, Mid1, and Mid2 are ancestors of Decision
+        assert ids["Root"] in ranked_ids, \
+            "Root should be in VoI rankings (ancestor of Decision)"
+        assert ids["Mid1"] in ranked_ids, \
+            "Mid1 should be in VoI rankings (ancestor of Decision)"
+        assert ids["Mid2"] in ranked_ids, \
+            "Mid2 should be in VoI rankings (ancestor of Decision)"
+
+        # Unrelated is NOT an ancestor of Decision
+        assert ids["Unrelated"] not in ranked_ids, \
+            "Unrelated should NOT be in VoI rankings (not an ancestor of Decision)"
+
+    def test_decision_not_in_own_ancestors(self, chain_graph):
+        """A decision node should not appear in its own VoI rankings."""
+        conn, ids = chain_graph
+        result = compute_voi(conn, decision_nodes=[ids["Decision"]])
+
+        ranked_ids = {r["node_id"] for r in result["rankings"]}
+        assert ids["Decision"] not in ranked_ids, \
+            "Decision node should not appear in its own VoI rankings"
+
+    def test_path_confidence_direction(self, chain_graph):
+        """Path confidence follows forward edges (cause → effect direction)."""
+        conn, ids = chain_graph
+        result = compute_voi(conn, decision_nodes=[ids["Decision"]])
+
+        # Root should have downstream_decisions = [Decision]
+        root_ranking = None
+        for r in result["rankings"]:
+            if r["node_id"] == ids["Root"]:
+                root_ranking = r
+                break
+
+        assert root_ranking is not None, "Root should appear in rankings"
+        assert ids["Decision"] in root_ranking["downstream_decisions"], \
+            "Root's downstream_decisions should include Decision"
