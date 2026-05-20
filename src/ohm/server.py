@@ -305,7 +305,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         """Send a JSON response."""
         body = json.dumps(data, indent=2, default=str).encode()
         self.send_response(code)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)

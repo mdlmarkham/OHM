@@ -205,6 +205,28 @@ class TestConnect:
 class TestSDKParity:
     """Tests for OHM-azn.4: CLI↔SDK parity gap methods."""
 
+    def test_unicode_roundtrip_café(self, graph):
+        """Node with Unicode label 'café' round-trips correctly."""
+        node = graph.create_node(label="café", node_type="concept")
+        assert node["label"] == "café"
+        # Read back
+        found = graph.get_node(node["id"])
+        assert found["label"] == "café"
+
+    def test_unicode_roundtrip_emoji(self, graph):
+        """Node with emoji label round-trips correctly."""
+        node = graph.create_node(label="⚠️ High Risk", node_type="concept")
+        assert node["label"] == "⚠️ High Risk"
+        found = graph.get_node(node["id"])
+        assert found["label"] == "⚠️ High Risk"
+
+    def test_unicode_roundtrip_mixed(self, graph):
+        """Node with mixed Unicode content works."""
+        node = graph.create_node(label="naïve approach: ½ + 日本語", node_type="concept")
+        assert node["label"] == "naïve approach: ½ + 日本語"
+        found = graph.get_node(node["id"])
+        assert found["label"] == "naïve approach: ½ + 日本語"
+
     def test_apply_decay_dry_run(self, graph):
         """apply_decay with dry_run=True reports but doesn't modify."""
         a = graph.create_node(label="A")["id"]

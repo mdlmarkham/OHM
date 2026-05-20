@@ -2644,7 +2644,16 @@ def connect_http(
             req = urllib.request.Request(url, data=data, headers=headers, method=method)
             try:
                 with urllib.request.urlopen(req, timeout=30) as resp:
-                    return json.loads(resp.read())
+                    # Force UTF-8 decoding to handle non-ASCII characters
+                    raw = resp.read()
+                    try:
+                        return json.loads(raw.decode('utf-8'))
+                    except UnicodeDecodeError:
+                        # Fallback to latin-1 with warning
+                        import logging
+                        logger = logging.getLogger(__name__)
+                        logger.warning(f'Latin-1 fallback for response from {method} {path}')
+                        return json.loads(raw.decode('latin-1'))
             except urllib.error.HTTPError as e:
                 error_body = e.read().decode() if e.fp else str(e)
                 raise ConnectionError(f"HTTP {e.code} from {method} {path}: {error_body}") from e
