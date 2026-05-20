@@ -464,10 +464,12 @@ def attach_ducklake(
     """
     # Check if DuckLake extension is loaded
     try:
-        conn.execute(
+        result = conn.execute(
             "SELECT extension_name FROM duckdb_extensions()"
             " WHERE loaded = true AND extension_name = 'ducklake'"
         ).fetchone()
+        if result is None:
+            return False  # extension not loaded
     except Exception as e:
         logger.debug("DuckLake extension check failed: %s", e, exc_info=True)
         return False
@@ -485,7 +487,8 @@ def attach_ducklake(
         err_msg = str(e).lower()
         if "already attached" in err_msg or "already exists" in err_msg:
             return True
-        raise
+        logger.debug("DuckLake ATTACH failed: %s", e, exc_info=True)
+        return False
 
     # Create mirror tables in DuckLake schema (no PKs — DuckLake constraint)
     _create_ducklake_tables(conn, alias)
