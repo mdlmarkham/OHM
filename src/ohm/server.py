@@ -320,7 +320,8 @@ class OhmHandler(BaseHTTPRequestHandler):
         """Validate bearer token using constant-time comparison, return agent name or None."""
         auth = self.headers.get("Authorization", "")
         if auth.startswith("Bearer "):
-            token = auth[7:]
+            from urllib.parse import unquote
+            token = unquote(auth[7:])
             for token_hash, agent_name in self.tokens.items():
                 if _verify_token(token, token_hash):
                     return agent_name
@@ -848,6 +849,102 @@ class OhmHandler(BaseHTTPRequestHandler):
             self.log_message(
                 "DELETE %s → %s (%.1fms)", self.path, code, elapsed,
             )
+
+    def do_PATCH(self):
+        """Handle PATCH requests with error mapping and correlation IDs."""
+        self._correlation_id = str(uuid.uuid4())
+        start = time.time()
+        with _metrics_lock:
+            _metrics["requests_total"] += 1
+        try:
+            if not self._check_rate_limit():
+                with _metrics_lock:
+                    _metrics["rate_limited"] += 1
+                self._json_response(429, {
+                    "error": "rate_limited",
+                    "message": "Too many requests. Try again later.",
+                    "correlation_id": self._correlation_id,
+                })
+                return
+            self._do_PATCH()
+        except OHMError as e:
+            self._error_response(e)
+        except ValueError as e:
+            self._error_response(ValidationError(str(e)))
+        except Exception as e:
+            self._error_response(OHMError(str(e)))
+        finally:
+            elapsed = (time.time() - start) * 1000
+            code = getattr(self, "_response_code", 0)
+            with _metrics_lock:
+                if 400 <= code < 500:
+                    _metrics["errors_4xx"] += 1
+                elif code >= 500:
+                    _metrics["errors_5xx"] += 1
+                _request_latencies.append(elapsed)
+            self.log_message(
+                "PATCH %s → %s (%.1fms)", self.path, code, elapsed,
+            )
+
+    def _do_PATCH(self):
+        """Handle PATCH /edge/{id} — partial update of PERT fields on an existing edge."""
+        from urllib.parse import urlparse
+        from .validation import validate_identifier
+        from .exceptions import NodeNotFoundError
+
+        agent = self._require_write_auth()
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/")
+        body = self._parse_body()
+
+        if path.startswith("/edge/"):
+            edge_id = path[6:]
+            edge_id = validate_identifier(edge_id, name="edge_id")
+            edge = self.store.get_edge(edge_id)
+            if not edge:
+                raise NodeNotFoundError(f"Edge not found: {edge_id}")
+
+            now = datetime.now(timezone.utc).isoformat()
+            pert_fields = [
+                "probability", "probability_p05", "probability_p50", "probability_p95",
+                "confidence", "confidence_p05", "confidence_p50", "confidence_p95",
+                "condition", "provenance", "urgency",
+            ]
+            update_fields = []
+            update_params = []
+            for field in pert_fields:
+                if field in body:
+                    update_fields.append(f"{field} = ?")
+                    update_params.append(body[field])
+
+            # Recompute PERT mean if p50 provided and probability not explicitly set
+            if "probability_p50" in body and "probability" not in body:
+                from .pert import compute_pert_mean
+                p05 = body.get("probability_p05", edge.get("probability_p05") or body["probability_p50"])
+                p95 = body.get("probability_p95", edge.get("probability_p95") or body["probability_p50"])
+                pert_mean = compute_pert_mean(p05, body["probability_p50"], p95)
+                update_fields.append("probability = ?")
+                update_params.append(pert_mean)
+
+            if not update_fields:
+                raise ValidationError("No updatable fields provided")
+
+            update_fields.append("updated_at = ?")
+            update_params.append(now)
+            update_fields.append("updated_by = ?")
+            update_params.append(agent)
+            update_params.append(edge_id)
+
+            self.store.conn.execute(
+                f"UPDATE ohm_edges SET {', '.join(update_fields)} WHERE id = ?",
+                update_params,
+            )
+            self.store._log_change("ohm_edges", edge_id, "UPDATE", edge["layer"], agent_name=agent)
+            updated = self.store.get_edge(edge_id)
+            _trigger_webhooks({"type": "edge.updated", "agent": agent, "edge": updated})
+            self._json_response(200, updated)
+        else:
+            raise ValidationError(f"Unknown PATCH path: {path}")
 
     def _do_GET(self):
         """Handle GET requests — queries.
@@ -1631,6 +1728,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             # Parse optional edge_types filter: ?edge_types=CAUSES,DEPENDS_ON
             edge_types_str = qs.get("edge_types", [""])[0]
             edge_types = [e.strip() for e in edge_types_str.split(",") if e.strip()] if edge_types_str else None
+            timeout = float(qs.get("timeout", ["0"])[0]) or None
             from .bayesian import compute_voi
             result = compute_voi(
                 self.store.conn,
@@ -1640,6 +1738,39 @@ class OhmHandler(BaseHTTPRequestHandler):
                 top=top,
                 leak_probability=leak_probability,
                 root_prior=root_prior,
+                timeout=timeout,
+            )
+            self._json_response(200, result)
+        elif path == "/markov/absorbing":
+            # Markov absorbing-state risk (OHM-9bom)
+            # ?start=<node_id>&edge_types=TRANSITIONS_TO,LEADS_TO
+            start_node = qs.get("start", [None])[0]
+            if not start_node:
+                raise ValidationError("?start=<node_id> is required")
+            edge_types_str = qs.get("edge_types", [""])[0]
+            markov_edge_types = [e.strip() for e in edge_types_str.split(",") if e.strip()] or None
+            from .markov import markov_absorbing_risk
+            result = markov_absorbing_risk(
+                self.store.conn,
+                start_node,
+                edge_types=markov_edge_types,
+            )
+            self._json_response(200, result)
+        elif path == "/markov/expected_steps":
+            # Markov expected steps to absorption (OHM-9bom)
+            # ?start=<node_id>&target=<node_id>&edge_types=TRANSITIONS_TO
+            start_node = qs.get("start", [None])[0]
+            if not start_node:
+                raise ValidationError("?start=<node_id> is required")
+            target_state = qs.get("target", [None])[0]
+            edge_types_str = qs.get("edge_types", [""])[0]
+            markov_edge_types = [e.strip() for e in edge_types_str.split(",") if e.strip()] or None
+            from .markov import markov_expected_steps
+            result = markov_expected_steps(
+                self.store.conn,
+                start_node,
+                target_state=target_state,
+                edge_types=markov_edge_types,
             )
             self._json_response(200, result)
         elif path == "/voi/tasks":
@@ -2463,6 +2594,22 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
 
     server = ThreadedHTTPServer((config["host"], config["port"]), OhmHandler)
     print(f"OHM daemon listening on {config['host']}:{config['port']}", file=sys.stderr)
+
+    # Background DuckLake sync thread (OHM-1rwl): sync every sync_interval_seconds
+    # so data is not lost between heartbeats on hard shutdown (SIGKILL/OOM).
+    ducklake_sync_interval = config.get("sync_interval_seconds", 60)
+    _sync_stop = threading.Event()
+
+    def _ducklake_sync_loop():
+        while not _sync_stop.wait(ducklake_sync_interval):
+            try:
+                store.sync_heartbeat()
+            except Exception:
+                pass
+
+    if hasattr(store, "sync_heartbeat") and ducklake_sync_interval > 0:
+        _sync_thread = threading.Thread(target=_ducklake_sync_loop, daemon=True, name="ducklake-sync")
+        _sync_thread.start()
     print(f"Schema: {schema_config.name}", file=sys.stderr)
     if quack_info:
         print("Concurrent access: Quack (multi-writer)", file=sys.stderr)
@@ -2472,6 +2619,11 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     # Graceful shutdown — CHECKPOINT before exit (OHM-8n9)
     def shutdown_handler(signum, frame):
         print("Shutting down...", file=sys.stderr)
+        _sync_stop.set()
+        try:
+            store.sync_heartbeat()
+        except Exception:
+            pass
         try:
             store.conn.execute("CHECKPOINT")
         except Exception:

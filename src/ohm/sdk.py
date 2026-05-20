@@ -2688,7 +2688,13 @@ def connect_http(
             data = json.dumps(body).encode() if body else None
             headers = {"Content-Type": "application/json"}
             if self._token:
-                headers["Authorization"] = f"Bearer {self._token}"
+                token_header = f"Bearer {self._token}"
+                try:
+                    token_header.encode('latin-1')
+                except UnicodeEncodeError:
+                    from urllib.parse import quote
+                    token_header = f"Bearer {quote(self._token, safe='-._~')}"
+                headers["Authorization"] = token_header
 
             req = urllib.request.Request(url, data=data, headers=headers, method=method)
             try:

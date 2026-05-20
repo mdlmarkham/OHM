@@ -33,6 +33,7 @@ Usage (agent mode):
 import json
 import logging
 import os
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from .schema import DEFAULT_SCHEMA, SchemaConfig
@@ -581,8 +582,8 @@ class OhmStore:
             result = self.get_node(id) or {}
             result["created"] = False
 
-            # Auto-generate embedding for updated nodes (best-effort)
-            self._auto_embed_node(id, label, content)
+            # Auto-generate embedding in background (best-effort, non-blocking)
+            threading.Thread(target=self._auto_embed_node, args=(id, label, content), daemon=True).start()
 
             return result
 
@@ -613,8 +614,8 @@ class OhmStore:
             result = self.get_node(id) or {}
             result["created"] = False
 
-            # Auto-generate embedding for reactivated nodes (best-effort)
-            self._auto_embed_node(id, label, content)
+            # Auto-generate embedding in background (best-effort, non-blocking)
+            threading.Thread(target=self._auto_embed_node, args=(id, label, content), daemon=True).start()
 
             return result
 
@@ -638,8 +639,8 @@ class OhmStore:
         result = self.get_node(id) or {}
         result["created"] = True
 
-        # Auto-generate embedding for new nodes (non-blocking, best-effort)
-        self._auto_embed_node(id, label, content)
+        # Auto-generate embedding in background (best-effort, non-blocking)
+        threading.Thread(target=self._auto_embed_node, args=(id, label, content), daemon=True).start()
 
         return result
 

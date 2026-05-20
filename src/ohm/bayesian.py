@@ -1606,6 +1606,7 @@ def compute_voi(
     top: int | None = None,
     leak_probability: float = 0.15,
     root_prior: float = 0.3,
+    timeout: float | None = None,
 ) -> dict[str, Any]:
     """Compute Value of Information (VoI) for research prioritization.
 
@@ -1628,6 +1629,8 @@ def compute_voi(
         top: Return only the top N nodes by VoI score. None = all.
         leak_probability: Baseline probability for Bayesian inference.
         root_prior: Prior probability for root nodes.
+        timeout: Maximum seconds for ATE computation. Candidates not computed
+            within this window fall back to path-confidence sensitivity.
 
     Returns:
         Dict with:
@@ -1780,6 +1783,8 @@ def compute_voi(
 
     # Compute VoI for each candidate node
     # Track whether we used ATE or path-confidence fallback for each ranking
+    import time as _time
+    _deadline = (_time.monotonic() + timeout) if timeout else None
     rankings = []
     for node_id in candidate_nodes:
         info = node_info.get(node_id, {"label": node_id, "confidence": 0.5, "utility_scale": None})
@@ -1806,19 +1811,24 @@ def compute_voi(
         # Sensitivity: how much does this node affect decisions?
         # Per ADR-013: use |ATE(ancestor → decision)| when possible,
         # falling back to path-weighted confidence product when ATE is unavailable.
+        # If deadline exceeded, skip ATE for remaining candidates.
+        _ate_allowed = _deadline is None or _time.monotonic() < _deadline
         sensitivity = 0.0
         sensitivity_method = "path_confidence"  # default fallback
         downstream_decisions = []
         for decision in decision_nodes:
             if node_id in all_ancestors.get(decision, set()):
                 # Try ATE first (model-based causal effect)
-                ate_result = compute_ate(
-                    conn, node_id, decision,
-                    edge_types=edge_types,
-                    layers=layers,
-                    leak_probability=leak_probability,
-                    root_prior=root_prior,
-                )
+                if not _ate_allowed:
+                    ate_result = {"method": "timeout_fallback"}
+                else:
+                    ate_result = compute_ate(
+                        conn, node_id, decision,
+                        edge_types=edge_types,
+                        layers=layers,
+                        leak_probability=leak_probability,
+                        root_prior=root_prior,
+                    )
                 if ate_result.get("method") == "model_based_ate":
                     ate_value = ate_result["ate"]
                     sensitivity += abs(ate_value) * (info.get("utility_scale") or 0.5)
