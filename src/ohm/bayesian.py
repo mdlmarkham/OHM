@@ -1672,7 +1672,7 @@ def compute_voi(
         conn: DuckDB connection.
         decision_nodes: List of decision node IDs. If None, auto-detect
             nodes with type='decision' and utility_scale > 0.
-        edge_types: Edge types to include (default: CAUSES, INFLUENCES, ENABLES).
+        edge_types: Edge types to include (default: CAUSES, INFLUENCES, ENABLES, DEPENDS_ON).
         layers: Optional list of layers to include (e.g., ["L3", "L4"]).
         top: Return only the top N nodes by VoI score. None = all.
         leak_probability: Baseline probability for Bayesian inference.
@@ -1687,7 +1687,7 @@ def compute_voi(
         - n_candidates: total number of candidate nodes
     """
     if edge_types is None:
-        edge_types = ["CAUSES", "INFLUENCES", "ENABLES"]
+        edge_types = ["CAUSES", "INFLUENCES", "ENABLES", "DEPENDS_ON"]
 
     # Find decision nodes if not specified
     if decision_nodes is None:

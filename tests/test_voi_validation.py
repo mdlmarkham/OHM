@@ -1,4 +1,5 @@
 """OHM-6mv.7: Self-referential VoI validation.
+OHM-6mv.16: DEPENDS_ON edges included in VoI by default.
 
 Prove that VoI methodology works on OHM itself:
 1. Build a test graph with decision nodes and causal chains
@@ -7,6 +8,7 @@ Prove that VoI methodology works on OHM itself:
 4. Recompute confidence on downstream decision nodes
 5. Verify that high-VoI observations improve downstream confidence
    more than low-VoI observations.
+6. Verify DEPENDS_ON edges are included by default in VoI computation.
 """
 
 import pytest
@@ -229,3 +231,125 @@ class TestVoIValidation:
             assert "sensitivity" in ranking, f"Missing sensitivity in ranking for {ranking['node_id']}"
             assert "uncertainty" in ranking, f"Missing uncertainty in ranking for {ranking['node_id']}"
             assert "voi_score" in ranking, f"Missing voi_score in ranking for {ranking['node_id']}"
+
+
+class TestVoIDependsOnInclusion:
+    """OHM-6mv.16: Verify DEPENDS_ON edges are included in VoI by default.
+
+    Before this change, compute_voi() defaulted to
+    edge_types=["CAUSES", "INFLUENCES", "ENABLES"], which excluded
+    DEPENDS_ON edges (L4 dependency edges). This meant VoI would
+    ignore prerequisite/dependency relationships when computing
+    research priorities.
+
+    Now the default is ["CAUSES", "INFLUENCES", "ENABLES", "DEPENDS_ON"].
+    """
+
+    @pytest.fixture
+    def depends_graph(self):
+        """Create a graph with DEPENDS_ON edges for VoI testing.
+
+        Graph structure:
+          Root A --CAUSES--> Decision 1
+          Root B --DEPENDS_ON--> Decision 1  (prerequisite)
+          Root C --CAUSES--> Decision 2
+        """
+        conn = duckdb.connect(":memory:")
+        initialize_schema(conn)
+
+        # Create nodes
+        create_node(conn, label="Root A", node_type="concept",
+                    created_by="test", confidence=0.3)
+        create_node(conn, label="Root B", node_type="concept",
+                    created_by="test", confidence=0.4)
+        create_node(conn, label="Root C", node_type="concept",
+                    created_by="test", confidence=0.5)
+        create_node(conn, label="Decision 1", node_type="decision",
+                    created_by="test", confidence=0.6, utility_scale=0.9)
+        create_node(conn, label="Decision 2", node_type="decision",
+                    created_by="test", confidence=0.7, utility_scale=0.6)
+
+        # Look up IDs
+        ids = {}
+        for label in ["Root A", "Root B", "Root C", "Decision 1", "Decision 2"]:
+            row = conn.execute(
+                "SELECT id FROM ohm_nodes WHERE label = ? AND deleted_at IS NULL LIMIT 1",
+                [label],
+            ).fetchone()
+            ids[label] = row[0]
+
+        # CAUSES edge (L3)
+        create_edge(conn, from_node=ids["Root A"], to_node=ids["Decision 1"],
+                    layer="L3", edge_type="CAUSES", created_by="test", confidence=0.8)
+        # DEPENDS_ON edge (L4) — the key edge type we're testing
+        create_edge(conn, from_node=ids["Root B"], to_node=ids["Decision 1"],
+                    layer="L4", edge_type="DEPENDS_ON", created_by="test", confidence=0.7)
+        # Another CAUSES edge for comparison
+        create_edge(conn, from_node=ids["Root C"], to_node=ids["Decision 2"],
+                    layer="L3", edge_type="CAUSES", created_by="test", confidence=0.6)
+
+        yield conn, ids
+        conn.close()
+
+    def test_depends_on_included_by_default(self, depends_graph):
+        """DEPENDS_ON edges are included in VoI computation by default."""
+        conn, ids = depends_graph
+        result = compute_voi(conn)
+        # Root B connects via DEPENDS_ON — it should appear in rankings
+        ranked_ids = {r["node_id"] for r in result["rankings"]}
+        assert ids["Root B"] in ranked_ids, \
+            "Root B (connected via DEPENDS_ON) should appear in VoI rankings by default"
+
+    def test_depends_on_excluded_when_filtered(self, depends_graph):
+        """DEPENDS_ON edges are excluded when edge_types omits them."""
+        conn, ids = depends_graph
+        result = compute_voi(conn, edge_types=["CAUSES", "INFLUENCES", "ENABLES"])
+        ranked_ids = {r["node_id"] for r in result["rankings"]}
+        # Root B only connects via DEPENDS_ON, so it should NOT appear
+        # when DEPENDS_ON is excluded
+        assert ids["Root B"] not in ranked_ids, \
+            "Root B should NOT appear when DEPENDS_ON is excluded from edge_types"
+
+    def test_depends_on_in_default_edge_types(self):
+        """The default edge_types for compute_voi includes DEPENDS_ON.
+
+        The function signature uses edge_types=None, but the body defaults
+        to ["CAUSES", "INFLUENCES", "ENABLES", "DEPENDS_ON"].
+        Verify by calling compute_voi with no edge_types and checking
+        that DEPENDS_ON edges are included.
+        """
+        conn = duckdb.connect(":memory:")
+        initialize_schema(conn)
+        create_node(conn, label="Prereq", node_type="concept",
+                    created_by="test", confidence=0.3)
+        create_node(conn, label="Action", node_type="decision",
+                    created_by="test", confidence=0.6, utility_scale=0.8)
+        ids = {}
+        for label in ["Prereq", "Action"]:
+            row = conn.execute(
+                "SELECT id FROM ohm_nodes WHERE label = ? AND deleted_at IS NULL LIMIT 1",
+                [label],
+            ).fetchone()
+            ids[label] = row[0]
+        create_edge(conn, from_node=ids["Prereq"], to_node=ids["Action"],
+                    layer="L4", edge_type="DEPENDS_ON", created_by="test", confidence=0.7)
+        # Call with default (None) — should include DEPENDS_ON
+        result = compute_voi(conn)
+        ranked_ids = {r["node_id"] for r in result["rankings"]}
+        assert ids["Prereq"] in ranked_ids, \
+            "DEPENDS_ON edges should be included by default in compute_voi"
+        conn.close()
+
+    def test_voi_with_only_depends_on(self, depends_graph):
+        """VoI can be computed using only DEPENDS_ON edges."""
+        conn, ids = depends_graph
+        result = compute_voi(conn, edge_types=["DEPENDS_ON"])
+        ranked_ids = {r["node_id"] for r in result["rankings"]}
+        # Root B connects via DEPENDS_ON — should be ranked
+        assert ids["Root B"] in ranked_ids, \
+            "Root B should appear when only DEPENDS_ON edges are considered"
+        # Root A and Root C only have CAUSES edges — should NOT appear
+        assert ids["Root A"] not in ranked_ids, \
+            "Root A (CAUSES only) should NOT appear when only DEPENDS_ON is considered"
+        assert ids["Root C"] not in ranked_ids, \
+            "Root C (CAUSES only) should NOT appear when only DEPENDS_ON is considered"

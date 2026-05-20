@@ -385,6 +385,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--root-prior", type=float, default=0.3,
         help="Default prior for root nodes (default: 0.3)",
     )
+    voi_parser.add_argument(
+        "--edge-types", default=None,
+        help="Comma-separated edge types to include (default: CAUSES,INFLUENCES,ENABLES,DEPENDS_ON)",
+    )
 
     # graph voi-tasks
     voi_tasks_parser = graph_sub.add_parser(
@@ -1582,9 +1586,13 @@ def _handle_voi(args: argparse.Namespace) -> None:
         layers = None
         if args.layers:
             layers = [l.strip() for l in args.layers.split(",") if l.strip()]
+        edge_types = None
+        if args.edge_types:
+            edge_types = [e.strip() for e in args.edge_types.split(",") if e.strip()]
         result = compute_voi(
             conn,
             decision_nodes=decision_nodes,
+            edge_types=edge_types,
             layers=layers,
             top=args.top,
             leak_probability=args.leak,

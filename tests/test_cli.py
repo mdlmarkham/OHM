@@ -203,6 +203,7 @@ class TestCLIParsing:
         assert args.layers is None
         assert args.leak == 0.15
         assert args.root_prior == 0.3
+        assert args.edge_types is None
 
     def test_graph_voi_with_args(self):
         parser = build_parser()
@@ -213,6 +214,7 @@ class TestCLIParsing:
             "--layers", "L3,L4",
             "--leak", "0.2",
             "--root-prior", "0.5",
+            "--edge-types", "CAUSES,DEPENDS_ON",
         ])
         assert args.graph_command == "voi"
         assert args.decision == "d1,d2"
@@ -220,6 +222,7 @@ class TestCLIParsing:
         assert args.layers == "L3,L4"
         assert args.leak == 0.2
         assert args.root_prior == 0.5
+        assert args.edge_types == "CAUSES,DEPENDS_ON"
 
     def test_graph_voi_tasks(self):
         parser = build_parser()
