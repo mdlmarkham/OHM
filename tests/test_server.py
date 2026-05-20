@@ -1863,10 +1863,10 @@ class TestIdempotentRegistration:
             "values": ["loyalty", "honesty"],
         })
         assert status == 201
-        # Should have 2 VALUES edges (old ones deleted, new ones created)
+        # Should have 2 active VALUES edges (old ones soft-deleted, new ones created)
         agent_id = data["agent"]["id"]
         values_edges = store.execute(
-            "SELECT * FROM ohm_edges WHERE from_node = ? AND edge_type = 'VALUES'",
+            "SELECT * FROM ohm_edges WHERE from_node = ? AND edge_type = 'VALUES' AND deleted_at IS NULL",
             [agent_id],
         )
         assert len(values_edges) == 2
