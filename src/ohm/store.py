@@ -1083,6 +1083,7 @@ class OhmStore:
             [now, now, deleted_by, edge_id]
         )
         self._log_change("ohm_edges", edge_id, "DELETE", deleted_by)
+        self._increment_graph_generation()
 
         return {
             "deleted": edge_id,
@@ -1913,6 +1914,7 @@ class OhmStore:
                          occurred_at or self._now(),
                          occurred_at or self._now()],
                     )
+                    self._increment_graph_generation()
 
     def _get_last_push_timestamp(self) -> Optional[str]:
         """Get the last push timestamp for this agent."""

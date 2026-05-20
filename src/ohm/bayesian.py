@@ -1132,24 +1132,37 @@ def compute_sensitivity(
         robustness = "very_strong"
         robustness_desc = "Very strong robustness — confounder needs RR>={:.2f} with both cause and effect".format(e_value)
 
-    # Confounder perturbation analysis
-    # Simulate how ATE changes as confounder strength grows
-    perturbation_levels = [0.0, 0.1, 0.2, 0.3, 0.5, 0.7, 1.0]
+    # Confounder perturbation analysis (VanderWeele & Ding bounding approach)
+    # For a confounder with strength s (RR of confounder-outcome association),
+    # the bias-adjusted RR is bounded by RR/s (positive confounding).
+    # This gives a proper sensitivity interval rather than an ad-hoc formula.
+    # Confounder strength s >= 1.0 represents how strongly the confounder
+    # is associated with the outcome (s=1 means no confounding).
+    perturbation_levels = [1.0, 1.2, 1.5, 2.0, 3.0, 5.0, 10.0]
     perturbation_results = []
     for conf_strength in perturbation_levels:
-        # Approximate: if confounder has RR=s with both cause and effect,
-        # bias = conf_strength^2 * (RR-1) * 0.5, subtracted from ATE
-        if ate > 0:
-            bias = conf_strength ** 2 * min(risk_ratio - 1, ate) * 0.5
-            adjusted_ate = max(0, round(ate - bias, 4))
+        if conf_strength == 1.0:
+            # No confounding — original estimate
+            adjusted_ate = round(ate, 4)
+        elif risk_ratio > 0 and conf_strength > 1.0:
+            # VanderWeele & Ding bounding: adjusted RR = RR / s
+            # where s is the confounder-outcome RR (>= 1.0)
+            # Convert back to probability scale for ATE
+            adjusted_rr = risk_ratio / conf_strength
+            # ATE = P(bad|do(bad)) - P(bad|do(good))
+            # Adjusted: use adjusted RR to bound the effect
+            if p_bad_do_good > 0:
+                adjusted_p_bad_do_bad = min(1.0, p_bad_do_good * adjusted_rr)
+                adjusted_ate = round(adjusted_p_bad_do_bad - p_bad_do_good, 4)
+            else:
+                adjusted_ate = round(ate, 4)
         else:
-            bias = conf_strength ** 2 * min(1 - risk_ratio, abs(ate)) * 0.5
-            adjusted_ate = min(0, round(ate + bias, 4))
+            adjusted_ate = round(ate, 4)
 
         perturbation_results.append({
             "confounder_strength": conf_strength,
             "adjusted_ate": adjusted_ate,
-            "ate_zero": adjusted_ate == 0,
+            "ate_zero": abs(adjusted_ate) < 1e-6,
         })
 
     # Find the confounder strength that overturns the result

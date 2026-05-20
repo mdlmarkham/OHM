@@ -142,7 +142,8 @@ class TestComputeSensitivity:
         reason="pgmpy not available"
     )
     def test_sensitivity_perturbation_analysis(self, db, causal_chain):
-        """Confounder perturbation should show decreasing ATE as confounder strength grows."""
+        """Confounder perturbation (VanderWeele & Ding bounding) should show
+        decreasing ATE as confounder strength grows (s >= 1.0)."""
         try:
             from pgmpy.models import DiscreteBayesianNetwork
         except ImportError:
@@ -156,14 +157,15 @@ class TestComputeSensitivity:
         assert result is not None
         perturbation = result.get("confounder_perturbation", [])
         assert len(perturbation) == 7  # 7 perturbation levels
-        # First level should have confounder_strength=0.0
-        assert perturbation[0]["confounder_strength"] == 0.0
+        # First level should have confounder_strength=1.0 (no confounding)
+        assert perturbation[0]["confounder_strength"] == 1.0
         # ATE should decrease as confounder strength increases (for positive ATE)
+        # VanderWeele & Ding: adjusted RR = RR/s, so higher s → lower adjusted ATE
         ate_values = [p["adjusted_ate"] for p in perturbation]
         if result["ate"] > 0:
             # Adjusted ATE should be non-increasing
             for i in range(1, len(ate_values)):
-                assert ate_values[i] <= ate_values[i-1] or ate_values[i] == 0, \
+                assert ate_values[i] <= ate_values[i-1] or abs(ate_values[i]) < 1e-6, \
                     f"Adjusted ATE should decrease: {ate_values}"
 
     def test_sensitivity_no_edges_returns_error(self, db):
