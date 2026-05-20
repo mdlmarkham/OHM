@@ -35,6 +35,7 @@ jobs:
         run: python -m mypy src/
 
       - name: Test with pytest
+        id: pytest
         run: |
           set +e
           python -m pytest tests/ --tb=long --benchmark-disable -r fEsxX --maxfail=10 2>&1 | tee /tmp/pytest.log
@@ -47,3 +48,30 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           echo '</details>' >> "$GITHUB_STEP_SUMMARY"
           exit $status
+
+      - name: Post pytest tail as PR comment on failure
+        if: failure() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PY_VERSION: ${{ matrix.python-version }}
+          REPO: ${{ github.repository }}
+        run: |
+          {
+            echo "### pytest failure on Python ${PY_VERSION}"
+            echo ""
+            echo "<details><summary>Last 300 lines of pytest output</summary>"
+            echo ""
+            echo '```'
+            tail -n 300 /tmp/pytest.log
+            echo '```'
+            echo "</details>"
+          } > /tmp/comment.md
+          jq -Rs '{body: .}' < /tmp/comment.md > /tmp/comment.json
+          curl -sS -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            --data @/tmp/comment.json \
+            "https://api.github.com/repos/${REPO}/issues/${PR_NUMBER}/comments" \
+            -o /tmp/comment-response.json -w "HTTP %{http_code}\n"
