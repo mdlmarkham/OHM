@@ -177,11 +177,14 @@ def build_bayesian_network(
         return None
 
     # Cache key based on query parameters (OHM-omr)
+    # All parameters that affect CPT values must be included to prevent stale cache hits
     cache_key = (
         tuple(sorted(edge_types)) if edge_types else None,
         tuple(sorted(layers)) if layers else None,
         max_nodes,
-        root_prior,  # root_prior affects CPT values, must be part of cache key
+        root_prior,
+        leak_probability,
+        default_probability,
     )
 
     # Check cache — invalidate if graph_generation has changed
