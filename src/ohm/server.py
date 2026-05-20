@@ -59,6 +59,7 @@ _START_TIME = time.time()
 # ── Security Constants ─────────────────────────────────────
 
 MAX_BODY_SIZE = 1 * 1024 * 1024  # 1 MB — reject bodies larger than this
+MAX_BATCH_SIZE = 500  # Maximum nodes + edges per /batch request
 RATE_LIMIT_WINDOW = 60  # seconds
 RATE_LIMIT_MAX_REQUESTS = 1000  # per window per IP
 
@@ -1127,17 +1128,58 @@ class OhmHandler(BaseHTTPRequestHandler):
                 metrics_snapshot = dict(_metrics)
                 sorted_lats = sorted(_request_latencies) if _request_latencies else [0]
             n = len(sorted_lats)
-            self._json_response(200, {
-                "uptime_seconds": round(time.time() - _START_TIME, 1),
-                "requests": metrics_snapshot,
-                "latency_ms": {
-                    "p50": sorted_lats[n // 2] if n > 0 else 0,
-                    "p95": sorted_lats[int(n * 0.95)] if n > 1 else sorted_lats[0] if n > 0 else 0,
-                    "p99": sorted_lats[int(n * 0.99)] if n > 1 else sorted_lats[0] if n > 0 else 0,
-                    "max": sorted_lats[-1] if n > 0 else 0,
-                    "sample_count": n,
-                },
-            })
+            uptime = round(time.time() - _START_TIME, 1)
+            p50 = sorted_lats[n // 2] if n > 0 else 0
+            p95 = sorted_lats[int(n * 0.95)] if n > 1 else sorted_lats[0] if n > 0 else 0
+            p99 = sorted_lats[int(n * 0.99)] if n > 1 else sorted_lats[0] if n > 0 else 0
+            lat_max = sorted_lats[-1] if n > 0 else 0
+
+            # Prometheus text format when requested via Accept header or ?format=prometheus
+            accept = self.headers.get("Accept", "")
+            fmt = qs.get("format", [""])[0]
+            if fmt == "prometheus" or "text/plain" in accept:
+                lines = [
+                    "# HELP ohm_uptime_seconds Seconds since daemon started",
+                    "# TYPE ohm_uptime_seconds gauge",
+                    f"ohm_uptime_seconds {uptime}",
+                    "# HELP ohm_requests_total Total HTTP requests",
+                    "# TYPE ohm_requests_total counter",
+                    f'ohm_requests_total{{method="all"}} {metrics_snapshot.get("requests_total", 0)}',
+                    f'ohm_requests_total{{method="get"}} {metrics_snapshot.get("requests_get", 0)}',
+                    f'ohm_requests_total{{method="post"}} {metrics_snapshot.get("requests_post", 0)}',
+                    "# HELP ohm_errors_total Total HTTP errors",
+                    "# TYPE ohm_errors_total counter",
+                    f'ohm_errors_total{{code="4xx"}} {metrics_snapshot.get("errors_4xx", 0)}',
+                    f'ohm_errors_total{{code="5xx"}} {metrics_snapshot.get("errors_5xx", 0)}',
+                    "# HELP ohm_rate_limited_total Requests rejected by rate limiter",
+                    "# TYPE ohm_rate_limited_total counter",
+                    f'ohm_rate_limited_total {metrics_snapshot.get("rate_limited", 0)}',
+                    "# HELP ohm_request_duration_ms Request latency in milliseconds",
+                    "# TYPE ohm_request_duration_ms summary",
+                    f'ohm_request_duration_ms{{quantile="0.5"}} {p50}',
+                    f'ohm_request_duration_ms{{quantile="0.95"}} {p95}',
+                    f'ohm_request_duration_ms{{quantile="0.99"}} {p99}',
+                    f'ohm_request_duration_ms_count {n}',
+                    "",
+                ]
+                body_bytes = "\n".join(lines).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+                self.send_header("Content-Length", str(len(body_bytes)))
+                self.end_headers()
+                self.wfile.write(body_bytes)
+            else:
+                self._json_response(200, {
+                    "uptime_seconds": uptime,
+                    "requests": metrics_snapshot,
+                    "latency_ms": {
+                        "p50": p50,
+                        "p95": p95,
+                        "p99": p99,
+                        "max": lat_max,
+                        "sample_count": n,
+                    },
+                })
             return
         elif path == "/events" or path.startswith("/events/"):
             # SSE endpoint — streams change feed events to connected clients
@@ -2243,6 +2285,12 @@ class OhmHandler(BaseHTTPRequestHandler):
             nodes_created = 0
             edges_created = 0
 
+            if len(nodes) + len(edges) > MAX_BATCH_SIZE:
+                raise ValidationError(
+                    f"Batch too large: {len(nodes)} nodes + {len(edges)} edges = "
+                    f"{len(nodes) + len(edges)} items exceeds limit of {MAX_BATCH_SIZE}"
+                )
+
             # Validate all inputs first
             for i, node in enumerate(nodes):
                 if "id" not in node or "label" not in node:
@@ -2677,6 +2725,10 @@ def main(schema_config: SchemaConfig | None = None):
         "--quack-token-env", default=None,
         help="Environment variable for Quack token (default: QUACK_TOKEN)",
     )
+    parser.add_argument(
+        "--check-migrations", action="store_true",
+        help="Report pending schema migrations without applying them, then exit",
+    )
     args = parser.parse_args()
 
     # Allow CLI override of schema
@@ -2722,6 +2774,37 @@ def main(schema_config: SchemaConfig | None = None):
         print(f"Token for {args.init_token}: {token}")
         print(f"Config saved to {config_path}")
         print("WARNING: Store this token securely — it will not be shown again.")
+        return
+
+    # Migration dry-run: report pending migrations and exit without applying
+    if args.check_migrations:
+        from .schema import MIGRATIONS
+        import duckdb as _duckdb
+
+        db_path_check = config.get("db_path", str(Path.home() / ".ohm" / "ohm.duckdb"))
+        try:
+            _check_conn = _duckdb.connect(db_path_check, read_only=True)
+            current = _check_conn.execute(
+                "SELECT value FROM ohm_meta WHERE key = 'schema_version'"
+            ).fetchone()
+            current_version = current[0] if current else "0.1.0"
+            _check_conn.close()
+        except Exception:
+            current_version = "0.1.0"
+
+        def _vtuple(v: str) -> tuple[int, ...]:
+            return tuple(int(x) for x in v.split("."))
+
+        current_key = _vtuple(current_version)
+        pending = [(v, desc) for v, desc, _ in MIGRATIONS if current_key < _vtuple(v)]
+
+        print(f"Current schema version: {current_version}")
+        if pending:
+            print(f"{len(pending)} pending migration(s):")
+            for v, desc in pending:
+                print(f"  {v}: {desc}")
+        else:
+            print("No pending migrations.")
         return
 
     # Initialize store

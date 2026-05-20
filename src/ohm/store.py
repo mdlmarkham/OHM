@@ -152,6 +152,7 @@ class OhmStore:
             schema: SchemaConfig for domain-specific validation.
                 Defaults to OHM schema if not provided.
         """
+        self._lock = threading.RLock()
         self.agent_name = agent_name
         self.readonly = readonly
         self.quack = quack
@@ -475,13 +476,14 @@ class OhmStore:
 
     def execute(self, sql: str, params: Optional[list] = None) -> list[dict[str, Any]]:
         """Execute a SQL query and return results as list of dicts."""
-        if params:
-            result = self.conn.execute(sql, params)
-        else:
-            result = self.conn.execute(sql)
+        with self._lock:
+            if params:
+                result = self.conn.execute(sql, params)
+            else:
+                result = self.conn.execute(sql)
 
-        columns = [desc[0] for desc in result.description]
-        rows = result.fetchall()
+            columns = [desc[0] for desc in result.description]
+            rows = result.fetchall()
         results = [dict(zip(columns, row)) for row in rows]
         # Deserialize known JSON columns
         _json_cols = {"tags", "metadata", "action_alternatives"}
@@ -501,7 +503,8 @@ class OhmStore:
 
     def execute_one(self, sql: str, params: Optional[list] = None) -> Optional[dict[str, Any]]:
         """Execute a query and return a single result or None."""
-        results = self.execute(sql, params)
+        with self._lock:
+            results = self.execute(sql, params)
         row = results[0] if results else None
         # Add convenience aliases for edge fields
         if row and "from_node" in row:
