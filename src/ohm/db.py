@@ -17,6 +17,22 @@ if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
 
+def _get_ducklake_path() -> str:
+    """Return the DuckLake catalog path, env var first then config file fallback."""
+    path = os.environ.get("OHM_DUCKLAKE_PATH", "")
+    if path:
+        return path
+    config_file = pathlib.Path(os.environ.get("OHM_CONFIG", str(pathlib.Path.home() / ".ohm" / "ohmd.json")))
+    if config_file.exists():
+        try:
+            with open(config_file) as f:
+                cfg = json.load(f)
+            path = cfg.get("ducklake", {}).get("path", "")
+        except Exception:
+            pass
+    return path
+
+
 def get_default_db_path() -> pathlib.Path:
     """Return the default database path.
 
@@ -152,7 +168,7 @@ def _try_ducklake_recovery(db_path_str: str) -> bool:
     """
     import duckdb
 
-    ducklake_path = os.environ.get("OHM_DUCKLAKE_PATH")
+    ducklake_path = _get_ducklake_path()
     if not ducklake_path:
         return False
 
@@ -304,7 +320,7 @@ def _auto_restore_if_empty(conn: "duckdb.DuckDBPyConnection", db_path_str: str) 
     if node_count > 0:
         return
 
-    ducklake_path = os.environ.get("OHM_DUCKLAKE_PATH")
+    ducklake_path = _get_ducklake_path()
     if not ducklake_path:
         return
 
