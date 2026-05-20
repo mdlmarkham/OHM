@@ -972,8 +972,8 @@ class TestComputeVoI:
 
         # Add an observation for node 'a'
         db.execute(
-            "INSERT INTO ohm_observations (id, node_id, value, source, created_by) "
-            "VALUES (?, ?, 0.5, 'test', 'test_agent')",
+            "INSERT INTO ohm_observations (id, node_id, value, source, type, created_by) "
+            "VALUES (?, ?, 0.5, 'test', 'measurement', 'test_agent')",
             [str(uuid.uuid4()), a],
         )
 

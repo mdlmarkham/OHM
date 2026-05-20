@@ -193,3 +193,30 @@ class TestCLIParsing:
         parser = build_parser()
         args = parser.parse_args([])
         assert args.command is None
+
+    def test_graph_voi(self):
+        parser = build_parser()
+        args = parser.parse_args(["graph", "voi"])
+        assert args.graph_command == "voi"
+        assert args.decision is None
+        assert args.top == 10
+        assert args.layers is None
+        assert args.leak == 0.15
+        assert args.root_prior == 0.3
+
+    def test_graph_voi_with_args(self):
+        parser = build_parser()
+        args = parser.parse_args([
+            "graph", "voi",
+            "--decision", "d1,d2",
+            "--top", "5",
+            "--layers", "L3,L4",
+            "--leak", "0.2",
+            "--root-prior", "0.5",
+        ])
+        assert args.graph_command == "voi"
+        assert args.decision == "d1,d2"
+        assert args.top == 5
+        assert args.layers == "L3,L4"
+        assert args.leak == 0.2
+        assert args.root_prior == 0.5

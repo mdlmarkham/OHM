@@ -1019,13 +1019,16 @@ def delete_node(
 
     # Delete associated edges — split into two statements to avoid DuckDB
     # index issues with OR conditions (OHM-cpi)
-    edges_from = conn.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE from_node = ? AND deleted_at IS NULL", [node_id])
-    edges_to = conn.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE to_node = ? AND deleted_at IS NULL", [node_id])
-    edges_deleted = (edges_from.rowcount or 0) + (edges_to.rowcount or 0)
+    # Note: conn.execute() for UPDATE returns the connection itself; call
+    # fetchone() to get the row count of affected rows.
+    edges_from = conn.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE from_node = ? AND deleted_at IS NULL", [node_id]).fetchone()
+    edges_to = conn.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE to_node = ? AND deleted_at IS NULL", [node_id]).fetchone()
+    edges_deleted = (edges_from[0] if edges_from else 0) + (edges_to[0] if edges_to else 0)
 
     # Delete observations
     obs_result = conn.execute("UPDATE ohm_observations SET deleted_at = CURRENT_TIMESTAMP WHERE node_id = ? AND deleted_at IS NULL", [node_id])
-    obs_count = obs_result.rowcount or 0
+    obs_row = obs_result.fetchone()
+    obs_count = obs_row[0] if obs_row else 0
 
     # Delete the node itself
     conn.execute("UPDATE ohm_nodes SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?", [node_id])
