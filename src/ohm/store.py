@@ -333,7 +333,7 @@ class OhmStore:
         try:
             node_count = self.conn.execute(
                 "SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL"
-            ).fetchone()[0]
+            ).fetchone()[0]  # type: ignore[index]
         except Exception:
             return
 
@@ -395,7 +395,7 @@ class OhmStore:
                     )
                     count = self.conn.execute(
                         f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL"
-                    ).fetchone()[0]
+                    ).fetchone()[0]  # type: ignore[index]
                     logger.info("Auto-restored %d %s from DuckLake", count, table)
                 except Exception as e:
                     logger.warning("Failed to auto-restore %s from DuckLake: %s", table, e)
@@ -1604,7 +1604,7 @@ class OhmStore:
                 # Check if mirror table has any data (for initial sync)
                 mirror_count = self.conn.execute(
                     f"SELECT COUNT(*) FROM {alias}.{table}"
-                ).fetchone()[0]
+                ).fetchone()[0]  # type: ignore[index]
 
                 if mirror_count == 0:
                     # Initial sync: copy all rows
@@ -1674,7 +1674,7 @@ class OhmStore:
 
         count = self.conn.execute(
             f"SELECT COUNT(*) FROM {alias}.{table}"
-        ).fetchone()[0]
+        ).fetchone()[0]  # type: ignore[index]
         return count
 
     def _incremental_sync_table(self, table: str, alias: str,
