@@ -220,3 +220,29 @@ class TestCLIParsing:
         assert args.layers == "L3,L4"
         assert args.leak == 0.2
         assert args.root_prior == 0.5
+
+    def test_graph_voi_tasks(self):
+        parser = build_parser()
+        args = parser.parse_args(["graph", "voi-tasks"])
+        assert args.graph_command == "voi-tasks"
+        assert args.agent is None
+        assert args.top == 5
+
+    def test_graph_voi_tasks_with_args(self):
+        parser = build_parser()
+        args = parser.parse_args([
+            "graph", "voi-tasks",
+            "--agent", "metis",
+            "--decision", "d1",
+            "--top", "3",
+            "--layers", "L3",
+            "--leak", "0.2",
+            "--root-prior", "0.5",
+        ])
+        assert args.graph_command == "voi-tasks"
+        assert args.agent == "metis"
+        assert args.decision == "d1"
+        assert args.top == 3
+        assert args.layers == "L3"
+        assert args.leak == 0.2
+        assert args.root_prior == 0.5

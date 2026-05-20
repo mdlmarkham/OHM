@@ -1860,6 +1860,178 @@ def compute_voi(
     }
 
 
+def generate_voi_tasks(
+    conn,
+    *,
+    agent: str | None = None,
+    decision_nodes: list[str] | None = None,
+    layers: list[str] | None = None,
+    top: int = 5,
+    leak_probability: float = 0.15,
+    root_prior: float = 0.3,
+) -> dict[str, Any]:
+    """Generate research tasks from VoI rankings, matched to agent expertise.
+
+    OHM-6mv.5: For each under-observed node in the VoI rankings, compute a
+    gap_score = (1 - mean_confidence) × downstream_impact. Match to agents
+    via tag overlap (CAPABLE_OF, VALUES, GOALS edges). Return ranked research
+    targets with suggested actions.
+
+    Args:
+        conn: DuckDB connection.
+        agent: Optional agent name to filter tasks by expertise match.
+        decision_nodes: List of decision node IDs. If None, auto-detect.
+        layers: Optional list of layers to include.
+        top: Maximum number of tasks to return (default 5).
+        leak_probability: Baseline probability for Bayesian inference.
+        root_prior: Prior probability for root nodes.
+
+    Returns:
+        Dict with:
+        - method: "voi_task_assignment"
+        - agent: agent name (if specified)
+        - tasks: list of research task dicts sorted by gap_score descending
+        - n_candidates: total number of candidate nodes
+    """
+    # Step 1: Compute VoI rankings
+    voi_result = compute_voi(
+        conn,
+        decision_nodes=decision_nodes,
+        layers=layers,
+        top=None,  # Get all candidates, we'll filter later
+        leak_probability=leak_probability,
+        root_prior=root_prior,
+    )
+
+    if not voi_result.get("rankings"):
+        return {
+            "method": "voi_task_assignment",
+            "agent": agent,
+            "tasks": [],
+            "n_candidates": 0,
+            "message": voi_result.get("message", "No VoI rankings available."),
+        }
+
+    # Step 2: Get agent expertise tags (if agent specified)
+    agent_tags: set[str] = set()
+    if agent:
+        from .validation import validate_identifier
+        safe_agent = validate_identifier(agent, name="agent")
+
+        # Get CAPABLE_OF, VALUES, GOALS edges for this agent
+        agent_edges = conn.execute(
+            "SELECT to_node, edge_type FROM ohm_edges "
+            "WHERE from_node = ? AND edge_type IN ('CAPABLE_OF', 'VALUES', 'GOALS', 'INTERESTED_IN') "
+            "AND deleted_at IS NULL",
+            [safe_agent],
+        ).fetchall()
+        for row in agent_edges:
+            agent_tags.add(row[0].lower())
+
+        # Also check node tags JSON column
+        agent_node = conn.execute(
+            "SELECT tags FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+            [safe_agent],
+        ).fetchone()
+        if agent_node and agent_node[0]:
+            import json
+            try:
+                tags_list = json.loads(agent_node[0]) if isinstance(agent_node[0], str) else agent_node[0]
+                if isinstance(tags_list, list):
+                    agent_tags.update(t.lower() for t in tags_list if isinstance(t, str))
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+    # Step 3: Build research tasks from VoI rankings
+    tasks = []
+    for ranking in voi_result["rankings"]:
+        node_id = ranking["node_id"]
+        label = ranking.get("label", node_id)
+        voi_score = ranking["voi_score"]
+        uncertainty = ranking["uncertainty"]
+        sensitivity = ranking["sensitivity"]
+        confidence = ranking.get("confidence", 0.5)
+        obs_count = ranking.get("observation_count", 0)
+        downstream = ranking.get("downstream_decisions", [])
+
+        # Gap score: how much room for improvement × how much it matters
+        gap_score = uncertainty * sensitivity
+
+        # Get node tags for matching
+        node_tags: set[str] = set()
+        node_row = conn.execute(
+            "SELECT tags FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+            [node_id],
+        ).fetchone()
+        if node_row and node_row[0]:
+            import json
+            try:
+                tags_list = json.loads(node_row[0]) if isinstance(node_row[0], str) else node_row[0]
+                if isinstance(tags_list, list):
+                    node_tags = {t.lower() for t in tags_list if isinstance(t, str)}
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # Also get labels of connected concepts for matching
+        concept_edges = conn.execute(
+            "SELECT to_node FROM ohm_edges WHERE from_node = ? "
+            "AND edge_type IN ('CAUSES', 'INFLUENCES', 'ENABLES', 'DEPENDS_ON') "
+            "AND deleted_at IS NULL",
+            [node_id],
+        ).fetchall()
+        concept_labels = {r[0].lower() for r in concept_edges}
+
+        # Compute tag overlap
+        all_node_tags = node_tags | concept_labels | {label.lower()}
+        matched_tags = list(agent_tags & all_node_tags) if agent_tags else []
+        tag_overlap = len(matched_tags) / max(len(agent_tags), 1) if agent_tags else 1.0
+
+        # Skip if agent filter and no tag overlap
+        if agent and tag_overlap == 0:
+            continue
+
+        # Suggest research action
+        if obs_count == 0:
+            suggested_research = f"Observe {label}: no observations exist yet"
+        elif obs_count < 3:
+            suggested_research = f"Add {3 - obs_count} more observations to {label}: only {obs_count} observation(s)"
+        elif confidence < 0.3:
+            suggested_research = f"Challenge low-confidence claims about {label}: confidence={confidence:.2f}"
+        elif confidence < 0.6:
+            suggested_research = f"Validate moderate-confidence claims about {label}: confidence={confidence:.2f}"
+        else:
+            suggested_research = f"Refine understanding of {label}: confidence={confidence:.2f}"
+
+        tasks.append({
+            "node_id": node_id,
+            "label": label,
+            "voi_score": voi_score,
+            "gap_score": round(gap_score, 4),
+            "uncertainty": uncertainty,
+            "sensitivity": sensitivity,
+            "confidence": confidence,
+            "observation_count": obs_count,
+            "downstream_decisions": downstream,
+            "n_downstream_decisions": len(downstream),
+            "matched_tags": matched_tags,
+            "tag_overlap": round(tag_overlap, 4),
+            "suggested_research": suggested_research,
+        })
+
+    # Sort by gap_score descending (highest impact first)
+    tasks.sort(key=lambda t: t["gap_score"], reverse=True)
+
+    # Limit to top N
+    tasks = tasks[:top]
+
+    return {
+        "method": "voi_task_assignment",
+        "agent": agent,
+        "tasks": tasks,
+        "n_candidates": voi_result["n_candidates"],
+    }
+
+
 def _path_confidence(
     source: str,
     target: str,

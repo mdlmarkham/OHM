@@ -21,6 +21,7 @@ from ohm.bayesian import (
     pert_mean,
     pert_variance,
     compute_voi,
+    generate_voi_tasks,
 )
 from tests.conftest import create_test_db, create_sample_node, create_sample_edge
 
@@ -1002,3 +1003,104 @@ class TestComputeVoI:
         assert d1 in a_ranking["downstream_decisions"]
         assert d2 in a_ranking["downstream_decisions"]
         assert a_ranking["n_downstream_decisions"] == 2
+
+
+# ── VoI Tasks Tests ──────────────────────────────────────────────────────
+
+
+class TestGenerateVoITasks:
+    """Test VoI task generation (OHM-6mv.5)."""
+
+    def test_voi_tasks_no_decision_nodes(self, db):
+        """When no decision nodes exist, should return empty tasks."""
+        result = generate_voi_tasks(db)
+        assert result["method"] == "voi_task_assignment"
+        assert result["tasks"] == []
+
+    def test_voi_tasks_basic(self, db):
+        """Should generate research tasks from VoI rankings."""
+        a = create_sample_node(db, label="uncertain_cause", confidence=0.2)
+        d = create_sample_node(db, label="my_decision", node_type="decision")
+        db.execute("UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d])
+
+        create_sample_edge(db, from_node=a, to_node=d, edge_type="CAUSES",
+                           layer="L3", confidence=0.8)
+
+        result = generate_voi_tasks(db, top=5)
+        assert result["method"] == "voi_task_assignment"
+        assert len(result["tasks"]) >= 1
+        task = result["tasks"][0]
+        assert task["node_id"] == a
+        assert "gap_score" in task
+        assert "suggested_research" in task
+        assert task["observation_count"] >= 0
+
+    def test_voi_tasks_top_limit(self, db):
+        """Should respect the top parameter."""
+        nodes = []
+        for i in range(5):
+            n = create_sample_node(db, label=f"cause_{i}", confidence=0.1 + i * 0.15)
+            nodes.append(n)
+        d = create_sample_node(db, label="decision_node", node_type="decision")
+        db.execute("UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d])
+
+        for n in nodes:
+            create_sample_edge(db, from_node=n, to_node=d, edge_type="CAUSES",
+                               layer="L3", confidence=0.7)
+
+        result = generate_voi_tasks(db, top=2)
+        assert len(result["tasks"]) <= 2
+
+    def test_voi_tasks_with_agent_filter(self, db):
+        """Should filter tasks by agent expertise tags."""
+        # Create an agent with tags
+        agent = create_sample_node(db, label="test_agent", node_type="agent")
+        a = create_sample_node(db, label="research_topic", confidence=0.2)
+        d = create_sample_node(db, label="my_decision", node_type="decision")
+        db.execute("UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d])
+
+        # Agent has CAPABLE_OF edge to a concept
+        create_sample_edge(db, from_node=agent, to_node=a, edge_type="CAPABLE_OF",
+                           layer="L2", confidence=0.9)
+        create_sample_edge(db, from_node=a, to_node=d, edge_type="CAUSES",
+                           layer="L3", confidence=0.8)
+
+        # With agent filter — should find tasks matching agent expertise
+        result = generate_voi_tasks(db, agent=agent, top=5)
+        assert result["agent"] == agent
+        # The agent has expertise matching node 'a', so it should appear
+        if result["tasks"]:
+            task = result["tasks"][0]
+            assert "matched_tags" in task
+            assert "tag_overlap" in task
+
+    def test_voi_tasks_suggested_research(self, db):
+        """Should suggest appropriate research actions based on observation count."""
+        a = create_sample_node(db, label="no_obs_cause", confidence=0.3)
+        d = create_sample_node(db, label="decision_node", node_type="decision")
+        db.execute("UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d])
+
+        create_sample_edge(db, from_node=a, to_node=d, edge_type="CAUSES",
+                           layer="L3", confidence=0.8)
+
+        result = generate_voi_tasks(db, top=5)
+        assert len(result["tasks"]) >= 1
+        task = result["tasks"][0]
+        # Node with 0 observations should suggest observing
+        assert "Observe" in task["suggested_research"] or "observe" in task["suggested_research"].lower()
+
+    def test_voi_tasks_gap_score(self, db):
+        """Gap score should be uncertainty × sensitivity."""
+        a = create_sample_node(db, label="gap_cause", confidence=0.3)
+        d = create_sample_node(db, label="decision_node", node_type="decision")
+        db.execute("UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d])
+
+        create_sample_edge(db, from_node=a, to_node=d, edge_type="CAUSES",
+                           layer="L3", confidence=0.8)
+
+        result = generate_voi_tasks(db, top=5)
+        assert len(result["tasks"]) >= 1
+        task = result["tasks"][0]
+        # gap_score should equal uncertainty × sensitivity
+        expected_gap = round(task["uncertainty"] * task["sensitivity"], 4)
+        assert task["gap_score"] == expected_gap

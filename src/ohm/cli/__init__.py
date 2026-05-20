@@ -386,6 +386,35 @@ def build_parser() -> argparse.ArgumentParser:
         help="Default prior for root nodes (default: 0.3)",
     )
 
+    # graph voi-tasks
+    voi_tasks_parser = graph_sub.add_parser(
+        "voi-tasks", help="Generate research tasks from VoI rankings matched to agent expertise",
+    )
+    voi_tasks_parser.add_argument(
+        "--agent", default=None,
+        help="Agent name to filter tasks by expertise match",
+    )
+    voi_tasks_parser.add_argument(
+        "--decision", default=None,
+        help="Comma-separated decision node IDs (auto-detects if omitted)",
+    )
+    voi_tasks_parser.add_argument(
+        "--top", type=int, default=5,
+        help="Maximum tasks to return (default: 5)",
+    )
+    voi_tasks_parser.add_argument(
+        "--layers", default=None,
+        help="Comma-separated layer filter (e.g. L3,L4)",
+    )
+    voi_tasks_parser.add_argument(
+        "--leak", type=float, default=0.15,
+        help="Leak probability for Bayesian network (default: 0.15)",
+    )
+    voi_tasks_parser.add_argument(
+        "--root-prior", type=float, default=0.3,
+        help="Default prior for root nodes (default: 0.3)",
+    )
+
     # ── state ────────────────────────────────────────────────────────────
     state_parser = subparsers.add_parser("state", help="Hive mind awareness")
     state_sub = state_parser.add_subparsers(dest="state_command", help="State commands")
@@ -642,6 +671,8 @@ def _handle_graph(args: argparse.Namespace) -> None:
         _handle_trend(args)
     elif cmd == "voi":
         _handle_voi(args)
+    elif cmd == "voi-tasks":
+        _handle_voi_tasks(args)
     else:
         print(f"Unknown graph command: {cmd}")
 
@@ -1577,6 +1608,56 @@ def _handle_voi(args: argparse.Namespace) -> None:
                           f"(uncertainty={uncertainty:.4f}, sensitivity={sensitivity:.4f})")
             if result.get("decision_nodes"):
                 print(f"  Decision nodes: {', '.join(result['decision_nodes'])}")
+    finally:
+        conn.close()
+
+
+def _handle_voi_tasks(args: argparse.Namespace) -> None:
+    """Generate research tasks from VoI rankings matched to agent expertise."""
+    from ohm.bayesian import generate_voi_tasks
+
+    conn = _get_db(args)
+    try:
+        decision_nodes = None
+        if args.decision:
+            decision_nodes = [d.strip() for d in args.decision.split(",") if d.strip()]
+        layers = None
+        if args.layers:
+            layers = [l.strip() for l in args.layers.split(",") if l.strip()]
+        result = generate_voi_tasks(
+            conn,
+            agent=args.agent,
+            decision_nodes=decision_nodes,
+            layers=layers,
+            top=args.top,
+            leak_probability=args.leak,
+            root_prior=args.root_prior,
+        )
+        if args.format == "json":
+            import json
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            print("── VoI Research Tasks ──")
+            tasks = result.get("tasks", [])
+            if not tasks:
+                print("  No research tasks found.")
+                if result.get("message"):
+                    print(f"  {result['message']}")
+            else:
+                for i, task in enumerate(tasks, 1):
+                    node_id = task.get("node_id", "?")
+                    label = task.get("label", node_id)
+                    gap = task.get("gap_score", 0)
+                    voi = task.get("voi_score", 0)
+                    obs = task.get("observation_count", 0)
+                    matched = task.get("matched_tags", [])
+                    research = task.get("suggested_research", "")
+                    print(f"  {i}. [{label}] gap={gap:.4f} voi={voi:.4f} obs={obs}")
+                    if matched:
+                        print(f"     Tags: {', '.join(matched)}")
+                    print(f"     → {research}")
+            if result.get("agent"):
+                print(f"  Agent: {result['agent']}")
     finally:
         conn.close()
 
