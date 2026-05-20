@@ -1105,7 +1105,7 @@ class OhmStore:
             "UPDATE ohm_nodes SET deleted_at = ?, updated_at = ?, updated_by = ? WHERE id = ?",
             [now, now, deleted_by, node_id]
         )
-        self._log_change("ohm_nodes", node_id, "DELETE", deleted_by)
+        self._log_change("ohm_nodes", node_id, "DELETE", None, agent_name=deleted_by)
 
         return {
             "deleted": node_id,
@@ -1142,7 +1142,7 @@ class OhmStore:
             "UPDATE ohm_edges SET deleted_at = ?, updated_at = ?, updated_by = ? WHERE id = ?",
             [now, now, deleted_by, edge_id]
         )
-        self._log_change("ohm_edges", edge_id, "DELETE", deleted_by)
+        self._log_change("ohm_edges", edge_id, "DELETE", None, agent_name=deleted_by)
         self._increment_graph_generation()
 
         return {

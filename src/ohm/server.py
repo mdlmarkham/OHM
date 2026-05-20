@@ -984,23 +984,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                 # Public-read model: unauthenticated reads allowed
                 agent = "ohm"
 
-        if path == "/metrics":
-            latencies = _request_latencies
-            sorted_lats = sorted(latencies) if latencies else [0]
-            n = len(sorted_lats)
-            self._json_response(200, {
-                "uptime_seconds": round(time.time() - _START_TIME, 1),
-                "requests": dict(_metrics),
-                "latency_ms": {
-                    "p50": sorted_lats[n // 2] if n > 0 else 0,
-                    "p95": sorted_lats[int(n * 0.95)] if n > 1 else sorted_lats[0] if n > 0 else 0,
-                    "p99": sorted_lats[int(n * 0.99)] if n > 1 else sorted_lats[0] if n > 0 else 0,
-                    "max": sorted_lats[-1] if n > 0 else 0,
-                    "sample_count": n,
-                },
-            })
-            return
-        elif path == "/stats":
+        if path == "/stats":
             from ohm.queries import query_stats
             stats = query_stats(self.store.conn)
             stats["uptime"] = round(time.time() - _START_TIME, 1)
@@ -1388,7 +1372,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             # Find nodes with zero edges — completely disconnected from the graph
             from .methods import find_orphans
             node_type = qs.get("type", [None])[0]
-            exclude_system = qs.get("exclude_system", ["true"][0]).lower() == "true"
+            exclude_system = qs.get("exclude_system", ["true"])[0].lower() == "true"
             limit = int(qs.get("limit", [50])[0])
             result = find_orphans(self.store.conn, node_type=node_type, exclude_system=exclude_system, limit=limit)
             self._json_response(200, result)
@@ -1588,6 +1572,12 @@ class OhmHandler(BaseHTTPRequestHandler):
         elif path == "/deduplicate":
             # Remove duplicate edges (same from→to, type, layer), keeping most recent
             layer = qs.get("layer", [None])[0]
+            if layer:
+                from .validation import validate_layer
+                try:
+                    validate_layer(layer)
+                except ValueError as e:
+                    raise ValidationError(str(e))
             removed = self.store.deduplicate_edges(layer=layer)
             self._json_response(200, {"removed": removed, "layer": layer})
         elif path == "/refute":
