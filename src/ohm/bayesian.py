@@ -858,31 +858,38 @@ def causal_intervention(
 
     # Step 5: Compare with observation-based inference for the same evidence
     # This shows the confounder effect: difference = confounding bias
-    observation_result = bayesian_inference(
-        conn, target, {target: intervention_state},
-        edge_types=edge_types,
-        leak_probability=leak_probability,
-    )
-
+    # Reuse the already-built network instead of rebuilding per query node (OHM-1p8)
     comparison = {}
-    for node_id, post in posteriors.items():
-        if isinstance(post, dict) and "error" not in post:
-            obs_post = observation_result.get("posterior", {})
-            # Observation posterior is for target only; we need to query each node
-            obs_result = bayesian_inference(
-                conn, node_id, {target: intervention_state},
-                edge_types=edge_types,
-                leak_probability=leak_probability,
-            )
-            obs_bad = obs_result.get("posterior", {}).get("bad", None)
-            int_bad = post.get("bad", None)
-            if obs_bad is not None and int_bad is not None:
-                comparison[node_id] = {
-                    "intervention_bad": int_bad,
-                    "observation_bad": obs_bad,
-                    "confounding_bias": round(obs_bad - int_bad, 4),
-                    "interpretation": "positive bias = observation overestimates causal effect (confounders inflate)" if obs_bad > int_bad else "negative bias = observation underestimates causal effect (confounders suppress)",
-                }
+    try:
+        obs_model = network["model"]
+        obs_infer = VariableElimination(obs_model)
+        for node_id, post in posteriors.items():
+            if isinstance(post, dict) and "error" not in post:
+                safe_qn = None
+                for orig, safe in safe_names.items():
+                    if orig == node_id:
+                        safe_qn = safe
+                        break
+                if not safe_qn:
+                    continue
+                try:
+                    obs_result = obs_infer.query(
+                        [safe_qn], evidence={safe_target: intervention_state}
+                    )
+                    obs_bad = round(float(obs_result.values[0]), 4)
+                    int_bad = post.get("bad", None)
+                    if int_bad is not None:
+                        comparison[node_id] = {
+                            "intervention_bad": int_bad,
+                            "observation_bad": obs_bad,
+                            "confounding_bias": round(obs_bad - int_bad, 4),
+                            "interpretation": "positive bias = observation overestimates causal effect (confounders inflate)" if obs_bad > int_bad else "negative bias = observation underestimates causal effect (confounders suppress)",
+                        }
+                except Exception:
+                    # Skip nodes where observation inference fails
+                    pass
+    except Exception as e:
+        logger.warning(f"Observation comparison failed: {e}")
 
     return {
         "method": "causal_intervention",

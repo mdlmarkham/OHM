@@ -10,6 +10,8 @@ compute_ate, and related functions with a focus on:
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
 from ohm.bayesian import (
@@ -429,6 +431,57 @@ class TestCausalIntervention:
         )
         assert result is not None
         assert "method" in result
+
+    @pytest.mark.skipif(
+        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
+        reason="pgmpy not available"
+    )
+    def test_intervention_comparison_does_not_rebuild_network(self, db):
+        """OHM-1p8: comparison_with_observation should reuse the built network,
+        not call build_bayesian_network per query node."""
+        try:
+            from pgmpy.models import DiscreteBayesianNetwork
+        except ImportError:
+            pytest.skip("pgmpy not available")
+
+        from unittest.mock import patch
+        from ohm.bayesian import causal_intervention, build_bayesian_network
+
+        # Create a chain: A -> B -> C -> D with probabilities
+        a = create_sample_node(db, label="chain_a")
+        b = create_sample_node(db, label="chain_b")
+        c = create_sample_node(db, label="chain_c")
+        d = create_sample_node(db, label="chain_d")
+        for src, dst, prob in [(a, b, 0.8), (b, c, 0.7), (c, d, 0.6)]:
+            db.execute(
+                "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, "
+                "probability, confidence, created_by) "
+                "VALUES (?, ?, ?, 'L3', 'CAUSES', ?, 0.9, 'test_agent')",
+                [str(uuid.uuid4()), src, dst, prob],
+            )
+
+        # Patch build_bayesian_network to count calls
+        original_build = build_bayesian_network
+        call_count = {"count": 0}
+
+        def counting_build(*args, **kwargs):
+            call_count["count"] += 1
+            return original_build(*args, **kwargs)
+
+        with patch("ohm.bayesian.build_bayesian_network", side_effect=counting_build):
+            result = causal_intervention(
+                db,
+                target=b,
+                intervention_state=0,
+                query_nodes=[c, d],
+            )
+
+        # build_bayesian_network should be called exactly once (not once per query node)
+        assert call_count["count"] == 1, (
+            f"Expected 1 call to build_bayesian_network, got {call_count['count']}"
+        )
+        assert result is not None
+        assert result["method"] == "causal_intervention"
 
 
 # ── Integration Tests: compute_ate ────────────────────────────────────────
