@@ -2522,6 +2522,26 @@ class OhmHandler(BaseHTTPRequestHandler):
             result["ducklake_sync"] = sync_result
             self._json_response(200, result)
 
+        elif path == "/deduplicate":
+            # Remove duplicate edges (same from→to, type, layer), keeping most recent
+            layer = qs.get("layer", [None])[0]
+            if layer:
+                from .validation import validate_layer
+                try:
+                    validate_layer(layer)
+                except ValueError as e:
+                    raise ValidationError(str(e))
+            removed = self.store.deduplicate_edges(layer=layer)
+            self._json_response(200, {"removed": removed, "layer": layer})
+
+        elif path == "/admin/checkpoint":
+            # Force DuckDB CHECKPOINT to flush WAL to main DB file
+            try:
+                self.store.conn.execute("CHECKPOINT")
+                self._json_response(200, {"status": "ok", "message": "WAL flushed to main database"})
+            except Exception as e:
+                self._json_response(500, {"error": "checkpoint_failed", "message": str(e)})
+
         else:
             self._json_response(404, {"error": f"Unknown endpoint: {path}"})
 

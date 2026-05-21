@@ -1820,11 +1820,11 @@ def compute_voi(
     # Get observation counts for each candidate (proxy for information quality)
     obs_counts: dict[str, int] = {}
     for node_id in candidate_nodes:
-        count = conn.execute(
+        _row = conn.execute(
             "SELECT COUNT(*) FROM ohm_observations WHERE node_id = ? AND deleted_at IS NULL",
             [node_id],
-        ).fetchone()[0]
-        obs_counts[node_id] = count
+        ).fetchone()
+        obs_counts[node_id] = _row[0] if _row is not None else 0
 
     # Compute VoI for each candidate node
     # Track whether we used ATE or path-confidence fallback for each ranking
