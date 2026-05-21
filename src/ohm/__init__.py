@@ -7,7 +7,7 @@ DuckLake shared backend, and change-feed-driven coordination.
 
 __version__ = "0.1.0"
 
-from .graph_reader import (
+from .framework.graph_reader import (
     DuckDBGraphReader,
     EdgeRecord,
     GraphReader,
@@ -15,8 +15,8 @@ from .graph_reader import (
     NodeRecord,
     ObservationRecord,
 )
-from .ingest import IngestAdapter, IngestRecord, IngestResult, run_ingest
-from .semantic_roles import SemanticRoles
+from .framework.ingest import IngestAdapter, IngestRecord, IngestResult, run_ingest
+from .framework.semantic_roles import SemanticRoles
 
 __all__ = [
     "DuckDBGraphReader",
