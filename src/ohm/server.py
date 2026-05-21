@@ -944,6 +944,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                 update_params,
             )
             self.store._log_change("ohm_edges", edge_id, "UPDATE", edge["layer"], agent_name=agent)
+            self.store._increment_graph_generation()  # Invalidate Bayesian network cache on edge update
             updated = self.store.get_edge(edge_id)
             _trigger_webhooks({"type": "edge.updated", "agent": agent, "edge": updated})
             self._json_response(200, updated)
