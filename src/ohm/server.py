@@ -899,7 +899,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         agent = self._require_write_auth()
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
-        body = self._parse_body()
+        body = self._read_body()
 
         if path.startswith("/edge/"):
             edge_id = path[6:]
