@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
+from ohm.graph_reader import coerce_reader as _coerce_reader
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -50,27 +52,20 @@ def _build_transition_matrix(
     if edge_types is None:
         edge_types = ["CAUSES", "TRANSITIONS_TO"]
 
-    type_placeholders = ", ".join(["?"] * len(edge_types))
+    reader = _coerce_reader(conn)
+    _edge_records = reader.get_edges(edge_types=edge_types)
 
     if state_nodes is not None:
-        node_placeholders = ", ".join(["?"] * len(state_nodes))
-        edges = conn.execute(
-            f"SELECT from_node, to_node, probability, confidence "
-            f"FROM ohm_edges "
-            f"WHERE edge_type IN ({type_placeholders}) "
-            f"AND from_node IN ({node_placeholders}) "
-            f"AND to_node IN ({node_placeholders}) "
-            f"AND deleted_at IS NULL",
-            edge_types + state_nodes + state_nodes,
-        ).fetchall()
-    else:
-        edges = conn.execute(
-            f"SELECT from_node, to_node, probability, confidence "
-            f"FROM ohm_edges "
-            f"WHERE edge_type IN ({type_placeholders}) "
-            f"AND deleted_at IS NULL",
-            edge_types,
-        ).fetchall()
+        _node_set_filter = set(state_nodes)
+        _edge_records = [
+            e for e in _edge_records
+            if e.from_node in _node_set_filter and e.to_node in _node_set_filter
+        ]
+
+    edges = [
+        (e.from_node, e.to_node, e.probability, e.confidence)
+        for e in _edge_records
+    ]
 
     if not edges:
         return [], None, [], []
@@ -143,16 +138,14 @@ def markov_absorbing_risk(
     """
     _require_numpy()
 
+    reader = _coerce_reader(conn)
     nodes, matrix, transient, absorbing = _build_transition_matrix(
-        conn, edge_types=edge_types, state_nodes=state_nodes
+        reader, edge_types=edge_types, state_nodes=state_nodes
     )
 
     if not nodes:
         # No transition edges found. Check if start_node exists in ohm_nodes.
-        existing = conn.execute(
-            "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
-            [start_node],
-        ).fetchone()
+        existing = reader.get_nodes(ids=[start_node])
         if existing:
             return {
                 "method": "markov_absorbing_risk",
@@ -284,15 +277,13 @@ def markov_expected_steps(
     """
     _require_numpy()
 
+    reader = _coerce_reader(conn)
     nodes, matrix, transient, absorbing = _build_transition_matrix(
-        conn, edge_types=edge_types, state_nodes=state_nodes
+        reader, edge_types=edge_types, state_nodes=state_nodes
     )
 
     if not nodes:
-        existing = conn.execute(
-            "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
-            [start_node],
-        ).fetchone()
+        existing = reader.get_nodes(ids=[start_node])
         if existing:
             return {
                 "method": "markov_expected_steps",

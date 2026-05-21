@@ -32,6 +32,10 @@ import math
 from typing import Any
 
 from ohm.validation import validate_identifier
+from ohm.graph_reader import GraphReader, DuckDBGraphReader, coerce_reader, raw_conn
+
+_coerce_reader = coerce_reader
+_raw_conn = raw_conn
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +185,8 @@ def build_bayesian_network(
         logger.warning("pgmpy not available — cannot build Bayesian network")
         return None
 
+    reader = _coerce_reader(conn)
+
     # Cache key based on query parameters (OHM-omr)
     # All parameters that affect CPT values AND the node scope must be included
     # to prevent stale cache hits. root_nodes was previously omitted, causing
@@ -199,10 +205,7 @@ def build_bayesian_network(
     # Check cache — invalidate if graph_generation has changed
     if cache_key in _bayesian_network_cache:
         cached_generation, cached_result = _bayesian_network_cache[cache_key]
-        current_generation = conn.execute(
-            "SELECT CAST(value AS INTEGER) FROM ohm_meta WHERE key = 'graph_generation'"
-        ).fetchone()
-        current_gen = current_generation[0] if current_generation else 0
+        current_gen = reader.get_graph_generation()
         if current_gen == cached_generation:
             logger.debug("Bayesian network cache hit for key=%s", cache_key)
             return cached_result
@@ -214,41 +217,15 @@ def build_bayesian_network(
         # (negative evidence: parent=bad *reduces* child=bad probability)
         edge_types = ["CAUSES", "DEPENDS_ON", "THREATENS", "EXPECTED_LIKELIHOOD", "NEGATES"]
 
-    # Build query — include edges with or without probability/confidence
-    # ADR-008: probability and confidence are semantically distinct.
-    # ADR-013: PERT three-point estimation for probability distributions.
-    #   When PERT values (p05/p50/p95) are provided:
-    #     - probability = (p05 + 4*p50 + p95) / 6  (PERT mean)
-    #     - variance = ((p95 - p05) / 6)^2          (PERT variance for VoI)
-    #   When PERT values are not provided:
-    #     - probability and confidence are used as-is (backward compatible)
-    placeholders = ",".join(["?"] * len(edge_types))
-    if layers:
-        layer_placeholders = ",".join(["?"] * len(layers))
-        query = f"""
-            SELECT from_node, to_node, edge_type,
-                   probability, confidence,
-                   probability_p05, probability_p50, probability_p95,
-                   confidence_p05, confidence_p50, confidence_p95
-            FROM ohm_edges
-            WHERE edge_type IN ({placeholders})
-            AND layer IN ({layer_placeholders})
-            AND deleted_at IS NULL
-            ORDER BY from_node, to_node
-        """
-        rows = conn.execute(query, edge_types + layers).fetchall()
-    else:
-        query = f"""
-            SELECT from_node, to_node, edge_type,
-                   probability, confidence,
-                   probability_p05, probability_p50, probability_p95,
-                   confidence_p05, confidence_p50, confidence_p95
-            FROM ohm_edges
-            WHERE edge_type IN ({placeholders})
-            AND deleted_at IS NULL
-            ORDER BY from_node, to_node
-        """
-        rows = conn.execute(query, edge_types).fetchall()
+    # Fetch edges via reader (ADR-008: prob and conf are distinct; ADR-013: PERT)
+    _edge_records = reader.get_edges(edge_types=edge_types, layers=layers)
+    rows = [
+        (e.from_node, e.to_node, e.edge_type,
+         e.probability, e.confidence,
+         e.probability_p05, e.probability_p50, e.probability_p95,
+         e.confidence_p05, e.confidence_p50, e.confidence_p95)
+        for e in _edge_records
+    ]
 
     if not rows:
         logger.info("No edges found — cannot build Bayesian network")
@@ -462,10 +439,8 @@ def build_bayesian_network(
         if safe not in parent_edges:
             root_safe_names.add(safe)
             # Get prior from observations or default
-            prior = conn.execute(
-                "SELECT AVG(value) FROM ohm_observations WHERE node_id = ? AND deleted_at IS NULL",
-                [node_id]
-            ).fetchone()[0]
+            _obs_values = [o.value for o in reader.get_observations(node_id) if o.value is not None]
+            prior = (sum(_obs_values) / len(_obs_values)) if _obs_values else None
             node_priors[safe] = float(prior) if prior is not None else root_prior
 
     # Build CPTs
@@ -578,10 +553,7 @@ def build_bayesian_network(
     }
 
     # Store in module-level cache with current generation (OHM-omr)
-    current_gen_result = conn.execute(
-        "SELECT CAST(value AS INTEGER) FROM ohm_meta WHERE key = 'graph_generation'"
-    ).fetchone()
-    current_gen = current_gen_result[0] if current_gen_result else 0
+    current_gen = reader.get_graph_generation()
     _bayesian_network_cache[cache_key] = (current_gen, result)
     logger.debug("Cached Bayesian network for key=%s at generation %d", cache_key, current_gen)
     return result
@@ -618,10 +590,11 @@ def bayesian_inference(
         Falls back to heuristic cascade if pgmpy is unavailable.
     """
     target = validate_identifier(target, name="target")
+    reader = _coerce_reader(conn)
 
     if not PGMPY_AVAILABLE:
         from ohm.queries import query_cascade_scenario
-        cascade = query_cascade_scenario(conn, target, failure_probability=1.0)
+        cascade = query_cascade_scenario(_raw_conn(conn), target, failure_probability=1.0)
         return {
             "method": "heuristic_cascade",
             "pgmpy_available": False,
@@ -632,7 +605,7 @@ def bayesian_inference(
 
     # Build the Bayesian network scoped around target and evidence nodes
     scope_nodes = [target] + list(evidence.keys())
-    network = build_bayesian_network(conn, edge_types=edge_types,
+    network = build_bayesian_network(reader, edge_types=edge_types,
                                       layers=layers,
                                       root_nodes=scope_nodes,
                                       root_prior=root_prior)
@@ -754,6 +727,7 @@ def causal_intervention(
         with observation-based inference, and network info.
     """
     target = validate_identifier(target, name="target")
+    reader = _coerce_reader(conn)
 
     if not PGMPY_AVAILABLE:
         return {
@@ -776,7 +750,7 @@ def causal_intervention(
     if query_nodes:
         scope_nodes.extend(query_nodes)
     network = build_bayesian_network(
-        conn, edge_types=edge_types,
+        reader, edge_types=edge_types,
         layers=layers,
         root_nodes=scope_nodes,
         leak_probability=leak_probability,
@@ -1046,6 +1020,7 @@ def compute_ate(
     """
     cause = validate_identifier(cause, name="cause")
     effect = validate_identifier(effect, name="effect")
+    reader = _coerce_reader(conn)
 
     if not PGMPY_AVAILABLE:
         return {
@@ -1058,7 +1033,7 @@ def compute_ate(
 
     # Compute interventional distributions: do(cause=bad) and do(cause=good)
     do_bad = causal_intervention(
-        conn, cause, 0,
+        reader, cause, 0,
         query_nodes=[effect],
         edge_types=edge_types,
         layers=layers,
@@ -1066,7 +1041,7 @@ def compute_ate(
         root_prior=root_prior,
     )
     do_good = causal_intervention(
-        conn, cause, 1,
+        reader, cause, 1,
         query_nodes=[effect],
         edge_types=edge_types,
         layers=layers,
@@ -1172,10 +1147,11 @@ def compute_sensitivity(
 
     cause = validate_identifier(cause, name="cause")
     effect = validate_identifier(effect, name="effect")
+    reader = _coerce_reader(conn)
 
     # First compute ATE to get risk ratio
     ate_result = compute_ate(
-        conn, cause, effect,
+        reader, cause, effect,
         edge_types=edge_types,
         layers=layers,
         leak_probability=leak_probability,
@@ -1322,6 +1298,7 @@ def find_adjustment_sets(
 
     cause = validate_identifier(cause, name="cause")
     effect = validate_identifier(effect, name="effect")
+    reader = _coerce_reader(conn)
 
     if not PGMPY_AVAILABLE:
         return {
@@ -1334,7 +1311,7 @@ def find_adjustment_sets(
 
     # Build the Bayesian network
     network = build_bayesian_network(
-        conn,
+        reader,
         edge_types=edge_types,
         layers=layers,
         leak_probability=leak_probability,
@@ -1527,31 +1504,23 @@ def suggest_causes(
     """
     import networkx as nx
 
+    reader = _coerce_reader(conn)
+
     # Candidate edge types that might indicate causal relationships
     candidate_types = ["DEPENDS_ON", "APPLIES_TO", "REFINES", "INFLUENCES", "EXPECTED_LIKELIHOOD"]
 
-    # Find all edges of candidate types
-    placeholders = ",".join(["?"] * len(candidate_types))
-    query = f"""
-        SELECT from_node, to_node, edge_type, confidence
-        FROM ohm_edges
-        WHERE edge_type IN ({placeholders})
-        AND deleted_at IS NULL
-        AND confidence IS NOT NULL
-        ORDER BY confidence DESC
-    """
-    candidate_edges = conn.execute(query, candidate_types).fetchall()
+    # Find all edges of candidate types with confidence set
+    _cand_records = reader.get_edges(edge_types=candidate_types)
+    candidate_edges = [
+        (e.from_node, e.to_node, e.edge_type, e.confidence)
+        for e in _cand_records
+        if e.confidence is not None
+    ]
+    candidate_edges.sort(key=lambda r: r[3], reverse=True)
 
     # Find all existing CAUSES edges
-    causes_query = """
-        SELECT from_node, to_node
-        FROM ohm_edges
-        WHERE edge_type = 'CAUSES'
-        AND deleted_at IS NULL
-    """
-    causes_edges = set(
-        (r[0], r[1]) for r in conn.execute(causes_query).fetchall()
-    )
+    _causes_records = reader.get_edges(edge_types=["CAUSES"])
+    causes_edges = {(e.from_node, e.to_node) for e in _causes_records}
 
     # Find candidate pairs that don't have a CAUSES edge yet
     candidates = []
@@ -1571,26 +1540,16 @@ def suggest_causes(
     # Find nodes with no causal parents but high centrality
     # These may have unmeasured causes (latent confounders)
     # Build a NetworkX graph from CAUSES edges
-    causes_rows = conn.execute("""
-        SELECT from_node, to_node, probability, confidence
-        FROM ohm_edges
-        WHERE edge_type = 'CAUSES'
-        AND deleted_at IS NULL
-    """).fetchall()
-
     G = nx.DiGraph()
     node_set = set()
-    for from_n, to_n, prob, conf in causes_rows:
-        G.add_edge(from_n, to_n)
-        node_set.add(from_n)
-        node_set.add(to_n)
+    for e in _causes_records:
+        G.add_edge(e.from_node, e.to_node)
+        node_set.add(e.from_node)
+        node_set.add(e.to_node)
 
     # Find nodes that are NOT in CAUSES edges at all (no causal parents, no causal children)
     # And nodes that are in CAUSES but have no parents (root nodes)
-    all_nodes_query = """
-        SELECT id, label, type FROM ohm_nodes WHERE deleted_at IS NULL
-    """
-    all_nodes = {r[0]: {"label": r[1], "type": r[2]} for r in conn.execute(all_nodes_query).fetchall()}
+    all_nodes = {n.id: {"label": n.label, "type": n.type} for n in reader.get_nodes()}
 
     # Nodes with CAUSES children but no CAUSES parents = root cause candidates
     root_causes = []
@@ -1690,14 +1649,15 @@ def compute_voi(
     if edge_types is None:
         edge_types = ["CAUSES", "INFLUENCES", "ENABLES", "DEPENDS_ON"]
 
+    reader = _coerce_reader(conn)
+
     # Find decision nodes if not specified
     if decision_nodes is None:
-        decision_rows = conn.execute(
-            "SELECT id FROM ohm_nodes WHERE type = 'decision' "
-            "AND (utility_scale IS NULL OR utility_scale > 0) "
-            "AND deleted_at IS NULL"
-        ).fetchall()
-        decision_nodes = [r[0] for r in decision_rows]
+        _dec_nodes = reader.get_nodes(node_type="decision")
+        decision_nodes = [
+            n.id for n in _dec_nodes
+            if n.utility_scale is None or n.utility_scale > 0
+        ]
 
     if not decision_nodes:
         return {
@@ -1709,19 +1669,13 @@ def compute_voi(
         }
 
     # Get all CAUSES/INFLUENCES/ENABLES edges for causal traversal
-    edge_type_list = ", ".join(f"'{t}'" for t in edge_types)
-    layer_filter = ""
-    if layers:
-        layer_list = ", ".join(f"'{lyr}'" for lyr in layers)
-        layer_filter = f"AND layer IN ({layer_list})"
-
-    edges = conn.execute(
-        f"SELECT from_node, to_node, confidence, probability, "
-        f"probability_p05, probability_p50, probability_p95, "
-        f"confidence_p05, confidence_p50, confidence_p95 "
-        f"FROM ohm_edges WHERE edge_type IN ({edge_type_list}) "
-        f"AND deleted_at IS NULL {layer_filter}"
-    ).fetchall()
+    _edge_records = reader.get_edges(edge_types=edge_types, layers=layers)
+    edges = [
+        (e.from_node, e.to_node, e.confidence, e.probability,
+         e.probability_p05, e.probability_p50, e.probability_p95,
+         e.confidence_p05, e.confidence_p50, e.confidence_p95)
+        for e in _edge_records
+    ]
 
     # Build adjacency maps with clear naming:
     # forward_adj: cause → effects (parent → children)
@@ -1804,31 +1758,22 @@ def compute_voi(
         }
 
     # Get node labels and confidence for each candidate
-    node_id_list = ", ".join(f"'{n}'" for n in candidate_nodes)
-    node_info = {}
-    rows = conn.execute(
-        f"SELECT id, label, confidence FROM ohm_nodes "
-        f"WHERE id IN ({node_id_list}) AND deleted_at IS NULL"
-    ).fetchall()
-    for row in rows:
-        node_info[row[0]] = {
-            "label": row[1],
-            "confidence": row[2] if row[2] is not None else 0.5,
-        }
+    _cand_node_records = reader.get_nodes(ids=list(candidate_nodes))
+    node_info = {
+        n.id: {"label": n.label, "confidence": n.confidence if n.confidence is not None else 0.5}
+        for n in _cand_node_records
+    }
 
     # Fetch decision-node utility: USD value takes precedence over dimensionless utility_scale.
-    dec_id_list = ", ".join(f"'{d}'" for d in decision_nodes)
-    decision_utility: dict[str, dict] = {}
-    dec_rows = conn.execute(
-        f"SELECT id, utility_usd_per_day, utility_currency, utility_scale FROM ohm_nodes "
-        f"WHERE id IN ({dec_id_list}) AND deleted_at IS NULL"
-    ).fetchall()
-    for row in dec_rows:
-        decision_utility[row[0]] = {
-            "utility_usd_per_day": row[1],
-            "utility_currency": row[2],
-            "utility_scale": row[3],
+    _dec_node_records = reader.get_nodes(ids=list(decision_nodes))
+    decision_utility: dict[str, dict] = {
+        n.id: {
+            "utility_usd_per_day": n.utility_usd_per_day,
+            "utility_currency": n.utility_currency,
+            "utility_scale": n.utility_scale,
         }
+        for n in _dec_node_records
+    }
 
     # Determine VoI units from decision nodes.
     _usd_count = sum(
@@ -1843,13 +1788,10 @@ def compute_voi(
         voi_units = "mixed"
 
     # Get observation counts for each candidate (proxy for information quality)
-    obs_counts: dict[str, int] = {}
-    for node_id in candidate_nodes:
-        _row = conn.execute(
-            "SELECT COUNT(*) FROM ohm_observations WHERE node_id = ? AND deleted_at IS NULL",
-            [node_id],
-        ).fetchone()
-        obs_counts[node_id] = _row[0] if _row is not None else 0
+    obs_counts: dict[str, int] = {
+        node_id: len(reader.get_observations(node_id))
+        for node_id in candidate_nodes
+    }
 
     # Compute VoI for each candidate node
     # Track whether we used ATE or path-confidence fallback for each ranking
@@ -1899,7 +1841,7 @@ def compute_voi(
                     ate_result = {"method": "timeout_fallback"}
                 else:
                     ate_result = compute_ate(
-                        conn, node_id, decision,
+                        reader, node_id, decision,
                         edge_types=edge_types,
                         layers=layers,
                         leak_probability=leak_probability,
@@ -1985,9 +1927,11 @@ def generate_voi_tasks(
         - tasks: list of research task dicts sorted by gap_score descending
         - n_candidates: total number of candidate nodes
     """
+    reader = _coerce_reader(conn)
+
     # Step 1: Compute VoI rankings
     voi_result = compute_voi(
-        conn,
+        reader,
         decision_nodes=decision_nodes,
         layers=layers,
         top=None,  # Get all candidates, we'll filter later
@@ -2017,46 +1961,32 @@ def generate_voi_tasks(
 
         # Capability edges: CAPABLE_OF targets contribute both as tags and as
         # type hints (if the target is a node whose type we can look up)
-        agent_edges = conn.execute(
-            "SELECT to_node, edge_type FROM ohm_edges "
-            "WHERE from_node = ? AND edge_type IN ('CAPABLE_OF', 'VALUES', 'GOALS', 'INTERESTED_IN') "
-            "AND deleted_at IS NULL",
-            [safe_agent],
-        ).fetchall()
-        for row in agent_edges:
-            agent_tags.add(row[0].lower())
-            if row[1] == "CAPABLE_OF":
-                agent_capable_nodes.add(row[0])
+        _cap_edge_types = ["CAPABLE_OF", "VALUES", "GOALS", "INTERESTED_IN"]
+        _all_cap_edges = reader.get_edges(edge_types=_cap_edge_types)
+        for e in _all_cap_edges:
+            if e.from_node == safe_agent:
+                agent_tags.add(e.to_node.lower())
+                if e.edge_type == "CAPABLE_OF":
+                    agent_capable_nodes.add(e.to_node)
 
         # Resolve node types for CAPABLE_OF targets
         if agent_capable_nodes:
-            placeholders = ", ".join(["?"] * len(agent_capable_nodes))
-            type_rows = conn.execute(
-                f"SELECT type FROM ohm_nodes WHERE id IN ({placeholders}) AND deleted_at IS NULL",
-                list(agent_capable_nodes),
-            ).fetchall()
-            agent_capable_types = {r[0].lower() for r in type_rows if r[0]}
+            _cap_nodes = reader.get_nodes(ids=list(agent_capable_nodes))
+            agent_capable_types = {n.type.lower() for n in _cap_nodes if n.type}
 
         # Agent node tags
-        agent_node = conn.execute(
-            "SELECT tags FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
-            [safe_agent],
-        ).fetchone()
-        if agent_node and agent_node[0]:
+        _agent_nodes = reader.get_nodes(ids=[safe_agent])
+        if _agent_nodes and _agent_nodes[0].tags:
             try:
-                tags_list = _json.loads(agent_node[0]) if isinstance(agent_node[0], str) else agent_node[0]
+                tags_list = _agent_nodes[0].tags
                 if isinstance(tags_list, list):
                     agent_tags.update(t.lower() for t in tags_list if isinstance(t, str))
             except (ValueError, TypeError):
                 pass
 
         # Workload: count open tasks assigned to this agent
-        workload_row = conn.execute(
-            "SELECT COUNT(*) FROM ohm_edges "
-            "WHERE to_node = ? AND edge_type = 'ASSIGNED_TO' AND deleted_at IS NULL",
-            [safe_agent],
-        ).fetchone()
-        agent_workload = workload_row[0] if workload_row else 0
+        _assigned_edges = reader.get_edges(edge_types=["ASSIGNED_TO"])
+        agent_workload = sum(1 for e in _assigned_edges if e.to_node == safe_agent)
 
     # Step 3: Build research tasks from VoI rankings
     tasks = []
@@ -2077,28 +2007,22 @@ def generate_voi_tasks(
         gap_score = uncertainty * sensitivity
 
         # Retrieve node metadata for capability matching
-        node_row = conn.execute(
-            "SELECT type, tags FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
-            [node_id],
-        ).fetchone()
-        node_type = (node_row[0] or "").lower() if node_row else ""
+        _node_records = reader.get_nodes(ids=[node_id])
+        _nr = _node_records[0] if _node_records else None
+        node_type = (_nr.type or "").lower() if _nr else ""
         node_tags: set[str] = set()
-        if node_row and node_row[1]:
+        if _nr and _nr.tags:
             try:
-                tags_list = _json.loads(node_row[1]) if isinstance(node_row[1], str) else node_row[1]
+                tags_list = _nr.tags
                 if isinstance(tags_list, list):
                     node_tags = {t.lower() for t in tags_list if isinstance(t, str)}
             except (ValueError, TypeError):
                 pass
 
-        # Connected concept labels for tag broadening
-        concept_edges = conn.execute(
-            "SELECT to_node FROM ohm_edges WHERE from_node = ? "
-            "AND edge_type IN ('CAUSES', 'INFLUENCES', 'ENABLES', 'DEPENDS_ON') "
-            "AND deleted_at IS NULL",
-            [node_id],
-        ).fetchall()
-        concept_labels = {r[0].lower() for r in concept_edges}
+        # Connected concept labels for tag broadening (reuse already-fetched causal edges)
+        _concept_edge_types = ["CAUSES", "INFLUENCES", "ENABLES", "DEPENDS_ON"]
+        _concept_records = reader.get_edges(edge_types=_concept_edge_types)
+        concept_labels = {e.to_node.lower() for e in _concept_records if e.from_node == node_id}
 
         # Multi-signal capability match score (0.0–1.0)
         all_node_tokens = node_tags | concept_labels | {label.lower(), node_id.lower()}
@@ -2297,7 +2221,7 @@ class BayesianContext:
         default_probability: float = 0.5,
         root_prior: float = 0.3,
     ):
-        self._conn = conn
+        self._reader = _coerce_reader(conn)
         self._edge_types = edge_types
         self._layers = layers
         self._leak_probability = leak_probability
@@ -2306,7 +2230,7 @@ class BayesianContext:
 
         # Build the network once
         self._network = build_bayesian_network(
-            conn,
+            self._reader,
             root_nodes=root_nodes,
             edge_types=edge_types,
             layers=layers,

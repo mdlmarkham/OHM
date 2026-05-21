@@ -142,6 +142,31 @@ class GraphReader(Protocol):
         return int(raw) if raw is not None else 0
 
 
+# ── Coercion helpers ──────────────────────────────────────────────────────────
+
+
+def coerce_reader(conn_or_reader: Any) -> "DuckDBGraphReader | GraphReader":
+    """Accept either a raw DuckDB conn or any GraphReader; always return a GraphReader.
+
+    Use this at the top of inference functions to support both legacy callers
+    (pass a raw conn) and new callers (pass a DuckDBGraphReader or MockGraphReader).
+    """
+    if isinstance(conn_or_reader, GraphReader):
+        return conn_or_reader
+    return DuckDBGraphReader(conn_or_reader)
+
+
+def raw_conn(conn_or_reader: Any) -> Any:
+    """Extract the underlying DuckDB conn from a DuckDBGraphReader, or return as-is.
+
+    Use for legacy code paths that require a raw DuckDB connection (e.g.
+    functions not yet migrated to GraphReader).
+    """
+    if isinstance(conn_or_reader, DuckDBGraphReader):
+        return conn_or_reader._conn
+    return conn_or_reader
+
+
 # ── DuckDB implementation ─────────────────────────────────────────────────────
 
 
