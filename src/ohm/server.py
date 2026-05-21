@@ -288,6 +288,133 @@ def _map_exception_to_http(exc: Exception) -> tuple[int, str]:
     return 500, "internal_error"
 
 
+# ── Route Registry ─────────────────────────────────────────
+
+
+class _RouteRegistry:
+    """Declarative method→path registry for 405 Method Not Allowed enforcement.
+
+    Stores which HTTP methods are valid for each path pattern.  Used before
+    dispatching to the existing if/elif chains so that wrong-method calls
+    (e.g. GET /deduplicate when the endpoint is POST-only) get a proper 405
+    with an Allow header instead of falling through to a misleading 404.
+
+    Path patterns:
+      - Exact:  "/stats", "/node"  — matched case-sensitively
+      - Prefix: "/node/", "/edge/" — matched with str.startswith()
+        Prefix patterns must end with "/".  Longer prefixes take priority.
+    """
+
+    def __init__(self) -> None:
+        self._exact: dict[str, set[str]] = {}
+        # List of (prefix, methods) sorted longest-first for correct matching
+        self._prefixes: list[tuple[str, set[str]]] = []
+
+    def add(self, method: str, path: str) -> None:
+        method = method.upper()
+        # "/" is the root exact path, not a catch-all prefix
+        if path.endswith("/") and path != "/":
+            for existing_prefix, methods in self._prefixes:
+                if existing_prefix == path:
+                    methods.add(method)
+                    return
+            entry: set[str] = {method}
+            self._prefixes.append((path, entry))
+            self._prefixes.sort(key=lambda x: len(x[0]), reverse=True)
+        else:
+            self._exact.setdefault(path, set()).add(method)
+
+    def methods_for(self, path: str) -> set[str] | None:
+        """Return allowed methods for a path, or None if the path is not registered."""
+        if path in self._exact:
+            return self._exact[path]
+        for prefix, methods in self._prefixes:
+            if path.startswith(prefix):
+                return methods
+        return None
+
+    def check(self, method: str, path: str) -> tuple[bool, set[str] | None]:
+        """Return (is_allowed, allowed_methods).
+
+        - (True, None)     → path unknown; pass through to existing 404 handling
+        - (True, methods)  → method is allowed for this path
+        - (False, methods) → method NOT allowed; caller should send 405
+        """
+        allowed = self.methods_for(path)
+        if allowed is None:
+            return True, None
+        if method.upper() in allowed:
+            return True, allowed
+        return False, allowed
+
+
+def _build_router() -> _RouteRegistry:
+    r = _RouteRegistry()
+
+    # Infrastructure — no auth, always open
+    for _p in ("/", "/openapi.json", "/health", "/ready", "/metrics"):
+        r.add("GET", _p)
+    r.add("GET", "/events")
+    r.add("GET", "/events/")
+
+    # Read endpoints (GET exact)
+    for _p in (
+        "/stats", "/status", "/schema", "/layers", "/agents", "/nodes",
+        "/listen", "/search", "/semantic_search",
+        "/inference", "/intervene", "/ate", "/sensitivity", "/adjustment",
+        "/voi", "/voi/tasks", "/suggest_causes", "/refute",
+        "/lint", "/contract", "/duplicates", "/stale",
+        "/admin/embeddings", "/admin/snapshots", "/graph/at", "/graph/changes",
+    ):
+        r.add("GET", _p)
+
+    # GET prefix routes (parameterised paths like /node/{id})
+    for _p in (
+        "/node/", "/deep/", "/edge/", "/neighborhood/", "/path/",
+        "/impact/", "/confidence/", "/agent/", "/provenance/",
+        "/monte-carlo/", "/calibration/", "/reliability/",
+    ):
+        r.add("GET", _p)
+
+    # Multi-method: /observations supports both GET (list) and POST (bulk upload)
+    r.add("GET", "/observations")
+    r.add("POST", "/observations")
+
+    # /deduplicate and /admin/checkpoint: POST is canonical; GET kept for compat
+    r.add("GET", "/deduplicate")
+    r.add("POST", "/deduplicate")
+    r.add("GET", "/admin/checkpoint")
+    r.add("POST", "/admin/checkpoint")
+
+    # /decay: write-in-GET (legacy); registered as GET to avoid spurious 405
+    r.add("GET", "/decay")
+
+    # POST-only write endpoints (exact)
+    for _p in (
+        "/node", "/node/find_or_create", "/edge",
+        "/outcome", "/agent/synthesis", "/batch",
+        "/webhook", "/state", "/register", "/heartbeat",
+    ):
+        r.add("POST", _p)
+
+    # POST prefix routes
+    for _p in ("/challenge/", "/support/", "/observe/", "/webhook/"):
+        r.add("POST", _p)
+
+    # PATCH
+    r.add("PATCH", "/edge/")
+
+    # DELETE
+    r.add("DELETE", "/node/")
+    r.add("DELETE", "/edge/")
+
+    return r
+
+
+_ROUTER = _build_router()
+del _build_router
+
+
 # ── HTTP Handler ───────────────────────────────────────────
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
@@ -365,6 +492,21 @@ class OhmHandler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _method_not_allowed(self, allowed_methods: set[str]) -> None:
+        """Send 405 Method Not Allowed with required Allow header (RFC 7231 §6.5.5)."""
+        allow_header = ", ".join(sorted(allowed_methods))
+        body = json.dumps({
+            "error": "method_not_allowed",
+            "message": f"Method not allowed — use: {allow_header}",
+            "allow": allow_header,
+        }, indent=2).encode()
+        self.send_response(405)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Allow", allow_header)
         self.end_headers()
         self.wfile.write(body)
 
@@ -761,6 +903,12 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "correlation_id": self._correlation_id,
                 })
                 return
+            from urllib.parse import urlparse as _up
+            _path = _up(self.path).path.rstrip("/") or "/"
+            _ok, _allowed = _ROUTER.check("GET", _path)
+            if not _ok:
+                self._method_not_allowed(_allowed)
+                return
             self._do_GET()
         except OHMError as e:
             self._error_response(e)
@@ -798,6 +946,12 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "correlation_id": self._correlation_id,
                 })
                 return
+            from urllib.parse import urlparse as _up
+            _path = _up(self.path).path.rstrip("/") or "/"
+            _ok, _allowed = _ROUTER.check("POST", _path)
+            if not _ok:
+                self._method_not_allowed(_allowed)
+                return
             self._do_POST()
         except OHMError as e:
             self._error_response(e)
@@ -834,6 +988,12 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "correlation_id": self._correlation_id,
                 })
                 return
+            from urllib.parse import urlparse as _up
+            _path = _up(self.path).path.rstrip("/") or "/"
+            _ok, _allowed = _ROUTER.check("DELETE", _path)
+            if not _ok:
+                self._method_not_allowed(_allowed)
+                return
             self._do_DELETE()
         except OHMError as e:
             self._error_response(e)
@@ -869,6 +1029,12 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "message": "Too many requests. Try again later.",
                     "correlation_id": self._correlation_id,
                 })
+                return
+            from urllib.parse import urlparse as _up
+            _path = _up(self.path).path.rstrip("/") or "/"
+            _ok, _allowed = _ROUTER.check("PATCH", _path)
+            if not _ok:
+                self._method_not_allowed(_allowed)
                 return
             self._do_PATCH()
         except OHMError as e:
