@@ -1416,3 +1416,220 @@ class TestGenerateVoITasks:
         # Confidence-weighted gap score: higher-value for uncertain + low-confidence nodes
         expected_gap = round(task["uncertainty"] * task["sensitivity"] * (1 - task["confidence"]), 4)
         assert task["gap_score"] == expected_gap
+
+
+# ── Regression Tests: Cache poisoning + silent node dropping ─────────────────
+
+class TestCachePoisoningRegression:
+    """Regression tests for bugs that caused /ate, /sensitivity, /refute to
+    return 'Unknown error' on real data while /inference and /intervene worked.
+
+    Root cause: build_bayesian_network() cache key omitted root_nodes, so a
+    network scoped to nodes from a previous request could be returned for a
+    different request. The effect node would silently be dropped from
+    safe_query_nodes, producing posteriors with only the cause node key.
+    """
+
+    @pytest.mark.skipif(
+        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
+        reason="pgmpy not available"
+    )
+    def test_cache_key_includes_root_nodes(self, db):
+        """Two build_bayesian_network calls with different root_nodes should
+        produce different cache entries (not reuse the first)."""
+        try:
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
+        except ImportError:
+            pytest.skip("pgmpy not available")
+
+        from ohm.bayesian import build_bayesian_network, _bayesian_network_cache
+
+        # Build two disconnected components: A->B and C->D
+        a = create_sample_node(db, label="cache_a")
+        b = create_sample_node(db, label="cache_b")
+        c = create_sample_node(db, label="cache_c")
+        d = create_sample_node(db, label="cache_d")
+        for src, dst in [(a, b), (c, d)]:
+            db.execute(
+                "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, "
+                "probability, confidence, created_by) "
+                "VALUES (?, ?, ?, 'L3', 'CAUSES', 0.8, 0.9, 'test')",
+                [str(uuid.uuid4()), src, dst],
+            )
+
+        _bayesian_network_cache.clear()
+
+        net1 = build_bayesian_network(db, root_nodes=[a, b], edge_types=["CAUSES"], layers=["L3"])
+        assert net1 is not None
+        assert c not in net1["nodes"]
+
+        net2 = build_bayesian_network(db, root_nodes=[c, d], edge_types=["CAUSES"], layers=["L3"])
+        assert net2 is not None
+        assert c in net2["nodes"]
+
+    @pytest.mark.skipif(
+        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
+        reason="pgmpy not available"
+    )
+    def test_ate_after_inference_on_different_nodes(self, db):
+        """ATE should work even after a prior /inference call scoped to
+        different nodes (the cache should not poison the network)."""
+        try:
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
+        except ImportError:
+            pytest.skip("pgmpy not available")
+
+        from ohm.bayesian import bayesian_inference, compute_ate, _bayesian_network_cache
+
+        # Build two disconnected components: A->B and C->D
+        a = create_sample_node(db, label="poison_a")
+        b = create_sample_node(db, label="poison_b")
+        c = create_sample_node(db, label="poison_c")
+        d = create_sample_node(db, label="poison_d")
+        for src, dst in [(a, b), (c, d)]:
+            db.execute(
+                "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, "
+                "probability, confidence, created_by) "
+                "VALUES (?, ?, ?, 'L3', 'CAUSES', 0.8, 0.9, 'test')",
+                [str(uuid.uuid4()), src, dst],
+            )
+
+        _bayesian_network_cache.clear()
+
+        # First: inference on A (scope=[A])
+        inf_result = bayesian_inference(db, a, {})
+        assert inf_result is not None
+
+        # Second: ATE on C->D (should NOT reuse A's network)
+        ate_result = compute_ate(db, c, d, edge_types=["CAUSES"], layers=["L3"])
+        assert "error" not in ate_result, f"ATE failed with: {ate_result.get('error')}"
+        assert ate_result["method"] == "model_based_ate"
+        assert "ate" in ate_result
+
+    @pytest.mark.skipif(
+        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
+        reason="pgmpy not available"
+    )
+    def test_intervention_returns_error_when_query_node_missing(self, db):
+        """causal_intervention should return an explicit error when a specified
+        query node is not in the network, not silently drop it."""
+        try:
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
+        except ImportError:
+            pytest.skip("pgmpy not available")
+
+        from ohm.bayesian import causal_intervention, _bayesian_network_cache
+
+        a = create_sample_node(db, label="missing_a")
+        b = create_sample_node(db, label="missing_b")
+        db.execute(
+            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, "
+            "probability, confidence, created_by) "
+            "VALUES (?, ?, ?, 'L3', 'CAUSES', 0.8, 0.9, 'test')",
+            [str(uuid.uuid4()), a, b],
+        )
+
+        _bayesian_network_cache.clear()
+
+        # Create a node that has no edges
+        orphan = create_sample_node(db, label="orphan_node")
+
+        result = causal_intervention(
+            db, a, 0, query_nodes=[orphan],
+            edge_types=["CAUSES"], layers=["L3"],
+        )
+        assert "error" in result, "Expected error when query node is not in network"
+        assert orphan in result["error"]
+
+    @pytest.mark.skipif(
+        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
+        reason="pgmpy not available"
+    )
+    def test_ate_diagnostic_error_message(self, db):
+        """compute_ate should return a diagnostic error message (not 'Unknown
+        error') when the effect node is missing from posteriors."""
+        try:
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
+        except ImportError:
+            pytest.skip("pgmpy not available")
+
+        from ohm.bayesian import compute_ate, _bayesian_network_cache
+
+        a = create_sample_node(db, label="diag_a")
+        b = create_sample_node(db, label="diag_b")
+        db.execute(
+            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, "
+            "probability, confidence, created_by) "
+            "VALUES (?, ?, ?, 'L3', 'CAUSES', 0.8, 0.9, 'test')",
+            [str(uuid.uuid4()), a, b],
+        )
+
+        orphan = create_sample_node(db, label="diag_orphan")
+
+        _bayesian_network_cache.clear()
+
+        result = compute_ate(db, a, orphan, edge_types=["CAUSES"], layers=["L3"])
+        assert "error" in result
+        assert "Unknown error" not in result["error"], (
+            f"Error message should be diagnostic, got: {result['error']}"
+        )
+        assert "orphan" in result["error"] or "not found" in result["error"]
+
+
+class TestBayesianContextMultiNodeExtraction:
+    """Regression test for BayesianContext.intervention() multi-node posteriors.
+
+    The BayesianContext version was indexing result.values[i] as if pgmpy
+    returns per-variable marginals, but it actually returns a joint
+    distribution. The fix makes it do per-variable queries like the
+    standalone causal_intervention does.
+    """
+
+    @pytest.mark.skipif(
+        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
+        reason="pgmpy not available"
+    )
+    def test_context_multi_node_posteriors_match_standalone(self, db):
+        """BayesianContext multi-query-node posteriors should match the
+        standalone causal_intervention result."""
+        try:
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
+        except ImportError:
+            pytest.skip("pgmpy not available")
+
+        from ohm.bayesian import BayesianContext, causal_intervention, _bayesian_network_cache
+
+        a = create_sample_node(db, label="multi_a")
+        b = create_sample_node(db, label="multi_b")
+        c = create_sample_node(db, label="multi_c")
+        d = create_sample_node(db, label="multi_d")
+        for src, dst, prob in [(a, b, 0.8), (b, c, 0.7), (c, d, 0.6)]:
+            db.execute(
+                "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, "
+                "probability, confidence, created_by) "
+                "VALUES (?, ?, ?, 'L3', 'CAUSES', ?, 0.9, 'test')",
+                [str(uuid.uuid4()), src, dst, prob],
+            )
+
+        _bayesian_network_cache.clear()
+
+        with BayesianContext(db, edge_types=["CAUSES"], layers=["L3"]) as ctx:
+            ctx_result = ctx.intervention(b, 0, query_nodes=[c, d])
+
+        _bayesian_network_cache.clear()
+
+        standalone_result = causal_intervention(
+            db, b, 0, query_nodes=[c, d], edge_types=["CAUSES"], layers=["L3"]
+        )
+
+        assert ctx_result["method"] == "causal_intervention"
+        assert standalone_result["method"] == "causal_intervention"
+
+        for node in [c, d]:
+            ctx_post = ctx_result["posterior"].get(node, {})
+            sa_post = standalone_result["posterior"].get(node, {})
+            assert "error" not in ctx_post, f"Context posterior for {node} has error: {ctx_post}"
+            assert "error" not in sa_post, f"Standalone posterior for {node} has error: {sa_post}"
+            assert abs(ctx_post["bad"] - sa_post["bad"]) < 0.01, (
+                f"Context P({node}=bad)={ctx_post['bad']} != standalone {sa_post['bad']}"
+            )

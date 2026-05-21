@@ -180,10 +180,14 @@ def build_bayesian_network(
         return None
 
     # Cache key based on query parameters (OHM-omr)
-    # All parameters that affect CPT values must be included to prevent stale cache hits
+    # All parameters that affect CPT values AND the node scope must be included
+    # to prevent stale cache hits. root_nodes was previously omitted, causing
+    # a network scoped to one set of nodes to be returned for a different set
+    # (e.g., /inference?target=X cached network reused for /ate?cause=A&effect=B).
     cache_key = (
         tuple(sorted(edge_types)) if edge_types else None,
         tuple(sorted(layers)) if layers else None,
+        tuple(sorted(root_nodes)) if root_nodes else None,
         max_nodes,
         root_prior,
         leak_probability,
@@ -836,14 +840,29 @@ def causal_intervention(
     # The target is set to intervention_state deterministically
     # We query downstream nodes to see the causal effect
     safe_query_nodes = []
+    missing_query_nodes = []
     if query_nodes:
         for qn in query_nodes:
             safe_qn = _safe_node_id(validate_identifier(qn, name="query_node"))
             if safe_qn in network["variables"]:
                 safe_query_nodes.append(safe_qn)
+            else:
+                missing_query_nodes.append(qn)
 
     # If no explicit query nodes, find all descendants of target
     if not safe_query_nodes:
+        if missing_query_nodes:
+            return {
+                "method": "error",
+                "pgmpy_available": True,
+                "target": target,
+                "intervention_state": intervention_state,
+                "error": (
+                    f"Query node(s) {missing_query_nodes} not in Bayesian network "
+                    f"(network has {network['n_nodes']} nodes: {network['nodes'][:10]}{'...' if len(network['nodes']) > 10 else ''})"
+                ),
+                "incoming_edges_severed": len(incoming_edges),
+            }
         try:
             import networkx as nx
             descendants = nx.descendants(model_do, safe_target)
@@ -1039,7 +1058,15 @@ def compute_ate(
     p_bad_do_good = do_good.get("posterior", {}).get(effect, {}).get("bad")
 
     if p_bad_do_bad is None or p_bad_do_good is None:
-        error_msg = do_bad.get("error") or do_good.get("error") or "Unknown error"
+        error_msg = do_bad.get("error") or do_good.get("error")
+        if not error_msg:
+            bad_keys = list(do_bad.get("posterior", {}).keys())
+            good_keys = list(do_good.get("posterior", {}).keys())
+            error_msg = (
+                f"Effect node '{effect}' not found in intervention posteriors. "
+                f"do(bad) has keys {bad_keys}, do(good) has keys {good_keys}. "
+                f"The effect node may not be in the Bayesian network."
+            )
         return {
             "method": "error",
             "cause": cause,
@@ -2426,13 +2453,28 @@ class BayesianContext:
 
         # Determine query nodes
         safe_query_nodes = []
+        missing_query_nodes = []
         if query_nodes:
             for qn in query_nodes:
                 safe_qn = _safe_node_id(validate_identifier(qn, name="query_node"))
                 if safe_qn in network["variables"]:
                     safe_query_nodes.append(safe_qn)
+                else:
+                    missing_query_nodes.append(qn)
 
         if not safe_query_nodes:
+            if missing_query_nodes:
+                return {
+                    "method": "error",
+                    "pgmpy_available": True,
+                    "target": target,
+                    "intervention_state": intervention_state,
+                    "error": (
+                        f"Query node(s) {missing_query_nodes} not in Bayesian network "
+                        f"(network has {network['n_nodes']} nodes)"
+                    ),
+                    "incoming_edges_severed": len(incoming_edges),
+                }
             try:
                 import networkx as nx
                 descendants = nx.descendants(model_do, safe_target)
@@ -2478,17 +2520,20 @@ class BayesianContext:
                     "bad": round(float(result.values[0]), 4),
                 }
             else:
-                for i, qn in enumerate(safe_query_nodes):
+                for qn in safe_query_nodes:
                     qn_original = None
                     for orig, safe in safe_names.items():
                         if safe == qn:
                             qn_original = orig
                             break
-                    val = result.values[i] if i < len(result.values) else 0.5
-                    posteriors[qn_original or qn] = {
-                        "good": round(float(val[1]), 4),
-                        "bad": round(float(val[0]), 4),
-                    }
+                    try:
+                        result_single = infer.query([qn], evidence={safe_target: intervention_state})
+                        posteriors[qn_original or qn] = {
+                            "good": round(float(result_single.values[1]), 4),
+                            "bad": round(float(result_single.values[0]), 4),
+                        }
+                    except Exception:
+                        posteriors[qn_original or qn] = {"error": "inference failed for this node"}
 
             # Observation comparison using original model
             comparison = {}
@@ -2578,7 +2623,15 @@ class BayesianContext:
         p_bad_do_good = do_good.get("posterior", {}).get(effect, {}).get("bad")
 
         if p_bad_do_bad is None or p_bad_do_good is None:
-            error_msg = do_bad.get("error") or do_good.get("error") or "Unknown error"
+            error_msg = do_bad.get("error") or do_good.get("error")
+            if not error_msg:
+                bad_keys = list(do_bad.get("posterior", {}).keys())
+                good_keys = list(do_good.get("posterior", {}).keys())
+                error_msg = (
+                    f"Effect node '{effect}' not found in intervention posteriors. "
+                    f"do(bad) has keys {bad_keys}, do(good) has keys {good_keys}. "
+                    f"The effect node may not be in the Bayesian network."
+                )
             return {
                 "method": "error",
                 "cause": cause,
