@@ -578,6 +578,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         "/observe": [],
         "/observations": [],
         "/outcome": [],
+        "/agent/synthesis": [],
         "/reliability": [],
         "/webhook": [],
     }
@@ -1011,6 +1012,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "/observe/{id}": {"method": "POST", "description": "Record an observation on a node"},
                     "/observations": {"method": "GET", "description": "List observations with filtering by type, source, node_id. POST for bulk upload: {observations: [{node_id, value, sigma, obs_type, source}]}"},
                     "/outcome": {"method": "POST", "description": "Record whether a source agent's claim was correct"},
+                    "/agent/synthesis": {"method": "POST", "description": "Write a synthesis: one concept node + L3 edges + observation in one call"},
                     "/reliability/{source}": {"method": "GET", "description": "Compute source reliability metrics from historical outcomes"},
                     "/state": {"method": "POST", "description": "Update agent state/focus"},
                     "/register": {"method": "POST", "description": "Register a new agent"},
@@ -1074,6 +1076,8 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "/support/{id}": {"post": {"summary": "Support edge"}},
                     "/observe/{id}": {"post": {"summary": "Record observation"}},
                     "/observations": {"get": {"summary": "List observations"}, "post": {"summary": "Bulk upload observations"}},
+                    "/outcome": {"post": {"summary": "Record outcome"}},
+                    "/agent/synthesis": {"post": {"summary": "Write synthesis (concept + L3 edges + observation)"}},
                     "/state": {"post": {"summary": "Update agent state"}},
                     "/register": {"post": {"summary": "Register agent"}},
                     "/heartbeat": {"post": {"summary": "Agent heartbeat"}},
@@ -2280,6 +2284,82 @@ class OhmHandler(BaseHTTPRequestHandler):
                 notes=notes,
             )
             self._json_response(201, result)
+
+        elif path == "/agent/synthesis":
+            # One-call L3 writing: concept node + edges + observation
+            label = body.get("label")
+            content = body.get("content")
+            cluster_ids = body.get("cluster_ids", [])
+            edge_type = body.get("edge_type", "SUPPORTS")
+            confidence = body.get("confidence", 0.8)
+            sigma = body.get("sigma", 0.1)
+            provenance = body.get("provenance")
+            tags = body.get("tags")
+
+            if not label or not content or not cluster_ids:
+                raise ValidationError("agent/synthesis requires label, content, and cluster_ids")
+
+            # Create synthesis concept node
+            # Auto-generate ID from label
+            from ohm.schema import generate_node_id
+            node_id = generate_node_id(label)
+            node_result = self.store.write_node(
+                id=node_id,
+                label=label,
+                type="concept",
+                content=content,
+                confidence=confidence,
+                agent_name=agent,
+                provenance=provenance or f"{agent}_synthesis",
+            )
+            node_id = node_result["id"] if isinstance(node_result, dict) else node_result
+
+            # Add tags if provided
+            if tags:
+                import json as _json
+                self.store.conn.execute(
+                    "UPDATE ohm_nodes SET tags = ? WHERE id = ?",
+                    [_json.dumps(tags), node_id],
+                )
+
+            # Create L3 edges to each cluster node
+            edges_created = 0
+            for cid in cluster_ids:
+                from .validation import validate_identifier
+                try:
+                    safe_cid = validate_identifier(cid, name="cluster_id")
+                except ValueError:
+                    continue
+                try:
+                    self.store.write_edge(
+                        from_node=node_id,
+                        to_node=safe_cid,
+                        edge_type=edge_type,
+                        layer="L3",
+                        confidence=confidence,
+                        agent_name=agent,
+                        provenance=provenance or f"{agent}_synthesis",
+                    )
+                    edges_created += 1
+                except Exception:
+                    pass  # Skip edges to nonexistent nodes
+
+            # Record observation on the synthesis node
+            obs_result = self.store.write_observation(
+                node_id=node_id,
+                type="pattern",
+                value=confidence,
+                sigma=sigma,
+                source="synthesis",
+                notes=content[:200],
+                agent_name=agent,
+            )
+
+            self._json_response(201, {
+                "node": node_result if isinstance(node_result, dict) else {"id": node_id},
+                "edges_created": edges_created,
+                "observation": obs_result,
+            })
 
         elif path == "/batch":
             # Batch node and edge creation — all-or-nothing transaction

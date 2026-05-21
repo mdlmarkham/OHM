@@ -498,6 +498,86 @@ class Graph:
             source_url=source_url,
         )
 
+    def write_synthesis(
+        self,
+        cluster_ids: list[str],
+        label: str,
+        content: str,
+        *,
+        edge_type: str = "SUPPORTS",
+        confidence: float = 0.8,
+        sigma: float = 0.1,
+        provenance: str | None = None,
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Write a synthesis: one concept node + L3 edges + observation.
+
+        The core L3 writing primitive. Instead of calling create_node,
+        create_edge (×N), and observe separately, this collapses the
+        most common agent writing pattern into a single call.
+
+        Args:
+            cluster_ids: Node IDs this synthesis connects to.
+            label: Short name for the synthesis concept.
+            content: Full synthesis text — your reasoning, the pattern you see.
+            edge_type: L3 edge type (SUPPORTS, CAUSES, TRANSITIONS_TO,
+                APPLIES_TO, INFLUENCES, REFINES). Default SUPPORTS.
+            confidence: Your confidence in this synthesis (0-1).
+            sigma: Uncertainty in confidence (0-1).
+            provenance: How you arrived at this (e.g., 'pattern_analysis').
+            tags: Tags for discoverability (e.g., ['AND-OR', 'governance']).
+
+        Returns:
+            Dict with node, edges_created (count), and observation.
+        """
+        # Create the synthesis concept node
+        node = self.create_node(
+            label=label,
+            node_type="concept",
+            content=content,
+            confidence=confidence,
+            provenance=provenance or f"{self.actor}_synthesis",
+        )
+
+        # Add tags if provided
+        if tags:
+            self._conn.execute(
+                "UPDATE ohm_nodes SET tags = ? WHERE id = ?",
+                [tags, node["id"]],
+            )
+
+        # Create L3 edges to each cluster node
+        edges_created = 0
+        for cid in cluster_ids:
+            try:
+                self.create_edge(
+                    from_node=node["id"],
+                    to_node=cid,
+                    edge_type=edge_type,
+                    layer="L3",
+                    confidence=confidence,
+                    provenance=provenance or f"{self.actor}_synthesis",
+                )
+                edges_created += 1
+            except Exception:
+                pass  # Skip edges to nonexistent nodes
+
+        # Record observation on the synthesis node
+        obs = self.observe(
+            node_id=node["id"],
+            obs_type="pattern",
+            value=confidence,
+            sigma=sigma,
+            source="synthesis",
+            notes=content[:200],
+        )
+
+        return {
+            "node": node,
+            "edges_created": edges_created,
+            "observation": obs,
+        }
+
     def set_focus(self, focus: str) -> None:
         """Set the current focus for this agent."""
         from ohm.queries import set_agent_state
