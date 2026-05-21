@@ -130,8 +130,8 @@ class TestSynthesisHTTPEndpoint:
         }, token="test-token")
 
         assert status == 201
-        # Both edges are created (DuckDB has no FK constraints)
-        assert data["edges_created"] == 2
+        # Only valid-node edge is created; nonexistent-node edge is rejected by referential integrity (OHM-7298)
+        assert data["edges_created"] == 1
 
     def test_synthesis_default_edge_type(self, synthesis_server):
         """Default edge type is SUPPORTS."""

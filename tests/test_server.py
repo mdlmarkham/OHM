@@ -2156,3 +2156,111 @@ class TestPublicReadAuthModel:
             server.shutdown()
             thread.join(timeout=2)
             store.close()
+
+
+@pytest.mark.xdist_group("server")
+class TestMetisBugFixes:
+    """Regression tests for bugs found by Metis in the 50-endpoint test run."""
+
+    def test_edge_rejects_nonexistent_from_node(self, test_server):
+        """POST /edge should 404 when from_node doesn't exist (OHM-7298)."""
+        port, store = test_server
+        store.write_node("real-node", "Real Node", "concept", agent_name="test")
+        status, data = _request("POST", port, "/edge", body={
+            "from": "ghost-node",
+            "to": "real-node",
+            "type": "CAUSES",
+            "layer": "L3",
+        })
+        assert status == 404
+        assert "ghost-node" in data.get("message", "")
+
+    def test_edge_rejects_nonexistent_to_node(self, test_server):
+        """POST /edge should 404 when to_node doesn't exist (OHM-7298)."""
+        port, store = test_server
+        store.write_node("src-node", "Source Node", "concept", agent_name="test")
+        status, data = _request("POST", port, "/edge", body={
+            "from": "src-node",
+            "to": "ghost-target",
+            "type": "CAUSES",
+            "layer": "L3",
+        })
+        assert status == 404
+        assert "ghost-target" in data.get("message", "")
+
+    def test_edge_with_valid_nodes_succeeds(self, test_server):
+        """POST /edge should succeed when both nodes exist (OHM-7298 no regression)."""
+        port, store = test_server
+        store.write_node("ei-src", "Source", "concept", agent_name="test")
+        store.write_node("ei-dst", "Dest", "concept", agent_name="test")
+        status, data = _request("POST", port, "/edge", body={
+            "from": "ei-src",
+            "to": "ei-dst",
+            "type": "CAUSES",
+            "layer": "L3",
+        })
+        assert status == 201
+
+    def test_observe_rejects_nonexistent_node(self, test_server):
+        """POST /observe/{id} should 404 when node doesn't exist (OHM-7302)."""
+        port, _ = test_server
+        status, data = _request("POST", port, "/observe/ghost-node-obs", body={
+            "type": "measurement",
+            "value": 42.0,
+        })
+        assert status == 404
+
+    def test_observe_valid_node_succeeds(self, test_server):
+        """POST /observe/{id} should succeed when node exists (OHM-7302 no regression)."""
+        port, store = test_server
+        store.write_node("obs-node", "Observable", "concept", agent_name="test")
+        status, data = _request("POST", port, "/observe/obs-node", body={
+            "type": "measurement",
+            "value": 42.0,
+        })
+        assert status == 201
+
+    def test_deep_includes_edges(self, test_server):
+        """GET /deep/{id} should include connected edges (OHM-7299)."""
+        port, store = test_server
+        store.write_node("deep-hub", "Hub", "concept", agent_name="test")
+        store.write_node("deep-spoke", "Spoke", "concept", agent_name="test")
+        store.write_edge("deep-hub", "deep-spoke", "CAUSES", "L3", agent_name="test")
+        status, data = _request("GET", port, "/deep/deep-hub")
+        assert status == 200
+        assert "edges" in data
+        assert data["edge_count"] >= 1
+        assert any(e["from_node"] == "deep-hub" for e in data["edges"])
+
+    def test_post_sync_returns_200(self, test_server):
+        """POST /sync should return 200 with sync result (OHM-7301)."""
+        port, _ = test_server
+        status, data = _request("POST", port, "/sync", body={})
+        assert status == 200
+        assert "pushed" in data or "last_sync" in data
+
+    def test_post_tasks_creates_task(self, test_server):
+        """POST /tasks should create a task node (OHM-7304)."""
+        port, store = test_server
+        status, data = _request("POST", port, "/tasks", body={
+            "id": "task-create-test",
+            "label": "Do the thing",
+            "task_status": "open",
+            "priority": "P1",
+        })
+        assert status == 201
+        assert data.get("type") == "task"
+        assert data.get("task_status") == "open"
+
+    def test_post_tasks_then_get_tasks(self, test_server):
+        """Task created via POST /tasks is visible in GET /tasks (OHM-7304)."""
+        port, store = test_server
+        _request("POST", port, "/tasks", body={
+            "id": "task-roundtrip",
+            "label": "Roundtrip task",
+            "task_status": "open",
+        })
+        status, data = _request("GET", port, "/tasks")
+        assert status == 200
+        ids = [t["id"] for t in data.get("tasks", [])]
+        assert "task-roundtrip" in ids
