@@ -1989,8 +1989,11 @@ def generate_voi_tasks(
         obs_count = ranking.get("observation_count", 0)
         downstream = ranking.get("downstream_decisions", [])
 
-        # Confidence-weighted gap score: accounts for how poorly-known the node is
-        gap_score = uncertainty * sensitivity * (1.0 - confidence)
+        # Gap score: uncertainty × sensitivity.
+        # Note: uncertainty already incorporates (1-confidence) for non-PERT nodes,
+        # so we do NOT multiply by (1-confidence) again (OHM#4 — double-counting bug).
+        # For PERT nodes, uncertainty comes from PERT variance, which is independent of confidence.
+        gap_score = uncertainty * sensitivity
 
         # Retrieve node metadata for capability matching
         node_row = conn.execute(
