@@ -1807,15 +1807,40 @@ def compute_voi(
     node_id_list = ", ".join(f"'{n}'" for n in candidate_nodes)
     node_info = {}
     rows = conn.execute(
-        f"SELECT id, label, confidence, utility_scale FROM ohm_nodes "
+        f"SELECT id, label, confidence FROM ohm_nodes "
         f"WHERE id IN ({node_id_list}) AND deleted_at IS NULL"
     ).fetchall()
     for row in rows:
         node_info[row[0]] = {
             "label": row[1],
             "confidence": row[2] if row[2] is not None else 0.5,
+        }
+
+    # Fetch decision-node utility: USD value takes precedence over dimensionless utility_scale.
+    dec_id_list = ", ".join(f"'{d}'" for d in decision_nodes)
+    decision_utility: dict[str, dict] = {}
+    dec_rows = conn.execute(
+        f"SELECT id, utility_usd_per_day, utility_currency, utility_scale FROM ohm_nodes "
+        f"WHERE id IN ({dec_id_list}) AND deleted_at IS NULL"
+    ).fetchall()
+    for row in dec_rows:
+        decision_utility[row[0]] = {
+            "utility_usd_per_day": row[1],
+            "utility_currency": row[2],
             "utility_scale": row[3],
         }
+
+    # Determine VoI units from decision nodes.
+    _usd_count = sum(
+        1 for d in decision_nodes
+        if decision_utility.get(d, {}).get("utility_usd_per_day") is not None
+    )
+    if _usd_count == len(decision_nodes):
+        voi_units = "usd"
+    elif _usd_count == 0:
+        voi_units = "dimensionless"
+    else:
+        voi_units = "mixed"
 
     # Get observation counts for each candidate (proxy for information quality)
     obs_counts: dict[str, int] = {}
@@ -1832,7 +1857,7 @@ def compute_voi(
     _deadline = (_time.monotonic() + timeout) if timeout else None
     rankings = []
     for node_id in candidate_nodes:
-        info = node_info.get(node_id, {"label": node_id, "confidence": 0.5, "utility_scale": None})
+        info = node_info.get(node_id, {"label": node_id, "confidence": 0.5})
         confidence = info["confidence"]
 
         # Uncertainty: how uncertain are we about this node?
@@ -1880,17 +1905,20 @@ def compute_voi(
                         leak_probability=leak_probability,
                         root_prior=root_prior,
                     )
+                _du = decision_utility.get(decision, {})
+                _usd = _du.get("utility_usd_per_day")
+                _util = _usd if _usd is not None else (_du.get("utility_scale") or 0.5)
                 if ate_result.get("method") == "model_based_ate":
                     ate_value = ate_result["ate"]
-                    sensitivity += abs(ate_value) * (info.get("utility_scale") or 0.5)
+                    sensitivity += abs(ate_value) * _util
                     sensitivity_method = "ate"
                 else:
                     # Fallback: path confidence (minimum edge confidence along best path)
                     path_conf = _path_confidence(node_id, decision, forward_adj, edge_confidences)
                     if path_conf is not None:
-                        sensitivity += path_conf * (info.get("utility_scale") or 0.5)
+                        sensitivity += path_conf * _util
                     else:
-                        sensitivity += 0.1 * (info.get("utility_scale") or 0.5)
+                        sensitivity += 0.1 * _util
                 downstream_decisions.append(decision)
 
         # VoI = uncertainty × sensitivity
@@ -1920,6 +1948,7 @@ def compute_voi(
         "decision_nodes": decision_nodes,
         "rankings": rankings,
         "n_candidates": len(candidate_nodes),
+        "units": voi_units,
     }
 
 

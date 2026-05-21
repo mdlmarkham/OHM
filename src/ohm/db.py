@@ -507,22 +507,27 @@ def _create_ducklake_tables(conn: "DuckDBPyConnection", alias: str) -> None:
     mirror_tables = {
         "ohm_nodes": """
             CREATE TABLE IF NOT EXISTS {alias}.ohm_nodes (
-                id            VARCHAR,
-                label         VARCHAR,
-                type          VARCHAR,
-                content       VARCHAR,
-                url           VARCHAR,
-                created_by    VARCHAR,
-                created_at    VARCHAR,
-                updated_at    VARCHAR,
-                updated_by    VARCHAR,
-                confidence    VARCHAR,
-                visibility    VARCHAR,
-                provenance    VARCHAR,
-                tags          VARCHAR,
-                metadata      VARCHAR,
-                priority      VARCHAR,
-                deleted_at    VARCHAR
+                id                      VARCHAR,
+                label                   VARCHAR,
+                type                    VARCHAR,
+                content                 VARCHAR,
+                url                     VARCHAR,
+                created_by              VARCHAR,
+                created_at              VARCHAR,
+                updated_at              VARCHAR,
+                updated_by              VARCHAR,
+                confidence              VARCHAR,
+                visibility              VARCHAR,
+                provenance              VARCHAR,
+                tags                    VARCHAR,
+                metadata                VARCHAR,
+                priority                VARCHAR,
+                utility_scale           VARCHAR,
+                current_best_action     VARCHAR,
+                action_alternatives     VARCHAR,
+                utility_usd_per_day     VARCHAR,
+                utility_currency        VARCHAR,
+                deleted_at              VARCHAR
             )
         """,
         "ohm_edges": """

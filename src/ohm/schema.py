@@ -481,7 +481,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.16.0"
+SCHEMA_VERSION = "0.17.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -563,6 +563,10 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
         "ALTER TABLE ohm_nodes ADD COLUMN utility_scale FLOAT",
         "ALTER TABLE ohm_nodes ADD COLUMN current_best_action VARCHAR",
         "ALTER TABLE ohm_nodes ADD COLUMN action_alternatives JSON",
+    ]),
+    ("0.17.0", "add USD utility columns to decision nodes for VoI calibration (OHM-fh3e)", [
+        "ALTER TABLE ohm_nodes ADD COLUMN utility_usd_per_day FLOAT",
+        "ALTER TABLE ohm_nodes ADD COLUMN utility_currency VARCHAR",
     ]),
 ]
 

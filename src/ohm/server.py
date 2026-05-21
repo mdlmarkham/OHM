@@ -2272,6 +2272,8 @@ class OhmHandler(BaseHTTPRequestHandler):
                 utility_scale=body.get("utility_scale"),
                 current_best_action=body.get("current_best_action"),
                 action_alternatives=body.get("action_alternatives"),
+                utility_usd_per_day=body.get("utility_usd_per_day"),
+                utility_currency=body.get("utility_currency"),
                 agent_name=agent,
             )
             event_type = "node.created" if result.get("created") else "node.updated"
@@ -2502,6 +2504,8 @@ class OhmHandler(BaseHTTPRequestHandler):
                         utility_scale=node.get("utility_scale"),
                         current_best_action=node.get("current_best_action"),
                         action_alternatives=node.get("action_alternatives"),
+                        utility_usd_per_day=node.get("utility_usd_per_day"),
+                        utility_currency=node.get("utility_currency"),
                         agent_name=agent,
                     )
                     nodes_created += 1

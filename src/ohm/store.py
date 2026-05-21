@@ -252,6 +252,9 @@ class OhmStore:
                         'confidence': 'confidence', 'visibility': 'visibility',
                         'provenance': 'provenance', 'tags': 'tags',
                         'metadata': 'metadata', 'priority': 'priority',
+                        'utility_scale': 'utility_scale',
+                        'utility_usd_per_day': 'utility_usd_per_day',
+                        'utility_currency': 'utility_currency',
                     }
                     EDGE_COLS = {
                         'id': 'id', 'from_node': 'from_node', 'to_node': 'to_node',
@@ -367,6 +370,9 @@ class OhmStore:
                 'confidence': 'confidence', 'visibility': 'visibility',
                 'provenance': 'provenance', 'tags': 'tags',
                 'metadata': 'metadata', 'priority': 'priority',
+                'utility_scale': 'utility_scale',
+                'utility_usd_per_day': 'utility_usd_per_day',
+                'utility_currency': 'utility_currency',
             }
             EDGE_COLS = {
                 'id': 'id', 'from_node': 'from_node', 'to_node': 'to_node',
@@ -390,7 +396,8 @@ class OhmStore:
                 try:
                     cast_parts = []
                     for dl_col, local_col in col_map.items():
-                        if local_col in ('confidence', 'probability', 'baseline', 'value', 'sigma'):
+                        if local_col in ('confidence', 'probability', 'baseline', 'value', 'sigma',
+                                         'utility_scale', 'utility_usd_per_day'):
                             cast_parts.append(f"CAST({dl_col} AS FLOAT) AS {local_col}")
                         elif local_col in ('created_at', 'updated_at'):
                             cast_parts.append(f"CAST({dl_col} AS TIMESTAMP) AS {local_col}")
@@ -551,6 +558,8 @@ class OhmStore:
         utility_scale: Optional[float] = None,
         current_best_action: Optional[str] = None,
         action_alternatives: Optional[list[str]] = None,
+        utility_usd_per_day: Optional[float] = None,
+        utility_currency: Optional[str] = None,
         agent_name: Optional[str] = None,
     ) -> dict[str, Any]:
         """Create or update a node. Attributed to the given agent.
@@ -565,6 +574,8 @@ class OhmStore:
             utility_scale: For decision nodes: importance weight 0-1.
             current_best_action: For decision nodes: currently preferred action.
             action_alternatives: For decision nodes: list of alternative actions.
+            utility_usd_per_day: For decision nodes: monetary value of resolving uncertainty (USD/day).
+            utility_currency: ISO 4217 currency code for utility_usd_per_day (e.g. "USD").
 
         Returns a dict with the node record and a 'created' key
         indicating whether this was a new creation (True) or an
@@ -587,13 +598,14 @@ class OhmStore:
                     visibility = ?, provenance = ?, tags = ?, metadata = ?,
                     priority = ?, url = ?, task_status = ?, assigned_to = ?,
                     due_date = ?, utility_scale = ?, current_best_action = ?,
-                    action_alternatives = ?, updated_at = ?, updated_by = ?
+                    action_alternatives = ?, utility_usd_per_day = ?,
+                    utility_currency = ?, updated_at = ?, updated_by = ?
                 WHERE id = ?
                 """,
                 [label, type, content, confidence, visibility, provenance,
                  tags_json, metadata_json, priority, url, task_status, assigned_to,
                  due_date, utility_scale, current_best_action, alternatives_json,
-                 now, actor, id],
+                 utility_usd_per_day, utility_currency, now, actor, id],
             )
             self._log_change("ohm_nodes", id, "UPDATE", None, agent_name=actor)
             result = self.get_node(id) or {}
@@ -618,6 +630,7 @@ class OhmStore:
                     priority = ?, url = ?, created_by = ?, task_status = ?,
                     assigned_to = ?, due_date = ?, utility_scale = ?,
                     current_best_action = ?, action_alternatives = ?,
+                    utility_usd_per_day = ?, utility_currency = ?,
                     updated_at = ?, updated_by = ?,
                     deleted_at = NULL
                 WHERE id = ?
@@ -625,7 +638,8 @@ class OhmStore:
                 [label, type, content, confidence, visibility, provenance,
                  tags_json, metadata_json, priority, url, actor, task_status,
                  assigned_to, due_date, utility_scale, current_best_action,
-                 alternatives_json, now, actor, id],
+                 alternatives_json, utility_usd_per_day, utility_currency,
+                 now, actor, id],
             )
             self._log_change("ohm_nodes", id, "UPDATE", None, agent_name=actor)
             result = self.get_node(id) or {}
@@ -643,13 +657,15 @@ class OhmStore:
                                    visibility, provenance, tags, metadata, priority, url,
                                    task_status, assigned_to, due_date,
                                    utility_scale, current_best_action, action_alternatives,
+                                   utility_usd_per_day, utility_currency,
                                    created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [id, label, type, content, actor, confidence,
              visibility, provenance, tags_json, metadata_json, priority, url,
              task_status, assigned_to, due_date,
              utility_scale, current_best_action, alternatives_json,
+             utility_usd_per_day, utility_currency,
              now, now],
         )
         self._log_change("ohm_nodes", id, "INSERT", None, agent_name=actor)

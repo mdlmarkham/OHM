@@ -162,6 +162,57 @@ def aggregate_mixture_of_experts(
     }
 
 
+def weibull_to_pert_anchor(
+    beta: float,
+    eta: float,
+    horizon_days: float,
+    percentiles: tuple[float, float, float] = (0.05, 0.50, 0.95),
+) -> tuple[float, float, float, float]:
+    """Convert Weibull reliability parameters to a PERT anchor triple.
+
+    Uses the Weibull CDF and its inverse to compute:
+
+      F(t) = 1 - exp(-(t / eta) ^ beta)
+      t_p  = eta * (-ln(1 - p)) ^ (1 / beta)
+
+    Args:
+        beta: Weibull shape parameter (>0). beta<1: infant mortality,
+              beta=1: constant failure rate, beta>1: wear-out.
+        eta: Weibull scale (characteristic life), in days.
+        horizon_days: Observation window for the base-rate calculation.
+        percentiles: Three quantile levels for the PERT triple (default: 5th, 50th, 95th).
+
+    Returns:
+        (base_rate, t_p05, t_p50, t_p95) where:
+        - base_rate: P(failure within horizon_days) in [0, 1]
+        - t_p05, t_p50, t_p95: time-to-failure (in days) at each percentile
+
+        Use base_rate as ``reference_class`` in :func:`anchored_pert` to pull
+        an expert's three-point probability estimate toward the Weibull baseline.
+
+    Raises:
+        PERTELError: If any parameter is out of range or percentiles are invalid.
+    """
+    import math
+
+    if beta <= 0:
+        raise PERTELError(f"beta must be positive, got {beta}")
+    if eta <= 0:
+        raise PERTELError(f"eta must be positive, got {eta}")
+    if horizon_days <= 0:
+        raise PERTELError(f"horizon_days must be positive, got {horizon_days}")
+    if len(percentiles) != 3:
+        raise PERTELError("percentiles must be a 3-tuple of (p05, p50, p95) quantile levels")
+    for p in percentiles:
+        if not (0.0 < p < 1.0):
+            raise PERTELError(f"percentile {p} must be in (0, 1)")
+
+    base_rate = 1.0 - math.exp(-((horizon_days / eta) ** beta))
+
+    t_values = tuple(eta * ((-math.log(1.0 - p)) ** (1.0 / beta)) for p in percentiles)
+    return (base_rate, t_values[0], t_values[1], t_values[2])
+
+
 def anchored_pert(
     p05: float,
     p50: float,
