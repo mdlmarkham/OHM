@@ -1474,18 +1474,26 @@ class OhmHandler(BaseHTTPRequestHandler):
             ).fetchone()
 
             if is_node and is_node[0] > 0:
-                # Node: find all challenge/support/refine edges pointing TO this node
+                # Node: find all challenge/support/refine edges pointing TO this node.
+                # Use SELECT * so challenge_of, challenge_type, provenance, and PERT
+                # percentile fields (probability_p05/p50/p95, confidence_p05/p50/p95)
+                # are all included in the response.
                 refs_result = self.store.conn.execute(
-                    """SELECT id, edge_type, confidence, condition, created_by, created_at,
-                              from_node, to_node, layer
+                    """SELECT *
                        FROM ohm_edges
                        WHERE to_node = ?
                          AND edge_type IN ('CHALLENGED_BY', 'SUPPORTS', 'REFINES')
+                         AND deleted_at IS NULL
                        ORDER BY created_at DESC""",
                     [target_id],
                 )
                 ref_columns = [desc[0] for desc in refs_result.description]
                 refs = [dict(zip(ref_columns, row)) for row in refs_result.fetchall()]
+                # Add convenience aliases
+                for r in refs:
+                    r["from"] = r.get("from_node")
+                    r["to"] = r.get("to_node")
+                    r["type"] = r.get("edge_type")
 
                 challenges = [r for r in refs if r["edge_type"] == "CHALLENGED_BY"]
                 supports = [r for r in refs if r["edge_type"] == "SUPPORTS"]
