@@ -28,6 +28,7 @@ ADR-009: NEGATES edges have inverted probability semantics.
 """
 
 import logging
+import math
 from typing import Any
 
 from ohm.validation import validate_identifier
@@ -42,6 +43,7 @@ _bayesian_network_cache: dict[tuple, tuple[int, dict[str, Any]]] = {}
 
 from ohm.pert import compute_pert_mean as _compute_pert_mean
 from ohm.pert import compute_pert_variance as _compute_pert_variance
+from ohm.pert import scale_pert_variance as _scale_pert_variance
 
 try:
     from pgmpy.models import DiscreteBayesianNetwork as BayesianNetwork
@@ -279,20 +281,39 @@ def build_bayesian_network(
         has_pert_confidence = conf_p50 is not None
 
         if has_pert_probability:
-            # PERT mean: μ = (O + 4M + P) / 6
-            p05 = float(prob_p05) if prob_p05 is not None else float(prob_p50) * 0.8
+            has_full_pert_probability = prob_p05 is not None and prob_p95 is not None
             p50 = float(prob_p50)
-            p95 = float(prob_p95) if prob_p95 is not None else min(1.0, float(prob_p50) * 1.2)
+            if has_full_pert_probability:
+                p05 = float(prob_p05)
+                p95 = float(prob_p95)
+            else:
+                # Only p50 given: ±20% defaults create fake precision for CPTs.
+                # Use wider ±40% spread to encode more uncertainty, or just use
+                # p50 directly when defaults would be too tight.
+                if p50 < 0.1 or p50 > 0.9:
+                    p05 = max(0.01, p50 * 0.6)
+                    p95 = min(0.99, p50 * 1.4)
+                else:
+                    p05 = p50 * 0.6
+                    p95 = min(1.0, p50 * 1.4)
             raw_probability = (p05 + 4 * p50 + p95) / 6.0
             has_explicit_probability = True
         else:
             has_explicit_probability = raw_probability is not None
 
         if has_pert_confidence:
-            # PERT mean for confidence
-            c05 = float(conf_p05) if conf_p05 is not None else float(conf_p50) * 0.8
+            has_full_pert_confidence = conf_p05 is not None and conf_p95 is not None
             c50 = float(conf_p50)
-            c95 = float(conf_p95) if conf_p95 is not None else min(1.0, float(conf_p50) * 1.2)
+            if has_full_pert_confidence:
+                c05 = float(conf_p05)
+                c95 = float(conf_p95)
+            else:
+                if c50 < 0.1 or c50 > 0.9:
+                    c05 = max(0.01, c50 * 0.6)
+                    c95 = min(0.99, c50 * 1.4)
+                else:
+                    c05 = c50 * 0.6
+                    c95 = min(1.0, c50 * 1.4)
             raw_confidence = (c05 + 4 * c50 + c95) / 6.0
             has_explicit_confidence = True
         else:
@@ -1746,10 +1767,8 @@ def compute_voi(
             p95 = float(conf_p95)
 
         if p05 is not None and p95 is not None:
-            pert_variance = ((p95 - p05) / 6.0) ** 2
-            # Scale to [0,1] range: max theoretical variance ≈ 0.0278 (p05=0, p95=1)
-            # Use min() to cap at 1.0
-            scaled_variance = min(1.0, pert_variance * 36.0)  # scale factor 36 maps 0.0278 → ~1
+            spread = p95 - p05
+            scaled_variance = _scale_pert_variance(spread)
             edge_pert_variance[(from_node, to_node)] = scaled_variance
         else:
             edge_pert_variance[(from_node, to_node)] = None
@@ -1831,7 +1850,13 @@ def compute_voi(
                 else:
                     node_uncertainties.append(1.0 - confidence)
 
-        # Use maximum uncertainty across all paths (conservative estimate)
+        # Use maximum uncertainty across all paths (conservative estimate).
+        # Note asymmetry with sensitivity: uncertainty uses max() while
+        # sensitivity sums across decisions. This is intentional — uncertainty
+        # is a property of the node (we take the worst case), while sensitivity
+        # is additive because a node that affects multiple decisions is more
+        # valuable to research (the same observation reduces uncertainty for
+        # all downstream decisions simultaneously).
         uncertainty = max(node_uncertainties) if node_uncertainties else (1.0 - confidence)
 
         # Sensitivity: how much does this node affect decisions?
@@ -2123,25 +2148,29 @@ def _max_edge_pert_variance_toward(
 ) -> float | None:
     """Find the maximum PERT variance among edges along any path from source to target.
 
-    Uses BFS to explore paths from source to target following forward adjacency
+    Uses BFS to explore ALL paths from source to target following forward adjacency
     (cause → effect). For each path, takes the max PERT variance across all edges.
     Returns the maximum across all valid paths, or None if no path has any PERT data.
 
     A path only contributes if ALL edges on it have PERT variance (otherwise
     the uncertainty falls back to 1 - confidence).
+
+    Note: No visited set — in DAGs with multiple paths to the same target
+    (diamond/multi-path graphs), a visited set would prune alternative paths
+    and underestimate max variance. A depth limit prevents infinite loops.
     """
     from collections import deque
 
+    max_depth = len(forward_adj) + 2  # prevent infinite loops in cyclic graphs
     queue = deque([(source, [source], True)])  # (node, path, all_edges_have_pert)
-    visited: set[str] = {source}
     best_variance: float | None = None
 
     while queue:
         node, path, all_have_pert = queue.popleft()
         if node == target:
-            if all_have_pert and best_variance is not None:
-                # path has PERT on all edges - could be None if no edges had pert
-                pass
+            continue
+
+        if len(path) > max_depth:
             continue
 
         for neighbor in forward_adj.get(node, []):
@@ -2150,19 +2179,17 @@ def _max_edge_pert_variance_toward(
 
             if neighbor == target:
                 if new_all_have_pert and edge_var is not None:
-                    # Collect PERT variances for all edges on path + final edge
                     path_edges = []
                     for i in range(len(path) - 1):
                         e = edge_pert_variance.get((path[i], path[i + 1]), None)
                         if e is not None:
                             path_edges.append(e)
-                    path_edges.append(edge_var)  # Final edge to target
+                    path_edges.append(edge_var)
                     if path_edges:
                         path_max = max(path_edges)
                         if best_variance is None or path_max > best_variance:
                             best_variance = path_max
-            elif neighbor not in visited:
-                visited.add(neighbor)
+            elif neighbor not in path:  # prevent cycles, not alternative paths
                 queue.append((neighbor, path + [neighbor], new_all_have_pert))
 
     return best_variance

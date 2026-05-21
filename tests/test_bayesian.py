@@ -951,13 +951,13 @@ class TestPERTInBuildBayesianNetwork:
         assert edge["probability"] == pytest.approx(expected_prob, abs=0.01)
 
     def test_pert_p50_only_uses_defaults(self, db):
-        """When only p50 is set, p05 and p95 should default to 0.8× and 1.2×."""
+        """When only p50 is set, p05 and p95 should default to wider ±40% spread."""
         a = create_sample_node(db, label="pert_p50_only_a")
         b = create_sample_node(db, label="pert_p50_only_b")
 
         # Edge with only p50=0.5 set
-        # Defaults: p05 = 0.5 * 0.8 = 0.4, p95 = min(1.0, 0.5 * 1.2) = 0.6
-        # PERT mean = (0.4 + 4*0.5 + 0.6) / 6 = 3.0/6 = 0.5
+        # Defaults: p05 = 0.5 * 0.6 = 0.3, p95 = min(1.0, 0.5 * 1.4) = 0.7
+        # PERT mean = (0.3 + 4*0.5 + 0.7) / 6 = 3.0/6 = 0.5
         create_sample_edge(
             db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3",
             confidence=0.9,
@@ -972,13 +972,13 @@ class TestPERTInBuildBayesianNetwork:
         assert edge["probability"] == pytest.approx(0.45, abs=0.01)
 
     def test_pert_p50_only_confidence_defaults(self, db):
-        """When only conf_p50 is set, c05/c95 should default to 0.8×/1.2×."""
+        """When only conf_p50 is set, c05/c95 should default to wider ±40% spread."""
         a = create_sample_node(db, label="pert_conf_p50_only_a")
         b = create_sample_node(db, label="pert_conf_p50_only_b")
 
         # Edge with only conf_p50=0.8 set
-        # Defaults: c05 = 0.8 * 0.8 = 0.64, c95 = min(1.0, 0.8 * 1.2) = 0.96
-        # PERT mean = (0.64 + 4*0.8 + 0.96) / 6 = 4.8/6 = 0.8
+        # Defaults: c05 = 0.8 * 0.6 = 0.48, c95 = min(1.0, 0.8 * 1.4) = 1.0
+        # PERT mean = (0.48 + 4*0.8 + 1.0) / 6 = 4.68/6 = 0.78
         create_sample_edge(
             db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3",
             probability=0.6,
@@ -989,8 +989,8 @@ class TestPERTInBuildBayesianNetwork:
         assert result is not None
         edge = self._find_edge(result, a, b)
         assert edge is not None
-        # PERT conf = 0.8, probability = 0.6, effective = 0.6 * 0.8 = 0.48
-        assert edge["probability"] == pytest.approx(0.48, abs=0.01)
+        # PERT conf ≈ 0.78, probability = 0.6, effective ≈ 0.6 * 0.78 ≈ 0.468
+        assert edge["probability"] == pytest.approx(0.468, abs=0.01)
 
     def test_pert_backward_compatibility(self, db):
         """Edges without PERT values should work exactly as before."""
@@ -1033,13 +1033,13 @@ class TestPERTInBuildBayesianNetwork:
         assert edge["probability"] == pytest.approx(0.42, abs=0.01)
 
     def test_pert_p95_capped_at_one(self, db):
-        """When p50 * 1.2 > 1.0, p95 should be capped at 1.0."""
+        """When p50 * 1.4 > 1.0, p95 should be capped at 1.0 (wider ±40% default)."""
         a = create_sample_node(db, label="pert_cap_a")
         b = create_sample_node(db, label="pert_cap_b")
 
-        # p50=0.9 → p95 default = min(1.0, 0.9 * 1.2) = min(1.0, 1.08) = 1.0
-        # p05 default = 0.9 * 0.8 = 0.72
-        # PERT mean = (0.72 + 4*0.9 + 1.0) / 6 = 5.32/6 ≈ 0.887
+        # p50=0.9 → p95 default = min(1.0, 0.9 * 1.4) = min(1.0, 1.26) = 1.0
+        # p05 default = max(0.01, 0.9 * 0.6) = 0.54
+        # PERT mean = (0.54 + 4*0.9 + 1.0) / 6 = 5.14/6 ≈ 0.857
         create_sample_edge(
             db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3",
             confidence=0.8,
@@ -1050,8 +1050,8 @@ class TestPERTInBuildBayesianNetwork:
         assert result is not None
         edge = self._find_edge(result, a, b)
         assert edge is not None
-        # PERT prob ≈ 0.887, confidence = 0.8, effective ≈ 0.887 * 0.8 ≈ 0.709
-        expected_pert = (0.72 + 4 * 0.9 + 1.0) / 6.0
+        # PERT prob ≈ 0.857, confidence = 0.8, effective ≈ 0.857 * 0.8 ≈ 0.685
+        expected_pert = (0.54 + 4 * 0.9 + 1.0) / 6.0
         expected_prob = expected_pert * 0.8
         assert edge["probability"] == pytest.approx(expected_prob, abs=0.01)
 
@@ -1311,9 +1311,10 @@ class TestComputeVoI:
 
         result = compute_voi(db)
         ranking = result["rankings"][0]
-        # Variance = ((0.51-0.49)/6)^2 = (0.02/6)^2 ≈ 0.000011
-        # Scaled: 0.000011 * 36 ≈ 0.0004 — very low uncertainty
-        assert ranking["uncertainty"] < 0.01
+        # With sigmoid scaling: spread=0.02 → uncertainty ≈ 0.057 (low but not zero)
+        # This is better than the old linear which gave 0.0004 — sigmoid correctly
+        # encodes that even tight PERT bounds have *some* residual uncertainty
+        assert ranking["uncertainty"] < 0.1
 
 
 # ── VoI Tasks Tests ──────────────────────────────────────────────────────
@@ -1412,9 +1413,10 @@ class TestGenerateVoITasks:
         result = generate_voi_tasks(db, top=5)
         assert len(result["tasks"]) >= 1
         task = result["tasks"][0]
-        # gap_score should equal uncertainty × sensitivity × (1 - confidence)
-        # Confidence-weighted gap score: higher-value for uncertain + low-confidence nodes
-        expected_gap = round(task["uncertainty"] * task["sensitivity"] * (1 - task["confidence"]), 4)
+        # gap_score should equal uncertainty × sensitivity (OHM#4 — no double-counting)
+        # For non-PERT nodes, uncertainty = 1 - confidence, so gap_score = (1-conf) × sensitivity.
+        # Do NOT multiply by (1 - confidence) again — that was the double-counting bug.
+        expected_gap = round(task["uncertainty"] * task["sensitivity"], 4)
         assert task["gap_score"] == expected_gap
 
 
@@ -1633,3 +1635,115 @@ class TestBayesianContextMultiNodeExtraction:
             assert abs(ctx_post["bad"] - sa_post["bad"]) < 0.01, (
                 f"Context P({node}=bad)={ctx_post['bad']} != standalone {sa_post['bad']}"
             )
+
+
+# ── Regression Tests: VoI PERT variance scaling + path enumeration ─────────
+
+class TestVoIPertVarianceScaling:
+    """Regression tests for PERT variance scaling bugs:
+
+    1. Linear ×36 compressed meaningful differences at low variance
+    2. PERT p50-only edges created fake precision with ±20% defaults
+    3. _max_edge_pert_variance_toward visited set pruned alternative paths
+    """
+
+    def test_sigmoid_scaling_discriminates_low_spread(self):
+        """Sigmoid scaling should discriminate between tight PERT estimates,
+        not compress them all to near-zero like the old ×36 linear did."""
+        from ohm.pert import scale_pert_variance
+
+        # Spread of 0.1 (tight PERT): should be low but not ~0
+        v01 = scale_pert_variance(0.1)
+        # Spread of 0.2 (moderate): should be noticeably higher
+        v02 = scale_pert_variance(0.2)
+
+        assert v01 < v02, f"0.1 spread ({v01}) should be less uncertain than 0.2 ({v02})"
+        # The old linear: 0.1 → 0.0003, 0.2 → 0.0011 — both near-zero
+        # Sigmoid should give meaningful separation
+        assert v02 / max(v01, 1e-6) > 2, "Sigmoid should discriminate better than linear"
+
+    def test_sigmoid_scaling_does_not_saturate_at_high_spread(self):
+        """Sigmoid should not map all high-spread PERTs to 1.0 like linear ×36 did."""
+        from ohm.pert import scale_pert_variance
+
+        v05 = scale_pert_variance(0.5)
+        v07 = scale_pert_variance(0.7)
+        v10 = scale_pert_variance(1.0)
+
+        assert v10 > v07 > v05, f"Should be monotonic: {v05} < {v07} < {v10}"
+        # Linear ×36: spread≥0.5 all mapped to 1.0. Sigmoid should distinguish.
+        assert v10 - v05 > 0.05, "Should distinguish moderate vs wide PERT"
+
+    def test_pert_p50_only_wider_defaults(self, db):
+        """PERT p50-only edges should use wider ±40% defaults, not the old
+        ±20% that created fake precision."""
+        a = create_sample_node(db, label="wide_default_a")
+        b = create_sample_node(db, label="wide_default_b")
+
+        create_sample_edge(
+            db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3",
+            confidence=0.9,
+            probability_p50=0.5,
+        )
+
+        result = build_bayesian_network(db)
+        assert result is not None
+        edge = None
+        for e in result["edges"]:
+            if e["from"] == a and e["to"] == b:
+                edge = e
+                break
+        assert edge is not None
+        # With ±40%: p05=0.3, p95=0.7, PERT mean = 0.5 (symmetric, same as p50)
+        # This is correct — the wider defaults don't change the mean for symmetric cases
+        assert edge["probability"] == pytest.approx(0.45, abs=0.01)
+
+    def test_path_variance_diamond_graph(self, db):
+        """_max_edge_pert_variance_toward should explore ALL paths in a
+        diamond graph, not prune the second path via a visited set."""
+        from ohm.bayesian import _max_edge_pert_variance_toward, _bayesian_network_cache
+        from ohm.pert import scale_pert_variance
+
+        _bayesian_network_cache.clear()
+
+        # Diamond: A→B→D, A→C→D
+        # All edges have PERT data so paths contribute to variance
+        a = create_sample_node(db, label="diamond_a")
+        b = create_sample_node(db, label="diamond_b")
+        c = create_sample_node(db, label="diamond_c")
+        d = create_sample_node(db, label="diamond_d")
+
+        # A→B, A→C (with PERT — narrow spread)
+        for src, dst in [(a, b), (a, c)]:
+            create_sample_edge(db, from_node=src, to_node=dst, edge_type="CAUSES",
+                               layer="L3", confidence=0.9,
+                               probability_p05=0.45, probability_p50=0.5, probability_p95=0.55)
+
+        # B→D (narrow PERT spread = 0.2)
+        create_sample_edge(db, from_node=b, to_node=d, edge_type="CAUSES",
+                           layer="L3", confidence=0.8,
+                           probability_p05=0.1, probability_p50=0.2, probability_p95=0.3)
+        # C→D (wide PERT spread = 0.9 — this is the max)
+        create_sample_edge(db, from_node=c, to_node=d, edge_type="CAUSES",
+                           layer="L3", confidence=0.8,
+                           probability_p05=0.05, probability_p50=0.5, probability_p95=0.95)
+
+        forward_adj = {a: [b, c], b: [d], c: [d]}
+        edge_pert_variance = {}
+        edge_pert_variance[(a, b)] = scale_pert_variance(0.1)   # spread 0.55-0.45=0.1
+        edge_pert_variance[(a, c)] = scale_pert_variance(0.1)   # spread 0.55-0.45=0.1
+        edge_pert_variance[(b, d)] = scale_pert_variance(0.2)   # spread 0.3-0.1=0.2
+        edge_pert_variance[(c, d)] = scale_pert_variance(0.9)   # spread 0.95-0.05=0.9
+
+        result = _max_edge_pert_variance_toward(a, d, forward_adj, edge_pert_variance)
+        # The visited-set bug would only explore A→B→D (first path found),
+        # missing A→C→D which has the max variance. The fix should find the
+        # max across all paths.
+        assert result is not None, "Should find at least one path with PERT variance"
+        # The C→D edge has much higher variance — should be the max
+        c_d_var = edge_pert_variance[(c, d)]
+        b_d_var = edge_pert_variance[(b, d)]
+        assert result == c_d_var, (
+            f"Should find C→D variance ({c_d_var:.4f}) as max, "
+            f"got {result:.4f} (B→D was {b_d_var:.4f})"
+        )

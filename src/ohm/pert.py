@@ -79,6 +79,31 @@ def compute_pert_variance(p05: float, p95: float) -> float:
     return ((p95 - p05) / 6.0) ** 2
 
 
+def scale_pert_variance(spread: float) -> float:
+    """Scale PERT spread to a [0, 1] uncertainty signal via sigmoid.
+
+    The raw PERT variance σ² = ((p95-p05)/6)² is on a very narrow range
+    (max ≈ 0.028 for [0,1] bounds), so linear scaling (×36) compressed
+    meaningful differences at low spread and saturated at high spread.
+
+    Sigmoid scaling provides better discrimination:
+    - spread=0.1 (tight PERT) → ~0.12 (low uncertainty)
+    - spread=0.3 (moderate) → 0.5
+    - spread=0.5 (wide PERT) → ~0.88 (high uncertainty)
+    - spread=1.0 (full range) → ~1.0
+
+    Formula: 1 / (1 + exp(-10 * (spread - 0.3)))
+
+    Args:
+        spread: p95 - p05, the PERT range.
+
+    Returns:
+        Scaled uncertainty in [0, 1].
+    """
+    import math
+    return 1.0 / (1.0 + math.exp(-10.0 * (spread - 0.3)))
+
+
 def aggregate_mixture_of_experts(
     estimates: list[tuple[float, float, float]],
     weights: list[float] | None = None,
