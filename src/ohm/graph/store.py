@@ -849,7 +849,7 @@ class OhmStore:
 
         # Compute PERT mean when PERT triple is provided but probability is not
         if probability is None and probability_p50 is not None:
-            from .pert import compute_pert_mean
+            from ohm.inference.pert import compute_pert_mean
             p05 = probability_p05 if probability_p05 is not None else probability_p50
             p95 = probability_p95 if probability_p95 is not None else probability_p50
             probability = compute_pert_mean(p05, probability_p50, p95)
