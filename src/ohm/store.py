@@ -1352,14 +1352,17 @@ class OhmStore:
             """,
             [table_name, row_id, operation, actor, layer, now],
         )
-        # Also populate the agent-facing change feed
-        self.conn.execute(
-            """
-            INSERT INTO ohm_change_feed (table_name, row_id, operation, agent_name, occurred_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            [table_name, row_id, operation, actor, now],
-        )
+        # Also populate the agent-facing change feed (non-critical: skip if table missing)
+        try:
+            self.conn.execute(
+                """
+                INSERT INTO ohm_change_feed (table_name, row_id, operation, agent_name, occurred_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [table_name, row_id, operation, actor, now],
+            )
+        except Exception:
+            pass
         # Update agent's last_sync so they appear in active_agents
         existing = self.conn.execute(
             "SELECT COUNT(*) FROM ohm_agent_state WHERE agent_name = ?", [actor],
@@ -1808,6 +1811,10 @@ class OhmStore:
         Returns:
             Number of changes pushed.
         """
+        # Can't push to an empty path (would open an in-memory DB that vanishes)
+        if not ducklake_path:
+            return 0
+
         from datetime import datetime
 
         # Get last push timestamp for this agent
@@ -1832,30 +1839,36 @@ class OhmStore:
         ducklake = duckdb.connect(ducklake_path, read_only=False)
 
         try:
+            inserted = 0
             for change in changes:
                 table_name = change["table_name"]
                 row_id = change["row_id"]
                 operation = change["operation"]
-                change["layer"]
                 change_data = change["change_data"]
                 changed_at = change["changed_at"]
 
-                # Insert into DuckLake's change feed
-                ducklake.execute(
-                    """
-                    INSERT INTO ohm_change_feed
-                    (table_name, row_id, operation, agent_name, old_data, new_data, occurred_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    [table_name, row_id, operation, self.agent_name,
-                     None, change_data, changed_at],
-                )
+                # Insert into DuckLake's change feed.
+                # ohm_change_feed may be absent if the DuckLake file was created
+                # before this table was added — skip rather than abort the whole push.
+                try:
+                    ducklake.execute(
+                        """
+                        INSERT INTO ohm_change_feed
+                        (table_name, row_id, operation, agent_name, old_data, new_data, occurred_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        [table_name, row_id, operation, self.agent_name,
+                         None, change_data, changed_at],
+                    )
+                    inserted += 1
+                except Exception as _exc:
+                    logger.debug("Legacy DuckLake push skipped for row %s: %s", row_id, _exc)
 
             # Record push timestamp
             now = datetime.now(timezone.utc)
             self._set_last_push_timestamp(now)
 
-            return len(changes)
+            return inserted
         finally:
             ducklake.close()
 
@@ -1998,6 +2011,10 @@ class OhmStore:
         Returns:
             Number of changes pulled and applied.
         """
+        # Can't pull from an empty path (would open an in-memory DB with no tables)
+        if not ducklake_path:
+            return 0
+
         # Get last pull timestamp for this agent
         last_pull = self._get_last_pull_timestamp()
         last_pull_str = last_pull if last_pull else "1970-01-01T00:00:00Z"
@@ -2007,6 +2024,8 @@ class OhmStore:
 
         try:
             # Read remote changes since last pull (excluding our own)
+            # ohm_change_feed may be absent in DuckLake catalog files (.ducklake format)
+            # opened as plain DuckDB — return 0 gracefully if the table doesn't exist.
             changes = ducklake.execute(
                 """
                 SELECT table_name, row_id, operation, agent_name, new_data, occurred_at
@@ -2016,7 +2035,12 @@ class OhmStore:
                 """,
                 [self.agent_name, last_pull_str],
             ).fetchall()
+        except Exception as _exc:
+            logger.debug("Legacy DuckLake pull skipped: %s", _exc)
+            ducklake.close()
+            return 0
 
+        try:
             if not changes:
                 return 0
 

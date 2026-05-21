@@ -66,12 +66,17 @@ def _log_change(
     """
     import json
 
-    conn.execute(
-        """INSERT INTO ohm_change_feed
-           (table_name, row_id, operation, agent_name, old_data)
-           VALUES (?, ?, ?, ?, ?)""",
-        [table_name, row_id, operation, agent_name, json.dumps({})],
-    )
+    try:
+        conn.execute(
+            """INSERT INTO ohm_change_feed
+               (table_name, row_id, operation, agent_name, old_data)
+               VALUES (?, ?, ?, ?, ?)""",
+            [table_name, row_id, operation, agent_name, json.dumps({})],
+        )
+    except Exception:
+        # ohm_change_feed may be missing on old or read-only databases;
+        # change-feed logging is non-critical — skip rather than crash
+        pass
 
 
 def query_neighborhood(
