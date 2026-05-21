@@ -433,6 +433,14 @@ class OhmHandler(BaseHTTPRequestHandler):
     require_read_auth: bool = False  # OHM-gwg: require auth for reads (default: public reads)
     schema_config: SchemaConfig = DEFAULT_SCHEMA  # configurable schema (OHM or TOPO)
 
+    # ── Dispatch tables (set after class body) ────────────────
+    # Maps path → method_name (string) for runtime getattr dispatch.
+    _GET_EXACT: dict = {}
+    _GET_PREFIXES: list = []
+    _POST_EXACT: dict = {}
+    _POST_PREFIXES: list = []
+    _DELETE_PREFIXES: list = []
+
     def log_message(self, format, *args):
         """Structured request logging with correlation ID."""
         import re
@@ -1129,230 +1137,14 @@ class OhmHandler(BaseHTTPRequestHandler):
         path = parsed.path.rstrip("/")
         qs = parse_qs(parsed.query)
 
-        # Infrastructure endpoints bypass auth
-        if path == "" or path == "/":
-            # Root discovery endpoint — OpenAPI-style route listing (ADR-005)
-            self._json_response(200, {
-                "service": "ohmd",
-                "version": "0.2.0",
-                "schema": self.schema_config.name,
-                "description": "Multi-agent knowledge graph daemon",
-                "auth_model": "public-read" if not self.require_read_auth else "authenticated",
-                "endpoints": {
-                    "/": {"method": "GET", "description": "This discovery index (no auth required)"},
-                    "/health": {"method": "GET", "description": "Health check (no auth required)"},
-                    "/ready": {"method": "GET", "description": "Readiness check (no auth required)"},
-                    "/metrics": {"method": "GET", "description": "Prometheus-style metrics"},
-                    "/stats": {"method": "GET", "description": "Graph statistics (nodes, edges, layers)"},
-                    "/inference": {"method": "GET", "description": "Bayesian inference: compute posterior probabilities given evidence (observation, includes confounders). ?layers=L3,L4 to scope by layer"},
-                    "/intervene": {"method": "GET", "description": "Causal intervention using Pearl's do-operator: sever incoming edges to target, set value externally, propagate direct causal effect (no confounders). ?layers=L3,L4 to scope by layer"},
-                    "/ate": {"method": "GET", "description": "Average Treatment Effect: model-based ATE from noisy-OR CPDs (ATE = P(effect=bad|do(cause=bad)) - P(effect=bad|do(cause=good))). ?layers=L3,L4 to scope by layer"},
-                    "/sensitivity": {"method": "GET", "description": "Sensitivity analysis: E-value quantifying how much unmeasured confounding would overturn a causal conclusion. ?layers=L3,L4 to scope by layer"},
-                    "/adjustment": {"method": "GET", "description": "Find valid backdoor/frontdoor adjustment sets for causal identification (Pearl's criteria). ?layers=L3,L4 to scope by layer"},
-                    "/voi": {"method": "GET", "description": "Value of Information: rank nodes by research priority (uncertainty × sensitivity to decision). ?decision=node1,node2&top=10&layers=L3,L4&edge_types=CAUSES,DEPENDS_ON"},
-                    "/voi/tasks": {"method": "GET", "description": "Generate research tasks from VoI rankings, matched to agent expertise. ?agent=metis&decision=node1,node2&top=5&layers=L3,L4"},
-                    "/suggest_causes": {"method": "GET", "description": "Suggest candidate CAUSES edges from existing non-causal relationships (DEPENDS_ON, APPLIES_TO, etc.)"},
-                    "/deduplicate": {"method": "POST", "description": "Remove duplicate edges (same from→to, type, layer), keeping the most recent"},
-                    "/refute": {"method": "GET", "description": "Test robustness of causal conclusions using DoWhy refutation methods (random common cause, placebo, data subset, unobserved confounder)"},
-                    "/lint": {"method": "GET", "description": "Contract layer linting: validate graph against naming conventions and required fields"},
-                    "/contract": {"method": "GET", "description": "Current contract configuration (naming conventions, required fields, schema)"},
-                    "/status": {"method": "GET", "description": "Daemon status and configuration"},
-                    "/schema": {"method": "GET", "description": "Node types, edge types, layers"},
-                    "/layers": {"method": "GET", "description": "L1-L4 layer descriptions"},
-                    "/node/{id}": {"method": "GET", "description": "Get a single node by ID"},
-                    "/edge/{id}": {"method": "GET", "description": "Get a single edge by ID"},
-                    "/neighborhood/{id}": {"method": "GET", "description": "Bounded-depth graph traversal"},
-                    "/path/{from}/{to}": {"method": "GET", "description": "Shortest path between two nodes"},
-                    "/impact/{id}": {"method": "GET", "description": "Downstream failure impact analysis"},
-                    "/confidence/{id}": {"method": "GET", "description": "Provenance and challenge audit"},
-                    "/agent/{name}": {"method": "GET", "description": "Agent state and focus"},
-                    "/agents": {"method": "GET", "description": "List all registered agents"},
-                    "/nodes": {"method": "GET", "description": "List nodes with pagination and filtering"},
-                    "/listen": {"method": "GET", "description": "Change feed since last check"},
-                    "/events": {"method": "GET", "description": "SSE stream of real-time change feed events"},
-                    "/node": {"method": "POST", "description": "Create a new node"},
-                    "/edge": {"method": "POST", "description": "Create a new edge"},
-                    "/challenge/{id}": {"method": "POST", "description": "Challenge an existing edge"},
-                    "/support/{id}": {"method": "POST", "description": "Support an existing edge"},
-                    "/observe/{id}": {"method": "POST", "description": "Record an observation on a node"},
-                    "/observations": {"method": "GET", "description": "List observations with filtering by type, source, node_id. POST for bulk upload: {observations: [{node_id, value, sigma, obs_type, source}]}"},
-                    "/outcome": {"method": "POST", "description": "Record whether a source agent's claim was correct"},
-                    "/reliability/{source}": {"method": "GET", "description": "Compute source reliability metrics from historical outcomes"},
-                    "/state": {"method": "POST", "description": "Update agent state/focus"},
-                    "/register": {"method": "POST", "description": "Register a new agent"},
-                    "/heartbeat": {"method": "POST", "description": "Agent heartbeat with sync"},
-                    "/webhook/{agent}": {"method": "POST", "description": "Register a webhook callback"},
-                    "/search": {"method": "GET", "description": "ILIKE text search (?q=QUERY)"},
-                    "/semantic_search": {"method": "GET", "description": "Semantic vector search (requires Ollama)"},
-                    "/admin/checkpoint": {"method": "POST", "description": "Force DuckDB CHECKPOINT (flush WAL to main DB)"},
-                    "/admin/embeddings": {"method": "GET", "description": "Batch generate embeddings for nodes missing them (?batch_size=N&delay_ms=M)"},
-                    "/admin/snapshots": {"method": "GET", "description": "List DuckLake snapshots (time-travel)"},
-                    "/graph/at": {"method": "GET", "description": "Query graph at snapshot version (?version=N)"},
-                    "/graph/changes": {"method": "GET", "description": "Changes between snapshots"},
-                },
-                "links": {
-                    "schema": "/schema",
-                    "layers": "/layers",
-                    "health": "/health",
-                    "docs": "https://github.com/mdlmarkham/OHM",
-                },
-            })
+        # Infrastructure endpoints bypass auth — dispatch directly
+        infra_method = self._GET_EXACT.get(path) or self._GET_EXACT.get(path or "/")
+        if infra_method and infra_method.startswith("_get_infra_"):
+            getattr(self, infra_method)(path, qs)
             return
-        elif path == "/openapi.json":
-            # OpenAPI 3.0 spec endpoint (ADR-005)
-            self._json_response(200, {
-                "openapi": "3.0.3",
-                "info": {
-                    "title": "OHM Daemon API",
-                    "version": "0.2.0",
-                    "description": "Multi-agent knowledge graph daemon — shared awareness, individual judgment.",
-                },
-                "servers": [{"url": (
-                    f"http://{self.config.get('host', '127.0.0.1')}"
-                    f":{self.config.get('port', 8710)}"
-                )}],
-                "paths": {
-                    "/": {"get": {"summary": "Discovery index",
-                               "responses": {"200": {"description": "Route listing"}}}},
-                    "/health": {"get": {"summary": "Health check", "responses": {"200": {"description": "OK"}}}},
-                    "/ready": {"get": {"summary": "Readiness check",
-                                   "responses": {"200": {"description": "Ready"},
-                                                 "503": {"description": "Not ready"}}}},
-                    "/metrics": {"get": {"summary": "Prometheus-style metrics",
-                                    "responses": {"200": {"description": "Metrics"}}}},
-                    "/stats": {"get": {"summary": "Graph statistics", "responses": {"200": {"description": "Stats"}}}},
-                    "/status": {"get": {"summary": "Daemon status", "responses": {"200": {"description": "Status"}}}},
-                    "/schema": {"get": {"summary": "Node/edge types", "responses": {"200": {"description": "Schema"}}}},
-                    "/layers": {"get": {"summary": "L1-L4 descriptions",
-                                   "responses": {"200": {"description": "Layers"}}}},
-                    "/node/{id}": {"get": {"summary": "Get node"}, "post": {"summary": "Create node"}},
-                    "/edge/{id}": {"get": {"summary": "Get edge"}, "post": {"summary": "Create edge"}},
-                    "/neighborhood/{id}": {"get": {"summary": "Graph traversal"}},
-                    "/path/{from}/{to}": {"get": {"summary": "Shortest path"}},
-                    "/impact/{id}": {"get": {"summary": "Impact analysis"}},
-                    "/confidence/{id}": {"get": {"summary": "Confidence audit"}},
-                    "/agent/{name}": {"get": {"summary": "Agent state"}},
-                    "/agents": {"get": {"summary": "List agents"}},
-                    "/nodes": {"get": {"summary": "List nodes with pagination and filtering"}},
-                    "/listen": {"get": {"summary": "Change feed"}},
-                    "/events": {"get": {"summary": "SSE event stream"}},
-                    "/challenge/{id}": {"post": {"summary": "Challenge edge"}},
-                    "/support/{id}": {"post": {"summary": "Support edge"}},
-                    "/observe/{id}": {"post": {"summary": "Record observation"}},
-                    "/observations": {"get": {"summary": "List observations"}, "post": {"summary": "Bulk upload observations"}},
-                    "/state": {"post": {"summary": "Update agent state"}},
-                    "/register": {"post": {"summary": "Register agent"}},
-                    "/heartbeat": {"post": {"summary": "Agent heartbeat"}},
-                    "/webhook/{agent}": {"post": {"summary": "Register webhook"}},
-                    "/search": {"get": {"summary": "ILIKE text search",
-                                   "parameters": [{"name": "q", "in": "query",
-                                                   "required": True,
-                                                   "schema": {"type": "string"}}]}},
-                    "/semantic_search": {"get": {"summary": "Semantic vector search (requires Ollama)",
-                                            "parameters": [
-                                                {"name": "q", "in": "query", "required": True,
-                                                 "schema": {"type": "string"}},
-                                                {"name": "type", "in": "query", "required": False,
-                                                 "schema": {"type": "string"}},
-                                                {"name": "limit", "in": "query", "required": False,
-                                                 "schema": {"type": "integer"}},
-                                                {"name": "min_confidence", "in": "query",
-                                                 "required": False, "schema": {"type": "number"}},
-                                            ],
-                                            "responses": {
-                                                "200": {"description": "Search results"},
-                                                "503": {"description": "Ollama not available"},
-                                            }}},
-                    "/admin/checkpoint": {"post": {"summary": "Force CHECKPOINT",
-                                           "responses": {"200": {"description": "WAL flushed to main DB"}}}},
-                    "/graph/at": {"get": {"summary": "Graph at snapshot version",
-                                      "responses": {"200": {"description": "Historical graph state"}}}},
-                    "/graph/changes": {"get": {"summary": "Changes between snapshots",
-                                           "responses": {"200": {"description": "Insertions/deletions"}}}},
-                    "/voi/tasks": {"get": {"summary": "VoI task assignment for agent routing",
-                                       "responses": {"200": {"description": "Research tasks ranked by VoI"}}}},
-                },
-            })
-            return
-        elif path == "/health":
-            self._json_response(200, {
-                "status": "ok",
-                "uptime": round(time.time() - _START_TIME, 1),
-            })
-            return
-        elif path == "/ready":
-            try:
-                self.store.execute("SELECT 1")
-                self._json_response(200, {
-                    "status": "ready",
-                    "database": str(self.store.db_path),
-                })
-            except Exception:
-                self._json_response(503, {
-                    "status": "not_ready",
-                    "database": str(self.store.db_path),
-                })
-            return
-        elif path == "/metrics":
-            with _metrics_lock:
-                metrics_snapshot = dict(_metrics)
-                sorted_lats = sorted(_request_latencies) if _request_latencies else [0]
-            n = len(sorted_lats)
-            uptime = round(time.time() - _START_TIME, 1)
-            p50 = sorted_lats[n // 2] if n > 0 else 0
-            p95 = sorted_lats[int(n * 0.95)] if n > 1 else sorted_lats[0] if n > 0 else 0
-            p99 = sorted_lats[int(n * 0.99)] if n > 1 else sorted_lats[0] if n > 0 else 0
-            lat_max = sorted_lats[-1] if n > 0 else 0
 
-            # Prometheus text format when requested via Accept header or ?format=prometheus
-            accept = self.headers.get("Accept", "")
-            fmt = qs.get("format", [""])[0]
-            if fmt == "prometheus" or "text/plain" in accept:
-                lines = [
-                    "# HELP ohm_uptime_seconds Seconds since daemon started",
-                    "# TYPE ohm_uptime_seconds gauge",
-                    f"ohm_uptime_seconds {uptime}",
-                    "# HELP ohm_requests_total Total HTTP requests",
-                    "# TYPE ohm_requests_total counter",
-                    f'ohm_requests_total{{method="all"}} {metrics_snapshot.get("requests_total", 0)}',
-                    f'ohm_requests_total{{method="get"}} {metrics_snapshot.get("requests_get", 0)}',
-                    f'ohm_requests_total{{method="post"}} {metrics_snapshot.get("requests_post", 0)}',
-                    "# HELP ohm_errors_total Total HTTP errors",
-                    "# TYPE ohm_errors_total counter",
-                    f'ohm_errors_total{{code="4xx"}} {metrics_snapshot.get("errors_4xx", 0)}',
-                    f'ohm_errors_total{{code="5xx"}} {metrics_snapshot.get("errors_5xx", 0)}',
-                    "# HELP ohm_rate_limited_total Requests rejected by rate limiter",
-                    "# TYPE ohm_rate_limited_total counter",
-                    f'ohm_rate_limited_total {metrics_snapshot.get("rate_limited", 0)}',
-                    "# HELP ohm_request_duration_ms Request latency in milliseconds",
-                    "# TYPE ohm_request_duration_ms summary",
-                    f'ohm_request_duration_ms{{quantile="0.5"}} {p50}',
-                    f'ohm_request_duration_ms{{quantile="0.95"}} {p95}',
-                    f'ohm_request_duration_ms{{quantile="0.99"}} {p99}',
-                    f'ohm_request_duration_ms_count {n}',
-                    "",
-                ]
-                body_bytes = "\n".join(lines).encode()
-                self.send_response(200)
-                self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-                self.send_header("Content-Length", str(len(body_bytes)))
-                self.end_headers()
-                self.wfile.write(body_bytes)
-            else:
-                self._json_response(200, {
-                    "uptime_seconds": uptime,
-                    "requests": metrics_snapshot,
-                    "latency_ms": {
-                        "p50": p50,
-                        "p95": p95,
-                        "p99": p99,
-                        "max": lat_max,
-                        "sample_count": n,
-                    },
-                })
-            return
-        elif path == "/events" or path.startswith("/events/"):
-            # SSE endpoint — streams change feed events to connected clients
+        # SSE endpoint — has its own auth logic
+        if path == "/events" or path.startswith("/events/"):
             self._handle_sse_events(path, qs)
             return
 
@@ -1372,852 +1164,1199 @@ class OhmHandler(BaseHTTPRequestHandler):
                 # Public-read model: unauthenticated reads allowed
                 agent = "ohm"
 
-        if path == "/stats":
-            from ohm.queries import query_stats
-            stats = query_stats(self.store.conn)
-            stats["uptime"] = round(time.time() - _START_TIME, 1)
-            self._json_response(200, stats)
-            return
-
-        if path == "/status":
-            status = self.store.status()
-            status["uptime"] = round(time.time() - _START_TIME, 1)
-            status["version"] = "0.2.0"
-            status["schema"] = self.schema_config.name
-            status["quack"] = self.config.get("quack", False)
-            self._json_response(200, status)
-        elif path == "/schema":
-            schema = self.schema_config
-            # Flatten edge types: collect all unique edge type names across layers
-            all_edge_types: set[str] = set()
-            for types in schema.layer_edge_types.values():
-                all_edge_types.update(types)
-            self._json_response(200, {
-                "schema": schema.name,
-                "node_types": sorted(schema.node_types),
-                "edge_types": sorted(all_edge_types),
-                "edge_types_by_layer": {k: sorted(v) for k, v in schema.layer_edge_types.items()},
-                "layers": schema.layer_descriptions,
-            })
-        elif path == "/layers":
-            self._json_response(200, self.schema_config.layer_descriptions)
-        elif path.startswith("/node/"):
-            node_id = path[6:]
-            from .validation import validate_identifier
-            node_id = validate_identifier(node_id, name="node_id")
-            node = self.store.get_node(node_id)
-            if node:
-                self._json_response(200, node)
-            else:
-                raise NodeNotFoundError(f"Node {node_id} not found")
-        elif path.startswith("/deep/"):
-            # Deep content retrieval — follows node URL to full source
-            node_id = path[6:]
-            from .validation import validate_identifier
-            node_id = validate_identifier(node_id, name="node_id")
-            try:
-                result = self.store.deep_content(node_id)
-                self._json_response(200, result)
-            except NodeNotFoundError:
-                raise
-            except Exception as e:
-                self._json_response(500, {"error": "deep_content_failed", "message": str(e)})
-        elif path.startswith("/edge/"):
-            edge_id = path[6:]
-            from .validation import validate_identifier
-            edge_id = validate_identifier(edge_id, name="edge_id")
-            edge = self.store.get_edge(edge_id)
-            if edge:
-                self._json_response(200, edge)
-            else:
-                raise EdgeNotFoundError(f"Edge {edge_id} not found")
-        elif path.startswith("/neighborhood/"):
-            node_id = path[14:]  # strip "/neighborhood/"
-            from .validation import validate_identifier
-            node_id = validate_identifier(node_id, name="node_id")
-            depth = int(qs.get("depth", [3])[0])
-            layer = qs.get("layer", [None])[0]
-            from .queries import query_neighborhood
-            results = query_neighborhood(self.store.conn, node_id, depth=depth, layer=layer)
-            self._json_response(200, results)
-        elif path.startswith("/path/"):
-            parts = path[6:].split("/")
-            if len(parts) >= 2:
-                from .validation import validate_identifier
-                from_node = validate_identifier(parts[0], name="from_node")
-                to_node = validate_identifier(parts[1], name="to_node")
-                from .queries import query_path
-                results = query_path(self.store.conn, from_node, to_node)
-                self._json_response(200, results)
-            else:
-                raise ValidationError("Path requires /path/from/to")
-        elif path.startswith("/impact/"):
-            node_id = path[8:]
-            from .validation import validate_identifier
-            node_id = validate_identifier(node_id, name="node_id")
-            depth = int(qs.get("depth", [5])[0])
-            from .queries import query_impact
-            results = query_impact(self.store.conn, node_id, depth=depth)
-            self._json_response(200, results)
-        elif path.startswith("/confidence/"):
-            target_id = path[12:]
-            from .validation import validate_identifier
-            target_id = validate_identifier(target_id, name="target_id")
-            from .queries import query_confidence
-
-            # Check if target_id is a node or an edge
-            is_node = self.store.conn.execute(
-                "SELECT COUNT(*) FROM ohm_nodes WHERE id = ?", [target_id],
-            ).fetchone()
-            is_edge = self.store.conn.execute(
-                "SELECT COUNT(*) FROM ohm_edges WHERE id = ?", [target_id],
-            ).fetchone()
-
-            if is_node and is_node[0] > 0:
-                # Node: find all challenge/support/refine edges pointing TO this node.
-                # Use SELECT * so challenge_of, challenge_type, provenance, and PERT
-                # percentile fields (probability_p05/p50/p95, confidence_p05/p50/p95)
-                # are all included in the response.
-                refs_result = self.store.conn.execute(
-                    """SELECT *
-                       FROM ohm_edges
-                       WHERE to_node = ?
-                         AND edge_type IN ('CHALLENGED_BY', 'SUPPORTS', 'REFINES')
-                         AND deleted_at IS NULL
-                       ORDER BY created_at DESC""",
-                    [target_id],
-                )
-                ref_columns = [desc[0] for desc in refs_result.description]
-                refs = [dict(zip(ref_columns, row)) for row in refs_result.fetchall()]
-                # Add convenience aliases
-                for r in refs:
-                    r["from"] = r.get("from_node")
-                    r["to"] = r.get("to_node")
-                    r["type"] = r.get("edge_type")
-
-                challenges = [r for r in refs if r["edge_type"] == "CHALLENGED_BY"]
-                supports = [r for r in refs if r["edge_type"] == "SUPPORTS"]
-                refinements = [r for r in refs if r["edge_type"] == "REFINES"]
-
-                self._json_response(200, {
-                    "node_id": target_id,
-                    "challenges": challenges,
-                    "supports": supports,
-                    "refinements": refinements,
-                })
-            elif is_edge and is_edge[0] > 0:
-                # Edge: use existing query_confidence
-                results = query_confidence(self.store.conn, target_id)
-                self._json_response(200, results)
-            else:
-                raise NodeNotFoundError(f"Neither node nor edge found with id: {target_id}")
-        elif path.startswith("/agent/"):
-            agent_name = path[7:]
-            from .validation import validate_identifier
-            agent_name = validate_identifier(agent_name, name="agent_name")
-            state = self.store.get_agent_state(agent_name)
-            if state:
-                self._json_response(200, state)
-            else:
-                self._json_response(404, {"error": f"Agent {agent_name} not found"})
-        elif path == "/agents":
-            results = self.store.execute("SELECT * FROM ohm_agent_state ORDER BY agent_name")
-            self._json_response(200, results)
-        elif path == "/nodes":
-            # List nodes with pagination and optional type/label filtering
-            node_type = qs.get("type", [None])[0]
-            label = qs.get("label", [None])[0]
-            label_contains = qs.get("label_contains", [None])[0]
-            label_prefix = qs.get("label_prefix", [None])[0]
-            created_by = qs.get("created_by", [None])[0]
-            limit = int(qs.get("limit", [100])[0])
-            offset = int(qs.get("offset", [0])[0])
-            conditions = ["deleted_at IS NULL"]
-            params = []
-            if node_type:
-                conditions.append("type = ?")
-                params.append(node_type)
-            if label:
-                conditions.append("label ILIKE ?")
-                params.append(f"%{label}%")
-            if label_contains:
-                conditions.append("label ILIKE ?")
-                params.append(f"%{label_contains}%")
-            if label_prefix:
-                conditions.append("label ILIKE ?")
-                params.append(f"{label_prefix}%")
-            if created_by:
-                conditions.append("created_by = ?")
-                params.append(created_by)
-            params.append(limit)
-            params.append(offset)
-            sql = (
-                "SELECT * FROM ohm_nodes WHERE "
-                + " AND ".join(conditions)
-                + " ORDER BY created_at DESC LIMIT ? OFFSET ?"
-            )
-            results = self.store.execute(sql, params)
-            # Also return total count for pagination
-            count_sql = "SELECT COUNT(*) as cnt FROM ohm_nodes WHERE " + " AND ".join(conditions)
-            count_params = params[:-2]  # Remove limit and offset
-            total_result = self.store.execute(count_sql, count_params)
-            total = total_result[0]["cnt"] if total_result else len(results)
-            self._json_response(200, {
-                "nodes": results,
-                "total": total,
-                "limit": limit,
-                "offset": offset,
-            })
-        elif path == "/tasks":
-            # List task nodes with status/assignment filtering
-            # Tasks are nodes of type='task' with optional filters
-            task_status = qs.get("status", [None])[0]
-            assigned_to = qs.get("assigned_to", [None])[0]
-            priority = qs.get("priority", [None])[0]
-            created_by = qs.get("created_by", [None])[0]
-            limit = int(qs.get("limit", [100])[0])
-            offset = int(qs.get("offset", [0])[0])
-            conditions = ["deleted_at IS NULL", "type = 'task'"]
-            params = []
-            if task_status:
-                conditions.append("task_status = ?")
-                params.append(task_status)
-            if assigned_to:
-                conditions.append("assigned_to = ?")
-                params.append(assigned_to)
-            if priority:
-                conditions.append("priority = ?")
-                params.append(priority)
-            if created_by:
-                conditions.append("created_by = ?")
-                params.append(created_by)
-            params.append(limit)
-            params.append(offset)
-            sql = (
-                "SELECT * FROM ohm_nodes WHERE "
-                + " AND ".join(conditions)
-                + " ORDER BY CASE priority WHEN 'P0' THEN 0 WHEN 'P1' THEN 1 WHEN 'P2' THEN 2 WHEN 'P3' THEN 3 WHEN 'P4' THEN 4 ELSE 5 END, due_date ASC NULLS LAST, created_at DESC LIMIT ? OFFSET ?"
-            )
-            results = self.store.execute(sql, params)
-            # Also return total count
-            count_sql = "SELECT COUNT(*) as cnt FROM ohm_nodes WHERE " + " AND ".join(conditions)
-            count_params = params[:-2]
-            total_result = self.store.execute(count_sql, count_params)
-            total = total_result[0]["cnt"] if total_result else len(results)
-            self._json_response(200, {
-                "tasks": results,
-                "total": total,
-                "limit": limit,
-                "offset": offset,
-            })
-        elif path == "/listen":
-            since = qs.get("since", [None])[0]
-            agent_name = qs.get("agent", [agent or "ohm"])[0]
-            enrich = qs.get("enrich", ["false"])[0].lower() == "true"
-            if not since:
-                state = self.store.get_agent_state(agent_name)
-                if state and state.get("last_sync"):
-                    since = state["last_sync"]
-                    # last_sync is a TIMESTAMP column — DuckDB returns datetime, not string
-                    if isinstance(since, datetime):
-                        since = since.isoformat()
-                else:
-                    # Default to 24 hours ago (OHM-4oc)
-                    since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
-            from .queries import query_change_feed
-            results = query_change_feed(
-                self.store.conn, since=since, agent_name=agent_name, enrich=enrich
-            )
-            self._json_response(200, results)
-        elif path == "/search":
-            query_text = qs.get("q", [""])[0]
-            node_type = qs.get("type", [None])[0]
-            created_by = qs.get("created_by", [None])[0]
-            limit = int(qs.get("limit", [20])[0])
-            if not query_text:
-                raise ValidationError("Search requires ?q=QUERY")
-            conditions = ["deleted_at IS NULL", "(label ILIKE ? OR content ILIKE ?)"]
-            params = [f"%{query_text}%", f"%{query_text}%"]
-            if node_type:
-                conditions.append("type = ?")
-                params.append(node_type)
-            if created_by:
-                conditions.append("created_by = ?")
-                params.append(created_by)
-            params.append(limit)
-            # Column names hardcoded, values parameterized
-            sql = (
-                "SELECT * FROM ohm_nodes WHERE "
-                + " AND ".join(conditions)
-                + " ORDER BY created_at DESC LIMIT ?"
-            )
-            results = self.store.execute(sql, params)
-            self._json_response(200, results)
-        elif path == "/semantic_search":
-            # Semantic search via VSS/HNSW index (OHM-o9f)
-            query_text = qs.get("q", [""])[0]
-            if not query_text:
-                raise ValidationError("Semantic search requires ?q=QUERY")
-            node_type = qs.get("type", [None])[0]
-            limit = int(qs.get("limit", [10])[0])
-            min_confidence = qs.get("min_confidence", [None])[0]
-            if min_confidence is not None:
-                try:
-                    min_confidence = float(min_confidence)
-                except ValueError:
-                    raise ValidationError("?min_confidence must be a number")
-            try:
-                from .queries import semantic_search
-                results = semantic_search(
-                    self.store.conn,
-                    query=query_text,
-                    limit=limit,
-                    node_type=node_type,
-                    min_confidence=min_confidence,
-                )
-                self._json_response(200, {"results": results, "count": len(results)})
-            except ValueError as e:
-                # Ollama not available
-                self._json_response(503, {
-                    "error": "service_unavailable",
-                    "message": str(e),
-                })
-        elif path == "/health/graph":
-            from .queries import query_graph_health
-            result = query_graph_health(self.store.conn)
-            self._json_response(200, result)
-        elif path == "/health/agents":
-            from .methods import query_agent_health
-            result = query_agent_health(self.store.conn)
-            self._json_response(200, result)
-        elif path == "/contradictions":
-            from .methods import detect_contradictions
-            conf_thresh = float(qs.get("confidence", [0.5])[0])
-            result = detect_contradictions(self.store.conn, confidence_threshold=conf_thresh)
-            self._json_response(200, result)
-        elif path == "/anomalies":
-            from .methods import detect_anomalies
-            sigma = float(qs.get("sigma", [2.0])[0])
-            layer = qs.get("layer", [None])[0]
-            limit = int(qs.get("limit", [50])[0])
-            result = detect_anomalies(self.store.conn, sigma_threshold=sigma, layer=layer, limit=limit)
-            self._json_response(200, result)
-        elif path.startswith("/aggregate/"):
-            node_id = path[11:]
-            from .validation import validate_identifier
-            node_id = validate_identifier(node_id, name="node_id")
-            method = qs.get("method", ["weighted"])[0]
-            from .methods import aggregate_observations
-            result = aggregate_observations(self.store.conn, node_id, method=method)
-            self._json_response(200, result)
-        elif path.startswith("/provenance/"):
-            node_id = path[12:]
-            from .validation import validate_identifier
-            node_id = validate_identifier(node_id, name="node_id")
-            max_depth = int(qs.get("depth", [10])[0])
-            from .queries import query_provenance
-            result = query_provenance(self.store.conn, node_id, max_depth=max_depth)
-            self._json_response(200, result)
-        elif path == "/stale":
-            from .queries import query_stale_edges
-            threshold = float(qs.get("threshold", [0.1])[0])
-            result = query_stale_edges(self.store.conn, stale_threshold=threshold)
-            self._json_response(200, result)
-        elif path == "/decay":
-            self._require_write_auth()
-            from .queries import apply_confidence_decay
-            threshold = float(qs.get("threshold", [0.1])[0])
-            layer = qs.get("layer", [None])[0]
-            dry_run = qs.get("dry_run", ["false"])[0].lower() == "true"
-            result = apply_confidence_decay(
-                self.store.conn,
-                stale_threshold=threshold,
-                layer=layer,
-                dry_run=dry_run,
-            )
-            self._json_response(200, result)
-        elif path.startswith("/monte-carlo/"):
-            node_id = path[13:]
-            from .validation import validate_identifier
-            node_id = validate_identifier(node_id, name="node_id")
-            from .methods import monte_carlo_impact
-            sims = int(qs.get("simulations", [1000])[0])
-            depth = int(qs.get("depth", [3])[0])
-            default_prob = float(qs.get("default_probability", [0.5])[0])
-            seed_val = qs.get("seed", [None])[0]
-            seed = int(seed_val) if seed_val is not None else None
-            result = monte_carlo_impact(
-                self.store.conn, node_id,
-                simulations=sims, depth=depth,
-                default_probability=default_prob,
-                seed=seed,
-            )
-            self._json_response(200, result)
-        elif path == "/duplicates":
-            from .methods import detect_near_duplicates
-            threshold = float(qs.get("similarity", [0.8])[0])
-            result = detect_near_duplicates(self.store.conn, similarity_threshold=threshold)
-            self._json_response(200, result)
-        elif path.startswith("/calibration/"):
-            agent_name = path[13:]
-            from .validation import validate_identifier
-            agent_name = validate_identifier(agent_name, name="agent_name")
-            from .methods import compute_confidence_calibration
-            result = compute_confidence_calibration(self.store.conn, agent_name)
-            self._json_response(200, result)
-        elif path == "/orphans":
-            # Find nodes with zero edges — completely disconnected from the graph
-            from .methods import find_orphans
-            node_type = qs.get("type", [None])[0]
-            exclude_system = qs.get("exclude_system", ["true"])[0].lower() == "true"
-            limit = int(qs.get("limit", [50])[0])
-            result = find_orphans(self.store.conn, node_type=node_type, exclude_system=exclude_system, limit=limit)
-            self._json_response(200, result)
-        elif path == "/hubs":
-            # Find most-connected nodes — anchors of the graph
-            from .methods import find_hubs
-            node_type = qs.get("type", [None])[0]
-            min_connections = int(qs.get("min_connections", [3])[0])
-            limit = int(qs.get("limit", [20])[0])
-            result = find_hubs(self.store.conn, node_type=node_type, min_connections=min_connections, limit=limit)
-            self._json_response(200, result)
-        elif path == "/dead_ends":
-            # Find nodes with only incoming edges — sinks that don't lead anywhere
-            from .methods import find_dead_ends
-            node_type = qs.get("type", [None])[0]
-            limit = int(qs.get("limit", [50])[0])
-            result = find_dead_ends(self.store.conn, node_type=node_type, limit=limit)
-            self._json_response(200, result)
-        elif path == "/suggest":
-            # Suggest connections between nodes that share context but aren't linked
-            from .methods import suggest_connections
-            method = qs.get("method", ["shared_provenance"])[0]
-            min_shared = int(qs.get("min_shared", [2])[0])
-            limit = int(qs.get("limit", [20])[0])
-            result = suggest_connections(self.store.conn, method=method, min_shared=min_shared, limit=limit)
-            self._json_response(200, result)
-        elif path == "/graph/stats":
-            # Extended graph statistics (orphans, hubs, density, etc.)
-            from .methods import graph_stats
-            result = graph_stats(self.store.conn)
-            self._json_response(200, result)
-        elif path == "/lint":
-            # Contract layer linting: validate graph against naming conventions and required fields
-            from .contract import ContractConfig, lint_graph
-            node_type_filter = qs.get("node_types", [None])[0]
-            node_types = node_type_filter.split(",") if node_type_filter else None
-            limit = int(qs.get("limit", ["1000"])[0])
-            contract = ContractConfig()
-            result = lint_graph(self.store.conn, contract, limit=limit, node_types=node_types)
-            self._json_response(200, result)
-        elif path == "/contract":
-            # Return the current contract configuration
-            from .contract import ContractConfig
-            contract = ContractConfig()
-            self._json_response(200, contract.to_dict())
-        elif path == "/inference":
-            # Bayesian inference: compute posterior probabilities given evidence
-            # Uses pgmpy Variable Elimination (optional dependency)
-            target = qs.get("target", [None])[0]
-            if not target:
-                self._json_response(400, {"error": "missing_parameter", "message": "?target=node_id required"})
-                return
-            from .validation import validate_identifier
-            target = validate_identifier(target, name="target")
-            # Parse evidence from query params: ?evidence=node1:0,node2:1
-            evidence_str = qs.get("evidence", [""])[0]
-            leak_probability = float(qs.get("leak", ["0.15"])[0])
-            evidence = {}
-            if evidence_str:
-                for pair in evidence_str.split(","):
-                    if ":" in pair:
-                        node_id, state = pair.split(":", 1)
-                        evidence[validate_identifier(node_id.strip(), name="evidence_node")] = int(state.strip())
-            # Parse optional layers filter: ?layers=L3,L4
-            layers_str = qs.get("layers", [""])[0]
-            layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
-            from .bayesian import bayesian_inference
-            result = bayesian_inference(self.store.conn, target, evidence, edge_types=None, layers=layers, leak_probability=leak_probability)
-            self._json_response(200, result)
-        elif path == "/intervene":
-            # Causal intervention using Pearl's do-operator (graph surgery)
-            # Differs from /inference: severs incoming edges to target, sets value externally
-            # This isolates direct causal effect by removing confounder influence
-            target = qs.get("target", [None])[0]
-            if not target:
-                self._json_response(400, {"error": "missing_parameter", "message": "?target=node_id required"})
-                return
-            from .validation import validate_identifier
-            target = validate_identifier(target, name="target")
-            # Parse intervention state: ?state=0 (force bad) or ?state=1 (force good)
-            state_str = qs.get("state", [None])[0]
-            if state_str is None:
-                self._json_response(400, {"error": "missing_parameter", "message": "?state=0 (bad) or ?state=1 (good) required"})
-                return
-            try:
-                intervention_state = int(state_str)
-            except ValueError:
-                self._json_response(400, {"error": "invalid_parameter", "message": "state must be 0 or 1"})
-                return
-            # Parse optional query nodes: ?query=node1,node2
-            query_str = qs.get("query", [""])[0]
-            query_nodes = None
-            if query_str:
-                query_nodes = [validate_identifier(q.strip(), name="query_node") for q in query_str.split(",") if q.strip()]
-            leak_probability = float(qs.get("leak", ["0.15"])[0])
-            # Parse optional layers filter: ?layers=L3,L4
-            layers_str = qs.get("layers", [""])[0]
-            layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
-            from .bayesian import causal_intervention
-            result = causal_intervention(
-                self.store.conn, target, intervention_state,
-                query_nodes=query_nodes,
-                layers=layers,
-                leak_probability=leak_probability,
-            )
-            self._json_response(200, result)
-        elif path == "/ate":
-            # Average Treatment Effect: model-based ATE from noisy-OR CPDs
-            # ATE = P(effect=bad|do(cause=bad)) - P(effect=bad|do(cause=good))
-            cause = qs.get("cause", [None])[0]
-            effect = qs.get("effect", [None])[0]
-            if not cause or not effect:
-                self._json_response(400, {"error": "missing_parameter", "message": "?cause=X&effect=Y required"})
-                return
-            from .validation import validate_identifier
-            cause = validate_identifier(cause, name="cause")
-            effect = validate_identifier(effect, name="effect")
-            leak_probability = float(qs.get("leak", ["0.15"])[0])
-            # Parse optional layers filter: ?layers=L3,L4
-            layers_str = qs.get("layers", [""])[0]
-            layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
-            from .bayesian import compute_ate
-            result = compute_ate(self.store.conn, cause, effect, layers=layers, leak_probability=leak_probability)
-            self._json_response(200, result)
-        elif path == "/sensitivity":
-            # Sensitivity analysis: E-value for causal robustness
-            # "How much unmeasured confounding would overturn this conclusion?"
-            cause = qs.get("cause", [None])[0]
-            effect = qs.get("effect", [None])[0]
-            if not cause or not effect:
-                self._json_response(400, {"error": "missing_parameter", "message": "?cause=X&effect=Y required"})
-                return
-            from .validation import validate_identifier
-            cause = validate_identifier(cause, name="cause")
-            effect = validate_identifier(effect, name="effect")
-            leak_probability = float(qs.get("leak", ["0.15"])[0])
-            # Parse optional layers filter: ?layers=L3,L4
-            layers_str = qs.get("layers", [""])[0]
-            layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
-            from .bayesian import compute_sensitivity
-            result = compute_sensitivity(self.store.conn, cause, effect, layers=layers, leak_probability=leak_probability)
-            self._json_response(200, result)
-        elif path == "/adjustment":
-            # Find valid backdoor/frontdoor adjustment sets for causal identification
-            # Uses pgmpy's CausalInference for formal identification
-            cause = qs.get("cause", [None])[0]
-            effect = qs.get("effect", [None])[0]
-            if not cause or not effect:
-                self._json_response(400, {"error": "missing_parameter", "message": "?cause=X&effect=Y required"})
-                return
-            from .validation import validate_identifier
-            cause = validate_identifier(cause, name="cause")
-            effect = validate_identifier(effect, name="effect")
-            leak_probability = float(qs.get("leak", ["0.15"])[0])
-            # Parse optional layers filter: ?layers=L3,L4
-            layers_str = qs.get("layers", [""])[0]
-            layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
-            from .bayesian import find_adjustment_sets
-            result = find_adjustment_sets(self.store.conn, cause, effect, layers=layers, leak_probability=leak_probability)
-            self._json_response(200, result)
-        elif path == "/voi":
-            # Value of Information: rank nodes by research priority
-            # VoI = uncertainty × sensitivity_to_decision
-            # ?decision=node1,node2 to specify decision nodes (auto-detects if omitted)
-            # ?top=10 to limit results
-            # ?layers=L3,L4 to scope by layer
-            # ?edge_types=CAUSES,INFLUENCES,ENABLES,DEPENDS_ON to filter edge types
-            decision_str = qs.get("decision", [None])[0]
-            decision_nodes = [d.strip() for d in decision_str.split(",") if d.strip()] if decision_str else None
-            top = int(qs.get("top", ["10"])[0])
-            leak_probability = float(qs.get("leak", ["0.15"])[0])
-            root_prior = float(qs.get("root_prior", ["0.3"])[0])
-            # Parse optional layers filter: ?layers=L3,L4
-            layers_str = qs.get("layers", [""])[0]
-            layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
-            # Parse optional edge_types filter: ?edge_types=CAUSES,DEPENDS_ON
-            edge_types_str = qs.get("edge_types", [""])[0]
-            edge_types = [e.strip() for e in edge_types_str.split(",") if e.strip()] if edge_types_str else None
-            timeout = float(qs.get("timeout", ["0"])[0]) or None
-            from .bayesian import compute_voi
-            result = compute_voi(
-                self.store.conn,
-                decision_nodes=decision_nodes,
-                edge_types=edge_types,
-                layers=layers,
-                top=top,
-                leak_probability=leak_probability,
-                root_prior=root_prior,
-                timeout=timeout,
-            )
-            self._json_response(200, result)
-        elif path == "/markov/absorbing":
-            # Markov absorbing-state risk (OHM-9bom)
-            # ?start=<node_id>&edge_types=TRANSITIONS_TO,LEADS_TO
-            start_node = qs.get("start", [None])[0]
-            if not start_node:
-                raise ValidationError("?start=<node_id> is required")
-            edge_types_str = qs.get("edge_types", [""])[0]
-            markov_edge_types = [e.strip() for e in edge_types_str.split(",") if e.strip()] or None
-            from .markov import markov_absorbing_risk
-            result = markov_absorbing_risk(
-                self.store.conn,
-                start_node,
-                edge_types=markov_edge_types,
-            )
-            self._json_response(200, result)
-        elif path == "/markov/expected_steps":
-            # Markov expected steps to absorption (OHM-9bom)
-            # ?start=<node_id>&target=<node_id>&edge_types=TRANSITIONS_TO
-            start_node = qs.get("start", [None])[0]
-            if not start_node:
-                raise ValidationError("?start=<node_id> is required")
-            target_state = qs.get("target", [None])[0]
-            edge_types_str = qs.get("edge_types", [""])[0]
-            markov_edge_types = [e.strip() for e in edge_types_str.split(",") if e.strip()] or None
-            from .markov import markov_expected_steps
-            result = markov_expected_steps(
-                self.store.conn,
-                start_node,
-                target_state=target_state,
-                edge_types=markov_edge_types,
-            )
-            self._json_response(200, result)
-        elif path == "/voi/tasks":
-            # OHM-8w2: Value of Information task assignment for agent routing.
-            # Generates research tasks from VoI rankings, matched to agent expertise.
-            # ?agent=metis to filter by agent
-            # ?decision=node1,node2 to specify decision nodes
-            # ?top=5 to limit results
-            # ?layers=L3,L4 to scope by layer
-            # ?leak=0.15&root_prior=0.3 for Bayesian parameters
-            agent = qs.get("agent", [None])[0]
-            decision_str = qs.get("decision", [None])[0]
-            decision_nodes = [d.strip() for d in decision_str.split(",") if d.strip()] if decision_str else None
-            top = int(qs.get("top", ["5"])[0])
-            leak_probability = float(qs.get("leak", ["0.15"])[0])
-            root_prior = float(qs.get("root_prior", ["0.3"])[0])
-            layers_str = qs.get("layers", [""])[0]
-            layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
-            from .bayesian import generate_voi_tasks
-            result = generate_voi_tasks(
-                self.store.conn,
-                agent=agent,
-                decision_nodes=decision_nodes,
-                layers=layers,
-                top=top,
-                leak_probability=leak_probability,
-                root_prior=root_prior,
-            )
-            self._json_response(200, result)
-        elif path == "/suggest_causes":
-            # Suggest candidate CAUSES edges from existing non-causal relationships
-            # Identifies DEPENDS_ON/APPLIES_TO/REFINES/INFLUENCES edges that might be causal
-            min_confidence = float(qs.get("min_confidence", ["0.5"])[0])
-            from .bayesian import suggest_causes
-            result = suggest_causes(self.store.conn, min_confidence=min_confidence)
-            self._json_response(200, result)
-        elif path == "/deduplicate":
-            # Remove duplicate edges (same from→to, type, layer), keeping most recent
-            self._require_write_auth()
-            layer = qs.get("layer", [None])[0]
-            if layer:
-                from .validation import validate_layer
-                try:
-                    validate_layer(layer)
-                except ValueError as e:
-                    raise ValidationError(str(e))
-            removed = self.store.deduplicate_edges(layer=layer)
-            self._json_response(200, {"removed": removed, "layer": layer})
-        elif path == "/refute":
-            # Causal refutation: test robustness of causal conclusions
-            # Uses DoWhy refutation methods (requires dowhy package)
-            cause = qs.get("cause", [None])[0]
-            effect = qs.get("effect", [None])[0]
-            if not cause or not effect:
-                self._json_response(400, {"error": "missing_parameter", "message": "?cause=X\u0026effect=Y required"})
-                return
-            from .validation import validate_identifier
-            cause = validate_identifier(cause, name="cause")
-            effect = validate_identifier(effect, name="effect")
-            n_samples = int(qs.get("n_samples", ["1000"])[0])
-            seed = int(qs.get("seed", ["42"])[0])
-            methods_str = qs.get("methods", [None])[0]
-            refutation_methods = methods_str.split(",") if methods_str else None
-            from .causal_refutation import refute_causal_effect
-            result = refute_causal_effect(
-                self.store.conn, cause, effect,
-                n_samples=n_samples,
-                seed=seed,
-                refutation_methods=refutation_methods,
-            )
-            self._json_response(200, result)
-        elif path == "/admin/checkpoint":
-            # Force DuckDB CHECKPOINT to flush WAL to main DB file
-            self._require_write_auth()
-            try:
-                self.store.conn.execute("CHECKPOINT")
-                self._json_response(200, {"status": "ok", "message": "WAL flushed to main database"})
-            except Exception as e:
-                self._json_response(500, {"error": "checkpoint_failed", "message": str(e)})
-        elif path == "/admin/embeddings":
-            # Batch generate embeddings for nodes missing them (OHM-emb)
-            # Processes in small batches with delays to avoid OOM/timeout crashes
-            try:
-                from .queries import update_node_embedding
-
-                # Parse optional batch_size and delay_ms query params
-                batch_size = 5  # Process N nodes per request (small to avoid OOM)
-                delay_ms = 200  # Pause between each embedding (ms) to reduce memory pressure
-                if qs.get("batch_size"):
-                    try:
-                        batch_size = int(qs["batch_size"][0])
-                        if batch_size < 1:
-                            batch_size = 1
-                        elif batch_size > 50:
-                            batch_size = 50
-                    except ValueError:
-                        pass
-                if qs.get("delay_ms"):
-                    try:
-                        delay_ms = int(qs["delay_ms"][0])
-                        if delay_ms < 0:
-                            delay_ms = 0
-                        elif delay_ms > 5000:
-                            delay_ms = 5000
-                    except ValueError:
-                        pass
-
-                # Find all nodes without embeddings
-                rows = self.store.execute(
-                    "SELECT id, label FROM ohm_nodes WHERE embedding IS NULL AND deleted_at IS NULL"
-                )
-                if not rows:
-                    self._json_response(200, {
-                        "status": "ok",
-                        "updated": 0,
-                        "failed": 0,
-                        "total": 0,
-                        "message": "All nodes already have embeddings",
-                    })
-                    return
-
-                updated = 0
-                failed = 0
-                processed = 0
-                for row in rows:
-                    # Stop after batch_size nodes — client can re-call for more
-                    if processed >= batch_size:
-                        break
-                    try:
-                        if update_node_embedding(self.store.conn, row["id"]):
-                            updated += 1
-                        else:
-                            failed += 1
-                    except Exception:
-                        failed += 1
-                    processed += 1
-                    # Small delay between embeddings to reduce memory pressure
-                    if delay_ms > 0:
-                        time.sleep(delay_ms / 1000.0)
-
-                total_missing = len(rows)
-                remaining = total_missing - processed
-                self._json_response(200, {
-                    "status": "ok" if remaining == 0 else "partial",
-                    "updated": updated,
-                    "failed": failed,
-                    "processed": processed,
-                    "total": total_missing,
-                    "remaining": remaining,
-                    "message": f"Generated {updated} embeddings ({failed} failed). {remaining} remaining — re-call to continue.",
-                })
-            except Exception as e:
-                self._json_response(500, {"error": "embedding_backfill_failed", "message": str(e)})
-        elif path == "/admin/snapshots":
-            # DuckLake time-travel: list available snapshots (OHM-kdk.3)
-            snapshots = self.store.list_snapshots()
-            self._json_response(200, {"snapshots": snapshots, "count": len(snapshots)})
-        elif path == "/graph/at":
-            # DuckLake time-travel: query graph at specific snapshot version (OHM-kdk.3)
-            version = qs.get("version", [None])[0]
-            if not version:
-                raise ValidationError("?version=N is required for /graph/at")
-            try:
-                version_int = int(version)
-            except ValueError:
-                raise ValidationError("?version must be an integer snapshot ID")
-            result = self.store.graph_at_version(version_int)
-            self._json_response(200, result)
-        elif path == "/graph/changes":
-            # DuckLake time-travel: changes between two snapshot versions (OHM-kdk.3)
-            from_version = qs.get("from_version", [None])[0]
-            to_version = qs.get("to_version", [None])[0]
-            if not from_version or not to_version:
-                raise ValidationError("?from_version=M&to_version=N are required for /graph/changes")
-            try:
-                from_int = int(from_version)
-                to_int = int(to_version)
-            except ValueError:
-                raise ValidationError("?from_version and ?to_version must be integers")
-            result = self.store.graph_changes(from_int, to_int)
-            self._json_response(200, result)
-        elif path.startswith("/reliability/"):
-            # Compute source reliability metrics from historical outcomes
-            source_agent = path[13:]  # strip /reliability/
-            from .validation import validate_identifier
-            source_agent = validate_identifier(source_agent, name="source_agent")
-            from .queries import query_source_reliability
-            result = query_source_reliability(self.store.conn, source_agent)
-            self._json_response(200, result)
-        elif path == "/observations":
-            # List observations with optional filtering
-            obs_type = qs.get("type", [None])[0]
-            source = qs.get("source", [None])[0]
-            node_id = qs.get("node_id", [None])[0]
-            created_by = qs.get("created_by", [None])[0]
-            limit = int(qs.get("limit", [100])[0])
-            offset = int(qs.get("offset", [0])[0])
-            conditions = ["deleted_at IS NULL"]
-            params = []
-            if obs_type:
-                conditions.append("type = ?")
-                params.append(obs_type)
-            if source:
-                conditions.append("source = ?")
-                params.append(source)
-            if node_id:
-                conditions.append("node_id = ?")
-                params.append(node_id)
-            if created_by:
-                conditions.append("created_by = ?")
-                params.append(created_by)
-            params.append(limit)
-            params.append(offset)
-            sql = (
-                "SELECT * FROM ohm_observations WHERE "
-                + " AND ".join(conditions)
-                + " ORDER BY created_at DESC LIMIT ? OFFSET ?"
-            )
-            results = self.store.execute(sql, params)
-            # Count query
-            count_sql = "SELECT COUNT(*) as cnt FROM ohm_observations WHERE " + " AND ".join(conditions)
-            count_params = params[:-2]
-            total_result = self.store.execute(count_sql, count_params)
-            total = total_result[0]["cnt"] if total_result else len(results)
-            self._json_response(200, {"observations": results, "total": total, "limit": limit, "offset": offset})
+        method_name = self._GET_EXACT.get(path)
+        if method_name is None:
+            for prefix, mn in self._GET_PREFIXES:
+                if path.startswith(prefix):
+                    method_name = mn
+                    break
+        if method_name:
+            getattr(self, method_name)(path, qs)
         else:
             self._json_response(404, {"error": f"Unknown endpoint: {path}"})
+
+    # ── Infrastructure GET handlers (no auth) ────────────────
+
+    def _get_infra_root(self, path: str, qs: dict) -> None:
+        """GET / — root discovery endpoint (no auth)."""
+        # Root discovery endpoint — OpenAPI-style route listing (ADR-005)
+        self._json_response(200, {
+            "service": "ohmd",
+            "version": "0.2.0",
+            "schema": self.schema_config.name,
+            "description": "Multi-agent knowledge graph daemon",
+            "auth_model": "public-read" if not self.require_read_auth else "authenticated",
+            "endpoints": {
+                "/": {"method": "GET", "description": "This discovery index (no auth required)"},
+                "/health": {"method": "GET", "description": "Health check (no auth required)"},
+                "/ready": {"method": "GET", "description": "Readiness check (no auth required)"},
+                "/metrics": {"method": "GET", "description": "Prometheus-style metrics"},
+                "/stats": {"method": "GET", "description": "Graph statistics (nodes, edges, layers)"},
+                "/inference": {"method": "GET", "description": "Bayesian inference: compute posterior probabilities given evidence (observation, includes confounders). ?layers=L3,L4 to scope by layer"},
+                "/intervene": {"method": "GET", "description": "Causal intervention using Pearl's do-operator: sever incoming edges to target, set value externally, propagate direct causal effect (no confounders). ?layers=L3,L4 to scope by layer"},
+                "/ate": {"method": "GET", "description": "Average Treatment Effect: model-based ATE from noisy-OR CPDs (ATE = P(effect=bad|do(cause=bad)) - P(effect=bad|do(cause=good))). ?layers=L3,L4 to scope by layer"},
+                "/sensitivity": {"method": "GET", "description": "Sensitivity analysis: E-value quantifying how much unmeasured confounding would overturn a causal conclusion. ?layers=L3,L4 to scope by layer"},
+                "/adjustment": {"method": "GET", "description": "Find valid backdoor/frontdoor adjustment sets for causal identification (Pearl's criteria). ?layers=L3,L4 to scope by layer"},
+                "/voi": {"method": "GET", "description": "Value of Information: rank nodes by research priority (uncertainty × sensitivity to decision). ?decision=node1,node2&top=10&layers=L3,L4&edge_types=CAUSES,DEPENDS_ON"},
+                "/voi/tasks": {"method": "GET", "description": "Generate research tasks from VoI rankings, matched to agent expertise. ?agent=metis&decision=node1,node2&top=5&layers=L3,L4"},
+                "/suggest_causes": {"method": "GET", "description": "Suggest candidate CAUSES edges from existing non-causal relationships (DEPENDS_ON, APPLIES_TO, etc.)"},
+                "/deduplicate": {"method": "POST", "description": "Remove duplicate edges (same from→to, type, layer), keeping the most recent"},
+                "/refute": {"method": "GET", "description": "Test robustness of causal conclusions using DoWhy refutation methods (random common cause, placebo, data subset, unobserved confounder)"},
+                "/lint": {"method": "GET", "description": "Contract layer linting: validate graph against naming conventions and required fields"},
+                "/contract": {"method": "GET", "description": "Current contract configuration (naming conventions, required fields, schema)"},
+                "/status": {"method": "GET", "description": "Daemon status and configuration"},
+                "/schema": {"method": "GET", "description": "Node types, edge types, layers"},
+                "/layers": {"method": "GET", "description": "L1-L4 layer descriptions"},
+                "/node/{id}": {"method": "GET", "description": "Get a single node by ID"},
+                "/edge/{id}": {"method": "GET", "description": "Get a single edge by ID"},
+                "/neighborhood/{id}": {"method": "GET", "description": "Bounded-depth graph traversal"},
+                "/path/{from}/{to}": {"method": "GET", "description": "Shortest path between two nodes"},
+                "/impact/{id}": {"method": "GET", "description": "Downstream failure impact analysis"},
+                "/confidence/{id}": {"method": "GET", "description": "Provenance and challenge audit"},
+                "/agent/{name}": {"method": "GET", "description": "Agent state and focus"},
+                "/agents": {"method": "GET", "description": "List all registered agents"},
+                "/nodes": {"method": "GET", "description": "List nodes with pagination and filtering"},
+                "/listen": {"method": "GET", "description": "Change feed since last check"},
+                "/events": {"method": "GET", "description": "SSE stream of real-time change feed events"},
+                "/node": {"method": "POST", "description": "Create a new node"},
+                "/edge": {"method": "POST", "description": "Create a new edge"},
+                "/challenge/{id}": {"method": "POST", "description": "Challenge an existing edge"},
+                "/support/{id}": {"method": "POST", "description": "Support an existing edge"},
+                "/observe/{id}": {"method": "POST", "description": "Record an observation on a node"},
+                "/observations": {"method": "GET", "description": "List observations with filtering by type, source, node_id. POST for bulk upload: {observations: [{node_id, value, sigma, obs_type, source}]}"},
+                "/outcome": {"method": "POST", "description": "Record whether a source agent's claim was correct"},
+                "/reliability/{source}": {"method": "GET", "description": "Compute source reliability metrics from historical outcomes"},
+                "/state": {"method": "POST", "description": "Update agent state/focus"},
+                "/register": {"method": "POST", "description": "Register a new agent"},
+                "/heartbeat": {"method": "POST", "description": "Agent heartbeat with sync"},
+                "/webhook/{agent}": {"method": "POST", "description": "Register a webhook callback"},
+                "/search": {"method": "GET", "description": "ILIKE text search (?q=QUERY)"},
+                "/semantic_search": {"method": "GET", "description": "Semantic vector search (requires Ollama)"},
+                "/admin/checkpoint": {"method": "POST", "description": "Force DuckDB CHECKPOINT (flush WAL to main DB)"},
+                "/admin/embeddings": {"method": "GET", "description": "Batch generate embeddings for nodes missing them (?batch_size=N&delay_ms=M)"},
+                "/admin/snapshots": {"method": "GET", "description": "List DuckLake snapshots (time-travel)"},
+                "/graph/at": {"method": "GET", "description": "Query graph at snapshot version (?version=N)"},
+                "/graph/changes": {"method": "GET", "description": "Changes between snapshots"},
+            },
+            "links": {
+                "schema": "/schema",
+                "layers": "/layers",
+                "health": "/health",
+                "docs": "https://github.com/mdlmarkham/OHM",
+            },
+        })
+
+    def _get_infra_openapi(self, path: str, qs: dict) -> None:
+        """GET /openapi.json — OpenAPI 3.0 spec endpoint (ADR-005)."""
+        self._json_response(200, {
+            "openapi": "3.0.3",
+            "info": {
+                "title": "OHM Daemon API",
+                "version": "0.2.0",
+                "description": "Multi-agent knowledge graph daemon — shared awareness, individual judgment.",
+            },
+            "servers": [{"url": (
+                f"http://{self.config.get('host', '127.0.0.1')}"
+                f":{self.config.get('port', 8710)}"
+            )}],
+            "paths": {
+                "/": {"get": {"summary": "Discovery index",
+                           "responses": {"200": {"description": "Route listing"}}}},
+                "/health": {"get": {"summary": "Health check", "responses": {"200": {"description": "OK"}}}},
+                "/ready": {"get": {"summary": "Readiness check",
+                               "responses": {"200": {"description": "Ready"},
+                                             "503": {"description": "Not ready"}}}},
+                "/metrics": {"get": {"summary": "Prometheus-style metrics",
+                                "responses": {"200": {"description": "Metrics"}}}},
+                "/stats": {"get": {"summary": "Graph statistics", "responses": {"200": {"description": "Stats"}}}},
+                "/status": {"get": {"summary": "Daemon status", "responses": {"200": {"description": "Status"}}}},
+                "/schema": {"get": {"summary": "Node/edge types", "responses": {"200": {"description": "Schema"}}}},
+                "/layers": {"get": {"summary": "L1-L4 descriptions",
+                               "responses": {"200": {"description": "Layers"}}}},
+                "/node/{id}": {"get": {"summary": "Get node"}, "post": {"summary": "Create node"}},
+                "/edge/{id}": {"get": {"summary": "Get edge"}, "post": {"summary": "Create edge"}},
+                "/neighborhood/{id}": {"get": {"summary": "Graph traversal"}},
+                "/path/{from}/{to}": {"get": {"summary": "Shortest path"}},
+                "/impact/{id}": {"get": {"summary": "Impact analysis"}},
+                "/confidence/{id}": {"get": {"summary": "Confidence audit"}},
+                "/agent/{name}": {"get": {"summary": "Agent state"}},
+                "/agents": {"get": {"summary": "List agents"}},
+                "/nodes": {"get": {"summary": "List nodes with pagination and filtering"}},
+                "/listen": {"get": {"summary": "Change feed"}},
+                "/events": {"get": {"summary": "SSE event stream"}},
+                "/challenge/{id}": {"post": {"summary": "Challenge edge"}},
+                "/support/{id}": {"post": {"summary": "Support edge"}},
+                "/observe/{id}": {"post": {"summary": "Record observation"}},
+                "/observations": {"get": {"summary": "List observations"}, "post": {"summary": "Bulk upload observations"}},
+                "/state": {"post": {"summary": "Update agent state"}},
+                "/register": {"post": {"summary": "Register agent"}},
+                "/heartbeat": {"post": {"summary": "Agent heartbeat"}},
+                "/webhook/{agent}": {"post": {"summary": "Register webhook"}},
+                "/search": {"get": {"summary": "ILIKE text search",
+                               "parameters": [{"name": "q", "in": "query",
+                                               "required": True,
+                                               "schema": {"type": "string"}}]}},
+                "/semantic_search": {"get": {"summary": "Semantic vector search (requires Ollama)",
+                                        "parameters": [
+                                            {"name": "q", "in": "query", "required": True,
+                                             "schema": {"type": "string"}},
+                                            {"name": "type", "in": "query", "required": False,
+                                             "schema": {"type": "string"}},
+                                            {"name": "limit", "in": "query", "required": False,
+                                             "schema": {"type": "integer"}},
+                                            {"name": "min_confidence", "in": "query",
+                                             "required": False, "schema": {"type": "number"}},
+                                        ],
+                                        "responses": {
+                                            "200": {"description": "Search results"},
+                                            "503": {"description": "Ollama not available"},
+                                        }}},
+                "/admin/checkpoint": {"post": {"summary": "Force CHECKPOINT",
+                                       "responses": {"200": {"description": "WAL flushed to main DB"}}}},
+                "/graph/at": {"get": {"summary": "Graph at snapshot version",
+                                  "responses": {"200": {"description": "Historical graph state"}}}},
+                "/graph/changes": {"get": {"summary": "Changes between snapshots",
+                                       "responses": {"200": {"description": "Insertions/deletions"}}}},
+                "/voi/tasks": {"get": {"summary": "VoI task assignment for agent routing",
+                                   "responses": {"200": {"description": "Research tasks ranked by VoI"}}}},
+            },
+        })
+
+    def _get_infra_health(self, path: str, qs: dict) -> None:
+        """GET /health — health check (no auth)."""
+        self._json_response(200, {
+            "status": "ok",
+            "uptime": round(time.time() - _START_TIME, 1),
+        })
+
+    def _get_infra_ready(self, path: str, qs: dict) -> None:
+        """GET /ready — readiness check (no auth)."""
+        try:
+            self.store.execute("SELECT 1")
+            self._json_response(200, {
+                "status": "ready",
+                "database": str(self.store.db_path),
+            })
+        except Exception:
+            self._json_response(503, {
+                "status": "not_ready",
+                "database": str(self.store.db_path),
+            })
+
+    def _get_infra_metrics(self, path: str, qs: dict) -> None:
+        """GET /metrics — Prometheus-style metrics (no auth)."""
+        with _metrics_lock:
+            metrics_snapshot = dict(_metrics)
+            sorted_lats = sorted(_request_latencies) if _request_latencies else [0]
+        n = len(sorted_lats)
+        uptime = round(time.time() - _START_TIME, 1)
+        p50 = sorted_lats[n // 2] if n > 0 else 0
+        p95 = sorted_lats[int(n * 0.95)] if n > 1 else sorted_lats[0] if n > 0 else 0
+        p99 = sorted_lats[int(n * 0.99)] if n > 1 else sorted_lats[0] if n > 0 else 0
+        lat_max = sorted_lats[-1] if n > 0 else 0
+
+        # Prometheus text format when requested via Accept header or ?format=prometheus
+        accept = self.headers.get("Accept", "")
+        fmt = qs.get("format", [""])[0]
+        if fmt == "prometheus" or "text/plain" in accept:
+            lines = [
+                "# HELP ohm_uptime_seconds Seconds since daemon started",
+                "# TYPE ohm_uptime_seconds gauge",
+                f"ohm_uptime_seconds {uptime}",
+                "# HELP ohm_requests_total Total HTTP requests",
+                "# TYPE ohm_requests_total counter",
+                f'ohm_requests_total{{method="all"}} {metrics_snapshot.get("requests_total", 0)}',
+                f'ohm_requests_total{{method="get"}} {metrics_snapshot.get("requests_get", 0)}',
+                f'ohm_requests_total{{method="post"}} {metrics_snapshot.get("requests_post", 0)}',
+                "# HELP ohm_errors_total Total HTTP errors",
+                "# TYPE ohm_errors_total counter",
+                f'ohm_errors_total{{code="4xx"}} {metrics_snapshot.get("errors_4xx", 0)}',
+                f'ohm_errors_total{{code="5xx"}} {metrics_snapshot.get("errors_5xx", 0)}',
+                "# HELP ohm_rate_limited_total Requests rejected by rate limiter",
+                "# TYPE ohm_rate_limited_total counter",
+                f'ohm_rate_limited_total {metrics_snapshot.get("rate_limited", 0)}',
+                "# HELP ohm_request_duration_ms Request latency in milliseconds",
+                "# TYPE ohm_request_duration_ms summary",
+                f'ohm_request_duration_ms{{quantile="0.5"}} {p50}',
+                f'ohm_request_duration_ms{{quantile="0.95"}} {p95}',
+                f'ohm_request_duration_ms{{quantile="0.99"}} {p99}',
+                f'ohm_request_duration_ms_count {n}',
+                "",
+            ]
+            body_bytes = "\n".join(lines).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+            self.send_header("Content-Length", str(len(body_bytes)))
+            self.end_headers()
+            self.wfile.write(body_bytes)
+        else:
+            self._json_response(200, {
+                "uptime_seconds": uptime,
+                "requests": metrics_snapshot,
+                "latency_ms": {
+                    "p50": p50,
+                    "p95": p95,
+                    "p99": p99,
+                    "max": lat_max,
+                    "sample_count": n,
+                },
+            })
+
+    # ── Authenticated GET handlers ────────────────────────────
+
+    def _get_stats(self, path: str, qs: dict) -> None:
+        """GET /stats — graph statistics."""
+        from ohm.queries import query_stats
+        stats = query_stats(self.store.conn)
+        stats["uptime"] = round(time.time() - _START_TIME, 1)
+        self._json_response(200, stats)
+
+    def _get_status(self, path: str, qs: dict) -> None:
+        """GET /status — daemon status."""
+        status = self.store.status()
+        status["uptime"] = round(time.time() - _START_TIME, 1)
+        status["version"] = "0.2.0"
+        status["schema"] = self.schema_config.name
+        status["quack"] = self.config.get("quack", False)
+        self._json_response(200, status)
+
+    def _get_schema(self, path: str, qs: dict) -> None:
+        """GET /schema — schema description."""
+        schema = self.schema_config
+        # Flatten edge types: collect all unique edge type names across layers
+        all_edge_types: set[str] = set()
+        for types in schema.layer_edge_types.values():
+            all_edge_types.update(types)
+        self._json_response(200, {
+            "schema": schema.name,
+            "node_types": sorted(schema.node_types),
+            "edge_types": sorted(all_edge_types),
+            "edge_types_by_layer": {k: sorted(v) for k, v in schema.layer_edge_types.items()},
+            "layers": schema.layer_descriptions,
+        })
+
+    def _get_layers(self, path: str, qs: dict) -> None:
+        """GET /layers — layer descriptions."""
+        self._json_response(200, self.schema_config.layer_descriptions)
+
+    def _get_node(self, path: str, qs: dict) -> None:
+        """GET /node/<id> — fetch a node."""
+        node_id = path[6:]
+        from .validation import validate_identifier
+        node_id = validate_identifier(node_id, name="node_id")
+        node = self.store.get_node(node_id)
+        if node:
+            self._json_response(200, node)
+        else:
+            raise NodeNotFoundError(f"Node {node_id} not found")
+
+    def _get_deep(self, path: str, qs: dict) -> None:
+        """GET /deep/<id> — deep content retrieval."""
+        node_id = path[6:]
+        from .validation import validate_identifier
+        node_id = validate_identifier(node_id, name="node_id")
+        try:
+            result = self.store.deep_content(node_id)
+            self._json_response(200, result)
+        except NodeNotFoundError:
+            raise
+        except Exception as e:
+            self._json_response(500, {"error": "deep_content_failed", "message": str(e)})
+
+    def _get_edge(self, path: str, qs: dict) -> None:
+        """GET /edge/<id> — fetch an edge."""
+        edge_id = path[6:]
+        from .validation import validate_identifier
+        edge_id = validate_identifier(edge_id, name="edge_id")
+        edge = self.store.get_edge(edge_id)
+        if edge:
+            self._json_response(200, edge)
+        else:
+            raise EdgeNotFoundError(f"Edge {edge_id} not found")
+
+    def _get_neighborhood(self, path: str, qs: dict) -> None:
+        """GET /neighborhood/<id> — node neighborhood."""
+        node_id = path[14:]  # strip "/neighborhood/"
+        from .validation import validate_identifier
+        node_id = validate_identifier(node_id, name="node_id")
+        depth = int(qs.get("depth", [3])[0])
+        layer = qs.get("layer", [None])[0]
+        from .queries import query_neighborhood
+        results = query_neighborhood(self.store.conn, node_id, depth=depth, layer=layer)
+        self._json_response(200, results)
+
+    def _get_path(self, path: str, qs: dict) -> None:
+        """GET /path/<from>/<to> — shortest path."""
+        parts = path[6:].split("/")
+        if len(parts) >= 2:
+            from .validation import validate_identifier
+            from_node = validate_identifier(parts[0], name="from_node")
+            to_node = validate_identifier(parts[1], name="to_node")
+            from .queries import query_path
+            results = query_path(self.store.conn, from_node, to_node)
+            self._json_response(200, results)
+        else:
+            raise ValidationError("Path requires /path/from/to")
+
+    def _get_impact(self, path: str, qs: dict) -> None:
+        """GET /impact/<id> — impact analysis."""
+        node_id = path[8:]
+        from .validation import validate_identifier
+        node_id = validate_identifier(node_id, name="node_id")
+        depth = int(qs.get("depth", [5])[0])
+        from .queries import query_impact
+        results = query_impact(self.store.conn, node_id, depth=depth)
+        self._json_response(200, results)
+
+    def _get_confidence(self, path: str, qs: dict) -> None:
+        """GET /confidence/<id> — confidence breakdown."""
+        target_id = path[12:]
+        from .validation import validate_identifier
+        target_id = validate_identifier(target_id, name="target_id")
+        from .queries import query_confidence
+
+        # Check if target_id is a node or an edge
+        is_node = self.store.conn.execute(
+            "SELECT COUNT(*) FROM ohm_nodes WHERE id = ?", [target_id],
+        ).fetchone()
+        is_edge = self.store.conn.execute(
+            "SELECT COUNT(*) FROM ohm_edges WHERE id = ?", [target_id],
+        ).fetchone()
+
+        if is_node and is_node[0] > 0:
+            # Node: find all challenge/support/refine edges pointing TO this node.
+            # Use SELECT * so challenge_of, challenge_type, provenance, and PERT
+            # percentile fields (probability_p05/p50/p95, confidence_p05/p50/p95)
+            # are all included in the response.
+            refs_result = self.store.conn.execute(
+                """SELECT *
+                   FROM ohm_edges
+                   WHERE to_node = ?
+                     AND edge_type IN ('CHALLENGED_BY', 'SUPPORTS', 'REFINES')
+                     AND deleted_at IS NULL
+                   ORDER BY created_at DESC""",
+                [target_id],
+            )
+            ref_columns = [desc[0] for desc in refs_result.description]
+            refs = [dict(zip(ref_columns, row)) for row in refs_result.fetchall()]
+            # Add convenience aliases
+            for r in refs:
+                r["from"] = r.get("from_node")
+                r["to"] = r.get("to_node")
+                r["type"] = r.get("edge_type")
+
+            challenges = [r for r in refs if r["edge_type"] == "CHALLENGED_BY"]
+            supports = [r for r in refs if r["edge_type"] == "SUPPORTS"]
+            refinements = [r for r in refs if r["edge_type"] == "REFINES"]
+
+            self._json_response(200, {
+                "node_id": target_id,
+                "challenges": challenges,
+                "supports": supports,
+                "refinements": refinements,
+            })
+        elif is_edge and is_edge[0] > 0:
+            # Edge: use existing query_confidence
+            results = query_confidence(self.store.conn, target_id)
+            self._json_response(200, results)
+        else:
+            raise NodeNotFoundError(f"Neither node nor edge found with id: {target_id}")
+
+    def _get_agent(self, path: str, qs: dict) -> None:
+        """GET /agent/<name> — agent state."""
+        agent_name = path[7:]
+        from .validation import validate_identifier
+        agent_name = validate_identifier(agent_name, name="agent_name")
+        state = self.store.get_agent_state(agent_name)
+        if state:
+            self._json_response(200, state)
+        else:
+            self._json_response(404, {"error": f"Agent {agent_name} not found"})
+
+    def _get_agents(self, path: str, qs: dict) -> None:
+        """GET /agents — list all agent states."""
+        results = self.store.execute("SELECT * FROM ohm_agent_state ORDER BY agent_name")
+        self._json_response(200, results)
+
+    def _get_nodes(self, path: str, qs: dict) -> None:
+        """GET /nodes — list nodes with pagination and filtering."""
+        node_type = qs.get("type", [None])[0]
+        label = qs.get("label", [None])[0]
+        label_contains = qs.get("label_contains", [None])[0]
+        label_prefix = qs.get("label_prefix", [None])[0]
+        created_by = qs.get("created_by", [None])[0]
+        limit = int(qs.get("limit", [100])[0])
+        offset = int(qs.get("offset", [0])[0])
+        conditions = ["deleted_at IS NULL"]
+        params = []
+        if node_type:
+            conditions.append("type = ?")
+            params.append(node_type)
+        if label:
+            conditions.append("label ILIKE ?")
+            params.append(f"%{label}%")
+        if label_contains:
+            conditions.append("label ILIKE ?")
+            params.append(f"%{label_contains}%")
+        if label_prefix:
+            conditions.append("label ILIKE ?")
+            params.append(f"{label_prefix}%")
+        if created_by:
+            conditions.append("created_by = ?")
+            params.append(created_by)
+        params.append(limit)
+        params.append(offset)
+        sql = (
+            "SELECT * FROM ohm_nodes WHERE "
+            + " AND ".join(conditions)
+            + " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        )
+        results = self.store.execute(sql, params)
+        # Also return total count for pagination
+        count_sql = "SELECT COUNT(*) as cnt FROM ohm_nodes WHERE " + " AND ".join(conditions)
+        count_params = params[:-2]  # Remove limit and offset
+        total_result = self.store.execute(count_sql, count_params)
+        total = total_result[0]["cnt"] if total_result else len(results)
+        self._json_response(200, {
+            "nodes": results,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        })
+
+    def _get_tasks(self, path: str, qs: dict) -> None:
+        """GET /tasks — list task nodes with filtering."""
+        task_status = qs.get("status", [None])[0]
+        assigned_to = qs.get("assigned_to", [None])[0]
+        priority = qs.get("priority", [None])[0]
+        created_by = qs.get("created_by", [None])[0]
+        limit = int(qs.get("limit", [100])[0])
+        offset = int(qs.get("offset", [0])[0])
+        conditions = ["deleted_at IS NULL", "type = 'task'"]
+        params = []
+        if task_status:
+            conditions.append("task_status = ?")
+            params.append(task_status)
+        if assigned_to:
+            conditions.append("assigned_to = ?")
+            params.append(assigned_to)
+        if priority:
+            conditions.append("priority = ?")
+            params.append(priority)
+        if created_by:
+            conditions.append("created_by = ?")
+            params.append(created_by)
+        params.append(limit)
+        params.append(offset)
+        sql = (
+            "SELECT * FROM ohm_nodes WHERE "
+            + " AND ".join(conditions)
+            + " ORDER BY CASE priority WHEN 'P0' THEN 0 WHEN 'P1' THEN 1 WHEN 'P2' THEN 2 WHEN 'P3' THEN 3 WHEN 'P4' THEN 4 ELSE 5 END, due_date ASC NULLS LAST, created_at DESC LIMIT ? OFFSET ?"
+        )
+        results = self.store.execute(sql, params)
+        # Also return total count
+        count_sql = "SELECT COUNT(*) as cnt FROM ohm_nodes WHERE " + " AND ".join(conditions)
+        count_params = params[:-2]
+        total_result = self.store.execute(count_sql, count_params)
+        total = total_result[0]["cnt"] if total_result else len(results)
+        self._json_response(200, {
+            "tasks": results,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        })
+
+    def _get_listen(self, path: str, qs: dict) -> None:
+        """GET /listen — poll change feed since last sync."""
+        agent = self._authenticate()
+        if agent is None:
+            if self.no_auth or not self.tokens:
+                agent = "ohm"
+            elif self.require_read_auth:
+                raise AuthenticationError("Authentication required — provide Bearer token")
+            else:
+                agent = "ohm"
+        since = qs.get("since", [None])[0]
+        agent_name = qs.get("agent", [agent or "ohm"])[0]
+        enrich = qs.get("enrich", ["false"])[0].lower() == "true"
+        if not since:
+            state = self.store.get_agent_state(agent_name)
+            if state and state.get("last_sync"):
+                since = state["last_sync"]
+                # last_sync is a TIMESTAMP column — DuckDB returns datetime, not string
+                if isinstance(since, datetime):
+                    since = since.isoformat()
+            else:
+                # Default to 24 hours ago (OHM-4oc)
+                since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+        from .queries import query_change_feed
+        results = query_change_feed(
+            self.store.conn, since=since, agent_name=agent_name, enrich=enrich
+        )
+        self._json_response(200, results)
+
+    def _get_search(self, path: str, qs: dict) -> None:
+        """GET /search — text search over nodes."""
+        query_text = qs.get("q", [""])[0]
+        node_type = qs.get("type", [None])[0]
+        created_by = qs.get("created_by", [None])[0]
+        limit = int(qs.get("limit", [20])[0])
+        if not query_text:
+            raise ValidationError("Search requires ?q=QUERY")
+        conditions = ["deleted_at IS NULL", "(label ILIKE ? OR content ILIKE ?)"]
+        params = [f"%{query_text}%", f"%{query_text}%"]
+        if node_type:
+            conditions.append("type = ?")
+            params.append(node_type)
+        if created_by:
+            conditions.append("created_by = ?")
+            params.append(created_by)
+        params.append(limit)
+        # Column names hardcoded, values parameterized
+        sql = (
+            "SELECT * FROM ohm_nodes WHERE "
+            + " AND ".join(conditions)
+            + " ORDER BY created_at DESC LIMIT ?"
+        )
+        results = self.store.execute(sql, params)
+        self._json_response(200, results)
+
+    def _get_semantic_search(self, path: str, qs: dict) -> None:
+        """GET /semantic_search — vector similarity search."""
+        # Semantic search via VSS/HNSW index (OHM-o9f)
+        query_text = qs.get("q", [""])[0]
+        if not query_text:
+            raise ValidationError("Semantic search requires ?q=QUERY")
+        node_type = qs.get("type", [None])[0]
+        limit = int(qs.get("limit", [10])[0])
+        min_confidence = qs.get("min_confidence", [None])[0]
+        if min_confidence is not None:
+            try:
+                min_confidence = float(min_confidence)
+            except ValueError:
+                raise ValidationError("?min_confidence must be a number")
+        try:
+            from .queries import semantic_search
+            results = semantic_search(
+                self.store.conn,
+                query=query_text,
+                limit=limit,
+                node_type=node_type,
+                min_confidence=min_confidence,
+            )
+            self._json_response(200, {"results": results, "count": len(results)})
+        except ValueError as e:
+            # Ollama not available
+            self._json_response(503, {
+                "error": "service_unavailable",
+                "message": str(e),
+            })
+
+    def _get_health_graph(self, path: str, qs: dict) -> None:
+        """GET /health/graph — graph health check."""
+        from .queries import query_graph_health
+        result = query_graph_health(self.store.conn)
+        self._json_response(200, result)
+
+    def _get_health_agents(self, path: str, qs: dict) -> None:
+        """GET /health/agents — agent health check."""
+        from .methods import query_agent_health
+        result = query_agent_health(self.store.conn)
+        self._json_response(200, result)
+
+    def _get_contradictions(self, path: str, qs: dict) -> None:
+        """GET /contradictions — detect contradictions."""
+        from .methods import detect_contradictions
+        conf_thresh = float(qs.get("confidence", [0.5])[0])
+        result = detect_contradictions(self.store.conn, confidence_threshold=conf_thresh)
+        self._json_response(200, result)
+
+    def _get_anomalies(self, path: str, qs: dict) -> None:
+        """GET /anomalies — detect anomalies."""
+        from .methods import detect_anomalies
+        sigma = float(qs.get("sigma", [2.0])[0])
+        layer = qs.get("layer", [None])[0]
+        limit = int(qs.get("limit", [50])[0])
+        result = detect_anomalies(self.store.conn, sigma_threshold=sigma, layer=layer, limit=limit)
+        self._json_response(200, result)
+
+    def _get_aggregate(self, path: str, qs: dict) -> None:
+        """GET /aggregate/<id> — aggregate observations."""
+        node_id = path[11:]
+        from .validation import validate_identifier
+        node_id = validate_identifier(node_id, name="node_id")
+        method = qs.get("method", ["weighted"])[0]
+        from .methods import aggregate_observations
+        result = aggregate_observations(self.store.conn, node_id, method=method)
+        self._json_response(200, result)
+
+    def _get_provenance(self, path: str, qs: dict) -> None:
+        """GET /provenance/<id> — provenance trace."""
+        node_id = path[12:]
+        from .validation import validate_identifier
+        node_id = validate_identifier(node_id, name="node_id")
+        max_depth = int(qs.get("depth", [10])[0])
+        from .queries import query_provenance
+        result = query_provenance(self.store.conn, node_id, max_depth=max_depth)
+        self._json_response(200, result)
+
+    def _get_stale(self, path: str, qs: dict) -> None:
+        """GET /stale — list stale edges."""
+        from .queries import query_stale_edges
+        threshold = float(qs.get("threshold", [0.1])[0])
+        result = query_stale_edges(self.store.conn, stale_threshold=threshold)
+        self._json_response(200, result)
+
+    def _get_decay(self, path: str, qs: dict) -> None:
+        """GET /decay — apply confidence decay."""
+        self._require_write_auth()
+        from .queries import apply_confidence_decay
+        threshold = float(qs.get("threshold", [0.1])[0])
+        layer = qs.get("layer", [None])[0]
+        dry_run = qs.get("dry_run", ["false"])[0].lower() == "true"
+        result = apply_confidence_decay(
+            self.store.conn,
+            stale_threshold=threshold,
+            layer=layer,
+            dry_run=dry_run,
+        )
+        self._json_response(200, result)
+
+    def _get_monte_carlo(self, path: str, qs: dict) -> None:
+        """GET /monte-carlo/<id> — Monte Carlo impact simulation."""
+        node_id = path[13:]
+        from .validation import validate_identifier
+        node_id = validate_identifier(node_id, name="node_id")
+        from .methods import monte_carlo_impact
+        sims = int(qs.get("simulations", [1000])[0])
+        depth = int(qs.get("depth", [3])[0])
+        default_prob = float(qs.get("default_probability", [0.5])[0])
+        seed_val = qs.get("seed", [None])[0]
+        seed = int(seed_val) if seed_val is not None else None
+        result = monte_carlo_impact(
+            self.store.conn, node_id,
+            simulations=sims, depth=depth,
+            default_probability=default_prob,
+            seed=seed,
+        )
+        self._json_response(200, result)
+
+    def _get_duplicates(self, path: str, qs: dict) -> None:
+        """GET /duplicates — detect near-duplicate nodes."""
+        from .methods import detect_near_duplicates
+        threshold = float(qs.get("similarity", [0.8])[0])
+        result = detect_near_duplicates(self.store.conn, similarity_threshold=threshold)
+        self._json_response(200, result)
+
+    def _get_calibration(self, path: str, qs: dict) -> None:
+        """GET /calibration/<agent> — confidence calibration."""
+        agent_name = path[13:]
+        from .validation import validate_identifier
+        agent_name = validate_identifier(agent_name, name="agent_name")
+        from .methods import compute_confidence_calibration
+        result = compute_confidence_calibration(self.store.conn, agent_name)
+        self._json_response(200, result)
+
+    def _get_orphans(self, path: str, qs: dict) -> None:
+        """GET /orphans — find disconnected nodes."""
+        # Find nodes with zero edges — completely disconnected from the graph
+        from .methods import find_orphans
+        node_type = qs.get("type", [None])[0]
+        exclude_system = qs.get("exclude_system", ["true"])[0].lower() == "true"
+        limit = int(qs.get("limit", [50])[0])
+        result = find_orphans(self.store.conn, node_type=node_type, exclude_system=exclude_system, limit=limit)
+        self._json_response(200, result)
+
+    def _get_hubs(self, path: str, qs: dict) -> None:
+        """GET /hubs — find most-connected nodes."""
+        # Find most-connected nodes — anchors of the graph
+        from .methods import find_hubs
+        node_type = qs.get("type", [None])[0]
+        min_connections = int(qs.get("min_connections", [3])[0])
+        limit = int(qs.get("limit", [20])[0])
+        result = find_hubs(self.store.conn, node_type=node_type, min_connections=min_connections, limit=limit)
+        self._json_response(200, result)
+
+    def _get_dead_ends(self, path: str, qs: dict) -> None:
+        """GET /dead_ends — find sink nodes."""
+        # Find nodes with only incoming edges — sinks that don't lead anywhere
+        from .methods import find_dead_ends
+        node_type = qs.get("type", [None])[0]
+        limit = int(qs.get("limit", [50])[0])
+        result = find_dead_ends(self.store.conn, node_type=node_type, limit=limit)
+        self._json_response(200, result)
+
+    def _get_suggest(self, path: str, qs: dict) -> None:
+        """GET /suggest — suggest connections."""
+        # Suggest connections between nodes that share context but aren't linked
+        from .methods import suggest_connections
+        method = qs.get("method", ["shared_provenance"])[0]
+        min_shared = int(qs.get("min_shared", [2])[0])
+        limit = int(qs.get("limit", [20])[0])
+        result = suggest_connections(self.store.conn, method=method, min_shared=min_shared, limit=limit)
+        self._json_response(200, result)
+
+    def _get_graph_stats(self, path: str, qs: dict) -> None:
+        """GET /graph/stats — extended graph statistics."""
+        # Extended graph statistics (orphans, hubs, density, etc.)
+        from .methods import graph_stats
+        result = graph_stats(self.store.conn)
+        self._json_response(200, result)
+
+    def _get_lint(self, path: str, qs: dict) -> None:
+        """GET /lint — lint graph against contract."""
+        # Contract layer linting: validate graph against naming conventions and required fields
+        from .contract import ContractConfig, lint_graph
+        node_type_filter = qs.get("node_types", [None])[0]
+        node_types = node_type_filter.split(",") if node_type_filter else None
+        limit = int(qs.get("limit", ["1000"])[0])
+        contract = ContractConfig()
+        result = lint_graph(self.store.conn, contract, limit=limit, node_types=node_types)
+        self._json_response(200, result)
+
+    def _get_contract(self, path: str, qs: dict) -> None:
+        """GET /contract — return current contract configuration."""
+        from .contract import ContractConfig
+        contract = ContractConfig()
+        self._json_response(200, contract.to_dict())
+
+    def _get_inference(self, path: str, qs: dict) -> None:
+        """GET /inference — Bayesian inference."""
+        # Bayesian inference: compute posterior probabilities given evidence
+        # Uses pgmpy Variable Elimination (optional dependency)
+        target = qs.get("target", [None])[0]
+        if not target:
+            self._json_response(400, {"error": "missing_parameter", "message": "?target=node_id required"})
+            return
+        from .validation import validate_identifier
+        target = validate_identifier(target, name="target")
+        # Parse evidence from query params: ?evidence=node1:0,node2:1
+        evidence_str = qs.get("evidence", [""])[0]
+        leak_probability = float(qs.get("leak", ["0.15"])[0])
+        evidence = {}
+        if evidence_str:
+            for pair in evidence_str.split(","):
+                if ":" in pair:
+                    node_id, state = pair.split(":", 1)
+                    evidence[validate_identifier(node_id.strip(), name="evidence_node")] = int(state.strip())
+        # Parse optional layers filter: ?layers=L3,L4
+        layers_str = qs.get("layers", [""])[0]
+        layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
+        from .bayesian import bayesian_inference
+        result = bayesian_inference(self.store.conn, target, evidence, edge_types=None, layers=layers, leak_probability=leak_probability)
+        self._json_response(200, result)
+
+    def _get_intervene(self, path: str, qs: dict) -> None:
+        """GET /intervene — causal intervention (do-operator)."""
+        # Causal intervention using Pearl's do-operator (graph surgery)
+        # Differs from /inference: severs incoming edges to target, sets value externally
+        # This isolates direct causal effect by removing confounder influence
+        target = qs.get("target", [None])[0]
+        if not target:
+            self._json_response(400, {"error": "missing_parameter", "message": "?target=node_id required"})
+            return
+        from .validation import validate_identifier
+        target = validate_identifier(target, name="target")
+        # Parse intervention state: ?state=0 (force bad) or ?state=1 (force good)
+        state_str = qs.get("state", [None])[0]
+        if state_str is None:
+            self._json_response(400, {"error": "missing_parameter", "message": "?state=0 (bad) or ?state=1 (good) required"})
+            return
+        try:
+            intervention_state = int(state_str)
+        except ValueError:
+            self._json_response(400, {"error": "invalid_parameter", "message": "state must be 0 or 1"})
+            return
+        # Parse optional query nodes: ?query=node1,node2
+        query_str = qs.get("query", [""])[0]
+        query_nodes = None
+        if query_str:
+            query_nodes = [validate_identifier(q.strip(), name="query_node") for q in query_str.split(",") if q.strip()]
+        leak_probability = float(qs.get("leak", ["0.15"])[0])
+        # Parse optional layers filter: ?layers=L3,L4
+        layers_str = qs.get("layers", [""])[0]
+        layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
+        from .bayesian import causal_intervention
+        result = causal_intervention(
+            self.store.conn, target, intervention_state,
+            query_nodes=query_nodes,
+            layers=layers,
+            leak_probability=leak_probability,
+        )
+        self._json_response(200, result)
+
+    def _get_ate(self, path: str, qs: dict) -> None:
+        """GET /ate — average treatment effect."""
+        # Average Treatment Effect: model-based ATE from noisy-OR CPDs
+        # ATE = P(effect=bad|do(cause=bad)) - P(effect=bad|do(cause=good))
+        cause = qs.get("cause", [None])[0]
+        effect = qs.get("effect", [None])[0]
+        if not cause or not effect:
+            self._json_response(400, {"error": "missing_parameter", "message": "?cause=X&effect=Y required"})
+            return
+        from .validation import validate_identifier
+        cause = validate_identifier(cause, name="cause")
+        effect = validate_identifier(effect, name="effect")
+        leak_probability = float(qs.get("leak", ["0.15"])[0])
+        # Parse optional layers filter: ?layers=L3,L4
+        layers_str = qs.get("layers", [""])[0]
+        layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
+        from .bayesian import compute_ate
+        result = compute_ate(self.store.conn, cause, effect, layers=layers, leak_probability=leak_probability)
+        self._json_response(200, result)
+
+    def _get_sensitivity(self, path: str, qs: dict) -> None:
+        """GET /sensitivity — sensitivity analysis (E-value)."""
+        # Sensitivity analysis: E-value for causal robustness
+        # "How much unmeasured confounding would overturn this conclusion?"
+        cause = qs.get("cause", [None])[0]
+        effect = qs.get("effect", [None])[0]
+        if not cause or not effect:
+            self._json_response(400, {"error": "missing_parameter", "message": "?cause=X&effect=Y required"})
+            return
+        from .validation import validate_identifier
+        cause = validate_identifier(cause, name="cause")
+        effect = validate_identifier(effect, name="effect")
+        leak_probability = float(qs.get("leak", ["0.15"])[0])
+        # Parse optional layers filter: ?layers=L3,L4
+        layers_str = qs.get("layers", [""])[0]
+        layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
+        from .bayesian import compute_sensitivity
+        result = compute_sensitivity(self.store.conn, cause, effect, layers=layers, leak_probability=leak_probability)
+        self._json_response(200, result)
+
+    def _get_adjustment(self, path: str, qs: dict) -> None:
+        """GET /adjustment — find adjustment sets."""
+        # Find valid backdoor/frontdoor adjustment sets for causal identification
+        # Uses pgmpy's CausalInference for formal identification
+        cause = qs.get("cause", [None])[0]
+        effect = qs.get("effect", [None])[0]
+        if not cause or not effect:
+            self._json_response(400, {"error": "missing_parameter", "message": "?cause=X&effect=Y required"})
+            return
+        from .validation import validate_identifier
+        cause = validate_identifier(cause, name="cause")
+        effect = validate_identifier(effect, name="effect")
+        leak_probability = float(qs.get("leak", ["0.15"])[0])
+        # Parse optional layers filter: ?layers=L3,L4
+        layers_str = qs.get("layers", [""])[0]
+        layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
+        from .bayesian import find_adjustment_sets
+        result = find_adjustment_sets(self.store.conn, cause, effect, layers=layers, leak_probability=leak_probability)
+        self._json_response(200, result)
+
+    def _get_voi(self, path: str, qs: dict) -> None:
+        """GET /voi — value of information ranking."""
+        # Value of Information: rank nodes by research priority
+        # VoI = uncertainty × sensitivity_to_decision
+        # ?decision=node1,node2 to specify decision nodes (auto-detects if omitted)
+        # ?top=10 to limit results
+        # ?layers=L3,L4 to scope by layer
+        # ?edge_types=CAUSES,INFLUENCES,ENABLES,DEPENDS_ON to filter edge types
+        decision_str = qs.get("decision", [None])[0]
+        decision_nodes = [d.strip() for d in decision_str.split(",") if d.strip()] if decision_str else None
+        top = int(qs.get("top", ["10"])[0])
+        leak_probability = float(qs.get("leak", ["0.15"])[0])
+        root_prior = float(qs.get("root_prior", ["0.3"])[0])
+        # Parse optional layers filter: ?layers=L3,L4
+        layers_str = qs.get("layers", [""])[0]
+        layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
+        # Parse optional edge_types filter: ?edge_types=CAUSES,DEPENDS_ON
+        edge_types_str = qs.get("edge_types", [""])[0]
+        edge_types = [e.strip() for e in edge_types_str.split(",") if e.strip()] if edge_types_str else None
+        timeout = float(qs.get("timeout", ["0"])[0]) or None
+        from .bayesian import compute_voi
+        result = compute_voi(
+            self.store.conn,
+            decision_nodes=decision_nodes,
+            edge_types=edge_types,
+            layers=layers,
+            top=top,
+            leak_probability=leak_probability,
+            root_prior=root_prior,
+            timeout=timeout,
+        )
+        self._json_response(200, result)
+
+    def _get_markov_absorbing(self, path: str, qs: dict) -> None:
+        """GET /markov/absorbing — Markov absorbing-state risk."""
+        # Markov absorbing-state risk (OHM-9bom)
+        # ?start=<node_id>&edge_types=TRANSITIONS_TO,LEADS_TO
+        start_node = qs.get("start", [None])[0]
+        if not start_node:
+            raise ValidationError("?start=<node_id> is required")
+        edge_types_str = qs.get("edge_types", [""])[0]
+        markov_edge_types = [e.strip() for e in edge_types_str.split(",") if e.strip()] or None
+        from .markov import markov_absorbing_risk
+        result = markov_absorbing_risk(
+            self.store.conn,
+            start_node,
+            edge_types=markov_edge_types,
+        )
+        self._json_response(200, result)
+
+    def _get_markov_expected_steps(self, path: str, qs: dict) -> None:
+        """GET /markov/expected_steps — Markov expected steps to absorption."""
+        # Markov expected steps to absorption (OHM-9bom)
+        # ?start=<node_id>&target=<node_id>&edge_types=TRANSITIONS_TO
+        start_node = qs.get("start", [None])[0]
+        if not start_node:
+            raise ValidationError("?start=<node_id> is required")
+        target_state = qs.get("target", [None])[0]
+        edge_types_str = qs.get("edge_types", [""])[0]
+        markov_edge_types = [e.strip() for e in edge_types_str.split(",") if e.strip()] or None
+        from .markov import markov_expected_steps
+        result = markov_expected_steps(
+            self.store.conn,
+            start_node,
+            target_state=target_state,
+            edge_types=markov_edge_types,
+        )
+        self._json_response(200, result)
+
+    def _get_voi_tasks(self, path: str, qs: dict) -> None:
+        """GET /voi/tasks — VoI task assignments."""
+        # OHM-8w2: Value of Information task assignment for agent routing.
+        # Generates research tasks from VoI rankings, matched to agent expertise.
+        # ?agent=metis to filter by agent
+        # ?decision=node1,node2 to specify decision nodes
+        # ?top=5 to limit results
+        # ?layers=L3,L4 to scope by layer
+        # ?leak=0.15&root_prior=0.3 for Bayesian parameters
+        agent = qs.get("agent", [None])[0]
+        decision_str = qs.get("decision", [None])[0]
+        decision_nodes = [d.strip() for d in decision_str.split(",") if d.strip()] if decision_str else None
+        top = int(qs.get("top", ["5"])[0])
+        leak_probability = float(qs.get("leak", ["0.15"])[0])
+        root_prior = float(qs.get("root_prior", ["0.3"])[0])
+        layers_str = qs.get("layers", [""])[0]
+        layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
+        from .bayesian import generate_voi_tasks
+        result = generate_voi_tasks(
+            self.store.conn,
+            agent=agent,
+            decision_nodes=decision_nodes,
+            layers=layers,
+            top=top,
+            leak_probability=leak_probability,
+            root_prior=root_prior,
+        )
+        self._json_response(200, result)
+
+    def _get_suggest_causes(self, path: str, qs: dict) -> None:
+        """GET /suggest_causes — suggest candidate causal edges."""
+        # Suggest candidate CAUSES edges from existing non-causal relationships
+        # Identifies DEPENDS_ON/APPLIES_TO/REFINES/INFLUENCES edges that might be causal
+        min_confidence = float(qs.get("min_confidence", ["0.5"])[0])
+        from .bayesian import suggest_causes
+        result = suggest_causes(self.store.conn, min_confidence=min_confidence)
+        self._json_response(200, result)
+
+    def _get_deduplicate(self, path: str, qs: dict) -> None:
+        """GET /deduplicate — remove duplicate edges."""
+        # Remove duplicate edges (same from→to, type, layer), keeping most recent
+        self._require_write_auth()
+        layer = qs.get("layer", [None])[0]
+        if layer:
+            from .validation import validate_layer
+            try:
+                validate_layer(layer)
+            except ValueError as e:
+                raise ValidationError(str(e))
+        removed = self.store.deduplicate_edges(layer=layer)
+        self._json_response(200, {"removed": removed, "layer": layer})
+
+    def _get_refute(self, path: str, qs: dict) -> None:
+        """GET /refute — causal refutation tests."""
+        # Causal refutation: test robustness of causal conclusions
+        # Uses DoWhy refutation methods (requires dowhy package)
+        cause = qs.get("cause", [None])[0]
+        effect = qs.get("effect", [None])[0]
+        if not cause or not effect:
+            self._json_response(400, {"error": "missing_parameter", "message": "?cause=X&effect=Y required"})
+            return
+        from .validation import validate_identifier
+        cause = validate_identifier(cause, name="cause")
+        effect = validate_identifier(effect, name="effect")
+        n_samples = int(qs.get("n_samples", ["1000"])[0])
+        seed = int(qs.get("seed", ["42"])[0])
+        methods_str = qs.get("methods", [None])[0]
+        refutation_methods = methods_str.split(",") if methods_str else None
+        from .causal_refutation import refute_causal_effect
+        result = refute_causal_effect(
+            self.store.conn, cause, effect,
+            n_samples=n_samples,
+            seed=seed,
+            refutation_methods=refutation_methods,
+        )
+        self._json_response(200, result)
+
+    def _get_admin_checkpoint(self, path: str, qs: dict) -> None:
+        """GET /admin/checkpoint — force DuckDB CHECKPOINT."""
+        # Force DuckDB CHECKPOINT to flush WAL to main DB file
+        self._require_write_auth()
+        try:
+            self.store.conn.execute("CHECKPOINT")
+            self._json_response(200, {"status": "ok", "message": "WAL flushed to main database"})
+        except Exception as e:
+            self._json_response(500, {"error": "checkpoint_failed", "message": str(e)})
+
+    def _get_admin_embeddings(self, path: str, qs: dict) -> None:
+        """GET /admin/embeddings — batch generate embeddings."""
+        # Batch generate embeddings for nodes missing them (OHM-emb)
+        # Processes in small batches with delays to avoid OOM/timeout crashes
+        try:
+            from .queries import update_node_embedding
+            # Parse optional batch_size and delay_ms query params
+            batch_size = 5  # Process N nodes per request (small to avoid OOM)
+            delay_ms = 200  # Pause between each embedding (ms) to reduce memory pressure
+            if qs.get("batch_size"):
+                try:
+                    batch_size = int(qs["batch_size"][0])
+                    if batch_size < 1:
+                        batch_size = 1
+                    elif batch_size > 50:
+                        batch_size = 50
+                except ValueError:
+                    pass
+            if qs.get("delay_ms"):
+                try:
+                    delay_ms = int(qs["delay_ms"][0])
+                    if delay_ms < 0:
+                        delay_ms = 0
+                    elif delay_ms > 5000:
+                        delay_ms = 5000
+                except ValueError:
+                    pass
+
+            # Find all nodes without embeddings
+            rows = self.store.execute(
+                "SELECT id, label FROM ohm_nodes WHERE embedding IS NULL AND deleted_at IS NULL"
+            )
+            if not rows:
+                self._json_response(200, {
+                    "status": "ok",
+                    "updated": 0,
+                    "failed": 0,
+                    "total": 0,
+                    "message": "All nodes already have embeddings",
+                })
+                return
+
+            updated = 0
+            failed = 0
+            processed = 0
+            for row in rows:
+                # Stop after batch_size nodes — client can re-call for more
+                if processed >= batch_size:
+                    break
+                try:
+                    if update_node_embedding(self.store.conn, row["id"]):
+                        updated += 1
+                    else:
+                        failed += 1
+                except Exception:
+                    failed += 1
+                processed += 1
+                # Small delay between embeddings to reduce memory pressure
+                if delay_ms > 0:
+                    time.sleep(delay_ms / 1000.0)
+
+            total_missing = len(rows)
+            remaining = total_missing - processed
+            self._json_response(200, {
+                "status": "ok" if remaining == 0 else "partial",
+                "updated": updated,
+                "failed": failed,
+                "processed": processed,
+                "total": total_missing,
+                "remaining": remaining,
+                "message": f"Generated {updated} embeddings ({failed} failed). {remaining} remaining — re-call to continue.",
+            })
+        except Exception as e:
+            self._json_response(500, {"error": "embedding_backfill_failed", "message": str(e)})
+
+    def _get_admin_snapshots(self, path: str, qs: dict) -> None:
+        """GET /admin/snapshots — list DuckLake snapshots."""
+        # DuckLake time-travel: list available snapshots (OHM-kdk.3)
+        snapshots = self.store.list_snapshots()
+        self._json_response(200, {"snapshots": snapshots, "count": len(snapshots)})
+
+    def _get_graph_at(self, path: str, qs: dict) -> None:
+        """GET /graph/at — query graph at snapshot version."""
+        # DuckLake time-travel: query graph at specific snapshot version (OHM-kdk.3)
+        version = qs.get("version", [None])[0]
+        if not version:
+            raise ValidationError("?version=N is required for /graph/at")
+        try:
+            version_int = int(version)
+        except ValueError:
+            raise ValidationError("?version must be an integer snapshot ID")
+        result = self.store.graph_at_version(version_int)
+        self._json_response(200, result)
+
+    def _get_graph_changes(self, path: str, qs: dict) -> None:
+        """GET /graph/changes — changes between snapshot versions."""
+        # DuckLake time-travel: changes between two snapshot versions (OHM-kdk.3)
+        from_version = qs.get("from_version", [None])[0]
+        to_version = qs.get("to_version", [None])[0]
+        if not from_version or not to_version:
+            raise ValidationError("?from_version=M&to_version=N are required for /graph/changes")
+        try:
+            from_int = int(from_version)
+            to_int = int(to_version)
+        except ValueError:
+            raise ValidationError("?from_version and ?to_version must be integers")
+        result = self.store.graph_changes(from_int, to_int)
+        self._json_response(200, result)
+
+    def _get_reliability(self, path: str, qs: dict) -> None:
+        """GET /reliability/<agent> — source reliability metrics."""
+        # Compute source reliability metrics from historical outcomes
+        source_agent = path[13:]  # strip /reliability/
+        from .validation import validate_identifier
+        source_agent = validate_identifier(source_agent, name="source_agent")
+        from .queries import query_source_reliability
+        result = query_source_reliability(self.store.conn, source_agent)
+        self._json_response(200, result)
+
+    def _get_observations(self, path: str, qs: dict) -> None:
+        """GET /observations — list observations with filtering."""
+        obs_type = qs.get("type", [None])[0]
+        source = qs.get("source", [None])[0]
+        node_id = qs.get("node_id", [None])[0]
+        created_by = qs.get("created_by", [None])[0]
+        limit = int(qs.get("limit", [100])[0])
+        offset = int(qs.get("offset", [0])[0])
+        conditions = ["deleted_at IS NULL"]
+        params = []
+        if obs_type:
+            conditions.append("type = ?")
+            params.append(obs_type)
+        if source:
+            conditions.append("source = ?")
+            params.append(source)
+        if node_id:
+            conditions.append("node_id = ?")
+            params.append(node_id)
+        if created_by:
+            conditions.append("created_by = ?")
+            params.append(created_by)
+        params.append(limit)
+        params.append(offset)
+        sql = (
+            "SELECT * FROM ohm_observations WHERE "
+            + " AND ".join(conditions)
+            + " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        )
+        results = self.store.execute(sql, params)
+        # Count query
+        count_sql = "SELECT COUNT(*) as cnt FROM ohm_observations WHERE " + " AND ".join(conditions)
+        count_params = params[:-2]
+        total_result = self.store.execute(count_sql, count_params)
+        total = total_result[0]["cnt"] if total_result else len(results)
+        self._json_response(200, {"observations": results, "total": total, "limit": limit, "offset": offset})
+
 
     def _do_POST(self):
         """Handle POST requests — writes. Requires auth + write access.
@@ -2240,488 +2379,503 @@ class OhmHandler(BaseHTTPRequestHandler):
         body = self._read_body()
         body = self._validate_body(path, body)
 
-        if path == "/node":
-            # Support ?create_only=true to reject updates (upsert is the default — OHM-y2i.20)
-            create_only = qs.get("create_only", ["false"])[0].lower() in ("true", "1", "yes")
-            if create_only:
-                existing = self.store.conn.execute(
-                    "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [body["id"]],
-                ).fetchone()
-                if existing:
-                    self._json_response(409, {
-                        "error": "conflict",
-                        "message": f"Node {body['id']} already exists. Use ?create_only=false for upsert.",
-                    })
-                    return
+        method_name = self._POST_EXACT.get(path)
+        if method_name is None:
+            for prefix, mn in self._POST_PREFIXES:
+                if path.startswith(prefix):
+                    method_name = mn
+                    break
+        if method_name:
+            getattr(self, method_name)(path, qs, body, agent)
+        else:
+            self._json_response(404, {"error": f"Unknown endpoint: {path}"})
 
-            result = self.store.write_node(
-                id=body["id"],
-                label=body["label"],
-                type=body.get("type", "concept"),
-                content=body.get("content"),
-                confidence=body.get("confidence", 1.0),
-                visibility=body.get("visibility", "team"),
-                provenance=body.get("provenance"),
-                tags=body.get("tags"),
-                metadata=body.get("metadata"),
-                priority=body.get("priority"),
-                url=body.get("url"),
-                task_status=body.get("task_status"),
-                assigned_to=body.get("assigned_to"),
-                due_date=body.get("due_date"),
-                utility_scale=body.get("utility_scale"),
-                current_best_action=body.get("current_best_action"),
-                action_alternatives=body.get("action_alternatives"),
-                utility_usd_per_day=body.get("utility_usd_per_day"),
-                utility_currency=body.get("utility_currency"),
-                agent_name=agent,
-            )
-            event_type = "node.created" if result.get("created") else "node.updated"
+    def _post_node(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /node — create or upsert a node."""
+        # Support ?create_only=true to reject updates (upsert is the default — OHM-y2i.20)
+        create_only = qs.get("create_only", ["false"])[0].lower() in ("true", "1", "yes")
+        if create_only:
+            existing = self.store.conn.execute(
+                "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [body["id"]],
+            ).fetchone()
+            if existing:
+                self._json_response(409, {
+                    "error": "conflict",
+                    "message": f"Node {body['id']} already exists. Use ?create_only=false for upsert.",
+                })
+                return
+
+        result = self.store.write_node(
+            id=body["id"],
+            label=body["label"],
+            type=body.get("type", "concept"),
+            content=body.get("content"),
+            confidence=body.get("confidence", 1.0),
+            visibility=body.get("visibility", "team"),
+            provenance=body.get("provenance"),
+            tags=body.get("tags"),
+            metadata=body.get("metadata"),
+            priority=body.get("priority"),
+            url=body.get("url"),
+            task_status=body.get("task_status"),
+            assigned_to=body.get("assigned_to"),
+            due_date=body.get("due_date"),
+            utility_scale=body.get("utility_scale"),
+            current_best_action=body.get("current_best_action"),
+            action_alternatives=body.get("action_alternatives"),
+            utility_usd_per_day=body.get("utility_usd_per_day"),
+            utility_currency=body.get("utility_currency"),
+            agent_name=agent,
+        )
+        event_type = "node.created" if result.get("created") else "node.updated"
+        _trigger_webhooks({
+            "type": event_type,
+            "agent": agent,
+            "node": result,
+        })
+        if result.get("created", True):
+            self._json_response(201, result)
+        else:
+            self._json_response(200, result)
+
+    def _post_node_find_or_create(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /node/find_or_create — find existing node by label+type, or create new one."""
+        from .queries import find_or_create_node
+        node = find_or_create_node(
+            self.store.conn,
+            label=body["label"],
+            node_type=body.get("type", "concept"),
+            content=body.get("content"),
+            created_by=agent,
+            visibility=body.get("visibility", "team"),
+            provenance=body.get("provenance"),
+            confidence=body.get("confidence", 1.0),
+            priority=body.get("priority"),
+            url=body.get("url"),
+        )
+        is_new = node.pop("created", False)
+        self._json_response(201 if is_new else 200, node)
+
+    def _post_edge(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /edge — create an edge."""
+        result = self.store.write_edge(
+            from_node=body["from"],
+            to_node=body["to"],
+            edge_type=body["type"],
+            layer=body.get("layer", "L3"),
+            confidence=body.get("confidence"),
+            condition=body.get("condition"),
+            provenance=body.get("provenance"),
+            challenge_of=body.get("challenge_of"),
+            challenge_type=body.get("challenge_type"),
+            urgency=body.get("urgency"),
+            probability=body.get("probability"),
+            probability_p05=body.get("probability_p05"),
+            probability_p50=body.get("probability_p50"),
+            probability_p95=body.get("probability_p95"),
+            confidence_p05=body.get("confidence_p05"),
+            confidence_p50=body.get("confidence_p50"),
+            confidence_p95=body.get("confidence_p95"),
+            agent_name=agent,
+        )
+        _trigger_webhooks({
+            "type": "edge.created",
+            "agent": agent,
+            "edge": result,
+        })
+        self._json_response(201, result)
+
+    def _post_challenge(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /challenge/{id} — challenge an existing edge."""
+        edge_id = path[11:]
+        from .validation import validate_identifier
+        edge_id = validate_identifier(edge_id, name="edge_id")
+        reason = body.get("reason", "")
+        confidence = body.get("confidence", 0.5)
+        challenge_type = body.get("challenge_type", "CHALLENGED_BY")
+        result = self.store.challenge_edge(edge_id, reason, confidence, challenge_type, agent_name=agent)
+        if result:
             _trigger_webhooks({
-                "type": event_type,
+                "type": "edge.challenged",
                 "agent": agent,
-                "node": result,
+                "edge": result,
+                "challenge_type": challenge_type,
             })
-            if result.get("created", True):
-                self._json_response(201, result)
-            else:
-                self._json_response(200, result)
+            self._json_response(201, result)
+        else:
+            raise EdgeNotFoundError(f"Edge {edge_id} not found")
 
-        elif path == "/node/find_or_create":
-            # Find existing node by label+type, or create new one
-            from .queries import find_or_create_node
-            node = find_or_create_node(
-                self.store.conn,
-                label=body["label"],
-                node_type=body.get("type", "concept"),
-                content=body.get("content"),
-                created_by=agent,
-                visibility=body.get("visibility", "team"),
-                provenance=body.get("provenance"),
-                confidence=body.get("confidence", 1.0),
-                priority=body.get("priority"),
-                url=body.get("url"),
-            )
-            is_new = node.pop("created", False)
-            self._json_response(201 if is_new else 200, node)
-
-        elif path == "/edge":
-            result = self.store.write_edge(
-                from_node=body["from"],
-                to_node=body["to"],
-                edge_type=body["type"],
-                layer=body.get("layer", "L3"),
-                confidence=body.get("confidence"),
-                condition=body.get("condition"),
-                provenance=body.get("provenance"),
-                challenge_of=body.get("challenge_of"),
-                challenge_type=body.get("challenge_type"),
-                urgency=body.get("urgency"),
-                probability=body.get("probability"),
-                probability_p05=body.get("probability_p05"),
-                probability_p50=body.get("probability_p50"),
-                probability_p95=body.get("probability_p95"),
-                confidence_p05=body.get("confidence_p05"),
-                confidence_p50=body.get("confidence_p50"),
-                confidence_p95=body.get("confidence_p95"),
-                agent_name=agent,
-            )
+    def _post_support(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /support/{id} — support an existing edge."""
+        edge_id = path[9:]
+        from .validation import validate_identifier
+        edge_id = validate_identifier(edge_id, name="edge_id")
+        reason = body.get("reason", "")
+        confidence = body.get("confidence", 0.8)
+        result = self.store.challenge_edge(edge_id, reason, confidence, "SUPPORTS", agent_name=agent)
+        if result:
             _trigger_webhooks({
-                "type": "edge.created",
+                "type": "edge.supported",
                 "agent": agent,
                 "edge": result,
             })
             self._json_response(201, result)
-
-        elif path.startswith("/challenge/"):
-            edge_id = path[11:]
-            from .validation import validate_identifier
-            edge_id = validate_identifier(edge_id, name="edge_id")
-            reason = body.get("reason", "")
-            confidence = body.get("confidence", 0.5)
-            challenge_type = body.get("challenge_type", "CHALLENGED_BY")
-            result = self.store.challenge_edge(edge_id, reason, confidence, challenge_type, agent_name=agent)
-            if result:
-                _trigger_webhooks({
-                    "type": "edge.challenged",
-                    "agent": agent,
-                    "edge": result,
-                    "challenge_type": challenge_type,
-                })
-                self._json_response(201, result)
-            else:
-                raise EdgeNotFoundError(f"Edge {edge_id} not found")
-
-        elif path.startswith("/support/"):
-            edge_id = path[9:]
-            from .validation import validate_identifier
-            edge_id = validate_identifier(edge_id, name="edge_id")
-            reason = body.get("reason", "")
-            confidence = body.get("confidence", 0.8)
-            result = self.store.challenge_edge(edge_id, reason, confidence, "SUPPORTS", agent_name=agent)
-            if result:
-                _trigger_webhooks({
-                    "type": "edge.supported",
-                    "agent": agent,
-                    "edge": result,
-                })
-                self._json_response(201, result)
-            else:
-                raise EdgeNotFoundError(f"Edge {edge_id} not found")
-
-        elif path.startswith("/observe/"):
-            node_id = path[9:]
-            from .validation import validate_identifier
-            node_id = validate_identifier(node_id, name="node_id")
-            result = self.store.write_observation(
-                node_id=node_id,
-                type=body.get("type", "measurement"),
-                value=body.get("value"),
-                baseline=body.get("baseline"),
-                sigma=body.get("sigma"),
-                source=body.get("source"),
-                notes=body.get("notes"),
-                source_name=body.get("source_name"),
-                source_url=body.get("source_url"),
-                agent_name=agent,
-            )
-            _trigger_webhooks({
-                "type": "observation.created",
-                "agent": agent,
-                "observation": result,
-            })
-            self._json_response(201, result)
-
-        elif path == "/observations":
-            # OHM-0lf: Bulk observation upload.
-            # Accepts an array of observation objects in the "observations" field.
-            # Each observation: {node_id, value, sigma, obs_type, source}
-            obs_list = body.get("observations", [])
-            if not isinstance(obs_list, list):
-                raise ValidationError("'observations' must be an array")
-            if len(obs_list) > 1000:
-                raise ValidationError(f"Too many observations: {len(obs_list)} (max 1000)")
-
-            results = []
-            errors = []
-            for i, obs in enumerate(obs_list):
-                node_id = obs.get("node_id")
-                if not node_id:
-                    errors.append({"index": i, "error": "missing node_id"})
-                    continue
-                from .validation import validate_identifier
-                try:
-                    node_id = validate_identifier(node_id, name="node_id")
-                except ValueError as e:
-                    errors.append({"index": i, "error": str(e)})
-                    continue
-                try:
-                    result = self.store.write_observation(
-                        node_id=node_id,
-                        type=obs.get("obs_type", obs.get("type", "measurement")),
-                        value=obs.get("value"),
-                        baseline=obs.get("baseline"),
-                        sigma=obs.get("sigma"),
-                        source=obs.get("source"),
-                        notes=obs.get("notes"),
-                        source_name=obs.get("source_name"),
-                        source_url=obs.get("source_url"),
-                        agent_name=agent,
-                    )
-                    results.append(result)
-                except Exception as e:
-                    errors.append({"index": i, "node_id": node_id, "error": str(e)})
-
-            self._json_response(201, {
-                "created": len(results),
-                "errors": errors,
-                "observations": results,
-            })
-
-        elif path == "/outcome":
-            # Record whether a source agent's claim was correct
-            source_agent = body.get("source_agent")
-            claim_node = body.get("claim_node")
-            outcome = body.get("outcome")
-            notes = body.get("notes")
-            if not source_agent or not claim_node or outcome is None:
-                raise ValidationError("outcome requires source_agent, claim_node, and outcome fields")
-            from .queries import query_record_outcome
-            result = query_record_outcome(
-                self.store.conn,
-                source_agent=source_agent,
-                claim_node=claim_node,
-                outcome=bool(outcome),
-                recorded_by=agent,
-                notes=notes,
-            )
-            self._json_response(201, result)
-
-        elif path == "/batch":
-            # Batch node and edge creation — all-or-nothing transaction
-            nodes = body.get("nodes", [])
-            edges = body.get("edges", [])
-            errors = []
-            nodes_created = 0
-            edges_created = 0
-
-            if len(nodes) + len(edges) > MAX_BATCH_SIZE:
-                raise ValidationError(
-                    f"Batch too large: {len(nodes)} nodes + {len(edges)} edges = "
-                    f"{len(nodes) + len(edges)} items exceeds limit of {MAX_BATCH_SIZE}"
-                )
-
-            # Validate all inputs first
-            for i, node in enumerate(nodes):
-                if "id" not in node or "label" not in node:
-                    errors.append({"index": i, "type": "node", "error": "Missing required field: id and label"})
-            for i, edge in enumerate(edges):
-                if "from" not in edge or "to" not in edge or "type" not in edge:
-                    errors.append({"index": i, "type": "edge", "error": "Missing required field: from, to, type"})
-
-            if errors:
-                raise ValidationError(f"Batch validation failed: {json.dumps(errors)}")
-
-            # All-or-nothing: execute in a single transaction
-            try:
-                self.store.conn.execute("BEGIN TRANSACTION")
-                for node in nodes:
-                    self.store.write_node(
-                        id=node["id"],
-                        label=node["label"],
-                        type=node.get("type", "concept"),
-                        content=node.get("content"),
-                        confidence=node.get("confidence", 1.0),
-                        visibility=node.get("visibility", "team"),
-                        provenance=node.get("provenance"),
-                        tags=node.get("tags"),
-                        metadata=node.get("metadata"),
-                        priority=node.get("priority"),
-                        url=node.get("url"),
-                        task_status=node.get("task_status"),
-                        assigned_to=node.get("assigned_to"),
-                        due_date=node.get("due_date"),
-                        utility_scale=node.get("utility_scale"),
-                        current_best_action=node.get("current_best_action"),
-                        action_alternatives=node.get("action_alternatives"),
-                        utility_usd_per_day=node.get("utility_usd_per_day"),
-                        utility_currency=node.get("utility_currency"),
-                        agent_name=agent,
-                    )
-                    nodes_created += 1
-                for edge in edges:
-                    self.store.write_edge(
-                        from_node=edge["from"],
-                        to_node=edge["to"],
-                        edge_type=edge["type"],
-                        layer=edge.get("layer", "L3"),
-                        confidence=edge.get("confidence"),
-                        condition=edge.get("condition"),
-                        provenance=edge.get("provenance"),
-                        challenge_of=edge.get("challenge_of"),
-                        challenge_type=edge.get("challenge_type"),
-                        urgency=edge.get("urgency"),
-                        probability=edge.get("probability"),
-                        probability_p05=edge.get("probability_p05"),
-                        probability_p50=edge.get("probability_p50"),
-                        probability_p95=edge.get("probability_p95"),
-                        confidence_p05=edge.get("confidence_p05"),
-                        confidence_p50=edge.get("confidence_p50"),
-                        confidence_p95=edge.get("confidence_p95"),
-                        agent_name=agent,
-                    )
-                    edges_created += 1
-                self.store.conn.execute("COMMIT")
-            except Exception:
-                self.store.conn.execute("ROLLBACK")
-                raise
-
-            self._json_response(201, {
-                "nodes_created": nodes_created,
-                "edges_created": edges_created,
-                "errors": errors,
-            })
-
-        elif path == "/webhook":
-            # Register or update webhook callback URL for this agent
-            url = body.get("url", "")
-            events = body.get("events", ["node.created", "node.updated", "edge.created"])
-            if not url:
-                raise ValidationError("Webhook requires a 'url' field")
-            _validate_webhook_url(url)
-            with _webhook_lock:
-                _webhook_registry[agent] = {"url": url, "events": events}
-            self._json_response(200, {
-                "status": "registered",
-                "agent": agent,
-                "url": url,
-                "events": events,
-            })
-
-        elif path == "/state":
-            result = self.store.update_agent_state(
-                current_focus=body.get("focus"),
-                active_patterns=body.get("patterns"),
-                available_services=body.get("services"),
-                session_id=body.get("session_id"),
-                agent_name=agent,
-            )
-            self._json_response(200, result)
-
-        elif path == "/register":
-            # Agent registration — idempotent: creates or updates agent node + edges.
-            # If an agent with the same name already exists, reuses its node and
-            # refreshes its edges (deletes old, creates new).
-            from .queries import create_edge, find_or_create_node
-
-            agent_label = body.get("name", agent)
-            # Use deterministic ID for agent nodes to prevent duplicates
-            import re
-            agent_id = "agent_" + re.sub(r'[^a-zA-Z0-9]+', '_', agent_label.lower()).strip('_')
-
-            # Check if agent node already exists (including soft-deleted)
-            existing_active = self.store.conn.execute(
-                "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [agent_id]
-            ).fetchone()
-            existing_soft_deleted = self.store.conn.execute(
-                "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NOT NULL", [agent_id]
-            ).fetchone()
-
-            if existing_active:
-                # Update existing agent node (description may have changed)
-                self.store.conn.execute(
-                    "UPDATE ohm_nodes SET content = ?, updated_at = CURRENT_TIMESTAMP, updated_by = ? WHERE id = ?",
-                    [body.get("description"), agent, agent_id],
-                )
-                me = self.store.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [agent_id])[0]
-                # Soft-delete old registration edges
-                reg_edge_types = ("VALUES", "GOALS", "CAPABLE_OF", "INTERESTED_IN", "LISTENS_TO")
-                placeholders = ",".join(["?"] * len(reg_edge_types))
-                self.store.conn.execute(
-                    f"UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE from_node = ? AND edge_type IN ({placeholders}) AND deleted_at IS NULL",
-                    [agent_id] + list(reg_edge_types),
-                )
-            elif existing_soft_deleted:
-                # Reactivate soft-deleted agent node
-                self.store.conn.execute(
-                    """UPDATE ohm_nodes SET
-                        content = ?, updated_at = CURRENT_TIMESTAMP, updated_by = ?,
-                        deleted_at = NULL
-                    WHERE id = ?""",
-                    [body.get("description"), agent, agent_id],
-                )
-                me = self.store.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [agent_id])[0]
-                # Soft-delete old registration edges
-                reg_edge_types = ("VALUES", "GOALS", "CAPABLE_OF", "INTERESTED_IN", "LISTENS_TO")
-                placeholders = ",".join(["?"] * len(reg_edge_types))
-                self.store.conn.execute(
-                    f"UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE from_node = ? AND edge_type IN ({placeholders}) AND deleted_at IS NULL",
-                    [agent_id] + list(reg_edge_types),
-                )
-            else:
-                # Create new agent node with deterministic ID
-                self.store.conn.execute(
-                    """INSERT INTO ohm_nodes
-                       (id, label, type, content, created_by, confidence, visibility, created_at, updated_at)
-                       VALUES (?, ?, 'agent', ?, ?, 1.0, 'team', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
-                    [agent_id, agent_label, body.get("description"), agent],
-                )
-                me = self.store.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [agent_id])[0]
-
-            created_edges = []
-            for v in body.get("values", []):
-                value_node = find_or_create_node(
-                    self.store.conn, label=v, node_type="value", created_by=agent,
-                )
-                edge = create_edge(
-                    self.store.conn, from_node=agent_id, to_node=value_node["id"],
-                    edge_type="VALUES", layer="L1", created_by=agent, confidence=1.0,
-                    provenance="self_declaration",
-                )
-                created_edges.append(edge)
-
-            for g in body.get("goals", []):
-                goal_node = find_or_create_node(
-                    self.store.conn, label=g, node_type="goal", created_by=agent,
-                )
-                edge = create_edge(
-                    self.store.conn, from_node=agent_id, to_node=goal_node["id"],
-                    edge_type="GOALS", layer="L1", created_by=agent, confidence=1.0,
-                    provenance="self_declaration",
-                )
-                created_edges.append(edge)
-
-            for c in body.get("capabilities", []):
-                cap_node = find_or_create_node(
-                    self.store.conn, label=c, node_type="skill", created_by=agent,
-                )
-                edge = create_edge(
-                    self.store.conn, from_node=agent_id, to_node=cap_node["id"],
-                    edge_type="CAPABLE_OF", layer="L1", created_by=agent, confidence=1.0,
-                    provenance="self_declaration",
-                )
-                created_edges.append(edge)
-
-            for i in body.get("interests", []):
-                topic_node = find_or_create_node(
-                    self.store.conn, label=i, node_type="topic", created_by=agent,
-                )
-                edge = create_edge(
-                    self.store.conn, from_node=agent_id, to_node=topic_node["id"],
-                    edge_type="INTERESTED_IN", layer="L1", created_by=agent, confidence=1.0,
-                    provenance="self_declaration",
-                )
-                created_edges.append(edge)
-
-            for a in body.get("listens_to", []):
-                other = find_or_create_node(
-                    self.store.conn, label=a, node_type="agent", created_by=agent,
-                )
-                edge = create_edge(
-                    self.store.conn, from_node=agent_id, to_node=other["id"],
-                    edge_type="LISTENS_TO", layer="L3", created_by=agent, confidence=0.7,
-                    provenance="self_declaration",
-                )
-                created_edges.append(edge)
-
-            self._json_response(201, {
-                "agent": me,
-                "edges_created": len(created_edges),
-            })
-
-        elif path == "/heartbeat":
-            from .methods import agent_heartbeat
-            result = agent_heartbeat(
-                self.store.conn, agent,
-                focus=body.get("focus"),
-            )
-            # Also sync with DuckLake if configured
-            sync_result = self.store.sync_heartbeat()
-            result["ducklake_sync"] = sync_result
-            self._json_response(200, result)
-
-        elif path == "/deduplicate":
-            # Remove duplicate edges (same from→to, type, layer), keeping most recent
-            layer = qs.get("layer", [None])[0]
-            if layer:
-                from .validation import validate_layer
-                try:
-                    validate_layer(layer)
-                except ValueError as e:
-                    raise ValidationError(str(e))
-            removed = self.store.deduplicate_edges(layer=layer)
-            self._json_response(200, {"removed": removed, "layer": layer})
-
-        elif path == "/admin/checkpoint":
-            # Force DuckDB CHECKPOINT to flush WAL to main DB file
-            try:
-                self.store.conn.execute("CHECKPOINT")
-                self._json_response(200, {"status": "ok", "message": "WAL flushed to main database"})
-            except Exception as e:
-                self._json_response(500, {"error": "checkpoint_failed", "message": str(e)})
-
         else:
-            self._json_response(404, {"error": f"Unknown endpoint: {path}"})
+            raise EdgeNotFoundError(f"Edge {edge_id} not found")
+
+    def _post_observe(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /observe/{id} — record an observation on a node."""
+        node_id = path[9:]
+        from .validation import validate_identifier
+        node_id = validate_identifier(node_id, name="node_id")
+        result = self.store.write_observation(
+            node_id=node_id,
+            type=body.get("type", "measurement"),
+            value=body.get("value"),
+            baseline=body.get("baseline"),
+            sigma=body.get("sigma"),
+            source=body.get("source"),
+            notes=body.get("notes"),
+            source_name=body.get("source_name"),
+            source_url=body.get("source_url"),
+            agent_name=agent,
+        )
+        _trigger_webhooks({
+            "type": "observation.created",
+            "agent": agent,
+            "observation": result,
+        })
+        self._json_response(201, result)
+
+    def _post_observations(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /observations — bulk observation upload (OHM-0lf)."""
+        # Accepts an array of observation objects in the "observations" field.
+        # Each observation: {node_id, value, sigma, obs_type, source}
+        obs_list = body.get("observations", [])
+        if not isinstance(obs_list, list):
+            raise ValidationError("'observations' must be an array")
+        if len(obs_list) > 1000:
+            raise ValidationError(f"Too many observations: {len(obs_list)} (max 1000)")
+
+        results = []
+        errors = []
+        for i, obs in enumerate(obs_list):
+            node_id = obs.get("node_id")
+            if not node_id:
+                errors.append({"index": i, "error": "missing node_id"})
+                continue
+            from .validation import validate_identifier
+            try:
+                node_id = validate_identifier(node_id, name="node_id")
+            except ValueError as e:
+                errors.append({"index": i, "error": str(e)})
+                continue
+            try:
+                result = self.store.write_observation(
+                    node_id=node_id,
+                    type=obs.get("obs_type", obs.get("type", "measurement")),
+                    value=obs.get("value"),
+                    baseline=obs.get("baseline"),
+                    sigma=obs.get("sigma"),
+                    source=obs.get("source"),
+                    notes=obs.get("notes"),
+                    source_name=obs.get("source_name"),
+                    source_url=obs.get("source_url"),
+                    agent_name=agent,
+                )
+                results.append(result)
+            except Exception as e:
+                errors.append({"index": i, "node_id": node_id, "error": str(e)})
+
+        self._json_response(201, {
+            "created": len(results),
+            "errors": errors,
+            "observations": results,
+        })
+
+    def _post_outcome(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /outcome — record whether a source agent's claim was correct."""
+        source_agent = body.get("source_agent")
+        claim_node = body.get("claim_node")
+        outcome = body.get("outcome")
+        notes = body.get("notes")
+        if not source_agent or not claim_node or outcome is None:
+            raise ValidationError("outcome requires source_agent, claim_node, and outcome fields")
+        from .queries import query_record_outcome
+        result = query_record_outcome(
+            self.store.conn,
+            source_agent=source_agent,
+            claim_node=claim_node,
+            outcome=bool(outcome),
+            recorded_by=agent,
+            notes=notes,
+        )
+        self._json_response(201, result)
+
+    def _post_batch(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /batch — batch node and edge creation (all-or-nothing transaction)."""
+        nodes = body.get("nodes", [])
+        edges = body.get("edges", [])
+        errors = []
+        nodes_created = 0
+        edges_created = 0
+
+        if len(nodes) + len(edges) > MAX_BATCH_SIZE:
+            raise ValidationError(
+                f"Batch too large: {len(nodes)} nodes + {len(edges)} edges = "
+                f"{len(nodes) + len(edges)} items exceeds limit of {MAX_BATCH_SIZE}"
+            )
+
+        # Validate all inputs first
+        for i, node in enumerate(nodes):
+            if "id" not in node or "label" not in node:
+                errors.append({"index": i, "type": "node", "error": "Missing required field: id and label"})
+        for i, edge in enumerate(edges):
+            if "from" not in edge or "to" not in edge or "type" not in edge:
+                errors.append({"index": i, "type": "edge", "error": "Missing required field: from, to, type"})
+
+        if errors:
+            raise ValidationError(f"Batch validation failed: {json.dumps(errors)}")
+
+        # All-or-nothing: execute in a single transaction
+        try:
+            self.store.conn.execute("BEGIN TRANSACTION")
+            for node in nodes:
+                self.store.write_node(
+                    id=node["id"],
+                    label=node["label"],
+                    type=node.get("type", "concept"),
+                    content=node.get("content"),
+                    confidence=node.get("confidence", 1.0),
+                    visibility=node.get("visibility", "team"),
+                    provenance=node.get("provenance"),
+                    tags=node.get("tags"),
+                    metadata=node.get("metadata"),
+                    priority=node.get("priority"),
+                    url=node.get("url"),
+                    task_status=node.get("task_status"),
+                    assigned_to=node.get("assigned_to"),
+                    due_date=node.get("due_date"),
+                    utility_scale=node.get("utility_scale"),
+                    current_best_action=node.get("current_best_action"),
+                    action_alternatives=node.get("action_alternatives"),
+                    utility_usd_per_day=node.get("utility_usd_per_day"),
+                    utility_currency=node.get("utility_currency"),
+                    agent_name=agent,
+                )
+                nodes_created += 1
+            for edge in edges:
+                self.store.write_edge(
+                    from_node=edge["from"],
+                    to_node=edge["to"],
+                    edge_type=edge["type"],
+                    layer=edge.get("layer", "L3"),
+                    confidence=edge.get("confidence"),
+                    condition=edge.get("condition"),
+                    provenance=edge.get("provenance"),
+                    challenge_of=edge.get("challenge_of"),
+                    challenge_type=edge.get("challenge_type"),
+                    urgency=edge.get("urgency"),
+                    probability=edge.get("probability"),
+                    probability_p05=edge.get("probability_p05"),
+                    probability_p50=edge.get("probability_p50"),
+                    probability_p95=edge.get("probability_p95"),
+                    confidence_p05=edge.get("confidence_p05"),
+                    confidence_p50=edge.get("confidence_p50"),
+                    confidence_p95=edge.get("confidence_p95"),
+                    agent_name=agent,
+                )
+                edges_created += 1
+            self.store.conn.execute("COMMIT")
+        except Exception:
+            self.store.conn.execute("ROLLBACK")
+            raise
+
+        self._json_response(201, {
+            "nodes_created": nodes_created,
+            "edges_created": edges_created,
+            "errors": errors,
+        })
+
+    def _post_webhook(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /webhook — register or update webhook callback URL for this agent."""
+        url = body.get("url", "")
+        events = body.get("events", ["node.created", "node.updated", "edge.created"])
+        if not url:
+            raise ValidationError("Webhook requires a 'url' field")
+        _validate_webhook_url(url)
+        with _webhook_lock:
+            _webhook_registry[agent] = {"url": url, "events": events}
+        self._json_response(200, {
+            "status": "registered",
+            "agent": agent,
+            "url": url,
+            "events": events,
+        })
+
+    def _post_state(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /state — update agent state/focus."""
+        result = self.store.update_agent_state(
+            current_focus=body.get("focus"),
+            active_patterns=body.get("patterns"),
+            available_services=body.get("services"),
+            session_id=body.get("session_id"),
+            agent_name=agent,
+        )
+        self._json_response(200, result)
+
+    def _post_register(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /register — agent registration (idempotent: creates or updates agent node + edges)."""
+        # If an agent with the same name already exists, reuses its node and
+        # refreshes its edges (deletes old, creates new).
+        from .queries import create_edge, find_or_create_node
+
+        agent_label = body.get("name", agent)
+        # Use deterministic ID for agent nodes to prevent duplicates
+        import re
+        agent_id = "agent_" + re.sub(r'[^a-zA-Z0-9]+', '_', agent_label.lower()).strip('_')
+
+        # Check if agent node already exists (including soft-deleted)
+        existing_active = self.store.conn.execute(
+            "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [agent_id]
+        ).fetchone()
+        existing_soft_deleted = self.store.conn.execute(
+            "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NOT NULL", [agent_id]
+        ).fetchone()
+
+        if existing_active:
+            # Update existing agent node (description may have changed)
+            self.store.conn.execute(
+                "UPDATE ohm_nodes SET content = ?, updated_at = CURRENT_TIMESTAMP, updated_by = ? WHERE id = ?",
+                [body.get("description"), agent, agent_id],
+            )
+            me = self.store.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [agent_id])[0]
+            # Soft-delete old registration edges
+            reg_edge_types = ("VALUES", "GOALS", "CAPABLE_OF", "INTERESTED_IN", "LISTENS_TO")
+            placeholders = ",".join(["?"] * len(reg_edge_types))
+            self.store.conn.execute(
+                f"UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE from_node = ? AND edge_type IN ({placeholders}) AND deleted_at IS NULL",
+                [agent_id] + list(reg_edge_types),
+            )
+        elif existing_soft_deleted:
+            # Reactivate soft-deleted agent node
+            self.store.conn.execute(
+                """UPDATE ohm_nodes SET
+                    content = ?, updated_at = CURRENT_TIMESTAMP, updated_by = ?,
+                    deleted_at = NULL
+                WHERE id = ?""",
+                [body.get("description"), agent, agent_id],
+            )
+            me = self.store.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [agent_id])[0]
+            # Soft-delete old registration edges
+            reg_edge_types = ("VALUES", "GOALS", "CAPABLE_OF", "INTERESTED_IN", "LISTENS_TO")
+            placeholders = ",".join(["?"] * len(reg_edge_types))
+            self.store.conn.execute(
+                f"UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE from_node = ? AND edge_type IN ({placeholders}) AND deleted_at IS NULL",
+                [agent_id] + list(reg_edge_types),
+            )
+        else:
+            # Create new agent node with deterministic ID
+            self.store.conn.execute(
+                """INSERT INTO ohm_nodes
+                   (id, label, type, content, created_by, confidence, visibility, created_at, updated_at)
+                   VALUES (?, ?, 'agent', ?, ?, 1.0, 'team', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
+                [agent_id, agent_label, body.get("description"), agent],
+            )
+            me = self.store.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [agent_id])[0]
+
+        created_edges = []
+        for v in body.get("values", []):
+            value_node = find_or_create_node(
+                self.store.conn, label=v, node_type="value", created_by=agent,
+            )
+            edge = create_edge(
+                self.store.conn, from_node=agent_id, to_node=value_node["id"],
+                edge_type="VALUES", layer="L1", created_by=agent, confidence=1.0,
+                provenance="self_declaration",
+            )
+            created_edges.append(edge)
+
+        for g in body.get("goals", []):
+            goal_node = find_or_create_node(
+                self.store.conn, label=g, node_type="goal", created_by=agent,
+            )
+            edge = create_edge(
+                self.store.conn, from_node=agent_id, to_node=goal_node["id"],
+                edge_type="GOALS", layer="L1", created_by=agent, confidence=1.0,
+                provenance="self_declaration",
+            )
+            created_edges.append(edge)
+
+        for c in body.get("capabilities", []):
+            cap_node = find_or_create_node(
+                self.store.conn, label=c, node_type="skill", created_by=agent,
+            )
+            edge = create_edge(
+                self.store.conn, from_node=agent_id, to_node=cap_node["id"],
+                edge_type="CAPABLE_OF", layer="L1", created_by=agent, confidence=1.0,
+                provenance="self_declaration",
+            )
+            created_edges.append(edge)
+
+        for i in body.get("interests", []):
+            topic_node = find_or_create_node(
+                self.store.conn, label=i, node_type="topic", created_by=agent,
+            )
+            edge = create_edge(
+                self.store.conn, from_node=agent_id, to_node=topic_node["id"],
+                edge_type="INTERESTED_IN", layer="L1", created_by=agent, confidence=1.0,
+                provenance="self_declaration",
+            )
+            created_edges.append(edge)
+
+        for a in body.get("listens_to", []):
+            other = find_or_create_node(
+                self.store.conn, label=a, node_type="agent", created_by=agent,
+            )
+            edge = create_edge(
+                self.store.conn, from_node=agent_id, to_node=other["id"],
+                edge_type="LISTENS_TO", layer="L3", created_by=agent, confidence=0.7,
+                provenance="self_declaration",
+            )
+            created_edges.append(edge)
+
+        self._json_response(201, {
+            "agent": me,
+            "edges_created": len(created_edges),
+        })
+
+    def _post_heartbeat(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /heartbeat — agent heartbeat with sync."""
+        from .methods import agent_heartbeat
+        result = agent_heartbeat(
+            self.store.conn, agent,
+            focus=body.get("focus"),
+        )
+        # Also sync with DuckLake if configured
+        sync_result = self.store.sync_heartbeat()
+        result["ducklake_sync"] = sync_result
+        self._json_response(200, result)
+
+    def _post_deduplicate(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /deduplicate — remove duplicate edges (same from→to, type, layer), keeping most recent."""
+        layer = qs.get("layer", [None])[0]
+        if layer:
+            from .validation import validate_layer
+            try:
+                validate_layer(layer)
+            except ValueError as e:
+                raise ValidationError(str(e))
+        removed = self.store.deduplicate_edges(layer=layer)
+        self._json_response(200, {"removed": removed, "layer": layer})
+
+    def _post_admin_checkpoint(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /admin/checkpoint — force DuckDB CHECKPOINT to flush WAL to main DB file."""
+        try:
+            self.store.conn.execute("CHECKPOINT")
+            self._json_response(200, {"status": "ok", "message": "WAL flushed to main database"})
+        except Exception as e:
+            self._json_response(500, {"error": "checkpoint_failed", "message": str(e)})
 
     def _do_DELETE(self):
         """Handle DELETE requests — remove nodes or edges.
@@ -2744,52 +2898,158 @@ class OhmHandler(BaseHTTPRequestHandler):
             else:
                 raise AuthenticationError("Authentication required — provide Bearer token")
 
-        if path.startswith("/node/"):
-            node_id = path[6:]
-            from .validation import validate_identifier
-            node_id = validate_identifier(node_id, name="node_id")
-
-            # Verify node exists (idempotent 404)
-            node = self.store.conn.execute(
-                "SELECT id, created_by FROM ohm_nodes WHERE id = ?", [node_id],
-            ).fetchone()
-            if not node:
-                raise NodeNotFoundError(f"Node not found: {node_id}")
-
-            # Only allow deletion of own nodes (unless no_auth mode)
-            if not self.no_auth and node[1] != agent:
-                raise PermissionDeniedError(
-                    f"Cannot delete node {node_id}: owned by {node[1]}, you are {agent}"
-                )
-
-            # Use store method — splits edge deletion to avoid DuckDB index issues (OHM-cpi)
-            result = self.store.delete_node(node_id, deleted_by=agent)
-            self._json_response(200, result)
-
-        elif path.startswith("/edge/"):
-            edge_id = path[6:]
-            from .validation import validate_identifier
-            edge_id = validate_identifier(edge_id, name="edge_id")
-
-            # Verify edge exists (idempotent 404)
-            edge = self.store.conn.execute(
-                "SELECT id, created_by FROM ohm_edges WHERE id = ?", [edge_id],
-            ).fetchone()
-            if not edge:
-                raise EdgeNotFoundError(f"Edge not found: {edge_id}")
-
-            # Only allow deletion of own edges (unless no_auth mode)
-            if not self.no_auth and edge[1] != agent:
-                raise PermissionDeniedError(
-                    f"Cannot delete edge {edge_id}: owned by {edge[1]}, you are {agent}"
-                )
-
-            # Use store method
-            result = self.store.delete_edge(edge_id, deleted_by=agent)
-            self._json_response(200, result)
-
+        method_name = None
+        for prefix, mn in self._DELETE_PREFIXES:
+            if path.startswith(prefix):
+                method_name = mn
+                break
+        if method_name:
+            getattr(self, method_name)(path, agent)
         else:
             self._json_response(404, {"error": f"Unknown endpoint: {path}"})
+
+    def _delete_node(self, path: str, agent: str) -> None:
+        """DELETE /node/{id} — removes a node and its associated edges."""
+        node_id = path[6:]
+        from .validation import validate_identifier
+        node_id = validate_identifier(node_id, name="node_id")
+
+        # Verify node exists (idempotent 404)
+        node = self.store.conn.execute(
+            "SELECT id, created_by FROM ohm_nodes WHERE id = ?", [node_id],
+        ).fetchone()
+        if not node:
+            raise NodeNotFoundError(f"Node not found: {node_id}")
+
+        # Only allow deletion of own nodes (unless no_auth mode)
+        if not self.no_auth and node[1] != agent:
+            raise PermissionDeniedError(
+                f"Cannot delete node {node_id}: owned by {node[1]}, you are {agent}"
+            )
+
+        # Use store method — splits edge deletion to avoid DuckDB index issues (OHM-cpi)
+        result = self.store.delete_node(node_id, deleted_by=agent)
+        self._json_response(200, result)
+
+    def _delete_edge(self, path: str, agent: str) -> None:
+        """DELETE /edge/{id} — removes an edge."""
+        edge_id = path[6:]
+        from .validation import validate_identifier
+        edge_id = validate_identifier(edge_id, name="edge_id")
+
+        # Verify edge exists (idempotent 404)
+        edge = self.store.conn.execute(
+            "SELECT id, created_by FROM ohm_edges WHERE id = ?", [edge_id],
+        ).fetchone()
+        if not edge:
+            raise EdgeNotFoundError(f"Edge not found: {edge_id}")
+
+        # Only allow deletion of own edges (unless no_auth mode)
+        if not self.no_auth and edge[1] != agent:
+            raise PermissionDeniedError(
+                f"Cannot delete edge {edge_id}: owned by {edge[1]}, you are {agent}"
+            )
+
+        # Use store method
+        result = self.store.delete_edge(edge_id, deleted_by=agent)
+        self._json_response(200, result)
+
+
+# ── Dispatch table population ─────────────────────────────────────────────────
+# Populated after class body so method names are valid references.
+
+OhmHandler._DELETE_PREFIXES = [
+    ("/node/", "_delete_node"),
+    ("/edge/", "_delete_edge"),
+]
+
+OhmHandler._POST_EXACT = {
+    "/node": "_post_node",
+    "/node/find_or_create": "_post_node_find_or_create",
+    "/edge": "_post_edge",
+    "/observations": "_post_observations",
+    "/outcome": "_post_outcome",
+    "/batch": "_post_batch",
+    "/webhook": "_post_webhook",
+    "/state": "_post_state",
+    "/register": "_post_register",
+    "/heartbeat": "_post_heartbeat",
+    "/deduplicate": "_post_deduplicate",
+    "/admin/checkpoint": "_post_admin_checkpoint",
+}
+
+OhmHandler._POST_PREFIXES = [
+    ("/challenge/", "_post_challenge"),
+    ("/support/", "_post_support"),
+    ("/observe/", "_post_observe"),
+]
+
+OhmHandler._GET_EXACT = {
+    "/": "_get_infra_root",
+    "": "_get_infra_root",
+    "/openapi.json": "_get_infra_openapi",
+    "/health": "_get_infra_health",
+    "/ready": "_get_infra_ready",
+    "/metrics": "_get_infra_metrics",
+    "/stats": "_get_stats",
+    "/status": "_get_status",
+    "/schema": "_get_schema",
+    "/layers": "_get_layers",
+    "/agents": "_get_agents",
+    "/nodes": "_get_nodes",
+    "/tasks": "_get_tasks",
+    "/listen": "_get_listen",
+    "/search": "_get_search",
+    "/semantic_search": "_get_semantic_search",
+    "/health/graph": "_get_health_graph",
+    "/health/agents": "_get_health_agents",
+    "/contradictions": "_get_contradictions",
+    "/anomalies": "_get_anomalies",
+    "/stale": "_get_stale",
+    "/decay": "_get_decay",
+    "/duplicates": "_get_duplicates",
+    "/orphans": "_get_orphans",
+    "/hubs": "_get_hubs",
+    "/dead_ends": "_get_dead_ends",
+    "/suggest": "_get_suggest",
+    "/graph/stats": "_get_graph_stats",
+    "/lint": "_get_lint",
+    "/contract": "_get_contract",
+    "/inference": "_get_inference",
+    "/intervene": "_get_intervene",
+    "/ate": "_get_ate",
+    "/sensitivity": "_get_sensitivity",
+    "/adjustment": "_get_adjustment",
+    "/voi": "_get_voi",
+    "/markov/absorbing": "_get_markov_absorbing",
+    "/markov/expected_steps": "_get_markov_expected_steps",
+    "/voi/tasks": "_get_voi_tasks",
+    "/suggest_causes": "_get_suggest_causes",
+    "/deduplicate": "_get_deduplicate",
+    "/refute": "_get_refute",
+    "/admin/checkpoint": "_get_admin_checkpoint",
+    "/admin/embeddings": "_get_admin_embeddings",
+    "/admin/snapshots": "_get_admin_snapshots",
+    "/graph/at": "_get_graph_at",
+    "/graph/changes": "_get_graph_changes",
+    "/observations": "_get_observations",
+}
+
+OhmHandler._GET_PREFIXES = [
+    ("/node/", "_get_node"),
+    ("/deep/", "_get_deep"),
+    ("/edge/", "_get_edge"),
+    ("/neighborhood/", "_get_neighborhood"),
+    ("/path/", "_get_path"),
+    ("/impact/", "_get_impact"),
+    ("/confidence/", "_get_confidence"),
+    ("/agent/", "_get_agent"),
+    ("/aggregate/", "_get_aggregate"),
+    ("/provenance/", "_get_provenance"),
+    ("/monte-carlo/", "_get_monte_carlo"),
+    ("/calibration/", "_get_calibration"),
+    ("/reliability/", "_get_reliability"),
+]
 
 
 def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None = None):
