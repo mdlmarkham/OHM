@@ -169,3 +169,50 @@ def discretize_evidence(
         "direction": direction,
         "raw_value": value,
     }
+
+
+def discretize_alarms(
+    values: "dict[str, float]",
+    thresholds: "dict[str, tuple[float | None, float | None]]",
+    default_state: int = 1,
+) -> "dict[str, int]":
+    """Map a batch of sensor/metric values to binary states via alarm bounds (OHM-mk5v).
+
+    Each key in *values* is classified as 0 (bad) if its reading falls outside
+    the ``(low_alarm, high_alarm)`` interval, or 1 (good) if it's inside.
+    Keys with no entry in *thresholds* receive *default_state*.
+
+    Args:
+        values: ``{name: reading}`` dict of continuous measurements.
+        thresholds: ``{name: (low_alarm, high_alarm)}`` — either bound may be
+            ``None`` for one-sided alarm (e.g. ``(None, 100.0)`` = only an
+            upper limit).
+        default_state: State to assign when a key has no threshold (default 1 = good).
+
+    Returns:
+        ``{name: 0_or_1}`` binary state dict (0 = bad, 1 = good).
+
+    Examples::
+
+        discretize_alarms({"temp": 105}, {"temp": (0.0, 100.0)})
+        # → {"temp": 0}   (above high_alarm)
+
+        discretize_alarms({"ph": 6.5}, {"ph": (7.0, 14.0)})
+        # → {"ph": 0}     (below low_alarm)
+
+        discretize_alarms({"rpm": 1800}, {"rpm": (1000.0, 2000.0)})
+        # → {"rpm": 1}    (within alarm band)
+
+        discretize_alarms({"unknown": 42}, {})
+        # → {"unknown": 1}  (no threshold → default_state)
+    """
+    result: "dict[str, int]" = {}
+    for key, reading in values.items():
+        bounds = thresholds.get(key)
+        if bounds is None:
+            result[key] = default_state
+            continue
+        low, high = bounds
+        bad = (low is not None and reading < low) or (high is not None and reading > high)
+        result[key] = 0 if bad else 1
+    return result

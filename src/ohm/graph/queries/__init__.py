@@ -294,23 +294,8 @@ def query_confidence(
     from ohm.validation import validate_identifier
 
     edge_id = validate_identifier(edge_id, name="edge_id")
-    query = """
-        SELECT
-            e.id,
-            e.from_node,
-            e.to_node,
-            e.layer,
-            e.edge_type,
-            e.confidence,
-            e.condition,
-            e.provenance,
-            e.created_by,
-            e.created_at,
-            e.updated_at,
-            e.updated_by
-        FROM ohm_edges e
-        WHERE e.id = ?
-    """
+    # SELECT * so challenge_of, challenge_type, provenance, PERT fields etc. are all present (OHM-oxdq)
+    query = "SELECT * FROM ohm_edges WHERE id = ? AND deleted_at IS NULL"
     original = conn.execute(query, [edge_id]).fetchone()
     if original is None:
         return {"original": None, "challenges": [], "supports": [], "refinements": []}
@@ -320,10 +305,9 @@ def query_confidence(
 
     # Find all challenge/support/refine edges referencing this edge
     refs_query = """
-        SELECT
-            id, edge_type, confidence, condition, created_by, created_at
+        SELECT *
         FROM ohm_edges
-        WHERE challenge_of = ?
+        WHERE challenge_of = ? AND deleted_at IS NULL
         ORDER BY created_at DESC
     """
     refs_result = conn.execute(refs_query, [edge_id])

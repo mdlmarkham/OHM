@@ -3,6 +3,7 @@ from ohm.inference.evidence import *  # noqa: F401,F403
 from ohm.inference.evidence import (  # noqa: F401
     _norm_cdf,
     _sigmoid,
+    discretize_alarms as discretize_evidence,  # batch alarm API (OHM-mk5v)
 )
 try:
     from ohm.inference.evidence import __all__  # noqa: F401
