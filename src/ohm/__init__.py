@@ -15,6 +15,7 @@ from .graph_reader import (
     NodeRecord,
     ObservationRecord,
 )
+from .semantic_roles import SemanticRoles
 
 __all__ = [
     "DuckDBGraphReader",
@@ -23,4 +24,5 @@ __all__ = [
     "MockGraphReader",
     "NodeRecord",
     "ObservationRecord",
+    "SemanticRoles",
 ]

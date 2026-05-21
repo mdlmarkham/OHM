@@ -33,6 +33,7 @@ from typing import Any
 
 from ohm.validation import validate_identifier
 from ohm.graph_reader import GraphReader, DuckDBGraphReader, coerce_reader, raw_conn
+from ohm.semantic_roles import SemanticRoles
 
 _coerce_reader = coerce_reader
 _raw_conn = raw_conn
@@ -138,6 +139,7 @@ def build_bayesian_network(
     leak_probability: float = 0.15,
     default_probability: float = 0.5,
     root_prior: float = 0.3,
+    semantic_roles: SemanticRoles | None = None,
 ) -> dict[str, Any] | None:
     """Build a BayesianNetwork from OHM edges with probability/confidence values.
 
@@ -215,7 +217,10 @@ def build_bayesian_network(
     if edge_types is None:
         # ADR-009: NEGATES edges have inverted probability semantics
         # (negative evidence: parent=bad *reduces* child=bad probability)
-        edge_types = ["CAUSES", "DEPENDS_ON", "THREATENS", "EXPECTED_LIKELIHOOD", "NEGATES"]
+        if semantic_roles is not None:
+            edge_types = semantic_roles.bayesian_list()
+        else:
+            edge_types = ["CAUSES", "DEPENDS_ON", "THREATENS", "EXPECTED_LIKELIHOOD", "NEGATES"]
 
     # Fetch edges via reader (ADR-008: prob and conf are distinct; ADR-013: PERT)
     _edge_records = reader.get_edges(edge_types=edge_types, layers=layers)
@@ -689,6 +694,7 @@ def causal_intervention(
     layers: list[str] | None = None,
     leak_probability: float = 0.15,
     root_prior: float = 0.3,
+    semantic_roles: SemanticRoles | None = None,
 ) -> dict[str, Any]:
     """Run causal intervention using Pearl's do-operator (graph surgery).
 
@@ -755,6 +761,7 @@ def causal_intervention(
         root_nodes=scope_nodes,
         leak_probability=leak_probability,
         root_prior=root_prior,
+        semantic_roles=semantic_roles,
     )
 
     if network is None:
@@ -997,6 +1004,7 @@ def compute_ate(
     layers: list[str] | None = None,
     leak_probability: float = 0.15,
     root_prior: float = 0.3,
+    semantic_roles: SemanticRoles | None = None,
 ) -> dict[str, Any]:
     """Compute Average Treatment Effect (ATE) from the Bayesian model.
 
@@ -1039,6 +1047,7 @@ def compute_ate(
         layers=layers,
         leak_probability=leak_probability,
         root_prior=root_prior,
+        semantic_roles=semantic_roles,
     )
     do_good = causal_intervention(
         reader, cause, 1,
@@ -1047,6 +1056,7 @@ def compute_ate(
         layers=layers,
         leak_probability=leak_probability,
         root_prior=root_prior,
+        semantic_roles=semantic_roles,
     )
 
     # Extract posteriors
@@ -1613,6 +1623,7 @@ def compute_voi(
     leak_probability: float = 0.15,
     root_prior: float = 0.3,
     timeout: float | None = None,
+    semantic_roles: SemanticRoles | None = None,
 ) -> dict[str, Any]:
     """Compute Value of Information (VoI) for research prioritization.
 
@@ -1647,7 +1658,10 @@ def compute_voi(
         - n_candidates: total number of candidate nodes
     """
     if edge_types is None:
-        edge_types = ["CAUSES", "INFLUENCES", "ENABLES", "DEPENDS_ON"]
+        if semantic_roles is not None:
+            edge_types = semantic_roles.causal_list()
+        else:
+            edge_types = ["CAUSES", "INFLUENCES", "ENABLES", "DEPENDS_ON"]
 
     reader = _coerce_reader(conn)
 
@@ -1846,6 +1860,7 @@ def compute_voi(
                         layers=layers,
                         leak_probability=leak_probability,
                         root_prior=root_prior,
+                        semantic_roles=semantic_roles,
                     )
                 _du = decision_utility.get(decision, {})
                 _usd = _du.get("utility_usd_per_day")

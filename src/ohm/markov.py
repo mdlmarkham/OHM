@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
 from ohm.graph_reader import coerce_reader as _coerce_reader
+from ohm.semantic_roles import SemanticRoles
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,7 @@ def _build_transition_matrix(
     *,
     edge_types: list[str] | None = None,
     state_nodes: list[str] | None = None,
+    semantic_roles: "SemanticRoles | None" = None,
 ) -> tuple[list[str], Any, list[str], list[str]]:
     """Build transition matrix from OHM edges.
 
@@ -50,7 +52,10 @@ def _build_transition_matrix(
     _require_numpy()
 
     if edge_types is None:
-        edge_types = ["CAUSES", "TRANSITIONS_TO"]
+        if semantic_roles is not None:
+            edge_types = semantic_roles.state_transitions_list()
+        else:
+            edge_types = ["CAUSES", "TRANSITIONS_TO"]
 
     reader = _coerce_reader(conn)
     _edge_records = reader.get_edges(edge_types=edge_types)
@@ -120,6 +125,7 @@ def markov_absorbing_risk(
     *,
     edge_types: list[str] | None = None,
     state_nodes: list[str] | None = None,
+    semantic_roles: "SemanticRoles | None" = None,
 ) -> dict[str, Any]:
     """Compute absorption probabilities from a start node.
 
@@ -131,6 +137,7 @@ def markov_absorbing_risk(
         start_node: Node ID to compute absorption from.
         edge_types: Edge types to treat as transitions.
         state_nodes: Optional restrict to specific node IDs.
+        semantic_roles: Optional role-to-edge-type mapping overrides.
 
     Returns:
         Dict with 'method', 'start_node', 'absorption_probabilities',
@@ -140,7 +147,8 @@ def markov_absorbing_risk(
 
     reader = _coerce_reader(conn)
     nodes, matrix, transient, absorbing = _build_transition_matrix(
-        reader, edge_types=edge_types, state_nodes=state_nodes
+        reader, edge_types=edge_types, state_nodes=state_nodes,
+        semantic_roles=semantic_roles,
     )
 
     if not nodes:
@@ -257,6 +265,7 @@ def markov_expected_steps(
     target_state: str | None = None,
     edge_types: list[str] | None = None,
     state_nodes: list[str] | None = None,
+    semantic_roles: "SemanticRoles | None" = None,
 ) -> dict[str, Any]:
     """Compute expected number of steps to absorption from a start node.
 
@@ -270,6 +279,7 @@ def markov_expected_steps(
             absorbing state (not implemented — returns total for now).
         edge_types: Edge types to treat as transitions.
         state_nodes: Optional restrict to specific node IDs.
+        semantic_roles: Optional role-to-edge-type mapping overrides.
 
     Returns:
         Dict with 'method', 'start_node', 'expected_steps',
@@ -279,7 +289,8 @@ def markov_expected_steps(
 
     reader = _coerce_reader(conn)
     nodes, matrix, transient, absorbing = _build_transition_matrix(
-        reader, edge_types=edge_types, state_nodes=state_nodes
+        reader, edge_types=edge_types, state_nodes=state_nodes,
+        semantic_roles=semantic_roles,
     )
 
     if not nodes:
@@ -383,7 +394,8 @@ def markov_expected_steps(
     if target_state is not None:
         if target_state in absorbing:
             absorption = markov_absorbing_risk(
-                conn, start_node, edge_types=edge_types, state_nodes=state_nodes
+                conn, start_node, edge_types=edge_types, state_nodes=state_nodes,
+                semantic_roles=semantic_roles,
             )
             prob = absorption.get("absorption_probabilities", {}).get(target_state, 0.0)
             if prob > 0:
