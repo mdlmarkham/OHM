@@ -1320,13 +1320,17 @@ def find_adjustment_sets(
         }
 
     # Build the Bayesian network
-    network = build_bayesian_network(
-        reader,
-        edge_types=edge_types,
-        layers=layers,
-        leak_probability=leak_probability,
-        root_prior=root_prior,
-    )
+    try:
+        network = build_bayesian_network(
+            reader,
+            edge_types=edge_types,
+            layers=layers,
+            leak_probability=leak_probability,
+            root_prior=root_prior,
+        )
+    except Exception as e:
+        return {"method": "none", "cause": cause, "effect": effect,
+                "error": f"Failed to build Bayesian network: {e}"}
     if network is None:
         return {
             "method": "none",
@@ -1350,7 +1354,11 @@ def find_adjustment_sets(
     # Use pgmpy's CausalInference to find adjustment sets
     from pgmpy.inference import CausalInference
 
-    ci = CausalInference(bn)
+    try:
+        ci = CausalInference(bn)
+    except Exception as e:
+        return {"method": "none", "cause": cause, "effect": effect,
+                "error": f"CausalInference init failed (CPD missing after subgraph pruning): {e}"}
     len(bn.nodes())
     result = {
         "method": "adjustment_sets",

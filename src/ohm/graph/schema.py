@@ -481,7 +481,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.17.0"
+SCHEMA_VERSION = "0.18.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -567,6 +567,32 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
     ("0.17.0", "add USD utility columns to decision nodes for VoI calibration (OHM-fh3e)", [
         "ALTER TABLE ohm_nodes ADD COLUMN utility_usd_per_day FLOAT",
         "ALTER TABLE ohm_nodes ADD COLUMN utility_currency VARCHAR",
+    ]),
+    ("0.18.0", "create ohm_change_feed/ohm_change_log if missing (OHM-y30o)", [
+        "CREATE SEQUENCE IF NOT EXISTS seq_change_feed START 1",
+        """CREATE TABLE IF NOT EXISTS ohm_change_feed (
+            id          BIGINT PRIMARY KEY DEFAULT nextval('seq_change_feed'),
+            table_name  VARCHAR NOT NULL,
+            row_id      VARCHAR NOT NULL,
+            operation   VARCHAR NOT NULL,
+            agent_name  VARCHAR NOT NULL,
+            old_data    JSON,
+            new_data    JSON,
+            occurred_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+        """CREATE TABLE IF NOT EXISTS ohm_change_log (
+            id          VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+            table_name  VARCHAR NOT NULL,
+            row_id      VARCHAR NOT NULL,
+            operation   VARCHAR NOT NULL,
+            agent_name  VARCHAR NOT NULL,
+            layer       VARCHAR,
+            snapshot_id VARCHAR,
+            changed_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            change_data JSON
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_feed_agent ON ohm_change_feed(agent_name)",
+        "CREATE INDEX IF NOT EXISTS idx_feed_time ON ohm_change_feed(occurred_at)",
     ]),
 ]
 

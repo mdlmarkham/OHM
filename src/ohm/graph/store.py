@@ -847,6 +847,17 @@ class OhmStore:
         actor = agent_name or self.agent_name
         now = self._now()
 
+        # Referential integrity: verify both endpoints exist (OHM-7298)
+        if challenge_of is None:  # challenge edges can reference deleted/nonexistent nodes
+            for node_id, role in ((from_node, "from_node"), (to_node, "to_node")):
+                exists = self.conn.execute(
+                    "SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                    [node_id],
+                ).fetchone()
+                if not exists:
+                    from ohm.exceptions import NodeNotFoundError
+                    raise NodeNotFoundError(f"Edge {role} does not exist: {node_id}")
+
         # Compute PERT mean when PERT triple is provided but probability is not
         if probability is None and probability_p50 is not None:
             from ohm.inference.pert import compute_pert_mean

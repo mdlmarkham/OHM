@@ -394,8 +394,13 @@ def _build_router() -> _RouteRegistry:
         "/node", "/node/find_or_create", "/edge",
         "/outcome", "/agent/synthesis", "/batch",
         "/webhook", "/state", "/register", "/heartbeat",
+        "/sync",
     ):
         r.add("POST", _p)
+
+    # /tasks: GET (list) and POST (create)
+    r.add("GET", "/tasks")
+    r.add("POST", "/tasks")
 
     # POST prefix routes
     for _p in ("/challenge/", "/support/", "/observe/", "/webhook/"):
@@ -719,10 +724,12 @@ class OhmHandler(BaseHTTPRequestHandler):
 
     _REQUIRED_FIELDS = {
         "/node": ["id", "label"],
+        "/tasks": ["id", "label"],
         "/edge": ["from", "to", "type"],
         "/state": [],
         "/register": [],
         "/heartbeat": [],
+        "/sync": [],
         "/challenge": [],
         "/support": [],
         "/observe": [],
@@ -1451,12 +1458,20 @@ class OhmHandler(BaseHTTPRequestHandler):
             raise NodeNotFoundError(f"Node {node_id} not found")
 
     def _get_deep(self, path: str, qs: dict) -> None:
-        """GET /deep/<id> — deep content retrieval."""
+        """GET /deep/<id> — deep content retrieval with connected edges (OHM-7299)."""
         node_id = path[6:]
         from ohm.validation import validate_identifier
         node_id = validate_identifier(node_id, name="node_id")
         try:
             result = self.store.deep_content(node_id)
+            # Include connected edges so agents get graph context alongside file content
+            edges = self.store.execute(
+                "SELECT * FROM ohm_edges WHERE (from_node = ? OR to_node = ?) "
+                "AND deleted_at IS NULL ORDER BY created_at DESC",
+                [node_id, node_id],
+            )
+            result["edges"] = edges
+            result["edge_count"] = len(edges)
             self._json_response(200, result)
         except NodeNotFoundError:
             raise
@@ -2528,6 +2543,9 @@ class OhmHandler(BaseHTTPRequestHandler):
         node_id = path[9:]
         from ohm.validation import validate_identifier
         node_id = validate_identifier(node_id, name="node_id")
+        # Validate node exists before writing observation (OHM-7302)
+        if not self.store.get_node(node_id):
+            raise NodeNotFoundError(f"Node not found: {node_id}")
         result = self.store.write_observation(
             node_id=node_id,
             type=body.get("type", "measurement"),
@@ -2845,6 +2863,38 @@ class OhmHandler(BaseHTTPRequestHandler):
             "edges_created": len(created_edges),
         })
 
+    def _post_sync(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /sync — explicit DuckLake sync trigger (OHM-7301)."""
+        sync_result = self.store.sync_heartbeat()
+        self._json_response(200, sync_result)
+
+    def _post_task(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /tasks — create a task node (OHM-7304)."""
+        result = self.store.write_node(
+            id=body["id"],
+            label=body["label"],
+            type="task",
+            content=body.get("content"),
+            confidence=body.get("confidence", 1.0),
+            visibility=body.get("visibility", "team"),
+            provenance=body.get("provenance"),
+            tags=body.get("tags"),
+            metadata=body.get("metadata"),
+            priority=body.get("priority"),
+            url=body.get("url"),
+            task_status=body.get("task_status", "open"),
+            assigned_to=body.get("assigned_to"),
+            due_date=body.get("due_date"),
+            utility_usd_per_day=body.get("utility_usd_per_day"),
+            utility_currency=body.get("utility_currency"),
+            agent_name=agent,
+        )
+        _trigger_webhooks({"type": "task.created", "agent": agent, "node": result})
+        if result.get("created", True):
+            self._json_response(201, result)
+        else:
+            self._json_response(200, result)
+
     def _post_heartbeat(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /heartbeat — agent heartbeat with sync."""
         from ohm.methods import agent_heartbeat
@@ -2974,6 +3024,8 @@ OhmHandler._POST_EXACT = {
     "/state": "_post_state",
     "/register": "_post_register",
     "/heartbeat": "_post_heartbeat",
+    "/sync": "_post_sync",
+    "/tasks": "_post_task",
     "/deduplicate": "_post_deduplicate",
     "/admin/checkpoint": "_post_admin_checkpoint",
 }
