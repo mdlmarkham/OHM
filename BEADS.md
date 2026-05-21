@@ -164,3 +164,13 @@ Closed cross-cutting:
 - **Server tests:** 17 HTTP endpoints now covered ✅
 - **Auth fail-open fixed:** Default is fail-closed, --no-auth for dev ✅
 - **Parameterized queries:** f-string SQL replaced ✅
+OHM-gfix   P0: Graph Structural Health — Orphan Reduction, Challenge Culture, Deduplication
+├── OHM-gfix.1  P0: Orphan Detection and Auto-Connect Pipeline (50 orphans, 38% disconnected)
+├── OHM-gfix.2  P0: Challenge Edge Culture — Breaking the 0.02 Ratio (3/146 CHALLENGED_BY)
+├── OHM-gfix.3  P0: Source Reliability Endpoint Missing (404, merges OHM-7e4)
+├── OHM-gfix.4  P0: Duplicate Node Detection and Merge (detected by /suggest shared_tags)
+├── OHM-gfix.5  P1: Agent Synthesis Writing — L3 Edges Not Just Observations
+├── OHM-gfix.6  P1: /listen Endpoint Broken or Empty
+├── OHM-gfix.7  P1: /suggest Output Missing Node Details
+├── OHM-gfix.8  P1: /neighborhood Endpoint Not Working
+└── OHM-gfix.9  P2: Embedding Backfill Still Not Run
