@@ -413,6 +413,7 @@ def _build_router() -> _RouteRegistry:
     # PATCH
     r.add("PATCH", "/node/")
     r.add("PATCH", "/edge/")
+    r.add("PATCH", "/tasks/")
 
     # DELETE
     r.add("DELETE", "/node/")
@@ -1098,6 +1099,9 @@ class OhmHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
         body = self._read_body()
+
+        if path.startswith("/tasks/"):
+            path = "/node/" + path[7:]
 
         if path.startswith("/node/"):
             node_id = path[6:]
