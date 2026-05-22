@@ -124,6 +124,7 @@ def query_neighborhood(
             FROM visited v
             JOIN ohm_edges e ON {join_on}
             WHERE v.hop < ?
+              AND e.deleted_at IS NULL
               {layer_clause}
         )
         SELECT DISTINCT ON (e.id)
@@ -140,6 +141,7 @@ def query_neighborhood(
             MIN(v.hop) AS hop
         FROM visited v
         JOIN ohm_edges e ON (e.from_node = v.node OR e.to_node = v.node)
+          AND e.deleted_at IS NULL
         {layer_clause}
         GROUP BY e.id, e.from_node, e.to_node, e.layer, e.edge_type,
                  e.confidence, e.created_by, e.created_at,
@@ -179,11 +181,12 @@ def query_path(
 
     edge_query = (
         "SELECT id, from_node, to_node, layer, edge_type, confidence FROM ohm_edges"
+        " WHERE deleted_at IS NULL"
     )
     params: list = []
     if layer:
         layer = validate_layer(layer)
-        edge_query += " WHERE layer = ?"
+        edge_query += " AND layer = ?"
         params.append(layer)
 
     all_edges = _rows_to_dicts(conn.execute(edge_query, params))
@@ -242,6 +245,7 @@ def query_impact(
                 1 AS depth
             FROM ohm_edges e
             WHERE e.from_node = ?
+              AND e.deleted_at IS NULL
               AND e.layer IN ('L2', 'L3')
 
             UNION ALL
@@ -257,6 +261,7 @@ def query_impact(
             FROM impact_cte i
             JOIN ohm_edges e ON e.from_node = i.to_node
             WHERE i.depth < ?
+              AND e.deleted_at IS NULL
               AND e.layer IN ('L2', 'L3')
         )
         SELECT edge_id, from_node, to_node, layer, edge_type, confidence, depth
@@ -525,6 +530,7 @@ def query_threat_cluster(
         )
         WHERE (e.from_node = ? OR e.to_node = ?)
           AND n.id != ?
+          AND e.deleted_at IS NULL
           {edge_filter}
         ORDER BY n.id, e.confidence DESC
     """
