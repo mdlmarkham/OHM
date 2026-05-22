@@ -1388,10 +1388,24 @@ class OhmHandler(BaseHTTPRequestHandler):
 
     def _get_infra_health(self, path: str, qs: dict) -> None:
         """GET /health — health check (no auth)."""
-        self._json_response(200, {
+        payload: dict = {
             "status": "ok",
             "uptime": round(time.time() - _START_TIME, 1),
-        })
+        }
+        try:
+            from ohm.queries import query_graph_health
+            graph = query_graph_health(self.store.conn)
+            payload["graph"] = {
+                "health_score": graph.get("health_score"),
+                "node_count": graph.get("node_count"),
+                "edge_count": graph.get("edge_count"),
+                "orphan_count": graph.get("orphan_count"),
+                "orphan_rate": graph.get("orphan_rate"),
+                "low_confidence_count": graph.get("low_confidence_count"),
+            }
+        except Exception:
+            pass  # Graph stats are advisory — don't fail the health check
+        self._json_response(200, payload)
 
     def _get_infra_ready(self, path: str, qs: dict) -> None:
         """GET /ready — readiness check (no auth)."""
