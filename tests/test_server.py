@@ -119,6 +119,17 @@ class TestHealthEndpoints:
         assert data["status"] == "ok"
         assert "uptime" in data
 
+    def test_health_graph_stats_populated(self, test_server):
+        port, _ = test_server
+        status, data = _request("GET", port, "/health")
+        assert status == 200
+        graph = data.get("graph", {})
+        # All graph stat fields must be present and non-None
+        for key in ("health_score", "node_count", "edge_count", "orphan_count",
+                    "orphan_rate", "low_confidence_count"):
+            assert key in graph, f"Missing graph stat: {key}"
+            assert graph[key] is not None, f"Graph stat null: {key}"
+
     def test_ready_returns_ready(self, test_server):
         port, _ = test_server
         status, data = _request("GET", port, "/ready")
@@ -226,6 +237,35 @@ class TestQueryEndpoints:
 
         status, data = _request("GET", port, "/path/p/q")
         assert status == 200
+        # Single-hop: should return exactly 1 edge (p→q)
+        assert len(data) == 1
+        assert data[0]["from_node"] == "p"
+        assert data[0]["to_node"] == "q"
+        assert data[0]["depth"] == 1
+
+    def test_path_multi_hop_returns_full_chain(self, test_server):
+        port, store = test_server
+        for nid in ("pa", "pb", "pc"):
+            _request("POST", port, "/node", body={"id": nid, "label": nid.upper(), "type": "concept"})
+        _request("POST", port, "/edge", body={"from": "pa", "to": "pb", "type": "CAUSES", "layer": "L3"})
+        _request("POST", port, "/edge", body={"from": "pb", "to": "pc", "type": "CAUSES", "layer": "L3"})
+
+        status, data = _request("GET", port, "/path/pa/pc")
+        assert status == 200
+        # Must return both edges in order: pa→pb, pb→pc
+        assert len(data) == 2
+        assert data[0]["from_node"] == "pa" and data[0]["to_node"] == "pb"
+        assert data[1]["from_node"] == "pb" and data[1]["to_node"] == "pc"
+
+    def test_path_no_route_returns_empty(self, test_server):
+        port, store = test_server
+        for nid in ("px", "py"):
+            _request("POST", port, "/node", body={"id": nid, "label": nid.upper(), "type": "concept"})
+        # No edge between px and py
+
+        status, data = _request("GET", port, "/path/px/py")
+        assert status == 200
+        assert data == []
 
     def test_impact(self, test_server):
         port, store = test_server

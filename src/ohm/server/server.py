@@ -1257,7 +1257,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                 "/metrics": {"method": "GET", "description": "Prometheus-style metrics"},
                 "/stats": {"method": "GET", "description": "Graph statistics (nodes, edges, layers)"},
                 "/inference": {"method": "GET", "description": "Bayesian inference: compute posterior probabilities given evidence (observation, includes confounders). ?layers=L3,L4 to scope by layer"},
-                "/intervene": {"method": "GET", "description": "Causal intervention using Pearl's do-operator: sever incoming edges to target, set value externally, propagate direct causal effect (no confounders). ?layers=L3,L4 to scope by layer"},
+                "/intervene": {"method": "GET", "description": "Causal intervention using Pearl's do-operator: sever incoming edges to target, set value externally, propagate direct causal effect (no confounders). Required: ?target=node_id&state=0|1 (0=bad/forced-down, 1=good/forced-up). Optional: ?query=node1,node2 ?layers=L3,L4 ?leak=0.15"},
                 "/ate": {"method": "GET", "description": "Average Treatment Effect: model-based ATE from noisy-OR CPDs (ATE = P(effect=bad|do(cause=bad)) - P(effect=bad|do(cause=good))). ?layers=L3,L4 to scope by layer"},
                 "/sensitivity": {"method": "GET", "description": "Sensitivity analysis: E-value quantifying how much unmeasured confounding would overturn a causal conclusion. ?layers=L3,L4 to scope by layer"},
                 "/adjustment": {"method": "GET", "description": "Find valid backdoor/frontdoor adjustment sets for causal identification (Pearl's criteria). ?layers=L3,L4 to scope by layer"},
@@ -1398,13 +1398,15 @@ class OhmHandler(BaseHTTPRequestHandler):
         try:
             from ohm.queries import query_graph_health
             graph = query_graph_health(self.store.conn)
+            total_nodes = graph.get("total_nodes") or 0
+            orphan_nodes = graph.get("orphan_nodes") or 0
             payload["graph"] = {
                 "health_score": graph.get("health_score"),
-                "node_count": graph.get("node_count"),
-                "edge_count": graph.get("edge_count"),
-                "orphan_count": graph.get("orphan_count"),
-                "orphan_rate": graph.get("orphan_rate"),
-                "low_confidence_count": graph.get("low_confidence_count"),
+                "node_count": total_nodes,
+                "edge_count": graph.get("total_edges"),
+                "orphan_count": orphan_nodes,
+                "orphan_rate": round(orphan_nodes / total_nodes, 4) if total_nodes else 0,
+                "low_confidence_count": graph.get("low_confidence_unchallenged"),
             }
         except Exception:
             pass  # Graph stats are advisory — don't fail the health check
