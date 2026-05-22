@@ -411,9 +411,11 @@ DDL_STATEMENTS: list[str] = [
     );
     """,
     # ── Change Feed ──────────────────────────────────────────────────────
-    """
-    CREATE SEQUENCE IF NOT EXISTS seq_change_feed START 1;
-    CREATE TABLE IF NOT EXISTS ohm_change_feed (
+    # Split into separate execute() calls — DuckDB only runs the first
+    # statement in a multi-statement string, so CREATE TABLE would be silently
+    # skipped if combined with CREATE SEQUENCE in one string.
+    "CREATE SEQUENCE IF NOT EXISTS seq_change_feed START 1",
+    """CREATE TABLE IF NOT EXISTS ohm_change_feed (
         id          BIGINT PRIMARY KEY DEFAULT nextval('seq_change_feed'),
         table_name  VARCHAR NOT NULL,
         row_id      VARCHAR NOT NULL,
@@ -422,8 +424,7 @@ DDL_STATEMENTS: list[str] = [
         old_data    JSON,
         new_data    JSON,
         occurred_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-    """,
+    )""",
     # ── Snapshots ────────────────────────────────────────────────────────
     """
     CREATE TABLE IF NOT EXISTS ohm_snapshots (

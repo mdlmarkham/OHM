@@ -2410,3 +2410,73 @@ class TestMetisBatch2Fixes:
         assert abs(data.get("ate", 0.0)) > 0.01, (
             f"ATE should be non-zero with direct causal edge, got {data}"
         )
+
+
+class TestGitHubBacklogFixes:
+    """Regression tests for GitHub issues from Deepthought/Socrates (OHM-zwrw, OHM-9pb7, OHM-zn3s)."""
+
+    def test_heartbeat_does_not_crash_when_change_feed_missing(self, test_server):
+        """POST /heartbeat must not 500 even when ohm_change_feed table is absent (OHM-zwrw)."""
+        port, store = test_server
+        # Drop the change feed table to simulate a pre-migration production DB
+        try:
+            store.conn.execute("DROP TABLE IF EXISTS ohm_change_feed")
+            store.conn.execute("DROP SEQUENCE IF EXISTS seq_change_feed")
+        except Exception:
+            pass
+        # Heartbeat should succeed (not 500)
+        status, data = _request("POST", port, "/heartbeat", body={"focus": "test"})
+        assert status == 200, f"Heartbeat should not crash without ohm_change_feed: {data}"
+
+    def test_change_feed_query_falls_back_when_table_missing(self, test_server):
+        """GET /listen must not crash when ohm_change_feed is absent (OHM-zwrw)."""
+        port, store = test_server
+        try:
+            store.conn.execute("DROP TABLE IF EXISTS ohm_change_feed")
+        except Exception:
+            pass
+        # /listen reads from ohm_change_feed — should fall back to ohm_change_log
+        status, data = _request("GET", port, "/listen?limit=5")
+        assert status == 200, f"/listen should not crash without ohm_change_feed: {data}"
+
+    def test_voi_reports_mixed_sensitivity_methods(self, test_server):
+        """GET /voi includes mixed_sensitivity_methods flag in response (OHM-9pb7)."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/voi?top=5")
+        assert status == 200
+        assert "mixed_sensitivity_methods" in data, (
+            f"VoI response must include mixed_sensitivity_methods field: {data}"
+        )
+        assert "sensitivity_methods_used" in data
+
+    def test_voi_min_observations_flags_sparse_nodes(self, test_server):
+        """GET /voi?min_observations=3 flags nodes with fewer than 3 observations (OHM-zn3s)."""
+        port, store = test_server
+        store.write_node("dec-test-voi", "Test Decision", "decision",
+                         agent_name="test", utility_scale=1.0)
+        store.write_node("anc-test-voi", "Test Ancestor", "concept", agent_name="test")
+        _request("POST", port, "/edge", body={
+            "from": "anc-test-voi",
+            "to": "dec-test-voi",
+            "type": "CAUSES",
+            "layer": "L3",
+            "probability": 0.7,
+        })
+        status, data = _request("GET", port, "/voi?min_observations=3&decision=dec-test-voi")
+        assert status == 200
+        for entry in data.get("rankings", []):
+            if entry["node_id"] == "anc-test-voi":
+                assert entry.get("low_data_warning") is True, (
+                    f"Node with 0 obs should have low_data_warning: {entry}"
+                )
+                break
+
+    def test_voi_no_low_data_warning_when_threshold_zero(self, test_server):
+        """GET /voi without min_observations has no low_data_warning fields (OHM-zn3s)."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/voi?top=5")
+        assert status == 200
+        for entry in data.get("rankings", []):
+            assert "low_data_warning" not in entry, (
+                f"low_data_warning should not appear when min_observations=0: {entry}"
+            )

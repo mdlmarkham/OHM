@@ -1702,6 +1702,7 @@ def compute_voi(
     root_prior: float = 0.3,
     timeout: float | None = None,
     semantic_roles: SemanticRoles | None = None,
+    min_observations: int = 0,
 ) -> dict[str, Any]:
     """Compute Value of Information (VoI) for research prioritization.
 
@@ -1726,14 +1727,19 @@ def compute_voi(
         root_prior: Prior probability for root nodes.
         timeout: Maximum seconds for ATE computation. Candidates not computed
             within this window fall back to path-confidence sensitivity.
+        min_observations: Minimum observation count for reliable VoI estimates.
+            Nodes below this threshold are flagged with low_data_warning=True.
+            Default 0 (no flagging). Recommended: 3.
 
     Returns:
         Dict with:
         - method: "value_of_information"
         - decision_nodes: list of decision node IDs used
         - rankings: list of {node_id, label, voi_score, uncertainty, sensitivity,
-          downstream_decisions} sorted by voi_score descending
+          sensitivity_method, downstream_decisions, low_data_warning} sorted by voi_score desc
         - n_candidates: total number of candidate nodes
+        - mixed_sensitivity_methods: True when rankings mix ATE and path_confidence
+          (values are non-comparable; standardize with ?min_ate=1 or add more causal edges)
     """
     if edge_types is None:
         if semantic_roles is not None:
@@ -1757,6 +1763,8 @@ def compute_voi(
             "decision_nodes": [],
             "rankings": [],
             "n_candidates": 0,
+            "mixed_sensitivity_methods": False,
+            "sensitivity_methods_used": [],
             "message": "No decision nodes found. Create nodes with type='decision' or specify decision_nodes.",
         }
 
@@ -1846,6 +1854,8 @@ def compute_voi(
             "decision_nodes": decision_nodes,
             "rankings": [],
             "n_candidates": 0,
+            "mixed_sensitivity_methods": False,
+            "sensitivity_methods_used": [],
             "message": "No causal ancestors found for the specified decision nodes.",
         }
 
@@ -1959,6 +1969,8 @@ def compute_voi(
         # VoI = uncertainty × sensitivity
         voi_score = uncertainty * sensitivity
 
+        obs_count = obs_counts.get(node_id, 0)
+        low_data = min_observations > 0 and obs_count < min_observations
         rankings.append({
             "node_id": node_id,
             "label": info["label"],
@@ -1967,9 +1979,13 @@ def compute_voi(
             "sensitivity": round(sensitivity, 4),
             "sensitivity_method": sensitivity_method,
             "confidence": round(confidence, 4),
-            "observation_count": obs_counts.get(node_id, 0),
+            "observation_count": obs_count,
             "downstream_decisions": downstream_decisions,
             "n_downstream_decisions": len(downstream_decisions),
+            **({"low_data_warning": True, "low_data_note": (
+                f"Only {obs_count} observation(s) — VoI estimate unreliable "
+                f"(min_observations={min_observations})"
+            )} if low_data else {}),
         })
 
     # Sort by VoI score descending
@@ -1978,12 +1994,22 @@ def compute_voi(
     if top is not None:
         rankings = rankings[:top]
 
+    methods_used = set(r["sensitivity_method"] for r in rankings)
+    mixed = len(methods_used) > 1
+
     return {
         "method": "value_of_information",
         "decision_nodes": decision_nodes,
         "rankings": rankings,
         "n_candidates": len(candidate_nodes),
         "units": voi_units,
+        "sensitivity_methods_used": sorted(methods_used),
+        **({"mixed_sensitivity_methods": True, "mixed_methods_note": (
+            "Rankings mix ATE (causal effect size, ~0.02-0.12) and "
+            "path_confidence (edge confidence product, ~0.3-0.5) — "
+            "values are not directly comparable. Check sensitivity_method "
+            "per entry. Add more CAUSES edges or increase timeout for full ATE coverage."
+        )} if mixed else {"mixed_sensitivity_methods": False}),
     }
 
 

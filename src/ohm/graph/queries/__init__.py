@@ -420,8 +420,14 @@ def query_change_feed(
     """
     params.append(limit)
 
-    result = conn.execute(query, params)
-    entries = _rows_to_dicts(result)
+    try:
+        result = conn.execute(query, params)
+        entries = _rows_to_dicts(result)
+    except Exception:
+        # ohm_change_feed missing on DBs that pre-date the 0.18.0 migration or
+        # where CREATE SEQUENCE/TABLE silently failed — fall through to the
+        # ohm_change_log fallback below.
+        entries = []
 
     # Fallback to ohm_change_log when feed is empty (e.g., database migrated from older version)
     if not entries:
