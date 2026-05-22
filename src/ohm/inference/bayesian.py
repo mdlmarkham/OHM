@@ -1954,6 +1954,12 @@ def compute_voi(
         # Per ADR-013: use max PERT variance across edges from this node toward decisions.
         # If any edge has PERT data, use the max variance. If no PERT data on any edge,
         # fall back to 1 - confidence.
+        # NOTE: ohm_nodes has DEFAULT 1.0 for confidence, so confidence=1.0 means
+        # "no explicit belief set", NOT "perfectly known". Treat it as 50% uncertain
+        # rather than 0%, otherwise ALL unrated nodes get VoI=0.
+        def _conf_to_uncertainty(conf: float) -> float:
+            return 0.5 if conf >= 1.0 else max(0.0, 1.0 - conf)
+
         node_uncertainties = []
         for decision in decision_nodes:
             if node_id in all_ancestors.get(decision, set()):
@@ -1963,7 +1969,7 @@ def compute_voi(
                 if path_variance is not None:
                     node_uncertainties.append(path_variance)
                 else:
-                    node_uncertainties.append(1.0 - confidence)
+                    node_uncertainties.append(_conf_to_uncertainty(confidence))
 
         # Use maximum uncertainty across all paths (conservative estimate).
         # Note asymmetry with sensitivity: uncertainty uses max() while
@@ -1972,7 +1978,7 @@ def compute_voi(
         # is additive because a node that affects multiple decisions is more
         # valuable to research (the same observation reduces uncertainty for
         # all downstream decisions simultaneously).
-        uncertainty = max(node_uncertainties) if node_uncertainties else (1.0 - confidence)
+        uncertainty = max(node_uncertainties) if node_uncertainties else _conf_to_uncertainty(confidence)
 
         # Sensitivity: how much does this node affect decisions?
         # Per ADR-013: use |ATE(ancestor → decision)| when possible,
