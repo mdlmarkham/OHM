@@ -68,6 +68,7 @@ def _safe_node_id(node_id: str) -> str:
 def _find_acyclic_subgraph(
     edges: list[tuple[str, str]],
     edge_probabilities: dict[tuple[str, str], float] | None = None,
+    preferred_edges: set[tuple[str, str]] | None = None,
 ) -> list[tuple[str, str]]:
     """Remove edges that create cycles using topological sort.
 
@@ -75,11 +76,17 @@ def _find_acyclic_subgraph(
     preferring to remove low-probability edges when probability data is
     available (ADR-008: probability reflects causal strength).
 
+    When *preferred_edges* is provided, avoids removing those edges during
+    cycle-breaking (e.g. the queried cause→effect edge). Falls back to
+    removing a preferred edge only if all cycle candidates are preferred.
+
     Args:
         edges: List of (from, to) node pairs.
         edge_probabilities: Optional mapping of (from, to) -> probability.
             When provided, edges in cycles are removed by lowest probability
             first. When not provided, the edge in the most cycles is removed.
+        preferred_edges: Optional set of (from, to) edges to preserve.
+            The cycle breaker avoids removing these edges when alternatives exist.
     """
     # Build adjacency and try topological sort
     import networkx as nx  # type: ignore
@@ -116,12 +123,17 @@ def _find_acyclic_subgraph(
                     edge_cycle_count[e] = edge_cycle_count.get(e, 0) + 1
             # Choose which edge to remove
             cycle_edges = [e for e in edge_cycle_count if e in set(edges_list)]
+            # Never remove a preferred edge if a non-preferred alternative exists
+            candidates = (
+                [e for e in cycle_edges if e not in preferred_edges]
+                if preferred_edges else cycle_edges
+            ) or cycle_edges  # fall back to all cycle edges if all are preferred
             if edge_probabilities:
-                # Prefer removing the lowest-probability edge among cycle edges
-                worst = min(cycle_edges, key=lambda e: edge_probabilities.get(e, 0.5))
+                # Prefer removing the lowest-probability edge among candidates
+                worst = min(candidates, key=lambda e: edge_probabilities.get(e, 0.5))
             else:
                 # Fall back to removing the edge in the most cycles
-                worst = max(cycle_edges, key=edge_cycle_count.get)  # type: ignore
+                worst = max(candidates, key=lambda e: edge_cycle_count.get(e, 0))
             edges_list.remove(worst)
         except (nx.NetworkXError, StopIteration):
             break
@@ -140,6 +152,7 @@ def build_bayesian_network(
     default_probability: float = 0.5,
     root_prior: float = 0.3,
     semantic_roles: SemanticRoles | None = None,
+    preferred_edges: set[tuple[str, str]] | None = None,
 ) -> dict[str, Any] | None:
     """Build a BayesianNetwork from OHM edges with probability/confidence values.
 
@@ -396,7 +409,16 @@ def build_bayesian_network(
             st = safe_names.get(e["to"])
             if sf and st:
                 edge_prob_map[(sf, st)] = e.get("probability", default_probability)
-        model_edge_tuples = _find_acyclic_subgraph(model_edge_tuples, edge_probabilities=edge_prob_map)
+        safe_preferred: set[tuple[str, str]] | None = None
+        if preferred_edges:
+            safe_preferred = {
+                (_safe_node_id(a), _safe_node_id(b)) for a, b in preferred_edges
+            }
+        model_edge_tuples = _find_acyclic_subgraph(
+            model_edge_tuples,
+            edge_probabilities=edge_prob_map,
+            preferred_edges=safe_preferred,
+        )
 
     if not model_edge_tuples:
         # Single-node network (no edges) — still valid for priors
@@ -705,6 +727,7 @@ def causal_intervention(
     leak_probability: float = 0.15,
     root_prior: float = 0.3,
     semantic_roles: SemanticRoles | None = None,
+    preferred_edges: set[tuple[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Run causal intervention using Pearl's do-operator (graph surgery).
 
@@ -772,6 +795,7 @@ def causal_intervention(
         leak_probability=leak_probability,
         root_prior=root_prior,
         semantic_roles=semantic_roles,
+        preferred_edges=preferred_edges,
     )
 
     if network is None:
@@ -1050,6 +1074,9 @@ def compute_ate(
         }
 
     # Compute interventional distributions: do(cause=bad) and do(cause=good)
+    # Pass the queried cause→effect as a preferred edge so the cycle breaker
+    # avoids removing it (it prefers removing backward/feedback edges instead).
+    _preferred = {(cause, effect)}
     do_bad = causal_intervention(
         reader, cause, 0,
         query_nodes=[effect],
@@ -1058,6 +1085,7 @@ def compute_ate(
         leak_probability=leak_probability,
         root_prior=root_prior,
         semantic_roles=semantic_roles,
+        preferred_edges=_preferred,
     )
     do_good = causal_intervention(
         reader, cause, 1,
@@ -1067,6 +1095,7 @@ def compute_ate(
         leak_probability=leak_probability,
         root_prior=root_prior,
         semantic_roles=semantic_roles,
+        preferred_edges=_preferred,
     )
 
     # Extract posteriors

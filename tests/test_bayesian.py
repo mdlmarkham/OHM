@@ -158,6 +158,26 @@ class TestFindAcyclicSubgraph:
         # D→A should be removed (lowest probability)
         assert ("D", "A") not in result
 
+    def test_preferred_edge_preserved_in_cycle(self):
+        """OHM-n80b: preferred_edges prevents removal of the queried causal edge.
+
+        Scenario: bidirectional CAUSES cycle where the backward edge (B→A) has
+        higher probability than the forward edge (A→B). Without preferred_edges,
+        the cycle breaker would remove A→B (lower prob). With preferred_edges,
+        it must keep A→B and remove B→A instead.
+        """
+        edges = [("A", "B"), ("B", "A")]
+        probs = {("A", "B"): 0.85, ("B", "A"): 0.92}
+        # Without preferred_edges: removes A→B (lower probability)
+        result_default = _find_acyclic_subgraph(edges, edge_probabilities=probs)
+        assert ("A", "B") not in result_default  # wrong — removes the causal edge
+        # With preferred_edges={(A,B)}: must keep A→B, removes B→A instead
+        result_preferred = _find_acyclic_subgraph(
+            edges, edge_probabilities=probs, preferred_edges={("A", "B")}
+        )
+        assert ("A", "B") in result_preferred
+        assert ("B", "A") not in result_preferred
+
 
 # ── Unit Tests: build_bayesian_network ────────────────────────────────────
 
