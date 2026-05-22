@@ -312,7 +312,13 @@ def query_agent_health(
                 NULL AS minutes_since_heartbeat
             FROM ohm_nodes n
             WHERE n.type = 'agent' AND n.deleted_at IS NULL
+              -- Skip if already tracked in ohm_agent_state under the same name
               AND n.id NOT IN (SELECT agent_name FROM ohm_agent_state)
+              -- Skip if this is the 'agent-X' prefixed form of a tracked agent
+              -- (avoids duplicate rows when agents register as both 'metis' and 'agent-metis')
+              AND REGEXP_REPLACE(n.id, '^agent-', '') NOT IN (SELECT agent_name FROM ohm_agent_state)
+              -- Skip if the bare name has an 'agent-' prefixed version already tracked
+              AND ('agent-' || n.id) NOT IN (SELECT agent_name FROM ohm_agent_state)
         )
         SELECT *, CASE status WHEN 'alive' THEN 1 WHEN 'registered' THEN 2 WHEN 'stale' THEN 3 ELSE 4 END AS sort_key FROM state_agents
         UNION ALL

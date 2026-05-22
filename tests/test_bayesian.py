@@ -560,7 +560,10 @@ class TestCausalIntervention:
                 [str(uuid.uuid4()), src, dst, prob],
             )
 
-        # Patch build_bayesian_network to count calls
+        # Patch build_bayesian_network to count calls.
+        # Must patch the real module (ohm.inference.bayesian), not the shim
+        # (ohm.bayesian) — causal_intervention resolves the function from its
+        # own module namespace, so patching the shim has no effect.
         original_build = build_bayesian_network
         call_count = {"count": 0}
 
@@ -568,7 +571,7 @@ class TestCausalIntervention:
             call_count["count"] += 1
             return original_build(*args, **kwargs)
 
-        with patch("ohm.bayesian.build_bayesian_network", side_effect=counting_build):
+        with patch("ohm.inference.bayesian.build_bayesian_network", side_effect=counting_build):
             result = causal_intervention(
                 db,
                 target=b,
