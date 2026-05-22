@@ -479,3 +479,5 @@
 {"id":"int-9c07c6fd","kind":"field_change","created_at":"2026-05-22T14:39:52.002658116Z","actor":"Claude","issue_id":"OHM-ylnw","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Fixed in commit 3b24991"}}
 {"id":"int-9654c0b6","kind":"field_change","created_at":"2026-05-22T14:39:52.186931572Z","actor":"Claude","issue_id":"OHM-k2t4","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Fixed in commit 3b24991"}}
 {"id":"int-6bc1efae","kind":"field_change","created_at":"2026-05-22T14:39:52.360673381Z","actor":"Claude","issue_id":"OHM-21ar","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Fixed in commit 3b24991"}}
+{"id":"int-2398fc9f","kind":"field_change","created_at":"2026-05-22T15:07:24.595002399Z","actor":"Claude","issue_id":"OHM-n80b","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
+{"id":"int-edd77efc","kind":"field_change","created_at":"2026-05-22T15:07:24.876244368Z","actor":"Claude","issue_id":"OHM-in4l","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
