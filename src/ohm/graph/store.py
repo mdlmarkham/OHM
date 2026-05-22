@@ -960,10 +960,11 @@ class OhmStore:
         return edge
 
     def deduplicate_edges(self, layer: str | None = None) -> int:
-        """Remove duplicate edges, keeping the most recent one per unique combination.
+        """Remove duplicate edges, keeping the highest-confidence one per unique combination.
 
         Two edges are considered duplicates if they share the same
         (from_node, to_node, edge_type, layer) and neither is deleted.
+        When confidence is equal or NULL, the most recently created edge wins.
 
         Args:
             layer: Optional layer filter. If provided, only deduplicate edges
@@ -975,7 +976,8 @@ class OhmStore:
         now = self._now()
 
         # Find duplicate groups: same (from_node, to_node, edge_type, layer)
-        # with more than one active edge. Keep the most recently created one.
+        # with more than one active edge. Keep highest-confidence edge
+        # (NULL confidence treated as 0); break ties by most recent created_at.
         # OHM-s0g: Use parameterized queries instead of f-string SQL for layer.
 
         if layer:
@@ -983,7 +985,7 @@ class OhmStore:
                 SELECT keep_id FROM (
                     SELECT id as keep_id, from_node, to_node, edge_type, layer, ROW_NUMBER() OVER (
                         PARTITION BY from_node, to_node, edge_type, layer
-                        ORDER BY created_at DESC
+                        ORDER BY COALESCE(confidence, 0) DESC, created_at DESC
                     ) as rn
                     FROM ohm_edges
                     WHERE deleted_at IS NULL
@@ -1003,7 +1005,7 @@ class OhmStore:
                 SELECT keep_id FROM (
                     SELECT id as keep_id, from_node, to_node, edge_type, layer, ROW_NUMBER() OVER (
                         PARTITION BY from_node, to_node, edge_type, layer
-                        ORDER BY created_at DESC
+                        ORDER BY COALESCE(confidence, 0) DESC, created_at DESC
                     ) as rn
                     FROM ohm_edges
                     WHERE deleted_at IS NULL

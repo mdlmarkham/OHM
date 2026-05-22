@@ -2079,12 +2079,22 @@ class OhmHandler(BaseHTTPRequestHandler):
         # Parse optional layers filter: ?layers=L3,L4
         layers_str = qs.get("layers", [""])[0]
         layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
+        # Parse optional preferred_edges: ?preferred_edges=A:B,C:D (colon-separated pairs)
+        pe_str = qs.get("preferred_edges", [""])[0]
+        preferred_edges: set[tuple[str, str]] | None = None
+        if pe_str:
+            preferred_edges = set()
+            for pair in pe_str.split(","):
+                parts = pair.strip().split(":")
+                if len(parts) == 2 and parts[0].strip() and parts[1].strip():
+                    preferred_edges.add((parts[0].strip(), parts[1].strip()))
         from ohm.bayesian import causal_intervention
         result = causal_intervention(
             self.store.conn, target, intervention_state,
             query_nodes=query_nodes,
             layers=layers,
             leak_probability=leak_probability,
+            preferred_edges=preferred_edges,
         )
         self._json_response(200, result)
 
