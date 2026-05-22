@@ -1599,6 +1599,7 @@ def suggest_causes(
     conn,
     *,
     edge_types: list[str] | None = None,
+    layers: list[str] | None = None,
     min_confidence: float = 0.5,
 ) -> dict[str, Any]:
     """Suggest candidate CAUSES edges from existing non-causal relationships.
@@ -1626,8 +1627,8 @@ def suggest_causes(
     # Candidate edge types that might indicate causal relationships
     candidate_types = ["DEPENDS_ON", "APPLIES_TO", "REFINES", "INFLUENCES", "EXPECTED_LIKELIHOOD"]
 
-    # Find all edges of candidate types with confidence set
-    _cand_records = reader.get_edges(edge_types=candidate_types)
+    # Find all edges of candidate types with confidence set (respect layer scope)
+    _cand_records = reader.get_edges(edge_types=candidate_types, layers=layers)
     candidate_edges = [
         (e.from_node, e.to_node, e.edge_type, e.confidence)
         for e in _cand_records
@@ -1635,8 +1636,8 @@ def suggest_causes(
     ]
     candidate_edges.sort(key=lambda r: r[3], reverse=True)
 
-    # Find all existing CAUSES edges
-    _causes_records = reader.get_edges(edge_types=["CAUSES"])
+    # Find all existing CAUSES edges (scope to same layers to avoid cross-domain checks)
+    _causes_records = reader.get_edges(edge_types=["CAUSES"], layers=layers)
     causes_edges = {(e.from_node, e.to_node) for e in _causes_records}
 
     # Find candidate pairs that don't have a CAUSES edge yet

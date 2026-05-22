@@ -227,7 +227,17 @@ class TestQueryEndpoints:
 
         status, data = _request("GET", port, "/neighborhood/x?depth=2")
         assert status == 200
-        assert isinstance(data, list)
+        # Response is {nodes: [...], edges: [...]}
+        assert isinstance(data, dict)
+        assert "nodes" in data and "edges" in data
+        assert isinstance(data["nodes"], list)
+        assert isinstance(data["edges"], list)
+        # Seed node and neighbor must appear in nodes
+        node_ids = {n["id"] for n in data["nodes"]}
+        assert "x" in node_ids
+        assert "y" in node_ids
+        # Edge x→y must appear in edges
+        assert any(e["from_node"] == "x" and e["to_node"] == "y" for e in data["edges"])
 
     def test_path(self, test_server):
         port, store = test_server

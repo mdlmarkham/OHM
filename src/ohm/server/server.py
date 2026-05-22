@@ -1263,7 +1263,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                 "/adjustment": {"method": "GET", "description": "Find valid backdoor/frontdoor adjustment sets for causal identification (Pearl's criteria). ?layers=L3,L4 to scope by layer"},
                 "/voi": {"method": "GET", "description": "Value of Information: rank nodes by research priority (uncertainty × sensitivity to decision). ?decision=node1,node2&top=10&layers=L3,L4&edge_types=CAUSES,DEPENDS_ON&min_observations=3&timeout=30. Response includes mixed_sensitivity_methods warning when ATE and path_confidence are both used (non-comparable scales)."},
                 "/voi/tasks": {"method": "GET", "description": "Generate research tasks from VoI rankings, matched to agent expertise. ?agent=metis&decision=node1,node2&top=5&layers=L3,L4"},
-                "/suggest_causes": {"method": "GET", "description": "Suggest candidate CAUSES edges from existing non-causal relationships (DEPENDS_ON, APPLIES_TO, etc.)"},
+                "/suggest_causes": {"method": "GET", "description": "Suggest candidate CAUSES edges from existing non-causal relationships (DEPENDS_ON, APPLIES_TO, etc.). Optional: ?layers=L3,L4 to scope by layer, ?min_confidence=0.5"},
                 "/deduplicate": {"method": "POST", "description": "Remove duplicate edges (same from→to, type, layer), keeping the most recent"},
                 "/refute": {"method": "GET", "description": "Test robustness of causal conclusions using DoWhy refutation methods (random common cause, placebo, data subset, unobserved confounder)"},
                 "/lint": {"method": "GET", "description": "Contract layer linting: validate graph against naming conventions and required fields"},
@@ -1570,8 +1570,20 @@ class OhmHandler(BaseHTTPRequestHandler):
         depth = int(qs.get("depth", [3])[0])
         layer = qs.get("layer", [None])[0]
         from ohm.queries import query_neighborhood
-        results = query_neighborhood(self.store.conn, node_id, depth=depth, layer=layer)
-        self._json_response(200, results)
+        edges = query_neighborhood(self.store.conn, node_id, depth=depth, layer=layer)
+        # Collect unique node IDs from all edges plus the seed node
+        node_ids = {node_id}
+        for e in edges:
+            node_ids.add(e["from_node"])
+            node_ids.add(e["to_node"])
+        # Fetch node details for all referenced nodes
+        placeholders = ", ".join("?" * len(node_ids))
+        node_rows = self.store.execute(
+            f"SELECT id, label, type, created_by, created_at FROM ohm_nodes "
+            f"WHERE id IN ({placeholders}) AND deleted_at IS NULL",
+            list(node_ids),
+        )
+        self._json_response(200, {"nodes": node_rows, "edges": edges})
 
     def _get_path(self, path: str, qs: dict) -> None:
         """GET /path/<from>/<to> — shortest path."""
@@ -2238,8 +2250,10 @@ class OhmHandler(BaseHTTPRequestHandler):
         # Suggest candidate CAUSES edges from existing non-causal relationships
         # Identifies DEPENDS_ON/APPLIES_TO/REFINES/INFLUENCES edges that might be causal
         min_confidence = float(qs.get("min_confidence", ["0.5"])[0])
+        layers_str = qs.get("layers", [""])[0]
+        layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
         from ohm.bayesian import suggest_causes
-        result = suggest_causes(self.store.conn, min_confidence=min_confidence)
+        result = suggest_causes(self.store.conn, min_confidence=min_confidence, layers=layers)
         self._json_response(200, result)
 
     def _get_deduplicate(self, path: str, qs: dict) -> None:
