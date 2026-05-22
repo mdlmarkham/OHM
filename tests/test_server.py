@@ -2368,3 +2368,45 @@ class TestMetisBatch2Fixes:
         for item in data:
             assert item.get("from_id"), f"from_id empty in {item}"
             assert item.get("to_id"), f"to_id empty in {item}"
+
+    def test_ate_returns_diagnostic_when_disconnected(self, test_server):
+        """GET /ate returns diagnostic error (not silent ATE=0) when nodes not connected (OHM-7320)."""
+        port, store = test_server
+        # Create two nodes with no edge between them
+        store.write_node("ate-cause-island", "Isolated Cause", "concept", agent_name="test")
+        store.write_node("ate-effect-island", "Isolated Effect", "concept", agent_name="test")
+        status, data = _request("GET", port, "/ate?cause=ate-cause-island&effect=ate-effect-island")
+        assert status == 200
+        # When pgmpy is unavailable the endpoint returns method=none with an error message —
+        # either way it must never silently return ATE=0.0 with risk_ratio=1.0 and no error.
+        if data.get("method") not in ("none", "error"):
+            # pgmpy available — should detect disconnection and return method=error
+            if data.get("ate") == 0.0 and data.get("risk_ratio") == 1.0:
+                assert data.get("method") == "error", (
+                    "ATE=0 with RR=1 must not be returned silently for disconnected nodes; "
+                    f"got {data}"
+                )
+
+    def test_ate_connected_path_returns_nonzero(self, test_server):
+        """GET /ate returns non-zero ATE when cause→effect edge exists (OHM-7320)."""
+        import importlib.util
+        if not importlib.util.find_spec("pgmpy"):
+            pytest.skip("pgmpy not installed")
+        port, store = test_server
+        store.write_node("ate-cause-a", "Cause A", "concept", agent_name="test")
+        store.write_node("ate-effect-b", "Effect B", "concept", agent_name="test")
+        # Create a direct causal edge with high probability
+        _request("POST", port, "/edge", body={
+            "from": "ate-cause-a",
+            "to": "ate-effect-b",
+            "type": "CAUSES",
+            "layer": "L3",
+            "probability": 0.9,
+        })
+        status, data = _request("GET", port, "/ate?cause=ate-cause-a&effect=ate-effect-b")
+        assert status == 200
+        assert data.get("method") != "error", f"Unexpected error: {data}"
+        # With a direct high-probability CAUSES edge, ATE should be detectably non-zero
+        assert abs(data.get("ate", 0.0)) > 0.01, (
+            f"ATE should be non-zero with direct causal edge, got {data}"
+        )

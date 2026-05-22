@@ -338,13 +338,16 @@ def build_bayesian_network(
     # Scope to root_nodes if specified
     if root_nodes:
         included = set(root_nodes)
-        # BFS to find reachable nodes
-        for _ in range(3):  # 3 hops
+        # BFS to find reachable nodes — 6 rounds captures paths up to 12 hops,
+        # expanding simultaneously from all root_nodes in both edge directions.
+        for _ in range(6):
             new_nodes = set()
             for e in edges:
                 if e["from"] in included or e["to"] in included:
                     new_nodes.add(e["from"])
                     new_nodes.add(e["to"])
+            if not (new_nodes - included):
+                break  # Converged
             included |= new_nodes
         node_ids &= included
         edges = [e for e in edges if e["from"] in node_ids and e["to"] in node_ids]
@@ -1088,6 +1091,66 @@ def compute_ate(
         }
 
     ate = p_bad_do_bad - p_bad_do_good
+
+    # When ATE rounds to 0, check if cause actually has a directed path to effect.
+    # If not, the zero is spurious (disconnected subgraphs) rather than a genuine
+    # null effect — return a diagnostic error instead of a misleading ATE=0.
+    network_nodes = list(do_bad.get("network_info", {}).get("nodes", []) or [])
+    safe_cause = _safe_node_id(cause)
+    safe_effect = _safe_node_id(effect)
+    if abs(ate) < 1e-6:
+        try:
+            import networkx as nx
+            # Rebuild the scoped network to get the DAG
+            _net = build_bayesian_network(
+                reader,
+                root_nodes=[cause, effect],
+                edge_types=edge_types,
+                layers=layers,
+                leak_probability=leak_probability,
+                root_prior=root_prior,
+                semantic_roles=semantic_roles,
+            )
+            if _net is not None:
+                _model = _net["model"]
+                _safe_cause = _safe_node_id(cause)
+                _safe_effect = _safe_node_id(effect)
+                _cause_in_net = _safe_cause in _net["variables"]
+                _effect_in_net = _safe_effect in _net["variables"]
+                if not _cause_in_net or not _effect_in_net:
+                    missing = []
+                    if not _cause_in_net:
+                        missing.append(f"cause '{cause}' (not an edge endpoint in the graph)")
+                    if not _effect_in_net:
+                        missing.append(f"effect '{effect}' (not an edge endpoint in the graph)")
+                    return {
+                        "method": "error",
+                        "cause": cause,
+                        "effect": effect,
+                        "error": (
+                            f"ATE cannot be computed: {'; '.join(missing)}. "
+                            f"Network has {_net['n_nodes']} nodes. "
+                            f"Check that both node IDs exist and have causal edges."
+                        ),
+                        "network_nodes": _net.get("nodes", [])[:20],
+                    }
+                _g = nx.DiGraph(_model.edges())
+                if _safe_cause in _g and _safe_effect in _g:
+                    if not nx.has_path(_g, _safe_cause, _safe_effect):
+                        return {
+                            "method": "error",
+                            "cause": cause,
+                            "effect": effect,
+                            "error": (
+                                f"No directed path from '{cause}' to '{effect}' in the "
+                                f"Bayesian network ({_net['n_nodes']} nodes). "
+                                f"Both nodes are present but not causally connected — "
+                                f"add a CAUSES/DEPENDS_ON edge chain between them."
+                            ),
+                            "network_nodes": _net.get("nodes", [])[:20],
+                        }
+        except Exception:
+            pass  # Diagnostic check failed — return ATE=0 result as-is
 
     # Risk ratio: how much does the treatment increase risk?
     risk_ratio = p_bad_do_bad / p_bad_do_good if p_bad_do_good > 0 else float("inf")
