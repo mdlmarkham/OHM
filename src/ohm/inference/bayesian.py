@@ -338,13 +338,16 @@ def build_bayesian_network(
     # Scope to root_nodes if specified
     if root_nodes:
         included = set(root_nodes)
-        # BFS to find reachable nodes
-        for _ in range(3):  # 3 hops
+        # BFS to find reachable nodes — 6 rounds captures paths up to 12 hops,
+        # expanding simultaneously from all root_nodes in both edge directions.
+        for _ in range(6):
             new_nodes = set()
             for e in edges:
                 if e["from"] in included or e["to"] in included:
                     new_nodes.add(e["from"])
                     new_nodes.add(e["to"])
+            if not (new_nodes - included):
+                break  # Converged
             included |= new_nodes
         node_ids &= included
         edges = [e for e in edges if e["from"] in node_ids and e["to"] in node_ids]
@@ -436,11 +439,18 @@ def build_bayesian_network(
             model.add_node(safe)
             break
 
+    # Only build CPDs for nodes actually in the model (not nodes that were
+    # removed during cycle elimination or truncation). Using model.nodes()
+    # prevents "CPD defined on variable not in the model" errors (OHM-7309).
+    model_node_set = set(model.nodes())
+
     # Get prior probabilities for root nodes
     node_priors = {}
     root_safe_names = set()
     for node_id in node_ids:
         safe = safe_names[node_id]
+        if safe not in model_node_set:
+            continue  # Node was excluded from model edges — skip its CPD
         if safe not in parent_edges:
             root_safe_names.add(safe)
             # Get prior from observations or default
@@ -1082,6 +1092,66 @@ def compute_ate(
 
     ate = p_bad_do_bad - p_bad_do_good
 
+    # When ATE rounds to 0, check if cause actually has a directed path to effect.
+    # If not, the zero is spurious (disconnected subgraphs) rather than a genuine
+    # null effect — return a diagnostic error instead of a misleading ATE=0.
+    network_nodes = list(do_bad.get("network_info", {}).get("nodes", []) or [])
+    safe_cause = _safe_node_id(cause)
+    safe_effect = _safe_node_id(effect)
+    if abs(ate) < 1e-6:
+        try:
+            import networkx as nx
+            # Rebuild the scoped network to get the DAG
+            _net = build_bayesian_network(
+                reader,
+                root_nodes=[cause, effect],
+                edge_types=edge_types,
+                layers=layers,
+                leak_probability=leak_probability,
+                root_prior=root_prior,
+                semantic_roles=semantic_roles,
+            )
+            if _net is not None:
+                _model = _net["model"]
+                _safe_cause = _safe_node_id(cause)
+                _safe_effect = _safe_node_id(effect)
+                _cause_in_net = _safe_cause in _net["variables"]
+                _effect_in_net = _safe_effect in _net["variables"]
+                if not _cause_in_net or not _effect_in_net:
+                    missing = []
+                    if not _cause_in_net:
+                        missing.append(f"cause '{cause}' (not an edge endpoint in the graph)")
+                    if not _effect_in_net:
+                        missing.append(f"effect '{effect}' (not an edge endpoint in the graph)")
+                    return {
+                        "method": "error",
+                        "cause": cause,
+                        "effect": effect,
+                        "error": (
+                            f"ATE cannot be computed: {'; '.join(missing)}. "
+                            f"Network has {_net['n_nodes']} nodes. "
+                            f"Check that both node IDs exist and have causal edges."
+                        ),
+                        "network_nodes": _net.get("nodes", [])[:20],
+                    }
+                _g = nx.DiGraph(_model.edges())
+                if _safe_cause in _g and _safe_effect in _g:
+                    if not nx.has_path(_g, _safe_cause, _safe_effect):
+                        return {
+                            "method": "error",
+                            "cause": cause,
+                            "effect": effect,
+                            "error": (
+                                f"No directed path from '{cause}' to '{effect}' in the "
+                                f"Bayesian network ({_net['n_nodes']} nodes). "
+                                f"Both nodes are present but not causally connected — "
+                                f"add a CAUSES/DEPENDS_ON edge chain between them."
+                            ),
+                            "network_nodes": _net.get("nodes", [])[:20],
+                        }
+        except Exception:
+            pass  # Diagnostic check failed — return ATE=0 result as-is
+
     # Risk ratio: how much does the treatment increase risk?
     risk_ratio = p_bad_do_bad / p_bad_do_good if p_bad_do_good > 0 else float("inf")
 
@@ -1632,6 +1702,7 @@ def compute_voi(
     root_prior: float = 0.3,
     timeout: float | None = None,
     semantic_roles: SemanticRoles | None = None,
+    min_observations: int = 0,
 ) -> dict[str, Any]:
     """Compute Value of Information (VoI) for research prioritization.
 
@@ -1656,14 +1727,19 @@ def compute_voi(
         root_prior: Prior probability for root nodes.
         timeout: Maximum seconds for ATE computation. Candidates not computed
             within this window fall back to path-confidence sensitivity.
+        min_observations: Minimum observation count for reliable VoI estimates.
+            Nodes below this threshold are flagged with low_data_warning=True.
+            Default 0 (no flagging). Recommended: 3.
 
     Returns:
         Dict with:
         - method: "value_of_information"
         - decision_nodes: list of decision node IDs used
         - rankings: list of {node_id, label, voi_score, uncertainty, sensitivity,
-          downstream_decisions} sorted by voi_score descending
+          sensitivity_method, downstream_decisions, low_data_warning} sorted by voi_score desc
         - n_candidates: total number of candidate nodes
+        - mixed_sensitivity_methods: True when rankings mix ATE and path_confidence
+          (values are non-comparable; standardize with ?min_ate=1 or add more causal edges)
     """
     if edge_types is None:
         if semantic_roles is not None:
@@ -1687,6 +1763,8 @@ def compute_voi(
             "decision_nodes": [],
             "rankings": [],
             "n_candidates": 0,
+            "mixed_sensitivity_methods": False,
+            "sensitivity_methods_used": [],
             "message": "No decision nodes found. Create nodes with type='decision' or specify decision_nodes.",
         }
 
@@ -1776,6 +1854,8 @@ def compute_voi(
             "decision_nodes": decision_nodes,
             "rankings": [],
             "n_candidates": 0,
+            "mixed_sensitivity_methods": False,
+            "sensitivity_methods_used": [],
             "message": "No causal ancestors found for the specified decision nodes.",
         }
 
@@ -1889,6 +1969,8 @@ def compute_voi(
         # VoI = uncertainty × sensitivity
         voi_score = uncertainty * sensitivity
 
+        obs_count = obs_counts.get(node_id, 0)
+        low_data = min_observations > 0 and obs_count < min_observations
         rankings.append({
             "node_id": node_id,
             "label": info["label"],
@@ -1897,9 +1979,13 @@ def compute_voi(
             "sensitivity": round(sensitivity, 4),
             "sensitivity_method": sensitivity_method,
             "confidence": round(confidence, 4),
-            "observation_count": obs_counts.get(node_id, 0),
+            "observation_count": obs_count,
             "downstream_decisions": downstream_decisions,
             "n_downstream_decisions": len(downstream_decisions),
+            **({"low_data_warning": True, "low_data_note": (
+                f"Only {obs_count} observation(s) — VoI estimate unreliable "
+                f"(min_observations={min_observations})"
+            )} if low_data else {}),
         })
 
     # Sort by VoI score descending
@@ -1908,12 +1994,22 @@ def compute_voi(
     if top is not None:
         rankings = rankings[:top]
 
+    methods_used = set(r["sensitivity_method"] for r in rankings)
+    mixed = len(methods_used) > 1
+
     return {
         "method": "value_of_information",
         "decision_nodes": decision_nodes,
         "rankings": rankings,
         "n_candidates": len(candidate_nodes),
         "units": voi_units,
+        "sensitivity_methods_used": sorted(methods_used),
+        **({"mixed_sensitivity_methods": True, "mixed_methods_note": (
+            "Rankings mix ATE (causal effect size, ~0.02-0.12) and "
+            "path_confidence (edge confidence product, ~0.3-0.5) — "
+            "values are not directly comparable. Check sensitivity_method "
+            "per entry. Add more CAUSES edges or increase timeout for full ATE coverage."
+        )} if mixed else {"mixed_sensitivity_methods": False}),
     }
 
 

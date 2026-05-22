@@ -2264,3 +2264,219 @@ class TestMetisBugFixes:
         assert status == 200
         ids = [t["id"] for t in data.get("tasks", [])]
         assert "task-roundtrip" in ids
+
+
+@pytest.mark.xdist_group("server")
+class TestMetisBatch2Fixes:
+    """Regression tests for bugs found in Metis's second test run (OHM-7308..7321)."""
+
+    def test_post_task_auto_generates_id(self, test_server):
+        """POST /tasks without 'id' field auto-generates one (OHM-7308)."""
+        port, _ = test_server
+        status, data = _request("POST", port, "/tasks", body={
+            "label": "Auto-ID task",
+            "task_status": "open",
+        })
+        assert status == 201
+        assert data.get("id"), "id should be auto-generated"
+        assert data["id"].startswith("task_")
+
+    def test_post_task_with_explicit_id(self, test_server):
+        """POST /tasks with explicit 'id' uses that id (OHM-7308)."""
+        port, _ = test_server
+        status, data = _request("POST", port, "/tasks", body={
+            "id": "explicit-task-id-7308",
+            "label": "Explicit ID task",
+        })
+        assert status == 201
+        assert data.get("id") == "explicit-task-id-7308"
+
+    def test_post_edge_accepts_from_node_alias(self, test_server):
+        """POST /edge accepts from_node/to_node/edge_type aliases (OHM-7314)."""
+        port, store = test_server
+        store.write_node("alias-from", "Alias Source", "concept", agent_name="test")
+        store.write_node("alias-to", "Alias Dest", "concept", agent_name="test")
+        status, data = _request("POST", port, "/edge", body={
+            "from_node": "alias-from",
+            "to_node": "alias-to",
+            "edge_type": "CAUSES",
+            "layer": "L3",
+        })
+        assert status == 201
+        assert data.get("from_node") == "alias-from"
+        assert data.get("to_node") == "alias-to"
+
+    def test_patch_node_updates_label(self, test_server):
+        """PATCH /node/{id} can update node label (OHM-7319)."""
+        port, store = test_server
+        store.write_node("patch-test-node", "Original Label", "concept", agent_name="test")
+        status, data = _request("PATCH", port, "/node/patch-test-node", body={
+            "label": "Updated Label",
+        })
+        assert status == 200
+        assert data.get("label") == "Updated Label"
+
+    def test_patch_node_404_for_missing(self, test_server):
+        """PATCH /node/{id} returns 404 for non-existent node (OHM-7319)."""
+        port, _ = test_server
+        status, data = _request("PATCH", port, "/node/nonexistent-patch-node", body={
+            "label": "Won't work",
+        })
+        assert status == 404
+
+    def test_source_reliability_alias(self, test_server):
+        """GET /source_reliability?source=<agent> returns reliability data (OHM-7310)."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/source_reliability?source=test")
+        assert status == 200
+        assert "source_agent" in data
+
+    def test_compound_confidence_endpoint(self, test_server):
+        """GET /compound_confidence/{node} returns compound confidence (OHM-7311)."""
+        port, store = test_server
+        store.write_node("cc-test-node", "CC Node", "concept", agent_name="test")
+        status, data = _request("GET", port, "/compound_confidence/cc-test-node")
+        assert status == 200
+        assert "node_id" in data
+        assert data["node_id"] == "cc-test-node"
+
+    def test_suggest_orphan_connect_returns_list(self, test_server):
+        """GET /suggest?method=orphan_connect returns a list (OHM-7312)."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/suggest?method=orphan_connect")
+        assert status == 200
+        assert isinstance(data, list)
+
+    def test_suggest_cooccurrence_returns_list(self, test_server):
+        """GET /suggest?method=cooccurrence returns a list (OHM-7312)."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/suggest?method=cooccurrence")
+        assert status == 200
+        assert isinstance(data, list)
+
+    def test_suggest_shared_tags_no_empty_fields(self, test_server):
+        """GET /suggest?method=shared_tags results have non-empty from_id/to_id (OHM-7313)."""
+        port, store = test_server
+        # Create tagged nodes to trigger shared_tags results
+        store.write_node("tagged-a", "Tagged A", "concept", agent_name="test",
+                         tags=["geopolitics", "energy"])
+        store.write_node("tagged-b", "Tagged B", "concept", agent_name="test",
+                         tags=["geopolitics", "security"])
+        status, data = _request("GET", port, "/suggest?method=shared_tags&min_shared=1")
+        assert status == 200
+        assert isinstance(data, list)
+        for item in data:
+            assert item.get("from_id"), f"from_id empty in {item}"
+            assert item.get("to_id"), f"to_id empty in {item}"
+
+    def test_ate_returns_diagnostic_when_disconnected(self, test_server):
+        """GET /ate returns diagnostic error (not silent ATE=0) when nodes not connected (OHM-7320)."""
+        port, store = test_server
+        # Create two nodes with no edge between them
+        store.write_node("ate-cause-island", "Isolated Cause", "concept", agent_name="test")
+        store.write_node("ate-effect-island", "Isolated Effect", "concept", agent_name="test")
+        status, data = _request("GET", port, "/ate?cause=ate-cause-island&effect=ate-effect-island")
+        assert status == 200
+        # When pgmpy is unavailable the endpoint returns method=none with an error message —
+        # either way it must never silently return ATE=0.0 with risk_ratio=1.0 and no error.
+        if data.get("method") not in ("none", "error"):
+            # pgmpy available — should detect disconnection and return method=error
+            if data.get("ate") == 0.0 and data.get("risk_ratio") == 1.0:
+                assert data.get("method") == "error", (
+                    "ATE=0 with RR=1 must not be returned silently for disconnected nodes; "
+                    f"got {data}"
+                )
+
+    def test_ate_connected_path_returns_nonzero(self, test_server):
+        """GET /ate returns non-zero ATE when cause→effect edge exists (OHM-7320)."""
+        import importlib.util
+        if not importlib.util.find_spec("pgmpy"):
+            pytest.skip("pgmpy not installed")
+        port, store = test_server
+        store.write_node("ate-cause-a", "Cause A", "concept", agent_name="test")
+        store.write_node("ate-effect-b", "Effect B", "concept", agent_name="test")
+        # Create a direct causal edge with high probability
+        _request("POST", port, "/edge", body={
+            "from": "ate-cause-a",
+            "to": "ate-effect-b",
+            "type": "CAUSES",
+            "layer": "L3",
+            "probability": 0.9,
+        })
+        status, data = _request("GET", port, "/ate?cause=ate-cause-a&effect=ate-effect-b")
+        assert status == 200
+        assert data.get("method") != "error", f"Unexpected error: {data}"
+        # With a direct high-probability CAUSES edge, ATE should be detectably non-zero
+        assert abs(data.get("ate", 0.0)) > 0.01, (
+            f"ATE should be non-zero with direct causal edge, got {data}"
+        )
+
+
+class TestGitHubBacklogFixes:
+    """Regression tests for GitHub issues from Deepthought/Socrates (OHM-zwrw, OHM-9pb7, OHM-zn3s)."""
+
+    def test_heartbeat_does_not_crash_when_change_feed_missing(self, test_server):
+        """POST /heartbeat must not 500 even when ohm_change_feed table is absent (OHM-zwrw)."""
+        port, store = test_server
+        # Drop the change feed table to simulate a pre-migration production DB
+        try:
+            store.conn.execute("DROP TABLE IF EXISTS ohm_change_feed")
+            store.conn.execute("DROP SEQUENCE IF EXISTS seq_change_feed")
+        except Exception:
+            pass
+        # Heartbeat should succeed (not 500)
+        status, data = _request("POST", port, "/heartbeat", body={"focus": "test"})
+        assert status == 200, f"Heartbeat should not crash without ohm_change_feed: {data}"
+
+    def test_change_feed_query_falls_back_when_table_missing(self, test_server):
+        """GET /listen must not crash when ohm_change_feed is absent (OHM-zwrw)."""
+        port, store = test_server
+        try:
+            store.conn.execute("DROP TABLE IF EXISTS ohm_change_feed")
+        except Exception:
+            pass
+        # /listen reads from ohm_change_feed — should fall back to ohm_change_log
+        status, data = _request("GET", port, "/listen?limit=5")
+        assert status == 200, f"/listen should not crash without ohm_change_feed: {data}"
+
+    def test_voi_reports_mixed_sensitivity_methods(self, test_server):
+        """GET /voi includes mixed_sensitivity_methods flag in response (OHM-9pb7)."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/voi?top=5")
+        assert status == 200
+        assert "mixed_sensitivity_methods" in data, (
+            f"VoI response must include mixed_sensitivity_methods field: {data}"
+        )
+        assert "sensitivity_methods_used" in data
+
+    def test_voi_min_observations_flags_sparse_nodes(self, test_server):
+        """GET /voi?min_observations=3 flags nodes with fewer than 3 observations (OHM-zn3s)."""
+        port, store = test_server
+        store.write_node("dec-test-voi", "Test Decision", "decision",
+                         agent_name="test", utility_scale=1.0)
+        store.write_node("anc-test-voi", "Test Ancestor", "concept", agent_name="test")
+        _request("POST", port, "/edge", body={
+            "from": "anc-test-voi",
+            "to": "dec-test-voi",
+            "type": "CAUSES",
+            "layer": "L3",
+            "probability": 0.7,
+        })
+        status, data = _request("GET", port, "/voi?min_observations=3&decision=dec-test-voi")
+        assert status == 200
+        for entry in data.get("rankings", []):
+            if entry["node_id"] == "anc-test-voi":
+                assert entry.get("low_data_warning") is True, (
+                    f"Node with 0 obs should have low_data_warning: {entry}"
+                )
+                break
+
+    def test_voi_no_low_data_warning_when_threshold_zero(self, test_server):
+        """GET /voi without min_observations has no low_data_warning fields (OHM-zn3s)."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/voi?top=5")
+        assert status == 200
+        for entry in data.get("rankings", []):
+            assert "low_data_warning" not in entry, (
+                f"low_data_warning should not appear when min_observations=0: {entry}"
+            )

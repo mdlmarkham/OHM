@@ -271,45 +271,60 @@ def query_agent_health(
 ) -> list[dict[str, Any]]:
     """Check health of all registered agents.
 
-    An agent is stale if its last heartbeat is older than 2x its configured
-    sync interval. An agent is dead if it's never sent a heartbeat.
+    Includes all agents from ohm_agent_state (heartbeat history) plus any
+    agents registered via ohm_nodes (type='agent') that have no state row yet.
 
     Returns:
         List of agent health records with status (alive/stale/dead/unknown).
     """
-    # Get agents with config (sync_interval) and state (last_sync)
     result = conn.execute("""
-        SELECT
-            a.agent_name,
-            a.current_focus,
-            a.last_sync,
-            a.updated_at,
-            c.sync_interval_sec,
-            c.optimization_target,
-            CASE
-                WHEN a.last_sync IS NULL THEN 'dead'
-                WHEN a.last_sync < CURRENT_TIMESTAMP - INTERVAL (2 * COALESCE(c.sync_interval_sec, 300)) SECOND
-                    THEN 'stale'
-                ELSE 'alive'
-            END AS status,
-            CASE
-                WHEN a.last_sync IS NOT NULL
-                THEN EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - a.last_sync)) / 60.0
-                ELSE NULL
-            END AS minutes_since_heartbeat
-        FROM ohm_agent_state a
-        LEFT JOIN ohm_agent_config c ON c.agent_name = a.agent_name
-        ORDER BY
-            CASE
-                WHEN a.last_sync IS NULL THEN 3
-                WHEN a.last_sync < CURRENT_TIMESTAMP - INTERVAL (2 * COALESCE(c.sync_interval_sec, 300)) SECOND THEN 2
-                ELSE 1
-            END,
-            a.agent_name
+        WITH state_agents AS (
+            SELECT
+                a.agent_name,
+                a.current_focus,
+                a.last_sync,
+                a.updated_at,
+                c.sync_interval_sec,
+                c.optimization_target,
+                CASE
+                    WHEN a.last_sync IS NULL THEN 'dead'
+                    WHEN a.last_sync < CURRENT_TIMESTAMP - INTERVAL (2 * COALESCE(c.sync_interval_sec, 300)) SECOND
+                        THEN 'stale'
+                    ELSE 'alive'
+                END AS status,
+                CASE
+                    WHEN a.last_sync IS NOT NULL
+                    THEN EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - a.last_sync)) / 60.0
+                    ELSE NULL
+                END AS minutes_since_heartbeat
+            FROM ohm_agent_state a
+            LEFT JOIN ohm_agent_config c ON c.agent_name = a.agent_name
+        ),
+        node_agents AS (
+            SELECT
+                n.id AS agent_name,
+                NULL AS current_focus,
+                NULL AS last_sync,
+                n.updated_at,
+                NULL AS sync_interval_sec,
+                NULL AS optimization_target,
+                'registered' AS status,
+                NULL AS minutes_since_heartbeat
+            FROM ohm_nodes n
+            WHERE n.type = 'agent' AND n.deleted_at IS NULL
+              AND n.id NOT IN (SELECT agent_name FROM ohm_agent_state)
+        )
+        SELECT *, CASE status WHEN 'alive' THEN 1 WHEN 'registered' THEN 2 WHEN 'stale' THEN 3 ELSE 4 END AS sort_key FROM state_agents
+        UNION ALL
+        SELECT *, 2 AS sort_key FROM node_agents
+        ORDER BY sort_key, agent_name
     """)
 
     columns = [desc[0] for desc in result.description]
-    return [dict(zip(columns, row)) for row in result.fetchall()]
+    rows = [dict(zip(columns, row)) for row in result.fetchall()]
+    for r in rows:
+        r.pop("sort_key", None)
+    return rows
 
 
 def aggregate_observations(
@@ -1704,7 +1719,7 @@ def suggest_connections(
                 a.label AS from_label,
                 b.id AS to_id,
                 b.label AS to_label,
-                count(*) AS shared_tag_count,
+                count(*) AS shared_tag_count
             FROM tag_sets a
             JOIN tag_sets b ON a.tag = b.tag AND a.id < b.id
             WHERE NOT EXISTS (
@@ -1727,13 +1742,105 @@ def suggest_connections(
                 "to_label": row[3],
                 "shared_tag_count": row[4],
                 "reason": f"Shared {row[4]} tags",
-                "score": min(row[4] / 5.0, 1.0),  # Normalize: 5+ shared tags = score 1.0
+                "score": min(row[4] / 5.0, 1.0),
+            }
+            for row in rows
+        ]
+
+    elif method == "orphan_connect":
+        # Find orphan nodes (no edges) that share type with connected nodes —
+        # prime candidates to link into the graph.
+        query = """
+            WITH orphans AS (
+                SELECT n.id, n.label, n.type
+                FROM ohm_nodes n
+                WHERE n.deleted_at IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM ohm_edges e
+                      WHERE (e.from_node = n.id OR e.to_node = n.id)
+                        AND e.deleted_at IS NULL
+                  )
+            ),
+            connected AS (
+                SELECT DISTINCT n.id, n.label, n.type
+                FROM ohm_nodes n
+                WHERE n.deleted_at IS NULL
+                  AND EXISTS (
+                      SELECT 1 FROM ohm_edges e
+                      WHERE (e.from_node = n.id OR e.to_node = n.id)
+                        AND e.deleted_at IS NULL
+                  )
+            )
+            SELECT
+                o.id AS from_id,
+                o.label AS from_label,
+                c.id AS to_id,
+                c.label AS to_label,
+                o.type AS shared_type
+            FROM orphans o
+            JOIN connected c ON o.type = c.type AND o.id < c.id
+            ORDER BY o.label, c.label
+            LIMIT ?
+        """
+        rows = conn.execute(query, [limit]).fetchall()
+        return [
+            {
+                "from_id": row[0],
+                "from_label": row[1],
+                "to_id": row[2],
+                "to_label": row[3],
+                "shared_type": row[4],
+                "reason": f"Orphan node shares type '{row[4]}' with connected node",
+                "score": 0.6,
+            }
+            for row in rows
+        ]
+
+    elif method == "cooccurrence":
+        # Find nodes that appear together in the same provenance context
+        # (i.e., created from the same source or appear in same layer)
+        # but have no direct edge.
+        query = """
+            SELECT
+                a.id AS from_id,
+                a.label AS from_label,
+                b.id AS to_id,
+                b.label AS to_label,
+                a.created_by AS shared_author
+            FROM ohm_nodes a
+            JOIN ohm_nodes b ON a.created_by = b.created_by
+                AND a.id < b.id
+                AND a.deleted_at IS NULL
+                AND b.deleted_at IS NULL
+            WHERE NOT EXISTS (
+                SELECT 1 FROM ohm_edges e
+                WHERE (e.from_node = a.id AND e.to_node = b.id)
+                OR (e.from_node = b.id AND e.to_node = a.id)
+                AND e.deleted_at IS NULL
+            )
+            ORDER BY a.created_at DESC, a.label, b.label
+            LIMIT ?
+        """
+        rows = conn.execute(query, [limit]).fetchall()
+        return [
+            {
+                "from_id": row[0],
+                "from_label": row[1],
+                "to_id": row[2],
+                "to_label": row[3],
+                "shared_author": row[4],
+                "reason": f"Both created by {row[4]}, not connected",
+                "score": 0.4,
             }
             for row in rows
         ]
 
     else:
-        raise ValueError(f"Unknown method: {method}. Use 'shared_provenance', 'shared_type', 'shared_tags', or 'semantic'.")
+        raise ValueError(
+            f"Unknown method: {method!r}. "
+            "Use 'shared_provenance', 'shared_type', 'shared_tags', 'semantic', "
+            "'orphan_connect', or 'cooccurrence'."
+        )
 
 
 def graph_stats(
