@@ -211,6 +211,10 @@ def build_bayesian_network(
         tuple(sorted(edge_types)) if edge_types else None,
         tuple(sorted(layers)) if layers else None,
         tuple(sorted(root_nodes)) if root_nodes else None,
+        # preferred_edges changes which cycle edges are removed, so it must be
+        # part of the key — a cache hit for the same nodes but different
+        # preferred_edges would return a network built with the wrong DAG.
+        tuple(sorted(preferred_edges)) if preferred_edges else None,
         max_nodes,
         root_prior,
         leak_probability,
@@ -688,14 +692,18 @@ def bayesian_inference(
         p_bad = float(result.values[0])
         p_good = float(result.values[1])
 
+        # Return node-keyed posterior for consistency with causal_intervention:
+        # {"posterior": {"node_id": {"good": X, "bad": Y}}}
         return {
             "method": "bayesian_variable_elimination",
             "pgmpy_available": True,
             "target": target,
             "evidence": evidence,
             "posterior": {
-                "good": round(p_good, 4),
-                "bad": round(p_bad, 4),
+                target: {
+                    "good": round(p_good, 4),
+                    "bad": round(p_bad, 4),
+                }
             },
             "network_info": {
                 "n_nodes": network["n_nodes"],
@@ -1116,7 +1124,8 @@ def compute_ate(
     if abs(ate) < 1e-6:
         try:
             import networkx as nx
-            # Rebuild the scoped network to get the DAG
+            # Rebuild the scoped network to get the DAG — pass preferred_edges so
+            # the cycle breaker uses the same DAG as the actual VE computation.
             _net = build_bayesian_network(
                 reader,
                 root_nodes=[cause, effect],
@@ -1125,6 +1134,7 @@ def compute_ate(
                 leak_probability=leak_probability,
                 root_prior=root_prior,
                 semantic_roles=semantic_roles,
+                preferred_edges=_preferred,
             )
             if _net is not None:
                 _model = _net["model"]
@@ -1626,11 +1636,16 @@ def suggest_causes(
     _causes_records = reader.get_edges(edge_types=["CAUSES"], layers=layers)
     causes_edges = {(e.from_node, e.to_node) for e in _causes_records}
 
-    # Find candidate pairs that don't have a CAUSES edge yet
+    # Find candidate pairs that don't have a CAUSES edge yet.
+    # When layer-scoped, restrict to pairs where at least one endpoint is in the
+    # existing CAUSES graph for that layer — avoids surfacing entirely foreign
+    # node pairs whose edges happen to be tagged with the same layer.
+    causal_nodes = {n for pair in causes_edges for n in pair}
     candidates = []
     for from_node, to_node, edge_type, confidence in candidate_edges:
         if confidence >= min_confidence and (from_node, to_node) not in causes_edges:
-            # Also check if reverse CAUSES exists
+            if layers and (from_node not in causal_nodes and to_node not in causal_nodes):
+                continue  # Neither endpoint is in the scoped causal graph
             reverse_exists = (to_node, from_node) in causes_edges
             candidates.append({
                 "from": from_node,
@@ -1651,17 +1666,22 @@ def suggest_causes(
         node_set.add(e.from_node)
         node_set.add(e.to_node)
 
-    # Scope node lookups to the layer-filtered node set so cross-domain nodes are
-    # excluded when ?layers= is specified. Collect all node IDs that appear in
-    # either the candidate edges or the CAUSES edges for this layer.
-    scoped_node_ids = node_set.copy()
-    for from_node, to_node, _et, _conf in candidate_edges:
-        scoped_node_ids.add(from_node)
-        scoped_node_ids.add(to_node)
+    # When layer-scoped, restrict the "disconnected" node universe to nodes
+    # already in the CAUSES graph for that layer. This prevents foreign-domain
+    # nodes (whose edges happen to be tagged with the same layer) from appearing
+    # in the disconnected list. Without a layer filter, still include candidate-
+    # edge endpoints for breadth.
+    if layers:
+        scoped_node_ids = node_set.copy()
+    else:
+        scoped_node_ids = node_set.copy()
+        for from_node, to_node, _et, _conf in candidate_edges:
+            scoped_node_ids.add(from_node)
+            scoped_node_ids.add(to_node)
 
     all_nodes = {
         n.id: {"label": n.label, "type": n.type}
-        for n in reader.get_nodes(ids=list(scoped_node_ids) if layers else None)
+        for n in reader.get_nodes(ids=list(scoped_node_ids) if scoped_node_ids else None)
     }
 
     # Nodes with CAUSES children but no CAUSES parents = root cause candidates
