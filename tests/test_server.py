@@ -2264,3 +2264,107 @@ class TestMetisBugFixes:
         assert status == 200
         ids = [t["id"] for t in data.get("tasks", [])]
         assert "task-roundtrip" in ids
+
+
+@pytest.mark.xdist_group("server")
+class TestMetisBatch2Fixes:
+    """Regression tests for bugs found in Metis's second test run (OHM-7308..7321)."""
+
+    def test_post_task_auto_generates_id(self, test_server):
+        """POST /tasks without 'id' field auto-generates one (OHM-7308)."""
+        port, _ = test_server
+        status, data = _request("POST", port, "/tasks", body={
+            "label": "Auto-ID task",
+            "task_status": "open",
+        })
+        assert status == 201
+        assert data.get("id"), "id should be auto-generated"
+        assert data["id"].startswith("task_")
+
+    def test_post_task_with_explicit_id(self, test_server):
+        """POST /tasks with explicit 'id' uses that id (OHM-7308)."""
+        port, _ = test_server
+        status, data = _request("POST", port, "/tasks", body={
+            "id": "explicit-task-id-7308",
+            "label": "Explicit ID task",
+        })
+        assert status == 201
+        assert data.get("id") == "explicit-task-id-7308"
+
+    def test_post_edge_accepts_from_node_alias(self, test_server):
+        """POST /edge accepts from_node/to_node/edge_type aliases (OHM-7314)."""
+        port, store = test_server
+        store.write_node("alias-from", "Alias Source", "concept", agent_name="test")
+        store.write_node("alias-to", "Alias Dest", "concept", agent_name="test")
+        status, data = _request("POST", port, "/edge", body={
+            "from_node": "alias-from",
+            "to_node": "alias-to",
+            "edge_type": "CAUSES",
+            "layer": "L3",
+        })
+        assert status == 201
+        assert data.get("from_node") == "alias-from"
+        assert data.get("to_node") == "alias-to"
+
+    def test_patch_node_updates_label(self, test_server):
+        """PATCH /node/{id} can update node label (OHM-7319)."""
+        port, store = test_server
+        store.write_node("patch-test-node", "Original Label", "concept", agent_name="test")
+        status, data = _request("PATCH", port, "/node/patch-test-node", body={
+            "label": "Updated Label",
+        })
+        assert status == 200
+        assert data.get("label") == "Updated Label"
+
+    def test_patch_node_404_for_missing(self, test_server):
+        """PATCH /node/{id} returns 404 for non-existent node (OHM-7319)."""
+        port, _ = test_server
+        status, data = _request("PATCH", port, "/node/nonexistent-patch-node", body={
+            "label": "Won't work",
+        })
+        assert status == 404
+
+    def test_source_reliability_alias(self, test_server):
+        """GET /source_reliability?source=<agent> returns reliability data (OHM-7310)."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/source_reliability?source=test")
+        assert status == 200
+        assert "source_agent" in data
+
+    def test_compound_confidence_endpoint(self, test_server):
+        """GET /compound_confidence/{node} returns compound confidence (OHM-7311)."""
+        port, store = test_server
+        store.write_node("cc-test-node", "CC Node", "concept", agent_name="test")
+        status, data = _request("GET", port, "/compound_confidence/cc-test-node")
+        assert status == 200
+        assert "node_id" in data
+        assert data["node_id"] == "cc-test-node"
+
+    def test_suggest_orphan_connect_returns_list(self, test_server):
+        """GET /suggest?method=orphan_connect returns a list (OHM-7312)."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/suggest?method=orphan_connect")
+        assert status == 200
+        assert isinstance(data, list)
+
+    def test_suggest_cooccurrence_returns_list(self, test_server):
+        """GET /suggest?method=cooccurrence returns a list (OHM-7312)."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/suggest?method=cooccurrence")
+        assert status == 200
+        assert isinstance(data, list)
+
+    def test_suggest_shared_tags_no_empty_fields(self, test_server):
+        """GET /suggest?method=shared_tags results have non-empty from_id/to_id (OHM-7313)."""
+        port, store = test_server
+        # Create tagged nodes to trigger shared_tags results
+        store.write_node("tagged-a", "Tagged A", "concept", agent_name="test",
+                         tags=["geopolitics", "energy"])
+        store.write_node("tagged-b", "Tagged B", "concept", agent_name="test",
+                         tags=["geopolitics", "security"])
+        status, data = _request("GET", port, "/suggest?method=shared_tags&min_shared=1")
+        assert status == 200
+        assert isinstance(data, list)
+        for item in data:
+            assert item.get("from_id"), f"from_id empty in {item}"
+            assert item.get("to_id"), f"to_id empty in {item}"

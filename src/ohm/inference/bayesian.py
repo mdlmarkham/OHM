@@ -436,11 +436,18 @@ def build_bayesian_network(
             model.add_node(safe)
             break
 
+    # Only build CPDs for nodes actually in the model (not nodes that were
+    # removed during cycle elimination or truncation). Using model.nodes()
+    # prevents "CPD defined on variable not in the model" errors (OHM-7309).
+    model_node_set = set(model.nodes())
+
     # Get prior probabilities for root nodes
     node_priors = {}
     root_safe_names = set()
     for node_id in node_ids:
         safe = safe_names[node_id]
+        if safe not in model_node_set:
+            continue  # Node was excluded from model edges — skip its CPD
         if safe not in parent_edges:
             root_safe_names.add(safe)
             # Get prior from observations or default

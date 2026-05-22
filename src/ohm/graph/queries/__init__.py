@@ -423,6 +423,40 @@ def query_change_feed(
     result = conn.execute(query, params)
     entries = _rows_to_dicts(result)
 
+    # Fallback to ohm_change_log when feed is empty (e.g., database migrated from older version)
+    if not entries:
+        log_conditions = []
+        log_params: list = []
+        if since and since != "last-check":
+            log_conditions.append("changed_at >= ?::TIMESTAMP")
+            log_params.append(since)
+        if agent_name:
+            log_conditions.append("agent_name = ?")
+            log_params.append(agent_name)
+        if node_id:
+            log_conditions.append(
+                "(row_id = ? OR row_id IN ("
+                "  SELECT e.id FROM ohm_edges e WHERE (e.from_node = ? OR e.to_node = ?) AND e.deleted_at IS NULL"
+                "))"
+            )
+            log_params.extend([node_id, node_id, node_id])
+        log_where = ("WHERE " + " AND ".join(log_conditions)) if log_conditions else ""
+        log_params.append(limit)
+        try:
+            log_result = conn.execute(
+                f"""SELECT
+                        NULL AS id, table_name, row_id, operation, agent_name,
+                        NULL AS old_data, NULL AS new_data, changed_at AS occurred_at
+                    FROM ohm_change_log
+                    {log_where}
+                    ORDER BY changed_at DESC
+                    LIMIT ?""",
+                log_params,
+            )
+            entries = _rows_to_dicts(log_result)
+        except Exception:
+            pass
+
     # Optional enrichment: fetch node/edge data for each entry
     if enrich and entries:
         for entry in entries:

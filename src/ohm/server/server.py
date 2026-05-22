@@ -373,8 +373,12 @@ def _build_router() -> _RouteRegistry:
         "/node/", "/deep/", "/edge/", "/neighborhood/", "/path/",
         "/impact/", "/confidence/", "/agent/", "/provenance/",
         "/monte-carlo/", "/calibration/", "/reliability/",
+        "/compound_confidence/",
     ):
         r.add("GET", _p)
+
+    # /source_reliability: alias for /reliability/{source} with ?source= param
+    r.add("GET", "/source_reliability")
 
     # Multi-method: /observations supports both GET (list) and POST (bulk upload)
     r.add("GET", "/observations")
@@ -407,6 +411,7 @@ def _build_router() -> _RouteRegistry:
         r.add("POST", _p)
 
     # PATCH
+    r.add("PATCH", "/node/")
     r.add("PATCH", "/edge/")
 
     # DELETE
@@ -724,7 +729,7 @@ class OhmHandler(BaseHTTPRequestHandler):
 
     _REQUIRED_FIELDS = {
         "/node": ["id", "label"],
-        "/tasks": ["id", "label"],
+        "/tasks": ["label"],
         "/edge": ["from", "to", "type"],
         "/state": [],
         "/register": [],
@@ -800,6 +805,15 @@ class OhmHandler(BaseHTTPRequestHandler):
             if path.startswith(prefix):
                 validation_path = prefix.rstrip("/")
                 break
+
+        # Pre-normalize /edge field aliases before required-field check
+        if validation_path == "/edge":
+            if "from_node" in body and "from" not in body:
+                body["from"] = body.pop("from_node")
+            if "to_node" in body and "to" not in body:
+                body["to"] = body.pop("to_node")
+            if "edge_type" in body and "type" not in body:
+                body["type"] = body.pop("edge_type")
 
         # Check required fields
         required = self._REQUIRED_FIELDS.get(validation_path, [])
@@ -1072,17 +1086,60 @@ class OhmHandler(BaseHTTPRequestHandler):
             )
 
     def _do_PATCH(self):
-        """Handle PATCH /edge/{id} — partial update of PERT fields on an existing edge."""
+        """Handle PATCH /node/{id} or PATCH /edge/{id} — partial update."""
         from urllib.parse import urlparse
         from ohm.validation import validate_identifier
         from ohm.exceptions import NodeNotFoundError
 
-        agent = self._require_write_auth()
+        if self.no_auth:
+            agent = self._authenticate() or "ohm"
+        else:
+            agent = self._require_write_auth()
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
         body = self._read_body()
 
-        if path.startswith("/edge/"):
+        if path.startswith("/node/"):
+            node_id = path[6:]
+            node_id = validate_identifier(node_id, name="node_id")
+            node = self.store.get_node(node_id)
+            if not node:
+                raise NodeNotFoundError(f"Node not found: {node_id}")
+
+            now = datetime.now(timezone.utc).isoformat()
+            patchable = [
+                "label", "content", "confidence", "visibility", "provenance",
+                "tags", "metadata", "priority", "url", "task_status",
+                "assigned_to", "due_date", "utility_scale", "current_best_action",
+                "action_alternatives", "utility_usd_per_day", "utility_currency",
+            ]
+            update_fields = []
+            update_params = []
+            for field in patchable:
+                if field in body:
+                    update_fields.append(f"{field} = ?")
+                    update_params.append(body[field])
+
+            if not update_fields:
+                raise ValidationError("No updatable fields provided")
+
+            update_fields.append("updated_at = ?")
+            update_params.append(now)
+            update_fields.append("updated_by = ?")
+            update_params.append(agent)
+            update_params.append(node_id)
+
+            self.store.conn.execute(
+                f"UPDATE ohm_nodes SET {', '.join(update_fields)} WHERE id = ?",
+                update_params,
+            )
+            self.store._log_change("ohm_nodes", node_id, "UPDATE", "L3", agent_name=agent)
+            self.store._increment_graph_generation()
+            updated = self.store.get_node(node_id)
+            _trigger_webhooks({"type": "node.updated", "agent": agent, "node": updated})
+            self._json_response(200, updated)
+
+        elif path.startswith("/edge/"):
             edge_id = path[6:]
             edge_id = validate_identifier(edge_id, name="edge_id")
             edge = self.store.get_edge(edge_id)
@@ -2327,12 +2384,51 @@ class OhmHandler(BaseHTTPRequestHandler):
 
     def _get_reliability(self, path: str, qs: dict) -> None:
         """GET /reliability/<agent> — source reliability metrics."""
-        # Compute source reliability metrics from historical outcomes
         source_agent = path[13:]  # strip /reliability/
         from ohm.validation import validate_identifier
         source_agent = validate_identifier(source_agent, name="source_agent")
         from ohm.queries import query_source_reliability
         result = query_source_reliability(self.store.conn, source_agent)
+        self._json_response(200, result)
+
+    def _get_source_reliability(self, path: str, qs: dict) -> None:
+        """GET /source_reliability — alias for /reliability/{source} accepting ?source= param (OHM-7310)."""
+        source_agent = qs.get("source", [None])[0]
+        if not source_agent:
+            raise ValidationError("?source=<agent_name> is required")
+        from ohm.validation import validate_identifier
+        source_agent = validate_identifier(source_agent, name="source_agent")
+        from ohm.queries import query_source_reliability
+        result = query_source_reliability(self.store.conn, source_agent)
+        self._json_response(200, result)
+
+    def _get_compound_confidence(self, path: str, qs: dict) -> None:
+        """GET /compound_confidence/<node_id> — compound confidence from node observations (OHM-7311)."""
+        node_id = path[21:]  # strip /compound_confidence/ (21 chars)
+        from ohm.validation import validate_identifier
+        node_id = validate_identifier(node_id, name="node_id")
+        node = self.store.get_node(node_id)
+        if not node:
+            raise NodeNotFoundError(f"Node not found: {node_id}")
+        correlation = float(qs.get("correlation", ["0.0"])[0])
+        observations = self.store.execute(
+            "SELECT * FROM ohm_observations WHERE node_id = ? AND deleted_at IS NULL ORDER BY created_at DESC",
+            [node_id],
+        )
+        from ohm.methods import compound_confidence
+        # Derive confidence from sigma (lower sigma = higher confidence) or default 1.0
+        def _obs_confidence(obs: dict) -> float:
+            sigma = obs.get("sigma")
+            if sigma is not None and sigma > 0:
+                return max(0.0, min(1.0, 1.0 / (1.0 + float(sigma))))
+            return 1.0
+        obs_with_confidence = [
+            {"confidence": _obs_confidence(obs), "source": obs.get("created_by")}
+            for obs in observations
+        ]
+        result = compound_confidence(obs_with_confidence, correlation=correlation)
+        result["node_id"] = node_id
+        result["observations"] = len(observations)
         self._json_response(200, result)
 
     def _get_observations(self, path: str, qs: dict) -> None:
@@ -2870,8 +2966,13 @@ class OhmHandler(BaseHTTPRequestHandler):
 
     def _post_task(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /tasks — create a task node (OHM-7304)."""
+        import re
+        task_id = body.get("id") or (
+            "task_" + re.sub(r"[^a-z0-9]+", "_", body["label"].lower()).strip("_")[:48]
+            + "_" + str(uuid.uuid4())[:8]
+        )
         result = self.store.write_node(
-            id=body["id"],
+            id=task_id,
             label=body["label"],
             type="task",
             content=body.get("content"),
@@ -3085,7 +3186,10 @@ OhmHandler._GET_EXACT = {
     "/graph/at": "_get_graph_at",
     "/graph/changes": "_get_graph_changes",
     "/observations": "_get_observations",
+    "/source_reliability": "_get_source_reliability",
 }
+
+
 
 OhmHandler._GET_PREFIXES = [
     ("/node/", "_get_node"),
@@ -3101,6 +3205,7 @@ OhmHandler._GET_PREFIXES = [
     ("/monte-carlo/", "_get_monte_carlo"),
     ("/calibration/", "_get_calibration"),
     ("/reliability/", "_get_reliability"),
+    ("/compound_confidence/", "_get_compound_confidence"),
 ]
 
 
