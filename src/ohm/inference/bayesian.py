@@ -787,6 +787,14 @@ def causal_intervention(
         }
 
     # Step 1: Build the original Bayesian network
+    # Auto-derive preferred_edges from query_nodes: protect target→query_node
+    # direction so the cycle breaker never removes the queried causal path.
+    auto_preferred: set[tuple[str, str]] = set()
+    if query_nodes:
+        for qn in query_nodes:
+            auto_preferred.add((target, qn))
+    effective_preferred = (preferred_edges or set()) | auto_preferred
+
     scope_nodes = [target]
     if query_nodes:
         scope_nodes.extend(query_nodes)
@@ -797,7 +805,7 @@ def causal_intervention(
         leak_probability=leak_probability,
         root_prior=root_prior,
         semantic_roles=semantic_roles,
-        preferred_edges=preferred_edges,
+        preferred_edges=effective_preferred or None,
     )
 
     if network is None:
