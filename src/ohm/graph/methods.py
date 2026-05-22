@@ -314,11 +314,12 @@ def query_agent_health(
             WHERE n.type = 'agent' AND n.deleted_at IS NULL
               -- Skip if already tracked in ohm_agent_state under the same name
               AND n.id NOT IN (SELECT agent_name FROM ohm_agent_state)
-              -- Skip if this is the 'agent-X' prefixed form of a tracked agent
-              -- (avoids duplicate rows when agents register as both 'metis' and 'agent-metis')
-              AND REGEXP_REPLACE(n.id, '^agent-', '') NOT IN (SELECT agent_name FROM ohm_agent_state)
-              -- Skip if the bare name has an 'agent-' prefixed version already tracked
+              -- Skip if this is the 'agent-X' or 'agent_X' prefixed form of a tracked agent
+              -- (avoids duplicates when agents register as 'metis' and 'agent-metis' or 'agent_metis')
+              AND REGEXP_REPLACE(n.id, '^agent[-_]', '') NOT IN (SELECT agent_name FROM ohm_agent_state)
+              -- Skip if the bare name has an 'agent-' or 'agent_' prefixed version already tracked
               AND ('agent-' || n.id) NOT IN (SELECT agent_name FROM ohm_agent_state)
+              AND ('agent_' || n.id) NOT IN (SELECT agent_name FROM ohm_agent_state)
         )
         SELECT *, CASE status WHEN 'alive' THEN 1 WHEN 'registered' THEN 2 WHEN 'stale' THEN 3 ELSE 4 END AS sort_key FROM state_agents
         UNION ALL
