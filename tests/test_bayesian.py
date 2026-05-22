@@ -653,7 +653,7 @@ class TestBayesianContextReuse:
             call_count["count"] += 1
             return original_build(*args, **kwargs)
 
-        with patch("ohm.bayesian.build_bayesian_network", side_effect=counting_build):
+        with patch("ohm.inference.bayesian.build_bayesian_network", side_effect=counting_build):
             with BayesianContext(db, edge_types=["CAUSES"], layers=["L3"]) as ctx:
                 # Call intervention twice — should use cached network, not rebuild
                 result1 = ctx.intervention(b, 0, query_nodes=[c])
@@ -691,7 +691,7 @@ class TestBayesianContextReuse:
             call_count["count"] += 1
             return original_build(*args, **kwargs)
 
-        with patch("ohm.bayesian.build_bayesian_network", side_effect=counting_build):
+        with patch("ohm.inference.bayesian.build_bayesian_network", side_effect=counting_build):
             with BayesianContext(db, edge_types=["CAUSES"], layers=["L3"]) as ctx:
                 ate = ctx.ate(a, b)
 
@@ -818,7 +818,7 @@ class TestBayesianContextReuse:
             call_count["count"] += 1
             return original_build(*args, **kwargs)
 
-        with patch("ohm.bayesian.build_bayesian_network", side_effect=counting_build):
+        with patch("ohm.inference.bayesian.build_bayesian_network", side_effect=counting_build):
             with BayesianContext(db, edge_types=["CAUSES"], layers=["L3"]) as ctx:
                 # Make 5 calls across different methods
                 ctx.intervention(b, 0, query_nodes=[c])
