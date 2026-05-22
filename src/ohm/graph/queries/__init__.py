@@ -161,68 +161,56 @@ def query_path(
     max_depth: int = 10,
     layer: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Shortest path between *from_node* and *to_node* using BFS.
+    """Shortest path between *from_node* and *to_node* using directed BFS.
 
-    Returns the ordered list of edges forming the path, or empty list if
-    no path exists within *max_depth*.
+    Returns the ordered list of edges forming the path (from source to
+    destination), or empty list if no path exists within *max_depth*.
     """
+    from collections import deque
+
     from ohm.validation import validate_depth, validate_identifier, validate_layer
 
     from_node = validate_identifier(from_node, name="from_node")
     to_node = validate_identifier(to_node, name="to_node")
     max_depth = validate_depth(max_depth, max_depth=50)
+
+    if from_node == to_node:
+        return []
+
+    edge_query = (
+        "SELECT id, from_node, to_node, layer, edge_type, confidence FROM ohm_edges"
+    )
+    params: list = []
     if layer:
         layer = validate_layer(layer)
+        edge_query += " WHERE layer = ?"
+        params.append(layer)
 
-    params: list = [from_node, from_node, max_depth, to_node, to_node]
-    layer_clause = ""
-    if layer:
-        layer_clause = "AND e.layer = ?"
-        params.insert(2, layer)   # after the two from_node params, before max_depth
-        params.append(layer)      # layer_clause appears twice in the query
+    all_edges = _rows_to_dicts(conn.execute(edge_query, params))
 
-    query = f"""
-        WITH RECURSIVE path_cte AS (
-            SELECT
-                e.id AS edge_id,
-                e.from_node,
-                e.to_node,
-                e.layer,
-                e.edge_type,
-                e.confidence,
-                1 AS depth,
-                [e.id] AS path_ids
-            FROM ohm_edges e
-            WHERE (e.from_node = ? OR e.to_node = ?)
-              {layer_clause}
+    # Directed adjacency list: node → outgoing edges
+    adj: dict[str, list[dict[str, Any]]] = {}
+    for e in all_edges:
+        adj.setdefault(e["from_node"], []).append(e)
 
-            UNION ALL
+    # BFS: find shortest directed path
+    queue: deque[tuple[str, list[dict[str, Any]]]] = deque([(from_node, [])])
+    visited: set[str] = {from_node}
 
-            SELECT
-                e.id,
-                e.from_node,
-                e.to_node,
-                e.layer,
-                e.edge_type,
-                e.confidence,
-                p.depth + 1,
-                list_append(p.path_ids, e.id)
-            FROM path_cte p
-            JOIN ohm_edges e ON (e.from_node = p.to_node OR e.to_node = p.to_node
-                                  OR e.from_node = p.from_node OR e.to_node = p.from_node)
-            WHERE p.depth < ?
-              AND e.id NOT IN (SELECT UNNEST(p.path_ids))
-              {layer_clause}
-        )
-        SELECT edge_id, from_node, to_node, layer, edge_type, confidence, depth
-        FROM path_cte
-        WHERE to_node = ? OR from_node = ?
-        ORDER BY depth
-        LIMIT 1
-    """
+    while queue:
+        current, path = queue.popleft()
+        if len(path) >= max_depth:
+            continue
+        for edge in adj.get(current, []):
+            nxt = edge["to_node"]
+            new_path = path + [edge]
+            if nxt == to_node:
+                return [dict(e, depth=i + 1) for i, e in enumerate(new_path)]
+            if nxt not in visited:
+                visited.add(nxt)
+                queue.append((nxt, new_path))
 
-    result = conn.execute(query, params)
-    return _rows_to_dicts(result)
+    return []
 
 
 # ── Impact ──────────────────────────────────────────────────────────────────
