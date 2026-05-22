@@ -659,16 +659,18 @@ def bayesian_inference(
     model = network["model"]
     network["safe_names"]
 
-    # Convert evidence to safe names
+    # Only include evidence nodes actually in the model — BFS scope may include nodes
+    # that were excluded by cycle-breaking and are not in model.nodes()
+    model_node_set = set(network["model"].nodes())
     safe_evidence = {}
     for node_id, state in evidence.items():
         safe = _safe_node_id(validate_identifier(node_id, name="evidence_node"))
-        if safe in network["variables"]:
+        if safe in model_node_set:
             safe_evidence[safe] = int(state)
 
     safe_target = _safe_node_id(target)
 
-    if safe_target not in network["variables"]:
+    if safe_target not in model_node_set:
         return {
             "method": "none",
             "pgmpy_available": True,
@@ -875,17 +877,23 @@ def causal_intervention(
     # Step 4: Run inference on the mutilated graph
     # The target is set to intervention_state deterministically
     # We query downstream nodes to see the causal effect
+    model_nodes = set(model_do.nodes())
     safe_query_nodes = []
     missing_query_nodes = []
     if query_nodes:
         for qn in query_nodes:
             safe_qn = _safe_node_id(validate_identifier(qn, name="query_node"))
-            if safe_qn in network["variables"]:
+            # Verify node is in the model (not just in BFS scope) — some BFS-scoped
+            # nodes may have been excluded from the model by cycle-breaking
+            if safe_qn in model_nodes:
                 safe_query_nodes.append(safe_qn)
+            elif safe_qn in network["variables"]:
+                # In BFS scope but not in model — report as missing
+                missing_query_nodes.append(qn)
             else:
                 missing_query_nodes.append(qn)
 
-    # If no explicit query nodes, find all descendants of target
+    # If no explicit query nodes, find all model nodes reachable from target
     if not safe_query_nodes:
         if missing_query_nodes:
             return {
@@ -902,9 +910,11 @@ def causal_intervention(
         try:
             import networkx as nx
             descendants = nx.descendants(model_do, safe_target)
-            safe_query_nodes = list(descendants)
+            # Only include nodes actually in the model
+            safe_query_nodes = [v for v in descendants if v in model_nodes]
         except Exception:
-            safe_query_nodes = [v for v in network["variables"] if v != safe_target]
+            # Fall back to all model nodes except the target
+            safe_query_nodes = [v for v in model_nodes if v != safe_target]
 
     if not safe_query_nodes:
         # Target has no descendants — intervention only affects target itself
@@ -927,53 +937,21 @@ def causal_intervention(
             },
         }
 
-    # Run inference with target as evidence (deterministic)
-    try:
-        infer = VariableElimination(model_do)
-        result = infer.query(safe_query_nodes, evidence={safe_target: intervention_state})
-
-        # Extract posteriors for each query node
-        posteriors = {}
-        if len(safe_query_nodes) == 1:
-            # Single query node — result is a single factor
-            qn = safe_query_nodes[0]
-            qn_original = None
-            for orig, safe in safe_names.items():
-                if safe == qn:
-                    qn_original = orig
-                    break
-            posteriors[qn_original or qn] = {
-                "good": round(float(result.values[1]), 4),
-                "bad": round(float(result.values[0]), 4),
+    # Run inference per query node — query each individually to avoid a joint
+    # distribution that is slow and can fail if any node is not connected.
+    # Each individual query returns a marginal distribution for that node.
+    infer = VariableElimination(model_do)
+    posteriors = {}
+    for qn in safe_query_nodes:
+        qn_original = next((orig for orig, safe in safe_names.items() if safe == qn), qn)
+        try:
+            result_single = infer.query([qn], evidence={safe_target: intervention_state})
+            posteriors[qn_original] = {
+                "good": round(float(result_single.values[1]), 4),
+                "bad": round(float(result_single.values[0]), 4),
             }
-        else:
-            # Multiple query nodes — result may be joint or per-variable
-            # pgmpy VariableElimination.query with multiple variables returns a factor
-            # We need to marginalize to get per-variable posteriors
-            for qn in safe_query_nodes:
-                qn_original = None
-                for orig, safe in safe_names.items():
-                    if safe == qn:
-                        qn_original = orig
-                        break
-                try:
-                    result_single = infer.query([qn], evidence={safe_target: intervention_state})
-                    posteriors[qn_original or qn] = {
-                        "good": round(float(result_single.values[1]), 4),
-                        "bad": round(float(result_single.values[0]), 4),
-                    }
-                except Exception:
-                    posteriors[qn_original or qn] = {"error": "inference failed for this node"}
-
-    except Exception as e:
-        logger.error(f"Intervention inference failed: {e}")
-        return {
-            "method": "error",
-            "pgmpy_available": True,
-            "target": target,
-            "intervention_state": intervention_state,
-            "error": str(e),
-        }
+        except Exception as e:
+            posteriors[qn_original] = {"error": f"inference failed: {e}"}
 
     # Step 5: Compare with observation-based inference for the same evidence
     # This shows the confounder effect: difference = confounding bias
@@ -1665,9 +1643,18 @@ def suggest_causes(
         node_set.add(e.from_node)
         node_set.add(e.to_node)
 
-    # Find nodes that are NOT in CAUSES edges at all (no causal parents, no causal children)
-    # And nodes that are in CAUSES but have no parents (root nodes)
-    all_nodes = {n.id: {"label": n.label, "type": n.type} for n in reader.get_nodes()}
+    # Scope node lookups to the layer-filtered node set so cross-domain nodes are
+    # excluded when ?layers= is specified. Collect all node IDs that appear in
+    # either the candidate edges or the CAUSES edges for this layer.
+    scoped_node_ids = node_set.copy()
+    for from_node, to_node, _et, _conf in candidate_edges:
+        scoped_node_ids.add(from_node)
+        scoped_node_ids.add(to_node)
+
+    all_nodes = {
+        n.id: {"label": n.label, "type": n.type}
+        for n in reader.get_nodes(ids=list(scoped_node_ids) if layers else None)
+    }
 
     # Nodes with CAUSES children but no CAUSES parents = root cause candidates
     root_causes = []
@@ -1683,6 +1670,7 @@ def suggest_causes(
             })
 
     # Nodes not in any CAUSES edge = potentially missing causal structure
+    # When layer-scoped, only include nodes in the scoped set
     disconnected = []
     for node_id, node_info in all_nodes.items():
         if node_id not in node_set:
