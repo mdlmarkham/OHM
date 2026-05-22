@@ -1139,6 +1139,7 @@ def compute_ate(
                 leak_probability=leak_probability,
                 root_prior=root_prior,
                 semantic_roles=semantic_roles,
+                preferred_edges=_preferred,
             )
             if _net is not None:
                 _model = _net["model"]
