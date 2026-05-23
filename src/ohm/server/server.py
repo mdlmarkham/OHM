@@ -1398,10 +1398,13 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "/observe/{id}": {"method": "POST", "description": "Record an observation on a node"},
                     "/observations": {"method": "GET", "description": "List observations with filtering by type, source, node_id. POST for bulk upload: {observations: [{node_id, value, sigma, obs_type, source}]}"},
                     "/outcome": {"method": "POST", "description": "Record whether a source agent's claim was correct"},
+                    "/agent/synthesis": {"method": "POST", "description": "Write a synthesis: one concept node + L3 edges + observation in one call"},
                     "/reliability/{source}": {"method": "GET", "description": "Compute source reliability metrics from historical outcomes"},
                     "/state": {"method": "POST", "description": "Update agent state/focus"},
                     "/register": {"method": "POST", "description": "Register a new agent"},
                     "/heartbeat": {"method": "POST", "description": "Agent heartbeat with sync"},
+                    "/sync": {"method": "POST", "description": "Trigger explicit DuckLake sync (push local writes to shared lake)"},
+                    "/tasks": {"method": "GET", "description": "List task nodes with filtering. POST to create a task node (requires id, label)"},
                     "/webhook/{agent}": {"method": "POST", "description": "Register a webhook callback"},
                     "/search": {"method": "GET", "description": "ILIKE text search (?q=QUERY)"},
                     "/semantic_search": {"method": "GET", "description": "Semantic vector search (requires Ollama)"},
@@ -2965,6 +2968,83 @@ class OhmHandler(BaseHTTPRequestHandler):
         )
         self._json_response(201, result)
 
+    def _post_synthesis(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /agent/synthesis — one-call L3 writing: concept node + edges + observation."""
+        label = body.get("label")
+        content = body.get("content")
+        cluster_ids = body.get("cluster_ids", [])
+        edge_type = body.get("edge_type", "SUPPORTS")
+        confidence = body.get("confidence", 0.8)
+        sigma = body.get("sigma", 0.1)
+        provenance = body.get("provenance")
+        tags = body.get("tags")
+
+        if not label or not content or not cluster_ids:
+            raise ValidationError("agent/synthesis requires label, content, and cluster_ids")
+
+        from ohm.graph.schema import generate_node_id
+        from ohm.validation import validate_identifier
+        import json as _json
+
+        # Create synthesis concept node
+        node_id = generate_node_id(label)
+        node_result = self.store.write_node(
+            id=node_id,
+            label=label,
+            type="concept",
+            content=content,
+            confidence=confidence,
+            agent_name=agent,
+            provenance=provenance or f"{agent}_synthesis",
+        )
+        node_id = node_result["id"] if isinstance(node_result, dict) else node_id
+
+        # Add tags if provided
+        if tags:
+            self.store.conn.execute(
+                "UPDATE ohm_nodes SET tags = ? WHERE id = ?",
+                [_json.dumps(tags), node_id],
+            )
+
+        # Create L3 edges to each cluster node
+        edges_created = 0
+        for cid in cluster_ids:
+            try:
+                safe_cid = validate_identifier(cid, name="cluster_id")
+            except ValueError:
+                continue
+            try:
+                self.store.write_edge(
+                    from_node=node_id,
+                    to_node=safe_cid,
+                    edge_type=edge_type,
+                    layer="L3",
+                    confidence=confidence,
+                    agent_name=agent,
+                )
+                edges_created += 1
+            except Exception:
+                continue
+
+        # Record observation on the synthesis node
+        from ohm.queries import create_observation
+        obs_result = create_observation(
+            self.store.conn,
+            node_id=node_id,
+            obs_type="pattern",
+            value=confidence,
+            sigma=sigma,
+            source="synthesis",
+            notes=content,
+            created_by=agent,
+        )
+
+        self._json_response(201, {
+            "node": node_result if isinstance(node_result, dict) else {"id": node_id, "label": label},
+            "edges_created": edges_created,
+            "observation": obs_result,
+        })
+
     def _post_batch(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /batch — batch node and edge creation (all-or-nothing transaction)."""
         nodes = body.get("nodes", [])
@@ -3404,6 +3484,7 @@ OhmHandler._POST_EXACT = {
     "/edge": "_post_edge",
     "/observations": "_post_observations",
     "/outcome": "_post_outcome",
+    "/agent/synthesis": "_post_synthesis",
     "/batch": "_post_batch",
     "/webhook": "_post_webhook",
     "/state": "_post_state",

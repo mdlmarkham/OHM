@@ -2079,7 +2079,7 @@ def generate_voi_tasks(
     agent_capable_nodes: set[str] = set()  # specific nodes agent is CAPABLE_OF
     agent_workload: int = 0  # open tasks already assigned to agent
     if agent:
-        from .validation import validate_identifier
+        from ohm.validation import validate_identifier
 
         safe_agent = validate_identifier(agent, name="agent")
 

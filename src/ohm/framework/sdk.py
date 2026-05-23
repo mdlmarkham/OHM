@@ -506,6 +506,101 @@ class Graph:
 
         set_agent_state(self._conn, agent_name=self.actor, focus=focus)
 
+    def write_synthesis(
+        self,
+        cluster_ids: list[str],
+        label: str,
+        content: str,
+        *,
+        edge_type: str = "SUPPORTS",
+        confidence: float = 0.8,
+        sigma: float = 0.1,
+        provenance: str | None = None,
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Write a synthesis: one concept node + L3 edges + observation.
+
+        The core L3 writing primitive. Instead of calling create_node,
+        create_edge (×N), and observe separately, this collapses the
+        most common agent writing pattern into a single call.
+
+        Args:
+            cluster_ids: Node IDs this synthesis connects to.
+            label: Short name for the synthesis concept.
+            content: Full synthesis text — your reasoning, the pattern you see.
+            edge_type: L3 edge type (SUPPORTS, CAUSES, TRANSITIONS_TO,
+                APPLIES_TO, INFLUENCES, REFINES). Default SUPPORTS.
+            confidence: Your confidence in this synthesis (0-1).
+            sigma: Uncertainty in confidence (0-1).
+            provenance: How you arrived at this (e.g., 'pattern_analysis').
+            tags: Tags for discoverability (e.g., ['AND-OR', 'governance']).
+
+        Returns:
+            Dict with node, edges_created (count), and observation.
+        """
+        from ohm.graph.schema import generate_node_id
+        from ohm.validation import validate_identifier
+        from ohm.queries import create_node, create_edge, create_observation
+        import json as _json
+
+        node_id = generate_node_id(label)
+        node_result = create_node(
+            self._conn,
+            label=label,
+            node_type="concept",
+            content=content,
+            created_by=self.actor,
+            provenance=provenance or f"{self.actor}_synthesis",
+            confidence=confidence,
+        )
+        node_id = node_result["id"] if isinstance(node_result, dict) else node_id
+
+        # Add tags if provided
+        if tags:
+            self._conn.execute(
+                "UPDATE ohm_nodes SET tags = ? WHERE id = ?",
+                [_json.dumps(tags), node_id],
+            )
+
+        # Create L3 edges to each cluster node
+        edges_created = 0
+        for cid in cluster_ids:
+            try:
+                safe_cid = validate_identifier(cid, name="cluster_id")
+            except ValueError:
+                continue
+            try:
+                create_edge(
+                    self._conn,
+                    from_node=node_id,
+                    to_node=safe_cid,
+                    layer="L3",
+                    edge_type=edge_type,
+                    created_by=self.actor,
+                    confidence=confidence,
+                )
+                edges_created += 1
+            except Exception:
+                continue
+
+        # Record observation on the synthesis node
+        obs_result = create_observation(
+            self._conn,
+            node_id=node_id,
+            obs_type="pattern",
+            value=confidence,
+            sigma=sigma,
+            source="synthesis",
+            notes=content,
+            created_by=self.actor,
+        )
+
+        return {
+            "node": node_result if isinstance(node_result, dict) else {"id": node_id, "label": label},
+            "edges_created": edges_created,
+            "observation": obs_result,
+        }
+
     def register_agent(
         self,
         *,
