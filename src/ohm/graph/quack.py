@@ -107,9 +107,7 @@ def reset_availability() -> None:
 
 # ── URI Validation ──────────────────────────────────────────────────────────
 
-_QUACK_URI_RE = re.compile(
-    r"^quack:(//)?[a-zA-Z0-9._:-]+(?:\d+)?$"
-)
+_QUACK_URI_RE = re.compile(r"^quack:(//)?[a-zA-Z0-9._:-]+(?:\d+)?$")
 
 
 def validate_quack_uri(uri: str) -> str:
@@ -161,6 +159,7 @@ def validate_quack_token(token: str) -> str:
         raise ValueError(f"Quack token must be at least 4 characters, got {len(token)}")
     if len(token) < 32:
         import warnings
+
         warnings.warn(
             f"Quack token is {len(token)} chars — 32+ recommended for production",
             stacklevel=2,
@@ -171,6 +170,7 @@ def validate_quack_token(token: str) -> str:
 
 
 # ── Server-Side ─────────────────────────────────────────────────────────────
+
 
 def start_server(
     conn: DuckDBPyConnection,
@@ -202,10 +202,7 @@ def start_server(
         ValueError: If URI or token is invalid.
     """
     if not is_available(conn):
-        raise RuntimeError(
-            "Quack extension is not available. "
-            "Install with: FORCE INSTALL quack FROM core_nightly; LOAD quack;"
-        )
+        raise RuntimeError("Quack extension is not available. Install with: FORCE INSTALL quack FROM core_nightly; LOAD quack;")
 
     uri = validate_quack_uri(uri)
 
@@ -222,24 +219,17 @@ def start_server(
     # Use parameterized approach where possible, but Quack's CALL syntax
     # requires string interpolation for the URI. The URI is validated above.
     if resolved_token and allow_other_hostname:
-        conn.execute(
-            f"CALL quack_serve('{uri}', token := '{resolved_token}', "
-            f"allow_other_hostname := true)"
-        )
+        conn.execute(f"CALL quack_serve('{uri}', token := '{resolved_token}', allow_other_hostname := true)")
     elif resolved_token:
         conn.execute(f"CALL quack_serve('{uri}', token := '{resolved_token}')")
     elif allow_other_hostname:
-        conn.execute(
-            f"CALL quack_serve('{uri}', allow_other_hostname := true)"
-        )
+        conn.execute(f"CALL quack_serve('{uri}', allow_other_hostname := true)")
     else:
         conn.execute(f"CALL quack_serve('{uri}')")
 
     # Get the server info
     try:
-        conn.execute(
-            "SELECT * FROM duckdb_settings() WHERE name = 'quack_listen_uri'"
-        ).fetchall()
+        conn.execute("SELECT * FROM duckdb_settings() WHERE name = 'quack_listen_uri'").fetchall()
     except Exception:
         pass
 
@@ -269,6 +259,7 @@ def stop_server(conn: DuckDBPyConnection, uri: str = "quack:localhost") -> None:
 
 
 # ── Client-Side ─────────────────────────────────────────────────────────────
+
 
 def attach_remote(
     conn: DuckDBPyConnection,

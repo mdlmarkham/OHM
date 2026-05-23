@@ -69,23 +69,17 @@ class TestOhmStore:
 
     def test_write_edge_with_agent_name_override(self, populated_store):
         """OHM-y2i.19: write_edge should accept agent_name parameter."""
-        edge = populated_store.write_edge(
-            "and_or", "hungary", "EXPLAINS", "L3", confidence=0.8, agent_name="metis"
-        )
+        edge = populated_store.write_edge("and_or", "hungary", "EXPLAINS", "L3", confidence=0.8, agent_name="metis")
         assert edge["created_by"] == "metis"
 
     def test_challenge_edge(self, populated_store):
         # Get the CAUSES edge
-        edge = populated_store.execute_one(
-            "SELECT * FROM ohm_edges WHERE edge_type = 'CAUSES'"
-        )
+        edge = populated_store.execute_one("SELECT * FROM ohm_edges WHERE edge_type = 'CAUSES'")
         assert edge is not None
 
         # Challenge it as a different agent
         populated_store.agent_name = "socrates"
-        challenge = populated_store.challenge_edge(
-            edge["id"], "conditions too narrow", 0.5, "CHALLENGED_BY"
-        )
+        challenge = populated_store.challenge_edge(edge["id"], "conditions too narrow", 0.5, "CHALLENGED_BY")
         assert challenge is not None
         assert challenge["challenge_of"] == edge["id"]
         assert challenge["challenge_type"] == "CHALLENGED_BY"
@@ -97,19 +91,13 @@ class TestOhmStore:
 
     def test_challenge_edge_with_agent_name_override(self, populated_store):
         """OHM-y2i.19: challenge_edge should accept agent_name parameter."""
-        edge = populated_store.execute_one(
-            "SELECT * FROM ohm_edges WHERE edge_type = 'CAUSES'"
-        )
-        challenge = populated_store.challenge_edge(
-            edge["id"], "doubtful", 0.3, "CHALLENGED_BY", agent_name="metis"
-        )
+        edge = populated_store.execute_one("SELECT * FROM ohm_edges WHERE edge_type = 'CAUSES'")
+        challenge = populated_store.challenge_edge(edge["id"], "doubtful", 0.3, "CHALLENGED_BY", agent_name="metis")
         assert challenge is not None
         assert challenge["created_by"] == "metis"
 
     def test_update_edge_confidence_owner_only(self, populated_store):
-        edge = populated_store.execute_one(
-            "SELECT * FROM ohm_edges WHERE edge_type = 'CAUSES'"
-        )
+        edge = populated_store.execute_one("SELECT * FROM ohm_edges WHERE edge_type = 'CAUSES'")
 
         # Owner can update
         result = populated_store.update_edge_confidence(edge["id"], 0.96)
@@ -122,67 +110,47 @@ class TestOhmStore:
 
     def test_update_edge_confidence_with_agent_name_override(self, populated_store):
         """OHM-y2i.19: update_edge_confidence should accept agent_name parameter."""
-        edge = populated_store.execute_one(
-            "SELECT * FROM ohm_edges WHERE edge_type = 'CAUSES'"
-        )
+        edge = populated_store.execute_one("SELECT * FROM ohm_edges WHERE edge_type = 'CAUSES'")
         # Owner can update using agent_name parameter
-        result = populated_store.update_edge_confidence(
-            edge["id"], 0.97, agent_name="test_agent"
-        )
+        result = populated_store.update_edge_confidence(edge["id"], 0.97, agent_name="test_agent")
         assert abs(result["confidence"] - 0.97) < 0.001
 
         # Non-owner cannot update even with agent_name parameter
         with pytest.raises(PermissionError):
-            populated_store.update_edge_confidence(
-                edge["id"], 0.5, agent_name="socrates"
-            )
+            populated_store.update_edge_confidence(edge["id"], 0.5, agent_name="socrates")
 
     def test_write_observation(self, populated_store):
-        obs = populated_store.write_observation(
-            "hungary", "measurement", value=0.85, baseline=0.5, sigma=3.5, source="research"
-        )
+        obs = populated_store.write_observation("hungary", "measurement", value=0.85, baseline=0.5, sigma=3.5, source="research")
         assert obs["node_id"] == "hungary"
         assert obs["type"] == "measurement"
         assert abs(obs["value"] - 0.85) < 0.001
 
     def test_write_observation_with_notes(self, populated_store):
         """OHM-of8: write_observation should persist notes field."""
-        obs = populated_store.write_observation(
-            "hungary", "measurement", value=0.9, notes="Unusual pattern detected"
-        )
+        obs = populated_store.write_observation("hungary", "measurement", value=0.9, notes="Unusual pattern detected")
         assert obs["notes"] == "Unusual pattern detected"
 
     def test_write_observation_without_notes(self, populated_store):
         """OHM-of8: write_observation without notes should have notes=None."""
-        obs = populated_store.write_observation(
-            "hungary", "measurement", value=0.7
-        )
+        obs = populated_store.write_observation("hungary", "measurement", value=0.7)
         assert obs.get("notes") is None
 
     def test_write_observation_with_source_attribution(self, populated_store):
         """OHM-lmr: write_observation should persist source_name and source_url."""
-        obs = populated_store.write_observation(
-            "hungary", "measurement", value=0.88,
-            source_name="Reuters", source_url="https://reuters.com/article/123",
-            notes="Initial report"
-        )
+        obs = populated_store.write_observation("hungary", "measurement", value=0.88, source_name="Reuters", source_url="https://reuters.com/article/123", notes="Initial report")
         assert obs["source_name"] == "Reuters"
         assert obs["source_url"] == "https://reuters.com/article/123"
         assert obs["notes"] == "Initial report"
 
     def test_write_observation_without_source_attribution(self, populated_store):
         """OHM-lmr: write_observation without source attribution should have None fields."""
-        obs = populated_store.write_observation(
-            "hungary", "measurement", value=0.75
-        )
+        obs = populated_store.write_observation("hungary", "measurement", value=0.75)
         assert obs.get("source_name") is None
         assert obs.get("source_url") is None
 
     def test_write_observation_with_agent_name_override(self, populated_store):
         """OHM-y2i.19: write_observation should accept agent_name parameter."""
-        obs = populated_store.write_observation(
-            "hungary", "measurement", value=0.9, agent_name="metis"
-        )
+        obs = populated_store.write_observation("hungary", "measurement", value=0.9, agent_name="metis")
         assert obs["created_by"] == "metis"
 
     def test_agent_state(self, store):
@@ -277,9 +245,7 @@ class TestOhmStore:
 
         # Try to update as socrates - should fail
         populated_store.agent_name = "socrates"
-        edge = populated_store.execute_one(
-            "SELECT * FROM ohm_edges WHERE edge_type = 'EXPLAINS' AND created_by = 'metis'"
-        )
+        edge = populated_store.execute_one("SELECT * FROM ohm_edges WHERE edge_type = 'EXPLAINS' AND created_by = 'metis'")
         with pytest.raises(PermissionError):
             populated_store.update_edge_confidence(edge["id"], 0.5)
 
@@ -339,6 +305,7 @@ class TestDeleteNodeStore:
     def test_delete_node_not_found(self, store):
         """delete_node raises NodeNotFoundError for nonexistent node."""
         from ohm.exceptions import NodeNotFoundError
+
         with pytest.raises(NodeNotFoundError):
             store.delete_node("nonexistent_xyz", deleted_by="test_agent")
 
@@ -369,6 +336,7 @@ class TestDeleteEdgeStore:
     def test_delete_edge_not_found(self, store):
         """delete_edge raises EdgeNotFoundError for nonexistent edge."""
         from ohm.exceptions import EdgeNotFoundError
+
         with pytest.raises(EdgeNotFoundError):
             store.delete_edge("nonexistent_edge_xyz", deleted_by="test_agent")
 
@@ -391,10 +359,7 @@ class TestEdgeDeduplication:
         assert abs(edge2["confidence"] - 0.9) < 0.01
 
         # Should only have one edge
-        count = store.conn.execute(
-            "SELECT COUNT(*) FROM ohm_edges WHERE from_node = 'dedup-a' "
-            "AND to_node = 'dedup-b' AND edge_type = 'CAUSES' AND deleted_at IS NULL"
-        ).fetchone()[0]
+        count = store.conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE from_node = 'dedup-a' AND to_node = 'dedup-b' AND edge_type = 'CAUSES' AND deleted_at IS NULL").fetchone()[0]
         assert count == 1
 
     def test_write_edge_allows_duplicate_when_disabled(self, store):
@@ -409,10 +374,7 @@ class TestEdgeDeduplication:
         store.write_edge("dedup-c", "dedup-d", "CAUSES", "L3", confidence=0.9, deduplicate=False)
 
         # Should have two edges
-        count = store.conn.execute(
-            "SELECT COUNT(*) FROM ohm_edges WHERE from_node = 'dedup-c' "
-            "AND to_node = 'dedup-d' AND edge_type = 'CAUSES' AND deleted_at IS NULL"
-        ).fetchone()[0]
+        count = store.conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE from_node = 'dedup-c' AND to_node = 'dedup-d' AND edge_type = 'CAUSES' AND deleted_at IS NULL").fetchone()[0]
         assert count == 2
 
     def test_write_edge_different_types_not_deduplicated(self, store):
@@ -423,10 +385,7 @@ class TestEdgeDeduplication:
         store.write_edge("dedup-e", "dedup-f", "CAUSES", "L3", confidence=0.8)
         store.write_edge("dedup-e", "dedup-f", "DEPENDS_ON", "L4", confidence=0.7)
 
-        count = store.conn.execute(
-            "SELECT COUNT(*) FROM ohm_edges WHERE from_node = 'dedup-e' "
-            "AND to_node = 'dedup-f' AND deleted_at IS NULL"
-        ).fetchone()[0]
+        count = store.conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE from_node = 'dedup-e' AND to_node = 'dedup-f' AND deleted_at IS NULL").fetchone()[0]
         assert count == 2
 
     def test_deduplicate_edges_removes_duplicates(self, store):
@@ -439,10 +398,7 @@ class TestEdgeDeduplication:
         store.write_edge("dedup-g", "dedup-h", "CAUSES", "L3", confidence=0.9, deduplicate=False)
 
         # Should have 2 edges
-        count_before = store.conn.execute(
-            "SELECT COUNT(*) FROM ohm_edges WHERE from_node = 'dedup-g' "
-            "AND to_node = 'dedup-h' AND edge_type = 'CAUSES' AND deleted_at IS NULL"
-        ).fetchone()[0]
+        count_before = store.conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE from_node = 'dedup-g' AND to_node = 'dedup-h' AND edge_type = 'CAUSES' AND deleted_at IS NULL").fetchone()[0]
         assert count_before == 2
 
         # Deduplicate
@@ -450,10 +406,7 @@ class TestEdgeDeduplication:
         assert removed >= 1
 
         # Should have 1 edge remaining
-        count_after = store.conn.execute(
-            "SELECT COUNT(*) FROM ohm_edges WHERE from_node = 'dedup-g' "
-            "AND to_node = 'dedup-h' AND edge_type = 'CAUSES' AND deleted_at IS NULL"
-        ).fetchone()[0]
+        count_after = store.conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE from_node = 'dedup-g' AND to_node = 'dedup-h' AND edge_type = 'CAUSES' AND deleted_at IS NULL").fetchone()[0]
         assert count_after == 1
 
     def test_deduplicate_edges_with_layer_filter(self, store):
@@ -474,8 +427,5 @@ class TestEdgeDeduplication:
         assert removed >= 1
 
         # L4 should still have duplicates
-        l4_count = store.conn.execute(
-            "SELECT COUNT(*) FROM ohm_edges WHERE from_node = 'dedup-i' "
-            "AND to_node = 'dedup-j' AND edge_type = 'DEPENDS_ON' AND deleted_at IS NULL"
-        ).fetchone()[0]
+        l4_count = store.conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE from_node = 'dedup-i' AND to_node = 'dedup-j' AND edge_type = 'DEPENDS_ON' AND deleted_at IS NULL").fetchone()[0]
         assert l4_count == 2

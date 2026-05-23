@@ -34,12 +34,9 @@ def multi_agent_graph(tmp_path):
             interests=["economics", "cognition"],
         )
         node = g.create_node(label="Hormuz traffic", node_type="concept")
-        g.observe(node["id"], obs_type="measurement", value=0.3,
-                  baseline=0.3, sigma=0.5, source="routine")
-        g.observe(node["id"], obs_type="measurement", value=0.9,
-                  baseline=0.3, sigma=0.5, source="breaking")
-        g.observe(node["id"], obs_type="measurement", value=0.35,
-                  baseline=0.3, sigma=0.3, source="routine")
+        g.observe(node["id"], obs_type="measurement", value=0.3, baseline=0.3, sigma=0.5, source="routine")
+        g.observe(node["id"], obs_type="measurement", value=0.9, baseline=0.3, sigma=0.5, source="breaking")
+        g.observe(node["id"], obs_type="measurement", value=0.35, baseline=0.3, sigma=0.3, source="routine")
 
     # Agent 2: Clio — opposing observation
     with connect(db_path, actor="clio") as g:
@@ -49,13 +46,13 @@ def multi_agent_graph(tmp_path):
             interests=["economics", "international-law"],
         )
         node = g.find_or_create_node(label="Hormuz traffic", node_type="concept")
-        g.observe(node["id"], obs_type="measurement", value=0.1,
-                  baseline=0.3, sigma=0.4, source="alternative")
+        g.observe(node["id"], obs_type="measurement", value=0.1, baseline=0.3, sigma=0.4, source="alternative")
 
     return db_path
 
 
 # ===== Anomaly Detection =====
+
 
 class TestAnomalyDetection:
     def test_detects_high_sigma(self, multi_agent_graph):
@@ -84,6 +81,7 @@ class TestAnomalyDetection:
 
 # ===== Contradiction Detection =====
 
+
 class TestContradictionDetection:
     def test_detects_opposite_observations(self, multi_agent_graph):
         with connect(multi_agent_graph, actor="metis") as g:
@@ -105,6 +103,7 @@ class TestContradictionDetection:
 
 
 # ===== Agent Heartbeat =====
+
 
 class TestHeartbeat:
     def test_heartbeat_updates_sync(self, multi_agent_graph):
@@ -130,6 +129,7 @@ class TestHeartbeat:
 
 
 # ===== Aggregation =====
+
 
 class TestAggregation:
     def test_weighted_aggregation(self, multi_agent_graph):
@@ -162,6 +162,7 @@ class TestAggregation:
 
 
 # ===== Identity Evolution =====
+
 
 class TestIdentityEvolution:
     def test_evolve_value(self, tmp_path):
@@ -200,6 +201,7 @@ class TestIdentityEvolution:
 
             # Old edge is superseded
             import json
+
             old = g.get_edge(conn_edge_id)
             meta = json.loads(old.get("metadata", "{}")) if old.get("metadata") else {}
             assert meta.get("superseded") is True
@@ -217,6 +219,7 @@ class TestIdentityEvolution:
             ).fetchone()
             if edge:
                 from ohm.boundary import enforce_identity_evolution
+
                 with pytest.raises(Exception):
                     enforce_identity_evolution(g._conn, "socrates", edge[0])
 
@@ -225,15 +228,16 @@ class TestIdentityEvolution:
         with connect(db, actor="metis") as g:
             n1 = g.create_node(label="A", node_type="concept")
             n2 = g.create_node(label="B", node_type="concept")
-            g.create_edge(from_node=n1["id"], to_node=n2["id"],
-                                 edge_type="CAUSES", layer="L3")
+            g.create_edge(from_node=n1["id"], to_node=n2["id"], edge_type="CAUSES", layer="L3")
 
             from ohm.boundary import check_can_evolve_identity_edge
+
             with pytest.raises(Exception):
                 check_can_evolve_identity_edge("metis", "metis", "CAUSES")
 
 
 # ===== Cold Start Discovery =====
+
 
 class TestColdStartDiscovery:
     def test_discovers_shared_values(self, multi_agent_graph):
@@ -286,12 +290,14 @@ class TestColdStartDiscovery:
 
 # ===== L2 Immutability =====
 
+
 class TestL2Immutability:
     def test_cannot_update_source_node(self, tmp_path):
         db = str(tmp_path / "l2test.duckdb")
         with connect(db, actor="metis") as g:
             src = g.create_node(label="Reuters: test", node_type="source")
             from ohm.boundary import enforce_l2_immutability
+
             with pytest.raises(Exception):
                 enforce_l2_immutability(g._conn, "metis", src["id"])
 
@@ -300,11 +306,13 @@ class TestL2Immutability:
         with connect(db, actor="metis") as g:
             node = g.create_node(label="test concept", node_type="concept")
             from ohm.boundary import enforce_l2_immutability
+
             # Should not raise for non-source nodes
             enforce_l2_immutability(g._conn, "metis", node["id"])
 
 
 # ===== Provenance Chain =====
+
 
 class TestProvenance:
     def test_provenance_chain(self, tmp_path):
@@ -312,9 +320,7 @@ class TestProvenance:
         with connect(db, actor="metis") as g:
             a = g.create_node(label="Root idea", node_type="concept")
             b = g.create_node(label="Derived idea", node_type="concept")
-            g.create_edge(from_node=b["id"], to_node=a["id"],
-                          edge_type="DERIVES_FROM", layer="L2",
-                          provenance="test derivation")
+            g.create_edge(from_node=b["id"], to_node=a["id"], edge_type="DERIVES_FROM", layer="L2", provenance="test derivation")
 
             chain = g.provenance(b["id"])
             assert len(chain) >= 1
@@ -329,6 +335,7 @@ class TestProvenance:
 
 # ===== Graph Health =====
 
+
 class TestGraphHealth:
     def test_health_report(self, tmp_path):
         db = str(tmp_path / "health.duckdb")
@@ -336,8 +343,7 @@ class TestGraphHealth:
             g.create_node(label="Orphan", node_type="concept")
             g.create_node(label="Connected", node_type="concept")
             a = g.create_node(label="Target", node_type="concept")
-            g.create_edge(from_node=a["id"], to_node=g.find_or_create_node(label="Connected")["id"],
-                          edge_type="RELATED_TO", layer="L3")
+            g.create_edge(from_node=a["id"], to_node=g.find_or_create_node(label="Connected")["id"], edge_type="RELATED_TO", layer="L3")
 
             report = g.health()
             assert "health_score" in report
@@ -345,6 +351,7 @@ class TestGraphHealth:
 
 
 # ===== Change Feed Consumer =====
+
 
 class TestChangeFeedConsumer:
     def test_listen_returns_changes(self, tmp_path):
@@ -413,6 +420,7 @@ class TestChangeFeedConsumer:
 
 # ===== Monte Carlo Simulation =====
 
+
 class TestMonteCarlo:
     def test_cascade_propagation(self, tmp_path):
         db = str(tmp_path / "mc.duckdb")
@@ -454,12 +462,18 @@ class TestMonteCarloTwoStage:
             a = g.create_node(label="Root", node_type="concept")
             b = g.create_node(label="Target", node_type="concept")
             g.create_edge(
-                from_node=a["id"], to_node=b["id"],
-                edge_type="CAUSES", layer="L3",
-                confidence=0.9, probability=0.1,
+                from_node=a["id"],
+                to_node=b["id"],
+                edge_type="CAUSES",
+                layer="L3",
+                confidence=0.9,
+                probability=0.1,
             )
             result = g.monte_carlo(
-                a["id"], simulations=5000, depth=3, seed=42,
+                a["id"],
+                simulations=5000,
+                depth=3,
+                seed=42,
             )
             target = [n for n in result["affected_nodes"] if n["label"] == "Target"]
             assert len(target) == 1
@@ -474,13 +488,18 @@ class TestMonteCarloTwoStage:
             b = g.create_node(label="Target", node_type="concept")
             # Create edge without probability (NULL)
             g.create_edge(
-                from_node=a["id"], to_node=b["id"],
-                edge_type="CAUSES", layer="L3",
+                from_node=a["id"],
+                to_node=b["id"],
+                edge_type="CAUSES",
+                layer="L3",
                 confidence=0.8,
             )
             result = g.monte_carlo(
-                a["id"], simulations=5000, depth=3,
-                default_probability=0.5, seed=42,
+                a["id"],
+                simulations=5000,
+                depth=3,
+                default_probability=0.5,
+                seed=42,
             )
             target = [n for n in result["affected_nodes"] if n["label"] == "Target"]
             assert len(target) == 1
@@ -494,12 +513,18 @@ class TestMonteCarloTwoStage:
             a = g.create_node(label="Root", node_type="concept")
             b = g.create_node(label="Target", node_type="concept")
             g.create_edge(
-                from_node=a["id"], to_node=b["id"],
-                edge_type="CAUSES", layer="L3",
-                confidence=0.5, probability=0.9,
+                from_node=a["id"],
+                to_node=b["id"],
+                edge_type="CAUSES",
+                layer="L3",
+                confidence=0.5,
+                probability=0.9,
             )
             result = g.monte_carlo(
-                a["id"], simulations=5000, depth=3, seed=42,
+                a["id"],
+                simulations=5000,
+                depth=3,
+                seed=42,
             )
             target = [n for n in result["affected_nodes"] if n["label"] == "Target"]
             assert len(target) == 1
@@ -515,18 +540,27 @@ class TestMonteCarloTwoStage:
             c = g.create_node(label="C", node_type="concept")
             # A→B: high confidence, moderate probability
             g.create_edge(
-                from_node=a["id"], to_node=b["id"],
-                edge_type="CAUSES", layer="L3",
-                confidence=0.9, probability=0.8,
+                from_node=a["id"],
+                to_node=b["id"],
+                edge_type="CAUSES",
+                layer="L3",
+                confidence=0.9,
+                probability=0.8,
             )
             # B→C: moderate confidence, high probability
             g.create_edge(
-                from_node=b["id"], to_node=c["id"],
-                edge_type="CAUSES", layer="L3",
-                confidence=0.7, probability=0.9,
+                from_node=b["id"],
+                to_node=c["id"],
+                edge_type="CAUSES",
+                layer="L3",
+                confidence=0.7,
+                probability=0.9,
             )
             result = g.monte_carlo(
-                a["id"], simulations=5000, depth=3, seed=42,
+                a["id"],
+                simulations=5000,
+                depth=3,
+                seed=42,
             )
             # B impact ≈ 0.9 * 0.8 = 0.72
             b_node = [n for n in result["affected_nodes"] if n["label"] == "B"]
@@ -539,6 +573,7 @@ class TestMonteCarloTwoStage:
 
 
 # ===== Near Duplicate Detection =====
+
 
 class TestNearDuplicates:
     def test_detects_similar_observations(self, tmp_path):
@@ -577,6 +612,7 @@ class TestNearDuplicates:
 
 
 # ===== Confidence Calibration =====
+
 
 class TestConfidenceCalibration:
     def test_calibration_score(self, tmp_path):
@@ -618,8 +654,7 @@ class TestConfidenceCalibration:
             for i in range(5):
                 a = g.create_node(label=f"cause_{i}", node_type="concept")
                 b = g.create_node(label=f"effect_{i}", node_type="concept")
-                g.create_edge(from_node=a["id"], to_node=b["id"],
-                              edge_type="CAUSES", layer="L3", confidence=0.9)
+                g.create_edge(from_node=a["id"], to_node=b["id"], edge_type="CAUSES", layer="L3", confidence=0.9)
 
             result = g.calibration("metis")
             # Global challenge rate should be 0 (no challenges)
@@ -641,8 +676,7 @@ class TestConfidenceCalibration:
                 a = g.create_node(label=f"cause_{i}", node_type="concept")
                 b = g.create_node(label=f"effect_{i}", node_type="concept")
                 conf = 0.3 + (i * 0.07)  # 0.3 to 0.93
-                g.create_edge(from_node=a["id"], to_node=b["id"],
-                              edge_type="CAUSES", layer="L3", confidence=conf)
+                g.create_edge(from_node=a["id"], to_node=b["id"], edge_type="CAUSES", layer="L3", confidence=conf)
 
             result = g.calibration("metis")
             assert result["global_challenge_rate"] == 0.0
@@ -661,6 +695,7 @@ class TestConfidenceCalibration:
 
 # ===== Temporal Decay =====
 
+
 class TestTemporalDecay:
     def test_composite_score_with_temporal_decay(self, tmp_path):
         """Temporal decay weights recent observations more heavily."""
@@ -669,8 +704,7 @@ class TestTemporalDecay:
             g.register_agent(values=["wisdom"])
             node = g.create_node(label="Weather", node_type="concept")
             # Add observation — will be very recent (age ~0 hours)
-            g.observe(node["id"], obs_type="measurement", value=0.9,
-                      baseline=0.5, sigma=0.1)
+            g.observe(node["id"], obs_type="measurement", value=0.9, baseline=0.5, sigma=0.1)
 
             # Without decay
             result_no_decay = g.composite_score(node["id"])
@@ -689,8 +723,7 @@ class TestTemporalDecay:
         with connect(db, actor="metis") as g:
             g.register_agent(values=["wisdom"])
             node = g.create_node(label="Test", node_type="concept")
-            g.observe(node["id"], obs_type="measurement", value=0.5,
-                      baseline=0.5, sigma=0.1)
+            g.observe(node["id"], obs_type="measurement", value=0.5, baseline=0.5, sigma=0.1)
 
             result = g.composite_score(node["id"], temporal_decay_hours=4.0)
             assert "temporal_decay_hours" in result
@@ -705,8 +738,7 @@ class TestTemporalDecay:
         with connect(db, actor="metis") as g:
             g.register_agent(values=["wisdom"])
             node = g.create_node(label="Product", node_type="concept")
-            g.observe(node["id"], obs_type="measurement", value=0.8,
-                      baseline=0.5, sigma=0.1)
+            g.observe(node["id"], obs_type="measurement", value=0.8, baseline=0.5, sigma=0.1)
 
             results = g.decay_observations(node["id"], temporal_decay_hours=4.0, dry_run=True)
             assert len(results) >= 1
@@ -738,6 +770,7 @@ class TestTemporalDecay:
 
 # ===== Medical Diagnosis =====
 
+
 class TestMedicalDiagnosis:
     def test_rules_out_creates_negates_edge(self, tmp_path):
         """rules_out() creates a NEGATES edge between finding and condition."""
@@ -747,8 +780,7 @@ class TestMedicalDiagnosis:
             finding = g.create_node(label="Fever Absent", node_type="concept")
             condition = g.create_node(label="Malaria", node_type="concept")
 
-            edge = g.rules_out(from_node=finding["id"], to_node=condition["id"],
-                                confidence=0.9)
+            edge = g.rules_out(from_node=finding["id"], to_node=condition["id"], confidence=0.9)
             assert edge["edge_type"] == "NEGATES"
             assert edge["from_node"] == finding["id"]
             assert edge["to_node"] == condition["id"]
@@ -764,11 +796,9 @@ class TestMedicalDiagnosis:
             flu = g.create_node(label="Flu", node_type="concept")
 
             # Evidence: malaria CAUSES patient symptoms
-            g.create_edge(from_node=malaria["id"], to_node=patient["id"],
-                          edge_type="CAUSES", layer="L3", confidence=0.7)
+            g.create_edge(from_node=malaria["id"], to_node=patient["id"], edge_type="CAUSES", layer="L3", confidence=0.7)
             # Evidence: flu PREDICTS patient symptoms
-            g.create_edge(from_node=flu["id"], to_node=patient["id"],
-                          edge_type="PREDICTS", layer="L3", confidence=0.5)
+            g.create_edge(from_node=flu["id"], to_node=patient["id"], edge_type="PREDICTS", layer="L3", confidence=0.5)
 
             results = g.differential_diagnosis(patient["id"])
             assert len(results) >= 2
@@ -786,14 +816,11 @@ class TestMedicalDiagnosis:
             no_fever = g.create_node(label="Fever Absent", node_type="concept")
 
             # Evidence edges
-            g.create_edge(from_node=malaria["id"], to_node=patient["id"],
-                          edge_type="CAUSES", layer="L3", confidence=0.7)
-            g.create_edge(from_node=flu["id"], to_node=patient["id"],
-                          edge_type="PREDICTS", layer="L3", confidence=0.5)
+            g.create_edge(from_node=malaria["id"], to_node=patient["id"], edge_type="CAUSES", layer="L3", confidence=0.7)
+            g.create_edge(from_node=flu["id"], to_node=patient["id"], edge_type="PREDICTS", layer="L3", confidence=0.5)
 
             # Fever absent NEGATES malaria
-            g.rules_out(from_node=no_fever["id"], to_node=malaria["id"],
-                        confidence=0.9)
+            g.rules_out(from_node=no_fever["id"], to_node=malaria["id"], confidence=0.9)
 
             results = g.differential_diagnosis(patient["id"])
             # Malaria should be marked as ruled out
@@ -951,6 +978,7 @@ class TestMedicalDiagnosis:
 
 # ===== Edge Versioning =====
 
+
 class TestEdgeVersioning:
     def test_created_event(self, tmp_path):
         db = str(tmp_path / "version.duckdb")
@@ -972,6 +1000,7 @@ class TestEdgeVersioning:
             edge = g.create_edge(from_node=a["id"], to_node=b["id"], edge_type="CAUSES", layer="L3", confidence=0.8)
 
             from ohm.store import OhmStore
+
             store = OhmStore(db_path=db, agent_name="socrates")
             store.challenge_edge(edge["id"], "test", 0.5, "CHALLENGED_BY")
             store.close()
@@ -999,4 +1028,3 @@ class TestEdgeVersioning:
         with connect(db, actor="metis") as g:
             history = g.edge_history("nonexistent_edge_id")
             assert history == []
-

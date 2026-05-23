@@ -31,60 +31,118 @@ if TYPE_CHECKING:
 
 # ── Node Types ──────────────────────────────────────────────────────────────
 
-VALID_NODE_TYPES = frozenset({
-    "idea", "source", "person", "concept", "pattern",
-    "event", "institution", "technology", "equipment",
-    "system", "area", "site",
-    "agent", "skill", "value", "goal", "topic",
-    "task",  # Action items with status, priority, assignment
-    "decision",  # Decision nodes with utility function (OHM-6mv.2)
-})
+VALID_NODE_TYPES = frozenset(
+    {
+        "idea",
+        "source",
+        "person",
+        "concept",
+        "pattern",
+        "event",
+        "institution",
+        "technology",
+        "equipment",
+        "system",
+        "area",
+        "site",
+        "agent",
+        "skill",
+        "value",
+        "goal",
+        "topic",
+        "task",  # Action items with status, priority, assignment
+        "decision",  # Decision nodes with utility function (OHM-6mv.2)
+    }
+)
 
 VALID_VISIBILITIES = frozenset({"private", "team", "public"})
 
-VALID_PROVENANCES = frozenset({
-    "conversation", "research", "bookmark", "observation", "feed-ingest",
-    "metis-research", "metis-synthesis", "metis-review-request",
-    "socrates-curriculum", "clio-research",
-})
+VALID_PROVENANCES = frozenset(
+    {
+        "conversation",
+        "research",
+        "bookmark",
+        "observation",
+        "feed-ingest",
+        "metis-research",
+        "metis-synthesis",
+        "metis-review-request",
+        "socrates-curriculum",
+        "clio-research",
+    }
+)
 
 # ── Edge Types by Layer ─────────────────────────────────────────────────────
 
 LAYER_EDGE_TYPES: dict[str, frozenset[str]] = {
-    "L1": frozenset({"CONTAINS", "BELONGS_TO", "HAS_COMPONENT", "PART_OF",
-                      "CAPABLE_OF", "VALUES", "GOALS", "INTERESTED_IN"}),
-    "L2": frozenset({"DERIVES_FROM", "INFLUENCES", "REFERENCES", "USES",
-                      "FEEDS", "FLOWS_TO", "NOTIFIES", "TRUSTS", "SERVES",
-                      # ── Multi-scenario additions (OHM-af8.6) ──
-                      "BATCH_EXPIRES_BEFORE",   # retail inventory expiry
-                      "TRANSFERRED_TO",          # customer support handoff
-                      "OPENED_BY", "STARTED_BY", "AWAITING",
-                      "RESOLVED_BY", "CLOSED_BY",  # support state machine
-                      "INVESTIGATED_BY", "CONTAINED_BY",
-                      "ERADICATED_BY", "RECOVERED_BY",  # incident state machine
-                      "NEGOTIATES_WITH",         # SLAs, commitments
-                      }),
-    "L3": frozenset({
-        "CAUSES", "CORRELATES_WITH", "PREDICTS", "EXPLAINS",
-        "CHALLENGED_BY", "SUPPORTS", "REFINES", "CONTRADICTS",
-        "LISTENS_TO", "DEFERS_TO", "COLLABORATES_WITH",
-        "APPLIES_TO", "RELATED_TO",
-        # ── Multi-scenario additions (OHM-af8.6) ──
-        "NEGATES",                # medical: rules-out diagnosis
-        "EXPECTED_LIKELIHOOD",    # supply chain: probability claim
-        "ESCALATED_TO",           # support: escalation path
-        "DELEGATED_TO",           # support: delegation
-        "THREAT_CLUSTER",         # cybersecurity: IOC linkage
-        "TRANSITIONS_TO",         # Markov: state transition edge (OHM-g09)
-    }),
-    "L4": frozenset({"EXPECTS", "PLANS", "RISKS", "DEPENDS_ON",
-                      "THREATENS", "ENABLES", "EXPECTS_FROM", "PREDICTS",
-                      # ── Multi-scenario additions (OHM-af8.6) ──
-                      "ORDERS_TEST",       # medical: trigger diagnostic test
-                      "TRIGGERS_INCIDENT", # cybersecurity: finding triggers incident
-                      # ── Task management additions ──
-                      "BLOCKS",            # task blocks another task
-                      }),
+    "L1": frozenset({"CONTAINS", "BELONGS_TO", "HAS_COMPONENT", "PART_OF", "CAPABLE_OF", "VALUES", "GOALS", "INTERESTED_IN"}),
+    "L2": frozenset(
+        {
+            "DERIVES_FROM",
+            "INFLUENCES",
+            "REFERENCES",
+            "USES",
+            "FEEDS",
+            "FLOWS_TO",
+            "NOTIFIES",
+            "TRUSTS",
+            "SERVES",
+            # ── Multi-scenario additions (OHM-af8.6) ──
+            "BATCH_EXPIRES_BEFORE",  # retail inventory expiry
+            "TRANSFERRED_TO",  # customer support handoff
+            "OPENED_BY",
+            "STARTED_BY",
+            "AWAITING",
+            "RESOLVED_BY",
+            "CLOSED_BY",  # support state machine
+            "INVESTIGATED_BY",
+            "CONTAINED_BY",
+            "ERADICATED_BY",
+            "RECOVERED_BY",  # incident state machine
+            "NEGOTIATES_WITH",  # SLAs, commitments
+        }
+    ),
+    "L3": frozenset(
+        {
+            "CAUSES",
+            "CORRELATES_WITH",
+            "PREDICTS",
+            "EXPLAINS",
+            "CHALLENGED_BY",
+            "SUPPORTS",
+            "REFINES",
+            "CONTRADICTS",
+            "LISTENS_TO",
+            "DEFERS_TO",
+            "COLLABORATES_WITH",
+            "APPLIES_TO",
+            "RELATED_TO",
+            # ── Multi-scenario additions (OHM-af8.6) ──
+            "NEGATES",  # medical: rules-out diagnosis
+            "EXPECTED_LIKELIHOOD",  # supply chain: probability claim
+            "ESCALATED_TO",  # support: escalation path
+            "DELEGATED_TO",  # support: delegation
+            "THREAT_CLUSTER",  # cybersecurity: IOC linkage
+            "TRANSITIONS_TO",  # Markov: state transition edge (OHM-g09)
+        }
+    ),
+    "L4": frozenset(
+        {
+            "EXPECTS",
+            "PLANS",
+            "RISKS",
+            "DEPENDS_ON",
+            "THREATENS",
+            "ENABLES",
+            "EXPECTS_FROM",
+            "PREDICTS",
+            # ── Multi-scenario additions (OHM-af8.6) ──
+            "ORDERS_TEST",  # medical: trigger diagnostic test
+            "TRIGGERS_INCIDENT",  # cybersecurity: finding triggers incident
+            # ── Task management additions ──
+            "BLOCKS",  # task blocks another task
+        }
+    ),
 }
 
 ALL_EDGE_TYPES: frozenset[str] = frozenset().union(*LAYER_EDGE_TYPES.values())
@@ -93,14 +151,25 @@ VALID_LAYERS = frozenset(LAYER_EDGE_TYPES.keys())
 
 # ── Observation Types ───────────────────────────────────────────────────────
 
-VALID_OBSERVATION_TYPES = frozenset({
-    "anomaly", "measurement", "pattern", "challenge", "support",
-    "sentiment",  # customer support: sentiment observation
-})
+VALID_OBSERVATION_TYPES = frozenset(
+    {
+        "anomaly",
+        "measurement",
+        "pattern",
+        "challenge",
+        "support",
+        "sentiment",  # customer support: sentiment observation
+    }
+)
 
-VALID_OBSERVATION_SOURCES = frozenset({
-    "signal", "research", "conversation", "analysis",
-})
+VALID_OBSERVATION_SOURCES = frozenset(
+    {
+        "signal",
+        "research",
+        "conversation",
+        "analysis",
+    }
+)
 
 # ── Urgency / Priority ──────────────────────────────────────────────────────
 
@@ -108,14 +177,16 @@ VALID_URGENCY = frozenset({"low", "normal", "high", "critical"})
 
 VALID_PRIORITY = frozenset({"P0", "P1", "P2", "P3", "P4"})
 
-VALID_TASK_STATUSES = frozenset({
-    "open",           # New task, not yet started
-    "in_progress",    # Agent is actively working on it
-    "blocked",        # Waiting on dependency or external input
-    "review",         # Awaiting review by another agent
-    "done",           # Completed
-    "cancelled",      # No longer needed
-})
+VALID_TASK_STATUSES = frozenset(
+    {
+        "open",  # New task, not yet started
+        "in_progress",  # Agent is actively working on it
+        "blocked",  # Waiting on dependency or external input
+        "review",  # Awaiting review by another agent
+        "done",  # Completed
+        "cancelled",  # No longer needed
+    }
+)
 
 # ── Layer Descriptions ──────────────────────────────────────────────────────
 
@@ -207,12 +278,28 @@ class SchemaConfig:
         - Custom layer descriptions for industrial context
         - Additional observation types for industrial monitoring
         """
-        topo_node_types = VALID_NODE_TYPES | frozenset({
-            "process", "instrument", "controller", "valve", "pump",
-            "motor", "sensor", "pipeline", "vessel", "reactor",
-            "heat_exchanger", "tank", "compressor", "generator",
-            "transformer", "circuit", "bus", "line",
-        })
+        topo_node_types = VALID_NODE_TYPES | frozenset(
+            {
+                "process",
+                "instrument",
+                "controller",
+                "valve",
+                "pump",
+                "motor",
+                "sensor",
+                "pipeline",
+                "vessel",
+                "reactor",
+                "heat_exchanger",
+                "tank",
+                "compressor",
+                "generator",
+                "transformer",
+                "circuit",
+                "bus",
+                "line",
+            }
+        )
 
         topo_layer_descriptions = {
             "L1": "Structure — Physical hierarchy (site → area → system → equipment)",
@@ -221,18 +308,36 @@ class SchemaConfig:
             "L4": "Prospect — Predictive maintenance, risk assessments, what-if scenarios",
         }
 
-        topo_observation_types = VALID_OBSERVATION_TYPES | frozenset({
-            "vibration", "temperature", "pressure", "flow_rate",
-            "voltage", "current", "rpm", "level",
-        })
+        topo_observation_types = VALID_OBSERVATION_TYPES | frozenset(
+            {
+                "vibration",
+                "temperature",
+                "pressure",
+                "flow_rate",
+                "voltage",
+                "current",
+                "rpm",
+                "level",
+            }
+        )
 
-        topo_observation_sources = VALID_OBSERVATION_SOURCES | frozenset({
-            "scada", "dcs", "historian", "maintenance_log",
-        })
+        topo_observation_sources = VALID_OBSERVATION_SOURCES | frozenset(
+            {
+                "scada",
+                "dcs",
+                "historian",
+                "maintenance_log",
+            }
+        )
 
-        topo_provenances = VALID_PROVENANCES | frozenset({
-            "inspection", "monitoring", "audit", "simulation",
-        })
+        topo_provenances = VALID_PROVENANCES | frozenset(
+            {
+                "inspection",
+                "monitoring",
+                "audit",
+                "simulation",
+            }
+        )
 
         return cls(
             name="topo",
@@ -254,13 +359,24 @@ class SchemaConfig:
         - L4 edge types for risk/threat assessment (drought, disease, market volatility)
         - Observation types for PLF sensors and veterinary data
         """
-        beef_node_types = VALID_NODE_TYPES | frozenset({
-            "animal", "herd", "breed", "feed",
-            "pasture", "weather", "water",
-            "health_event", "diagnosis", "treatment",
-            "market", "contract",
-            "equipment", "system",
-        })
+        beef_node_types = VALID_NODE_TYPES | frozenset(
+            {
+                "animal",
+                "herd",
+                "breed",
+                "feed",
+                "pasture",
+                "weather",
+                "water",
+                "health_event",
+                "diagnosis",
+                "treatment",
+                "market",
+                "contract",
+                "equipment",
+                "system",
+            }
+        )
 
         beef_layer_descriptions = {
             "L1": "Structure — Herd hierarchy (ranch → herd → cohort → animal), land, infrastructure",
@@ -269,18 +385,39 @@ class SchemaConfig:
             "L4": "Prospect — Risk assessments, heifer retention decisions, what-if scenarios",
         }
 
-        beef_observation_types = VALID_OBSERVATION_TYPES | frozenset({
-            "weight", "temperature", "movement", "intake",
-            "mortality", "conception", "price", "rainfall",
-        })
+        beef_observation_types = VALID_OBSERVATION_TYPES | frozenset(
+            {
+                "weight",
+                "temperature",
+                "movement",
+                "intake",
+                "mortality",
+                "conception",
+                "price",
+                "rainfall",
+            }
+        )
 
-        beef_observation_sources = VALID_OBSERVATION_SOURCES | frozenset({
-            "sensor", "veterinarian", "auction", "usda", "noaa", "producer",
-        })
+        beef_observation_sources = VALID_OBSERVATION_SOURCES | frozenset(
+            {
+                "sensor",
+                "veterinarian",
+                "auction",
+                "usda",
+                "noaa",
+                "producer",
+            }
+        )
 
-        beef_provenances = VALID_PROVENANCES | frozenset({
-            "plf", "veterinary", "market_report", "weather_service", "extension",
-        })
+        beef_provenances = VALID_PROVENANCES | frozenset(
+            {
+                "plf",
+                "veterinary",
+                "market_report",
+                "weather_service",
+                "extension",
+            }
+        )
 
         return cls(
             name="beef_herd",
@@ -296,9 +433,7 @@ class SchemaConfig:
         return {
             "name": self.name,
             "node_types": sorted(self.node_types),
-            "layer_edge_types": {
-                layer: sorted(types) for layer, types in self.layer_edge_types.items()
-            },
+            "layer_edge_types": {layer: sorted(types) for layer, types in self.layer_edge_types.items()},
             "layer_descriptions": self.layer_descriptions,
             "observation_types": sorted(self.observation_types),
             "observation_sources": sorted(self.observation_sources),
@@ -489,29 +624,48 @@ SCHEMA_VERSION = "0.18.0"
 # Applied incrementally: if current version < migration version, apply it.
 
 MIGRATIONS: list[tuple[str, str, list[str]]] = [
-    ("0.2.0", "add values/goals columns to agent_state", [
-        "ALTER TABLE ohm_agent_state ADD COLUMN values TEXT",
-        "ALTER TABLE ohm_agent_state ADD COLUMN goals TEXT",
-    ]),
-    ("0.3.0", "add tags/metadata JSON columns and agent_config table", [
-        "ALTER TABLE ohm_nodes ADD COLUMN tags JSON",
-        "ALTER TABLE ohm_nodes ADD COLUMN metadata JSON",
-        "ALTER TABLE ohm_edges ADD COLUMN metadata JSON",
-        "ALTER TABLE ohm_observations ADD COLUMN metadata JSON",
-    ]),
-    ("0.4.0", "add agent relationship node types and edge types", [
-        "",  # Node types and edge types are validated in Python, not DDL
-    ]),
-    ("0.5.0", "add probability column to ohm_edges for supply chain / risk modeling", [
-        "ALTER TABLE ohm_edges ADD COLUMN probability FLOAT",
-    ]),
-    ("0.6.0", "add priority column to ohm_nodes, urgency column to ohm_edges, and sentiment observation type", [
-        "ALTER TABLE ohm_nodes ADD COLUMN priority VARCHAR",
-        "ALTER TABLE ohm_edges ADD COLUMN urgency VARCHAR",
-        "ALTER TABLE ohm_observations ADD COLUMN sentiment VARCHAR"
-    ]),
-    ("0.7.0", "add ohm_outcomes table for source reliability tracking", [
-        """CREATE TABLE IF NOT EXISTS ohm_outcomes (
+    (
+        "0.2.0",
+        "add values/goals columns to agent_state",
+        [
+            "ALTER TABLE ohm_agent_state ADD COLUMN values TEXT",
+            "ALTER TABLE ohm_agent_state ADD COLUMN goals TEXT",
+        ],
+    ),
+    (
+        "0.3.0",
+        "add tags/metadata JSON columns and agent_config table",
+        [
+            "ALTER TABLE ohm_nodes ADD COLUMN tags JSON",
+            "ALTER TABLE ohm_nodes ADD COLUMN metadata JSON",
+            "ALTER TABLE ohm_edges ADD COLUMN metadata JSON",
+            "ALTER TABLE ohm_observations ADD COLUMN metadata JSON",
+        ],
+    ),
+    (
+        "0.4.0",
+        "add agent relationship node types and edge types",
+        [
+            "",  # Node types and edge types are validated in Python, not DDL
+        ],
+    ),
+    (
+        "0.5.0",
+        "add probability column to ohm_edges for supply chain / risk modeling",
+        [
+            "ALTER TABLE ohm_edges ADD COLUMN probability FLOAT",
+        ],
+    ),
+    (
+        "0.6.0",
+        "add priority column to ohm_nodes, urgency column to ohm_edges, and sentiment observation type",
+        ["ALTER TABLE ohm_nodes ADD COLUMN priority VARCHAR", "ALTER TABLE ohm_edges ADD COLUMN urgency VARCHAR", "ALTER TABLE ohm_observations ADD COLUMN sentiment VARCHAR"],
+    ),
+    (
+        "0.7.0",
+        "add ohm_outcomes table for source reliability tracking",
+        [
+            """CREATE TABLE IF NOT EXISTS ohm_outcomes (
             id          VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
             source_agent VARCHAR NOT NULL,
             claim_node  VARCHAR NOT NULL,
@@ -520,58 +674,102 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             notes       TEXT
         )""",
-        "CREATE INDEX IF NOT EXISTS idx_outcomes_source ON ohm_outcomes(source_agent)",
-        "CREATE INDEX IF NOT EXISTS idx_outcomes_claim ON ohm_outcomes(claim_node)",
-    ]),
-    ("0.8.0", "add notes column to ohm_observations", [
-        "ALTER TABLE ohm_observations ADD COLUMN notes TEXT",
-    ]),
-    ("0.9.0", "add url column to ohm_nodes for external references", [
-        "ALTER TABLE ohm_nodes ADD COLUMN url TEXT",
-    ]),
-    ("0.10.0", "add source_name and source_url to ohm_observations", [
-        "ALTER TABLE ohm_observations ADD COLUMN source_name TEXT",
-        "ALTER TABLE ohm_observations ADD COLUMN source_url TEXT",
-    ]),
-    ("0.11.0", "add embedding column to ohm_nodes for semantic search (OHM-o9f)", [
-        "ALTER TABLE ohm_nodes ADD COLUMN embedding FLOAT[768]",
-    ]),
-    ("0.12.0", "add deleted_at column to ohm_nodes, ohm_edges, ohm_observations for soft delete (OHM-cpi)", [
-        "ALTER TABLE ohm_nodes ADD COLUMN deleted_at TIMESTAMP",
-        "ALTER TABLE ohm_edges ADD COLUMN deleted_at TIMESTAMP",
-        "ALTER TABLE ohm_observations ADD COLUMN deleted_at TIMESTAMP",
-    ]),
-    ("0.13.0", "add task_status column and task-related indexes for action item tracking", [
-        "ALTER TABLE ohm_nodes ADD COLUMN task_status VARCHAR",
-        "ALTER TABLE ohm_nodes ADD COLUMN due_date TIMESTAMP",
-        "ALTER TABLE ohm_nodes ADD COLUMN assigned_to VARCHAR",
-        "CREATE INDEX IF NOT EXISTS idx_nodes_task_status ON ohm_nodes(task_status) WHERE task_status IS NOT NULL",
-        "CREATE INDEX IF NOT EXISTS idx_nodes_assigned_to ON ohm_nodes(assigned_to) WHERE assigned_to IS NOT NULL",
-        "CREATE INDEX IF NOT EXISTS idx_nodes_due_date ON ohm_nodes(due_date) WHERE due_date IS NOT NULL",
-    ]),
-    ("0.14.0", "add graph_generation counter to ohm_meta for cache invalidation (OHM-omr)", [
-        "INSERT INTO ohm_meta (key, value) SELECT 'graph_generation', '0' WHERE NOT EXISTS (SELECT 1 FROM ohm_meta WHERE key = 'graph_generation')",
-    ]),
-    ("0.15.0", "add PERT distribution columns to ohm_edges for VoI (OHM-6mv.3)", [
-        "ALTER TABLE ohm_edges ADD COLUMN probability_p05 FLOAT",
-        "ALTER TABLE ohm_edges ADD COLUMN probability_p50 FLOAT",
-        "ALTER TABLE ohm_edges ADD COLUMN probability_p95 FLOAT",
-        "ALTER TABLE ohm_edges ADD COLUMN confidence_p05 FLOAT",
-        "ALTER TABLE ohm_edges ADD COLUMN confidence_p50 FLOAT",
-        "ALTER TABLE ohm_edges ADD COLUMN confidence_p95 FLOAT",
-    ]),
-    ("0.16.0", "add decision node type with utility function fields (OHM-6mv.2)", [
-        "ALTER TABLE ohm_nodes ADD COLUMN utility_scale FLOAT",
-        "ALTER TABLE ohm_nodes ADD COLUMN current_best_action VARCHAR",
-        "ALTER TABLE ohm_nodes ADD COLUMN action_alternatives JSON",
-    ]),
-    ("0.17.0", "add USD utility columns to decision nodes for VoI calibration (OHM-fh3e)", [
-        "ALTER TABLE ohm_nodes ADD COLUMN utility_usd_per_day FLOAT",
-        "ALTER TABLE ohm_nodes ADD COLUMN utility_currency VARCHAR",
-    ]),
-    ("0.18.0", "create ohm_change_feed/ohm_change_log if missing (OHM-y30o)", [
-        "CREATE SEQUENCE IF NOT EXISTS seq_change_feed START 1",
-        """CREATE TABLE IF NOT EXISTS ohm_change_feed (
+            "CREATE INDEX IF NOT EXISTS idx_outcomes_source ON ohm_outcomes(source_agent)",
+            "CREATE INDEX IF NOT EXISTS idx_outcomes_claim ON ohm_outcomes(claim_node)",
+        ],
+    ),
+    (
+        "0.8.0",
+        "add notes column to ohm_observations",
+        [
+            "ALTER TABLE ohm_observations ADD COLUMN notes TEXT",
+        ],
+    ),
+    (
+        "0.9.0",
+        "add url column to ohm_nodes for external references",
+        [
+            "ALTER TABLE ohm_nodes ADD COLUMN url TEXT",
+        ],
+    ),
+    (
+        "0.10.0",
+        "add source_name and source_url to ohm_observations",
+        [
+            "ALTER TABLE ohm_observations ADD COLUMN source_name TEXT",
+            "ALTER TABLE ohm_observations ADD COLUMN source_url TEXT",
+        ],
+    ),
+    (
+        "0.11.0",
+        "add embedding column to ohm_nodes for semantic search (OHM-o9f)",
+        [
+            "ALTER TABLE ohm_nodes ADD COLUMN embedding FLOAT[768]",
+        ],
+    ),
+    (
+        "0.12.0",
+        "add deleted_at column to ohm_nodes, ohm_edges, ohm_observations for soft delete (OHM-cpi)",
+        [
+            "ALTER TABLE ohm_nodes ADD COLUMN deleted_at TIMESTAMP",
+            "ALTER TABLE ohm_edges ADD COLUMN deleted_at TIMESTAMP",
+            "ALTER TABLE ohm_observations ADD COLUMN deleted_at TIMESTAMP",
+        ],
+    ),
+    (
+        "0.13.0",
+        "add task_status column and task-related indexes for action item tracking",
+        [
+            "ALTER TABLE ohm_nodes ADD COLUMN task_status VARCHAR",
+            "ALTER TABLE ohm_nodes ADD COLUMN due_date TIMESTAMP",
+            "ALTER TABLE ohm_nodes ADD COLUMN assigned_to VARCHAR",
+            "CREATE INDEX IF NOT EXISTS idx_nodes_task_status ON ohm_nodes(task_status) WHERE task_status IS NOT NULL",
+            "CREATE INDEX IF NOT EXISTS idx_nodes_assigned_to ON ohm_nodes(assigned_to) WHERE assigned_to IS NOT NULL",
+            "CREATE INDEX IF NOT EXISTS idx_nodes_due_date ON ohm_nodes(due_date) WHERE due_date IS NOT NULL",
+        ],
+    ),
+    (
+        "0.14.0",
+        "add graph_generation counter to ohm_meta for cache invalidation (OHM-omr)",
+        [
+            "INSERT INTO ohm_meta (key, value) SELECT 'graph_generation', '0' WHERE NOT EXISTS (SELECT 1 FROM ohm_meta WHERE key = 'graph_generation')",
+        ],
+    ),
+    (
+        "0.15.0",
+        "add PERT distribution columns to ohm_edges for VoI (OHM-6mv.3)",
+        [
+            "ALTER TABLE ohm_edges ADD COLUMN probability_p05 FLOAT",
+            "ALTER TABLE ohm_edges ADD COLUMN probability_p50 FLOAT",
+            "ALTER TABLE ohm_edges ADD COLUMN probability_p95 FLOAT",
+            "ALTER TABLE ohm_edges ADD COLUMN confidence_p05 FLOAT",
+            "ALTER TABLE ohm_edges ADD COLUMN confidence_p50 FLOAT",
+            "ALTER TABLE ohm_edges ADD COLUMN confidence_p95 FLOAT",
+        ],
+    ),
+    (
+        "0.16.0",
+        "add decision node type with utility function fields (OHM-6mv.2)",
+        [
+            "ALTER TABLE ohm_nodes ADD COLUMN utility_scale FLOAT",
+            "ALTER TABLE ohm_nodes ADD COLUMN current_best_action VARCHAR",
+            "ALTER TABLE ohm_nodes ADD COLUMN action_alternatives JSON",
+        ],
+    ),
+    (
+        "0.17.0",
+        "add USD utility columns to decision nodes for VoI calibration (OHM-fh3e)",
+        [
+            "ALTER TABLE ohm_nodes ADD COLUMN utility_usd_per_day FLOAT",
+            "ALTER TABLE ohm_nodes ADD COLUMN utility_currency VARCHAR",
+        ],
+    ),
+    (
+        "0.18.0",
+        "create ohm_change_feed/ohm_change_log if missing (OHM-y30o)",
+        [
+            "CREATE SEQUENCE IF NOT EXISTS seq_change_feed START 1",
+            """CREATE TABLE IF NOT EXISTS ohm_change_feed (
             id          BIGINT PRIMARY KEY DEFAULT nextval('seq_change_feed'),
             table_name  VARCHAR NOT NULL,
             row_id      VARCHAR NOT NULL,
@@ -581,7 +779,7 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             new_data    JSON,
             occurred_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""",
-        """CREATE TABLE IF NOT EXISTS ohm_change_log (
+            """CREATE TABLE IF NOT EXISTS ohm_change_log (
             id          VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
             table_name  VARCHAR NOT NULL,
             row_id      VARCHAR NOT NULL,
@@ -592,9 +790,10 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             changed_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             change_data JSON
         )""",
-        "CREATE INDEX IF NOT EXISTS idx_feed_agent ON ohm_change_feed(agent_name)",
-        "CREATE INDEX IF NOT EXISTS idx_feed_time ON ohm_change_feed(occurred_at)",
-    ]),
+            "CREATE INDEX IF NOT EXISTS idx_feed_agent ON ohm_change_feed(agent_name)",
+            "CREATE INDEX IF NOT EXISTS idx_feed_time ON ohm_change_feed(occurred_at)",
+        ],
+    ),
 ]
 
 # ── Indexes ─────────────────────────────────────────────────────────────────
@@ -660,9 +859,7 @@ def initialize_schema(conn: "DuckDBPyConnection") -> None:
 def _ensure_meta_table(conn: "DuckDBPyConnection") -> None:
     """Ensure the ohm_meta table exists and has a schema_version entry."""
     # Table is created by DDL_STATEMENTS, but ensure version row exists
-    existing = conn.execute(
-        "SELECT COUNT(*) FROM ohm_meta WHERE key = 'schema_version'"
-    ).fetchone()
+    existing = conn.execute("SELECT COUNT(*) FROM ohm_meta WHERE key = 'schema_version'").fetchone()
     if existing is None or existing[0] == 0:
         conn.execute(
             "INSERT INTO ohm_meta (key, value) VALUES ('schema_version', ?)",
@@ -678,9 +875,7 @@ def _apply_migrations(conn: "DuckDBPyConnection") -> None:
     2. Each migration runs in its own transaction
     3. Checkpoint after each migration to commit schema changes to disk
     """
-    current = conn.execute(
-        "SELECT value FROM ohm_meta WHERE key = 'schema_version'"
-    ).fetchone()
+    current = conn.execute("SELECT value FROM ohm_meta WHERE key = 'schema_version'").fetchone()
     current_version = current[0] if current else "0.1.0"
 
     def _version_tuple(v: str) -> tuple[int, ...]:
@@ -742,10 +937,7 @@ def _create_hnsw_index(conn: "DuckDBPyConnection") -> None:
     """
     # Check if VSS extension is loaded
     try:
-        vss_loaded = conn.execute(
-            "SELECT COUNT(*) FROM duckdb_extensions() "
-            "WHERE loaded = true AND extension_name = 'vss'"
-        ).fetchone()
+        vss_loaded = conn.execute("SELECT COUNT(*) FROM duckdb_extensions() WHERE loaded = true AND extension_name = 'vss'").fetchone()
         if vss_loaded is None or vss_loaded[0] == 0:
             return  # VSS not available — skip index creation
     except Exception:
@@ -753,10 +945,7 @@ def _create_hnsw_index(conn: "DuckDBPyConnection") -> None:
 
     # Check if embedding column exists
     try:
-        has_embedding = conn.execute(
-            "SELECT COUNT(*) FROM information_schema.columns "
-            "WHERE table_name = 'ohm_nodes' AND column_name = 'embedding'"
-        ).fetchone()
+        has_embedding = conn.execute("SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'ohm_nodes' AND column_name = 'embedding'").fetchone()
         if has_embedding is None or has_embedding[0] == 0:
             return  # Column doesn't exist yet — skip
     except Exception:
@@ -764,11 +953,7 @@ def _create_hnsw_index(conn: "DuckDBPyConnection") -> None:
 
     # Create HNSW index (idempotent — IF NOT EXISTS)
     try:
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_nodes_embedding "
-            "ON ohm_nodes USING HNSW (embedding) "
-            "WITH (metric = 'cosine')"
-        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_nodes_embedding ON ohm_nodes USING HNSW (embedding) WITH (metric = 'cosine')")
     except Exception:
         pass  # Index creation may fail if no data yet — safe to ignore
 
@@ -795,9 +980,7 @@ def get_schema_version(conn: "DuckDBPyConnection") -> str:
         the ohm_meta table doesn't exist yet.
     """
     try:
-        result = conn.execute(
-            "SELECT value FROM ohm_meta WHERE key = 'schema_version'"
-        ).fetchone()
+        result = conn.execute("SELECT value FROM ohm_meta WHERE key = 'schema_version'").fetchone()
         return result[0] if result else "0.0.0"
     except Exception:
         # Table doesn't exist yet — database hasn't been initialized
@@ -835,11 +1018,11 @@ def generate_node_id(label: str) -> str:
     import re
 
     # Normalize unicode: decompose accented chars, then strip diacritics
-    normalized = unicodedata.normalize('NFKD', label)
-    ascii_label = normalized.encode('ascii', 'ignore').decode('ascii')
+    normalized = unicodedata.normalize("NFKD", label)
+    ascii_label = normalized.encode("ascii", "ignore").decode("ascii")
 
     # Replace any remaining non-alphanumeric chars with underscores
-    base = re.sub(r'[^a-zA-Z0-9]+', '_', ascii_label).strip('_').lower()
+    base = re.sub(r"[^a-zA-Z0-9]+", "_", ascii_label).strip("_").lower()
     if not base:
         base = "node"
 

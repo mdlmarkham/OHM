@@ -116,6 +116,7 @@ def _validate_webhook_url(url: str) -> None:
     """
     import socket
     from urllib.parse import urlparse
+
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise ValidationError(f"Webhook URL must use http or https scheme, got: {parsed.scheme!r}")
@@ -127,9 +128,7 @@ def _validate_webhook_url(url: str) -> None:
         ip = ipaddress.ip_address(addr)
         for net in _PRIVATE_NETWORKS:
             if ip in net:
-                raise ValidationError(
-                    f"Webhook URL targets a private/loopback address ({addr}) — SSRF not allowed"
-                )
+                raise ValidationError(f"Webhook URL targets a private/loopback address ({addr}) — SSRF not allowed")
     except ValidationError:
         raise
     except Exception:
@@ -185,6 +184,7 @@ def _trigger_webhooks(event: dict) -> None:
 
 
 # ── Token Security ──────────────────────────────────────────
+
 
 def _hash_token(token: str) -> str:
     """Hash a token using SHA-256 for storage.
@@ -270,6 +270,7 @@ def load_config(config_path: Optional[str] = None) -> dict:
 
 
 # ── Error Mapping ──────────────────────────────────────────
+
 
 def _map_exception_to_http(exc: Exception) -> tuple[int, str]:
     """Map OHMError subclasses to HTTP status codes."""
@@ -359,20 +360,49 @@ def _build_router() -> _RouteRegistry:
 
     # Read endpoints (GET exact)
     for _p in (
-        "/stats", "/status", "/schema", "/layers", "/agents", "/nodes",
-        "/listen", "/search", "/semantic_search",
-        "/inference", "/intervene", "/ate", "/sensitivity", "/adjustment",
-        "/voi", "/voi/tasks", "/suggest_causes", "/refute",
-        "/lint", "/contract", "/duplicates", "/stale",
-        "/admin/embeddings", "/admin/snapshots", "/graph/at", "/graph/changes",
+        "/stats",
+        "/status",
+        "/schema",
+        "/layers",
+        "/agents",
+        "/nodes",
+        "/listen",
+        "/search",
+        "/semantic_search",
+        "/inference",
+        "/intervene",
+        "/ate",
+        "/sensitivity",
+        "/adjustment",
+        "/voi",
+        "/voi/tasks",
+        "/suggest_causes",
+        "/refute",
+        "/lint",
+        "/contract",
+        "/duplicates",
+        "/stale",
+        "/admin/embeddings",
+        "/admin/snapshots",
+        "/graph/at",
+        "/graph/changes",
     ):
         r.add("GET", _p)
 
     # GET prefix routes (parameterised paths like /node/{id})
     for _p in (
-        "/node/", "/deep/", "/edge/", "/neighborhood/", "/path/",
-        "/impact/", "/confidence/", "/agent/", "/provenance/",
-        "/monte-carlo/", "/calibration/", "/reliability/",
+        "/node/",
+        "/deep/",
+        "/edge/",
+        "/neighborhood/",
+        "/path/",
+        "/impact/",
+        "/confidence/",
+        "/agent/",
+        "/provenance/",
+        "/monte-carlo/",
+        "/calibration/",
+        "/reliability/",
         "/compound_confidence/",
     ):
         r.add("GET", _p)
@@ -395,9 +425,16 @@ def _build_router() -> _RouteRegistry:
 
     # POST-only write endpoints (exact)
     for _p in (
-        "/node", "/node/find_or_create", "/edge",
-        "/outcome", "/agent/synthesis", "/batch",
-        "/webhook", "/state", "/register", "/heartbeat",
+        "/node",
+        "/node/find_or_create",
+        "/edge",
+        "/outcome",
+        "/agent/synthesis",
+        "/batch",
+        "/webhook",
+        "/state",
+        "/register",
+        "/heartbeat",
         "/sync",
     ):
         r.add("POST", _p)
@@ -428,8 +465,10 @@ del _build_router
 
 # ── HTTP Handler ───────────────────────────────────────────
 
+
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     """Handle requests in separate threads for concurrent access."""
+
     daemon_threads = True
 
 
@@ -439,7 +478,7 @@ class OhmHandler(BaseHTTPRequestHandler):
     store: Optional[OhmStore] = None
     config: dict = {}
     tokens: dict = {}  # token -> agent_name
-    roles: dict = {}    # agent_name -> role (read-write, read-only)
+    roles: dict = {}  # agent_name -> role (read-write, read-only)
     no_auth: bool = False  # --no-auth flag: bypass all auth (dev mode)
     require_read_auth: bool = False  # OHM-gwg: require auth for reads (default: public reads)
     schema_config: SchemaConfig = DEFAULT_SCHEMA  # configurable schema (OHM or TOPO)
@@ -455,13 +494,12 @@ class OhmHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         """Structured request logging with correlation ID."""
         import re
+
         corr_id = getattr(self, "_correlation_id", "-")
         timestamp = datetime.now(timezone.utc).isoformat()
         message = format % args
-        message = re.sub(r'([?&]token=)[^&\s]+', r'\1[REDACTED]', message)
-        sys.stderr.write(
-            f"[{timestamp}] [{corr_id}] {message}\n"
-        )
+        message = re.sub(r"([?&]token=)[^&\s]+", r"\1[REDACTED]", message)
+        sys.stderr.write(f"[{timestamp}] [{corr_id}] {message}\n")
         sys.stderr.flush()
 
     def _authenticate(self) -> Optional[str]:
@@ -469,6 +507,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         auth = self.headers.get("Authorization", "")
         if auth.startswith("Bearer "):
             from urllib.parse import unquote
+
             token = unquote(auth[7:])
             for token_hash, agent_name in self.tokens.items():
                 if _verify_token(token, token_hash):
@@ -494,9 +533,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         """Verify agent has write access. Raises PermissionDeniedError if read-only."""
         role = self.roles.get(agent, "read-write")
         if role == "read-only":
-            raise PermissionDeniedError(
-                f"Agent '{agent}' has read-only access — writes are not permitted"
-            )
+            raise PermissionDeniedError(f"Agent '{agent}' has read-only access — writes are not permitted")
         return None
 
     def _require_write_auth(self) -> str:
@@ -517,11 +554,14 @@ class OhmHandler(BaseHTTPRequestHandler):
     def _method_not_allowed(self, allowed_methods: set[str]) -> None:
         """Send 405 Method Not Allowed with required Allow header (RFC 7231 §6.5.5)."""
         allow_header = ", ".join(sorted(allowed_methods))
-        body = json.dumps({
-            "error": "method_not_allowed",
-            "message": f"Method not allowed — use: {allow_header}",
-            "allow": allow_header,
-        }, indent=2).encode()
+        body = json.dumps(
+            {
+                "error": "method_not_allowed",
+                "message": f"Method not allowed — use: {allow_header}",
+                "allow": allow_header,
+            },
+            indent=2,
+        ).encode()
         self.send_response(405)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -575,6 +615,7 @@ class OhmHandler(BaseHTTPRequestHandler):
 
         # Register subscription
         import uuid
+
         sub_id = str(uuid.uuid4())[:8]
         with _sse_lock:
             _sse_subscribers[sub_id] = {
@@ -604,6 +645,7 @@ class OhmHandler(BaseHTTPRequestHandler):
 
         # Stream change feed events in batches
         from ohm.queries import query_change_feed
+
         last_ts = since
         event_count = 0
         max_events = 1000  # Safety limit
@@ -688,9 +730,7 @@ class OhmHandler(BaseHTTPRequestHandler):
 
             # Prune old entries
             window_start = now - RATE_LIMIT_WINDOW
-            _rate_limit_store[client_ip] = [
-                ts for ts in _rate_limit_store[client_ip] if ts > window_start
-            ]
+            _rate_limit_store[client_ip] = [ts for ts in _rate_limit_store[client_ip] if ts > window_start]
 
             # OHM-41g: Prune stale IP keys that have no recent timestamps.
             # Without this, unique IPs accumulate forever.
@@ -698,10 +738,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                 del _rate_limit_store[client_ip]
                 # Periodically prune other stale keys (every ~100 requests)
                 if len(_rate_limit_store) > 100:
-                    stale = [
-                        ip for ip, timestamps in _rate_limit_store.items()
-                        if not timestamps or timestamps[-1] < window_start
-                    ]
+                    stale = [ip for ip, timestamps in _rate_limit_store.items() if not timestamps or timestamps[-1] < window_start]
                     for ip in stale:
                         del _rate_limit_store[ip]
                 _rate_limit_store[client_ip] = [now]
@@ -747,43 +784,63 @@ class OhmHandler(BaseHTTPRequestHandler):
 
     _FIELD_TYPES: dict[str, dict[str, type | tuple[type, ...]]] = {
         "/node": {
-            "id": str, "label": str,
-            "type": str, "content": (str, type(None)),
-            "confidence": (int, float), "visibility": str,
-            "provenance": (str, type(None)), "tags": (list, type(None)),
+            "id": str,
+            "label": str,
+            "type": str,
+            "content": (str, type(None)),
+            "confidence": (int, float),
+            "visibility": str,
+            "provenance": (str, type(None)),
+            "tags": (list, type(None)),
             "metadata": (dict, type(None)),
         },
         "/edge": {
-            "from": str, "to": str, "type": str,
-            "layer": str, "confidence": (int, float, type(None)),
-            "condition": (str, type(None)), "provenance": (str, type(None)),
-            "challenge_of": (str, type(None)), "challenge_type": (str, type(None)),
+            "from": str,
+            "to": str,
+            "type": str,
+            "layer": str,
+            "confidence": (int, float, type(None)),
+            "condition": (str, type(None)),
+            "provenance": (str, type(None)),
+            "challenge_of": (str, type(None)),
+            "challenge_type": (str, type(None)),
         },
         "/state": {
-            "focus": (str, type(None)), "patterns": (list, type(None)),
-            "services": (list, type(None)), "session_id": (str, type(None)),
+            "focus": (str, type(None)),
+            "patterns": (list, type(None)),
+            "services": (list, type(None)),
+            "session_id": (str, type(None)),
         },
         "/register": {
-            "name": (str, type(None)), "description": (str, type(None)),
-            "values": (list, type(None)), "goals": (list, type(None)),
-            "capabilities": (list, type(None)), "interests": (list, type(None)),
+            "name": (str, type(None)),
+            "description": (str, type(None)),
+            "values": (list, type(None)),
+            "goals": (list, type(None)),
+            "capabilities": (list, type(None)),
+            "interests": (list, type(None)),
             "listens_to": (list, type(None)),
         },
         "/heartbeat": {
             "focus": (str, type(None)),
         },
         "/challenge": {
-            "reason": (str, type(None)), "confidence": (int, float, type(None)),
+            "reason": (str, type(None)),
+            "confidence": (int, float, type(None)),
             "challenge_type": (str, type(None)),
         },
         "/support": {
-            "reason": (str, type(None)), "confidence": (int, float, type(None)),
+            "reason": (str, type(None)),
+            "confidence": (int, float, type(None)),
         },
         "/observe": {
-            "type": (str, type(None)), "value": (int, float, str, type(None)),
-            "baseline": (int, float, type(None)), "sigma": (int, float, type(None)),
-            "source": (str, type(None)), "notes": (str, type(None)),
-            "source_name": (str, type(None)), "source_url": (str, type(None)),
+            "type": (str, type(None)),
+            "value": (int, float, str, type(None)),
+            "baseline": (int, float, type(None)),
+            "sigma": (int, float, type(None)),
+            "source": (str, type(None)),
+            "notes": (str, type(None)),
+            "source_name": (str, type(None)),
+            "source_url": (str, type(None)),
         },
     }
 
@@ -829,33 +886,26 @@ class OhmHandler(BaseHTTPRequestHandler):
                 expected = field_types[field]
                 if not isinstance(value, expected):
                     if isinstance(expected, tuple):
-                        type_names = " / ".join(
-                            t.__name__ if hasattr(t, "__name__") else str(t)
-                            for t in expected
-                        )
+                        type_names = " / ".join(t.__name__ if hasattr(t, "__name__") else str(t) for t in expected)
                     else:
                         type_names = expected.__name__ if hasattr(expected, "__name__") else str(expected)
-                    raise ValidationError(
-                        f"Field '{field}' must be {type_names}, "
-                        f"got {type(value).__name__}"
-                    )
+                    raise ValidationError(f"Field '{field}' must be {type_names}, got {type(value).__name__}")
 
         # Validate specific field values
         if validation_path == "/node":
             from ohm.validation import validate_identifier
+
             try:
                 validate_identifier(body["id"], name="id")
             except ValueError as e:
                 raise ValidationError(str(e))
             if "type" in body and body["type"] not in self.schema_config.node_types:
-                raise ValidationError(
-                    f"Invalid node type: '{body['type']}'"
-                    f" — must be one of: {', '.join(sorted(self.schema_config.node_types))}"
-                )
+                raise ValidationError(f"Invalid node type: '{body['type']}' — must be one of: {', '.join(sorted(self.schema_config.node_types))}")
             if "visibility" in body and body["visibility"] not in VALID_VISIBILITIES:
                 raise ValidationError(f"Invalid visibility: '{body['visibility']}' — must be private, team, or public")
             if "confidence" in body:
                 from ohm.validation import validate_confidence
+
                 try:
                     validate_confidence(float(body["confidence"]))
                 except ValueError as e:
@@ -863,31 +913,25 @@ class OhmHandler(BaseHTTPRequestHandler):
             # Task-specific field validation
             if "task_status" in body and body["task_status"] is not None:
                 from ohm.schema import VALID_TASK_STATUSES
+
                 if body["task_status"] not in VALID_TASK_STATUSES:
-                    raise ValidationError(
-                        f"Invalid task_status: '{body['task_status']}'"
-                        f" — must be one of: {', '.join(sorted(VALID_TASK_STATUSES))}"
-                    )
+                    raise ValidationError(f"Invalid task_status: '{body['task_status']}' — must be one of: {', '.join(sorted(VALID_TASK_STATUSES))}")
             if "priority" in body and body["priority"] is not None:
                 from ohm.schema import VALID_PRIORITY
+
                 if body["priority"] not in VALID_PRIORITY:
-                    raise ValidationError(
-                        f"Invalid priority: '{body['priority']}'"
-                        f" — must be one of: {', '.join(sorted(VALID_PRIORITY))}"
-                    )
+                    raise ValidationError(f"Invalid priority: '{body['priority']}' — must be one of: {', '.join(sorted(VALID_PRIORITY))}")
 
         elif validation_path == "/edge":
             from ohm.validation import validate_identifier, validate_layer
+
             try:
                 validate_identifier(body["from"], name="from_node")
                 validate_identifier(body["to"], name="to_node")
             except ValueError as e:
                 raise ValidationError(str(e))
             if body["type"] not in self.schema_config.all_edge_types:
-                raise ValidationError(
-                    f"Invalid edge type: '{body['type']}'"
-                    f" — must be one of: {', '.join(sorted(self.schema_config.all_edge_types))}"
-                )
+                raise ValidationError(f"Invalid edge type: '{body['type']}' — must be one of: {', '.join(sorted(self.schema_config.all_edge_types))}")
             if "layer" in body:
                 try:
                     validate_layer(body["layer"])
@@ -895,6 +939,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                     raise ValidationError(str(e))
             if "confidence" in body and body["confidence"] is not None:
                 from ohm.validation import validate_confidence
+
                 try:
                     validate_confidence(float(body["confidence"]))
                 except ValueError as e:
@@ -909,6 +954,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         elif validation_path in ("/challenge", "/support"):
             if "confidence" in body and body["confidence"] is not None:
                 from ohm.validation import validate_confidence
+
                 try:
                     validate_confidence(float(body["confidence"]))
                 except ValueError as e:
@@ -927,13 +973,17 @@ class OhmHandler(BaseHTTPRequestHandler):
             if not self._check_rate_limit():
                 with _metrics_lock:
                     _metrics["rate_limited"] += 1
-                self._json_response(429, {
-                    "error": "rate_limited",
-                    "message": "Too many requests. Try again later.",
-                    "correlation_id": self._correlation_id,
-                })
+                self._json_response(
+                    429,
+                    {
+                        "error": "rate_limited",
+                        "message": "Too many requests. Try again later.",
+                        "correlation_id": self._correlation_id,
+                    },
+                )
                 return
             from urllib.parse import urlparse as _up
+
             _path = _up(self.path).path.rstrip("/") or "/"
             _ok, _allowed = _ROUTER.check("GET", _path)
             if not _ok:
@@ -956,7 +1006,10 @@ class OhmHandler(BaseHTTPRequestHandler):
                     _metrics["errors_5xx"] += 1
                 _request_latencies.append(elapsed)
             self.log_message(
-                "GET %s → %s (%.1fms)", self.path, code, elapsed,
+                "GET %s → %s (%.1fms)",
+                self.path,
+                code,
+                elapsed,
             )
 
     def do_POST(self):
@@ -970,13 +1023,17 @@ class OhmHandler(BaseHTTPRequestHandler):
             if not self._check_rate_limit():
                 with _metrics_lock:
                     _metrics["rate_limited"] += 1
-                self._json_response(429, {
-                    "error": "rate_limited",
-                    "message": "Too many requests. Try again later.",
-                    "correlation_id": self._correlation_id,
-                })
+                self._json_response(
+                    429,
+                    {
+                        "error": "rate_limited",
+                        "message": "Too many requests. Try again later.",
+                        "correlation_id": self._correlation_id,
+                    },
+                )
                 return
             from urllib.parse import urlparse as _up
+
             _path = _up(self.path).path.rstrip("/") or "/"
             _ok, _allowed = _ROUTER.check("POST", _path)
             if not _ok:
@@ -999,7 +1056,10 @@ class OhmHandler(BaseHTTPRequestHandler):
                     _metrics["errors_5xx"] += 1
                 _request_latencies.append(elapsed)
             self.log_message(
-                "POST %s → %s (%.1fms)", self.path, code, elapsed,
+                "POST %s → %s (%.1fms)",
+                self.path,
+                code,
+                elapsed,
             )
 
     def do_DELETE(self):
@@ -1012,13 +1072,17 @@ class OhmHandler(BaseHTTPRequestHandler):
             if not self._check_rate_limit():
                 with _metrics_lock:
                     _metrics["rate_limited"] += 1
-                self._json_response(429, {
-                    "error": "rate_limited",
-                    "message": "Too many requests. Try again later.",
-                    "correlation_id": self._correlation_id,
-                })
+                self._json_response(
+                    429,
+                    {
+                        "error": "rate_limited",
+                        "message": "Too many requests. Try again later.",
+                        "correlation_id": self._correlation_id,
+                    },
+                )
                 return
             from urllib.parse import urlparse as _up
+
             _path = _up(self.path).path.rstrip("/") or "/"
             _ok, _allowed = _ROUTER.check("DELETE", _path)
             if not _ok:
@@ -1041,7 +1105,10 @@ class OhmHandler(BaseHTTPRequestHandler):
                     _metrics["errors_5xx"] += 1
                 _request_latencies.append(elapsed)
             self.log_message(
-                "DELETE %s → %s (%.1fms)", self.path, code, elapsed,
+                "DELETE %s → %s (%.1fms)",
+                self.path,
+                code,
+                elapsed,
             )
 
     def do_PATCH(self):
@@ -1054,13 +1121,17 @@ class OhmHandler(BaseHTTPRequestHandler):
             if not self._check_rate_limit():
                 with _metrics_lock:
                     _metrics["rate_limited"] += 1
-                self._json_response(429, {
-                    "error": "rate_limited",
-                    "message": "Too many requests. Try again later.",
-                    "correlation_id": self._correlation_id,
-                })
+                self._json_response(
+                    429,
+                    {
+                        "error": "rate_limited",
+                        "message": "Too many requests. Try again later.",
+                        "correlation_id": self._correlation_id,
+                    },
+                )
                 return
             from urllib.parse import urlparse as _up
+
             _path = _up(self.path).path.rstrip("/") or "/"
             _ok, _allowed = _ROUTER.check("PATCH", _path)
             if not _ok:
@@ -1083,7 +1154,10 @@ class OhmHandler(BaseHTTPRequestHandler):
                     _metrics["errors_5xx"] += 1
                 _request_latencies.append(elapsed)
             self.log_message(
-                "PATCH %s → %s (%.1fms)", self.path, code, elapsed,
+                "PATCH %s → %s (%.1fms)",
+                self.path,
+                code,
+                elapsed,
             )
 
     def _do_PATCH(self):
@@ -1112,10 +1186,23 @@ class OhmHandler(BaseHTTPRequestHandler):
 
             now = datetime.now(timezone.utc).isoformat()
             patchable = [
-                "label", "content", "confidence", "visibility", "provenance",
-                "tags", "metadata", "priority", "url", "task_status",
-                "assigned_to", "due_date", "utility_scale", "current_best_action",
-                "action_alternatives", "utility_usd_per_day", "utility_currency",
+                "label",
+                "content",
+                "confidence",
+                "visibility",
+                "provenance",
+                "tags",
+                "metadata",
+                "priority",
+                "url",
+                "task_status",
+                "assigned_to",
+                "due_date",
+                "utility_scale",
+                "current_best_action",
+                "action_alternatives",
+                "utility_usd_per_day",
+                "utility_currency",
             ]
             update_fields = []
             update_params = []
@@ -1152,9 +1239,17 @@ class OhmHandler(BaseHTTPRequestHandler):
 
             now = datetime.now(timezone.utc).isoformat()
             pert_fields = [
-                "probability", "probability_p05", "probability_p50", "probability_p95",
-                "confidence", "confidence_p05", "confidence_p50", "confidence_p95",
-                "condition", "provenance", "urgency",
+                "probability",
+                "probability_p05",
+                "probability_p50",
+                "probability_p95",
+                "confidence",
+                "confidence_p05",
+                "confidence_p50",
+                "confidence_p95",
+                "condition",
+                "provenance",
+                "urgency",
             ]
             update_fields = []
             update_params = []
@@ -1166,6 +1261,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             # Recompute PERT mean if p50 provided and probability not explicitly set
             if "probability_p50" in body and "probability" not in body:
                 from ohm.pert import compute_pert_mean
+
                 p05 = body.get("probability_p05", edge.get("probability_p05") or body["probability_p50"])
                 p95 = body.get("probability_p95", edge.get("probability_p95") or body["probability_p50"])
                 pert_mean = compute_pert_mean(p05, body["probability_p50"], p95)
@@ -1201,6 +1297,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         when tokens are configured.
         """
         from urllib.parse import urlparse, parse_qs
+
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
         qs = parse_qs(parsed.query)
@@ -1248,147 +1345,144 @@ class OhmHandler(BaseHTTPRequestHandler):
     def _get_infra_root(self, path: str, qs: dict) -> None:
         """GET / — root discovery endpoint (no auth)."""
         # Root discovery endpoint — OpenAPI-style route listing (ADR-005)
-        self._json_response(200, {
-            "service": "ohmd",
-            "version": "0.2.0",
-            "schema": self.schema_config.name,
-            "description": "Multi-agent knowledge graph daemon",
-            "auth_model": "public-read" if not self.require_read_auth else "authenticated",
-            "endpoints": {
-                "/": {"method": "GET", "description": "This discovery index (no auth required)"},
-                "/health": {"method": "GET", "description": "Health check (no auth required)"},
-                "/ready": {"method": "GET", "description": "Readiness check (no auth required)"},
-                "/metrics": {"method": "GET", "description": "Prometheus-style metrics"},
-                "/stats": {"method": "GET", "description": "Graph statistics (nodes, edges, layers)"},
-                "/inference": {"method": "GET", "description": "Bayesian inference: compute posterior probabilities given evidence (observation, includes confounders). ?layers=L3,L4 to scope by layer"},
-                "/intervene": {"method": "GET", "description": "Causal intervention using Pearl's do-operator: sever incoming edges to target, set value externally, propagate direct causal effect (no confounders). Required: ?target=node_id&state=0|1 (0=bad/forced-down, 1=good/forced-up). Optional: ?query=node1,node2 ?layers=L3,L4 ?leak=0.15"},
-                "/ate": {"method": "GET", "description": "Average Treatment Effect: model-based ATE from noisy-OR CPDs (ATE = P(effect=bad|do(cause=bad)) - P(effect=bad|do(cause=good))). ?layers=L3,L4 to scope by layer"},
-                "/sensitivity": {"method": "GET", "description": "Sensitivity analysis: E-value quantifying how much unmeasured confounding would overturn a causal conclusion. ?layers=L3,L4 to scope by layer"},
-                "/adjustment": {"method": "GET", "description": "Find valid backdoor/frontdoor adjustment sets for causal identification (Pearl's criteria). ?layers=L3,L4 to scope by layer"},
-                "/voi": {"method": "GET", "description": "Value of Information: rank nodes by research priority (uncertainty × sensitivity to decision). ?decision=node1,node2&top=10&layers=L3,L4&edge_types=CAUSES,DEPENDS_ON&min_observations=3&timeout=30. Response includes mixed_sensitivity_methods warning when ATE and path_confidence are both used (non-comparable scales)."},
-                "/voi/tasks": {"method": "GET", "description": "Generate research tasks from VoI rankings, matched to agent expertise. ?agent=metis&decision=node1,node2&top=5&layers=L3,L4"},
-                "/suggest_causes": {"method": "GET", "description": "Suggest candidate CAUSES edges from existing non-causal relationships (DEPENDS_ON, APPLIES_TO, etc.). Optional: ?layers=L3,L4 to scope by layer, ?min_confidence=0.5"},
-                "/deduplicate": {"method": "POST", "description": "Remove duplicate edges (same from→to, type, layer), keeping the most recent"},
-                "/refute": {"method": "GET", "description": "Test robustness of causal conclusions using DoWhy refutation methods (random common cause, placebo, data subset, unobserved confounder)"},
-                "/lint": {"method": "GET", "description": "Contract layer linting: validate graph against naming conventions and required fields"},
-                "/contract": {"method": "GET", "description": "Current contract configuration (naming conventions, required fields, schema)"},
-                "/status": {"method": "GET", "description": "Daemon status and configuration"},
-                "/schema": {"method": "GET", "description": "Node types, edge types, layers"},
-                "/layers": {"method": "GET", "description": "L1-L4 layer descriptions"},
-                "/node/{id}": {"method": "GET", "description": "Get a single node by ID"},
-                "/edge/{id}": {"method": "GET", "description": "Get a single edge by ID"},
-                "/neighborhood/{id}": {"method": "GET", "description": "Bounded-depth graph traversal"},
-                "/path/{from}/{to}": {"method": "GET", "description": "Shortest path between two nodes"},
-                "/impact/{id}": {"method": "GET", "description": "Downstream failure impact analysis"},
-                "/confidence/{id}": {"method": "GET", "description": "Provenance and challenge audit"},
-                "/agent/{name}": {"method": "GET", "description": "Agent state and focus"},
-                "/agents": {"method": "GET", "description": "List all registered agents"},
-                "/nodes": {"method": "GET", "description": "List nodes with pagination and filtering"},
-                "/listen": {"method": "GET", "description": "Change feed since last check"},
-                "/events": {"method": "GET", "description": "SSE stream of real-time change feed events"},
-                "/node": {"method": "POST", "description": "Create a new node"},
-                "/edge": {"method": "POST", "description": "Create a new edge"},
-                "/challenge/{id}": {"method": "POST", "description": "Challenge an existing edge"},
-                "/support/{id}": {"method": "POST", "description": "Support an existing edge"},
-                "/observe/{id}": {"method": "POST", "description": "Record an observation on a node"},
-                "/observations": {"method": "GET", "description": "List observations with filtering by type, source, node_id. POST for bulk upload: {observations: [{node_id, value, sigma, obs_type, source}]}"},
-                "/outcome": {"method": "POST", "description": "Record whether a source agent's claim was correct"},
-                "/reliability/{source}": {"method": "GET", "description": "Compute source reliability metrics from historical outcomes"},
-                "/state": {"method": "POST", "description": "Update agent state/focus"},
-                "/register": {"method": "POST", "description": "Register a new agent"},
-                "/heartbeat": {"method": "POST", "description": "Agent heartbeat with sync"},
-                "/webhook/{agent}": {"method": "POST", "description": "Register a webhook callback"},
-                "/search": {"method": "GET", "description": "ILIKE text search (?q=QUERY)"},
-                "/semantic_search": {"method": "GET", "description": "Semantic vector search (requires Ollama)"},
-                "/admin/checkpoint": {"method": "POST", "description": "Force DuckDB CHECKPOINT (flush WAL to main DB)"},
-                "/admin/embeddings": {"method": "GET", "description": "Batch generate embeddings for nodes missing them (?batch_size=N&delay_ms=M)"},
-                "/admin/snapshots": {"method": "GET", "description": "List DuckLake snapshots (time-travel)"},
-                "/graph/at": {"method": "GET", "description": "Query graph at snapshot version (?version=N)"},
-                "/graph/changes": {"method": "GET", "description": "Changes between snapshots"},
+        self._json_response(
+            200,
+            {
+                "service": "ohmd",
+                "version": "0.2.0",
+                "schema": self.schema_config.name,
+                "description": "Multi-agent knowledge graph daemon",
+                "auth_model": "public-read" if not self.require_read_auth else "authenticated",
+                "endpoints": {
+                    "/": {"method": "GET", "description": "This discovery index (no auth required)"},
+                    "/health": {"method": "GET", "description": "Health check (no auth required)"},
+                    "/ready": {"method": "GET", "description": "Readiness check (no auth required)"},
+                    "/metrics": {"method": "GET", "description": "Prometheus-style metrics"},
+                    "/stats": {"method": "GET", "description": "Graph statistics (nodes, edges, layers)"},
+                    "/inference": {"method": "GET", "description": "Bayesian inference: compute posterior probabilities given evidence (observation, includes confounders). ?layers=L3,L4 to scope by layer"},
+                    "/intervene": {
+                        "method": "GET",
+                        "description": "Causal intervention (do-operator): required ?target=node_id&state=0|1. Optional: ?query=node1,node2 ?layers=L3,L4 ?leak=0.15",
+                    },
+                    "/ate": {"method": "GET", "description": "Average Treatment Effect: model-based ATE from noisy-OR CPDs (ATE = P(effect=bad|do(cause=bad)) - P(effect=bad|do(cause=good))). ?layers=L3,L4 to scope by layer"},
+                    "/sensitivity": {"method": "GET", "description": "Sensitivity analysis: E-value quantifying how much unmeasured confounding would overturn a causal conclusion. ?layers=L3,L4 to scope by layer"},
+                    "/adjustment": {"method": "GET", "description": "Find valid backdoor/frontdoor adjustment sets for causal identification (Pearl's criteria). ?layers=L3,L4 to scope by layer"},
+                    "/voi": {
+                        "method": "GET",
+                        "description": "Value of Information: rank nodes by research priority (uncertainty × sensitivity to decision). ?decision=node1,node2&top=10&layers=L3,L4&edge_types=CAUSES,DEPENDS_ON&min_observations=3&timeout=30.",
+                    },
+                    "/voi/tasks": {"method": "GET", "description": "Generate research tasks from VoI rankings, matched to agent expertise. ?agent=metis&decision=node1,node2&top=5&layers=L3,L4"},
+                    "/suggest_causes": {"method": "GET", "description": "Suggest candidate CAUSES edges from existing non-causal relationships (DEPENDS_ON, APPLIES_TO, etc.). Optional: ?layers=L3,L4 to scope by layer, ?min_confidence=0.5"},
+                    "/deduplicate": {"method": "POST", "description": "Remove duplicate edges (same from→to, type, layer), keeping the most recent"},
+                    "/refute": {"method": "GET", "description": "Test robustness of causal conclusions using DoWhy refutation methods (random common cause, placebo, data subset, unobserved confounder)"},
+                    "/lint": {"method": "GET", "description": "Contract layer linting: validate graph against naming conventions and required fields"},
+                    "/contract": {"method": "GET", "description": "Current contract configuration (naming conventions, required fields, schema)"},
+                    "/status": {"method": "GET", "description": "Daemon status and configuration"},
+                    "/schema": {"method": "GET", "description": "Node types, edge types, layers"},
+                    "/layers": {"method": "GET", "description": "L1-L4 layer descriptions"},
+                    "/node/{id}": {"method": "GET", "description": "Get a single node by ID"},
+                    "/edge/{id}": {"method": "GET", "description": "Get a single edge by ID"},
+                    "/neighborhood/{id}": {"method": "GET", "description": "Bounded-depth graph traversal"},
+                    "/path/{from}/{to}": {"method": "GET", "description": "Shortest path between two nodes"},
+                    "/impact/{id}": {"method": "GET", "description": "Downstream failure impact analysis"},
+                    "/confidence/{id}": {"method": "GET", "description": "Provenance and challenge audit"},
+                    "/agent/{name}": {"method": "GET", "description": "Agent state and focus"},
+                    "/agents": {"method": "GET", "description": "List all registered agents"},
+                    "/nodes": {"method": "GET", "description": "List nodes with pagination and filtering"},
+                    "/listen": {"method": "GET", "description": "Change feed since last check"},
+                    "/events": {"method": "GET", "description": "SSE stream of real-time change feed events"},
+                    "/node": {"method": "POST", "description": "Create a new node"},
+                    "/edge": {"method": "POST", "description": "Create a new edge"},
+                    "/challenge/{id}": {"method": "POST", "description": "Challenge an existing edge"},
+                    "/support/{id}": {"method": "POST", "description": "Support an existing edge"},
+                    "/observe/{id}": {"method": "POST", "description": "Record an observation on a node"},
+                    "/observations": {"method": "GET", "description": "List observations with filtering by type, source, node_id. POST for bulk upload: {observations: [{node_id, value, sigma, obs_type, source}]}"},
+                    "/outcome": {"method": "POST", "description": "Record whether a source agent's claim was correct"},
+                    "/reliability/{source}": {"method": "GET", "description": "Compute source reliability metrics from historical outcomes"},
+                    "/state": {"method": "POST", "description": "Update agent state/focus"},
+                    "/register": {"method": "POST", "description": "Register a new agent"},
+                    "/heartbeat": {"method": "POST", "description": "Agent heartbeat with sync"},
+                    "/webhook/{agent}": {"method": "POST", "description": "Register a webhook callback"},
+                    "/search": {"method": "GET", "description": "ILIKE text search (?q=QUERY)"},
+                    "/semantic_search": {"method": "GET", "description": "Semantic vector search (requires Ollama)"},
+                    "/admin/checkpoint": {"method": "POST", "description": "Force DuckDB CHECKPOINT (flush WAL to main DB)"},
+                    "/admin/embeddings": {"method": "GET", "description": "Batch generate embeddings for nodes missing them (?batch_size=N&delay_ms=M)"},
+                    "/admin/snapshots": {"method": "GET", "description": "List DuckLake snapshots (time-travel)"},
+                    "/graph/at": {"method": "GET", "description": "Query graph at snapshot version (?version=N)"},
+                    "/graph/changes": {"method": "GET", "description": "Changes between snapshots"},
+                },
+                "links": {
+                    "schema": "/schema",
+                    "layers": "/layers",
+                    "health": "/health",
+                    "docs": "https://github.com/mdlmarkham/OHM",
+                },
             },
-            "links": {
-                "schema": "/schema",
-                "layers": "/layers",
-                "health": "/health",
-                "docs": "https://github.com/mdlmarkham/OHM",
-            },
-        })
+        )
 
     def _get_infra_openapi(self, path: str, qs: dict) -> None:
         """GET /openapi.json — OpenAPI 3.0 spec endpoint (ADR-005)."""
-        self._json_response(200, {
-            "openapi": "3.0.3",
-            "info": {
-                "title": "OHM Daemon API",
-                "version": "0.2.0",
-                "description": "Multi-agent knowledge graph daemon — shared awareness, individual judgment.",
+        self._json_response(
+            200,
+            {
+                "openapi": "3.0.3",
+                "info": {
+                    "title": "OHM Daemon API",
+                    "version": "0.2.0",
+                    "description": "Multi-agent knowledge graph daemon — shared awareness, individual judgment.",
+                },
+                "servers": [{"url": (f"http://{self.config.get('host', '127.0.0.1')}:{self.config.get('port', 8710)}")}],
+                "paths": {
+                    "/": {"get": {"summary": "Discovery index", "responses": {"200": {"description": "Route listing"}}}},
+                    "/health": {"get": {"summary": "Health check", "responses": {"200": {"description": "OK"}}}},
+                    "/ready": {"get": {"summary": "Readiness check", "responses": {"200": {"description": "Ready"}, "503": {"description": "Not ready"}}}},
+                    "/metrics": {"get": {"summary": "Prometheus-style metrics", "responses": {"200": {"description": "Metrics"}}}},
+                    "/stats": {"get": {"summary": "Graph statistics", "responses": {"200": {"description": "Stats"}}}},
+                    "/status": {"get": {"summary": "Daemon status", "responses": {"200": {"description": "Status"}}}},
+                    "/schema": {"get": {"summary": "Node/edge types", "responses": {"200": {"description": "Schema"}}}},
+                    "/layers": {"get": {"summary": "L1-L4 descriptions", "responses": {"200": {"description": "Layers"}}}},
+                    "/node/{id}": {"get": {"summary": "Get node"}, "post": {"summary": "Create node"}},
+                    "/edge/{id}": {"get": {"summary": "Get edge"}, "post": {"summary": "Create edge"}},
+                    "/neighborhood/{id}": {"get": {"summary": "Graph traversal"}},
+                    "/path/{from}/{to}": {"get": {"summary": "Shortest path"}},
+                    "/impact/{id}": {"get": {"summary": "Impact analysis"}},
+                    "/confidence/{id}": {"get": {"summary": "Confidence audit"}},
+                    "/agent/{name}": {"get": {"summary": "Agent state"}},
+                    "/agents": {"get": {"summary": "List agents"}},
+                    "/nodes": {"get": {"summary": "List nodes with pagination and filtering"}},
+                    "/listen": {"get": {"summary": "Change feed"}},
+                    "/events": {"get": {"summary": "SSE event stream"}},
+                    "/challenge/{id}": {"post": {"summary": "Challenge edge"}},
+                    "/support/{id}": {"post": {"summary": "Support edge"}},
+                    "/observe/{id}": {"post": {"summary": "Record observation"}},
+                    "/observations": {"get": {"summary": "List observations"}, "post": {"summary": "Bulk upload observations"}},
+                    "/state": {"post": {"summary": "Update agent state"}},
+                    "/register": {"post": {"summary": "Register agent"}},
+                    "/heartbeat": {"post": {"summary": "Agent heartbeat"}},
+                    "/webhook/{agent}": {"post": {"summary": "Register webhook"}},
+                    "/search": {"get": {"summary": "ILIKE text search", "parameters": [{"name": "q", "in": "query", "required": True, "schema": {"type": "string"}}]}},
+                    "/semantic_search": {
+                        "get": {
+                            "summary": "Semantic vector search (requires Ollama)",
+                            "parameters": [
+                                {"name": "q", "in": "query", "required": True, "schema": {"type": "string"}},
+                                {"name": "type", "in": "query", "required": False, "schema": {"type": "string"}},
+                                {"name": "limit", "in": "query", "required": False, "schema": {"type": "integer"}},
+                                {"name": "min_confidence", "in": "query", "required": False, "schema": {"type": "number"}},
+                            ],
+                            "responses": {
+                                "200": {"description": "Search results"},
+                                "503": {"description": "Ollama not available"},
+                            },
+                        }
+                    },
+                    "/admin/checkpoint": {"post": {"summary": "Force CHECKPOINT", "responses": {"200": {"description": "WAL flushed to main DB"}}}},
+                    "/graph/at": {"get": {"summary": "Graph at snapshot version", "responses": {"200": {"description": "Historical graph state"}}}},
+                    "/graph/changes": {"get": {"summary": "Changes between snapshots", "responses": {"200": {"description": "Insertions/deletions"}}}},
+                    "/voi/tasks": {"get": {"summary": "VoI task assignment for agent routing", "responses": {"200": {"description": "Research tasks ranked by VoI"}}}},
+                },
             },
-            "servers": [{"url": (
-                f"http://{self.config.get('host', '127.0.0.1')}"
-                f":{self.config.get('port', 8710)}"
-            )}],
-            "paths": {
-                "/": {"get": {"summary": "Discovery index",
-                           "responses": {"200": {"description": "Route listing"}}}},
-                "/health": {"get": {"summary": "Health check", "responses": {"200": {"description": "OK"}}}},
-                "/ready": {"get": {"summary": "Readiness check",
-                               "responses": {"200": {"description": "Ready"},
-                                             "503": {"description": "Not ready"}}}},
-                "/metrics": {"get": {"summary": "Prometheus-style metrics",
-                                "responses": {"200": {"description": "Metrics"}}}},
-                "/stats": {"get": {"summary": "Graph statistics", "responses": {"200": {"description": "Stats"}}}},
-                "/status": {"get": {"summary": "Daemon status", "responses": {"200": {"description": "Status"}}}},
-                "/schema": {"get": {"summary": "Node/edge types", "responses": {"200": {"description": "Schema"}}}},
-                "/layers": {"get": {"summary": "L1-L4 descriptions",
-                               "responses": {"200": {"description": "Layers"}}}},
-                "/node/{id}": {"get": {"summary": "Get node"}, "post": {"summary": "Create node"}},
-                "/edge/{id}": {"get": {"summary": "Get edge"}, "post": {"summary": "Create edge"}},
-                "/neighborhood/{id}": {"get": {"summary": "Graph traversal"}},
-                "/path/{from}/{to}": {"get": {"summary": "Shortest path"}},
-                "/impact/{id}": {"get": {"summary": "Impact analysis"}},
-                "/confidence/{id}": {"get": {"summary": "Confidence audit"}},
-                "/agent/{name}": {"get": {"summary": "Agent state"}},
-                "/agents": {"get": {"summary": "List agents"}},
-                "/nodes": {"get": {"summary": "List nodes with pagination and filtering"}},
-                "/listen": {"get": {"summary": "Change feed"}},
-                "/events": {"get": {"summary": "SSE event stream"}},
-                "/challenge/{id}": {"post": {"summary": "Challenge edge"}},
-                "/support/{id}": {"post": {"summary": "Support edge"}},
-                "/observe/{id}": {"post": {"summary": "Record observation"}},
-                "/observations": {"get": {"summary": "List observations"}, "post": {"summary": "Bulk upload observations"}},
-                "/state": {"post": {"summary": "Update agent state"}},
-                "/register": {"post": {"summary": "Register agent"}},
-                "/heartbeat": {"post": {"summary": "Agent heartbeat"}},
-                "/webhook/{agent}": {"post": {"summary": "Register webhook"}},
-                "/search": {"get": {"summary": "ILIKE text search",
-                               "parameters": [{"name": "q", "in": "query",
-                                               "required": True,
-                                               "schema": {"type": "string"}}]}},
-                "/semantic_search": {"get": {"summary": "Semantic vector search (requires Ollama)",
-                                        "parameters": [
-                                            {"name": "q", "in": "query", "required": True,
-                                             "schema": {"type": "string"}},
-                                            {"name": "type", "in": "query", "required": False,
-                                             "schema": {"type": "string"}},
-                                            {"name": "limit", "in": "query", "required": False,
-                                             "schema": {"type": "integer"}},
-                                            {"name": "min_confidence", "in": "query",
-                                             "required": False, "schema": {"type": "number"}},
-                                        ],
-                                        "responses": {
-                                            "200": {"description": "Search results"},
-                                            "503": {"description": "Ollama not available"},
-                                        }}},
-                "/admin/checkpoint": {"post": {"summary": "Force CHECKPOINT",
-                                       "responses": {"200": {"description": "WAL flushed to main DB"}}}},
-                "/graph/at": {"get": {"summary": "Graph at snapshot version",
-                                  "responses": {"200": {"description": "Historical graph state"}}}},
-                "/graph/changes": {"get": {"summary": "Changes between snapshots",
-                                       "responses": {"200": {"description": "Insertions/deletions"}}}},
-                "/voi/tasks": {"get": {"summary": "VoI task assignment for agent routing",
-                                   "responses": {"200": {"description": "Research tasks ranked by VoI"}}}},
-            },
-        })
+        )
 
     def _get_infra_health(self, path: str, qs: dict) -> None:
         """GET /health — health check (no auth)."""
@@ -1398,6 +1492,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         }
         try:
             from ohm.queries import query_graph_health
+
             graph = query_graph_health(self.store.conn)
             total_nodes = graph.get("total_nodes") or 0
             orphan_nodes = graph.get("orphan_nodes") or 0
@@ -1417,15 +1512,21 @@ class OhmHandler(BaseHTTPRequestHandler):
         """GET /ready — readiness check (no auth)."""
         try:
             self.store.execute("SELECT 1")
-            self._json_response(200, {
-                "status": "ready",
-                "database": str(self.store.db_path),
-            })
+            self._json_response(
+                200,
+                {
+                    "status": "ready",
+                    "database": str(self.store.db_path),
+                },
+            )
         except Exception:
-            self._json_response(503, {
-                "status": "not_ready",
-                "database": str(self.store.db_path),
-            })
+            self._json_response(
+                503,
+                {
+                    "status": "not_ready",
+                    "database": str(self.store.db_path),
+                },
+            )
 
     def _get_infra_metrics(self, path: str, qs: dict) -> None:
         """GET /metrics — Prometheus-style metrics (no auth)."""
@@ -1458,13 +1559,13 @@ class OhmHandler(BaseHTTPRequestHandler):
                 f'ohm_errors_total{{code="5xx"}} {metrics_snapshot.get("errors_5xx", 0)}',
                 "# HELP ohm_rate_limited_total Requests rejected by rate limiter",
                 "# TYPE ohm_rate_limited_total counter",
-                f'ohm_rate_limited_total {metrics_snapshot.get("rate_limited", 0)}',
+                f"ohm_rate_limited_total {metrics_snapshot.get('rate_limited', 0)}",
                 "# HELP ohm_request_duration_ms Request latency in milliseconds",
                 "# TYPE ohm_request_duration_ms summary",
                 f'ohm_request_duration_ms{{quantile="0.5"}} {p50}',
                 f'ohm_request_duration_ms{{quantile="0.95"}} {p95}',
                 f'ohm_request_duration_ms{{quantile="0.99"}} {p99}',
-                f'ohm_request_duration_ms_count {n}',
+                f"ohm_request_duration_ms_count {n}",
                 "",
             ]
             body_bytes = "\n".join(lines).encode()
@@ -1474,23 +1575,27 @@ class OhmHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body_bytes)
         else:
-            self._json_response(200, {
-                "uptime_seconds": uptime,
-                "requests": metrics_snapshot,
-                "latency_ms": {
-                    "p50": p50,
-                    "p95": p95,
-                    "p99": p99,
-                    "max": lat_max,
-                    "sample_count": n,
+            self._json_response(
+                200,
+                {
+                    "uptime_seconds": uptime,
+                    "requests": metrics_snapshot,
+                    "latency_ms": {
+                        "p50": p50,
+                        "p95": p95,
+                        "p99": p99,
+                        "max": lat_max,
+                        "sample_count": n,
+                    },
                 },
-            })
+            )
 
     # ── Authenticated GET handlers ────────────────────────────
 
     def _get_stats(self, path: str, qs: dict) -> None:
         """GET /stats — graph statistics."""
         from ohm.queries import query_stats
+
         stats = query_stats(self.store.conn)
         stats["uptime"] = round(time.time() - _START_TIME, 1)
         self._json_response(200, stats)
@@ -1511,13 +1616,16 @@ class OhmHandler(BaseHTTPRequestHandler):
         all_edge_types: set[str] = set()
         for types in schema.layer_edge_types.values():
             all_edge_types.update(types)
-        self._json_response(200, {
-            "schema": schema.name,
-            "node_types": sorted(schema.node_types),
-            "edge_types": sorted(all_edge_types),
-            "edge_types_by_layer": {k: sorted(v) for k, v in schema.layer_edge_types.items()},
-            "layers": schema.layer_descriptions,
-        })
+        self._json_response(
+            200,
+            {
+                "schema": schema.name,
+                "node_types": sorted(schema.node_types),
+                "edge_types": sorted(all_edge_types),
+                "edge_types_by_layer": {k: sorted(v) for k, v in schema.layer_edge_types.items()},
+                "layers": schema.layer_descriptions,
+            },
+        )
 
     def _get_layers(self, path: str, qs: dict) -> None:
         """GET /layers — layer descriptions."""
@@ -1527,6 +1635,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         """GET /node/<id> — fetch a node."""
         node_id = path[6:]
         from ohm.validation import validate_identifier
+
         node_id = validate_identifier(node_id, name="node_id")
         node = self.store.get_node(node_id)
         if node:
@@ -1538,13 +1647,13 @@ class OhmHandler(BaseHTTPRequestHandler):
         """GET /deep/<id> — deep content retrieval with connected edges (OHM-7299)."""
         node_id = path[6:]
         from ohm.validation import validate_identifier
+
         node_id = validate_identifier(node_id, name="node_id")
         try:
             result = self.store.deep_content(node_id)
             # Include connected edges so agents get graph context alongside file content
             edges = self.store.execute(
-                "SELECT * FROM ohm_edges WHERE (from_node = ? OR to_node = ?) "
-                "AND deleted_at IS NULL ORDER BY created_at DESC",
+                "SELECT * FROM ohm_edges WHERE (from_node = ? OR to_node = ?) AND deleted_at IS NULL ORDER BY created_at DESC",
                 [node_id, node_id],
             )
             result["edges"] = edges
@@ -1559,6 +1668,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         """GET /edge/<id> — fetch an edge."""
         edge_id = path[6:]
         from ohm.validation import validate_identifier
+
         edge_id = validate_identifier(edge_id, name="edge_id")
         edge = self.store.get_edge(edge_id)
         if edge:
@@ -1570,10 +1680,12 @@ class OhmHandler(BaseHTTPRequestHandler):
         """GET /neighborhood/<id> — node neighborhood."""
         node_id = path[14:]  # strip "/neighborhood/"
         from ohm.validation import validate_identifier
+
         node_id = validate_identifier(node_id, name="node_id")
         depth = int(qs.get("depth", [3])[0])
         layer = qs.get("layer", [None])[0]
         from ohm.queries import query_neighborhood
+
         edges = query_neighborhood(self.store.conn, node_id, depth=depth, layer=layer)
         # Collect unique node IDs from all edges plus the seed node
         node_ids = {node_id}
@@ -1583,8 +1695,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         # Fetch node details for all referenced nodes
         placeholders = ", ".join("?" * len(node_ids))
         node_rows = self.store.execute(
-            f"SELECT id, label, type, created_by, created_at FROM ohm_nodes "
-            f"WHERE id IN ({placeholders}) AND deleted_at IS NULL",
+            f"SELECT id, label, type, created_by, created_at FROM ohm_nodes WHERE id IN ({placeholders}) AND deleted_at IS NULL",
             list(node_ids),
         )
         self._json_response(200, {"nodes": node_rows, "edges": edges})
@@ -1594,9 +1705,11 @@ class OhmHandler(BaseHTTPRequestHandler):
         parts = path[6:].split("/")
         if len(parts) >= 2:
             from ohm.validation import validate_identifier
+
             from_node = validate_identifier(parts[0], name="from_node")
             to_node = validate_identifier(parts[1], name="to_node")
             from ohm.queries import query_path
+
             results = query_path(self.store.conn, from_node, to_node)
             self._json_response(200, results)
         else:
@@ -1606,9 +1719,11 @@ class OhmHandler(BaseHTTPRequestHandler):
         """GET /impact/<id> — impact analysis."""
         node_id = path[8:]
         from ohm.validation import validate_identifier
+
         node_id = validate_identifier(node_id, name="node_id")
         depth = int(qs.get("depth", [5])[0])
         from ohm.queries import query_impact
+
         results = query_impact(self.store.conn, node_id, depth=depth)
         self._json_response(200, results)
 
@@ -1616,15 +1731,18 @@ class OhmHandler(BaseHTTPRequestHandler):
         """GET /confidence/<id> — confidence breakdown."""
         target_id = path[12:]
         from ohm.validation import validate_identifier
+
         target_id = validate_identifier(target_id, name="target_id")
         from ohm.queries import query_confidence
 
         # Check if target_id is a node or an edge
         is_node = self.store.conn.execute(
-            "SELECT COUNT(*) FROM ohm_nodes WHERE id = ?", [target_id],
+            "SELECT COUNT(*) FROM ohm_nodes WHERE id = ?",
+            [target_id],
         ).fetchone()
         is_edge = self.store.conn.execute(
-            "SELECT COUNT(*) FROM ohm_edges WHERE id = ?", [target_id],
+            "SELECT COUNT(*) FROM ohm_edges WHERE id = ?",
+            [target_id],
         ).fetchone()
 
         if is_node and is_node[0] > 0:
@@ -1653,12 +1771,15 @@ class OhmHandler(BaseHTTPRequestHandler):
             supports = [r for r in refs if r["edge_type"] == "SUPPORTS"]
             refinements = [r for r in refs if r["edge_type"] == "REFINES"]
 
-            self._json_response(200, {
-                "node_id": target_id,
-                "challenges": challenges,
-                "supports": supports,
-                "refinements": refinements,
-            })
+            self._json_response(
+                200,
+                {
+                    "node_id": target_id,
+                    "challenges": challenges,
+                    "supports": supports,
+                    "refinements": refinements,
+                },
+            )
         elif is_edge and is_edge[0] > 0:
             # Edge: use existing query_confidence
             results = query_confidence(self.store.conn, target_id)
@@ -1670,6 +1791,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         """GET /agent/<name> — agent state."""
         agent_name = path[7:]
         from ohm.validation import validate_identifier
+
         agent_name = validate_identifier(agent_name, name="agent_name")
         state = self.store.get_agent_state(agent_name)
         if state:
@@ -1710,23 +1832,22 @@ class OhmHandler(BaseHTTPRequestHandler):
             params.append(created_by)
         params.append(limit)
         params.append(offset)
-        sql = (
-            "SELECT * FROM ohm_nodes WHERE "
-            + " AND ".join(conditions)
-            + " ORDER BY created_at DESC LIMIT ? OFFSET ?"
-        )
+        sql = "SELECT * FROM ohm_nodes WHERE " + " AND ".join(conditions) + " ORDER BY created_at DESC LIMIT ? OFFSET ?"
         results = self.store.execute(sql, params)
         # Also return total count for pagination
         count_sql = "SELECT COUNT(*) as cnt FROM ohm_nodes WHERE " + " AND ".join(conditions)
         count_params = params[:-2]  # Remove limit and offset
         total_result = self.store.execute(count_sql, count_params)
         total = total_result[0]["cnt"] if total_result else len(results)
-        self._json_response(200, {
-            "nodes": results,
-            "total": total,
-            "limit": limit,
-            "offset": offset,
-        })
+        self._json_response(
+            200,
+            {
+                "nodes": results,
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            },
+        )
 
     def _get_tasks(self, path: str, qs: dict) -> None:
         """GET /tasks — list task nodes with filtering."""
@@ -1752,23 +1873,22 @@ class OhmHandler(BaseHTTPRequestHandler):
             params.append(created_by)
         params.append(limit)
         params.append(offset)
-        sql = (
-            "SELECT * FROM ohm_nodes WHERE "
-            + " AND ".join(conditions)
-            + " ORDER BY CASE priority WHEN 'P0' THEN 0 WHEN 'P1' THEN 1 WHEN 'P2' THEN 2 WHEN 'P3' THEN 3 WHEN 'P4' THEN 4 ELSE 5 END, due_date ASC NULLS LAST, created_at DESC LIMIT ? OFFSET ?"
-        )
+        sql = "SELECT * FROM ohm_nodes WHERE " + " AND ".join(conditions) + " ORDER BY CASE priority WHEN 'P0' THEN 0 WHEN 'P1' THEN 1 WHEN 'P2' THEN 2 WHEN 'P3' THEN 3 WHEN 'P4' THEN 4 ELSE 5 END, due_date ASC NULLS LAST, created_at DESC LIMIT ? OFFSET ?"
         results = self.store.execute(sql, params)
         # Also return total count
         count_sql = "SELECT COUNT(*) as cnt FROM ohm_nodes WHERE " + " AND ".join(conditions)
         count_params = params[:-2]
         total_result = self.store.execute(count_sql, count_params)
         total = total_result[0]["cnt"] if total_result else len(results)
-        self._json_response(200, {
-            "tasks": results,
-            "total": total,
-            "limit": limit,
-            "offset": offset,
-        })
+        self._json_response(
+            200,
+            {
+                "tasks": results,
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            },
+        )
 
     def _get_listen(self, path: str, qs: dict) -> None:
         """GET /listen — poll change feed since last sync."""
@@ -1794,9 +1914,8 @@ class OhmHandler(BaseHTTPRequestHandler):
                 # Default to 24 hours ago (OHM-4oc)
                 since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
         from ohm.queries import query_change_feed
-        results = query_change_feed(
-            self.store.conn, since=since, agent_name=agent_name, enrich=enrich
-        )
+
+        results = query_change_feed(self.store.conn, since=since, agent_name=agent_name, enrich=enrich)
         self._json_response(200, results)
 
     def _get_search(self, path: str, qs: dict) -> None:
@@ -1817,11 +1936,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             params.append(created_by)
         params.append(limit)
         # Column names hardcoded, values parameterized
-        sql = (
-            "SELECT * FROM ohm_nodes WHERE "
-            + " AND ".join(conditions)
-            + " ORDER BY created_at DESC LIMIT ?"
-        )
+        sql = "SELECT * FROM ohm_nodes WHERE " + " AND ".join(conditions) + " ORDER BY created_at DESC LIMIT ?"
         results = self.store.execute(sql, params)
         self._json_response(200, results)
 
@@ -1841,6 +1956,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                 raise ValidationError("?min_confidence must be a number")
         try:
             from ohm.queries import semantic_search
+
             results = semantic_search(
                 self.store.conn,
                 query=query_text,
@@ -1851,26 +1967,32 @@ class OhmHandler(BaseHTTPRequestHandler):
             self._json_response(200, {"results": results, "count": len(results)})
         except ValueError as e:
             # Ollama not available
-            self._json_response(503, {
-                "error": "service_unavailable",
-                "message": str(e),
-            })
+            self._json_response(
+                503,
+                {
+                    "error": "service_unavailable",
+                    "message": str(e),
+                },
+            )
 
     def _get_health_graph(self, path: str, qs: dict) -> None:
         """GET /health/graph — graph health check."""
         from ohm.queries import query_graph_health
+
         result = query_graph_health(self.store.conn)
         self._json_response(200, result)
 
     def _get_health_agents(self, path: str, qs: dict) -> None:
         """GET /health/agents — agent health check."""
         from ohm.methods import query_agent_health
+
         result = query_agent_health(self.store.conn)
         self._json_response(200, result)
 
     def _get_contradictions(self, path: str, qs: dict) -> None:
         """GET /contradictions — detect contradictions."""
         from ohm.methods import detect_contradictions
+
         conf_thresh = float(qs.get("confidence", [0.5])[0])
         result = detect_contradictions(self.store.conn, confidence_threshold=conf_thresh)
         self._json_response(200, result)
@@ -1878,6 +2000,7 @@ class OhmHandler(BaseHTTPRequestHandler):
     def _get_anomalies(self, path: str, qs: dict) -> None:
         """GET /anomalies — detect anomalies."""
         from ohm.methods import detect_anomalies
+
         sigma = float(qs.get("sigma", [2.0])[0])
         layer = qs.get("layer", [None])[0]
         limit = int(qs.get("limit", [50])[0])
@@ -1888,9 +2011,11 @@ class OhmHandler(BaseHTTPRequestHandler):
         """GET /aggregate/<id> — aggregate observations."""
         node_id = path[11:]
         from ohm.validation import validate_identifier
+
         node_id = validate_identifier(node_id, name="node_id")
         method = qs.get("method", ["weighted"])[0]
         from ohm.methods import aggregate_observations
+
         result = aggregate_observations(self.store.conn, node_id, method=method)
         self._json_response(200, result)
 
@@ -1898,15 +2023,18 @@ class OhmHandler(BaseHTTPRequestHandler):
         """GET /provenance/<id> — provenance trace."""
         node_id = path[12:]
         from ohm.validation import validate_identifier
+
         node_id = validate_identifier(node_id, name="node_id")
         max_depth = int(qs.get("depth", [10])[0])
         from ohm.queries import query_provenance
+
         result = query_provenance(self.store.conn, node_id, max_depth=max_depth)
         self._json_response(200, result)
 
     def _get_stale(self, path: str, qs: dict) -> None:
         """GET /stale — list stale edges."""
         from ohm.queries import query_stale_edges
+
         threshold = float(qs.get("threshold", [0.1])[0])
         result = query_stale_edges(self.store.conn, stale_threshold=threshold)
         self._json_response(200, result)
@@ -1915,6 +2043,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         """GET /decay — apply confidence decay."""
         self._require_write_auth()
         from ohm.queries import apply_confidence_decay
+
         threshold = float(qs.get("threshold", [0.1])[0])
         layer = qs.get("layer", [None])[0]
         dry_run = qs.get("dry_run", ["false"])[0].lower() == "true"
@@ -1930,16 +2059,20 @@ class OhmHandler(BaseHTTPRequestHandler):
         """GET /monte-carlo/<id> — Monte Carlo impact simulation."""
         node_id = path[13:]
         from ohm.validation import validate_identifier
+
         node_id = validate_identifier(node_id, name="node_id")
         from ohm.methods import monte_carlo_impact
+
         sims = int(qs.get("simulations", [1000])[0])
         depth = int(qs.get("depth", [3])[0])
         default_prob = float(qs.get("default_probability", [0.5])[0])
         seed_val = qs.get("seed", [None])[0]
         seed = int(seed_val) if seed_val is not None else None
         result = monte_carlo_impact(
-            self.store.conn, node_id,
-            simulations=sims, depth=depth,
+            self.store.conn,
+            node_id,
+            simulations=sims,
+            depth=depth,
             default_probability=default_prob,
             seed=seed,
         )
@@ -1948,6 +2081,7 @@ class OhmHandler(BaseHTTPRequestHandler):
     def _get_duplicates(self, path: str, qs: dict) -> None:
         """GET /duplicates — detect near-duplicate nodes."""
         from ohm.methods import detect_near_duplicates
+
         threshold = float(qs.get("similarity", [0.8])[0])
         result = detect_near_duplicates(self.store.conn, similarity_threshold=threshold)
         self._json_response(200, result)
@@ -1956,8 +2090,10 @@ class OhmHandler(BaseHTTPRequestHandler):
         """GET /calibration/<agent> — confidence calibration."""
         agent_name = path[13:]
         from ohm.validation import validate_identifier
+
         agent_name = validate_identifier(agent_name, name="agent_name")
         from ohm.methods import compute_confidence_calibration
+
         result = compute_confidence_calibration(self.store.conn, agent_name)
         self._json_response(200, result)
 
@@ -1965,6 +2101,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         """GET /orphans — find disconnected nodes."""
         # Find nodes with zero edges — completely disconnected from the graph
         from ohm.methods import find_orphans
+
         node_type = qs.get("type", [None])[0]
         exclude_system = qs.get("exclude_system", ["true"])[0].lower() == "true"
         limit = int(qs.get("limit", [50])[0])
@@ -1975,6 +2112,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         """GET /hubs — find most-connected nodes."""
         # Find most-connected nodes — anchors of the graph
         from ohm.methods import find_hubs
+
         node_type = qs.get("type", [None])[0]
         min_connections = int(qs.get("min_connections", [3])[0])
         limit = int(qs.get("limit", [20])[0])
@@ -1985,6 +2123,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         """GET /dead_ends — find sink nodes."""
         # Find nodes with only incoming edges — sinks that don't lead anywhere
         from ohm.methods import find_dead_ends
+
         node_type = qs.get("type", [None])[0]
         limit = int(qs.get("limit", [50])[0])
         result = find_dead_ends(self.store.conn, node_type=node_type, limit=limit)
@@ -1994,6 +2133,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         """GET /suggest — suggest connections."""
         # Suggest connections between nodes that share context but aren't linked
         from ohm.methods import suggest_connections
+
         method = qs.get("method", ["shared_provenance"])[0]
         min_shared = int(qs.get("min_shared", [2])[0])
         limit = int(qs.get("limit", [20])[0])
@@ -2004,6 +2144,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         """GET /graph/stats — extended graph statistics."""
         # Extended graph statistics (orphans, hubs, density, etc.)
         from ohm.methods import graph_stats
+
         result = graph_stats(self.store.conn)
         self._json_response(200, result)
 
@@ -2011,6 +2152,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         """GET /lint — lint graph against contract."""
         # Contract layer linting: validate graph against naming conventions and required fields
         from ohm.contract import ContractConfig, lint_graph
+
         node_type_filter = qs.get("node_types", [None])[0]
         node_types = node_type_filter.split(",") if node_type_filter else None
         limit = int(qs.get("limit", ["1000"])[0])
@@ -2021,6 +2163,7 @@ class OhmHandler(BaseHTTPRequestHandler):
     def _get_contract(self, path: str, qs: dict) -> None:
         """GET /contract — return current contract configuration."""
         from ohm.contract import ContractConfig
+
         contract = ContractConfig()
         self._json_response(200, contract.to_dict())
 
@@ -2033,6 +2176,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             self._json_response(400, {"error": "missing_parameter", "message": "?target=node_id required"})
             return
         from ohm.validation import validate_identifier
+
         target = validate_identifier(target, name="target")
         # Parse evidence from query params: ?evidence=node1:0,node2:1
         evidence_str = qs.get("evidence", [""])[0]
@@ -2047,6 +2191,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         layers_str = qs.get("layers", [""])[0]
         layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
         from ohm.bayesian import bayesian_inference
+
         result = bayesian_inference(self.store.conn, target, evidence, edge_types=None, layers=layers, leak_probability=leak_probability)
         self._json_response(200, result)
 
@@ -2060,6 +2205,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             self._json_response(400, {"error": "missing_parameter", "message": "?target=node_id required"})
             return
         from ohm.validation import validate_identifier
+
         target = validate_identifier(target, name="target")
         # Parse intervention state: ?state=0 (force bad) or ?state=1 (force good)
         state_str = qs.get("state", [None])[0]
@@ -2090,8 +2236,11 @@ class OhmHandler(BaseHTTPRequestHandler):
                 if len(parts) == 2 and parts[0].strip() and parts[1].strip():
                     preferred_edges.add((parts[0].strip(), parts[1].strip()))
         from ohm.bayesian import causal_intervention
+
         result = causal_intervention(
-            self.store.conn, target, intervention_state,
+            self.store.conn,
+            target,
+            intervention_state,
             query_nodes=query_nodes,
             layers=layers,
             leak_probability=leak_probability,
@@ -2109,6 +2258,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             self._json_response(400, {"error": "missing_parameter", "message": "?cause=X&effect=Y required"})
             return
         from ohm.validation import validate_identifier
+
         cause = validate_identifier(cause, name="cause")
         effect = validate_identifier(effect, name="effect")
         leak_probability = float(qs.get("leak", ["0.15"])[0])
@@ -2116,6 +2266,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         layers_str = qs.get("layers", [""])[0]
         layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
         from ohm.bayesian import compute_ate
+
         result = compute_ate(self.store.conn, cause, effect, layers=layers, leak_probability=leak_probability)
         self._json_response(200, result)
 
@@ -2129,6 +2280,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             self._json_response(400, {"error": "missing_parameter", "message": "?cause=X&effect=Y required"})
             return
         from ohm.validation import validate_identifier
+
         cause = validate_identifier(cause, name="cause")
         effect = validate_identifier(effect, name="effect")
         leak_probability = float(qs.get("leak", ["0.15"])[0])
@@ -2136,6 +2288,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         layers_str = qs.get("layers", [""])[0]
         layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
         from ohm.bayesian import compute_sensitivity
+
         result = compute_sensitivity(self.store.conn, cause, effect, layers=layers, leak_probability=leak_probability)
         self._json_response(200, result)
 
@@ -2149,6 +2302,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             self._json_response(400, {"error": "missing_parameter", "message": "?cause=X&effect=Y required"})
             return
         from ohm.validation import validate_identifier
+
         cause = validate_identifier(cause, name="cause")
         effect = validate_identifier(effect, name="effect")
         leak_probability = float(qs.get("leak", ["0.15"])[0])
@@ -2156,6 +2310,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         layers_str = qs.get("layers", [""])[0]
         layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
         from ohm.bayesian import find_adjustment_sets
+
         result = find_adjustment_sets(self.store.conn, cause, effect, layers=layers, leak_probability=leak_probability)
         self._json_response(200, result)
 
@@ -2181,6 +2336,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         timeout = float(qs.get("timeout", ["0"])[0]) or None
         min_observations = int(qs.get("min_observations", ["0"])[0])
         from ohm.bayesian import compute_voi
+
         result = compute_voi(
             self.store.conn,
             decision_nodes=decision_nodes,
@@ -2204,6 +2360,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         edge_types_str = qs.get("edge_types", [""])[0]
         markov_edge_types = [e.strip() for e in edge_types_str.split(",") if e.strip()] or None
         from ohm.markov import markov_absorbing_risk
+
         result = markov_absorbing_risk(
             self.store.conn,
             start_node,
@@ -2222,6 +2379,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         edge_types_str = qs.get("edge_types", [""])[0]
         markov_edge_types = [e.strip() for e in edge_types_str.split(",") if e.strip()] or None
         from ohm.markov import markov_expected_steps
+
         result = markov_expected_steps(
             self.store.conn,
             start_node,
@@ -2248,6 +2406,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         layers_str = qs.get("layers", [""])[0]
         layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
         from ohm.bayesian import generate_voi_tasks
+
         result = generate_voi_tasks(
             self.store.conn,
             agent=agent,
@@ -2267,6 +2426,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         layers_str = qs.get("layers", [""])[0]
         layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
         from ohm.bayesian import suggest_causes
+
         result = suggest_causes(self.store.conn, min_confidence=min_confidence, layers=layers)
         self._json_response(200, result)
 
@@ -2277,6 +2437,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         layer = qs.get("layer", [None])[0]
         if layer:
             from ohm.validation import validate_layer
+
             try:
                 validate_layer(layer)
             except ValueError as e:
@@ -2294,6 +2455,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             self._json_response(400, {"error": "missing_parameter", "message": "?cause=X&effect=Y required"})
             return
         from ohm.validation import validate_identifier
+
         cause = validate_identifier(cause, name="cause")
         effect = validate_identifier(effect, name="effect")
         n_samples = int(qs.get("n_samples", ["1000"])[0])
@@ -2301,8 +2463,11 @@ class OhmHandler(BaseHTTPRequestHandler):
         methods_str = qs.get("methods", [None])[0]
         refutation_methods = methods_str.split(",") if methods_str else None
         from ohm.causal_refutation import refute_causal_effect
+
         result = refute_causal_effect(
-            self.store.conn, cause, effect,
+            self.store.conn,
+            cause,
+            effect,
             n_samples=n_samples,
             seed=seed,
             refutation_methods=refutation_methods,
@@ -2325,6 +2490,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         # Processes in small batches with delays to avoid OOM/timeout crashes
         try:
             from ohm.queries import update_node_embedding
+
             # Parse optional batch_size and delay_ms query params
             batch_size = 5  # Process N nodes per request (small to avoid OOM)
             delay_ms = 200  # Pause between each embedding (ms) to reduce memory pressure
@@ -2348,17 +2514,18 @@ class OhmHandler(BaseHTTPRequestHandler):
                     pass
 
             # Find all nodes without embeddings
-            rows = self.store.execute(
-                "SELECT id, label FROM ohm_nodes WHERE embedding IS NULL AND deleted_at IS NULL"
-            )
+            rows = self.store.execute("SELECT id, label FROM ohm_nodes WHERE embedding IS NULL AND deleted_at IS NULL")
             if not rows:
-                self._json_response(200, {
-                    "status": "ok",
-                    "updated": 0,
-                    "failed": 0,
-                    "total": 0,
-                    "message": "All nodes already have embeddings",
-                })
+                self._json_response(
+                    200,
+                    {
+                        "status": "ok",
+                        "updated": 0,
+                        "failed": 0,
+                        "total": 0,
+                        "message": "All nodes already have embeddings",
+                    },
+                )
                 return
 
             updated = 0
@@ -2382,15 +2549,18 @@ class OhmHandler(BaseHTTPRequestHandler):
 
             total_missing = len(rows)
             remaining = total_missing - processed
-            self._json_response(200, {
-                "status": "ok" if remaining == 0 else "partial",
-                "updated": updated,
-                "failed": failed,
-                "processed": processed,
-                "total": total_missing,
-                "remaining": remaining,
-                "message": f"Generated {updated} embeddings ({failed} failed). {remaining} remaining — re-call to continue.",
-            })
+            self._json_response(
+                200,
+                {
+                    "status": "ok" if remaining == 0 else "partial",
+                    "updated": updated,
+                    "failed": failed,
+                    "processed": processed,
+                    "total": total_missing,
+                    "remaining": remaining,
+                    "message": f"Generated {updated} embeddings ({failed} failed). {remaining} remaining — re-call to continue.",
+                },
+            )
         except Exception as e:
             self._json_response(500, {"error": "embedding_backfill_failed", "message": str(e)})
 
@@ -2432,8 +2602,10 @@ class OhmHandler(BaseHTTPRequestHandler):
         """GET /reliability/<agent> — source reliability metrics."""
         source_agent = path[13:]  # strip /reliability/
         from ohm.validation import validate_identifier
+
         source_agent = validate_identifier(source_agent, name="source_agent")
         from ohm.queries import query_source_reliability
+
         result = query_source_reliability(self.store.conn, source_agent)
         self._json_response(200, result)
 
@@ -2443,8 +2615,10 @@ class OhmHandler(BaseHTTPRequestHandler):
         if not source_agent:
             raise ValidationError("?source=<agent_name> is required")
         from ohm.validation import validate_identifier
+
         source_agent = validate_identifier(source_agent, name="source_agent")
         from ohm.queries import query_source_reliability
+
         result = query_source_reliability(self.store.conn, source_agent)
         self._json_response(200, result)
 
@@ -2452,6 +2626,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         """GET /compound_confidence/<node_id> — compound confidence from node observations (OHM-7311)."""
         node_id = path[21:]  # strip /compound_confidence/ (21 chars)
         from ohm.validation import validate_identifier
+
         node_id = validate_identifier(node_id, name="node_id")
         node = self.store.get_node(node_id)
         if not node:
@@ -2462,16 +2637,15 @@ class OhmHandler(BaseHTTPRequestHandler):
             [node_id],
         )
         from ohm.methods import compound_confidence
+
         # Derive confidence from sigma (lower sigma = higher confidence) or default 1.0
         def _obs_confidence(obs: dict) -> float:
             sigma = obs.get("sigma")
             if sigma is not None and sigma > 0:
                 return max(0.0, min(1.0, 1.0 / (1.0 + float(sigma))))
             return 1.0
-        obs_with_confidence = [
-            {"confidence": _obs_confidence(obs), "source": obs.get("created_by")}
-            for obs in observations
-        ]
+
+        obs_with_confidence = [{"confidence": _obs_confidence(obs), "source": obs.get("created_by")} for obs in observations]
         result = compound_confidence(obs_with_confidence, correlation=correlation)
         result["node_id"] = node_id
         result["observations"] = len(observations)
@@ -2501,11 +2675,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             params.append(created_by)
         params.append(limit)
         params.append(offset)
-        sql = (
-            "SELECT * FROM ohm_observations WHERE "
-            + " AND ".join(conditions)
-            + " ORDER BY created_at DESC LIMIT ? OFFSET ?"
-        )
+        sql = "SELECT * FROM ohm_observations WHERE " + " AND ".join(conditions) + " ORDER BY created_at DESC LIMIT ? OFFSET ?"
         results = self.store.execute(sql, params)
         # Count query
         count_sql = "SELECT COUNT(*) as cnt FROM ohm_observations WHERE " + " AND ".join(conditions)
@@ -2513,7 +2683,6 @@ class OhmHandler(BaseHTTPRequestHandler):
         total_result = self.store.execute(count_sql, count_params)
         total = total_result[0]["cnt"] if total_result else len(results)
         self._json_response(200, {"observations": results, "total": total, "limit": limit, "offset": offset})
-
 
     def _do_POST(self):
         """Handle POST requests — writes. Requires auth + write access.
@@ -2530,6 +2699,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         self._check_write_access(agent)
 
         from urllib.parse import urlparse, parse_qs
+
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
         qs = parse_qs(parsed.query)
@@ -2553,13 +2723,17 @@ class OhmHandler(BaseHTTPRequestHandler):
         create_only = qs.get("create_only", ["false"])[0].lower() in ("true", "1", "yes")
         if create_only:
             existing = self.store.conn.execute(
-                "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [body["id"]],
+                "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                [body["id"]],
             ).fetchone()
             if existing:
-                self._json_response(409, {
-                    "error": "conflict",
-                    "message": f"Node {body['id']} already exists. Use ?create_only=false for upsert.",
-                })
+                self._json_response(
+                    409,
+                    {
+                        "error": "conflict",
+                        "message": f"Node {body['id']} already exists. Use ?create_only=false for upsert.",
+                    },
+                )
                 return
 
         result = self.store.write_node(
@@ -2585,11 +2759,13 @@ class OhmHandler(BaseHTTPRequestHandler):
             agent_name=agent,
         )
         event_type = "node.created" if result.get("created") else "node.updated"
-        _trigger_webhooks({
-            "type": event_type,
-            "agent": agent,
-            "node": result,
-        })
+        _trigger_webhooks(
+            {
+                "type": event_type,
+                "agent": agent,
+                "node": result,
+            }
+        )
         if result.get("created", True):
             self._json_response(201, result)
         else:
@@ -2598,6 +2774,7 @@ class OhmHandler(BaseHTTPRequestHandler):
     def _post_node_find_or_create(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /node/find_or_create — find existing node by label+type, or create new one."""
         from ohm.queries import find_or_create_node
+
         node = find_or_create_node(
             self.store.conn,
             label=body["label"],
@@ -2635,29 +2812,34 @@ class OhmHandler(BaseHTTPRequestHandler):
             confidence_p95=body.get("confidence_p95"),
             agent_name=agent,
         )
-        _trigger_webhooks({
-            "type": "edge.created",
-            "agent": agent,
-            "edge": result,
-        })
+        _trigger_webhooks(
+            {
+                "type": "edge.created",
+                "agent": agent,
+                "edge": result,
+            }
+        )
         self._json_response(201, result)
 
     def _post_challenge(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /challenge/{id} — challenge an existing edge."""
         edge_id = path[11:]
         from ohm.validation import validate_identifier
+
         edge_id = validate_identifier(edge_id, name="edge_id")
         reason = body.get("reason", "")
         confidence = body.get("confidence", 0.5)
         challenge_type = body.get("challenge_type", "CHALLENGED_BY")
         result = self.store.challenge_edge(edge_id, reason, confidence, challenge_type, agent_name=agent)
         if result:
-            _trigger_webhooks({
-                "type": "edge.challenged",
-                "agent": agent,
-                "edge": result,
-                "challenge_type": challenge_type,
-            })
+            _trigger_webhooks(
+                {
+                    "type": "edge.challenged",
+                    "agent": agent,
+                    "edge": result,
+                    "challenge_type": challenge_type,
+                }
+            )
             self._json_response(201, result)
         else:
             raise EdgeNotFoundError(f"Edge {edge_id} not found")
@@ -2666,16 +2848,19 @@ class OhmHandler(BaseHTTPRequestHandler):
         """POST /support/{id} — support an existing edge."""
         edge_id = path[9:]
         from ohm.validation import validate_identifier
+
         edge_id = validate_identifier(edge_id, name="edge_id")
         reason = body.get("reason", "")
         confidence = body.get("confidence", 0.8)
         result = self.store.challenge_edge(edge_id, reason, confidence, "SUPPORTS", agent_name=agent)
         if result:
-            _trigger_webhooks({
-                "type": "edge.supported",
-                "agent": agent,
-                "edge": result,
-            })
+            _trigger_webhooks(
+                {
+                    "type": "edge.supported",
+                    "agent": agent,
+                    "edge": result,
+                }
+            )
             self._json_response(201, result)
         else:
             raise EdgeNotFoundError(f"Edge {edge_id} not found")
@@ -2684,6 +2869,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         """POST /observe/{id} — record an observation on a node."""
         node_id = path[9:]
         from ohm.validation import validate_identifier
+
         node_id = validate_identifier(node_id, name="node_id")
         # Validate node exists before writing observation (OHM-7302)
         if not self.store.get_node(node_id):
@@ -2700,11 +2886,13 @@ class OhmHandler(BaseHTTPRequestHandler):
             source_url=body.get("source_url"),
             agent_name=agent,
         )
-        _trigger_webhooks({
-            "type": "observation.created",
-            "agent": agent,
-            "observation": result,
-        })
+        _trigger_webhooks(
+            {
+                "type": "observation.created",
+                "agent": agent,
+                "observation": result,
+            }
+        )
         self._json_response(201, result)
 
     def _post_observations(self, path: str, qs: dict, body: dict, agent: str) -> None:
@@ -2725,6 +2913,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                 errors.append({"index": i, "error": "missing node_id"})
                 continue
             from ohm.validation import validate_identifier
+
             try:
                 node_id = validate_identifier(node_id, name="node_id")
             except ValueError as e:
@@ -2747,11 +2936,14 @@ class OhmHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 errors.append({"index": i, "node_id": node_id, "error": str(e)})
 
-        self._json_response(201, {
-            "created": len(results),
-            "errors": errors,
-            "observations": results,
-        })
+        self._json_response(
+            201,
+            {
+                "created": len(results),
+                "errors": errors,
+                "observations": results,
+            },
+        )
 
     def _post_outcome(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /outcome — record whether a source agent's claim was correct."""
@@ -2762,6 +2954,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         if not source_agent or not claim_node or outcome is None:
             raise ValidationError("outcome requires source_agent, claim_node, and outcome fields")
         from ohm.queries import query_record_outcome
+
         result = query_record_outcome(
             self.store.conn,
             source_agent=source_agent,
@@ -2781,10 +2974,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         edges_created = 0
 
         if len(nodes) + len(edges) > MAX_BATCH_SIZE:
-            raise ValidationError(
-                f"Batch too large: {len(nodes)} nodes + {len(edges)} edges = "
-                f"{len(nodes) + len(edges)} items exceeds limit of {MAX_BATCH_SIZE}"
-            )
+            raise ValidationError(f"Batch too large: {len(nodes)} nodes + {len(edges)} edges = {len(nodes) + len(edges)} items exceeds limit of {MAX_BATCH_SIZE}")
 
         # Validate all inputs first
         for i, node in enumerate(nodes):
@@ -2851,11 +3041,14 @@ class OhmHandler(BaseHTTPRequestHandler):
             self.store.conn.execute("ROLLBACK")
             raise
 
-        self._json_response(201, {
-            "nodes_created": nodes_created,
-            "edges_created": edges_created,
-            "errors": errors,
-        })
+        self._json_response(
+            201,
+            {
+                "nodes_created": nodes_created,
+                "edges_created": edges_created,
+                "errors": errors,
+            },
+        )
 
     def _post_webhook(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /webhook — register or update webhook callback URL for this agent."""
@@ -2866,12 +3059,15 @@ class OhmHandler(BaseHTTPRequestHandler):
         _validate_webhook_url(url)
         with _webhook_lock:
             _webhook_registry[agent] = {"url": url, "events": events}
-        self._json_response(200, {
-            "status": "registered",
-            "agent": agent,
-            "url": url,
-            "events": events,
-        })
+        self._json_response(
+            200,
+            {
+                "status": "registered",
+                "agent": agent,
+                "url": url,
+                "events": events,
+            },
+        )
 
     def _post_state(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /state — update agent state/focus."""
@@ -2893,15 +3089,12 @@ class OhmHandler(BaseHTTPRequestHandler):
         agent_label = body.get("name", agent)
         # Use deterministic ID for agent nodes to prevent duplicates
         import re
-        agent_id = "agent_" + re.sub(r'[^a-zA-Z0-9]+', '_', agent_label.lower()).strip('_')
+
+        agent_id = "agent_" + re.sub(r"[^a-zA-Z0-9]+", "_", agent_label.lower()).strip("_")
 
         # Check if agent node already exists (including soft-deleted)
-        existing_active = self.store.conn.execute(
-            "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [agent_id]
-        ).fetchone()
-        existing_soft_deleted = self.store.conn.execute(
-            "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NOT NULL", [agent_id]
-        ).fetchone()
+        existing_active = self.store.conn.execute("SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [agent_id]).fetchone()
+        existing_soft_deleted = self.store.conn.execute("SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NOT NULL", [agent_id]).fetchone()
 
         if existing_active:
             # Update existing agent node (description may have changed)
@@ -2947,63 +3140,106 @@ class OhmHandler(BaseHTTPRequestHandler):
         created_edges = []
         for v in body.get("values", []):
             value_node = find_or_create_node(
-                self.store.conn, label=v, node_type="value", created_by=agent,
+                self.store.conn,
+                label=v,
+                node_type="value",
+                created_by=agent,
             )
             edge = create_edge(
-                self.store.conn, from_node=agent_id, to_node=value_node["id"],
-                edge_type="VALUES", layer="L1", created_by=agent, confidence=1.0,
+                self.store.conn,
+                from_node=agent_id,
+                to_node=value_node["id"],
+                edge_type="VALUES",
+                layer="L1",
+                created_by=agent,
+                confidence=1.0,
                 provenance="self_declaration",
             )
             created_edges.append(edge)
 
         for g in body.get("goals", []):
             goal_node = find_or_create_node(
-                self.store.conn, label=g, node_type="goal", created_by=agent,
+                self.store.conn,
+                label=g,
+                node_type="goal",
+                created_by=agent,
             )
             edge = create_edge(
-                self.store.conn, from_node=agent_id, to_node=goal_node["id"],
-                edge_type="GOALS", layer="L1", created_by=agent, confidence=1.0,
+                self.store.conn,
+                from_node=agent_id,
+                to_node=goal_node["id"],
+                edge_type="GOALS",
+                layer="L1",
+                created_by=agent,
+                confidence=1.0,
                 provenance="self_declaration",
             )
             created_edges.append(edge)
 
         for c in body.get("capabilities", []):
             cap_node = find_or_create_node(
-                self.store.conn, label=c, node_type="skill", created_by=agent,
+                self.store.conn,
+                label=c,
+                node_type="skill",
+                created_by=agent,
             )
             edge = create_edge(
-                self.store.conn, from_node=agent_id, to_node=cap_node["id"],
-                edge_type="CAPABLE_OF", layer="L1", created_by=agent, confidence=1.0,
+                self.store.conn,
+                from_node=agent_id,
+                to_node=cap_node["id"],
+                edge_type="CAPABLE_OF",
+                layer="L1",
+                created_by=agent,
+                confidence=1.0,
                 provenance="self_declaration",
             )
             created_edges.append(edge)
 
         for i in body.get("interests", []):
             topic_node = find_or_create_node(
-                self.store.conn, label=i, node_type="topic", created_by=agent,
+                self.store.conn,
+                label=i,
+                node_type="topic",
+                created_by=agent,
             )
             edge = create_edge(
-                self.store.conn, from_node=agent_id, to_node=topic_node["id"],
-                edge_type="INTERESTED_IN", layer="L1", created_by=agent, confidence=1.0,
+                self.store.conn,
+                from_node=agent_id,
+                to_node=topic_node["id"],
+                edge_type="INTERESTED_IN",
+                layer="L1",
+                created_by=agent,
+                confidence=1.0,
                 provenance="self_declaration",
             )
             created_edges.append(edge)
 
         for a in body.get("listens_to", []):
             other = find_or_create_node(
-                self.store.conn, label=a, node_type="agent", created_by=agent,
+                self.store.conn,
+                label=a,
+                node_type="agent",
+                created_by=agent,
             )
             edge = create_edge(
-                self.store.conn, from_node=agent_id, to_node=other["id"],
-                edge_type="LISTENS_TO", layer="L3", created_by=agent, confidence=0.7,
+                self.store.conn,
+                from_node=agent_id,
+                to_node=other["id"],
+                edge_type="LISTENS_TO",
+                layer="L3",
+                created_by=agent,
+                confidence=0.7,
                 provenance="self_declaration",
             )
             created_edges.append(edge)
 
-        self._json_response(201, {
-            "agent": me,
-            "edges_created": len(created_edges),
-        })
+        self._json_response(
+            201,
+            {
+                "agent": me,
+                "edges_created": len(created_edges),
+            },
+        )
 
     def _post_sync(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /sync — explicit DuckLake sync trigger (OHM-7301)."""
@@ -3013,10 +3249,8 @@ class OhmHandler(BaseHTTPRequestHandler):
     def _post_task(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /tasks — create a task node (OHM-7304)."""
         import re
-        task_id = body.get("id") or (
-            "task_" + re.sub(r"[^a-z0-9]+", "_", body["label"].lower()).strip("_")[:48]
-            + "_" + str(uuid.uuid4())[:8]
-        )
+
+        task_id = body.get("id") or ("task_" + re.sub(r"[^a-z0-9]+", "_", body["label"].lower()).strip("_")[:48] + "_" + str(uuid.uuid4())[:8])
         result = self.store.write_node(
             id=task_id,
             label=body["label"],
@@ -3045,8 +3279,10 @@ class OhmHandler(BaseHTTPRequestHandler):
     def _post_heartbeat(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /heartbeat — agent heartbeat with sync."""
         from ohm.methods import agent_heartbeat
+
         result = agent_heartbeat(
-            self.store.conn, agent,
+            self.store.conn,
+            agent,
             focus=body.get("focus"),
         )
         # Also sync with DuckLake if configured
@@ -3059,6 +3295,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         layer = qs.get("layer", [None])[0]
         if layer:
             from ohm.validation import validate_layer
+
             try:
                 validate_layer(layer)
             except ValueError as e:
@@ -3084,6 +3321,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         Idempotent: returns 404 on second call (not 500).
         """
         from urllib.parse import urlparse
+
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
 
@@ -3109,20 +3347,20 @@ class OhmHandler(BaseHTTPRequestHandler):
         """DELETE /node/{id} — removes a node and its associated edges."""
         node_id = path[6:]
         from ohm.validation import validate_identifier
+
         node_id = validate_identifier(node_id, name="node_id")
 
         # Verify node exists (idempotent 404)
         node = self.store.conn.execute(
-            "SELECT id, created_by FROM ohm_nodes WHERE id = ?", [node_id],
+            "SELECT id, created_by FROM ohm_nodes WHERE id = ?",
+            [node_id],
         ).fetchone()
         if not node:
             raise NodeNotFoundError(f"Node not found: {node_id}")
 
         # Only allow deletion of own nodes (unless no_auth mode)
         if not self.no_auth and node[1] != agent:
-            raise PermissionDeniedError(
-                f"Cannot delete node {node_id}: owned by {node[1]}, you are {agent}"
-            )
+            raise PermissionDeniedError(f"Cannot delete node {node_id}: owned by {node[1]}, you are {agent}")
 
         # Use store method — splits edge deletion to avoid DuckDB index issues (OHM-cpi)
         result = self.store.delete_node(node_id, deleted_by=agent)
@@ -3132,20 +3370,20 @@ class OhmHandler(BaseHTTPRequestHandler):
         """DELETE /edge/{id} — removes an edge."""
         edge_id = path[6:]
         from ohm.validation import validate_identifier
+
         edge_id = validate_identifier(edge_id, name="edge_id")
 
         # Verify edge exists (idempotent 404)
         edge = self.store.conn.execute(
-            "SELECT id, created_by FROM ohm_edges WHERE id = ?", [edge_id],
+            "SELECT id, created_by FROM ohm_edges WHERE id = ?",
+            [edge_id],
         ).fetchone()
         if not edge:
             raise EdgeNotFoundError(f"Edge not found: {edge_id}")
 
         # Only allow deletion of own edges (unless no_auth mode)
         if not self.no_auth and edge[1] != agent:
-            raise PermissionDeniedError(
-                f"Cannot delete edge {edge_id}: owned by {edge[1]}, you are {agent}"
-            )
+            raise PermissionDeniedError(f"Cannot delete edge {edge_id}: owned by {edge[1]}, you are {agent}")
 
         # Use store method
         result = self.store.delete_edge(edge_id, deleted_by=agent)
@@ -3234,7 +3472,6 @@ OhmHandler._GET_EXACT = {
     "/observations": "_get_observations",
     "/source_reliability": "_get_source_reliability",
 }
-
 
 
 OhmHandler._GET_PREFIXES = [
@@ -3371,27 +3608,34 @@ def main(schema_config: SchemaConfig | None = None):
     parser.add_argument("--init-token", default=None, help="Create a token for an agent (agent_name)")
     parser.add_argument("--no-auth", action="store_true", help="Disable authentication (dev mode)")
     parser.add_argument(
-        "--require-read-auth", action="store_true",
+        "--require-read-auth",
+        action="store_true",
         help="Require authentication for read endpoints (default: public reads)",
     )
     parser.add_argument(
-        "--schema", choices=["ohm", "topo"], default=None,
+        "--schema",
+        choices=["ohm", "topo"],
+        default=None,
         help="Schema configuration (default: determined by entry point)",
     )
     parser.add_argument(
-        "--quack", action="store_true",
+        "--quack",
+        action="store_true",
         help="Enable Quack protocol for concurrent multi-writer access",
     )
     parser.add_argument(
-        "--quack-uri", default=None,
+        "--quack-uri",
+        default=None,
         help="Quack server URI (default: quack:localhost)",
     )
     parser.add_argument(
-        "--quack-token-env", default=None,
+        "--quack-token-env",
+        default=None,
         help="Environment variable for Quack token (default: QUACK_TOKEN)",
     )
     parser.add_argument(
-        "--check-migrations", action="store_true",
+        "--check-migrations",
+        action="store_true",
         help="Report pending schema migrations without applying them, then exit",
     )
     args = parser.parse_args()
@@ -3399,6 +3643,7 @@ def main(schema_config: SchemaConfig | None = None):
     # Allow CLI override of schema
     if args.schema == "topo":
         from ohm.schema import TOPO_SCHEMA
+
         schema_config = TOPO_SCHEMA
 
     config = load_config(args.config)
@@ -3449,9 +3694,7 @@ def main(schema_config: SchemaConfig | None = None):
         db_path_check = config.get("db_path", str(Path.home() / ".ohm" / "ohm.duckdb"))
         try:
             _check_conn = _duckdb.connect(db_path_check, read_only=True)
-            current = _check_conn.execute(
-                "SELECT value FROM ohm_meta WHERE key = 'schema_version'"
-            ).fetchone()
+            current = _check_conn.execute("SELECT value FROM ohm_meta WHERE key = 'schema_version'").fetchone()
             current_version = current[0] if current else "0.1.0"
             _check_conn.close()
         except Exception:
@@ -3491,6 +3734,7 @@ def main(schema_config: SchemaConfig | None = None):
     ducklake_path = ducklake_config.get("path", "")
     if ducklake_path:
         from ohm.db import attach_ducklake
+
         data_path = ducklake_config.get("data_path", "")
         attached = attach_ducklake(
             store.conn,
@@ -3517,6 +3761,7 @@ def topod_main():
     Same as ohmd but defaults to the TOPO schema configuration.
     """
     from ohm.schema import TOPO_SCHEMA
+
     main(schema_config=TOPO_SCHEMA)
 
 

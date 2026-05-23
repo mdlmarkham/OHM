@@ -322,12 +322,14 @@ class SocratesIntegration:
     - alternative_explanation: A better explanation exists
     """
 
-    CHALLENGE_CATEGORIES = frozenset({
-        "logical_flaw",
-        "insufficient_evidence",
-        "scope_too_narrow",
-        "alternative_explanation",
-    })
+    CHALLENGE_CATEGORIES = frozenset(
+        {
+            "logical_flaw",
+            "insufficient_evidence",
+            "scope_too_narrow",
+            "alternative_explanation",
+        }
+    )
 
     def __init__(self, graph: Graph):
         self.graph = graph
@@ -355,10 +357,7 @@ class SocratesIntegration:
             ValueError: If category is not a valid challenge category.
         """
         if category not in self.CHALLENGE_CATEGORIES:
-            raise ValueError(
-                f"Invalid challenge category: '{category}'. "
-                f"Must be one of: {', '.join(sorted(self.CHALLENGE_CATEGORIES))}"
-            )
+            raise ValueError(f"Invalid challenge category: '{category}'. Must be one of: {', '.join(sorted(self.CHALLENGE_CATEGORIES))}")
         full_reason = f"[{category}] {reason}"
         return self.graph.challenge(edge_id, reason=full_reason, confidence=confidence)
 

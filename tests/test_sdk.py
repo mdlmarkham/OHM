@@ -69,6 +69,7 @@ class TestGraphWrite:
 
         g2 = connect(db_path, actor="other_agent")
         from ohm.exceptions import PermissionDeniedError
+
         with pytest.raises(PermissionDeniedError):
             g2.update_edge(e2, confidence=0.5)
         g2.close()
@@ -90,8 +91,11 @@ class TestGraphWrite:
         """OHM-lmr: observe() should persist and return source_name and source_url."""
         a = graph.create_node(label="SourceTest")["id"]
         obs = graph.observe(
-            a, obs_type="measurement", value=3.0,
-            source_name="Reuters", source_url="https://reuters.com/article/456",
+            a,
+            obs_type="measurement",
+            value=3.0,
+            source_name="Reuters",
+            source_url="https://reuters.com/article/456",
         )
         assert obs["id"]
         assert obs["source_name"] == "Reuters"
@@ -346,6 +350,7 @@ class TestDiscovery:
 
 # ===== Customer Support SDK Tests (OHM-af8.5) =====
 
+
 class TestHandoff:
     """Tests for SDK handoff() method."""
 
@@ -463,8 +468,11 @@ class TestTicketProvenance:
         ticket = graph.create_node(label="Ticket #5", node_type="event")
 
         graph.create_edge(
-            from_node=agent["id"], to_node=ticket["id"],
-            edge_type="OPENED_BY", layer="L2", confidence=1.0,
+            from_node=agent["id"],
+            to_node=ticket["id"],
+            edge_type="OPENED_BY",
+            layer="L2",
+            confidence=1.0,
         )
 
         chain = graph.ticket_provenance(ticket["id"])
@@ -479,8 +487,11 @@ class TestTicketProvenance:
         ticket = graph.create_node(label="Support Ticket", node_type="event")
 
         graph.create_edge(
-            from_node=agent_a["id"], to_node=ticket["id"],
-            edge_type="OPENED_BY", layer="L2", confidence=1.0,
+            from_node=agent_a["id"],
+            to_node=ticket["id"],
+            edge_type="OPENED_BY",
+            layer="L2",
+            confidence=1.0,
         )
 
         graph.handoff(
@@ -498,8 +509,11 @@ class TestTicketProvenance:
         )
 
         graph.create_edge(
-            from_node=tier2["id"], to_node=ticket["id"],
-            edge_type="RESOLVED_BY", layer="L2", confidence=1.0,
+            from_node=tier2["id"],
+            to_node=ticket["id"],
+            edge_type="RESOLVED_BY",
+            layer="L2",
+            confidence=1.0,
         )
 
         chain = graph.ticket_provenance(ticket["id"])
@@ -511,6 +525,7 @@ class TestTicketProvenance:
 
 
 # ===== Cybersecurity SDK Tests (OHM-af8.4) =====
+
 
 class TestRecordOutcome:
     """Tests for SDK record_outcome() method."""
@@ -585,10 +600,8 @@ class TestThreatClusterSDK:
         alert1 = graph.create_node(label="Port Scan", node_type="concept")
         alert2 = graph.create_node(label="Lateral Movement", node_type="concept")
 
-        graph.create_edge(from_node=ioc["id"], to_node=alert1["id"],
-                          edge_type="THREAT_CLUSTER", layer="L3")
-        graph.create_edge(from_node=ioc["id"], to_node=alert2["id"],
-                          edge_type="THREAT_CLUSTER", layer="L3")
+        graph.create_edge(from_node=ioc["id"], to_node=alert1["id"], edge_type="THREAT_CLUSTER", layer="L3")
+        graph.create_edge(from_node=ioc["id"], to_node=alert2["id"], edge_type="THREAT_CLUSTER", layer="L3")
 
         results = graph.threat_cluster(ioc["id"])
         assert len(results) == 2
@@ -601,6 +614,7 @@ class TestThreatClusterSDK:
 
 
 # ===== Node Priority/Urgency SDK Tests =====
+
 
 class TestNodePriorityUrgency:
     """Tests for priority on nodes and urgency on edges."""
@@ -624,9 +638,7 @@ class TestNodePriorityUrgency:
         """create_edge with urgency sets the urgency field on the edge."""
         a = graph.create_node(label="A")["id"]
         b = graph.create_node(label="B")["id"]
-        edge = graph.create_edge(
-            from_node=a, to_node=b, edge_type="CAUSES", layer="L3", urgency="high"
-        )
+        edge = graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3", urgency="high")
         assert edge["urgency"] == "high"
 
     def test_edge_invalid_urgency_raises(self, graph):
@@ -634,12 +646,11 @@ class TestNodePriorityUrgency:
         a = graph.create_node(label="A")["id"]
         b = graph.create_node(label="B")["id"]
         with pytest.raises(ValueError, match="Invalid urgency"):
-            graph.create_edge(
-                from_node=a, to_node=b, edge_type="CAUSES", layer="L3", urgency="extreme"
-            )
+            graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3", urgency="extreme")
 
 
 # ===== Sentiment Observation SDK Tests =====
+
 
 class TestSentimentObservation:
     """Tests for sentiment observation type."""
@@ -658,6 +669,7 @@ class TestSentimentObservation:
 
 
 # ===== Read Operations SDK Tests =====
+
 
 class TestGetNode:
     """Tests for SDK get_node() method."""
@@ -774,6 +786,7 @@ class TestSearchEdges:
 
 # ===== Agent Registration SDK Tests =====
 
+
 class TestRegisterAgent:
     """Tests for SDK register_agent() method."""
 
@@ -798,16 +811,19 @@ class TestRegisterAgent:
 
 # ===== Batch Operations SDK Tests =====
 
+
 class TestBatchCreateNodes:
     """Tests for SDK batch_create_nodes() method."""
 
     def test_batch_create_nodes(self, graph):
         """batch_create_nodes() creates multiple nodes at once."""
-        nodes = graph.batch_create_nodes(nodes=[
-            {"label": "Node A", "node_type": "concept"},
-            {"label": "Node B", "node_type": "source"},
-            {"label": "Node C", "node_type": "pattern"},
-        ])
+        nodes = graph.batch_create_nodes(
+            nodes=[
+                {"label": "Node A", "node_type": "concept"},
+                {"label": "Node B", "node_type": "source"},
+                {"label": "Node C", "node_type": "pattern"},
+            ]
+        )
         assert len(nodes) == 3
         labels = {n["label"] for n in nodes}
         assert labels == {"Node A", "Node B", "Node C"}
@@ -821,10 +837,12 @@ class TestBatchCreateEdges:
         a = graph.create_node(label="A")["id"]
         b = graph.create_node(label="B")["id"]
         c = graph.create_node(label="C")["id"]
-        edges = graph.batch_create_edges(edges=[
-            {"from_node": a, "to_node": b, "edge_type": "CAUSES", "layer": "L3"},
-            {"from_node": b, "to_node": c, "edge_type": "INFLUENCES", "layer": "L2"},
-        ])
+        edges = graph.batch_create_edges(
+            edges=[
+                {"from_node": a, "to_node": b, "edge_type": "CAUSES", "layer": "L3"},
+                {"from_node": b, "to_node": c, "edge_type": "INFLUENCES", "layer": "L2"},
+            ]
+        )
         assert len(edges) == 2
         types = {e["edge_type"] for e in edges}
         assert types == {"CAUSES", "INFLUENCES"}
@@ -879,15 +897,14 @@ class TestCreateBatch:
         )
         assert result["nodes_created"] == 2
         # Each node creation should have its own change feed entry
-        rows = graph._conn.execute(
-            "SELECT row_id FROM ohm_change_feed WHERE table_name = 'ohm_nodes' ORDER BY occurred_at DESC"
-        ).fetchall()
+        rows = graph._conn.execute("SELECT row_id FROM ohm_change_feed WHERE table_name = 'ohm_nodes' ORDER BY occurred_at DESC").fetchall()
         node_ids = {n["id"] for n in result["nodes"]}
         changed_ids = {r[0] for r in rows}
         assert node_ids.issubset(changed_ids)
 
 
 # ===== Medical Diagnosis SDK Tests =====
+
 
 class TestRulesOut:
     """Tests for SDK rules_out() method."""
@@ -917,8 +934,11 @@ class TestDifferentialDiagnosis:
         patient = graph.create_node(label="Patient", node_type="concept")
         condition = graph.create_node(label="Flu", node_type="concept")
         graph.create_edge(
-            from_node=patient["id"], to_node=condition["id"],
-            edge_type="SUPPORTS", layer="L3", confidence=0.8,
+            from_node=patient["id"],
+            to_node=condition["id"],
+            edge_type="SUPPORTS",
+            layer="L3",
+            confidence=0.8,
         )
         results = graph.differential_diagnosis(patient["id"])
         assert isinstance(results, list)
@@ -962,6 +982,7 @@ class TestCompoundConfidence:
 
 # ===== Substrate Methods SDK Tests =====
 
+
 class TestDecayObservations:
     """Tests for SDK decay_observations() method."""
 
@@ -997,8 +1018,11 @@ class TestCascadeScenario:
         a = graph.create_node(label="Supplier A", node_type="concept")
         b = graph.create_node(label="Factory B", node_type="concept")
         graph.create_edge(
-            from_node=a["id"], to_node=b["id"],
-            edge_type="CAUSES", layer="L3", confidence=0.8,
+            from_node=a["id"],
+            to_node=b["id"],
+            edge_type="CAUSES",
+            layer="L3",
+            confidence=0.8,
         )
         result = graph.cascade_scenario(a["id"], failure_probability=0.5)
         assert isinstance(result, list)
@@ -1019,8 +1043,11 @@ class TestWhatIf:
         a = graph.create_node(label="A", node_type="concept")
         b = graph.create_node(label="B", node_type="concept")
         edge = graph.create_edge(
-            from_node=a["id"], to_node=b["id"],
-            edge_type="CAUSES", layer="L3", confidence=0.7,
+            from_node=a["id"],
+            to_node=b["id"],
+            edge_type="CAUSES",
+            layer="L3",
+            confidence=0.7,
         )
         result = graph.what_if(edge["id"])
         assert isinstance(result, dict)
@@ -1035,8 +1062,11 @@ class TestProvenance:
         source = graph.create_node(label="Original Source", node_type="source")
         derived = graph.create_node(label="Derived Claim", node_type="concept")
         graph.create_edge(
-            from_node=derived["id"], to_node=source["id"],
-            edge_type="REFERENCES", layer="L2", confidence=0.9,
+            from_node=derived["id"],
+            to_node=source["id"],
+            edge_type="REFERENCES",
+            layer="L2",
+            confidence=0.9,
         )
         result = graph.provenance(derived["id"])
         assert isinstance(result, list)
@@ -1070,6 +1100,7 @@ class TestEdgeHistory:
 
 # ===== Monte Carlo SDK Tests =====
 
+
 class TestMonteCarlo:
     """Tests for SDK monte_carlo() method."""
 
@@ -1078,8 +1109,11 @@ class TestMonteCarlo:
         a = graph.create_node(label="Source", node_type="concept")
         b = graph.create_node(label="Target", node_type="concept")
         graph.create_edge(
-            from_node=a["id"], to_node=b["id"],
-            edge_type="CAUSES", layer="L3", confidence=0.8,
+            from_node=a["id"],
+            to_node=b["id"],
+            edge_type="CAUSES",
+            layer="L3",
+            confidence=0.8,
         )
         result = graph.monte_carlo(a["id"], simulations=100)
         assert isinstance(result, dict)
@@ -1087,6 +1121,7 @@ class TestMonteCarlo:
 
 
 # ===== Near Duplicates SDK Tests =====
+
 
 class TestNearDuplicates:
     """Tests for SDK near_duplicates() method."""
@@ -1098,6 +1133,7 @@ class TestNearDuplicates:
 
 
 # ===== Calibration SDK Tests =====
+
 
 class TestCalibration:
     """Tests for SDK calibration() method."""
@@ -1111,6 +1147,7 @@ class TestCalibration:
 
 # ===== Suggest Connections SDK Tests =====
 
+
 class TestSuggestConnections:
     """Tests for SDK suggest_connections() method."""
 
@@ -1121,6 +1158,7 @@ class TestSuggestConnections:
 
 
 # ===== Export/Import SDK Tests =====
+
 
 class TestExportImport:
     """Tests for SDK export_graph() and import_graph() methods."""
@@ -1139,9 +1177,7 @@ class TestExportImport:
         """import_graph() with merge=True adds nodes."""
         data = {
             "nodes": [
-                {"id": "imported_1", "label": "Imported", "type": "concept",
-                 "content": None, "created_by": "test", "visibility": "team",
-                 "provenance": None, "confidence": 1.0, "priority": None},
+                {"id": "imported_1", "label": "Imported", "type": "concept", "content": None, "created_by": "test", "visibility": "team", "provenance": None, "confidence": 1.0, "priority": None},
             ],
             "edges": [],
             "observations": [],
@@ -1162,6 +1198,7 @@ class TestExportImport:
 
 # ===== Evolve Identity SDK Tests =====
 
+
 class TestEvolveIdentity:
     """Tests for SDK evolve_identity() method."""
 
@@ -1172,14 +1209,13 @@ class TestEvolveIdentity:
         edges = graph.search_edges(edge_type="VALUES")
         if edges:
             old_edge_id = edges[0]["id"]
-            new_edge = graph.evolve_identity(
-                old_edge_id, new_target="new_value", reason="values changed"
-            )
+            new_edge = graph.evolve_identity(old_edge_id, new_target="new_value", reason="values changed")
             assert new_edge["edge_type"] == "VALUES"
             assert new_edge["provenance"] is not None
 
 
 # ===== Discover Peers SDK Tests =====
+
 
 class TestDiscoverPeers:
     """Tests for SDK discover_peers() method."""
@@ -1199,6 +1235,7 @@ class TestDiscoverPeers:
 
 # ===== Health SDK Tests =====
 
+
 class TestHealth:
     """Tests for SDK health() method."""
 
@@ -1209,6 +1246,7 @@ class TestHealth:
 
 
 # ===== Agent Health SDK Tests =====
+
 
 class TestAgentHealth:
     """Tests for SDK agent_health() method."""
@@ -1222,6 +1260,7 @@ class TestAgentHealth:
 
 # ===== Heartbeat SDK Tests =====
 
+
 class TestHeartbeat:
     """Tests for SDK heartbeat() method."""
 
@@ -1234,6 +1273,7 @@ class TestHeartbeat:
 
 # ===== Confidence Chain SDK Tests =====
 
+
 class TestConfidenceChain:
     """Tests for SDK confidence_chain() method."""
 
@@ -1242,8 +1282,11 @@ class TestConfidenceChain:
         a = graph.create_node(label="Evidence A", node_type="concept")
         b = graph.create_node(label="Claim B", node_type="concept")
         graph.create_edge(
-            from_node=a["id"], to_node=b["id"],
-            edge_type="SUPPORTS", layer="L3", confidence=0.8,
+            from_node=a["id"],
+            to_node=b["id"],
+            edge_type="SUPPORTS",
+            layer="L3",
+            confidence=0.8,
         )
         result = graph.confidence_chain(b["id"])
         assert isinstance(result, dict)
@@ -1404,6 +1447,7 @@ class TestOHMClient:
     def test_ohmclient_init_defaults(self):
         """OHMClient initializes with defaults."""
         from ohm.client import OHMClient
+
         client = OHMClient(actor="test")
         assert client.actor == "test"
         assert client.base_url == "http://127.0.0.1:8710"
@@ -1411,18 +1455,21 @@ class TestOHMClient:
     def test_ohmclient_init_with_base_url(self):
         """OHMClient accepts explicit base_url."""
         from ohm.client import OHMClient
+
         client = OHMClient(actor="test", base_url="http://localhost:9999")
         assert client.base_url == "http://localhost:9999"
 
     def test_ohmclient_init_with_token(self):
         """OHMClient accepts explicit token."""
         from ohm.client import OHMClient
+
         client = OHMClient(actor="test", token="test-token-123")
         assert client.token == "test-token-123"
 
     def test_ohmclient_repr(self):
         """OHMClient repr includes actor and base_url."""
         from ohm.client import OHMClient
+
         client = OHMClient(actor="metis")
         r = repr(client)
         assert "metis" in r
@@ -1431,6 +1478,7 @@ class TestOHMClient:
     def test_ohmclient_context_manager(self):
         """OHMClient supports context manager protocol."""
         from ohm.client import OHMClient
+
         with OHMClient(actor="test") as client:
             assert client.actor == "test"
         # Should close cleanly
@@ -1439,12 +1487,14 @@ class TestOHMClient:
         """_resolve_token reads from OHM_TOKEN env var."""
         monkeypatch.setenv("OHM_TOKEN", "env-token-456")
         from ohm.client import _resolve_token
+
         token = _resolve_token("metis", None)
         assert token == "env-token-456"
 
     def test_resolve_token_from_config(self):
         """_resolve_token reads from config tokens dict."""
         from ohm.client import _resolve_token
+
         config = {"tokens": {"metis": "config-token-789"}}
         token = _resolve_token("metis", config)
         assert token == "config-token-789"
@@ -1452,6 +1502,7 @@ class TestOHMClient:
     def test_resolve_token_wildcard_fallback(self):
         """_resolve_token falls back to wildcard token."""
         from ohm.client import _resolve_token
+
         config = {"tokens": {"*": "wildcard-token"}}
         token = _resolve_token("unknown_agent", config)
         assert token == "wildcard-token"
@@ -1459,18 +1510,21 @@ class TestOHMClient:
     def test_resolve_base_url_default(self):
         """_resolve_base_url returns default when no config."""
         from ohm.client import _resolve_base_url
+
         url = _resolve_base_url(None)
         assert url == "http://127.0.0.1:8710"
 
     def test_resolve_base_url_from_config(self):
         """_resolve_base_url reads from config."""
         from ohm.client import _resolve_base_url
+
         config = {"host": "10.0.0.1", "port": 9999}
         url = _resolve_base_url(config)
         assert url == "http://10.0.0.1:9999"
 
 
 # ===== Delete Node/Edge SDK Tests =====
+
 
 class TestDeleteNodeSDK:
     """Tests for SDK delete_node() method (OHM-cpi)."""
@@ -1480,8 +1534,10 @@ class TestDeleteNodeSDK:
         a = graph.create_node(label="DelA", node_type="concept")
         b = graph.create_node(label="DelB", node_type="concept")
         graph.create_edge(
-            from_node=a["id"], to_node=b["id"],
-            edge_type="CAUSES", layer="L3",
+            from_node=a["id"],
+            to_node=b["id"],
+            edge_type="CAUSES",
+            layer="L3",
         )
         result = graph.delete_node(a["id"])
         assert result["deleted"] == a["id"]
@@ -1493,8 +1549,10 @@ class TestDeleteNodeSDK:
         a = graph.create_node(label="SrcA", node_type="concept")
         b = graph.create_node(label="TgtB", node_type="concept")
         graph.create_edge(
-            from_node=a["id"], to_node=b["id"],
-            edge_type="CAUSES", layer="L3",
+            from_node=a["id"],
+            to_node=b["id"],
+            edge_type="CAUSES",
+            layer="L3",
         )
         result = graph.delete_node(b["id"])
         assert result["edges_removed"] >= 1
@@ -1502,6 +1560,7 @@ class TestDeleteNodeSDK:
     def test_delete_node_not_found(self, graph):
         """delete_node() raises NodeNotFoundError for nonexistent node."""
         from ohm.exceptions import NodeNotFoundError
+
         with pytest.raises(NodeNotFoundError):
             graph.delete_node("nonexistent_node_xyz")
 
@@ -1521,8 +1580,10 @@ class TestDeleteEdgeSDK:
         a = graph.create_node(label="A", node_type="concept")
         b = graph.create_node(label="B", node_type="concept")
         edge = graph.create_edge(
-            from_node=a["id"], to_node=b["id"],
-            edge_type="CAUSES", layer="L3",
+            from_node=a["id"],
+            to_node=b["id"],
+            edge_type="CAUSES",
+            layer="L3",
         )
         result = graph.delete_edge(edge["id"])
         assert result["deleted"] == edge["id"]
@@ -1531,5 +1592,6 @@ class TestDeleteEdgeSDK:
     def test_delete_edge_not_found(self, graph):
         """delete_edge() raises EdgeNotFoundError for nonexistent edge."""
         from ohm.exceptions import EdgeNotFoundError
+
         with pytest.raises(EdgeNotFoundError):
             graph.delete_edge("nonexistent_edge_xyz")

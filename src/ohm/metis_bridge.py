@@ -5,6 +5,7 @@ from ohm.framework.metis_bridge import (  # noqa: F401
     _derive_edge_type,
     _get_zettelkasten_notes,
 )
+
 try:
     from ohm.framework.metis_bridge import __all__  # noqa: F401
 except ImportError:

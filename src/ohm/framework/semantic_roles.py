@@ -34,21 +34,11 @@ class SemanticRoles:
         evidential: Epistemic support/challenge edges.
     """
 
-    causal: tuple[str, ...] = field(
-        default=("CAUSES", "INFLUENCES", "ENABLES", "DEPENDS_ON")
-    )
-    bayesian: tuple[str, ...] = field(
-        default=("CAUSES", "DEPENDS_ON", "THREATENS", "EXPECTED_LIKELIHOOD", "NEGATES")
-    )
-    state_transitions: tuple[str, ...] = field(
-        default=("CAUSES", "TRANSITIONS_TO")
-    )
-    negating: tuple[str, ...] = field(
-        default=("NEGATES",)
-    )
-    evidential: tuple[str, ...] = field(
-        default=("SUPPORTS", "CHALLENGED_BY")
-    )
+    causal: tuple[str, ...] = field(default=("CAUSES", "INFLUENCES", "ENABLES", "DEPENDS_ON"))
+    bayesian: tuple[str, ...] = field(default=("CAUSES", "DEPENDS_ON", "THREATENS", "EXPECTED_LIKELIHOOD", "NEGATES"))
+    state_transitions: tuple[str, ...] = field(default=("CAUSES", "TRANSITIONS_TO"))
+    negating: tuple[str, ...] = field(default=("NEGATES",))
+    evidential: tuple[str, ...] = field(default=("SUPPORTS", "CHALLENGED_BY"))
 
     # ── Factories ─────────────────────────────────────────────────────────────
 

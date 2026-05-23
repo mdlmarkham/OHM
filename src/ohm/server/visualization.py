@@ -96,7 +96,7 @@ def to_mermaid_path(
             seen_nodes.add(to_n)
 
         # Highlight path edges
-        lines.append(f"    {from_n} ==>|{i+1}. {etype}| {to_n}")
+        lines.append(f"    {from_n} ==>|{i + 1}. {etype}| {to_n}")
 
     lines.append("```")
     return "\n".join(lines)
@@ -104,17 +104,7 @@ def to_mermaid_path(
 
 def _sanitize(node_id: str) -> str:
     """Sanitize a node ID for use as a Mermaid identifier."""
-    return (
-        node_id.replace(" ", "_")
-        .replace("-", "_")
-        .replace(".", "_")
-        .replace(":", "_")
-        .replace("/", "_")
-        .replace("(", "_")
-        .replace(")", "_")
-        .replace("'", "_")
-        .replace('"', "_")
-    )
+    return node_id.replace(" ", "_").replace("-", "_").replace(".", "_").replace(":", "_").replace("/", "_").replace("(", "_").replace(")", "_").replace("'", "_").replace('"', "_")
 
 
 def _edge_style(layer: str, edge_type: str) -> str:

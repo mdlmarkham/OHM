@@ -35,13 +35,19 @@ class TestNodeUpsertConflictBug:
         """
         # First write — node is created
         result1 = store.write_node(
-            id="upsert_test", label="concept", type="note", content="original",
+            id="upsert_test",
+            label="concept",
+            type="note",
+            content="original",
         )
         assert result1["created"] is True, "First write should create the node"
 
         # Second write with same ID — node is UPDATED (upsert behavior)
         result2 = store.write_node(
-            id="upsert_test", label="concept", type="note", content="updated",
+            id="upsert_test",
+            label="concept",
+            type="note",
+            content="updated",
         )
         assert result2["created"] is False, "Second write should return created=False"
         assert result2["content"] == "updated", "Node content should be updated"
@@ -57,7 +63,10 @@ class TestNodeUpsertConflictBug:
 
         # Simulate what server.py does: call write_node, check created
         result = store.write_node(
-            id="conflict_test", label="concept", type="note", content="v2",
+            id="conflict_test",
+            label="concept",
+            type="note",
+            content="v2",
         )
 
         # Server would raise ConflictError here, but the database already changed
@@ -65,11 +74,7 @@ class TestNodeUpsertConflictBug:
 
         # Verify the database WAS modified despite what the error would say
         node = store.get_node("conflict_test")
-        assert node["content"] == "v2", (
-            "Database was modified (content='v2'), but server.py would raise "
-            "ConflictError telling the client the operation failed. "
-            "This is a data integrity issue."
-        )
+        assert node["content"] == "v2", "Database was modified (content='v2'), but server.py would raise ConflictError telling the client the operation failed. This is a data integrity issue."
 
     def test_server_logic_would_raise_conflict_after_upsert(self, store):
         """Simulate the server.py logic that raises ConflictError after upsert.
@@ -84,7 +89,10 @@ class TestNodeUpsertConflictBug:
         store.write_node(id="server_sim", label="concept", type="note", content="first")
 
         result = store.write_node(
-            id="server_sim", label="concept", type="note", content="second",
+            id="server_sim",
+            label="concept",
+            type="note",
+            content="second",
         )
 
         # This is what server.py checks:
@@ -95,10 +103,7 @@ class TestNodeUpsertConflictBug:
             # Would raise ConflictError
             # But the node was ALREADY UPDATED in the database
             node = store.get_node("server_sim")
-            assert node["content"] == "second", (
-                "Node was updated to 'second' in DB, but server would return 409 Conflict. "
-                "Client thinks the operation failed, but it actually succeeded."
-            )
+            assert node["content"] == "second", "Node was updated to 'second' in DB, but server would return 409 Conflict. Client thinks the operation failed, but it actually succeeded."
 
     def test_write_node_field_updates_on_upsert(self, store):
         """Verify which fields get updated during upsert.
@@ -107,14 +112,22 @@ class TestNodeUpsertConflictBug:
         confidence, visibility, provenance, tags, metadata.
         """
         store.write_node(
-            id="field_test", label="original_label", type="note",
-            content="original", confidence=0.5, visibility="private",
+            id="field_test",
+            label="original_label",
+            type="note",
+            content="original",
+            confidence=0.5,
+            visibility="private",
             provenance="test_v1",
         )
 
         result = store.write_node(
-            id="field_test", label="updated_label", type="concept",
-            content="updated", confidence=0.9, visibility="team",
+            id="field_test",
+            label="updated_label",
+            type="concept",
+            content="updated",
+            confidence=0.9,
+            visibility="team",
             provenance="test_v2",
         )
         assert result["created"] is False
@@ -134,7 +147,10 @@ class TestNodeUpsertConflictBug:
         store.write_node(id="e2", label="concept", type="note")
 
         edge1 = store.write_edge(
-            from_node="e1", to_node="e2",
-            edge_type="RELATES_TO", layer="L1", confidence=0.8,
+            from_node="e1",
+            to_node="e2",
+            edge_type="RELATES_TO",
+            layer="L1",
+            confidence=0.8,
         )
         assert edge1["created_by"] == "test"

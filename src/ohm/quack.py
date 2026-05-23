@@ -3,4 +3,5 @@
 # is shared correctly when accessed via either import path.
 import sys as _sys
 import ohm.graph.quack as _real
+
 _sys.modules[__name__] = _real

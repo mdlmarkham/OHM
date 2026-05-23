@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 try:
     import dowhy  # noqa: F401
     from dowhy import CausalModel  # noqa: F401
+
     DOWHY_AVAILABLE = True
 except ImportError:
     DOWHY_AVAILABLE = False
@@ -77,7 +78,9 @@ def refute_causal_effect(
 
     # Compute the original ATE for comparison
     original_ate = compute_ate(
-        conn, cause, effect,
+        conn,
+        cause,
+        effect,
         edge_types=edge_types,
         leak_probability=leak_probability,
     )
@@ -110,9 +113,12 @@ def refute_causal_effect(
             # Or use the effect's own prior as the "placebo" estimate
             # Method: compute P(effect=bad) without any intervention = prior
             from ohm.bayesian import bayesian_inference
+
             # Empty evidence = prior P(effect)
             prior_result = bayesian_inference(
-                conn, effect, {},  # empty evidence = prior
+                conn,
+                effect,
+                {},  # empty evidence = prior
                 edge_types=edge_types,
                 leak_probability=leak_probability,
             )
@@ -155,6 +161,7 @@ def refute_causal_effect(
         try:
             # Create a random confounder with various strengths
             import random
+
             random.seed(seed)
             # OHM-ykg: Proportional perturbation (±10-20% of parameter value).
             # Previous fixed offsets (±0.5) caused ±330% perturbation for
@@ -166,17 +173,21 @@ def refute_causal_effect(
                 noisy_leak = leak_probability * (1 + noise)
                 noisy_leak = max(1e-6, min(0.5, noisy_leak))
                 noisy_ate = compute_ate(
-                    conn, cause, effect,
+                    conn,
+                    cause,
+                    effect,
                     edge_types=edge_types,
                     leak_probability=noisy_leak,
                 )
                 if "ate" in noisy_ate:
-                    ate_changes.append({
-                        "perturbation_fraction": fraction,
-                        "leak_probability": round(noisy_leak, 4),
-                        "ate": noisy_ate["ate"],
-                        "ate_change": round(abs(noisy_ate["ate"] - original_ate["ate"]), 4),
-                    })
+                    ate_changes.append(
+                        {
+                            "perturbation_fraction": fraction,
+                            "leak_probability": round(noisy_leak, 4),
+                            "ate": noisy_ate["ate"],
+                            "ate_change": round(abs(noisy_ate["ate"] - original_ate["ate"]), 4),
+                        }
+                    )
 
             max_change = max(c["ate_change"] for c in ate_changes) if ate_changes else 0
             results["refutation_results"]["random_common_cause"] = {
@@ -186,11 +197,7 @@ def refute_causal_effect(
                 "perturbations": ate_changes,
                 "max_ate_change": round(max_change, 4),
                 "robust": max_change < abs(original_ate["ate"]) * 0.5,
-                "interpretation": (
-                    f"ATE changes by at most {max_change:.4f} under random noise. "
-                    f"{'Robust' if max_change < abs(original_ate['ate']) * 0.5 else 'Not robust'}: "
-                    f"ATE is stable under random perturbation"
-                ),
+                "interpretation": (f"ATE changes by at most {max_change:.4f} under random noise. {'Robust' if max_change < abs(original_ate['ate']) * 0.5 else 'Not robust'}: ATE is stable under random perturbation"),
             }
         except Exception as e:
             logger.warning(f"Random common cause refutation failed: {e}")
@@ -207,16 +214,20 @@ def refute_causal_effect(
             perturbation_results = []
             for leak in leak_values:
                 ate_result = compute_ate(
-                    conn, cause, effect,
+                    conn,
+                    cause,
+                    effect,
                     edge_types=edge_types,
                     leak_probability=leak,
                 )
                 if "ate" in ate_result:
-                    perturbation_results.append({
-                        "leak_probability": leak,
-                        "ate": ate_result["ate"],
-                        "risk_ratio": ate_result["risk_ratio"],
-                    })
+                    perturbation_results.append(
+                        {
+                            "leak_probability": leak,
+                            "ate": ate_result["ate"],
+                            "risk_ratio": ate_result["risk_ratio"],
+                        }
+                    )
 
             # ATE should be relatively stable across leak values
             ates = [r["ate"] for r in perturbation_results]
@@ -247,7 +258,9 @@ def refute_causal_effect(
     if "unobserved_confounder" in refutation_methods:
         try:
             sens_result = compute_sensitivity(
-                conn, cause, effect,
+                conn,
+                cause,
+                effect,
                 edge_types=edge_types,
                 leak_probability=leak_probability,
             )

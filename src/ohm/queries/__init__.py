@@ -6,6 +6,7 @@ from ohm.graph.queries import (  # noqa: F401
     _log_change,
     _query_handoff_chain,
 )
+
 try:
     from ohm.graph.queries import __all__  # noqa: F401
 except ImportError:

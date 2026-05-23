@@ -89,6 +89,7 @@ def test_embeddings_response_fields():
 
 if __name__ == "__main__":
     import sys
+
     print("Testing embedding batch controls...")
     for name, fn in [
         ("batch_size=1", test_embeddings_batch_size),

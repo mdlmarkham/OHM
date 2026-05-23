@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 # ── Naming Conventions ──────────────────────────────────────────────────────
 
+
 @dataclass(frozen=True)
 class NamingConventions:
     """Rules for naming graph entities.
@@ -55,24 +56,27 @@ class NamingConventions:
     type_prefix_required: bool = True
 
     # Type prefix mapping (type → expected prefix)
-    type_prefixes: dict[str, str] = field(default_factory=lambda: {
-        "concept": "concept-",
-        "pattern": "pattern-",
-        "event": "event-",
-        "task": "task-",
-        "agent": "agent-",
-        "source": "source-",
-        "skill": "skill-",
-        "value": "value-",
-        "goal": "goal-",
-        "idea": "idea-",
-        "person": "person-",
-        "institution": "institution-",
-        "technology": "tech-",
-    })
+    type_prefixes: dict[str, str] = field(
+        default_factory=lambda: {
+            "concept": "concept-",
+            "pattern": "pattern-",
+            "event": "event-",
+            "task": "task-",
+            "agent": "agent-",
+            "source": "source-",
+            "skill": "skill-",
+            "value": "value-",
+            "goal": "goal-",
+            "idea": "idea-",
+            "person": "person-",
+            "institution": "institution-",
+            "technology": "tech-",
+        }
+    )
 
 
 # ── Required Fields ────────────────────────────────────────────────────────
+
 
 @dataclass(frozen=True)
 class RequiredFields:
@@ -83,47 +87,90 @@ class RequiredFields:
     """
 
     # Fields required on ALL nodes
-    node_required: frozenset[str] = frozenset({
-        "id", "label", "type", "created_by",
-    })
+    node_required: frozenset[str] = frozenset(
+        {
+            "id",
+            "label",
+            "type",
+            "created_by",
+        }
+    )
 
     # Fields required on concept/pattern nodes (knowledge layer)
-    knowledge_required: frozenset[str] = frozenset({
-        "id", "label", "type", "content", "confidence", "created_by",
-    })
+    knowledge_required: frozenset[str] = frozenset(
+        {
+            "id",
+            "label",
+            "type",
+            "content",
+            "confidence",
+            "created_by",
+        }
+    )
 
     # Fields required on task nodes
-    task_required: frozenset[str] = frozenset({
-        "id", "label", "type", "priority", "task_status", "assigned_to",
-    })
+    task_required: frozenset[str] = frozenset(
+        {
+            "id",
+            "label",
+            "type",
+            "priority",
+            "task_status",
+            "assigned_to",
+        }
+    )
 
     # Fields required on source nodes
-    source_required: frozenset[str] = frozenset({
-        "id", "label", "type", "provenance", "created_by",
-    })
+    source_required: frozenset[str] = frozenset(
+        {
+            "id",
+            "label",
+            "type",
+            "provenance",
+            "created_by",
+        }
+    )
 
     # Fields required on ALL edges
-    edge_required: frozenset[str] = frozenset({
-        "from_node", "to_node", "edge_type", "layer", "created_by",
-    })
+    edge_required: frozenset[str] = frozenset(
+        {
+            "from_node",
+            "to_node",
+            "edge_type",
+            "layer",
+            "created_by",
+        }
+    )
 
     # Fields required on CAUSES/DEPENDS_ON edges (for Bayesian inference)
-    causal_edge_required: frozenset[str] = frozenset({
-        "from_node", "to_node", "edge_type", "layer", "confidence",
-        "created_by",
-    })
+    causal_edge_required: frozenset[str] = frozenset(
+        {
+            "from_node",
+            "to_node",
+            "edge_type",
+            "layer",
+            "confidence",
+            "created_by",
+        }
+    )
 
     # Recommended but not required (warnings, not errors)
-    node_recommended: frozenset[str] = frozenset({
-        "tags", "provenance",
-    })
+    node_recommended: frozenset[str] = frozenset(
+        {
+            "tags",
+            "provenance",
+        }
+    )
 
-    edge_recommended: frozenset[str] = frozenset({
-        "confidence",
-    })
+    edge_recommended: frozenset[str] = frozenset(
+        {
+            "confidence",
+        }
+    )
 
 
 # ── Contract Configuration ──────────────────────────────────────────────────
+
 
 @dataclass
 class ContractConfig:
@@ -187,14 +234,16 @@ class ContractConfig:
 
 # ── Lint Engine ─────────────────────────────────────────────────────────────
 
+
 @dataclass
 class LintViolation:
     """A single contract violation found during linting."""
-    entity_type: str      # "node" or "edge"
-    entity_id: str        # Node ID or edge ID
-    rule: str             # Rule that was violated
-    severity: str         # "error" (required) or "warning" (recommended)
-    message: str          # Human-readable description
+
+    entity_type: str  # "node" or "edge"
+    entity_id: str  # Node ID or edge ID
+    rule: str  # Rule that was violated
+    severity: str  # "error" (required) or "warning" (recommended)
+    message: str  # Human-readable description
     field: str | None = None  # Specific field that's wrong
 
 
@@ -227,64 +276,88 @@ def lint_node(
     for req_field in required_fields:
         value = node.get(req_field)
         if value is None or value == "":
-            violations.append(LintViolation(
-                entity_type="node", entity_id=node_id,
-                rule="required_field", severity="error",
-                message=f"Missing required field: {req_field}",
-                field=req_field,
-            ))
+            violations.append(
+                LintViolation(
+                    entity_type="node",
+                    entity_id=node_id,
+                    rule="required_field",
+                    severity="error",
+                    message=f"Missing required field: {req_field}",
+                    field=req_field,
+                )
+            )
 
     # 2. Recommended fields (warnings only)
     for rec_field in contract.required.node_recommended:
         value = node.get(rec_field)
         if value is None or value == "":
-            violations.append(LintViolation(
-                entity_type="node", entity_id=node_id,
-                rule="recommended_field", severity="warning",
-                message=f"Missing recommended field: {rec_field}",
-                field=rec_field,
-            ))
+            violations.append(
+                LintViolation(
+                    entity_type="node",
+                    entity_id=node_id,
+                    rule="recommended_field",
+                    severity="warning",
+                    message=f"Missing recommended field: {rec_field}",
+                    field=rec_field,
+                )
+            )
 
     # 3. Node ID naming convention
     if contract.naming.type_prefix_required and node_type in contract.naming.type_prefixes:
         expected_prefix = contract.naming.type_prefixes[node_type]
         if not node_id.startswith(expected_prefix):
-            violations.append(LintViolation(
-                entity_type="node", entity_id=node_id,
-                rule="type_prefix", severity="warning",
-                message=f"Node ID '{node_id}' should start with '{expected_prefix}' for type '{node_type}'",
-                field="id",
-            ))
+            violations.append(
+                LintViolation(
+                    entity_type="node",
+                    entity_id=node_id,
+                    rule="type_prefix",
+                    severity="warning",
+                    message=f"Node ID '{node_id}' should start with '{expected_prefix}' for type '{node_type}'",
+                    field="id",
+                )
+            )
 
     # 4. Node ID format
     if not re.match(contract.naming.node_id_pattern, node_id):
-        violations.append(LintViolation(
-            entity_type="node", entity_id=node_id,
-            rule="node_id_format", severity="warning",
-            message=f"Node ID '{node_id}' doesn't match pattern '{contract.naming.node_id_pattern}'",
-            field="id",
-        ))
+        violations.append(
+            LintViolation(
+                entity_type="node",
+                entity_id=node_id,
+                rule="node_id_format",
+                severity="warning",
+                message=f"Node ID '{node_id}' doesn't match pattern '{contract.naming.node_id_pattern}'",
+                field="id",
+            )
+        )
 
     # 5. Label length
     label = node.get("label", "")
     if len(label) < contract.naming.label_min_length:
-        violations.append(LintViolation(
-            entity_type="node", entity_id=node_id,
-            rule="label_length", severity="warning",
-            message=f"Label too short ({len(label)} chars, min {contract.naming.label_min_length})",
-            field="label",
-        ))
+        violations.append(
+            LintViolation(
+                entity_type="node",
+                entity_id=node_id,
+                rule="label_length",
+                severity="warning",
+                message=f"Label too short ({len(label)} chars, min {contract.naming.label_min_length})",
+                field="label",
+            )
+        )
 
     # 6. Content length for knowledge nodes
     if node_type in ("concept", "pattern"):
         content = node.get("content", "") or ""
         if len(content) < contract.naming.content_min_length:
-            violations.append(LintViolation(
-                entity_type="node", entity_id=node_id,
-                rule="content_length", severity="warning",
-                message=f"Content too short ({len(content)} chars, min {contract.naming.content_min_length}) for {node_type} node",
-                field="content",
-            ))
+            violations.append(
+                LintViolation(
+                    entity_type="node",
+                    entity_id=node_id,
+                    rule="content_length",
+                    severity="warning",
+                    message=f"Content too short ({len(content)} chars, min {contract.naming.content_min_length}) for {node_type} node",
+                    field="content",
+                )
+            )
 
     # 7. Confidence bounds
     confidence = node.get("confidence")
@@ -292,38 +365,54 @@ def lint_node(
         try:
             c = float(confidence)
             if c < 0.0 or c > 1.0:
-                violations.append(LintViolation(
-                    entity_type="node", entity_id=node_id,
-                    rule="confidence_bounds", severity="error",
-                    message=f"Confidence {c} outside [0.0, 1.0]",
-                    field="confidence",
-                ))
+                violations.append(
+                    LintViolation(
+                        entity_type="node",
+                        entity_id=node_id,
+                        rule="confidence_bounds",
+                        severity="error",
+                        message=f"Confidence {c} outside [0.0, 1.0]",
+                        field="confidence",
+                    )
+                )
         except (TypeError, ValueError):
-            violations.append(LintViolation(
-                entity_type="node", entity_id=node_id,
-                rule="confidence_type", severity="error",
-                message=f"Confidence '{confidence}' is not a number",
-                field="confidence",
-            ))
+            violations.append(
+                LintViolation(
+                    entity_type="node",
+                    entity_id=node_id,
+                    rule="confidence_type",
+                    severity="error",
+                    message=f"Confidence '{confidence}' is not a number",
+                    field="confidence",
+                )
+            )
 
     # 8. Valid node type
     if not contract.schema.validate_node_type(node_type):
-        violations.append(LintViolation(
-            entity_type="node", entity_id=node_id,
-            rule="valid_node_type", severity="error",
-            message=f"Unknown node type: '{node_type}'",
-            field="type",
-        ))
+        violations.append(
+            LintViolation(
+                entity_type="node",
+                entity_id=node_id,
+                rule="valid_node_type",
+                severity="error",
+                message=f"Unknown node type: '{node_type}'",
+                field="type",
+            )
+        )
 
     # 9. Valid provenance
     provenance = node.get("provenance")
     if provenance and provenance not in contract.schema.provenances:
-        violations.append(LintViolation(
-            entity_type="node", entity_id=node_id,
-            rule="valid_provenance", severity="warning",
-            message=f"Unknown provenance: '{provenance}'",
-            field="provenance",
-        ))
+        violations.append(
+            LintViolation(
+                entity_type="node",
+                entity_id=node_id,
+                rule="valid_provenance",
+                severity="warning",
+                message=f"Unknown provenance: '{provenance}'",
+                field="provenance",
+            )
+        )
 
     return violations
 
@@ -346,33 +435,45 @@ def lint_edge(
     for req_field in required_fields:
         value = edge.get(req_field)
         if value is None or value == "":
-            violations.append(LintViolation(
-                entity_type="edge", entity_id=edge_id,
-                rule="required_field", severity="error",
-                message=f"Missing required field: {req_field}",
-                field=req_field,
-            ))
+            violations.append(
+                LintViolation(
+                    entity_type="edge",
+                    entity_id=edge_id,
+                    rule="required_field",
+                    severity="error",
+                    message=f"Missing required field: {req_field}",
+                    field=req_field,
+                )
+            )
 
     # 2. Recommended fields
     for rec_field in contract.required.edge_recommended:
         value = edge.get(rec_field)
         if value is None or value == "":
-            violations.append(LintViolation(
-                entity_type="edge", entity_id=edge_id,
-                rule="recommended_field", severity="warning",
-                message=f"Missing recommended field: {rec_field}",
-                field=rec_field,
-            ))
+            violations.append(
+                LintViolation(
+                    entity_type="edge",
+                    entity_id=edge_id,
+                    rule="recommended_field",
+                    severity="warning",
+                    message=f"Missing recommended field: {rec_field}",
+                    field=rec_field,
+                )
+            )
 
     # 3. Valid edge type for layer
     if layer and edge_type:
         if not contract.schema.validate_edge_type(layer, edge_type):
-            violations.append(LintViolation(
-                entity_type="edge", entity_id=edge_id,
-                rule="edge_type_for_layer", severity="error",
-                message=f"Edge type '{edge_type}' not valid for layer '{layer}'",
-                field="edge_type",
-            ))
+            violations.append(
+                LintViolation(
+                    entity_type="edge",
+                    entity_id=edge_id,
+                    rule="edge_type_for_layer",
+                    severity="error",
+                    message=f"Edge type '{edge_type}' not valid for layer '{layer}'",
+                    field="edge_type",
+                )
+            )
 
     # 4. Confidence bounds
     confidence = edge.get("confidence")
@@ -380,19 +481,27 @@ def lint_edge(
         try:
             c = float(confidence)
             if c < 0.0 or c > 1.0:
-                violations.append(LintViolation(
-                    entity_type="edge", entity_id=edge_id,
-                    rule="confidence_bounds", severity="error",
-                    message=f"Confidence {c} outside [0.0, 1.0]",
-                    field="confidence",
-                ))
+                violations.append(
+                    LintViolation(
+                        entity_type="edge",
+                        entity_id=edge_id,
+                        rule="confidence_bounds",
+                        severity="error",
+                        message=f"Confidence {c} outside [0.0, 1.0]",
+                        field="confidence",
+                    )
+                )
         except (TypeError, ValueError):
-            violations.append(LintViolation(
-                entity_type="edge", entity_id=edge_id,
-                rule="confidence_type", severity="error",
-                message=f"Confidence '{confidence}' is not a number",
-                field="confidence",
-            ))
+            violations.append(
+                LintViolation(
+                    entity_type="edge",
+                    entity_id=edge_id,
+                    rule="confidence_type",
+                    severity="error",
+                    message=f"Confidence '{confidence}' is not a number",
+                    field="confidence",
+                )
+            )
 
     # 5. Probability bounds
     probability = edge.get("probability")
@@ -400,19 +509,27 @@ def lint_edge(
         try:
             p = float(probability)
             if p < 0.0 or p > 1.0:
-                violations.append(LintViolation(
-                    entity_type="edge", entity_id=edge_id,
-                    rule="probability_bounds", severity="error",
-                    message=f"Probability {p} outside [0.0, 1.0]",
-                    field="probability",
-                ))
+                violations.append(
+                    LintViolation(
+                        entity_type="edge",
+                        entity_id=edge_id,
+                        rule="probability_bounds",
+                        severity="error",
+                        message=f"Probability {p} outside [0.0, 1.0]",
+                        field="probability",
+                    )
+                )
         except (TypeError, ValueError):
-            violations.append(LintViolation(
-                entity_type="edge", entity_id=edge_id,
-                rule="probability_type", severity="error",
-                message=f"Probability '{probability}' is not a number",
-                field="probability",
-            ))
+            violations.append(
+                LintViolation(
+                    entity_type="edge",
+                    entity_id=edge_id,
+                    rule="probability_type",
+                    severity="error",
+                    message=f"Probability '{probability}' is not a number",
+                    field="probability",
+                )
+            )
 
     return violations
 
@@ -466,10 +583,18 @@ def lint_graph(
     rows = conn.execute(node_query, params).fetchall()
     for row in rows:
         node = {
-            "id": row[0], "label": row[1], "type": row[2], "content": row[3],
-            "confidence": row[4], "provenance": row[5], "tags": row[6],
-            "created_by": row[7], "priority": row[8], "task_status": row[9],
-            "assigned_to": row[10], "visibility": row[11],
+            "id": row[0],
+            "label": row[1],
+            "type": row[2],
+            "content": row[3],
+            "confidence": row[4],
+            "provenance": row[5],
+            "tags": row[6],
+            "created_by": row[7],
+            "priority": row[8],
+            "task_status": row[9],
+            "assigned_to": row[10],
+            "visibility": row[11],
         }
         all_violations.extend(lint_node(node, contract))
 
@@ -485,9 +610,14 @@ def lint_graph(
     edge_rows = conn.execute(edge_query, [limit]).fetchall()
     for row in edge_rows:
         edge = {
-            "id": row[0], "from_node": row[1], "to_node": row[2],
-            "edge_type": row[3], "layer": row[4], "confidence": row[5],
-            "probability": row[6], "created_by": row[7],
+            "id": row[0],
+            "from_node": row[1],
+            "to_node": row[2],
+            "edge_type": row[3],
+            "layer": row[4],
+            "confidence": row[5],
+            "probability": row[6],
+            "created_by": row[7],
         }
         all_violations.extend(lint_edge(edge, contract))
 

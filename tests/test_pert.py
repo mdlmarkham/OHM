@@ -1,4 +1,5 @@
 """Tests for PERT three-point estimation functions (src/ohm/pert.py)."""
+
 import pytest
 from ohm.pert import (
     PERTELError,
@@ -13,12 +14,15 @@ from ohm.pert import (
 class TestValidatePert:
     """Tests for validate_pert()."""
 
-    @pytest.mark.parametrize("p05,p50,p95", [
-        (0.1, 0.5, 0.9),
-        (0.0, 0.0, 0.1),
-        (0.0, 0.5, 1.0),
-        (0.3, 0.3, 0.7),  # p05 == p50 is allowed
-    ])
+    @pytest.mark.parametrize(
+        "p05,p50,p95",
+        [
+            (0.1, 0.5, 0.9),
+            (0.0, 0.0, 0.1),
+            (0.0, 0.5, 1.0),
+            (0.3, 0.3, 0.7),  # p05 == p50 is allowed
+        ],
+    )
     def test_valid_triples(self, p05, p50, p95):
         validate_pert(p05, p50, p95)  # should not raise
 
@@ -57,12 +61,15 @@ class TestValidatePert:
 class TestComputePertMean:
     """Tests for compute_pert_mean()."""
 
-    @pytest.mark.parametrize("p05,p50,p95,expected", [
-        (0.0, 0.5, 1.0, 0.5),       # symmetric → mean == p50
-        (0.0, 0.0, 0.6, 0.1),       # (0 + 0 + 0.6) / 6
-        (0.2, 0.4, 1.0, 0.4666666), # (0.2 + 1.6 + 1.0) / 6
-        (0.1, 0.5, 0.9, 0.5),       # symmetric
-    ])
+    @pytest.mark.parametrize(
+        "p05,p50,p95,expected",
+        [
+            (0.0, 0.5, 1.0, 0.5),  # symmetric → mean == p50
+            (0.0, 0.0, 0.6, 0.1),  # (0 + 0 + 0.6) / 6
+            (0.2, 0.4, 1.0, 0.4666666),  # (0.2 + 1.6 + 1.0) / 6
+            (0.1, 0.5, 0.9, 0.5),  # symmetric
+        ],
+    )
     def test_known_values(self, p05, p50, p95, expected):
         result = compute_pert_mean(p05, p50, p95)
         assert abs(result - expected) < 1e-5
@@ -80,12 +87,15 @@ class TestComputePertMean:
 class TestComputePertVariance:
     """Tests for compute_pert_variance()."""
 
-    @pytest.mark.parametrize("p05,p95,expected", [
-        (0.0, 0.6, 0.01),     # ((0.6-0.0)/6)^2 = 0.1^2 = 0.01
-        (0.1, 0.7, 0.01),     # ((0.6)/6)^2 = 0.1^2 = 0.01
-        (0.4, 0.4, 0.0),      # zero spread (p05==p95)
-        (0.0, 1.0, (1/6)**2), # full range
-    ])
+    @pytest.mark.parametrize(
+        "p05,p95,expected",
+        [
+            (0.0, 0.6, 0.01),  # ((0.6-0.0)/6)^2 = 0.1^2 = 0.01
+            (0.1, 0.7, 0.01),  # ((0.6)/6)^2 = 0.1^2 = 0.01
+            (0.4, 0.4, 0.0),  # zero spread (p05==p95)
+            (0.0, 1.0, (1 / 6) ** 2),  # full range
+        ],
+    )
     def test_known_values(self, p05, p95, expected):
         result = compute_pert_variance(p05, p95)
         assert abs(result - expected) < 1e-10

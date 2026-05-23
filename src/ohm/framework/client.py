@@ -175,12 +175,14 @@ class OHMClient:
         """Create a node in the shared graph."""
         return self.graph.create_node(label, node_type=node_type, **kwargs)
 
-    def create_edge(self, *, from_node: str, to_node: str, edge_type: str,
-                    layer: str = "L3", **kwargs) -> dict[str, Any]:
+    def create_edge(self, *, from_node: str, to_node: str, edge_type: str, layer: str = "L3", **kwargs) -> dict[str, Any]:
         """Create an edge in the shared graph."""
         return self.graph.create_edge(
-            from_node=from_node, to_node=to_node,
-            edge_type=edge_type, layer=layer, **kwargs,
+            from_node=from_node,
+            to_node=to_node,
+            edge_type=edge_type,
+            layer=layer,
+            **kwargs,
         )
 
     def stats(self) -> dict[str, Any]:

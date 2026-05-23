@@ -23,34 +23,25 @@ def check_can_write_layer(agent_name: str, layer: str) -> None:
 def check_can_update_edge(agent_name: str, edge_owner: str, edge_id: str) -> None:
     """Only the owning agent can update their own edges."""
     if agent_name != edge_owner:
-        raise PermissionDeniedError(
-            f"Agent '{agent_name}' cannot update edge '{edge_id}' owned by '{edge_owner}'. "
-            f"Use challenge/support edges instead."
-        )
+        raise PermissionDeniedError(f"Agent '{agent_name}' cannot update edge '{edge_id}' owned by '{edge_owner}'. Use challenge/support edges instead.")
 
 
 def check_can_delete_edge(agent_name: str, edge_owner: str, edge_id: str) -> None:
     """Only the owning agent can delete their own edges."""
     if agent_name != edge_owner:
-        raise PermissionDeniedError(
-            f"Agent '{agent_name}' cannot delete edge '{edge_id}' owned by '{edge_owner}'."
-        )
+        raise PermissionDeniedError(f"Agent '{agent_name}' cannot delete edge '{edge_id}' owned by '{edge_owner}'.")
 
 
 def check_can_challenge(agent_name: str, layer: str) -> None:
     """Any agent can challenge L3/L4 edges. L1/L2 cannot be challenged."""
     if layer in ("L1", "L2"):
-        raise PermissionDeniedError(
-            f"Cannot challenge {layer} edges. {layer} edges are shared and authoritative."
-        )
+        raise PermissionDeniedError(f"Cannot challenge {layer} edges. {layer} edges are shared and authoritative.")
 
 
 def check_can_support(agent_name: str, layer: str) -> None:
     """Any agent can support L3/L4 edges. L1/L2 cannot be supported."""
     if layer in ("L1", "L2"):
-        raise PermissionDeniedError(
-            f"Cannot support {layer} edges. {layer} edges are shared and authoritative."
-        )
+        raise PermissionDeniedError(f"Cannot support {layer} edges. {layer} edges are shared and authoritative.")
 
 
 def check_can_update_l2_node(agent_name: str, node_id: str, conn) -> None:
@@ -68,11 +59,7 @@ def check_can_update_l2_node(agent_name: str, node_id: str, conn) -> None:
         return  # New node — allowed
     node_type, owner = result
     if node_type == "source":
-        raise PermissionDeniedError(
-            f"Cannot update L2 source node '{node_id}'. "
-            f"Sources are immutable after creation. "
-            f"Create a new source node and link with DERIVES_FROM instead."
-        )
+        raise PermissionDeniedError(f"Cannot update L2 source node '{node_id}'. Sources are immutable after creation. Create a new source node and link with DERIVES_FROM instead.")
 
 
 def check_can_evolve_identity_edge(agent_name: str, edge_owner: str, edge_type: str) -> None:
@@ -86,15 +73,9 @@ def check_can_evolve_identity_edge(agent_name: str, edge_owner: str, edge_type: 
     IDENTITY_EDGE_TYPES = frozenset({"VALUES", "GOALS", "CAPABLE_OF", "INTERESTED_IN"})
 
     if edge_type not in IDENTITY_EDGE_TYPES:
-        raise PermissionDeniedError(
-            f"Cannot evolve non-identity edge type '{edge_type}'. "
-            f"Only VALUES, GOALS, CAPABLE_OF, INTERESTED_IN edges can be evolved."
-        )
+        raise PermissionDeniedError(f"Cannot evolve non-identity edge type '{edge_type}'. Only VALUES, GOALS, CAPABLE_OF, INTERESTED_IN edges can be evolved.")
     if agent_name != edge_owner:
-        raise PermissionDeniedError(
-            f"Agent '{agent_name}' cannot evolve identity edge owned by '{edge_owner}'. "
-            f"Only the owning agent can evolve their own identity edges."
-        )
+        raise PermissionDeniedError(f"Agent '{agent_name}' cannot evolve identity edge owned by '{edge_owner}'. Only the owning agent can evolve their own identity edges.")
 
 
 def get_edge_owner(conn, edge_id: str) -> str:

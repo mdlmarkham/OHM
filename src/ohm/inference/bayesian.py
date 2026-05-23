@@ -28,11 +28,10 @@ ADR-009: NEGATES edges have inverted probability semantics.
 """
 
 import logging
-import math
 from typing import Any
 
 from ohm.validation import validate_identifier
-from ohm.graph_reader import GraphReader, DuckDBGraphReader, coerce_reader, raw_conn
+from ohm.graph_reader import coerce_reader, raw_conn
 from ohm.semantic_roles import SemanticRoles
 
 _coerce_reader = coerce_reader
@@ -54,6 +53,7 @@ try:
     from pgmpy.models import DiscreteBayesianNetwork as BayesianNetwork
     from pgmpy.factors.discrete import TabularCPD
     from pgmpy.inference import VariableElimination
+
     PGMPY_AVAILABLE = True
 except ImportError:
     PGMPY_AVAILABLE = False
@@ -124,10 +124,7 @@ def _find_acyclic_subgraph(
             # Choose which edge to remove
             cycle_edges = [e for e in edge_cycle_count if e in set(edges_list)]
             # Never remove a preferred edge if a non-preferred alternative exists
-            candidates = (
-                [e for e in cycle_edges if e not in preferred_edges]
-                if preferred_edges else cycle_edges
-            ) or cycle_edges  # fall back to all cycle edges if all are preferred
+            candidates = ([e for e in cycle_edges if e not in preferred_edges] if preferred_edges else cycle_edges) or cycle_edges  # fall back to all cycle edges if all are preferred
             if edge_probabilities:
                 # Prefer removing the lowest-probability edge among candidates
                 worst = min(candidates, key=lambda e: edge_probabilities.get(e, 0.5))
@@ -241,13 +238,7 @@ def build_bayesian_network(
 
     # Fetch edges via reader (ADR-008: prob and conf are distinct; ADR-013: PERT)
     _edge_records = reader.get_edges(edge_types=edge_types, layers=layers)
-    rows = [
-        (e.from_node, e.to_node, e.edge_type,
-         e.probability, e.confidence,
-         e.probability_p05, e.probability_p50, e.probability_p95,
-         e.confidence_p05, e.confidence_p50, e.confidence_p95)
-        for e in _edge_records
-    ]
+    rows = [(e.from_node, e.to_node, e.edge_type, e.probability, e.confidence, e.probability_p05, e.probability_p50, e.probability_p95, e.confidence_p05, e.confidence_p50, e.confidence_p95) for e in _edge_records]
 
     if not rows:
         logger.info("No edges found — cannot build Bayesian network")
@@ -267,10 +258,7 @@ def build_bayesian_network(
     node_ids = set()
     seen_edges: dict[tuple[str, str], dict] = {}
     for row in rows:
-        (from_node, to_node, edge_type,
-         raw_probability, raw_confidence,
-         prob_p05, prob_p50, prob_p95,
-         conf_p05, conf_p50, conf_p95) = row
+        (from_node, to_node, edge_type, raw_probability, raw_confidence, prob_p05, prob_p50, prob_p95, conf_p05, conf_p50, conf_p95) = row
         node_ids.add(from_node)
         node_ids.add(to_node)
 
@@ -393,14 +381,12 @@ def build_bayesian_network(
     safe_names = {n: _safe_node_id(n) for n in node_ids}
 
     # Build pgmpy network edges — deduplicate and check for cycles
-    model_edge_tuples = list(dict.fromkeys(
-        (safe_names[e["from"]], safe_names[e["to"]]) for e in edges
-        if e["from"] in safe_names and e["to"] in safe_names
-    ))
+    model_edge_tuples = list(dict.fromkeys((safe_names[e["from"]], safe_names[e["to"]]) for e in edges if e["from"] in safe_names and e["to"] in safe_names))
 
     # Remove cycles to form valid DAG
     try:
         import networkx as nx  # type: ignore  # noqa: F401
+
         has_nx = True
     except ImportError:
         has_nx = False
@@ -415,9 +401,7 @@ def build_bayesian_network(
                 edge_prob_map[(sf, st)] = e.get("probability", default_probability)
         safe_preferred: set[tuple[str, str]] | None = None
         if preferred_edges:
-            safe_preferred = {
-                (_safe_node_id(a), _safe_node_id(b)) for a, b in preferred_edges
-            }
+            safe_preferred = {(_safe_node_id(a), _safe_node_id(b)) for a, b in preferred_edges}
         model_edge_tuples = _find_acyclic_subgraph(
             model_edge_tuples,
             edge_probabilities=edge_prob_map,
@@ -529,7 +513,7 @@ def build_bayesian_network(
         # them indistinguishable from moderate-confidence edges.
         leak = max(1e-6, min(0.5, leak))
 
-        n_configs = 2 ** n_parents
+        n_configs = 2**n_parents
         true_row = []  # P(child=1="good")
         false_row = []  # P(child=0="bad")
 
@@ -538,7 +522,7 @@ def build_bayesian_network(
             # Noisy-OR with leak: P(bad) = 1 - (1-leak) * Π(1 - p_i * I(parent=bad))
             # ADR-009: NEGATES edges invert the parent state check.
             survival = 1.0  # P(child survives = stays good)
-                # ADR-008: Use probability (effective probability per ADR-008) in CPT construction.
+            # ADR-008: Use probability (effective probability per ADR-008) in CPT construction.
             # This properly models that confidence modulates the causal strength.
             for i, e in enumerate(pedges):
                 parent_state = (config >> (n_parents - 1 - i)) & 1
@@ -550,13 +534,13 @@ def build_bayesian_network(
                     # When parent is "good" (1), the negation effect activates:
                     # the parent being good *reduces* the child's chance of being good.
                     if parent_state == 1:  # parent is "good" → negation activates
-                        survival *= (1 - edge_prob)
+                        survival *= 1 - edge_prob
                     # When parent is "bad" (0), negation doesn't activate → no effect
                 else:
                     # Standard CAUSES/DEPENDS_ON/THREATENS: parent in "bad" state
                     # propagates failure with probability edge_prob
                     if parent_state == 0:  # parent is "bad"
-                        survival *= (1 - edge_prob)
+                        survival *= 1 - edge_prob
                     # Parent in "good" state (1) means no failure from this parent
             # Apply leak: even when all parents are good, there's a baseline risk
             p_good = (1 - leak) * survival
@@ -569,8 +553,7 @@ def build_bayesian_network(
             cpd = TabularCPD(child_safe, 2, [[leak], [1 - leak]])
         else:
             # pgmpy expects row 0 = state 0 (bad), row 1 = state 1 (good)
-            cpd = TabularCPD(child_safe, 2, [false_row, true_row],
-                            evidence=parents, evidence_card=[2] * n_parents)
+            cpd = TabularCPD(child_safe, 2, [false_row, true_row], evidence=parents, evidence_card=[2] * n_parents)
         cpds.append(cpd)
 
     model.add_cpds(*cpds)
@@ -635,6 +618,7 @@ def bayesian_inference(
 
     if not PGMPY_AVAILABLE:
         from ohm.queries import query_cascade_scenario
+
         cascade = query_cascade_scenario(_raw_conn(conn), target, failure_probability=1.0)
         return {
             "method": "heuristic_cascade",
@@ -646,10 +630,7 @@ def bayesian_inference(
 
     # Build the Bayesian network scoped around target and evidence nodes
     scope_nodes = [target] + list(evidence.keys())
-    network = build_bayesian_network(reader, edge_types=edge_types,
-                                      layers=layers,
-                                      root_nodes=scope_nodes,
-                                      root_prior=root_prior)
+    network = build_bayesian_network(reader, edge_types=edge_types, layers=layers, root_nodes=scope_nodes, root_prior=root_prior)
 
     if network is None:
         return {
@@ -807,7 +788,8 @@ def causal_intervention(
     if query_nodes:
         scope_nodes.extend(query_nodes)
     network = build_bayesian_network(
-        reader, edge_types=edge_types,
+        reader,
+        edge_types=edge_types,
         layers=layers,
         root_nodes=scope_nodes,
         leak_probability=leak_probability,
@@ -917,14 +899,12 @@ def causal_intervention(
                 "pgmpy_available": True,
                 "target": target,
                 "intervention_state": intervention_state,
-                "error": (
-                    f"Query node(s) {missing_query_nodes} not in Bayesian network "
-                    f"(network has {network['n_nodes']} nodes: {network['nodes'][:10]}{'...' if len(network['nodes']) > 10 else ''})"
-                ),
+                "error": (f"Query node(s) {missing_query_nodes} not in Bayesian network (network has {network['n_nodes']} nodes: {network['nodes'][:10]}{'...' if len(network['nodes']) > 10 else ''})"),
                 "incoming_edges_severed": len(incoming_edges),
             }
         try:
             import networkx as nx
+
             descendants = nx.descendants(model_do, safe_target)
             # Only include nodes actually in the model
             safe_query_nodes = [v for v in descendants if v in model_nodes]
@@ -986,9 +966,7 @@ def causal_intervention(
                 if not safe_qn:
                     continue
                 try:
-                    obs_result = obs_infer.query(
-                        [safe_qn], evidence={safe_target: intervention_state}
-                    )
+                    obs_result = obs_infer.query([safe_qn], evidence={safe_target: intervention_state})
                     obs_bad = round(float(obs_result.values[0]), 4)
                     int_bad = post.get("bad", None)
                     if int_bad is not None:
@@ -1072,7 +1050,9 @@ def compute_ate(
     # avoids removing it (it prefers removing backward/feedback edges instead).
     _preferred = {(cause, effect)}
     do_bad = causal_intervention(
-        reader, cause, 0,
+        reader,
+        cause,
+        0,
         query_nodes=[effect],
         edge_types=edge_types,
         layers=layers,
@@ -1082,7 +1062,9 @@ def compute_ate(
         preferred_edges=_preferred,
     )
     do_good = causal_intervention(
-        reader, cause, 1,
+        reader,
+        cause,
+        1,
         query_nodes=[effect],
         edge_types=edge_types,
         layers=layers,
@@ -1101,11 +1083,7 @@ def compute_ate(
         if not error_msg:
             bad_keys = list(do_bad.get("posterior", {}).keys())
             good_keys = list(do_good.get("posterior", {}).keys())
-            error_msg = (
-                f"Effect node '{effect}' not found in intervention posteriors. "
-                f"do(bad) has keys {bad_keys}, do(good) has keys {good_keys}. "
-                f"The effect node may not be in the Bayesian network."
-            )
+            error_msg = f"Effect node '{effect}' not found in intervention posteriors. do(bad) has keys {bad_keys}, do(good) has keys {good_keys}. The effect node may not be in the Bayesian network."
         return {
             "method": "error",
             "cause": cause,
@@ -1118,12 +1096,10 @@ def compute_ate(
     # When ATE rounds to 0, check if cause actually has a directed path to effect.
     # If not, the zero is spurious (disconnected subgraphs) rather than a genuine
     # null effect — return a diagnostic error instead of a misleading ATE=0.
-    network_nodes = list(do_bad.get("network_info", {}).get("nodes", []) or [])
-    safe_cause = _safe_node_id(cause)
-    safe_effect = _safe_node_id(effect)
     if abs(ate) < 1e-6:
         try:
             import networkx as nx
+
             # Rebuild the scoped network to get the DAG — pass preferred_edges so
             # the cycle breaker uses the same DAG as the actual VE computation.
             _net = build_bayesian_network(
@@ -1152,11 +1128,7 @@ def compute_ate(
                         "method": "error",
                         "cause": cause,
                         "effect": effect,
-                        "error": (
-                            f"ATE cannot be computed: {'; '.join(missing)}. "
-                            f"Network has {_net['n_nodes']} nodes. "
-                            f"Check that both node IDs exist and have causal edges."
-                        ),
+                        "error": (f"ATE cannot be computed: {'; '.join(missing)}. Network has {_net['n_nodes']} nodes. Check that both node IDs exist and have causal edges."),
                         "network_nodes": _net.get("nodes", [])[:20],
                     }
                 _g = nx.DiGraph(_model.edges())
@@ -1166,12 +1138,7 @@ def compute_ate(
                             "method": "error",
                             "cause": cause,
                             "effect": effect,
-                            "error": (
-                                f"No directed path from '{cause}' to '{effect}' in the "
-                                f"Bayesian network ({_net['n_nodes']} nodes). "
-                                f"Both nodes are present but not causally connected — "
-                                f"add a CAUSES/DEPENDS_ON edge chain between them."
-                            ),
+                            "error": (f"No directed path from '{cause}' to '{effect}' in the Bayesian network ({_net['n_nodes']} nodes). Both nodes are present but not causally connected — add a CAUSES/DEPENDS_ON edge chain between them."),
                             "network_nodes": _net.get("nodes", [])[:20],
                         }
         except Exception:
@@ -1256,7 +1223,9 @@ def compute_sensitivity(
 
     # First compute ATE to get risk ratio
     ate_result = compute_ate(
-        reader, cause, effect,
+        reader,
+        cause,
+        effect,
         edge_types=edge_types,
         layers=layers,
         leak_probability=leak_probability,
@@ -1329,11 +1298,13 @@ def compute_sensitivity(
         else:
             adjusted_ate = round(ate, 4)
 
-        perturbation_results.append({
-            "confounder_strength": conf_strength,
-            "adjusted_ate": adjusted_ate,
-            "ate_zero": abs(adjusted_ate) < 1e-6,
-        })
+        perturbation_results.append(
+            {
+                "confounder_strength": conf_strength,
+                "adjusted_ate": adjusted_ate,
+                "ate_zero": abs(adjusted_ate) < 1e-6,
+            }
+        )
 
     # Find the confounder strength that overturns the result
     overturn_strength = None
@@ -1424,8 +1395,7 @@ def find_adjustment_sets(
             root_prior=root_prior,
         )
     except Exception as e:
-        return {"method": "none", "cause": cause, "effect": effect,
-                "error": f"Failed to build Bayesian network: {e}"}
+        return {"method": "none", "cause": cause, "effect": effect, "error": f"Failed to build Bayesian network: {e}"}
     if network is None:
         return {
             "method": "none",
@@ -1440,11 +1410,9 @@ def find_adjustment_sets(
 
     # Check if both nodes exist in the network
     if safe_cause not in bn.nodes():
-        return {"method": "none", "cause": cause, "effect": effect,
-                "error": f"Node {cause} not found in Bayesian network"}
+        return {"method": "none", "cause": cause, "effect": effect, "error": f"Node {cause} not found in Bayesian network"}
     if safe_effect not in bn.nodes():
-        return {"method": "none", "cause": cause, "effect": effect,
-                "error": f"Node {effect} not found in Bayesian network"}
+        return {"method": "none", "cause": cause, "effect": effect, "error": f"Node {effect} not found in Bayesian network"}
 
     # Use pgmpy's CausalInference to find adjustment sets
     from pgmpy.inference import CausalInference
@@ -1452,8 +1420,7 @@ def find_adjustment_sets(
     try:
         ci = CausalInference(bn)
     except Exception as e:
-        return {"method": "none", "cause": cause, "effect": effect,
-                "error": f"CausalInference init failed (CPD missing after subgraph pruning): {e}"}
+        return {"method": "none", "cause": cause, "effect": effect, "error": f"CausalInference init failed (CPD missing after subgraph pruning): {e}"}
     len(bn.nodes())
     result = {
         "method": "adjustment_sets",
@@ -1484,6 +1451,7 @@ def find_adjustment_sets(
     # This is O(V+E) rather than exponential
     try:
         import networkx as nx
+
         # Build the underlying graph from the BN
         nx.DiGraph(bn.edges())
         # If cause has no parents in the DAG, there are no backdoor paths
@@ -1625,11 +1593,7 @@ def suggest_causes(
 
     # Find all edges of candidate types with confidence set (respect layer scope)
     _cand_records = reader.get_edges(edge_types=candidate_types, layers=layers)
-    candidate_edges = [
-        (e.from_node, e.to_node, e.edge_type, e.confidence)
-        for e in _cand_records
-        if e.confidence is not None
-    ]
+    candidate_edges = [(e.from_node, e.to_node, e.edge_type, e.confidence) for e in _cand_records if e.confidence is not None]
     candidate_edges.sort(key=lambda r: r[3], reverse=True)
 
     # Find all existing CAUSES edges (scope to same layers to avoid cross-domain checks)
@@ -1647,14 +1611,16 @@ def suggest_causes(
             if layers and (from_node not in causal_nodes and to_node not in causal_nodes):
                 continue  # Neither endpoint is in the scoped causal graph
             reverse_exists = (to_node, from_node) in causes_edges
-            candidates.append({
-                "from": from_node,
-                "to": to_node,
-                "existing_edge_type": edge_type,
-                "confidence": float(confidence) if confidence else None,
-                "reverse_causes_exists": reverse_exists,
-                "suggestion": f"Consider adding CAUSES edge from {from_node} to {to_node} (currently: {edge_type})",
-            })
+            candidates.append(
+                {
+                    "from": from_node,
+                    "to": to_node,
+                    "existing_edge_type": edge_type,
+                    "confidence": float(confidence) if confidence else None,
+                    "reverse_causes_exists": reverse_exists,
+                    "suggestion": f"Consider adding CAUSES edge from {from_node} to {to_node} (currently: {edge_type})",
+                }
+            )
 
     # Find nodes with no causal parents but high centrality
     # These may have unmeasured causes (latent confounders)
@@ -1679,35 +1645,36 @@ def suggest_causes(
             scoped_node_ids.add(from_node)
             scoped_node_ids.add(to_node)
 
-    all_nodes = {
-        n.id: {"label": n.label, "type": n.type}
-        for n in reader.get_nodes(ids=list(scoped_node_ids) if scoped_node_ids else None)
-    }
+    all_nodes = {n.id: {"label": n.label, "type": n.type} for n in reader.get_nodes(ids=list(scoped_node_ids) if scoped_node_ids else None)}
 
     # Nodes with CAUSES children but no CAUSES parents = root cause candidates
     root_causes = []
     for node in node_set:
         if G.in_degree(node) == 0 and G.out_degree(node) > 0:
             node_info = all_nodes.get(node, {})
-            root_causes.append({
-                "id": node,
-                "label": node_info.get("label", node),
-                "type": node_info.get("type", "unknown"),
-                "out_degree": G.out_degree(node),
-                "suggestion": f"{node} is a root cause with {G.out_degree(node)} causal children — verify no unmeasured confounders",
-            })
+            root_causes.append(
+                {
+                    "id": node,
+                    "label": node_info.get("label", node),
+                    "type": node_info.get("type", "unknown"),
+                    "out_degree": G.out_degree(node),
+                    "suggestion": f"{node} is a root cause with {G.out_degree(node)} causal children — verify no unmeasured confounders",
+                }
+            )
 
     # Nodes not in any CAUSES edge = potentially missing causal structure
     # When layer-scoped, only include nodes in the scoped set
     disconnected = []
     for node_id, node_info in all_nodes.items():
         if node_id not in node_set:
-            disconnected.append({
-                "id": node_id,
-                "label": node_info.get("label", node_id),
-                "type": node_info.get("type", "unknown"),
-                "suggestion": f"{node_id} has no CAUSES edges — consider adding causal relationships",
-            })
+            disconnected.append(
+                {
+                    "id": node_id,
+                    "label": node_info.get("label", node_id),
+                    "type": node_info.get("type", "unknown"),
+                    "suggestion": f"{node_id} has no CAUSES edges — consider adding causal relationships",
+                }
+            )
 
     return {
         "method": "suggest_causes",
@@ -1719,10 +1686,7 @@ def suggest_causes(
         "n_disconnected": len(disconnected),
         "causal_edge_count": len(causes_edges),
         "interpretation": (
-            f"Found {len(candidates)} candidate CAUSES relationships from non-causal edges. "
-            f"{len(root_causes)} root cause nodes and {len(disconnected)} nodes disconnected "
-            f"from the causal graph. Review candidates and add CAUSES edges where "
-            f"appropriate."
+            f"Found {len(candidates)} candidate CAUSES relationships from non-causal edges. {len(root_causes)} root cause nodes and {len(disconnected)} nodes disconnected from the causal graph. Review candidates and add CAUSES edges where appropriate."
         ),
     }
 
@@ -1798,10 +1762,7 @@ def compute_voi(
     # Find decision nodes if not specified
     if decision_nodes is None:
         _dec_nodes = reader.get_nodes(node_type="decision")
-        decision_nodes = [
-            n.id for n in _dec_nodes
-            if n.utility_scale is None or n.utility_scale > 0
-        ]
+        decision_nodes = [n.id for n in _dec_nodes if n.utility_scale is None or n.utility_scale > 0]
 
     if not decision_nodes:
         return {
@@ -1816,12 +1777,7 @@ def compute_voi(
 
     # Get all CAUSES/INFLUENCES/ENABLES edges for causal traversal
     _edge_records = reader.get_edges(edge_types=edge_types, layers=layers)
-    edges = [
-        (e.from_node, e.to_node, e.confidence, e.probability,
-         e.probability_p05, e.probability_p50, e.probability_p95,
-         e.confidence_p05, e.confidence_p50, e.confidence_p95)
-        for e in _edge_records
-    ]
+    edges = [(e.from_node, e.to_node, e.confidence, e.probability, e.probability_p05, e.probability_p50, e.probability_p95, e.confidence_p05, e.confidence_p50, e.confidence_p95) for e in _edge_records]
 
     # Build adjacency maps with clear naming:
     # forward_adj: cause → effects (parent → children)
@@ -1907,10 +1863,7 @@ def compute_voi(
 
     # Get node labels and confidence for each candidate
     _cand_node_records = reader.get_nodes(ids=list(candidate_nodes))
-    node_info = {
-        n.id: {"label": n.label, "confidence": n.confidence if n.confidence is not None else 0.5}
-        for n in _cand_node_records
-    }
+    node_info = {n.id: {"label": n.label, "confidence": n.confidence if n.confidence is not None else 0.5} for n in _cand_node_records}
 
     # Fetch decision-node utility: USD value takes precedence over dimensionless utility_scale.
     _dec_node_records = reader.get_nodes(ids=list(decision_nodes))
@@ -1924,10 +1877,7 @@ def compute_voi(
     }
 
     # Determine VoI units from decision nodes.
-    _usd_count = sum(
-        1 for d in decision_nodes
-        if decision_utility.get(d, {}).get("utility_usd_per_day") is not None
-    )
+    _usd_count = sum(1 for d in decision_nodes if decision_utility.get(d, {}).get("utility_usd_per_day") is not None)
     if _usd_count == len(decision_nodes):
         voi_units = "usd"
     elif _usd_count == 0:
@@ -1936,14 +1886,12 @@ def compute_voi(
         voi_units = "mixed"
 
     # Get observation counts for each candidate (proxy for information quality)
-    obs_counts: dict[str, int] = {
-        node_id: len(reader.get_observations(node_id))
-        for node_id in candidate_nodes
-    }
+    obs_counts: dict[str, int] = {node_id: len(reader.get_observations(node_id)) for node_id in candidate_nodes}
 
     # Compute VoI for each candidate node
     # Track whether we used ATE or path-confidence fallback for each ranking
     import time as _time
+
     _deadline = (_time.monotonic() + timeout) if timeout else None
     rankings = []
     for node_id in candidate_nodes:
@@ -1963,9 +1911,7 @@ def compute_voi(
         node_uncertainties = []
         for decision in decision_nodes:
             if node_id in all_ancestors.get(decision, set()):
-                path_variance = _max_edge_pert_variance_toward(
-                    node_id, decision, forward_adj, edge_pert_variance
-                )
+                path_variance = _max_edge_pert_variance_toward(node_id, decision, forward_adj, edge_pert_variance)
                 if path_variance is not None:
                     node_uncertainties.append(path_variance)
                 else:
@@ -1995,7 +1941,9 @@ def compute_voi(
                     ate_result = {"method": "timeout_fallback"}
                 else:
                     ate_result = compute_ate(
-                        reader, node_id, decision,
+                        reader,
+                        node_id,
+                        decision,
                         edge_types=edge_types,
                         layers=layers,
                         leak_probability=leak_probability,
@@ -2023,22 +1971,21 @@ def compute_voi(
 
         obs_count = obs_counts.get(node_id, 0)
         low_data = min_observations > 0 and obs_count < min_observations
-        rankings.append({
-            "node_id": node_id,
-            "label": info["label"],
-            "voi_score": round(voi_score, 4),
-            "uncertainty": round(uncertainty, 4),
-            "sensitivity": round(sensitivity, 4),
-            "sensitivity_method": sensitivity_method,
-            "confidence": round(confidence, 4),
-            "observation_count": obs_count,
-            "downstream_decisions": downstream_decisions,
-            "n_downstream_decisions": len(downstream_decisions),
-            **({"low_data_warning": True, "low_data_note": (
-                f"Only {obs_count} observation(s) — VoI estimate unreliable "
-                f"(min_observations={min_observations})"
-            )} if low_data else {}),
-        })
+        rankings.append(
+            {
+                "node_id": node_id,
+                "label": info["label"],
+                "voi_score": round(voi_score, 4),
+                "uncertainty": round(uncertainty, 4),
+                "sensitivity": round(sensitivity, 4),
+                "sensitivity_method": sensitivity_method,
+                "confidence": round(confidence, 4),
+                "observation_count": obs_count,
+                "downstream_decisions": downstream_decisions,
+                "n_downstream_decisions": len(downstream_decisions),
+                **({"low_data_warning": True, "low_data_note": (f"Only {obs_count} observation(s) — VoI estimate unreliable (min_observations={min_observations})")} if low_data else {}),
+            }
+        )
 
     # Sort by VoI score descending
     rankings.sort(key=lambda r: r["voi_score"], reverse=True)
@@ -2056,12 +2003,19 @@ def compute_voi(
         "n_candidates": len(candidate_nodes),
         "units": voi_units,
         "sensitivity_methods_used": sorted(methods_used),
-        **({"mixed_sensitivity_methods": True, "mixed_methods_note": (
-            "Rankings mix ATE (causal effect size, ~0.02-0.12) and "
-            "path_confidence (edge confidence product, ~0.3-0.5) — "
-            "values are not directly comparable. Check sensitivity_method "
-            "per entry. Add more CAUSES edges or increase timeout for full ATE coverage."
-        )} if mixed else {"mixed_sensitivity_methods": False}),
+        **(
+            {
+                "mixed_sensitivity_methods": True,
+                "mixed_methods_note": (
+                    "Rankings mix ATE (causal effect size, ~0.02-0.12) and "
+                    "path_confidence (edge confidence product, ~0.3-0.5) — "
+                    "values are not directly comparable. Check sensitivity_method "
+                    "per entry. Add more CAUSES edges or increase timeout for full ATE coverage."
+                ),
+            }
+            if mixed
+            else {"mixed_sensitivity_methods": False}
+        ),
     }
 
 
@@ -2119,15 +2073,14 @@ def generate_voi_tasks(
             "message": voi_result.get("message", "No VoI rankings available."),
         }
 
-    import json as _json
-
     # Step 2: Get agent expertise profile (if agent specified)
     agent_tags: set[str] = set()
-    agent_capable_types: set[str] = set()   # node types the agent can handle
-    agent_capable_nodes: set[str] = set()   # specific nodes agent is CAPABLE_OF
-    agent_workload: int = 0                 # open tasks already assigned to agent
+    agent_capable_types: set[str] = set()  # node types the agent can handle
+    agent_capable_nodes: set[str] = set()  # specific nodes agent is CAPABLE_OF
+    agent_workload: int = 0  # open tasks already assigned to agent
     if agent:
         from .validation import validate_identifier
+
         safe_agent = validate_identifier(agent, name="agent")
 
         # Capability edges: CAPABLE_OF targets contribute both as tags and as
@@ -2230,25 +2183,27 @@ def generate_voi_tasks(
         else:
             suggested_research = f"Refine understanding of {label}: confidence={confidence:.2f}"
 
-        tasks.append({
-            "node_id": node_id,
-            "label": label,
-            "voi_score": voi_score,
-            "gap_score": round(gap_score, 4),
-            "final_score": round(final_score, 4),
-            "uncertainty": uncertainty,
-            "sensitivity": sensitivity,
-            "confidence": confidence,
-            "observation_count": obs_count,
-            "downstream_decisions": downstream,
-            "n_downstream_decisions": len(downstream),
-            "matched_tags": matched_tags,
-            "tag_overlap": round(tag_overlap, 4),
-            "capability_score": round(capability_score, 4),
-            "type_match": type_match,
-            "agent_workload": agent_workload if agent else None,
-            "suggested_research": suggested_research,
-        })
+        tasks.append(
+            {
+                "node_id": node_id,
+                "label": label,
+                "voi_score": voi_score,
+                "gap_score": round(gap_score, 4),
+                "final_score": round(final_score, 4),
+                "uncertainty": uncertainty,
+                "sensitivity": sensitivity,
+                "confidence": confidence,
+                "observation_count": obs_count,
+                "downstream_decisions": downstream,
+                "n_downstream_decisions": len(downstream),
+                "matched_tags": matched_tags,
+                "tag_overlap": round(tag_overlap, 4),
+                "capability_score": round(capability_score, 4),
+                "type_match": type_match,
+                "agent_workload": agent_workload if agent else None,
+                "suggested_research": suggested_research,
+            }
+        )
 
     # Sort by final_score descending (highest value + capability + availability first)
     tasks.sort(key=lambda t: t["final_score"], reverse=True)
@@ -2499,8 +2454,7 @@ class BayesianContext:
                 "error": str(e),
             }
 
-    def intervention(self, target: str, intervention_state: int,
-                     *, query_nodes: list[str] | None = None) -> dict[str, Any]:
+    def intervention(self, target: str, intervention_state: int, *, query_nodes: list[str] | None = None) -> dict[str, Any]:
         """Run causal intervention reusing the cached network.
 
         Args:
@@ -2566,8 +2520,8 @@ class BayesianContext:
         # Copy over all other CPTs (unchanged by graph surgery)
         for cpd in model.get_cpds():
             if cpd.variable != safe_target:
-                cpd_evidence = getattr(cpd, 'evidence', None)
-                getattr(cpd, 'evidence_card', None)
+                cpd_evidence = getattr(cpd, "evidence", None)
+                getattr(cpd, "evidence_card", None)
                 if cpd_evidence:
                     removed_parents = set(e[0] for e in incoming_edges)
                     still_valid = [v for v in cpd_evidence if v not in removed_parents]
@@ -2576,8 +2530,7 @@ class BayesianContext:
                             n_states = cpd.variable_card
                             values = cpd.get_values()
                             marginal = values.mean(axis=1)
-                            new_cpd = _TabularCPD(cpd.variable, n_states,
-                                                 [[marginal[s]] for s in range(n_states)])
+                            new_cpd = _TabularCPD(cpd.variable, n_states, [[marginal[s]] for s in range(n_states)])
                             new_cpds.append(new_cpd)
                         else:
                             logger.warning(f"Cannot marginalize partially-removed parents for {cpd.variable}")
@@ -2620,14 +2573,12 @@ class BayesianContext:
                     "pgmpy_available": True,
                     "target": target,
                     "intervention_state": intervention_state,
-                    "error": (
-                        f"Query node(s) {missing_query_nodes} not in Bayesian network "
-                        f"(network has {network['n_nodes']} nodes)"
-                    ),
+                    "error": (f"Query node(s) {missing_query_nodes} not in Bayesian network (network has {network['n_nodes']} nodes)"),
                     "incoming_edges_severed": len(incoming_edges),
                 }
             try:
                 import networkx as nx
+
                 descendants = nx.descendants(model_do, safe_target)
                 safe_query_nodes = list(descendants)
             except Exception:
@@ -2701,9 +2652,7 @@ class BayesianContext:
                         if not safe_qn:
                             continue
                         try:
-                            obs_result = obs_infer.query(
-                                [safe_qn], evidence={safe_target: intervention_state}
-                            )
+                            obs_result = obs_infer.query([safe_qn], evidence={safe_target: intervention_state})
                             obs_bad = round(float(obs_result.values[0]), 4)
                             int_bad = post.get("bad", None)
                             if int_bad is not None:
@@ -2778,11 +2727,7 @@ class BayesianContext:
             if not error_msg:
                 bad_keys = list(do_bad.get("posterior", {}).keys())
                 good_keys = list(do_good.get("posterior", {}).keys())
-                error_msg = (
-                    f"Effect node '{effect}' not found in intervention posteriors. "
-                    f"do(bad) has keys {bad_keys}, do(good) has keys {good_keys}. "
-                    f"The effect node may not be in the Bayesian network."
-                )
+                error_msg = f"Effect node '{effect}' not found in intervention posteriors. do(bad) has keys {bad_keys}, do(good) has keys {good_keys}. The effect node may not be in the Bayesian network."
             return {
                 "method": "error",
                 "cause": cause,
@@ -2907,11 +2852,13 @@ class BayesianContext:
             else:
                 adjusted_ate = round(ate, 4)
 
-            perturbation_results.append({
-                "confounder_strength": conf_strength,
-                "adjusted_ate": adjusted_ate,
-                "ate_zero": abs(adjusted_ate) < 1e-6,
-            })
+            perturbation_results.append(
+                {
+                    "confounder_strength": conf_strength,
+                    "adjusted_ate": adjusted_ate,
+                    "ate_zero": abs(adjusted_ate) < 1e-6,
+                }
+            )
 
         overturn_strength = None
         for pr in perturbation_results:
@@ -2940,8 +2887,7 @@ class BayesianContext:
             },
         }
 
-    def adjustment_sets(self, cause: str, effect: str,
-                        *, max_network_size: int = 10) -> dict[str, Any]:
+    def adjustment_sets(self, cause: str, effect: str, *, max_network_size: int = 10) -> dict[str, Any]:
         """Find valid backdoor/frontdoor adjustment sets reusing the cached network.
 
         Args:
@@ -2953,7 +2899,9 @@ class BayesianContext:
             Dict with adjustment sets and network info.
         """
         return find_adjustment_sets(
-            self._conn, cause, effect,
+            self._conn,
+            cause,
+            effect,
             edge_types=self._edge_types,
             layers=self._layers,
             leak_probability=self._leak_probability,

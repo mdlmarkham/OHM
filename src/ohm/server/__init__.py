@@ -1,4 +1,5 @@
 """OHM server layer — HTTP daemon, boundary enforcement, contracts, visualization."""
+
 import sys
 import types
 
@@ -27,10 +28,19 @@ class _ServerPackage(types.ModuleType):
             raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
     def __setattr__(self, name: str, value) -> None:
-        _INTERNAL = frozenset({
-            "__spec__", "__loader__", "__package__", "__path__",
-            "__file__", "__cached__", "__builtins__", "__doc__", "__name__",
-        })
+        _INTERNAL = frozenset(
+            {
+                "__spec__",
+                "__loader__",
+                "__package__",
+                "__path__",
+                "__file__",
+                "__cached__",
+                "__builtins__",
+                "__doc__",
+                "__name__",
+            }
+        )
         if name in _INTERNAL:
             super().__setattr__(name, value)
         else:

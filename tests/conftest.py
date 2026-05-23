@@ -159,10 +159,7 @@ def create_sample_edge(
                                confidence_p05, confidence_p50, confidence_p95)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        [edge_id, from_node, to_node, layer, edge_type,
-         created_by, confidence, challenge_of, challenge_type,
-         probability, probability_p05, probability_p50, probability_p95,
-         confidence_p05, confidence_p50, confidence_p95],
+        [edge_id, from_node, to_node, layer, edge_type, created_by, confidence, challenge_of, challenge_type, probability, probability_p05, probability_p50, probability_p95, confidence_p05, confidence_p50, confidence_p95],
     )
     return edge_id
 
@@ -241,58 +238,60 @@ def create_sample_graph(conn: "duckdb.DuckDBPyConnection", size: str = "small") 
         nodes["a"] = create_sample_node(conn, label="Node A")
         nodes["b"] = create_sample_node(conn, label="Node B")
         nodes["c"] = create_sample_node(conn, label="Node C")
-        edges["ab"] = create_sample_edge(conn, from_node=nodes["a"], to_node=nodes["b"],
-                                          edge_type="CAUSES", layer="L3")
-        edges["bc"] = create_sample_edge(conn, from_node=nodes["b"], to_node=nodes["c"],
-                                          edge_type="INFLUENCES", layer="L2")
+        edges["ab"] = create_sample_edge(conn, from_node=nodes["a"], to_node=nodes["b"], edge_type="CAUSES", layer="L3")
+        edges["bc"] = create_sample_edge(conn, from_node=nodes["b"], to_node=nodes["c"], edge_type="INFLUENCES", layer="L2")
 
     elif size == "medium":
         for name in ["A", "B", "C", "D", "E", "F"]:
             nodes[name] = create_sample_node(conn, label=f"Node {name}")
-        edges["ab"] = create_sample_edge(conn, from_node=nodes["A"], to_node=nodes["B"],
-                                          edge_type="CAUSES", layer="L3")
-        edges["bc"] = create_sample_edge(conn, from_node=nodes["B"], to_node=nodes["C"],
-                                          edge_type="CAUSES", layer="L3")
-        edges["bd"] = create_sample_edge(conn, from_node=nodes["B"], to_node=nodes["D"],
-                                          edge_type="INFLUENCES", layer="L2")
-        edges["ce"] = create_sample_edge(conn, from_node=nodes["C"], to_node=nodes["E"],
-                                          edge_type="PREDICTS", layer="L3")
-        edges["cf"] = create_sample_edge(conn, from_node=nodes["C"], to_node=nodes["F"],
-                                          edge_type="DERIVES_FROM", layer="L2")
-        edges["de"] = create_sample_edge(conn, from_node=nodes["D"], to_node=nodes["E"],
-                                          edge_type="REFERENCES", layer="L2")
+        edges["ab"] = create_sample_edge(conn, from_node=nodes["A"], to_node=nodes["B"], edge_type="CAUSES", layer="L3")
+        edges["bc"] = create_sample_edge(conn, from_node=nodes["B"], to_node=nodes["C"], edge_type="CAUSES", layer="L3")
+        edges["bd"] = create_sample_edge(conn, from_node=nodes["B"], to_node=nodes["D"], edge_type="INFLUENCES", layer="L2")
+        edges["ce"] = create_sample_edge(conn, from_node=nodes["C"], to_node=nodes["E"], edge_type="PREDICTS", layer="L3")
+        edges["cf"] = create_sample_edge(conn, from_node=nodes["C"], to_node=nodes["F"], edge_type="DERIVES_FROM", layer="L2")
+        edges["de"] = create_sample_edge(conn, from_node=nodes["D"], to_node=nodes["E"], edge_type="REFERENCES", layer="L2")
         edges["challenge"] = create_sample_edge(
-            conn, from_node=nodes["F"], to_node=nodes["B"],
-            edge_type="CHALLENGED_BY", layer="L3",
-            challenge_of=edges["ab"], challenge_type="CHALLENGED_BY",
-            created_by="critic_agent", confidence=0.4,
+            conn,
+            from_node=nodes["F"],
+            to_node=nodes["B"],
+            edge_type="CHALLENGED_BY",
+            layer="L3",
+            challenge_of=edges["ab"],
+            challenge_type="CHALLENGED_BY",
+            created_by="critic_agent",
+            confidence=0.4,
         )
         edges["support"] = create_sample_edge(
-            conn, from_node=nodes["E"], to_node=nodes["B"],
-            edge_type="SUPPORTS", layer="L3",
-            challenge_of=edges["ab"], challenge_type="SUPPORTS",
-            created_by="supporter_agent", confidence=0.8,
+            conn,
+            from_node=nodes["E"],
+            to_node=nodes["B"],
+            edge_type="SUPPORTS",
+            layer="L3",
+            challenge_of=edges["ab"],
+            challenge_type="SUPPORTS",
+            created_by="supporter_agent",
+            confidence=0.8,
         )
 
     else:  # large
         import string
+
         for i, name in enumerate(string.ascii_uppercase[:10]):
             nodes[name] = create_sample_node(conn, label=f"Node {name}")
         # Chain: A→B→C→D→E→F→G→H→I→J
         for i in range(9):
             keys = list(string.ascii_uppercase[:10])
             edges[f"chain_{i}"] = create_sample_edge(
-                conn, from_node=nodes[keys[i]], to_node=nodes[keys[i + 1]],
-                edge_type="CAUSES", layer="L3",
+                conn,
+                from_node=nodes[keys[i]],
+                to_node=nodes[keys[i + 1]],
+                edge_type="CAUSES",
+                layer="L3",
             )
         # Cross edges: A→C, B→E, D→F, G→J
-        edges["cross_1"] = create_sample_edge(conn, from_node=nodes["A"], to_node=nodes["C"],
-                                               edge_type="INFLUENCES", layer="L2")
-        edges["cross_2"] = create_sample_edge(conn, from_node=nodes["B"], to_node=nodes["E"],
-                                               edge_type="REFERENCES", layer="L2")
-        edges["cross_3"] = create_sample_edge(conn, from_node=nodes["D"], to_node=nodes["F"],
-                                               edge_type="DERIVES_FROM", layer="L2")
-        edges["cross_4"] = create_sample_edge(conn, from_node=nodes["G"], to_node=nodes["J"],
-                                               edge_type="PREDICTS", layer="L3")
+        edges["cross_1"] = create_sample_edge(conn, from_node=nodes["A"], to_node=nodes["C"], edge_type="INFLUENCES", layer="L2")
+        edges["cross_2"] = create_sample_edge(conn, from_node=nodes["B"], to_node=nodes["E"], edge_type="REFERENCES", layer="L2")
+        edges["cross_3"] = create_sample_edge(conn, from_node=nodes["D"], to_node=nodes["F"], edge_type="DERIVES_FROM", layer="L2")
+        edges["cross_4"] = create_sample_edge(conn, from_node=nodes["G"], to_node=nodes["J"], edge_type="PREDICTS", layer="L3")
 
     return {"nodes": nodes, "edges": edges}

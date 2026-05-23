@@ -93,6 +93,7 @@ class TestPathQuery:
 
         # Create an isolated node
         from tests.conftest import create_sample_node
+
         isolated = create_sample_node(test_db, label="Isolated")
 
         results = query_path(test_db, sample_graph_small["nodes"]["a"], isolated, max_depth=5)
@@ -235,8 +236,7 @@ class TestChangeFeedQuery:
         tgt = create_node(test_db, label="Target Idea", node_type="idea", created_by="agent_a")
 
         # Create an edge between them
-        create_edge(test_db, from_node=src["id"], to_node=tgt["id"],
-                     edge_type="CAUSES", layer="L3", created_by="agent_a")
+        create_edge(test_db, from_node=src["id"], to_node=tgt["id"], edge_type="CAUSES", layer="L3", created_by="agent_a")
 
         # Filter by concept — should include the concept node
         concept_changes = query_change_feed(test_db, node_type="concept", limit=100)
@@ -275,8 +275,7 @@ class TestChangeFeedQuery:
         # Create two nodes and connect them
         node_a = create_node(test_db, label="Node A", node_type="concept", created_by="agent_a")
         node_b = create_node(test_db, label="Node B", node_type="concept", created_by="agent_a")
-        edge = create_edge(test_db, from_node=node_a["id"], to_node=node_b["id"],
-                           edge_type="CAUSES", layer="L3", created_by="agent_a")
+        edge = create_edge(test_db, from_node=node_a["id"], to_node=node_b["id"], edge_type="CAUSES", layer="L3", created_by="agent_a")
 
         # Filter by node_a's id — should include the edge too (touches node_a)
         node_a_changes = query_change_feed(test_db, node_id=node_a["id"], limit=100)
@@ -309,7 +308,10 @@ class TestDiffQuery:
         from ohm.queries import query_diff
 
         result = query_diff(
-            test_db, "2020-01-01T00:00:00", "2030-01-01T00:00:00", layer="L3",
+            test_db,
+            "2020-01-01T00:00:00",
+            "2030-01-01T00:00:00",
+            layer="L3",
         )
         for edge in result["edges_added"]:
             assert edge["layer"] == "L3"
@@ -319,7 +321,9 @@ class TestDiffQuery:
         from ohm.queries import query_diff
 
         result = query_diff(
-            test_db, "2020-01-01T00:00:00", "2030-01-01T00:00:00",
+            test_db,
+            "2020-01-01T00:00:00",
+            "2030-01-01T00:00:00",
             agent_name="test_agent",
         )
         for node in result["nodes_added"]:
@@ -413,8 +417,7 @@ class TestDecayQuery:
                 created_at)
                VALUES (?, ?, ?, 'L4', 'CAUSES', 'test_agent', 0.8,
                        ?::TIMESTAMP - INTERVAL '40 days')""",
-            [f"old_l4_{uuid.uuid4().hex[:6]}", node_a, node_b,
-             datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")],
+            [f"old_l4_{uuid.uuid4().hex[:6]}", node_a, node_b, datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")],
         )
 
         # With 30-day half-life, 0.8 confidence decays to 0.8 * 0.5^(40/30) ≈ 0.4
@@ -433,8 +436,7 @@ class TestDecayQuery:
                 created_at)
                VALUES (?, ?, ?, 'L1', 'CITATION', 'test_agent', 0.8,
                        ?::TIMESTAMP - INTERVAL '1000 days')""",
-            [f"old_l1_{uuid.uuid4().hex[:6]}", node_a, node_b,
-             datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")],
+            [f"old_l1_{uuid.uuid4().hex[:6]}", node_a, node_b, datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")],
         )
 
         stale = query_stale_edges(test_db, stale_threshold=0.5)
@@ -453,8 +455,7 @@ class TestDecayQuery:
                 created_at)
                VALUES (?, ?, ?, 'L4', 'CAUSES', 'test_agent', 0.8,
                        ?::TIMESTAMP - INTERVAL '40 days')""",
-            [edge_id, node_a, node_b,
-             datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")],
+            [edge_id, node_a, node_b, datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")],
         )
 
         result = apply_confidence_decay(test_db, stale_threshold=0.5, dry_run=True)
@@ -464,9 +465,7 @@ class TestDecayQuery:
         assert len(result["decayed"]) >= 1
 
         # Verify original confidence unchanged (use approximate comparison)
-        row = test_db.execute(
-            "SELECT confidence FROM ohm_edges WHERE id = ?", [edge_id]
-        ).fetchone()
+        row = test_db.execute("SELECT confidence FROM ohm_edges WHERE id = ?", [edge_id]).fetchone()
         assert abs(row[0] - 0.8) < 0.0001
 
     def test_apply_decay_updates_confidence(self, test_db, sample_graph_small):
@@ -482,8 +481,7 @@ class TestDecayQuery:
                 created_at)
                VALUES (?, ?, ?, 'L4', 'CAUSES', 'test_agent', 0.8,
                        ?::TIMESTAMP - INTERVAL '40 days')""",
-            [edge_id, node_a, node_b,
-             datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")],
+            [edge_id, node_a, node_b, datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")],
         )
 
         result = apply_confidence_decay(test_db, stale_threshold=0.5, dry_run=False)
@@ -491,9 +489,7 @@ class TestDecayQuery:
         assert result["updated"] >= 1
 
         # Verify confidence was updated
-        row = test_db.execute(
-            "SELECT confidence FROM ohm_edges WHERE id = ?", [edge_id]
-        ).fetchone()
+        row = test_db.execute("SELECT confidence FROM ohm_edges WHERE id = ?", [edge_id]).fetchone()
         assert row[0] < 0.8  # Should be decayed
 
     def test_apply_decay_layer_filter(self, test_db, sample_graph_small):
@@ -588,17 +584,11 @@ class TestProbabilityCascade:
         retailer = create_node(test_db, label="Retailer", node_type="system", created_by="test_agent")
 
         # Supplier → Factory at 20% disruption probability
-        create_edge(test_db, from_node=supplier["id"], to_node=factory["id"],
-                     layer="L3", edge_type="EXPECTED_LIKELIHOOD",
-                     created_by="test_agent", confidence=0.8, probability=0.2)
+        create_edge(test_db, from_node=supplier["id"], to_node=factory["id"], layer="L3", edge_type="EXPECTED_LIKELIHOOD", created_by="test_agent", confidence=0.8, probability=0.2)
         # Factory → Distributor at 50% pass-through
-        create_edge(test_db, from_node=factory["id"], to_node=distributor["id"],
-                     layer="L3", edge_type="CAUSES",
-                     created_by="test_agent", confidence=0.5)
+        create_edge(test_db, from_node=factory["id"], to_node=distributor["id"], layer="L3", edge_type="CAUSES", created_by="test_agent", confidence=0.5)
         # Distributor → Retailer at 80% pass-through (DEPENDS_ON is L4)
-        create_edge(test_db, from_node=distributor["id"], to_node=retailer["id"],
-                     layer="L4", edge_type="DEPENDS_ON",
-                     created_by="test_agent", confidence=0.8)
+        create_edge(test_db, from_node=distributor["id"], to_node=retailer["id"], layer="L4", edge_type="DEPENDS_ON", created_by="test_agent", confidence=0.8)
 
         # Start cascade from supplier with 100% failure
         results = query_deterministic_cascade(test_db, supplier["id"], failure_probability=1.0)
@@ -623,9 +613,7 @@ class TestProbabilityCascade:
         b = create_node(test_db, label="B", node_type="concept", created_by="test_agent")
 
         # Edge with confidence=0.6 but no probability
-        create_edge(test_db, from_node=a["id"], to_node=b["id"],
-                     layer="L3", edge_type="CAUSES",
-                     created_by="test_agent", confidence=0.6)
+        create_edge(test_db, from_node=a["id"], to_node=b["id"], layer="L3", edge_type="CAUSES", created_by="test_agent", confidence=0.6)
 
         results = query_deterministic_cascade(test_db, a["id"], failure_probability=1.0)
 
@@ -643,9 +631,7 @@ class TestProbabilityCascade:
             nodes.append(n)
 
         for i in range(4):
-            create_edge(test_db, from_node=nodes[i]["id"], to_node=nodes[i + 1]["id"],
-                         layer="L3", edge_type="CAUSES",
-                         created_by="test_agent", confidence=0.5)
+            create_edge(test_db, from_node=nodes[i]["id"], to_node=nodes[i + 1]["id"], layer="L3", edge_type="CAUSES", created_by="test_agent", confidence=0.5)
 
         # With max_depth=2, should only reach 2 hops
         results = query_deterministic_cascade(test_db, nodes[0]["id"], failure_probability=1.0, max_depth=2)
@@ -671,13 +657,9 @@ class TestProbabilityCascade:
         factory = create_node(test_db, label="Factory", node_type="system", created_by="test_agent")
         distributor = create_node(test_db, label="Distributor", node_type="system", created_by="test_agent")
 
-        edge = create_edge(test_db, from_node=supplier["id"], to_node=factory["id"],
-                            layer="L3", edge_type="EXPECTED_LIKELIHOOD",
-                            created_by="test_agent", confidence=0.8, probability=0.3)
+        edge = create_edge(test_db, from_node=supplier["id"], to_node=factory["id"], layer="L3", edge_type="EXPECTED_LIKELIHOOD", created_by="test_agent", confidence=0.8, probability=0.3)
 
-        create_edge(test_db, from_node=factory["id"], to_node=distributor["id"],
-                     layer="L3", edge_type="CAUSES",
-                     created_by="test_agent", confidence=0.5)
+        create_edge(test_db, from_node=factory["id"], to_node=distributor["id"], layer="L3", edge_type="CAUSES", created_by="test_agent", confidence=0.5)
 
         result = query_what_if(test_db, edge["id"])
 
@@ -702,12 +684,8 @@ class TestProbabilityCascade:
         b = create_node(test_db, label="B", node_type="concept", created_by="test_agent")
         c = create_node(test_db, label="C", node_type="concept", created_by="test_agent")
 
-        create_edge(test_db, from_node=a["id"], to_node=b["id"],
-                     layer="L3", edge_type="CAUSES",
-                     created_by="test_agent", confidence=0.5)
-        create_edge(test_db, from_node=b["id"], to_node=c["id"],
-                     layer="L3", edge_type="CAUSES",
-                     created_by="test_agent", confidence=0.5)
+        create_edge(test_db, from_node=a["id"], to_node=b["id"], layer="L3", edge_type="CAUSES", created_by="test_agent", confidence=0.5)
+        create_edge(test_db, from_node=b["id"], to_node=c["id"], layer="L3", edge_type="CAUSES", created_by="test_agent", confidence=0.5)
 
         results = query_deterministic_cascade(test_db, a["id"], failure_probability=1.0)
 
@@ -726,9 +704,12 @@ class TestProbabilityCascade:
         factory = g.create_node("Factory Y", node_type="system")
 
         g.create_edge(
-            from_node=supplier["id"], to_node=factory["id"],
-            edge_type="EXPECTED_LIKELIHOOD", layer="L3",
-            confidence=0.8, probability=0.25,
+            from_node=supplier["id"],
+            to_node=factory["id"],
+            edge_type="EXPECTED_LIKELIHOOD",
+            layer="L3",
+            confidence=0.8,
+            probability=0.25,
         )
 
         results = g.cascade_scenario(supplier["id"], failure_probability=1.0)
@@ -745,9 +726,12 @@ class TestProbabilityCascade:
         factory = g.create_node("Factory W", node_type="system")
 
         edge = g.create_edge(
-            from_node=supplier["id"], to_node=factory["id"],
-            edge_type="EXPECTED_LIKELIHOOD", layer="L3",
-            confidence=0.9, probability=0.15,
+            from_node=supplier["id"],
+            to_node=factory["id"],
+            edge_type="EXPECTED_LIKELIHOOD",
+            layer="L3",
+            confidence=0.9,
+            probability=0.15,
         )
 
         result = g.what_if(edge["id"])
@@ -769,12 +753,8 @@ class TestMonteCarloCascade:
         b = create_node(test_db, label="B", node_type="concept", created_by="test_agent")
         c = create_node(test_db, label="C", node_type="concept", created_by="test_agent")
 
-        create_edge(test_db, from_node=a["id"], to_node=b["id"],
-                     layer="L3", edge_type="CAUSES",
-                     created_by="test_agent", confidence=0.9, probability=0.8)
-        create_edge(test_db, from_node=b["id"], to_node=c["id"],
-                     layer="L3", edge_type="CAUSES",
-                     created_by="test_agent", confidence=0.8, probability=0.7)
+        create_edge(test_db, from_node=a["id"], to_node=b["id"], layer="L3", edge_type="CAUSES", created_by="test_agent", confidence=0.9, probability=0.8)
+        create_edge(test_db, from_node=b["id"], to_node=c["id"], layer="L3", edge_type="CAUSES", created_by="test_agent", confidence=0.8, probability=0.7)
 
         result = monte_carlo_cascade(test_db, a["id"], trials=1000, seed=42)
 
@@ -803,9 +783,7 @@ class TestMonteCarloCascade:
         b = create_node(test_db, label="B", node_type="concept", created_by="test_agent")
 
         # A → B: confidence=0.9, probability=0.1 → should activate ~9%
-        create_edge(test_db, from_node=a["id"], to_node=b["id"],
-                     layer="L3", edge_type="CAUSES",
-                     created_by="test_agent", confidence=0.9, probability=0.1)
+        create_edge(test_db, from_node=a["id"], to_node=b["id"], layer="L3", edge_type="CAUSES", created_by="test_agent", confidence=0.9, probability=0.1)
 
         result = monte_carlo_cascade(test_db, a["id"], trials=5000, seed=42)
 
@@ -821,9 +799,7 @@ class TestMonteCarloCascade:
         b = create_node(test_db, label="B", node_type="concept", created_by="test_agent")
 
         # A → B with confidence=0.8, probability=0.5 → should activate ~40%
-        create_edge(test_db, from_node=a["id"], to_node=b["id"],
-                     layer="L3", edge_type="CAUSES",
-                     created_by="test_agent", confidence=0.8, probability=0.5)
+        create_edge(test_db, from_node=a["id"], to_node=b["id"], layer="L3", edge_type="CAUSES", created_by="test_agent", confidence=0.8, probability=0.5)
 
         result = monte_carlo_cascade(test_db, a["id"], trials=1000, seed=42)
 
@@ -850,9 +826,7 @@ class TestMonteCarloCascade:
         a = create_node(test_db, label="A", node_type="concept", created_by="test_agent")
         b = create_node(test_db, label="B", node_type="concept", created_by="test_agent")
 
-        create_edge(test_db, from_node=a["id"], to_node=b["id"],
-                     layer="L3", edge_type="CAUSES",
-                     created_by="test_agent", confidence=0.8, probability=0.5)
+        create_edge(test_db, from_node=a["id"], to_node=b["id"], layer="L3", edge_type="CAUSES", created_by="test_agent", confidence=0.8, probability=0.5)
 
         # Two runs without seed should have different counts (not guaranteed but highly likely)
         result1 = monte_carlo_cascade(test_db, a["id"], trials=500)
@@ -953,9 +927,7 @@ class TestCreateBatch:
         )
         assert result["nodes_created"] == 2
         # Verify change feed entries exist for each node
-        rows = test_db.execute(
-            "SELECT row_id FROM ohm_change_feed WHERE table_name = 'ohm_nodes' ORDER BY occurred_at DESC"
-        ).fetchall()
+        rows = test_db.execute("SELECT row_id FROM ohm_change_feed WHERE table_name = 'ohm_nodes' ORDER BY occurred_at DESC").fetchall()
         created_ids = {n["id"] for n in result["nodes"]}
         feed_ids = {r[0] for r in rows}
         assert created_ids.issubset(feed_ids)
@@ -1003,16 +975,19 @@ class TestDecisionNode:
     def test_decision_node_type_is_valid(self):
         """The 'decision' node type should be in VALID_NODE_TYPES."""
         from ohm.schema import VALID_NODE_TYPES
+
         assert "decision" in VALID_NODE_TYPES
 
     def test_validate_decision_node_type(self):
         """validate_node_type should accept 'decision'."""
         from ohm.schema import validate_node_type
+
         assert validate_node_type("decision") is True
 
     def test_create_decision_node(self, test_db):
         """Creating a node with type='decision' should succeed."""
         from ohm.queries import create_node
+
         node = create_node(
             test_db,
             label="Hormuz Response Strategy",
@@ -1025,6 +1000,7 @@ class TestDecisionNode:
     def test_create_decision_node_with_utility(self, test_db):
         """Decision nodes should accept utility_scale, current_best_action, and action_alternatives."""
         from ohm.queries import create_node
+
         node = create_node(
             test_db,
             label="Agent Governance Standard",
@@ -1039,6 +1015,7 @@ class TestDecisionNode:
         assert node["current_best_action"] == "Adopt current standard"
         # action_alternatives is stored as JSON list
         import json
+
         alternatives = json.loads(node["action_alternatives"]) if isinstance(node["action_alternatives"], str) else node["action_alternatives"]
         assert "Revise standard" in alternatives
         assert "Wait for more data" in alternatives
@@ -1046,6 +1023,7 @@ class TestDecisionNode:
     def test_utility_scale_validation(self, test_db):
         """utility_scale must be between 0 and 1."""
         from ohm.queries import create_node
+
         with pytest.raises(ValueError, match="utility_scale"):
             create_node(
                 test_db,
@@ -1058,6 +1036,7 @@ class TestDecisionNode:
     def test_utility_scale_negative_rejected(self, test_db):
         """Negative utility_scale should be rejected."""
         from ohm.queries import create_node
+
         with pytest.raises(ValueError, match="utility_scale"):
             create_node(
                 test_db,
@@ -1070,6 +1049,7 @@ class TestDecisionNode:
     def test_utility_scale_zero_accepted(self, test_db):
         """utility_scale=0 should be accepted (being wrong doesn't matter)."""
         from ohm.queries import create_node
+
         node = create_node(
             test_db,
             label="Low Stakes Decision",
@@ -1082,6 +1062,7 @@ class TestDecisionNode:
     def test_utility_scale_one_accepted(self, test_db):
         """utility_scale=1.0 should be accepted (being wrong matters a lot)."""
         from ohm.queries import create_node
+
         node = create_node(
             test_db,
             label="High Stakes Decision",
@@ -1094,6 +1075,7 @@ class TestDecisionNode:
     def test_decision_node_without_utility(self, test_db):
         """Decision nodes can be created without utility fields (they default to NULL)."""
         from ohm.queries import create_node
+
         node = create_node(
             test_db,
             label="Decision Without Utility",
@@ -1108,6 +1090,7 @@ class TestDecisionNode:
     def test_utility_fields_on_non_decision_node(self, test_db):
         """Utility fields can be set on any node type, not just decision."""
         from ohm.queries import create_node
+
         node = create_node(
             test_db,
             label="Important Concept",
@@ -1123,6 +1106,7 @@ class TestDecisionNode:
     def test_schema_migration_adds_utility_columns(self, test_db):
         """Migration v0.16.0 should add utility columns to ohm_nodes."""
         from ohm.schema import get_schema_version, SCHEMA_VERSION
+
         version = get_schema_version(test_db)
         assert version == SCHEMA_VERSION
         # Verify columns exist
@@ -1141,8 +1125,7 @@ class TestDeleteNode:
 
         a = create_node(test_db, label="A", node_type="concept", created_by="test")
         b = create_node(test_db, label="B", node_type="concept", created_by="test")
-        create_edge(test_db, from_node=a["id"], to_node=b["id"],
-                     edge_type="CAUSES", layer="L3", created_by="test")
+        create_edge(test_db, from_node=a["id"], to_node=b["id"], edge_type="CAUSES", layer="L3", created_by="test")
 
         result = delete_node(test_db, node_id=a["id"], deleted_by="test")
         assert result["deleted"] == a["id"]
@@ -1173,8 +1156,7 @@ class TestDeleteNode:
 
         a = create_node(test_db, label="A", node_type="concept", created_by="test")
         b = create_node(test_db, label="B", node_type="concept", created_by="test")
-        create_edge(test_db, from_node=a["id"], to_node=b["id"],
-                     edge_type="CAUSES", layer="L3", created_by="test")
+        create_edge(test_db, from_node=a["id"], to_node=b["id"], edge_type="CAUSES", layer="L3", created_by="test")
 
         result = delete_node(test_db, node_id=b["id"], deleted_by="test")
         assert result["edges_removed"] >= 1
@@ -1237,8 +1219,7 @@ class TestDeleteEdge:
 
         a = create_node(test_db, label="A", node_type="concept", created_by="test")
         b = create_node(test_db, label="B", node_type="concept", created_by="test")
-        edge = create_edge(test_db, from_node=a["id"], to_node=b["id"],
-                            edge_type="CAUSES", layer="L3", created_by="test")
+        edge = create_edge(test_db, from_node=a["id"], to_node=b["id"], edge_type="CAUSES", layer="L3", created_by="test")
 
         result = delete_edge(test_db, edge_id=edge["id"], deleted_by="test")
         assert result["deleted"] == edge["id"]

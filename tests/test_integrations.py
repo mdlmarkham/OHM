@@ -76,7 +76,8 @@ class TestClioIntegration:
         clio.add_source("src-a", "Source A")
         graph.create_node(label="Concept B", node_type="concept")
         edge = clio.add_finding(
-            "src-a", "concept_b",
+            "src-a",
+            "concept_b",
             edge_type="CAUSES",
             confidence=0.85,
             condition="when X > 0",
@@ -220,7 +221,8 @@ class TestAgentWorkflowE2E:
         clio = ClioIntegration(graph)
         clio.add_source("src-constitution", "Hungarian Constitution Art. 21(2)")
         finding = clio.add_finding(
-            "src-constitution", "note-democracy",
+            "src-constitution",
+            "note-democracy",
             edge_type="CAUSES",
             confidence=0.85,
             condition="when supermajority controls parliament",

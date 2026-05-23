@@ -1,6 +1,5 @@
 """Tests for OHM exception hierarchy and error handling."""
 
-
 from ohm.exceptions import (
     EXIT_CODES,
     AuthenticationError,

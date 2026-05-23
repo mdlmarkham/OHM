@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 # ── Neighborhood ────────────────────────────────────────────────────────────
 
+
 def _rows_to_dicts(result: Any) -> list[dict[str, Any]]:
     """Convert DuckDB query result to list of dicts using column descriptions."""
     if not result:
@@ -45,6 +46,7 @@ def _percentile(count: int, trials: int, pct: float) -> float:
         return p
     # Normal approximation with continuity correction
     import math
+
     z = {0.05: -1.645, 0.50: 0.0, 0.95: 1.645}.get(pct, 0.0)
     se = math.sqrt(p * (1 - p) / trials)
     result = p + z * se
@@ -155,6 +157,7 @@ def query_neighborhood(
 
 # ── Path ────────────────────────────────────────────────────────────────────
 
+
 def query_path(
     conn: DuckDBPyConnection,
     from_node: str,
@@ -179,10 +182,7 @@ def query_path(
     if from_node == to_node:
         return []
 
-    edge_query = (
-        "SELECT id, from_node, to_node, layer, edge_type, confidence FROM ohm_edges"
-        " WHERE deleted_at IS NULL"
-    )
+    edge_query = "SELECT id, from_node, to_node, layer, edge_type, confidence FROM ohm_edges WHERE deleted_at IS NULL"
     params: list = []
     if layer:
         layer = validate_layer(layer)
@@ -217,6 +217,7 @@ def query_path(
 
 
 # ── Impact ──────────────────────────────────────────────────────────────────
+
 
 def query_impact(
     conn: DuckDBPyConnection,
@@ -275,6 +276,7 @@ def query_impact(
 
 # ── Confidence Audit ────────────────────────────────────────────────────────
 
+
 def query_confidence(
     conn: DuckDBPyConnection,
     edge_id: str,
@@ -329,6 +331,7 @@ def query_confidence(
 
 # ── Change Feed ─────────────────────────────────────────────────────────────
 
+
 def query_change_feed(
     conn: DuckDBPyConnection,
     *,
@@ -375,11 +378,7 @@ def query_change_feed(
     # it's an edge that touches the node (from_node or to_node).
     if node_id:
         node_id = validate_identifier(node_id, name="node_id")
-        conditions.append(
-            "(row_id = ? OR row_id IN ("
-            "  SELECT e.id FROM ohm_edges e WHERE (e.from_node = ? OR e.to_node = ?) AND e.deleted_at IS NULL"
-            "))"
-        )
+        conditions.append("(row_id = ? OR row_id IN (  SELECT e.id FROM ohm_edges e WHERE (e.from_node = ? OR e.to_node = ?) AND e.deleted_at IS NULL))")
         params.extend([node_id, node_id, node_id])
 
     # node_type filter: match changes where the row_id is a node of that type,
@@ -433,11 +432,7 @@ def query_change_feed(
             log_conditions.append("agent_name = ?")
             log_params.append(agent_name)
         if node_id:
-            log_conditions.append(
-                "(row_id = ? OR row_id IN ("
-                "  SELECT e.id FROM ohm_edges e WHERE (e.from_node = ? OR e.to_node = ?) AND e.deleted_at IS NULL"
-                "))"
-            )
+            log_conditions.append("(row_id = ? OR row_id IN (  SELECT e.id FROM ohm_edges e WHERE (e.from_node = ? OR e.to_node = ?) AND e.deleted_at IS NULL))")
             log_params.extend([node_id, node_id, node_id])
         log_where = ("WHERE " + " AND ".join(log_conditions)) if log_conditions else ""
         log_params.append(limit)
@@ -491,10 +486,12 @@ def query_change_feed(
 
 # ── Threat Cluster ──────────────────────────────────────────────────────────
 
+
 def query_threat_cluster(
     conn: DuckDBPyConnection,
     ioc_node_id: str,
-    *, edge_type: str | None = None,
+    *,
+    edge_type: str | None = None,
 ) -> list[dict[str, Any]]:
     """Find all alerts sharing a given IOC (Indicator of Compromise).
 
@@ -540,6 +537,7 @@ def query_threat_cluster(
 
 # ── Source Reliability ──────────────────────────────────────────────────────
 
+
 def query_record_outcome(
     conn: DuckDBPyConnection,
     *,
@@ -582,9 +580,7 @@ def query_record_outcome(
         [outcome_id, source_agent, claim_node, outcome, recorded_by, notes],
     )
     _log_change(conn, "ohm_outcomes", outcome_id, "INSERT", recorded_by)
-    return _rows_to_dicts(
-        conn.execute("SELECT * FROM ohm_outcomes WHERE id = ?", [outcome_id])
-    )[0]
+    return _rows_to_dicts(conn.execute("SELECT * FROM ohm_outcomes WHERE id = ?", [outcome_id]))[0]
 
 
 def query_source_reliability(
@@ -643,6 +639,7 @@ def query_source_reliability(
 
 # ── Agent State ─────────────────────────────────────────────────────────────
 
+
 def query_agent_state(
     conn: DuckDBPyConnection,
     agent_name: str | None = None,
@@ -669,6 +666,7 @@ def query_agent_state(
 
 
 # ── Stats ───────────────────────────────────────────────────────────────────
+
 
 def query_stats(conn: DuckDBPyConnection) -> dict[str, Any]:
     """Aggregate graph statistics.
@@ -772,15 +770,13 @@ def query_stats(conn: DuckDBPyConnection) -> dict[str, Any]:
         LIMIT 10
     """).fetchall()
     if top_observed:
-        stats["top_observed_nodes"] = [
-            {"label": row[0], "id": row[1], "observation_count": row[2]}
-            for row in top_observed
-        ]
+        stats["top_observed_nodes"] = [{"label": row[0], "id": row[1], "observation_count": row[2]} for row in top_observed]
 
     return stats
 
 
 # ── Write Operations ────────────────────────────────────────────────────────
+
 
 def create_node(
     conn: DuckDBPyConnection,
@@ -819,9 +815,7 @@ def create_node(
     node_id = generate_node_id(label)
 
     # Check for soft-deleted row with same ID (primary key collision avoidance)
-    soft_deleted = conn.execute(
-        "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NOT NULL", [node_id]
-    ).fetchone()
+    soft_deleted = conn.execute("SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NOT NULL", [node_id]).fetchone()
     if soft_deleted:
         # Reactivate soft-deleted row with new data
         conn.execute(
@@ -831,29 +825,21 @@ def create_node(
                 utility_scale = ?, current_best_action = ?, action_alternatives = ?,
                 deleted_at = NULL, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?""",
-            [label, node_type, content, created_by, visibility, provenance,
-             confidence, priority, url,
-             utility_scale, current_best_action, alternatives_json,
-             node_id],
+            [label, node_type, content, created_by, visibility, provenance, confidence, priority, url, utility_scale, current_best_action, alternatives_json, node_id],
         )
         _log_change(conn, "ohm_nodes", node_id, "UPDATE", created_by)
-        return _rows_to_dicts(
-            conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node_id])
-        )[0]
+        return _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node_id]))[0]
 
     conn.execute(
         """INSERT INTO ohm_nodes
            (id, label, type, content, created_by, visibility, provenance, confidence, priority, url,
             utility_scale, current_best_action, action_alternatives)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        [node_id, label, node_type, content, created_by, visibility, provenance, confidence,
-         priority, url, utility_scale, current_best_action, alternatives_json],
+        [node_id, label, node_type, content, created_by, visibility, provenance, confidence, priority, url, utility_scale, current_best_action, alternatives_json],
     )
     _log_change(conn, "ohm_nodes", node_id, "INSERT", created_by)
     # Return full node record
-    return _rows_to_dicts(
-        conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node_id])
-    )[0]
+    return _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node_id]))[0]
 
 
 def find_or_create_node(
@@ -877,10 +863,12 @@ def find_or_create_node(
     Returns the existing or newly created node record.
     """
     # Try to find an existing node with matching label and type (case-insensitive)
-    existing = _rows_to_dicts(conn.execute(
-        "SELECT * FROM ohm_nodes WHERE LOWER(label) = LOWER(?) AND type = ? AND deleted_at IS NULL LIMIT 1",
-        [label, node_type],
-    ))
+    existing = _rows_to_dicts(
+        conn.execute(
+            "SELECT * FROM ohm_nodes WHERE LOWER(label) = LOWER(?) AND type = ? AND deleted_at IS NULL LIMIT 1",
+            [label, node_type],
+        )
+    )
     if existing:
         node = existing[0]
         node["created"] = False
@@ -951,16 +939,11 @@ def create_edge(
             probability_p05, probability_p50, probability_p95,
             confidence_p05, confidence_p50, confidence_p95)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        [edge_id, from_node, to_node, layer, edge_type, created_by,
-         confidence, probability, urgency, condition, provenance, metadata_json,
-         probability_p05, probability_p50, probability_p95,
-         confidence_p05, confidence_p50, confidence_p95],
+        [edge_id, from_node, to_node, layer, edge_type, created_by, confidence, probability, urgency, condition, provenance, metadata_json, probability_p05, probability_p50, probability_p95, confidence_p05, confidence_p50, confidence_p95],
     )
     _log_change(conn, "ohm_edges", edge_id, "INSERT", created_by)
     # Return full edge record
-    return _rows_to_dicts(
-        conn.execute("SELECT * FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [edge_id])
-    )[0]
+    return _rows_to_dicts(conn.execute("SELECT * FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [edge_id]))[0]
 
 
 def create_challenge(
@@ -997,14 +980,11 @@ def create_challenge(
            (id, from_node, to_node, layer, edge_type, created_by,
             confidence, condition, challenge_of, challenge_type)
            VALUES (?, ?, ?, ?, 'CHALLENGED_BY', ?, ?, ?, ?, 'CHALLENGED_BY')""",
-        [challenge_id, target[1], target[2], target[3],
-         created_by, confidence, reason, edge_id],
+        [challenge_id, target[1], target[2], target[3], created_by, confidence, reason, edge_id],
     )
     _log_change(conn, "ohm_edges", challenge_id, "INSERT", created_by)
     # Return full edge record
-    return _rows_to_dicts(
-        conn.execute("SELECT * FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [challenge_id])
-    )[0]
+    return _rows_to_dicts(conn.execute("SELECT * FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [challenge_id]))[0]
 
 
 def create_support(
@@ -1041,14 +1021,11 @@ def create_support(
            (id, from_node, to_node, layer, edge_type, created_by,
             confidence, condition, challenge_of, challenge_type)
            VALUES (?, ?, ?, ?, 'SUPPORTS', ?, ?, ?, ?, 'SUPPORTS')""",
-        [support_id, target[1], target[2], target[3],
-         created_by, confidence, reason, edge_id],
+        [support_id, target[1], target[2], target[3], created_by, confidence, reason, edge_id],
     )
     _log_change(conn, "ohm_edges", support_id, "INSERT", created_by)
     # Return full edge record
-    return _rows_to_dicts(
-        conn.execute("SELECT * FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [support_id])
-    )[0]
+    return _rows_to_dicts(conn.execute("SELECT * FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [support_id]))[0]
 
 
 def delete_node(
@@ -1070,11 +1047,10 @@ def delete_node(
     node_id = validate_identifier(node_id, name="node_id")
 
     # Verify node exists
-    node = _rows_to_dicts(
-        conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node_id])
-    )
+    node = _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node_id]))
     if not node:
         from ohm.exceptions import NodeNotFoundError
+
         raise NodeNotFoundError(f"Node not found: {node_id}")
 
     # Delete associated edges — split into two statements to avoid DuckDB
@@ -1118,11 +1094,10 @@ def delete_edge(
     edge_id = validate_identifier(edge_id, name="edge_id")
 
     # Verify edge exists
-    edge = _rows_to_dicts(
-        conn.execute("SELECT * FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [edge_id])
-    )
+    edge = _rows_to_dicts(conn.execute("SELECT * FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [edge_id]))
     if not edge:
         from ohm.exceptions import EdgeNotFoundError
+
         raise EdgeNotFoundError(f"Edge not found: {edge_id}")
 
     edge[0].get("layer")
@@ -1154,9 +1129,7 @@ def set_agent_state(
     Dynamic SET clause uses hardcoded column names only — all values
     are parameterized with ? placeholders.
     """
-    existing = conn.execute(
-        "SELECT 1 FROM ohm_agent_state WHERE agent_name = ?", [agent_name]
-    ).fetchone()
+    existing = conn.execute("SELECT 1 FROM ohm_agent_state WHERE agent_name = ?", [agent_name]).fetchone()
     if existing:
         # Column names are hardcoded, values use ? — safe from injection
         set_parts = ["current_focus = ?", "updated_at = CURRENT_TIMESTAMP"]
@@ -1174,8 +1147,7 @@ def set_agent_state(
         )
     else:
         conn.execute(
-            "INSERT INTO ohm_agent_state (agent_name, current_focus, values, goals, updated_at) "
-            "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
+            "INSERT INTO ohm_agent_state (agent_name, current_focus, values, goals, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
             [agent_name, focus, values, goals],
         )
 
@@ -1203,14 +1175,11 @@ def create_observation(
         """INSERT INTO ohm_observations
            (id, node_id, edge_id, type, value, baseline, sigma, source, created_by, notes, source_name, source_url)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        [obs_id, node_id, edge_id, obs_type, value, baseline, sigma, source, created_by, notes,
-         source_name, source_url],
+        [obs_id, node_id, edge_id, obs_type, value, baseline, sigma, source, created_by, notes, source_name, source_url],
     )
     _log_change(conn, "ohm_observations", obs_id, "INSERT", created_by)
     # Return full observation record
-    return _rows_to_dicts(
-        conn.execute("SELECT * FROM ohm_observations WHERE id = ?", [obs_id])
-    )[0]
+    return _rows_to_dicts(conn.execute("SELECT * FROM ohm_observations WHERE id = ?", [obs_id]))[0]
 
 
 def node_exists(conn: DuckDBPyConnection, node_id: str) -> bool:
@@ -1252,9 +1221,14 @@ def query_provenance(
     node_id = validate_identifier(node_id, name="node_id")
     max_depth = validate_depth(max_depth)
 
-    frozenset({
-        "DERIVES_FROM", "REFERENCES", "INFLUENCES", "SUPPORTS",
-    })
+    frozenset(
+        {
+            "DERIVES_FROM",
+            "REFERENCES",
+            "INFLUENCES",
+            "SUPPORTS",
+        }
+    )
 
     # Recursive CTE: traverse forward through provenance edges
     # DERIVES_FROM: from_node = derived, to_node = source
@@ -1368,9 +1342,7 @@ def query_graph_health(
         "stale_agents": stale_count,
         "total_nodes": total_nodes,
         "total_edges": total_edges,
-        "health_score": round(
-            1.0 - (orphans + low_conf + stale_count) / max(total_nodes, 1), 4
-        ),
+        "health_score": round(1.0 - (orphans + low_conf + stale_count) / max(total_nodes, 1), 4),
     }
 
 
@@ -1385,16 +1357,13 @@ def query_find_orphan_agents(
     """
     import re
 
-    result = conn.execute(
-        "SELECT id, label, type, created_by, created_at, content "
-        "FROM ohm_nodes WHERE type = 'agent' ORDER BY created_at"
-    )
+    result = conn.execute("SELECT id, label, type, created_by, created_at, content FROM ohm_nodes WHERE type = 'agent' ORDER BY created_at")
     agents = _rows_to_dicts(result)
 
     orphans = []
     for agent in agents:
         label = agent.get("label", "")
-        expected_id = "agent_" + re.sub(r'[^a-zA-Z0-9]+', '_', label.lower()).strip('_')
+        expected_id = "agent_" + re.sub(r"[^a-zA-Z0-9]+", "_", label.lower()).strip("_")
         if agent["id"] != expected_id:
             orphans.append({**agent, "expected_id": expected_id})
 
@@ -1465,7 +1434,7 @@ def query_stale_edges(
                 continue
 
         # Calculate age in days
-        if hasattr(created_at, 'tzinfo') and created_at.tzinfo is None:
+        if hasattr(created_at, "tzinfo") and created_at.tzinfo is None:
             created_at = created_at.replace(tzinfo=timezone.utc)
 
         age_days = (now - created_at).total_seconds() / 86400
@@ -1541,20 +1510,21 @@ def apply_confidence_decay(
         else:
             continue
 
-        decayed.append({
-            "id": edge["id"],
-            "confidence": original_conf,
-            "new_confidence": new_confidence,
-            "decay_factor": round(decay_factor, 4),
-            "age_days": edge.get("age_days", 0),
-            "layer": edge.get("layer"),
-            "edge_type": edge.get("edge_type"),
-        })
+        decayed.append(
+            {
+                "id": edge["id"],
+                "confidence": original_conf,
+                "new_confidence": new_confidence,
+                "decay_factor": round(decay_factor, 4),
+                "age_days": edge.get("age_days", 0),
+                "layer": edge.get("layer"),
+                "edge_type": edge.get("edge_type"),
+            }
+        )
 
         if not dry_run:
             conn.execute(
-                "UPDATE ohm_edges SET confidence = ?, updated_at = CURRENT_TIMESTAMP "
-                "WHERE id = ?",
+                "UPDATE ohm_edges SET confidence = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 [new_confidence, edge["id"]],
             )
             _log_change(conn, "ohm_edges", edge["id"], "UPDATE", "decay")
@@ -1674,6 +1644,7 @@ def create_batch(
 
 # ── Diff ────────────────────────────────────────────────────────────────────
 
+
 def query_diff(
     conn: DuckDBPyConnection,
     from_ts: str,
@@ -1714,16 +1685,19 @@ def query_diff(
         node_agent_clause = "AND created_by = ?"
         node_params.append(agent_name)
 
-    nodes_added = _rows_to_dicts(conn.execute(
-        f"SELECT * FROM ohm_nodes WHERE created_at >= ? AND created_at <= ? {node_agent_clause} ORDER BY created_at",
-        node_params,
-    ))
+    nodes_added = _rows_to_dicts(
+        conn.execute(
+            f"SELECT * FROM ohm_nodes WHERE created_at >= ? AND created_at <= ? {node_agent_clause} ORDER BY created_at",
+            node_params,
+        )
+    )
 
-    nodes_updated = _rows_to_dicts(conn.execute(
-        f"SELECT * FROM ohm_nodes WHERE updated_at >= ? AND updated_at <= ?"
-        f" AND updated_at != created_at {node_agent_clause} ORDER BY updated_at",
-        node_params,
-    ))
+    nodes_updated = _rows_to_dicts(
+        conn.execute(
+            f"SELECT * FROM ohm_nodes WHERE updated_at >= ? AND updated_at <= ? AND updated_at != created_at {node_agent_clause} ORDER BY updated_at",
+            node_params,
+        )
+    )
 
     # ── Edges ──────────────────────────────────────────────────────────
     edge_params: list = [from_ts, to_ts]
@@ -1735,16 +1709,19 @@ def query_diff(
         edge_clauses += "AND created_by = ?"
         edge_params.append(agent_name)
 
-    edges_added = _rows_to_dicts(conn.execute(
-        f"SELECT * FROM ohm_edges WHERE created_at >= ? AND created_at <= ? {edge_clauses} ORDER BY created_at",
-        edge_params,
-    ))
+    edges_added = _rows_to_dicts(
+        conn.execute(
+            f"SELECT * FROM ohm_edges WHERE created_at >= ? AND created_at <= ? {edge_clauses} ORDER BY created_at",
+            edge_params,
+        )
+    )
 
-    edges_updated = _rows_to_dicts(conn.execute(
-        f"SELECT * FROM ohm_edges WHERE updated_at >= ? AND updated_at <= ?"
-        f" AND updated_at != created_at {edge_clauses} ORDER BY updated_at",
-        edge_params,
-    ))
+    edges_updated = _rows_to_dicts(
+        conn.execute(
+            f"SELECT * FROM ohm_edges WHERE updated_at >= ? AND updated_at <= ? AND updated_at != created_at {edge_clauses} ORDER BY updated_at",
+            edge_params,
+        )
+    )
 
     # ── Observations ───────────────────────────────────────────────────
     obs_params: list = [from_ts, to_ts]
@@ -1753,11 +1730,12 @@ def query_diff(
         obs_agent_clause = "AND created_by = ?"
         obs_params.append(agent_name)
 
-    observations_added = _rows_to_dicts(conn.execute(
-        f"SELECT * FROM ohm_observations WHERE created_at >= ? AND created_at <= ?"
-        f" {obs_agent_clause} ORDER BY created_at",
-        obs_params,
-    ))
+    observations_added = _rows_to_dicts(
+        conn.execute(
+            f"SELECT * FROM ohm_observations WHERE created_at >= ? AND created_at <= ? {obs_agent_clause} ORDER BY created_at",
+            obs_params,
+        )
+    )
 
     # ── Summary ────────────────────────────────────────────────────────
     summary = {
@@ -1766,11 +1744,7 @@ def query_diff(
         "edges_added": len(edges_added),
         "edges_updated": len(edges_updated),
         "observations_added": len(observations_added),
-        "total_changes": (
-            len(nodes_added) + len(nodes_updated)
-            + len(edges_added) + len(edges_updated)
-            + len(observations_added)
-        ),
+        "total_changes": (len(nodes_added) + len(nodes_updated) + len(edges_added) + len(edges_updated) + len(observations_added)),
     }
 
     return {
@@ -1786,6 +1760,7 @@ def query_diff(
 
 
 # ── Snapshot ────────────────────────────────────────────────────────────────
+
 
 def query_snapshot(
     conn: DuckDBPyConnection,
@@ -1818,44 +1793,58 @@ def query_snapshot(
 
     # ── Nodes ──────────────────────────────────────────────────────────
     if node_id:
-        nodes = _rows_to_dicts(conn.execute(
-            "SELECT * FROM ohm_nodes WHERE id = ? AND created_at <= ?",
-            [node_id, timestamp],
-        ))
+        nodes = _rows_to_dicts(
+            conn.execute(
+                "SELECT * FROM ohm_nodes WHERE id = ? AND created_at <= ?",
+                [node_id, timestamp],
+            )
+        )
     else:
-        nodes = _rows_to_dicts(conn.execute(
-            "SELECT * FROM ohm_nodes WHERE created_at <= ? ORDER BY created_at",
-            [timestamp],
-        ))
+        nodes = _rows_to_dicts(
+            conn.execute(
+                "SELECT * FROM ohm_nodes WHERE created_at <= ? ORDER BY created_at",
+                [timestamp],
+            )
+        )
 
     # ── Edges ──────────────────────────────────────────────────────────
     if edge_id:
-        edges = _rows_to_dicts(conn.execute(
-            "SELECT * FROM ohm_edges WHERE id = ? AND created_at <= ?",
-            [edge_id, timestamp],
-        ))
+        edges = _rows_to_dicts(
+            conn.execute(
+                "SELECT * FROM ohm_edges WHERE id = ? AND created_at <= ?",
+                [edge_id, timestamp],
+            )
+        )
     elif node_id:
-        edges = _rows_to_dicts(conn.execute(
-            "SELECT * FROM ohm_edges WHERE (from_node = ? OR to_node = ?) AND created_at <= ? ORDER BY created_at",
-            [node_id, node_id, timestamp],
-        ))
+        edges = _rows_to_dicts(
+            conn.execute(
+                "SELECT * FROM ohm_edges WHERE (from_node = ? OR to_node = ?) AND created_at <= ? ORDER BY created_at",
+                [node_id, node_id, timestamp],
+            )
+        )
     else:
-        edges = _rows_to_dicts(conn.execute(
-            "SELECT * FROM ohm_edges WHERE created_at <= ? ORDER BY created_at",
-            [timestamp],
-        ))
+        edges = _rows_to_dicts(
+            conn.execute(
+                "SELECT * FROM ohm_edges WHERE created_at <= ? ORDER BY created_at",
+                [timestamp],
+            )
+        )
 
     # ── Observations ───────────────────────────────────────────────────
     if node_id:
-        observations = _rows_to_dicts(conn.execute(
-            "SELECT * FROM ohm_observations WHERE node_id = ? AND created_at <= ? ORDER BY created_at",
-            [node_id, timestamp],
-        ))
+        observations = _rows_to_dicts(
+            conn.execute(
+                "SELECT * FROM ohm_observations WHERE node_id = ? AND created_at <= ? ORDER BY created_at",
+                [node_id, timestamp],
+            )
+        )
     else:
-        observations = _rows_to_dicts(conn.execute(
-            "SELECT * FROM ohm_observations WHERE created_at <= ? ORDER BY created_at",
-            [timestamp],
-        ))
+        observations = _rows_to_dicts(
+            conn.execute(
+                "SELECT * FROM ohm_observations WHERE created_at <= ? ORDER BY created_at",
+                [timestamp],
+            )
+        )
 
     # ── Summary ────────────────────────────────────────────────────────
     summary = {
@@ -1904,8 +1893,13 @@ def query_confidence_chain(
     max_depth = validate_depth(max_depth, max_depth=20)
 
     evidence_types = (
-        "CAUSES", "SUPPORTS", "DERIVES_FROM", "REFERENCES",
-        "PREDICTS", "CORRELATES_WITH", "EXPLAINS",
+        "CAUSES",
+        "SUPPORTS",
+        "DERIVES_FROM",
+        "REFERENCES",
+        "PREDICTS",
+        "CORRELATES_WITH",
+        "EXPLAINS",
     )
     placeholders = ",".join(["?"] * len(evidence_types))
 
@@ -1988,6 +1982,7 @@ def query_confidence_chain(
 
 # ── Batch Expiry ────────────────────────────────────────────────────────────
 
+
 def query_find_expiring_batches(
     conn: DuckDBPyConnection,
     *,
@@ -2017,6 +2012,7 @@ def query_find_expiring_batches(
 
     if product_type:
         from ohm.validation import validate_identifier
+
         product_type = validate_identifier(product_type, name="product_type")
         conditions.append("n_from.type = ?")
         params.append(product_type)
@@ -2052,6 +2048,7 @@ def query_find_expiring_batches(
         metadata = row.get("metadata")
         if isinstance(metadata, str):
             import json
+
             metadata = json.loads(metadata)
         expires_at_str = metadata.get("expires_at") if isinstance(metadata, dict) else None
 
@@ -2068,18 +2065,20 @@ def query_find_expiring_batches(
         if days_until is not None and days_until > days:
             continue
 
-        output.append({
-            "edge_id": row["edge_id"],
-            "from_node": row["from_node"],
-            "to_node": row["to_node"],
-            "batch_label": row["batch_label"],
-            "product_type": row["product_type"],
-            "location_label": row["location_label"],
-            "expires_at": expires_at_str,
-            "days_until_expiry": round(days_until, 1) if days_until is not None else None,
-            "confidence": row["confidence"],
-            "metadata": metadata,
-        })
+        output.append(
+            {
+                "edge_id": row["edge_id"],
+                "from_node": row["from_node"],
+                "to_node": row["to_node"],
+                "batch_label": row["batch_label"],
+                "product_type": row["product_type"],
+                "location_label": row["location_label"],
+                "expires_at": expires_at_str,
+                "days_until_expiry": round(days_until, 1) if days_until is not None else None,
+                "confidence": row["confidence"],
+                "metadata": metadata,
+            }
+        )
 
     # Sort by days_until_expiry ascending (soonest first)
     output.sort(key=lambda x: x["days_until_expiry"] if x["days_until_expiry"] is not None else float("inf"))
@@ -2088,6 +2087,7 @@ def query_find_expiring_batches(
 
 
 # ── Cascade Scenario (Supply Chain / Risk Modeling) ─────────────────────────
+
 
 def query_deterministic_cascade(
     conn: DuckDBPyConnection,
@@ -2180,6 +2180,7 @@ def query_cascade_scenario(
     cascade propagation, not Monte Carlo simulation.
     """
     import warnings
+
     warnings.warn(
         "query_cascade_scenario is deprecated, use query_deterministic_cascade instead",
         DeprecationWarning,
@@ -2279,11 +2280,13 @@ def monte_carlo_cascade(
         if from_node not in node_edges:
             node_edges[from_node] = []
         effective_prob = float(edge["probability"]) if edge["probability"] is not None else default_probability
-        node_edges[from_node].append({
-            "to_node": to_node,
-            "confidence": float(edge["confidence"]) if edge["confidence"] is not None else 0.7,
-            "probability": effective_prob,
-        })
+        node_edges[from_node].append(
+            {
+                "to_node": to_node,
+                "confidence": float(edge["confidence"]) if edge["confidence"] is not None else 0.7,
+                "probability": effective_prob,
+            }
+        )
         all_nodes.add(from_node)
         all_nodes.add(to_node)
 
@@ -2326,15 +2329,17 @@ def monte_carlo_cascade(
     for nid in sorted(all_nodes):
         count = activated_counts[nid]
         activated_pct = count / trials
-        results.append({
-            "node_id": nid,
-            "activated_count": count,
-            "activated_pct": round(activated_pct, 4),
-            "p5": round(_percentile(count, trials, 0.05), 4),
-            "p50": round(_percentile(count, trials, 0.50), 4),
-            "p95": round(_percentile(count, trials, 0.95), 4),
-            "mean": round(activated_pct, 4),
-        })
+        results.append(
+            {
+                "node_id": nid,
+                "activated_count": count,
+                "activated_pct": round(activated_pct, 4),
+                "p5": round(_percentile(count, trials, 0.05), 4),
+                "p50": round(_percentile(count, trials, 0.50), 4),
+                "p95": round(_percentile(count, trials, 0.95), 4),
+                "mean": round(activated_pct, 4),
+            }
+        )
 
     return {
         "node_id": node_id,  # starting node (not last in loop)
@@ -2378,8 +2383,7 @@ def query_what_if(
     if edge is None:
         raise ValueError(f"Edge not found: {edge_id}")
 
-    columns = ["id", "from_node", "to_node", "edge_type", "layer",
-               "confidence", "probability", "condition", "created_by"]
+    columns = ["id", "from_node", "to_node", "edge_type", "layer", "confidence", "probability", "condition", "created_by"]
     edge_dict = dict(zip(columns, edge))
 
     # Use edge's probability (or confidence) as the failure probability
@@ -2402,13 +2406,23 @@ def query_what_if(
 
 # ── Customer Support: Handoff, Escalation, Provenance ───────────────────────
 
-HANDOFF_EDGE_TYPES = frozenset({
-    "TRANSFERRED_TO", "ESCALATED_TO", "DELEGATED_TO",
-})
+HANDOFF_EDGE_TYPES = frozenset(
+    {
+        "TRANSFERRED_TO",
+        "ESCALATED_TO",
+        "DELEGATED_TO",
+    }
+)
 
-STATE_MACHINE_EDGE_TYPES = frozenset({
-    "OPENED_BY", "STARTED_BY", "AWAITING", "RESOLVED_BY", "CLOSED_BY",
-})
+STATE_MACHINE_EDGE_TYPES = frozenset(
+    {
+        "OPENED_BY",
+        "STARTED_BY",
+        "AWAITING",
+        "RESOLVED_BY",
+        "CLOSED_BY",
+    }
+)
 
 
 def query_handoff(
@@ -2448,10 +2462,7 @@ def query_handoff(
     ticket_node = validate_identifier(ticket_node, name="ticket_node")
 
     if edge_type not in HANDOFF_EDGE_TYPES:
-        raise ValueError(
-            f"Invalid handoff edge_type '{edge_type}'. "
-            f"Must be one of: {sorted(HANDOFF_EDGE_TYPES)}"
-        )
+        raise ValueError(f"Invalid handoff edge_type '{edge_type}'. Must be one of: {sorted(HANDOFF_EDGE_TYPES)}")
 
     # Determine layer based on edge type
     layer = "L2" if edge_type == "TRANSFERRED_TO" else "L3"
@@ -2523,8 +2534,7 @@ def _query_handoff_chain(
                   SELECT ?))
         ORDER BY e.created_at ASC
     """
-    result = conn.execute(query, [ticket_node, ticket_node, ticket_node,
-                                   ticket_node, ticket_node, ticket_node])
+    result = conn.execute(query, [ticket_node, ticket_node, ticket_node, ticket_node, ticket_node, ticket_node])
     return _rows_to_dicts(result)
 
 
@@ -2680,6 +2690,7 @@ def query_ticket_provenance(
 
 # ── Semantic Search ─────────────────────────────────────────────────────────
 
+
 def generate_embedding(
     text: str,
     model: str = "nomic-embed-text",
@@ -2755,10 +2766,7 @@ def semantic_search(
 
     embedding = generate_embedding(query)
     if embedding is None:
-        raise ValueError(
-            "Ollama is not available. Start Ollama with an embedding model "
-            "(e.g., 'ollama pull nomic-embed-text') to use semantic search."
-        )
+        raise ValueError("Ollama is not available. Start Ollama with an embedding model (e.g., 'ollama pull nomic-embed-text') to use semantic search.")
 
     # Build query with optional filters
     where_clauses = ["embedding IS NOT NULL"]
@@ -2818,9 +2826,7 @@ def update_node_embedding(
 
     # Get node label if no custom text provided
     if text is None:
-        result = conn.execute(
-            "SELECT label FROM ohm_nodes WHERE id = ?", [node_id]
-        ).fetchone()
+        result = conn.execute("SELECT label FROM ohm_nodes WHERE id = ?", [node_id]).fetchone()
         if result is None:
             return False
         text = result[0]

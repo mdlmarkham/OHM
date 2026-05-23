@@ -150,8 +150,12 @@ class TestWriteBenchmarks:
 
         def run():
             return create_edge(
-                conn, from_node=a, to_node=b,
-                layer="L3", edge_type="CAUSES", created_by="bench",
+                conn,
+                from_node=a,
+                to_node=b,
+                layer="L3",
+                edge_type="CAUSES",
+                created_by="bench",
             )
 
         benchmark(run)

@@ -51,24 +51,18 @@ class TestFullWorkflow:
     def test_challenge_and_support(self, populated_store):
         """Challenge an edge, then support it from another agent."""
         # Get the CAUSES edge
-        edge = populated_store.execute_one(
-            "SELECT * FROM ohm_edges WHERE edge_type = 'CAUSES'"
-        )
+        edge = populated_store.execute_one("SELECT * FROM ohm_edges WHERE edge_type = 'CAUSES'")
         assert edge is not None
 
         # Socrates challenges
         populated_store.agent_name = "socrates"
-        challenge = populated_store.challenge_edge(
-            edge["id"], "conditions too narrow for Hungary-specific case", 0.5, "CHALLENGED_BY"
-        )
+        challenge = populated_store.challenge_edge(edge["id"], "conditions too narrow for Hungary-specific case", 0.5, "CHALLENGED_BY")
         assert challenge["challenge_type"] == "CHALLENGED_BY"
         assert challenge["created_by"] == "socrates"
 
         # Clio supports
         populated_store.agent_name = "clio"
-        support = populated_store.challenge_edge(
-            edge["id"], "3 additional case studies confirmed", 0.85, "SUPPORTS"
-        )
+        support = populated_store.challenge_edge(edge["id"], "3 additional case studies confirmed", 0.85, "SUPPORTS")
         assert support["challenge_type"] == "SUPPORTS"
         assert support["created_by"] == "clio"
 
@@ -100,9 +94,7 @@ class TestFullWorkflow:
     def test_ownership_boundary(self, populated_store):
         """Only the owning agent can update their own L3 edges."""
         # Metis owns the CAUSES edge
-        edge = populated_store.execute_one(
-            "SELECT * FROM ohm_edges WHERE edge_type = 'CAUSES'"
-        )
+        edge = populated_store.execute_one("SELECT * FROM ohm_edges WHERE edge_type = 'CAUSES'")
 
         # Metis can update
         populated_store.agent_name = "metis"
@@ -116,9 +108,7 @@ class TestFullWorkflow:
 
     def test_observations(self, populated_store):
         """Create observations on nodes."""
-        obs = populated_store.write_observation(
-            "hungary", "measurement", value=0.85, baseline=0.5, sigma=3.5, source="research"
-        )
+        obs = populated_store.write_observation("hungary", "measurement", value=0.85, baseline=0.5, sigma=3.5, source="research")
         assert obs["node_id"] == "hungary"
         assert abs(obs["value"] - 0.85) < 0.001
 

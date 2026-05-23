@@ -17,6 +17,7 @@ from ohm.store import OhmStore
 
 # ── Test Helpers ────────────────────────────────────────────
 
+
 def _start_server(store, tokens=None, roles=None, no_auth=False):
     """Start a test HTTP server on a random port."""
     import socketserver
@@ -36,7 +37,9 @@ def _start_server(store, tokens=None, roles=None, no_auth=False):
     OhmHandler.no_auth = no_auth
 
     server = socketserver.TCPServer(
-        ("127.0.0.1", 0), OhmHandler, bind_and_activate=False,
+        ("127.0.0.1", 0),
+        OhmHandler,
+        bind_and_activate=False,
     )
     server.allow_reuse_address = True
     server.server_bind()
@@ -46,6 +49,7 @@ def _start_server(store, tokens=None, roles=None, no_auth=False):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     from tests.conftest import wait_for_port
+
     wait_for_port("127.0.0.1", port)
     return port, server, thread
 
@@ -81,6 +85,7 @@ def _request(method, port, path, body=None, headers=None, retries=2):
 
 # ── Concurrent Agent Simulation ────────────────────────────
 
+
 class ConcurrentAgent:
     """Simulates an agent making concurrent requests."""
 
@@ -96,11 +101,16 @@ class ConcurrentAgent:
         for i in range(count):
             node_id = f"{self.base_node_id}_{self.agent_id}_{i}"
             # Create node
-            status, data = _request("POST", self.port, "/node", body={
-                "id": node_id,
-                "label": f"Agent {self.agent_id} Node {i}",
-                "type": "concept",
-            })
+            status, data = _request(
+                "POST",
+                self.port,
+                "/node",
+                body={
+                    "id": node_id,
+                    "label": f"Agent {self.agent_id} Node {i}",
+                    "type": "concept",
+                },
+            )
             if status == 201:
                 self.results.append({"type": "node", "id": node_id})
             else:
@@ -108,22 +118,29 @@ class ConcurrentAgent:
 
             # Create edge to previous node
             if i > 0:
-                prev_node_id = f"{self.base_node_id}_{self.agent_id}_{i-1}"
-                edge_status, edge_data = _request("POST", self.port, "/edge", body={
-                    "from": prev_node_id,
-                    "to": node_id,
-                    "type": "CAUSES",
-                    "layer": "L3",
-                })
+                prev_node_id = f"{self.base_node_id}_{self.agent_id}_{i - 1}"
+                edge_status, edge_data = _request(
+                    "POST",
+                    self.port,
+                    "/edge",
+                    body={
+                        "from": prev_node_id,
+                        "to": node_id,
+                        "type": "CAUSES",
+                        "layer": "L3",
+                    },
+                )
                 if edge_status == 201:
                     self.results.append({"type": "edge", "from": prev_node_id, "to": node_id})
                 else:
-                    self.errors.append({
-                        "type": "edge",
-                        "from": prev_node_id,
-                        "to": node_id,
-                        "status": edge_status,
-                    })
+                    self.errors.append(
+                        {
+                            "type": "edge",
+                            "from": prev_node_id,
+                            "to": node_id,
+                            "status": edge_status,
+                        }
+                    )
 
     def query_graph(self, node_id, iterations=10):
         """Make concurrent read requests."""
@@ -136,6 +153,7 @@ class ConcurrentAgent:
 
 
 # ── Fixtures ────────────────────────────────────────────────
+
 
 @pytest.fixture
 def concurrent_server(tmp_path):
@@ -150,6 +168,7 @@ def concurrent_server(tmp_path):
 
 
 # ── Tests ──────────────────────────────────────────────────
+
 
 class TestConcurrentWrites:
     """Test that concurrent writes don't cause data loss."""
@@ -190,29 +209,28 @@ class TestConcurrentWrites:
         assert total_errors == 0, f"Expected no errors but got: {[e for a in agents for e in a.errors]}"
 
         # Verify all nodes exist in database
-        node_count = store.conn.execute(
-            "SELECT COUNT(*) FROM ohm_nodes WHERE id LIKE 'base_%'"
-        ).fetchone()[0]
-        assert node_count == num_agents * nodes_per_agent, \
-            f"Expected {num_agents * nodes_per_agent} nodes but found {node_count}"
+        node_count = store.conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE id LIKE 'base_%'").fetchone()[0]
+        assert node_count == num_agents * nodes_per_agent, f"Expected {num_agents * nodes_per_agent} nodes but found {node_count}"
 
         # Verify all edges exist
-        edge_count = store.conn.execute(
-            "SELECT COUNT(*) FROM ohm_edges WHERE from_node LIKE 'base_%'"
-        ).fetchone()[0]
-        assert edge_count == num_agents * (nodes_per_agent - 1), \
-            f"Expected {num_agents * (nodes_per_agent - 1)} edges but found {edge_count}"
+        edge_count = store.conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE from_node LIKE 'base_%'").fetchone()[0]
+        assert edge_count == num_agents * (nodes_per_agent - 1), f"Expected {num_agents * (nodes_per_agent - 1)} edges but found {edge_count}"
 
     def test_concurrent_reads_during_writes(self, concurrent_server):
         """Concurrent reads during writes should succeed without errors."""
         port, store = concurrent_server
 
         # Create a test node first
-        _request("POST", port, "/node", body={
-            "id": "read_test",
-            "label": "Read Test Node",
-            "type": "concept",
-        })
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "read_test",
+                "label": "Read Test Node",
+                "type": "concept",
+            },
+        )
 
         # Start concurrent reads and writes
         read_agent = ConcurrentAgent("reader", port, "read_test")
@@ -258,11 +276,16 @@ class TestConcurrentConflictResolution:
         node_id = "rapid_node"
 
         # Create initial node
-        _request("POST", port, "/node", body={
-            "id": node_id,
-            "label": "Rapid Node",
-            "type": "concept",
-        })
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": node_id,
+                "label": "Rapid Node",
+                "type": "concept",
+            },
+        )
 
         # Fire 50 concurrent requests to the same endpoint
         results = []
@@ -300,34 +323,41 @@ class TestConcurrentConflictResolution:
         node_id = "duplicate_id"
 
         # First create should succeed
-        status, data = _request("POST", port, "/node", body={
-            "id": node_id,
-            "label": "Duplicate Node",
-            "type": "concept",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": node_id,
+                "label": "Duplicate Node",
+                "type": "concept",
+            },
+        )
         assert status == 201, f"First create should succeed, got {status}"
 
         # Subsequent creates - need to check what status code comes back
         # The error handling should return 400 or 409, not 500
         results = []
         for _ in range(10):
-            status, data = _request("POST", port, "/node", body={
-                "id": node_id,
-                "label": "Duplicate Node",
-                "type": "concept",
-            })
+            status, data = _request(
+                "POST",
+                port,
+                "/node",
+                body={
+                    "id": node_id,
+                    "label": "Duplicate Node",
+                    "type": "concept",
+                },
+            )
             results.append(status)
 
         # Count how many succeeded - exactly 1 should have
         success_count = sum(1 for s in results if s == 201)
         # The first one (outside this loop) succeeded, so no more should
-        assert success_count == 0, \
-            f"Expected no additional successes but got {success_count}"
+        assert success_count == 0, f"Expected no additional successes but got {success_count}"
 
         # Verify exactly one node exists
-        node_count = store.conn.execute(
-            "SELECT COUNT(*) FROM ohm_nodes WHERE id = ?", [node_id]
-        ).fetchone()[0]
+        node_count = store.conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE id = ?", [node_id]).fetchone()[0]
         assert node_count == 1, f"Expected exactly 1 node, got {node_count}"
 
 
@@ -365,8 +395,7 @@ class TestRaceConditionPrevention:
             WHERE n1.id IS NULL OR n2.id IS NULL
         """).fetchall()
 
-        assert len(invalid_edges) == 0, \
-            f"Found {len(invalid_edges)} edges with invalid node references: {invalid_edges}"
+        assert len(invalid_edges) == 0, f"Found {len(invalid_edges)} edges with invalid node references: {invalid_edges}"
 
     def test_no_orphaned_edges_after_concurrent_writes(self, concurrent_server):
         """Every edge should have a valid challenge_of reference or null."""
@@ -377,16 +406,19 @@ class TestRaceConditionPrevention:
         agent.create_nodes_and_edges(5)
 
         # Challenge an edge
-        edges = store.conn.execute(
-            "SELECT id FROM ohm_edges WHERE from_node LIKE 'orphan_%' LIMIT 1"
-        ).fetchone()
+        edges = store.conn.execute("SELECT id FROM ohm_edges WHERE from_node LIKE 'orphan_%' LIMIT 1").fetchone()
         if edges:
             edge_id = edges[0]
-            status, _ = _request("POST", port, "/challenge", body={
-                "edge_id": edge_id,
-                "challenge_type": "CHALLENGED_BY",
-                "confidence": 0.3,
-            })
+            status, _ = _request(
+                "POST",
+                port,
+                "/challenge",
+                body={
+                    "edge_id": edge_id,
+                    "challenge_type": "CHALLENGED_BY",
+                    "confidence": 0.3,
+                },
+            )
 
         # Verify no orphaned challenge edges
         orphaned = store.conn.execute("""

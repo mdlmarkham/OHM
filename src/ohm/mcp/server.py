@@ -36,14 +36,16 @@ OHM_AGENT = os.environ.get("OHM_AGENT", "mcp")
 
 # Ensure stdout can handle Unicode (MCP stdio transport)
 import sys
-if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
-    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
-    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 # ---------------------------------------------------------------------------
 # HTTP helper
 # ---------------------------------------------------------------------------
+
 
 def _headers() -> dict[str, str]:
     h = {"Content-Type": "application/json"}
@@ -187,7 +189,7 @@ async def list_tools() -> list[Tool]:
                     "content": {"type": "string", "description": "Node content/description"},
                     "confidence": {"type": "number", "description": "Confidence 0.0-1.0 (default 0.5)"},
                     "provenance": {"type": "string", "description": "Where this knowledge came from"},
-                    "tags": {"type": "string", "description": "JSON array of tags, e.g. '[\"economics\",\"pattern\"]'"},
+                    "tags": {"type": "string", "description": 'JSON array of tags, e.g. \'["economics","pattern"]\''},
                     "visibility": {"type": "string", "description": "Visibility: team (default), private, public", "default": "team"},
                     "create_only": {"type": "boolean", "description": "If true, reject on duplicate ID. If false, upsert (default true)", "default": True},
                 },
@@ -450,6 +452,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
 # Entry point
 # ---------------------------------------------------------------------------
 
+
 async def main():
     """Run the OHM MCP server via stdio transport."""
     async with stdio_server() as (read_stream, write_stream):
@@ -459,6 +462,7 @@ async def main():
 def cli_main():
     """Synchronous entry point for the OHM MCP server."""
     import asyncio
+
     asyncio.run(main())
 
 

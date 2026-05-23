@@ -62,15 +62,18 @@ def build_parser() -> argparse.ArgumentParser:
     serve_start.add_argument("--port", type=int, default=9876, help="Quack server port")
     serve_start.add_argument("--config", default=None, help="Path to config file")
     serve_start.add_argument(
-        "--quack", action="store_true",
+        "--quack",
+        action="store_true",
         help="Enable Quack protocol for concurrent multi-writer access",
     )
     serve_start.add_argument(
-        "--quack-uri", default=None,
+        "--quack-uri",
+        default=None,
         help="Quack server URI (default: quack:localhost)",
     )
     serve_start.add_argument(
-        "--quack-token-env", default=None,
+        "--quack-token-env",
+        default=None,
         help="Environment variable for Quack token (default: QUACK_TOKEN)",
     )
 
@@ -94,7 +97,8 @@ def build_parser() -> argparse.ArgumentParser:
     # graph upgrade
     upgrade_parser = graph_sub.add_parser("upgrade", help="Apply pending schema migrations")
     upgrade_parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="Show what would be migrated without applying changes",
     )
 
@@ -115,10 +119,14 @@ def build_parser() -> argparse.ArgumentParser:
     neighborhood_parser.add_argument("node_id", help="Starting node ID")
     neighborhood_parser.add_argument("--depth", type=int, default=3, help="Max traversal depth")
     neighborhood_parser.add_argument(
-        "--layer", choices=["L1", "L2", "L3", "L4"], help="Filter by layer",
+        "--layer",
+        choices=["L1", "L2", "L3", "L4"],
+        help="Filter by layer",
     )
     neighborhood_parser.add_argument(
-        "--direction", choices=["outgoing", "incoming", "both"], default="both",
+        "--direction",
+        choices=["outgoing", "incoming", "both"],
+        default="both",
     )
     neighborhood_parser.add_argument("--mermaid", action="store_true", help="Output as Mermaid diagram")
 
@@ -128,10 +136,16 @@ def build_parser() -> argparse.ArgumentParser:
     write_parser.add_argument("--to", dest="to_node", required=True, help="Target node ID")
     write_parser.add_argument("--type", dest="edge_type", required=True, help="Edge type")
     write_parser.add_argument(
-        "--layer", choices=["L1", "L2", "L3", "L4"], default="L3", help="Layer",
+        "--layer",
+        choices=["L1", "L2", "L3", "L4"],
+        default="L3",
+        help="Layer",
     )
     write_parser.add_argument(
-        "--confidence", type=float, default=0.7, help="Confidence score (0-1)",
+        "--confidence",
+        type=float,
+        default=0.7,
+        help="Confidence score (0-1)",
     )
     write_parser.add_argument("--condition", help="Context condition string")
     write_parser.add_argument("--provenance", help="Source attribution")
@@ -141,7 +155,10 @@ def build_parser() -> argparse.ArgumentParser:
     challenge_parser.add_argument("edge_id", help="ID of the edge to challenge")
     challenge_parser.add_argument("--reason", required=True, help="Challenge rationale")
     challenge_parser.add_argument(
-        "--confidence", type=float, default=0.5, help="Challenge confidence",
+        "--confidence",
+        type=float,
+        default=0.5,
+        help="Challenge confidence",
     )
 
     # graph support
@@ -156,11 +173,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     # graph confidence-chain
     chain_parser = graph_sub.add_parser(
-        "confidence-chain", help="Trace evidence chain and compute aggregate confidence",
+        "confidence-chain",
+        help="Trace evidence chain and compute aggregate confidence",
     )
     chain_parser.add_argument("node_id", help="Node ID to trace evidence for")
     chain_parser.add_argument(
-        "--max-depth", type=int, default=5, help="Maximum chain depth (default: 5)",
+        "--max-depth",
+        type=int,
+        default=5,
+        help="Maximum chain depth (default: 5)",
     )
 
     # graph listen
@@ -169,21 +190,11 @@ def build_parser() -> argparse.ArgumentParser:
     listen_parser.add_argument("--node-type", help="Filter changes by node type (e.g., concept, pattern)")
 
     # graph events (SSE client for real-time change feed)
-    events_parser = graph_sub.add_parser(
-        "events", help="Stream change feed events via Server-Sent Events (SSE)"
-    )
-    events_parser.add_argument(
-        "--since", help="ISO timestamp to stream from (default: last sync)"
-    )
-    events_parser.add_argument(
-        "--topics", help="Comma-separated topic labels to filter"
-    )
-    events_parser.add_argument(
-        "--agent", help="Filter to changes by this agent"
-    )
-    events_parser.add_argument(
-        "--node-type", help="Filter to changes affecting nodes of this type (e.g., concept)"
-    )
+    events_parser = graph_sub.add_parser("events", help="Stream change feed events via Server-Sent Events (SSE)")
+    events_parser.add_argument("--since", help="ISO timestamp to stream from (default: last sync)")
+    events_parser.add_argument("--topics", help="Comma-separated topic labels to filter")
+    events_parser.add_argument("--agent", help="Filter to changes by this agent")
+    events_parser.add_argument("--node-type", help="Filter to changes affecting nodes of this type (e.g., concept)")
 
     # graph impact
     impact_parser = graph_sub.add_parser("impact", help="Downstream failure impact analysis")
@@ -209,7 +220,9 @@ def build_parser() -> argparse.ArgumentParser:
     observe_parser = graph_sub.add_parser("observe", help="Record an observation on a node")
     observe_parser.add_argument("node_id", help="Node ID to observe")
     observe_parser.add_argument(
-        "--type", dest="obs_type", required=True,
+        "--type",
+        dest="obs_type",
+        required=True,
         choices=["anomaly", "measurement", "pattern", "challenge", "support"],
         help="Observation type",
     )
@@ -219,28 +232,39 @@ def build_parser() -> argparse.ArgumentParser:
     observe_parser.add_argument(
         "--source",
         choices=["signal", "research", "conversation", "analysis"],
-        default="analysis", help="Observation source",
+        default="analysis",
+        help="Observation source",
     )
 
     # graph aggregate
     aggregate_parser = graph_sub.add_parser("aggregate", help="Combine observations on a node")
     aggregate_parser.add_argument("node_id", help="Node ID to aggregate observations for")
     aggregate_parser.add_argument(
-        "--method", choices=["weighted", "mean", "max_confidence", "consensus"],
-        default="weighted", help="Aggregation strategy",
+        "--method",
+        choices=["weighted", "mean", "max_confidence", "consensus"],
+        default="weighted",
+        help="Aggregation strategy",
     )
 
     # graph anomalies
     anomalies_parser = graph_sub.add_parser("anomalies", help="Detect anomalous observations")
     anomalies_parser.add_argument(
-        "--sigma", type=float, default=2.0, dest="sigma_threshold",
+        "--sigma",
+        type=float,
+        default=2.0,
+        dest="sigma_threshold",
         help="Sigma threshold for flagging (default: 2.0)",
     )
     anomalies_parser.add_argument(
-        "--layer", choices=["L1", "L2", "L3", "L4"], help="Filter by layer",
+        "--layer",
+        choices=["L1", "L2", "L3", "L4"],
+        help="Filter by layer",
     )
     anomalies_parser.add_argument(
-        "--limit", type=int, default=50, help="Maximum results (default: 50)",
+        "--limit",
+        type=int,
+        default=50,
+        help="Maximum results (default: 50)",
     )
 
     # graph health
@@ -249,91 +273,117 @@ def build_parser() -> argparse.ArgumentParser:
     # graph cleanup
     cleanup_parser = graph_sub.add_parser("cleanup", help="Find and remove orphan agent nodes")
     cleanup_parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="Show orphan agents without deleting",
     )
 
     # graph decay
     decay_parser = graph_sub.add_parser("decay", help="Apply confidence decay to stale edges")
     decay_parser.add_argument(
-        "--threshold", type=float, default=0.1,
+        "--threshold",
+        type=float,
+        default=0.1,
         help="Effective confidence below this is stale (default: 0.1)",
     )
     decay_parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="Show what would decay without updating",
     )
     decay_parser.add_argument(
-        "--layer", choices=["L1", "L2", "L3", "L4"],
+        "--layer",
+        choices=["L1", "L2", "L3", "L4"],
         help="Only decay edges in this layer",
     )
 
     # graph composite-score
     score_parser = graph_sub.add_parser(
-        "composite-score", help="Compute composite decision score for a node",
+        "composite-score",
+        help="Compute composite decision score for a node",
     )
     score_parser.add_argument("node_id", help="Node ID to score")
     score_parser.add_argument(
-        "--obs-weight", type=float, default=0.5,
+        "--obs-weight",
+        type=float,
+        default=0.5,
         help="Weight for observation signal (default: 0.5)",
     )
     score_parser.add_argument(
-        "--evidence-weight", type=float, default=0.5,
+        "--evidence-weight",
+        type=float,
+        default=0.5,
         help="Weight for evidence signal (default: 0.5)",
     )
     score_parser.add_argument(
-        "--method", choices=["arithmetic", "geometric"], default="arithmetic",
+        "--method",
+        choices=["arithmetic", "geometric"],
+        default="arithmetic",
         help="Composition method: arithmetic (weighted mean) or geometric (multiplicative factors)",
     )
     score_parser.add_argument(
-        "--baseline", type=float, default=1.0,
+        "--baseline",
+        type=float,
+        default=1.0,
         help="Baseline for geometric mode (default: 1.0 = no change)",
     )
 
     # graph handoff
     handoff_parser = graph_sub.add_parser(
-        "handoff", help="Transfer a ticket between agents",
+        "handoff",
+        help="Transfer a ticket between agents",
     )
     handoff_parser.add_argument("--from-agent", required=True, help="Agent node ID transferring from")
     handoff_parser.add_argument("--to-agent", required=True, help="Agent node ID transferring to")
     handoff_parser.add_argument("--ticket", required=True, help="Ticket/case node ID")
     handoff_parser.add_argument("--reason", required=True, help="Reason for the handoff")
     handoff_parser.add_argument(
-        "--type", choices=["TRANSFERRED_TO", "ESCALATED_TO", "DELEGATED_TO"],
-        default="TRANSFERRED_TO", dest="edge_type",
+        "--type",
+        choices=["TRANSFERRED_TO", "ESCALATED_TO", "DELEGATED_TO"],
+        default="TRANSFERRED_TO",
+        dest="edge_type",
         help="Handoff edge type (default: TRANSFERRED_TO)",
     )
     handoff_parser.add_argument(
-        "--confidence", type=float, default=0.8,
+        "--confidence",
+        type=float,
+        default=0.8,
         help="Confidence for the handoff edge (default: 0.8)",
     )
 
     # graph escalate
     escalate_parser = graph_sub.add_parser(
-        "escalate", help="Escalate a ticket to a higher tier",
+        "escalate",
+        help="Escalate a ticket to a higher tier",
     )
     escalate_parser.add_argument("--ticket", required=True, help="Ticket/case node ID")
     escalate_parser.add_argument("--to-tier", required=True, help="Agent/tier node ID to escalate to")
     escalate_parser.add_argument("--reason", required=True, help="Reason for escalation")
     escalate_parser.add_argument("--from-agent", default=None, help="Agent node ID escalating from")
     escalate_parser.add_argument(
-        "--confidence", type=float, default=0.9,
+        "--confidence",
+        type=float,
+        default=0.9,
         help="Confidence for the escalation edge (default: 0.9)",
     )
 
     # graph ticket-provenance
     provenance_parser = graph_sub.add_parser(
-        "ticket-provenance", help="Show handoff and state history for a ticket",
+        "ticket-provenance",
+        help="Show handoff and state history for a ticket",
     )
     provenance_parser.add_argument("ticket_node", help="Ticket/case node ID")
     provenance_parser.add_argument(
-        "--max-depth", type=int, default=10,
+        "--max-depth",
+        type=int,
+        default=10,
         help="Maximum traversal depth (default: 10)",
     )
 
     # graph record-outcome
     outcome_parser = graph_sub.add_parser(
-        "record-outcome", help="Record whether a source's claim was correct",
+        "record-outcome",
+        help="Record whether a source's claim was correct",
     )
     outcome_parser.add_argument("--source", required=True, help="Source agent node ID")
     outcome_parser.add_argument("--claim", required=True, help="Claim node ID")
@@ -343,79 +393,105 @@ def build_parser() -> argparse.ArgumentParser:
 
     # graph source-reliability
     reliability_parser = graph_sub.add_parser(
-        "source-reliability", help="Compute source reliability metrics",
+        "source-reliability",
+        help="Compute source reliability metrics",
     )
     reliability_parser.add_argument("source_agent", help="Source agent node ID")
 
     # graph trend
     trend_parser = graph_sub.add_parser(
-        "trend", help="Detect temporal trends in observations",
+        "trend",
+        help="Detect temporal trends in observations",
     )
     trend_parser.add_argument("node_id", help="Node ID to analyze")
     trend_parser.add_argument(
-        "--window", type=int, default=60,
+        "--window",
+        type=int,
+        default=60,
         help="Lookback window in days (default: 60)",
     )
     trend_parser.add_argument(
-        "--min-obs", type=int, default=3,
+        "--min-obs",
+        type=int,
+        default=3,
         help="Minimum observations needed (default: 3)",
     )
 
     # graph voi
     voi_parser = graph_sub.add_parser(
-        "voi", help="Value of Information: rank nodes by research priority",
+        "voi",
+        help="Value of Information: rank nodes by research priority",
     )
     voi_parser.add_argument(
-        "--decision", default=None,
+        "--decision",
+        default=None,
         help="Comma-separated decision node IDs (auto-detects if omitted)",
     )
     voi_parser.add_argument(
-        "--top", type=int, default=10,
+        "--top",
+        type=int,
+        default=10,
         help="Maximum results to return (default: 10)",
     )
     voi_parser.add_argument(
-        "--layers", default=None,
+        "--layers",
+        default=None,
         help="Comma-separated layer filter (e.g. L3,L4)",
     )
     voi_parser.add_argument(
-        "--leak", type=float, default=0.15,
+        "--leak",
+        type=float,
+        default=0.15,
         help="Leak probability for Bayesian network (default: 0.15)",
     )
     voi_parser.add_argument(
-        "--root-prior", type=float, default=0.3,
+        "--root-prior",
+        type=float,
+        default=0.3,
         help="Default prior for root nodes (default: 0.3)",
     )
     voi_parser.add_argument(
-        "--edge-types", default=None,
+        "--edge-types",
+        default=None,
         help="Comma-separated edge types to include (default: CAUSES,INFLUENCES,ENABLES,DEPENDS_ON)",
     )
 
     # graph voi-tasks
     voi_tasks_parser = graph_sub.add_parser(
-        "voi-tasks", help="Generate research tasks from VoI rankings matched to agent expertise",
+        "voi-tasks",
+        help="Generate research tasks from VoI rankings matched to agent expertise",
     )
     voi_tasks_parser.add_argument(
-        "--agent", default=None,
+        "--agent",
+        default=None,
         help="Agent name to filter tasks by expertise match",
     )
     voi_tasks_parser.add_argument(
-        "--decision", default=None,
+        "--decision",
+        default=None,
         help="Comma-separated decision node IDs (auto-detects if omitted)",
     )
     voi_tasks_parser.add_argument(
-        "--top", type=int, default=5,
+        "--top",
+        type=int,
+        default=5,
         help="Maximum tasks to return (default: 5)",
     )
     voi_tasks_parser.add_argument(
-        "--layers", default=None,
+        "--layers",
+        default=None,
         help="Comma-separated layer filter (e.g. L3,L4)",
     )
     voi_tasks_parser.add_argument(
-        "--leak", type=float, default=0.15,
+        "--leak",
+        type=float,
+        default=0.15,
         help="Leak probability for Bayesian network (default: 0.15)",
     )
     voi_tasks_parser.add_argument(
-        "--root-prior", type=float, default=0.3,
+        "--root-prior",
+        type=float,
+        default=0.3,
         help="Default prior for root nodes (default: 0.3)",
     )
 
@@ -464,11 +540,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     topo_fa.add_argument("node_id", help="Starting node ID (equipment, system, etc.)")
     topo_fa.add_argument(
-        "--depth", type=int, default=5,
+        "--depth",
+        type=int,
+        default=5,
         help="Max propagation depth (default: 5)",
     )
     topo_fa.add_argument(
-        "--edge-type", dest="edge_types", action="append",
+        "--edge-type",
+        dest="edge_types",
+        action="append",
         help="Filter by edge type (repeatable, default: FEEDS,FLOWS_TO,DEPENDS_ON)",
     )
 
@@ -479,11 +559,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     topo_cm.add_argument("node_id", help="Node ID to map compliance around")
     topo_cm.add_argument(
-        "--depth", type=int, default=3,
+        "--depth",
+        type=int,
+        default=3,
         help="Neighborhood depth (default: 3)",
     )
     topo_cm.add_argument(
-        "--direction", choices=["outgoing", "incoming", "both"], default="both",
+        "--direction",
+        choices=["outgoing", "incoming", "both"],
+        default="both",
         help="Edge direction (default: both)",
     )
 
@@ -494,7 +578,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     topo_is.add_argument("node_id", help="Node ID to study")
     topo_is.add_argument(
-        "--depth", type=int, default=5,
+        "--depth",
+        type=int,
+        default=5,
         help="Max traversal depth (default: 5)",
     )
 
@@ -515,6 +601,7 @@ def main(argv: list[str] | None = None) -> NoReturn:
 
     if args.version:
         from ohm import __version__
+
         print(f"ohm {__version__}")
         sys.exit(0)
 
@@ -585,9 +672,7 @@ def _handle_serve_token(args: argparse.Namespace) -> None:
     agent_name = args.agent_name
     token = secrets.token_urlsafe(32)
 
-    config_path = args.config or os.environ.get(
-        "OHM_CONFIG", str(Path.home() / ".ohm" / "ohmd.json")
-    )
+    config_path = args.config or os.environ.get("OHM_CONFIG", str(Path.home() / ".ohm" / "ohmd.json"))
     config_file = Path(config_path)
     config_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -725,6 +810,7 @@ def _handle_agents(args: argparse.Namespace) -> None:
 
             if args.format == "json":
                 import json
+
                 result = {"agent": agent_label, "id": agent_id, "edges": []}
                 for row in edges:
                     result["edges"].append({"type": row[0], "concept": row[1]})
@@ -742,12 +828,11 @@ def _handle_agents(args: argparse.Namespace) -> None:
                     print(f"  Capable of: {', '.join(capabilities)}")
         else:
             # List all registered agents
-            agents = conn.execute(
-                "SELECT id, label FROM ohm_nodes WHERE type = 'agent' ORDER BY label"
-            ).fetchall()
+            agents = conn.execute("SELECT id, label FROM ohm_nodes WHERE type = 'agent' ORDER BY label").fetchall()
 
             if args.format == "json":
                 import json
+
                 agent_list: list[dict[str, str]] = []
                 for row in agents:
                     agent_list.append({"id": row[0], "label": row[1]})
@@ -777,6 +862,7 @@ def _handle_snapshot(args: argparse.Namespace) -> None:
         )
         if args.format == "json":
             import json
+
             print(json.dumps(result, indent=2, default=str))
         else:
             s = result["summary"]
@@ -803,6 +889,7 @@ def _handle_diff(args: argparse.Namespace) -> None:
         )
         if args.format == "json":
             import json
+
             print(json.dumps(result, indent=2, default=str))
         else:
             s = result["summary"]
@@ -819,15 +906,18 @@ def _handle_diff(args: argparse.Namespace) -> None:
 
 # ── Graph Command Implementations ───────────────────────────────────────────
 
+
 def _get_db(args: argparse.Namespace) -> "duckdb.DuckDBPyConnection":
     """Open a database connection using args."""
     from ohm.db import connect
+
     return connect(args.db)
 
 
 def _get_actor(args: argparse.Namespace) -> str:
     """Resolve the actor name from args or environment."""
     import os
+
     return args.actor or os.environ.get("OHM_ACTOR", "unknown")
 
 
@@ -842,6 +932,7 @@ def _show_status(args: argparse.Namespace) -> None:
         schema_version = get_schema_version(conn)
         if args.format == "json":
             import json
+
             stats["schema_version"] = schema_version
             print(json.dumps(stats, indent=2))
         else:
@@ -892,6 +983,7 @@ def _show_stats(args: argparse.Namespace) -> None:
         stats = query_stats(conn)
         if args.format == "json":
             import json
+
             print(json.dumps(stats, indent=2))
         else:
             print("── Edges by Layer ──")
@@ -935,12 +1027,11 @@ def _handle_query(args: argparse.Namespace) -> None:
 
             where = " AND ".join(conditions) if conditions else "1=1"
             result = conn.execute(
-                "SELECT * FROM ohm_edges WHERE "
-                + where
-                + " ORDER BY created_at DESC LIMIT 100",
+                "SELECT * FROM ohm_edges WHERE " + where + " ORDER BY created_at DESC LIMIT 100",
                 params,
             )
             from ohm.queries import _rows_to_dicts
+
             rows = _rows_to_dicts(result)
         elif args.query_text:
             # Natural language: search by label/content match
@@ -949,26 +1040,25 @@ def _handle_query(args: argparse.Namespace) -> None:
                 [f"%{args.query_text}%", f"%{args.query_text}%"],
             )
             from ohm.queries import _rows_to_dicts
+
             rows = _rows_to_dicts(result)
         else:
             # No filters: show all nodes
             result = conn.execute("SELECT * FROM ohm_nodes ORDER BY created_at DESC LIMIT 100")
             from ohm.queries import _rows_to_dicts
+
             rows = _rows_to_dicts(result)
 
         if args.format == "json":
             import json
+
             print(json.dumps(rows, indent=2, default=str))
         else:
             for row in rows:
                 if "label" in row:
                     print(f"  [{row.get('type', '?')}] {row['label']} ({row['id']})")
                 elif "edge_type" in row:
-                    print(
-                        f"  [{row['layer']}] {row['edge_type']}: "
-                        f"{row['from_node']} → {row['to_node']} "
-                        f"(conf: {row.get('confidence', '?')})"
-                    )
+                    print(f"  [{row['layer']}] {row['edge_type']}: {row['from_node']} → {row['to_node']} (conf: {row.get('confidence', '?')})")
     finally:
         conn.close()
 
@@ -980,23 +1070,26 @@ def _handle_neighborhood(args: argparse.Namespace) -> None:
     conn = _get_db(args)
     try:
         results = query_neighborhood(
-            conn, args.node_id,
-            depth=args.depth, layer=args.layer, direction=args.direction,
+            conn,
+            args.node_id,
+            depth=args.depth,
+            layer=args.layer,
+            direction=args.direction,
         )
         if args.format == "json":
             import json
+
             print(json.dumps(results, indent=2, default=str))
         elif getattr(args, "mermaid", False):
             from ohm.visualization import to_mermaid
+
             print(to_mermaid(results, title=f"Neighborhood of {args.node_id}"))
         else:
             if not results:
                 print(f"No edges found within {args.depth} hops of '{args.node_id}'")
                 return
             for r in results:
-                print(f"  [hop {r['hop']}] [{r['layer']}] {r['edge_type']}: "
-                      f"{r['from_node']} → {r['to_node']} "
-                      f"(conf: {r.get('confidence', '?')}, by: {r['created_by']})")
+                print(f"  [hop {r['hop']}] [{r['layer']}] {r['edge_type']}: {r['from_node']} → {r['to_node']} (conf: {r.get('confidence', '?')}, by: {r['created_by']})")
     finally:
         conn.close()
 
@@ -1026,6 +1119,7 @@ def _handle_write(args: argparse.Namespace) -> None:
         )
         if args.format == "json":
             import json
+
             print(json.dumps({"edge_id": edge_id, "status": "created"}))
         else:
             print(f"Created edge: {args.from_node} --[{args.edge_type}]--> {args.to_node}")
@@ -1051,6 +1145,7 @@ def _handle_challenge(args: argparse.Namespace) -> None:
         )
         if args.format == "json":
             import json
+
             print(json.dumps({"challenge_id": challenge_id, "status": "created"}))
         else:
             print(f"Challenged edge {args.edge_id}")
@@ -1077,6 +1172,7 @@ def _handle_support(args: argparse.Namespace) -> None:
         )
         if args.format == "json":
             import json
+
             print(json.dumps({"support_id": support_id, "status": "created"}))
         else:
             print(f"Supported edge {args.edge_id}")
@@ -1096,6 +1192,7 @@ def _handle_confidence(args: argparse.Namespace) -> None:
         result = query_confidence(conn, args.edge_id)
         if args.format == "json":
             import json
+
             print(json.dumps(result, indent=2, default=str))
         else:
             if result["original"] is None:
@@ -1116,17 +1213,11 @@ def _handle_confidence(args: argparse.Namespace) -> None:
             if result["challenges"]:
                 print(f"\n  Challenges ({len(result['challenges'])}):")
                 for c in result["challenges"]:
-                    print(
-                        f"    • {c['created_by']} (conf: {c['confidence']}): "
-                        f"{c.get('condition', '')}"
-                    )
+                    print(f"    • {c['created_by']} (conf: {c['confidence']}): {c.get('condition', '')}")
             if result["supports"]:
                 print(f"\n  Support ({len(result['supports'])}):")
                 for s in result["supports"]:
-                    print(
-                        f"    • {s['created_by']} (conf: {s['confidence']}): "
-                        f"{s.get('condition', '')}"
-                    )
+                    print(f"    • {s['created_by']} (conf: {s['confidence']}): {s.get('condition', '')}")
     finally:
         conn.close()
 
@@ -1140,6 +1231,7 @@ def _handle_confidence_chain(args: argparse.Namespace) -> None:
         result = query_confidence_chain(conn, args.node_id, max_depth=args.max_depth)
         if args.format == "json":
             import json
+
             print(json.dumps(result, indent=2, default=str))
         else:
             print(f"── Confidence Chain: {args.node_id} ──")
@@ -1150,11 +1242,7 @@ def _handle_confidence_chain(args: argparse.Namespace) -> None:
                 print(f"\n  Evidence chain ({len(result['evidence_chain'])} edges):")
                 for e in result["evidence_chain"]:
                     indent = "  " * e["depth"]
-                    print(
-                        f"{indent}[d{e['depth']}] {e['edge_type']}: "
-                        f"{e['from_node']} → {e['to_node']} "
-                        f"(conf: {e['confidence']}, by: {e['created_by']})"
-                    )
+                    print(f"{indent}[d{e['depth']}] {e['edge_type']}: {e['from_node']} → {e['to_node']} (conf: {e['confidence']}, by: {e['created_by']})")
     finally:
         conn.close()
 
@@ -1169,6 +1257,7 @@ def _handle_listen(args: argparse.Namespace) -> None:
         results = query_change_feed(conn, since=args.since, node_type=node_type)
         if args.format == "json":
             import json
+
             print(json.dumps(results, indent=2, default=str))
         else:
             if not results:
@@ -1176,8 +1265,7 @@ def _handle_listen(args: argparse.Namespace) -> None:
                 return
             print(f"Changes ({len(results)}):")
             for r in results:
-                print(f"  [{r['occurred_at']}] {r['agent_name']} {r['operation']} "
-                      f"{r['table_name']}.{r['row_id']}")
+                print(f"  [{r['occurred_at']}] {r['agent_name']} {r['operation']} {r['table_name']}.{r['row_id']}")
     finally:
         conn.close()
 
@@ -1223,10 +1311,9 @@ def _handle_events(args: argparse.Namespace) -> None:
                 line = line.decode("utf-8").rstrip()
                 if line.startswith("data: "):
                     import json
+
                     data = json.loads(line[6:])
-                    print(f"  [{data.get('occurred_at', '?')}] "
-                          f"{data.get('agent_name', '?')} {data.get('operation', '?')} "
-                          f"{data.get('table_name', '?')}.{data.get('row_id', '?')}")
+                    print(f"  [{data.get('occurred_at', '?')}] {data.get('agent_name', '?')} {data.get('operation', '?')} {data.get('table_name', '?')}.{data.get('row_id', '?')}")
     except KeyboardInterrupt:
         print("\nStopped streaming.")
     except Exception as e:
@@ -1242,19 +1329,19 @@ def _handle_path(args: argparse.Namespace) -> None:
         results = query_path(conn, args.from_node, args.to_node, max_depth=args.max_depth)
         if args.format == "json":
             import json
+
             print(json.dumps(results, indent=2, default=str))
         elif getattr(args, "mermaid", False):
             from ohm.visualization import to_mermaid_path
+
             print(to_mermaid_path(results, title=f"Path: {args.from_node} → {args.to_node}"))
         else:
             if not results:
-                print(f"No path found from '{args.from_node}' to '{args.to_node}' "
-                      f"(max depth: {args.max_depth})")
+                print(f"No path found from '{args.from_node}' to '{args.to_node}' (max depth: {args.max_depth})")
                 return
             print(f"Path from '{args.from_node}' to '{args.to_node}':")
             for r in results:
-                print(f"  [{r['layer']}] {r['edge_type']}: "
-                      f"{r['from_node']} → {r['to_node']} (conf: {r.get('confidence', '?')})")
+                print(f"  [{r['layer']}] {r['edge_type']}: {r['from_node']} → {r['to_node']} (conf: {r.get('confidence', '?')})")
     finally:
         conn.close()
 
@@ -1268,20 +1355,19 @@ def _handle_impact(args: argparse.Namespace) -> None:
         results = query_impact(conn, args.node_id, depth=args.depth)
         if args.format == "json":
             import json
+
             print(json.dumps(results, indent=2, default=str))
         elif getattr(args, "mermaid", False):
             from ohm.visualization import to_mermaid
+
             print(to_mermaid(results, title=f"Impact from {args.node_id}"))
         else:
             if not results:
-                print(f"No downstream impact from '{args.node_id}' "
-                      f"(max depth: {args.depth})")
+                print(f"No downstream impact from '{args.node_id}' (max depth: {args.depth})")
                 return
             print(f"Downstream impact from '{args.node_id}':")
             for r in results:
-                print(f"  [depth {r['depth']}] [{r['layer']}] {r['edge_type']}: "
-                      f"{r['from_node']} → {r['to_node']} "
-                      f"(conf: {r.get('confidence', '?')})")
+                print(f"  [depth {r['depth']}] [{r['layer']}] {r['edge_type']}: {r['from_node']} → {r['to_node']} (conf: {r.get('confidence', '?')})")
     finally:
         conn.close()
 
@@ -1327,6 +1413,7 @@ def _handle_update(args: argparse.Namespace) -> None:
         )
         if args.format == "json":
             import json
+
             print(json.dumps({"edge_id": args.edge_id, "status": "updated"}))
         else:
             print(f"Updated edge {args.edge_id}")
@@ -1357,6 +1444,7 @@ def _handle_observe(args: argparse.Namespace) -> None:
         )
         if args.format == "json":
             import json
+
             print(json.dumps({"observation_id": obs["id"], "status": "created"}))
         else:
             print(f"Recorded {args.obs_type} observation on {args.node_id}")
@@ -1378,13 +1466,13 @@ def _handle_aggregate(args: argparse.Namespace) -> None:
         result = aggregate_observations(conn, args.node_id, method=args.method)
         if args.format == "json":
             import json
+
             print(json.dumps(result, indent=2, default=str))
         else:
             if result["observation_count"] == 0:
                 print(f"No observations found for node {args.node_id}")
                 return
-            print(f"Aggregating {result['observation_count']} observations "
-                  f"on {args.node_id} ({result['method_used']})")
+            print(f"Aggregating {result['observation_count']} observations on {args.node_id} ({result['method_used']})")
             if result.get("disagreement"):
                 print(f"  ⚠ No consensus — CV={result['coefficient_of_variation']}")
             else:
@@ -1408,6 +1496,7 @@ def _handle_anomalies(args: argparse.Namespace) -> None:
         )
         if args.format == "json":
             import json
+
             print(json.dumps(results, indent=2, default=str))
         else:
             if not results:
@@ -1416,15 +1505,11 @@ def _handle_anomalies(args: argparse.Namespace) -> None:
             print(f"Found {len(results)} anomalies:")
             for a in results:
                 if a["anomaly_type"] == "observation":
-                    print(f"  [{a['node_label']}] value={a['value']}, "
-                          f"baseline={a['baseline']}, σ={a['sigma']}, "
-                          f"distance={a['sigma_distance']}σ")
+                    print(f"  [{a['node_label']}] value={a['value']}, baseline={a['baseline']}, σ={a['sigma']}, distance={a['sigma_distance']}σ")
                 elif a["anomaly_type"] == "high_variance":
-                    print(f"  [{a['node_label']}] {a['observation_count']} obs, "
-                          f"σ={a['stddev']}, mean={a['mean_value']}")
+                    print(f"  [{a['node_label']}] {a['observation_count']} obs, σ={a['stddev']}, mean={a['mean_value']}")
                 elif a["anomaly_type"] == "low_confidence":
-                    print(f"  Edge {a['edge_id']}: confidence={a['confidence']} "
-                          f"({a['layer']}/{a['edge_type']})")
+                    print(f"  Edge {a['edge_id']}: confidence={a['confidence']} ({a['layer']}/{a['edge_type']})")
     finally:
         conn.close()
 
@@ -1438,13 +1523,12 @@ def _handle_health(args: argparse.Namespace) -> None:
         result = query_graph_health(conn)
         if args.format == "json":
             import json
+
             print(json.dumps(result, indent=2, default=str))
         else:
             print(f"Graph Health: {result['health_score']}/100")
-            print(f"  Nodes: {result['total_nodes']} "
-                  f"(orphans: {result['orphan_nodes']})")
-            print(f"  Edges: {result['total_edges']} "
-                  f"(unchallenged low-confidence: {result['unchallenged_low_confidence']})")
+            print(f"  Nodes: {result['total_nodes']} (orphans: {result['orphan_nodes']})")
+            print(f"  Edges: {result['total_edges']} (unchallenged low-confidence: {result['unchallenged_low_confidence']})")
             print(f"  Dense clusters: {result['dense_cluster_nodes']}")
             print(f"  Stale observations: {result['stale_observations']}")
     finally:
@@ -1461,6 +1545,7 @@ def _handle_cleanup(args: argparse.Namespace) -> None:
 
         if args.format == "json":
             import json
+
             print(json.dumps({"orphan_agents": orphans, "count": len(orphans)}, indent=2, default=str))
         elif not orphans:
             print("No orphan agent nodes found.")
@@ -1473,8 +1558,7 @@ def _handle_cleanup(args: argparse.Namespace) -> None:
             print(f"Deleting {len(orphans)} orphan agent node(s)...")
             for o in orphans:
                 # Delete associated edges first, then the node
-                conn.execute("DELETE FROM ohm_edges WHERE from_node = ? OR to_node = ?",
-                             [o["id"], o["id"]])
+                conn.execute("DELETE FROM ohm_edges WHERE from_node = ? OR to_node = ?", [o["id"], o["id"]])
                 conn.execute("DELETE FROM ohm_nodes WHERE id = ?", [o["id"]])
                 print(f"  Deleted {o['id']} (label={o['label']})")
             print("Done.")
@@ -1508,8 +1592,7 @@ def _handle_decay(args: argparse.Namespace) -> None:
             else:
                 print(f"Would decay {len(result['decayed'])} edges:")
                 for e in result["decayed"]:
-                    print(f"  {e['id']}: {e['confidence']} -> {e['new_confidence']} "
-                          f"({e['layer']}/{e['edge_type']})")
+                    print(f"  {e['id']}: {e['confidence']} -> {e['new_confidence']} ({e['layer']}/{e['edge_type']})")
         else:
             print(f"Decayed {result['updated']} edges")
             if result.get("skipped"):
@@ -1525,7 +1608,8 @@ def _handle_composite_score(args: argparse.Namespace) -> None:
     conn = _get_db(args)
     try:
         result = composite_score(
-            conn, args.node_id,
+            conn,
+            args.node_id,
             observation_weight=args.obs_weight,
             evidence_weight=args.evidence_weight,
             method=args.method,
@@ -1533,19 +1617,17 @@ def _handle_composite_score(args: argparse.Namespace) -> None:
         )
         if args.format == "json":
             import json
+
             print(json.dumps(result, indent=2, default=str))
         else:
             print(f"── Composite Score: {args.node_id} ──")
             print(f"  Method:        {result['method']}")
-            if result.get('baseline') and result['baseline'] != 1.0:
+            if result.get("baseline") and result["baseline"] != 1.0:
                 print(f"  Baseline:      {result['baseline']}")
             print(f"  Composite:     {result['composite_score']}")
-            print(f"  Observation:   {result['observation_score']} "
-                  f"({result['observation_count']} obs)")
-            print(f"  Evidence:      {result['evidence_score']} "
-                  f"({result['evidence_count']} edges)")
-            print(f"  Weights:       obs={result['weights']['observation']}, "
-                  f"evidence={result['weights']['evidence']}")
+            print(f"  Observation:   {result['observation_score']} ({result['observation_count']} obs)")
+            print(f"  Evidence:      {result['evidence_score']} ({result['evidence_count']} edges)")
+            print(f"  Weights:       obs={result['weights']['observation']}, evidence={result['weights']['evidence']}")
     finally:
         conn.close()
 
@@ -1557,19 +1639,21 @@ def _handle_trend(args: argparse.Namespace) -> None:
     conn = _get_db(args)
     try:
         result = detect_trend(
-            conn, args.node_id,
-            window_days=args.window, min_observations=args.min_obs,
+            conn,
+            args.node_id,
+            window_days=args.window,
+            min_observations=args.min_obs,
         )
         if args.format == "json":
             import json
+
             print(json.dumps(result, indent=2, default=str))
         else:
             print(f"── Trend: {args.node_id} ──")
             print(f"  Direction:  {result['trend']}")
             print(f"  Slope/day:  {result['slope_per_day']}")
             print(f"  R-squared:  {result['r_squared']}")
-            print(f"  Obs count:  {result['observation_count']} "
-                  f"(window: {result['window_days']}d)")
+            print(f"  Obs count:  {result['observation_count']} (window: {result['window_days']}d)")
     finally:
         conn.close()
 
@@ -1600,6 +1684,7 @@ def _handle_voi(args: argparse.Namespace) -> None:
         )
         if args.format == "json":
             import json
+
             print(json.dumps(result, indent=2, default=str))
         else:
             print("── Value of Information ──")
@@ -1612,8 +1697,7 @@ def _handle_voi(args: argparse.Namespace) -> None:
                     voi = entry.get("voi", 0)
                     uncertainty = entry.get("uncertainty", 0)
                     sensitivity = entry.get("sensitivity", 0)
-                    print(f"  {i}. {node_id}: VoI={voi:.4f} "
-                          f"(uncertainty={uncertainty:.4f}, sensitivity={sensitivity:.4f})")
+                    print(f"  {i}. {node_id}: VoI={voi:.4f} (uncertainty={uncertainty:.4f}, sensitivity={sensitivity:.4f})")
             if result.get("decision_nodes"):
                 print(f"  Decision nodes: {', '.join(result['decision_nodes'])}")
     finally:
@@ -1643,6 +1727,7 @@ def _handle_voi_tasks(args: argparse.Namespace) -> None:
         )
         if args.format == "json":
             import json
+
             print(json.dumps(result, indent=2, default=str))
         else:
             print("── VoI Research Tasks ──")
@@ -1686,6 +1771,7 @@ def _handle_handoff(args: argparse.Namespace) -> None:
         )
         if args.format == "json":
             import json
+
             print(json.dumps(result, indent=2, default=str))
         else:
             edge = result["edge"]
@@ -1699,9 +1785,7 @@ def _handle_handoff(args: argparse.Namespace) -> None:
             if chain:
                 print(f"  Chain ({len(chain)} steps):")
                 for step in chain:
-                    print(f"    {step.get('edge_type', '?')}: "
-                          f"{step.get('from_label', step.get('from_node', '?'))} → "
-                          f"{step.get('to_label', step.get('to_node', '?'))}")
+                    print(f"    {step.get('edge_type', '?')}: {step.get('from_label', step.get('from_node', '?'))} → {step.get('to_label', step.get('to_node', '?'))}")
     finally:
         graph.close()
 
@@ -1721,6 +1805,7 @@ def _handle_escalate(args: argparse.Namespace) -> None:
         )
         if args.format == "json":
             import json
+
             print(json.dumps(result, indent=2, default=str))
         else:
             edge = result["edge"]
@@ -1749,6 +1834,7 @@ def _handle_ticket_provenance(args: argparse.Namespace) -> None:
         )
         if args.format == "json":
             import json
+
             print(json.dumps(chain, indent=2, default=str))
         else:
             print(f"── Ticket Provenance: {args.ticket_node} ──")
@@ -1760,8 +1846,7 @@ def _handle_ticket_provenance(args: argparse.Namespace) -> None:
                 to_label = step.get("to_label", step.get("to_node", "?"))
                 reason = step.get("reason", "")
                 ts = step.get("created_at", "")
-                print(f"  [{ts}] {edge_type}: {from_label} → {to_label}"
-                      + (f" ({reason})" if reason else ""))
+                print(f"  [{ts}] {edge_type}: {from_label} → {to_label}" + (f" ({reason})" if reason else ""))
     finally:
         graph.close()
 
@@ -1788,6 +1873,7 @@ def _handle_record_outcome(args: argparse.Namespace) -> None:
         )
         if args.format == "json":
             import json
+
             print(json.dumps(result, indent=2, default=str))
         else:
             status = "correct" if outcome else "incorrect"
@@ -1809,6 +1895,7 @@ def _handle_source_reliability(args: argparse.Namespace) -> None:
         result = graph.source_reliability(args.source_agent)
         if args.format == "json":
             import json
+
             print(json.dumps(result, indent=2, default=str))
         else:
             print(f"── Source Reliability: {args.source_agent} ──")
@@ -1817,13 +1904,14 @@ def _handle_source_reliability(args: argparse.Namespace) -> None:
             print(f"  Total outcomes:       {result['total_outcomes']}")
             print(f"  Accurate:             {result['accurate_count']}")
             print(f"  False positives:      {result['false_positive_count']}")
-            if result.get('low_confidence_warning'):
+            if result.get("low_confidence_warning"):
                 print("  ⚠ Low confidence: fewer than 5 outcomes")
     finally:
         graph.close()
 
 
 # ── State Command Implementations ───────────────────────────────────────────
+
 
 def _handle_state_set(args: argparse.Namespace) -> None:
     """Set agent focus."""
@@ -1850,6 +1938,7 @@ def _handle_state_show(args: argparse.Namespace) -> None:
         results = query_agent_state(conn, agent_name=target)
         if args.format == "json":
             import json
+
             print(json.dumps(results, indent=2, default=str))
         else:
             if not results:
@@ -1873,12 +1962,10 @@ def _handle_state_who(args: argparse.Namespace) -> None:
     conn = _get_db(args)
     try:
         results = query_agent_state(conn)
-        matches = [
-            r for r in results
-            if r.get("current_focus") and topic.lower() in r["current_focus"].lower()
-        ]
+        matches = [r for r in results if r.get("current_focus") and topic.lower() in r["current_focus"].lower()]
         if args.format == "json":
             import json
+
             print(json.dumps(matches, indent=2, default=str))
         else:
             if not matches:
@@ -1897,11 +1984,10 @@ def _show_schema(args: argparse.Namespace) -> None:
 
     if args.format == "json":
         import json
+
         result = {
             "node_types": sorted(VALID_NODE_TYPES),
-            "edge_types_by_layer": {
-                layer: sorted(types) for layer, types in LAYER_EDGE_TYPES.items()
-            },
+            "edge_types_by_layer": {layer: sorted(types) for layer, types in LAYER_EDGE_TYPES.items()},
         }
         print(json.dumps(result, indent=2))
     else:
@@ -1921,6 +2007,7 @@ def _show_layers(args: argparse.Namespace) -> None:
     if args.format == "json":
         import json
         from ohm.schema import LAYER_EDGE_TYPES
+
         result = [
             {
                 "name": "L1",
@@ -1958,18 +2045,10 @@ def _show_layers(args: argparse.Namespace) -> None:
         print(json.dumps(result, indent=2))
     else:
         layers = [
-            ("L1: Structure", "Fully shared", "Communal",
-             "CONTAINS, BELONGS_TO, HAS_COMPONENT",
-             '"Hungary has a constitution"'),
-            ("L2: Flow", "Shared + attributed", "Proposing agent",
-             "DERIVES_FROM, INFLUENCES, REFERENCES, USES",
-             '"This idea derives from that source"'),
-            ("L3: Knowledge", "Agent-owned, challengeable", "Creating agent",
-             "CAUSES, CORRELATES_WITH, PREDICTS, EXPLAINS, CHALLENGED_BY, SUPPORTS",
-             '"Pattern X causes outcome Y conf: 0.94 (agent-alpha)"'),
-            ("L4: Prospect", "Agent-owned, visible", "Forecasting agent",
-             "EXPECTS, PLANS, RISKS, DEPENDS_ON",
-             '"Outcome Z expected conf: 0.65 (agent-beta)"'),
+            ("L1: Structure", "Fully shared", "Communal", "CONTAINS, BELONGS_TO, HAS_COMPONENT", '"Hungary has a constitution"'),
+            ("L2: Flow", "Shared + attributed", "Proposing agent", "DERIVES_FROM, INFLUENCES, REFERENCES, USES", '"This idea derives from that source"'),
+            ("L3: Knowledge", "Agent-owned, challengeable", "Creating agent", "CAUSES, CORRELATES_WITH, PREDICTS, EXPLAINS, CHALLENGED_BY, SUPPORTS", '"Pattern X causes outcome Y conf: 0.94 (agent-alpha)"'),
+            ("L4: Prospect", "Agent-owned, visible", "Forecasting agent", "EXPECTS, PLANS, RISKS, DEPENDS_ON", '"Outcome Z expected conf: 0.65 (agent-beta)"'),
         ]
         lines: list[str] = []
         for name, sharing, owner, types, example in layers:
@@ -2019,6 +2098,7 @@ def _handle_topo_schema(args: argparse.Namespace) -> None:
     config = TOPO_SCHEMA
     if args.format == "json":
         import json
+
         print(json.dumps(config.to_dict(), indent=2))
     else:
         print(f"── TOPO Schema: {config.name} ──")
@@ -2060,6 +2140,7 @@ def _handle_topo_failure_analysis(args: argparse.Namespace) -> None:
 
         if args.format == "json":
             import json
+
             output = {
                 "node_id": args.node_id,
                 "depth": args.depth,
@@ -2072,13 +2153,10 @@ def _handle_topo_failure_analysis(args: argparse.Namespace) -> None:
         else:
             if not filtered:
                 if results:
-                    print(f"No failure propagation found for '{args.node_id}' "
-                          f"using edge types: {', '.join(sorted(edge_types))}")
-                    print(f"  (Total downstream impacts: {len(results)}, "
-                          f"but none matched the specified edge types)")
+                    print(f"No failure propagation found for '{args.node_id}' using edge types: {', '.join(sorted(edge_types))}")
+                    print(f"  (Total downstream impacts: {len(results)}, but none matched the specified edge types)")
                 else:
-                    print(f"No downstream impact found for '{args.node_id}' "
-                          f"(depth ≤ {args.depth})")
+                    print(f"No downstream impact found for '{args.node_id}' (depth ≤ {args.depth})")
                 return
 
             print(f"Failure analysis for '{args.node_id}' (depth ≤ {args.depth})")
@@ -2086,9 +2164,7 @@ def _handle_topo_failure_analysis(args: argparse.Namespace) -> None:
             print(f"Impacts: {len(filtered)} of {len(results)} total downstream")
             print()
             for r in filtered:
-                print(f"  [depth {r['depth']}] [{r['layer']}] {r['edge_type']}: "
-                      f"{r['from_node']} → {r['to_node']} "
-                      f"(conf: {r.get('confidence', '?')})")
+                print(f"  [depth {r['depth']}] [{r['layer']}] {r['edge_type']}: {r['from_node']} → {r['to_node']} (conf: {r.get('confidence', '?')})")
     finally:
         conn.close()
 
@@ -2105,15 +2181,25 @@ def _handle_topo_compliance_map(args: argparse.Namespace) -> None:
     conn = _get_db(args)
     try:
         results = query_neighborhood(
-            conn, args.node_id,
-            depth=args.depth, direction=args.direction,
+            conn,
+            args.node_id,
+            depth=args.depth,
+            direction=args.direction,
         )
 
         # Compliance-relevant edge types in industrial contexts
         compliance_types = {
-            "BELONGS_TO", "CONTAINS", "HAS_COMPONENT", "PART_OF",
-            "DEPENDS_ON", "RISKS", "THREATENS", "ENABLES",
-            "REFERENCES", "NOTIFIES", "SERVES",
+            "BELONGS_TO",
+            "CONTAINS",
+            "HAS_COMPONENT",
+            "PART_OF",
+            "DEPENDS_ON",
+            "RISKS",
+            "THREATENS",
+            "ENABLES",
+            "REFERENCES",
+            "NOTIFIES",
+            "SERVES",
         }
 
         compliance_edges = [r for r in results if r.get("edge_type", "").upper() in compliance_types]
@@ -2121,6 +2207,7 @@ def _handle_topo_compliance_map(args: argparse.Namespace) -> None:
 
         if args.format == "json":
             import json
+
             output = {
                 "node_id": args.node_id,
                 "depth": args.depth,
@@ -2142,17 +2229,13 @@ def _handle_topo_compliance_map(args: argparse.Namespace) -> None:
             if compliance_edges:
                 print("── Compliance-relevant ──")
                 for r in compliance_edges:
-                    print(f"  [hop {r['hop']}] [{r['layer']}] {r['edge_type']}: "
-                          f"{r['from_node']} → {r['to_node']} "
-                          f"(conf: {r.get('confidence', '?')}, by: {r['created_by']})")
+                    print(f"  [hop {r['hop']}] [{r['layer']}] {r['edge_type']}: {r['from_node']} → {r['to_node']} (conf: {r.get('confidence', '?')}, by: {r['created_by']})")
                 print()
 
             if other_edges:
                 print("── Other connections ──")
                 for r in other_edges:
-                    print(f"  [hop {r['hop']}] [{r['layer']}] {r['edge_type']}: "
-                          f"{r['from_node']} → {r['to_node']} "
-                          f"(conf: {r.get('confidence', '?')})")
+                    print(f"  [hop {r['hop']}] [{r['layer']}] {r['edge_type']}: {r['from_node']} → {r['to_node']} (conf: {r.get('confidence', '?')})")
     finally:
         conn.close()
 
@@ -2169,7 +2252,10 @@ def _handle_topo_impact_study(args: argparse.Namespace) -> None:
     try:
         impact_results = query_impact(conn, args.node_id, depth=args.depth)
         neighborhood_results = query_neighborhood(
-            conn, args.node_id, depth=args.depth, direction="both",
+            conn,
+            args.node_id,
+            depth=args.depth,
+            direction="both",
         )
 
         # Categorize impact by layer
@@ -2184,6 +2270,7 @@ def _handle_topo_impact_study(args: argparse.Namespace) -> None:
 
         if args.format == "json":
             import json
+
             output = {
                 "node_id": args.node_id,
                 "depth": args.depth,
@@ -2213,9 +2300,7 @@ def _handle_topo_impact_study(args: argparse.Namespace) -> None:
                 for layer, edges in sorted(impact_by_layer.items()):
                     print(f"\n  {layer} ({len(edges)} edges):")
                     for r in edges:
-                        print(f"    [depth {r['depth']}] {r['edge_type']}: "
-                              f"{r['from_node']} → {r['to_node']} "
-                              f"(conf: {r.get('confidence', '?')})")
+                        print(f"    [depth {r['depth']}] {r['edge_type']}: {r['from_node']} → {r['to_node']} (conf: {r.get('confidence', '?')})")
 
             # Neighborhood section
             print(f"\n── Local Context ({len(neighborhood_results)} edges) ──")
@@ -2225,9 +2310,7 @@ def _handle_topo_impact_study(args: argparse.Namespace) -> None:
                 print(f"  Incoming: {len(incoming)}")
                 print(f"  Outgoing: {len(outgoing)}")
                 for r in neighborhood_results:
-                    print(f"  [hop {r['hop']}] [{r['layer']}] {r['edge_type']}: "
-                          f"{r['from_node']} → {r['to_node']} "
-                          f"(conf: {r.get('confidence', '?')})")
+                    print(f"  [hop {r['hop']}] [{r['layer']}] {r['edge_type']}: {r['from_node']} → {r['to_node']} (conf: {r.get('confidence', '?')})")
     finally:
         conn.close()
 

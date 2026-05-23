@@ -30,6 +30,7 @@ def db():
 
 # ── ADR-008: Probability/Confidence Separation (OHM-3xn) ────────────────
 
+
 class TestProbabilityConfidenceSeparation:
     """Test that probability and confidence are not conflated in BN construction.
 
@@ -38,10 +39,7 @@ class TestProbabilityConfidenceSeparation:
     confidence * default_probability, NOT confidence directly.
     """
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_confidence_does_not_substitute_for_probability(self, db):
         """An edge with confidence=0.9 but no probability should NOT use 0.9 as probability.
 
@@ -58,8 +56,7 @@ class TestProbabilityConfidenceSeparation:
 
         # Edge with confidence=0.9 but NO probability
         db.execute(
-            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, confidence, created_by) "
-            "VALUES (?, ?, ?, 'L3', 'CAUSES', 0.9, 'test_agent')",
+            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, confidence, created_by) VALUES (?, ?, ?, 'L3', 'CAUSES', 0.9, 'test_agent')",
             [f"edge_{a}_{b}", a, b],
         )
 
@@ -68,15 +65,10 @@ class TestProbabilityConfidenceSeparation:
         # The effective probability should be confidence * default_probability = 0.9 * 0.5 = 0.45
         # NOT confidence directly (0.9)
         edge = result["edges"][0]
-        assert edge["probability"] < 0.9, \
-            f"Probability should NOT be confidence directly; got {edge['probability']}"
-        assert abs(edge["probability"] - 0.45) < 0.01, \
-            f"Expected probability ≈ 0.45 (0.9 * 0.5), got {edge['probability']}"
+        assert edge["probability"] < 0.9, f"Probability should NOT be confidence directly; got {edge['probability']}"
+        assert abs(edge["probability"] - 0.45) < 0.01, f"Expected probability ≈ 0.45 (0.9 * 0.5), got {edge['probability']}"
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_explicit_probability_used_directly(self, db):
         """When both probability and confidence are set, effective_prob = probability * confidence.
 
@@ -94,8 +86,7 @@ class TestProbabilityConfidenceSeparation:
         # Edge with both probability=0.3 and confidence=0.9
         # Per ADR-008: effective_prob = probability * confidence = 0.3 * 0.9 = 0.27
         db.execute(
-            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) "
-            "VALUES (?, ?, ?, 'L3', 'CAUSES', 0.3, 0.9, 'test_agent')",
+            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) VALUES (?, ?, ?, 'L3', 'CAUSES', 0.3, 0.9, 'test_agent')",
             [f"edge_{a}_{b}", a, b],
         )
 
@@ -103,14 +94,13 @@ class TestProbabilityConfidenceSeparation:
         assert result is not None
         edge = result["edges"][0]
         # Per ADR-008: effective probability = probability * confidence = 0.3 * 0.9 = 0.27
-        assert abs(edge["probability"] - 0.27) < 0.01, \
-            f"Effective probability should be probability * confidence = 0.27; got {edge['probability']}"
+        assert abs(edge["probability"] - 0.27) < 0.01, f"Effective probability should be probability * confidence = 0.27; got {edge['probability']}"
         # Confidence should still be tracked for leak modulation
-        assert abs(edge["confidence"] - 0.9) < 0.01, \
-            f"Confidence should be preserved for leak modulation; got {edge['confidence']}"
+        assert abs(edge["confidence"] - 0.9) < 0.01, f"Confidence should be preserved for leak modulation; got {edge['confidence']}"
 
 
 # ── ADR-009: NEGATES Edge Handling (OHM-roa) ─────────────────────────────
+
 
 class TestNegatesEdgeHandling:
     """Test that NEGATES edges are included in BN construction with inverted semantics.
@@ -120,10 +110,7 @@ class TestNegatesEdgeHandling:
     In the noisy-OR gate, NEGATES propagates failure when parent is "good" (state 1).
     """
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_negates_edges_included_in_network(self, db):
         """NEGATES edges should be included in the Bayesian network by default."""
         try:
@@ -135,18 +122,14 @@ class TestNegatesEdgeHandling:
         b = create_sample_node(db, label="condition_b")
 
         # NEGATES edge: diagnosis_a rules out condition_b
-        create_sample_edge(db, from_node=a, to_node=b, edge_type="NEGATES",
-                           layer="L3", confidence=0.8)
+        create_sample_edge(db, from_node=a, to_node=b, edge_type="NEGATES", layer="L3", confidence=0.8)
 
         result = build_bayesian_network(db)
         assert result is not None, "Network should include NEGATES edges"
         assert result["n_nodes"] >= 2, f"Expected >=2 nodes, got {result['n_nodes']}"
         assert result["n_edges"] >= 1, f"Expected >=1 edge, got {result['n_edges']}"
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_negates_inverted_probability(self, db):
         """NEGATES edges should invert the parent state check in CPTs.
 
@@ -168,8 +151,7 @@ class TestNegatesEdgeHandling:
 
         # NEGATES edge with probability=0.7
         db.execute(
-            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) "
-            "VALUES (?, ?, ?, 'L3', 'NEGATES', 0.7, 0.9, 'test_agent')",
+            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) VALUES (?, ?, ?, 'L3', 'NEGATES', 0.7, 0.9, 'test_agent')",
             [f"edge_{a}_{b}", a, b],
         )
 
@@ -179,10 +161,7 @@ class TestNegatesEdgeHandling:
         edge = result["edges"][0]
         assert edge.get("is_negates") is True, "NEGATES edge should be flagged"
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_negates_excluded_when_edge_types_specified(self, db):
         """NEGATES should be excluded when edge_types explicitly excludes it."""
         try:
@@ -193,8 +172,7 @@ class TestNegatesEdgeHandling:
         a = create_sample_node(db, label="excl_cause")
         b = create_sample_node(db, label="excl_effect")
 
-        create_sample_edge(db, from_node=a, to_node=b, edge_type="NEGATES",
-                           layer="L3", confidence=0.8)
+        create_sample_edge(db, from_node=a, to_node=b, edge_type="NEGATES", layer="L3", confidence=0.8)
 
         # Request only CAUSES edges — NEGATES should be excluded
         result = build_bayesian_network(db, edge_types=["CAUSES"])
@@ -203,6 +181,7 @@ class TestNegatesEdgeHandling:
 
 # ── ADR-008: Confidence-Modulated Leak (OHM-pj2) ─────────────────────────
 
+
 class TestConfidenceModulatedLeak:
     """Test that leak probability is modulated by average parent confidence.
 
@@ -210,10 +189,7 @@ class TestConfidenceModulatedLeak:
     leak = leak_probability * (1 - avg_confidence)
     """
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_high_confidence_reduces_leak(self, db):
         """When parent edges have high confidence, leak should be lower than default."""
         try:
@@ -226,8 +202,7 @@ class TestConfidenceModulatedLeak:
 
         # Edge with high confidence (0.95)
         db.execute(
-            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) "
-            "VALUES (?, ?, ?, 'L3', 'CAUSES', 0.7, 0.95, 'test_agent')",
+            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) VALUES (?, ?, ?, 'L3', 'CAUSES', 0.7, 0.95, 'test_agent')",
             [f"edge_{a}_{b}", a, b],
         )
 
@@ -244,13 +219,9 @@ class TestConfidenceModulatedLeak:
             values = cpd.get_values()
             # P(bad|parent=good) should be small (≈ leak)
             p_bad_parent_good = values[0][1]  # state 0 (bad), parent=good (1)
-            assert p_bad_parent_good < 0.05, \
-                f"High confidence should reduce leak; P(bad|parent=good)={p_bad_parent_good}"
+            assert p_bad_parent_good < 0.05, f"High confidence should reduce leak; P(bad|parent=good)={p_bad_parent_good}"
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_low_confidence_increases_leak(self, db):
         """When parent edges have low confidence, leak should be closer to default."""
         try:
@@ -263,8 +234,7 @@ class TestConfidenceModulatedLeak:
 
         # Edge with low confidence (0.2)
         db.execute(
-            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) "
-            "VALUES (?, ?, ?, 'L3', 'CAUSES', 0.7, 0.2, 'test_agent')",
+            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) VALUES (?, ?, ?, 'L3', 'CAUSES', 0.7, 0.2, 'test_agent')",
             [f"edge_{a}_{b}", a, b],
         )
 
@@ -278,5 +248,4 @@ class TestConfidenceModulatedLeak:
             values = cpd.get_values()
             # P(bad|parent=good) should be moderate (≈ 0.12)
             p_bad_parent_good = values[0][1]  # state 0 (bad), parent=good (1)
-            assert p_bad_parent_good > 0.05, \
-                f"Low confidence should increase leak; P(bad|parent=good)={p_bad_parent_good}"
+            assert p_bad_parent_good > 0.05, f"Low confidence should increase leak; P(bad|parent=good)={p_bad_parent_good}"

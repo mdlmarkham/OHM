@@ -55,9 +55,9 @@ class OhmStore:
         agent_name: str,
         ducklake_path: Optional[str] = None,
         ducklake_data_path: Optional[str] = None,
-        schema: Optional['SchemaConfig'] = None,
+        schema: Optional["SchemaConfig"] = None,
         base_dir: Optional[str] = None,
-    ) -> 'OhmStore':
+    ) -> "OhmStore":
         """Create a per-agent local DuckDB with DuckLake sync.
 
         Each agent gets its own local DuckDB file for zero-latency reads/writes.
@@ -110,9 +110,7 @@ class OhmStore:
         # Attach DuckLake if available
         if os.path.exists(ducklake_path):
             try:
-                store.conn.execute(
-                    f"ATTACH IF NOT EXISTS '{ducklake_path}' AS ohm_lake (TYPE ducklake)"
-                )
+                store.conn.execute(f"ATTACH IF NOT EXISTS '{ducklake_path}' AS ohm_lake (TYPE ducklake)")
                 logger.info("DuckLake attached for agent %s at %s", agent_name, ducklake_path)
             except Exception as e:
                 logger.warning("DuckLake attach failed for agent %s: %s", agent_name, e)
@@ -136,7 +134,7 @@ class OhmStore:
         quack: bool = False,
         quack_uri: str = "quack:localhost",
         quack_token_env: str = "QUACK_TOKEN",
-        schema: Optional['SchemaConfig'] = None,
+        schema: Optional["SchemaConfig"] = None,
     ):
         """Initialize the store.
 
@@ -231,6 +229,7 @@ class OhmStore:
         try:
             conn = duckdb.connect(db_path_str)
             from .schema import initialize_schema
+
             initialize_schema(conn)
             logger.info("Initialized fresh schema")
 
@@ -238,65 +237,74 @@ class OhmStore:
             ducklake_path = self.ducklake_path
             if ducklake_path and os.path.exists(ducklake_path):
                 try:
-                    conn.execute(
-                        f"ATTACH IF NOT EXISTS '{ducklake_path}' AS ohm_lake (TYPE ducklake)"
-                    )
+                    conn.execute(f"ATTACH IF NOT EXISTS '{ducklake_path}' AS ohm_lake (TYPE ducklake)")
                     logger.info("DuckLake attached for recovery")
 
                     # Column mapping for DuckLake mirror -> local schema
                     NODE_COLS = {
-                        'id': 'id', 'label': 'label', 'type': 'type',
-                        'content': 'content', 'url': 'url',
-                        'created_by': 'created_by', 'created_at': 'created_at',
-                        'updated_at': 'updated_at', 'updated_by': 'updated_by',
-                        'confidence': 'confidence', 'visibility': 'visibility',
-                        'provenance': 'provenance', 'tags': 'tags',
-                        'metadata': 'metadata', 'priority': 'priority',
-                        'utility_scale': 'utility_scale',
-                        'utility_usd_per_day': 'utility_usd_per_day',
-                        'utility_currency': 'utility_currency',
+                        "id": "id",
+                        "label": "label",
+                        "type": "type",
+                        "content": "content",
+                        "url": "url",
+                        "created_by": "created_by",
+                        "created_at": "created_at",
+                        "updated_at": "updated_at",
+                        "updated_by": "updated_by",
+                        "confidence": "confidence",
+                        "visibility": "visibility",
+                        "provenance": "provenance",
+                        "tags": "tags",
+                        "metadata": "metadata",
+                        "priority": "priority",
+                        "utility_scale": "utility_scale",
+                        "utility_usd_per_day": "utility_usd_per_day",
+                        "utility_currency": "utility_currency",
                     }
                     EDGE_COLS = {
-                        'id': 'id', 'from_node': 'from_node', 'to_node': 'to_node',
-                        'edge_type': 'edge_type', 'layer': 'layer',
-                        'confidence': 'confidence', 'condition': 'condition',
-                        'probability': 'probability',
-                        'probability_p05': 'probability_p05',
-                        'probability_p50': 'probability_p50',
-                        'probability_p95': 'probability_p95',
-                        'confidence_p05': 'confidence_p05',
-                        'confidence_p50': 'confidence_p50',
-                        'confidence_p95': 'confidence_p95',
-                        'urgency': 'urgency',
-                        'challenge_of': 'challenge_of', 'challenge_type': 'challenge_type',
-                        'provenance': 'provenance', 'created_by': 'created_by',
-                        'created_at': 'created_at', 'updated_at': 'updated_at',
-                        'updated_by': 'updated_by', 'metadata': 'metadata',
+                        "id": "id",
+                        "from_node": "from_node",
+                        "to_node": "to_node",
+                        "edge_type": "edge_type",
+                        "layer": "layer",
+                        "confidence": "confidence",
+                        "condition": "condition",
+                        "probability": "probability",
+                        "probability_p05": "probability_p05",
+                        "probability_p50": "probability_p50",
+                        "probability_p95": "probability_p95",
+                        "confidence_p05": "confidence_p05",
+                        "confidence_p50": "confidence_p50",
+                        "confidence_p95": "confidence_p95",
+                        "urgency": "urgency",
+                        "challenge_of": "challenge_of",
+                        "challenge_type": "challenge_type",
+                        "provenance": "provenance",
+                        "created_by": "created_by",
+                        "created_at": "created_at",
+                        "updated_at": "updated_at",
+                        "updated_by": "updated_by",
+                        "metadata": "metadata",
                     }
 
-                    for table, col_map in [('ohm_nodes', NODE_COLS), ('ohm_edges', EDGE_COLS)]:
+                    for table, col_map in [("ohm_nodes", NODE_COLS), ("ohm_edges", EDGE_COLS)]:
                         try:
                             # Build SELECT with type casts
                             cast_parts = []
                             for dl_col, local_col in col_map.items():
-                                if local_col in ('confidence', 'probability', 'baseline', 'value', 'sigma'):
+                                if local_col in ("confidence", "probability", "baseline", "value", "sigma"):
                                     cast_parts.append(f"CAST({dl_col} AS FLOAT) AS {local_col}")
-                                elif local_col in ('created_at', 'updated_at'):
+                                elif local_col in ("created_at", "updated_at"):
                                     cast_parts.append(f"CAST({dl_col} AS TIMESTAMP) AS {local_col}")
-                                elif local_col == 'metadata':
+                                elif local_col == "metadata":
                                     cast_parts.append(f"CAST({dl_col} AS JSON) AS {local_col}")
                                 else:
                                     cast_parts.append(f'"{dl_col}" AS {local_col}')
-                            select_str = ', '.join(cast_parts)
-                            local_cols = ', '.join(col_map.values())
+                            select_str = ", ".join(cast_parts)
+                            local_cols = ", ".join(col_map.values())
 
                             # Only pull non-deleted rows
-                            conn.execute(
-                                f"INSERT INTO {table} ({local_cols}, deleted_at) "
-                                f"SELECT {select_str}, NULL::TIMESTAMP "
-                                f"FROM ohm_lake.{table} "
-                                f"WHERE deleted_at IS NULL OR CAST(deleted_at AS VARCHAR) = ''"
-                            )
+                            conn.execute(f"INSERT INTO {table} ({local_cols}, deleted_at) SELECT {select_str}, NULL::TIMESTAMP FROM ohm_lake.{table} WHERE deleted_at IS NULL OR CAST(deleted_at AS VARCHAR) = ''")
                             count = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]  # type: ignore[index]
                             logger.info("Recovered %d %s from DuckLake", count, table)
                         except Exception as e:
@@ -325,6 +333,7 @@ class OhmStore:
                 os.remove(db_path_str)
             conn = duckdb.connect(db_path_str)
             from .schema import initialize_schema
+
             initialize_schema(conn)
             conn.close()
             logger.info("Started with empty DB as fallback")
@@ -341,9 +350,7 @@ class OhmStore:
             return
 
         try:
-            node_count = self.conn.execute(
-                "SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL"
-            ).fetchone()[0]  # type: ignore[index]
+            node_count = self.conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL").fetchone()[0]  # type: ignore[index]
         except Exception:
             return
 
@@ -358,65 +365,71 @@ class OhmStore:
             return
 
         try:
-            self.conn.execute(
-                f"ATTACH IF NOT EXISTS '{ducklake_path}' AS ohm_lake (TYPE ducklake)"
-            )
+            self.conn.execute(f"ATTACH IF NOT EXISTS '{ducklake_path}' AS ohm_lake (TYPE ducklake)")
 
             NODE_COLS = {
-                'id': 'id', 'label': 'label', 'type': 'type',
-                'content': 'content', 'url': 'url',
-                'created_by': 'created_by', 'created_at': 'created_at',
-                'updated_at': 'updated_at', 'updated_by': 'updated_by',
-                'confidence': 'confidence', 'visibility': 'visibility',
-                'provenance': 'provenance', 'tags': 'tags',
-                'metadata': 'metadata', 'priority': 'priority',
-                'utility_scale': 'utility_scale',
-                'utility_usd_per_day': 'utility_usd_per_day',
-                'utility_currency': 'utility_currency',
+                "id": "id",
+                "label": "label",
+                "type": "type",
+                "content": "content",
+                "url": "url",
+                "created_by": "created_by",
+                "created_at": "created_at",
+                "updated_at": "updated_at",
+                "updated_by": "updated_by",
+                "confidence": "confidence",
+                "visibility": "visibility",
+                "provenance": "provenance",
+                "tags": "tags",
+                "metadata": "metadata",
+                "priority": "priority",
+                "utility_scale": "utility_scale",
+                "utility_usd_per_day": "utility_usd_per_day",
+                "utility_currency": "utility_currency",
             }
             EDGE_COLS = {
-                'id': 'id', 'from_node': 'from_node', 'to_node': 'to_node',
-                'edge_type': 'edge_type', 'layer': 'layer',
-                'confidence': 'confidence', 'condition': 'condition',
-                'probability': 'probability',
-                'probability_p05': 'probability_p05',
-                'probability_p50': 'probability_p50',
-                'probability_p95': 'probability_p95',
-                'confidence_p05': 'confidence_p05',
-                'confidence_p50': 'confidence_p50',
-                'confidence_p95': 'confidence_p95',
-                'urgency': 'urgency',
-                'challenge_of': 'challenge_of', 'challenge_type': 'challenge_type',
-                'provenance': 'provenance', 'created_by': 'created_by',
-                'created_at': 'created_at', 'updated_at': 'updated_at',
-                'updated_by': 'updated_by', 'metadata': 'metadata',
+                "id": "id",
+                "from_node": "from_node",
+                "to_node": "to_node",
+                "edge_type": "edge_type",
+                "layer": "layer",
+                "confidence": "confidence",
+                "condition": "condition",
+                "probability": "probability",
+                "probability_p05": "probability_p05",
+                "probability_p50": "probability_p50",
+                "probability_p95": "probability_p95",
+                "confidence_p05": "confidence_p05",
+                "confidence_p50": "confidence_p50",
+                "confidence_p95": "confidence_p95",
+                "urgency": "urgency",
+                "challenge_of": "challenge_of",
+                "challenge_type": "challenge_type",
+                "provenance": "provenance",
+                "created_by": "created_by",
+                "created_at": "created_at",
+                "updated_at": "updated_at",
+                "updated_by": "updated_by",
+                "metadata": "metadata",
             }
 
-            for table, col_map in [('ohm_nodes', NODE_COLS), ('ohm_edges', EDGE_COLS)]:
+            for table, col_map in [("ohm_nodes", NODE_COLS), ("ohm_edges", EDGE_COLS)]:
                 try:
                     cast_parts = []
                     for dl_col, local_col in col_map.items():
-                        if local_col in ('confidence', 'probability', 'baseline', 'value', 'sigma',
-                                         'utility_scale', 'utility_usd_per_day'):
+                        if local_col in ("confidence", "probability", "baseline", "value", "sigma", "utility_scale", "utility_usd_per_day"):
                             cast_parts.append(f"CAST({dl_col} AS FLOAT) AS {local_col}")
-                        elif local_col in ('created_at', 'updated_at'):
+                        elif local_col in ("created_at", "updated_at"):
                             cast_parts.append(f"CAST({dl_col} AS TIMESTAMP) AS {local_col}")
-                        elif local_col == 'metadata':
+                        elif local_col == "metadata":
                             cast_parts.append(f"CAST({dl_col} AS JSON) AS {local_col}")
                         else:
                             cast_parts.append(f'"{dl_col}" AS {local_col}')
-                    select_str = ', '.join(cast_parts)
-                    local_cols = ', '.join(col_map.values())
+                    select_str = ", ".join(cast_parts)
+                    local_cols = ", ".join(col_map.values())
 
-                    self.conn.execute(
-                        f"INSERT INTO {table} ({local_cols}, deleted_at) "
-                        f"SELECT {select_str}, NULL::TIMESTAMP "
-                        f"FROM ohm_lake.{table} "
-                        f"WHERE deleted_at IS NULL OR CAST(deleted_at AS VARCHAR) = ''"
-                    )
-                    count = self.conn.execute(
-                        f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL"
-                    ).fetchone()[0]  # type: ignore[index]
+                    self.conn.execute(f"INSERT INTO {table} ({local_cols}, deleted_at) SELECT {select_str}, NULL::TIMESTAMP FROM ohm_lake.{table} WHERE deleted_at IS NULL OR CAST(deleted_at AS VARCHAR) = ''")
+                    count = self.conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]  # type: ignore[index]
                     logger.info("Auto-restored %d %s from DuckLake", count, table)
                 except Exception as e:
                     logger.warning("Failed to auto-restore %s from DuckLake: %s", table, e)
@@ -435,6 +448,7 @@ class OhmStore:
         """Initialize the schema if not already present, including migrations."""
         if not self.readonly:
             from .schema import initialize_schema
+
             initialize_schema(self.conn)
 
     @staticmethod
@@ -475,12 +489,14 @@ class OhmStore:
                 self.quack_started = True
             else:
                 import sys
+
                 print(
                     "Quack extension not available — running in single-writer mode",
                     file=sys.stderr,
                 )
         except Exception as e:
             import sys
+
             print(f"Quack server failed to start: {e}", file=sys.stderr)
             print("Falling back to single-writer mode", file=sys.stderr)
             self.quack_started = False
@@ -490,6 +506,7 @@ class OhmStore:
         if self.quack_started:
             try:
                 from .quack import stop_server
+
                 stop_server(self.conn, uri=self.quack_uri)
             except Exception:
                 pass
@@ -537,6 +554,7 @@ class OhmStore:
     def _now(self) -> str:
         """Return current timestamp as ISO string."""
         from datetime import datetime
+
         return datetime.now(timezone.utc).isoformat()
 
     def write_node(
@@ -602,10 +620,29 @@ class OhmStore:
                     utility_currency = ?, updated_at = ?, updated_by = ?
                 WHERE id = ?
                 """,
-                [label, type, content, confidence, visibility, provenance,
-                 tags_json, metadata_json, priority, url, task_status, assigned_to,
-                 due_date, utility_scale, current_best_action, alternatives_json,
-                 utility_usd_per_day, utility_currency, now, actor, id],
+                [
+                    label,
+                    type,
+                    content,
+                    confidence,
+                    visibility,
+                    provenance,
+                    tags_json,
+                    metadata_json,
+                    priority,
+                    url,
+                    task_status,
+                    assigned_to,
+                    due_date,
+                    utility_scale,
+                    current_best_action,
+                    alternatives_json,
+                    utility_usd_per_day,
+                    utility_currency,
+                    now,
+                    actor,
+                    id,
+                ],
             )
             self._log_change("ohm_nodes", id, "UPDATE", None, agent_name=actor)
             result = self.get_node(id) or {}
@@ -617,9 +654,7 @@ class OhmStore:
             return result
 
         # Check if node exists but is soft-deleted (primary key collision avoidance)
-        soft_deleted = self.conn.execute(
-            "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NOT NULL", [id]
-        ).fetchone()
+        soft_deleted = self.conn.execute("SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NOT NULL", [id]).fetchone()
         if soft_deleted:
             # Reactivate: update the soft-deleted row with new data and clear deleted_at
             self.conn.execute(
@@ -635,11 +670,30 @@ class OhmStore:
                     deleted_at = NULL
                 WHERE id = ?
                 """,
-                [label, type, content, confidence, visibility, provenance,
-                 tags_json, metadata_json, priority, url, actor, task_status,
-                 assigned_to, due_date, utility_scale, current_best_action,
-                 alternatives_json, utility_usd_per_day, utility_currency,
-                 now, actor, id],
+                [
+                    label,
+                    type,
+                    content,
+                    confidence,
+                    visibility,
+                    provenance,
+                    tags_json,
+                    metadata_json,
+                    priority,
+                    url,
+                    actor,
+                    task_status,
+                    assigned_to,
+                    due_date,
+                    utility_scale,
+                    current_best_action,
+                    alternatives_json,
+                    utility_usd_per_day,
+                    utility_currency,
+                    now,
+                    actor,
+                    id,
+                ],
             )
             self._log_change("ohm_nodes", id, "UPDATE", None, agent_name=actor)
             result = self.get_node(id) or {}
@@ -661,12 +715,30 @@ class OhmStore:
                                    created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            [id, label, type, content, actor, confidence,
-             visibility, provenance, tags_json, metadata_json, priority, url,
-             task_status, assigned_to, due_date,
-             utility_scale, current_best_action, alternatives_json,
-             utility_usd_per_day, utility_currency,
-             now, now],
+            [
+                id,
+                label,
+                type,
+                content,
+                actor,
+                confidence,
+                visibility,
+                provenance,
+                tags_json,
+                metadata_json,
+                priority,
+                url,
+                task_status,
+                assigned_to,
+                due_date,
+                utility_scale,
+                current_best_action,
+                alternatives_json,
+                utility_usd_per_day,
+                utility_currency,
+                now,
+                now,
+            ],
         )
         self._log_change("ohm_nodes", id, "INSERT", None, agent_name=actor)
         result = self.get_node(id) or {}
@@ -686,6 +758,7 @@ class OhmStore:
         """
         try:
             from .queries import generate_embedding
+
             # Prefer label + content for richer embeddings
             text = label
             if content:
@@ -764,18 +837,12 @@ class OhmStore:
                 full_content = Path(file_path).read_text(encoding="utf-8")
 
                 # Try to extract plain text for embeddings/search
-                plain_text = self.conn.execute(
-                    "SELECT md_to_text(?)",
-                    [full_content]
-                ).fetchone()
+                plain_text = self.conn.execute("SELECT md_to_text(?)", [full_content]).fetchone()
                 plain_text = plain_text[0] if plain_text else full_content
 
                 # Try to extract frontmatter metadata
                 try:
-                    metadata = self.conn.execute(
-                        "SELECT md_extract_metadata(?)",
-                        [full_content]
-                    ).fetchone()
+                    metadata = self.conn.execute("SELECT md_extract_metadata(?)", [full_content]).fetchone()
                     result["frontmatter"] = metadata[0] if metadata else None
                 except Exception:
                     result["frontmatter"] = None
@@ -856,11 +923,13 @@ class OhmStore:
                 ).fetchone()
                 if not exists:
                     from ohm.exceptions import NodeNotFoundError
+
                     raise NodeNotFoundError(f"Edge {role} does not exist: {node_id}")
 
         # Compute PERT mean when PERT triple is provided but probability is not
         if probability is None and probability_p50 is not None:
             from ohm.inference.pert import compute_pert_mean
+
             p05 = probability_p05 if probability_p05 is not None else probability_p50
             p95 = probability_p95 if probability_p95 is not None else probability_p50
             probability = compute_pert_mean(p05, probability_p50, p95)
@@ -869,9 +938,7 @@ class OhmStore:
         # already exists, update it instead of creating a duplicate
         if deduplicate and challenge_of is None:
             existing = self.conn.execute(
-                "SELECT id FROM ohm_edges "
-                "WHERE from_node = ? AND to_node = ? AND edge_type = ? AND layer = ? "
-                "AND deleted_at IS NULL LIMIT 1",
+                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = ? AND layer = ? AND deleted_at IS NULL LIMIT 1",
                 [from_node, to_node, edge_type, layer],
             ).fetchone()
             if existing:
@@ -927,7 +994,8 @@ class OhmStore:
                     self._increment_graph_generation()
 
                 edge = self.execute_one(
-                    "SELECT * FROM ohm_edges WHERE id = ?", [edge_id],
+                    "SELECT * FROM ohm_edges WHERE id = ?",
+                    [edge_id],
                 )
                 return edge
 
@@ -941,16 +1009,11 @@ class OhmStore:
                                     created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            [from_node, to_node, layer, edge_type, confidence, condition,
-             provenance, actor, challenge_of, challenge_type, urgency, probability,
-             probability_p05, probability_p50, probability_p95,
-             confidence_p05, confidence_p50, confidence_p95,
-             now, now],
+            [from_node, to_node, layer, edge_type, confidence, condition, provenance, actor, challenge_of, challenge_type, urgency, probability, probability_p05, probability_p50, probability_p95, confidence_p05, confidence_p50, confidence_p95, now, now],
         )
 
         edge = self.execute_one(
-            "SELECT * FROM ohm_edges WHERE from_node = ? AND to_node = ? "
-            "AND edge_type = ? AND created_by = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1",
+            "SELECT * FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = ? AND created_by = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1",
             [from_node, to_node, edge_type, actor],
         )
 
@@ -981,7 +1044,8 @@ class OhmStore:
         # OHM-s0g: Use parameterized queries instead of f-string SQL for layer.
 
         if layer:
-            keep_ids = self.conn.execute("""
+            keep_ids = self.conn.execute(
+                """
                 SELECT keep_id FROM (
                     SELECT id as keep_id, from_node, to_node, edge_type, layer, ROW_NUMBER() OVER (
                         PARTITION BY from_node, to_node, edge_type, layer
@@ -999,7 +1063,9 @@ class OhmStore:
                       GROUP BY from_node, to_node, edge_type, layer
                       HAVING COUNT(*) > 1
                   )
-            """, [layer, layer]).fetchall()
+            """,
+                [layer, layer],
+            ).fetchall()
         else:
             keep_ids = self.conn.execute("""
                 SELECT keep_id FROM (
@@ -1028,7 +1094,8 @@ class OhmStore:
         placeholders = ", ".join(["?"] * len(keep_id_list))
         if layer:
             params = [layer, layer] + keep_id_list
-            duplicates = self.conn.execute(f"""
+            duplicates = self.conn.execute(
+                f"""
                 SELECT id FROM ohm_edges
                 WHERE deleted_at IS NULL
                   AND layer = ?
@@ -1041,9 +1108,12 @@ class OhmStore:
                       HAVING COUNT(*) > 1
                   )
                   AND id NOT IN ({placeholders})
-            """, params).fetchall()
+            """,
+                params,
+            ).fetchall()
         else:
-            duplicates = self.conn.execute(f"""
+            duplicates = self.conn.execute(
+                f"""
                 SELECT id FROM ohm_edges
                 WHERE deleted_at IS NULL
                   AND (from_node, to_node, edge_type, layer) IN (
@@ -1054,7 +1124,9 @@ class OhmStore:
                       HAVING COUNT(*) > 1
                   )
                   AND id NOT IN ({placeholders})
-            """, keep_id_list).fetchall()
+            """,
+                keep_id_list,
+            ).fetchall()
 
         if not duplicates:
             return 0
@@ -1132,10 +1204,7 @@ class OhmStore:
 
         # Enforce ownership
         if edge["created_by"] != actor:
-            raise PermissionError(
-                f"Cannot update edge {edge_id}: owned by {edge['created_by']}, not {actor}. "
-                f"Use challenge_edge instead."
-            )
+            raise PermissionError(f"Cannot update edge {edge_id}: owned by {edge['created_by']}, not {actor}. Use challenge_edge instead.")
 
         now = self._now()
         self.conn.execute(
@@ -1261,31 +1330,17 @@ class OhmStore:
         now = self._now()
 
         # Soft-delete edges (mark as deleted)
-        edges_from = self.conn.execute(
-            "UPDATE ohm_edges SET deleted_at = ?, updated_at = ?, updated_by = ? "
-            "WHERE from_node = ? AND deleted_at IS NULL",
-            [now, now, deleted_by, node_id]
-        ).fetchone()
-        edges_to = self.conn.execute(
-            "UPDATE ohm_edges SET deleted_at = ?, updated_at = ?, updated_by = ? "
-            "WHERE to_node = ? AND deleted_at IS NULL",
-            [now, now, deleted_by, node_id]
-        ).fetchone()
+        edges_from = self.conn.execute("UPDATE ohm_edges SET deleted_at = ?, updated_at = ?, updated_by = ? WHERE from_node = ? AND deleted_at IS NULL", [now, now, deleted_by, node_id]).fetchone()
+        edges_to = self.conn.execute("UPDATE ohm_edges SET deleted_at = ?, updated_at = ?, updated_by = ? WHERE to_node = ? AND deleted_at IS NULL", [now, now, deleted_by, node_id]).fetchone()
         edges_deleted = (edges_from[0] if edges_from else 0) + (edges_to[0] if edges_to else 0)
 
         # Soft-delete observations
-        obs_result = self.conn.execute(
-            "UPDATE ohm_observations SET deleted_at = ? WHERE node_id = ? AND deleted_at IS NULL",
-            [now, node_id]
-        )
+        obs_result = self.conn.execute("UPDATE ohm_observations SET deleted_at = ? WHERE node_id = ? AND deleted_at IS NULL", [now, node_id])
         obs_deleted = obs_result.fetchone()
         obs_count = obs_deleted[0] if obs_deleted else 0
 
         # Soft-delete the node
-        self.conn.execute(
-            "UPDATE ohm_nodes SET deleted_at = ?, updated_at = ?, updated_by = ? WHERE id = ?",
-            [now, now, deleted_by, node_id]
-        )
+        self.conn.execute("UPDATE ohm_nodes SET deleted_at = ?, updated_at = ?, updated_by = ? WHERE id = ?", [now, now, deleted_by, node_id])
         self._log_change("ohm_nodes", node_id, "DELETE", None, agent_name=deleted_by)
 
         return {
@@ -1313,16 +1368,10 @@ class OhmStore:
         now = self._now()
 
         # Soft-delete observations referencing this edge
-        self.conn.execute(
-            "UPDATE ohm_observations SET deleted_at = ? WHERE edge_id = ? AND deleted_at IS NULL",
-            [now, edge_id]
-        )
+        self.conn.execute("UPDATE ohm_observations SET deleted_at = ? WHERE edge_id = ? AND deleted_at IS NULL", [now, edge_id])
 
         # Soft-delete the edge
-        self.conn.execute(
-            "UPDATE ohm_edges SET deleted_at = ?, updated_at = ?, updated_by = ? WHERE id = ?",
-            [now, now, deleted_by, edge_id]
-        )
+        self.conn.execute("UPDATE ohm_edges SET deleted_at = ?, updated_at = ?, updated_by = ? WHERE id = ?", [now, now, deleted_by, edge_id])
         self._log_change("ohm_edges", edge_id, "DELETE", None, agent_name=deleted_by)
         self._increment_graph_generation()
 
@@ -1356,9 +1405,7 @@ class OhmStore:
         obs_count = oc["cnt"] if oc else 0
         agent_count = ac["cnt"] if ac else 0
 
-        edges_by_layer = self.execute(
-            "SELECT layer, COUNT(*) AS cnt FROM ohm_edges WHERE deleted_at IS NULL GROUP BY layer ORDER BY layer"
-        )
+        edges_by_layer = self.execute("SELECT layer, COUNT(*) AS cnt FROM ohm_edges WHERE deleted_at IS NULL GROUP BY layer ORDER BY layer")
 
         return {
             "node_count": node_count,
@@ -1408,7 +1455,8 @@ class OhmStore:
             pass
         # Update agent's last_sync so they appear in active_agents
         existing = self.conn.execute(
-            "SELECT COUNT(*) FROM ohm_agent_state WHERE agent_name = ?", [actor],
+            "SELECT COUNT(*) FROM ohm_agent_state WHERE agent_name = ?",
+            [actor],
         ).fetchone()
         if existing and existing[0] > 0:
             self.conn.execute(
@@ -1431,13 +1479,8 @@ class OhmStore:
         Returns:
             The new generation number after incrementing.
         """
-        self.conn.execute(
-            "UPDATE ohm_meta SET value = CAST(CAST(value AS INTEGER) + 1 AS VARCHAR) "
-            "WHERE key = 'graph_generation'"
-        )
-        result = self.conn.execute(
-            "SELECT CAST(value AS INTEGER) FROM ohm_meta WHERE key = 'graph_generation'"
-        ).fetchone()
+        self.conn.execute("UPDATE ohm_meta SET value = CAST(CAST(value AS INTEGER) + 1 AS VARCHAR) WHERE key = 'graph_generation'")
+        result = self.conn.execute("SELECT CAST(value AS INTEGER) FROM ohm_meta WHERE key = 'graph_generation'").fetchone()
         return result[0] if result else 0
 
     def close(self):
@@ -1559,14 +1602,12 @@ class OhmStore:
         ).fetchone()
         if existing:
             self.conn.execute(
-                "UPDATE ohm_agent_state SET last_sync = CURRENT_TIMESTAMP, "
-                "updated_at = CURRENT_TIMESTAMP WHERE agent_name = ?",
+                "UPDATE ohm_agent_state SET last_sync = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE agent_name = ?",
                 [self.agent_name],
             )
         else:
             self.conn.execute(
-                "INSERT INTO ohm_agent_state (agent_name, last_sync, updated_at) "
-                "VALUES (?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                "INSERT INTO ohm_agent_state (agent_name, last_sync, updated_at) VALUES (?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                 [self.agent_name],
             )
         row = self.conn.execute(
@@ -1606,8 +1647,7 @@ class OhmStore:
         # Check if DuckLake alias is attached on this connection
         try:
             attached = self.conn.execute(
-                "SELECT database_name FROM duckdb_databases() "
-                "WHERE database_name = ?",
+                "SELECT database_name FROM duckdb_databases() WHERE database_name = ?",
                 [alias],
             ).fetchone()
         except Exception:
@@ -1617,6 +1657,7 @@ class OhmStore:
             # New approach: sync via attached mirror tables
             result = self.sync_to_ducklake(alias=alias)
             from datetime import datetime, timezone
+
             now = datetime.now(timezone.utc)
             self._set_last_push_timestamp(now)
             return result
@@ -1648,9 +1689,7 @@ class OhmStore:
         for table in ["ohm_nodes", "ohm_edges", "ohm_observations"]:
             try:
                 # Check if mirror table has any data (for initial sync)
-                mirror_count = self.conn.execute(
-                    f"SELECT COUNT(*) FROM {alias}.{table}"
-                ).fetchone()[0]  # type: ignore[index]
+                mirror_count = self.conn.execute(f"SELECT COUNT(*) FROM {alias}.{table}").fetchone()[0]  # type: ignore[index]
 
                 if mirror_count == 0:
                     # Initial sync: copy all rows
@@ -1683,17 +1722,11 @@ class OhmStore:
             Number of rows inserted.
         """
         # Get column lists using duckdb_columns() for DuckLake tables
-        local_cols = self.conn.execute(
-            f"SELECT column_name FROM information_schema.columns "
-            f"WHERE table_name = '{table}' ORDER BY ordinal_position"
-        ).fetchall()
+        local_cols = self.conn.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table}' ORDER BY ordinal_position").fetchall()
         # Deduplicate while preserving order (information_schema may return duplicates)
         local_col_names = list(dict.fromkeys(c[0] for c in local_cols))
 
-        mirror_cols = self.conn.execute(
-            f"SELECT column_name FROM duckdb_columns() "
-            f"WHERE database_name = '{alias}' AND table_name = '{table}'"
-        ).fetchall()
+        mirror_cols = self.conn.execute(f"SELECT column_name FROM duckdb_columns() WHERE database_name = '{alias}' AND table_name = '{table}'").fetchall()
         mirror_col_names = [c[0] for c in mirror_cols]
 
         # Use intersection of local and mirror columns
@@ -1708,23 +1741,14 @@ class OhmStore:
 
         # Filter out soft-deleted rows from sync
         if "deleted_at" in local_col_names:
-            self.conn.execute(
-                f"INSERT INTO {alias}.{table} ({common_str}) "
-                f"SELECT {common_str} FROM {table} WHERE deleted_at IS NULL"
-            )
+            self.conn.execute(f"INSERT INTO {alias}.{table} ({common_str}) SELECT {common_str} FROM {table} WHERE deleted_at IS NULL")
         else:
-            self.conn.execute(
-                f"INSERT INTO {alias}.{table} ({common_str}) "
-                f"SELECT {common_str} FROM {table}"
-            )
+            self.conn.execute(f"INSERT INTO {alias}.{table} ({common_str}) SELECT {common_str} FROM {table}")
 
-        count = self.conn.execute(
-            f"SELECT COUNT(*) FROM {alias}.{table}"
-        ).fetchone()[0]  # type: ignore[index]
+        count = self.conn.execute(f"SELECT COUNT(*) FROM {alias}.{table}").fetchone()[0]  # type: ignore[index]
         return count
 
-    def _incremental_sync_table(self, table: str, alias: str,
-                                 last_push: str | None) -> int:
+    def _incremental_sync_table(self, table: str, alias: str, last_push: str | None) -> int:
         """Perform incremental sync of changed rows to DuckLake mirror.
 
         Uses updated_at (or created_at for observations) to find rows
@@ -1742,17 +1766,11 @@ class OhmStore:
         ts_col = "updated_at" if table != "ohm_observations" else "created_at"
 
         # Get column lists using duckdb_columns() for DuckLake tables
-        local_cols = self.conn.execute(
-            f"SELECT column_name FROM information_schema.columns "
-            f"WHERE table_name = '{table}' ORDER BY ordinal_position"
-        ).fetchall()
+        local_cols = self.conn.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table}' ORDER BY ordinal_position").fetchall()
         # Deduplicate while preserving order (information_schema may return duplicates)
         col_names = list(dict.fromkeys(c[0] for c in local_cols))
 
-        mirror_cols = self.conn.execute(
-            f"SELECT column_name FROM duckdb_columns() "
-            f"WHERE database_name = '{alias}' AND table_name = '{table}'"
-        ).fetchall()
+        mirror_cols = self.conn.execute(f"SELECT column_name FROM duckdb_columns() WHERE database_name = '{alias}' AND table_name = '{table}'").fetchall()
         mirror_col_names = [c[0] for c in mirror_cols]
 
         common_cols = [c for c in col_names if c in mirror_col_names]
@@ -1771,9 +1789,7 @@ class OhmStore:
             ).fetchall()
         else:
             # No last push — sync everything (excluding soft-deleted)
-            changed_rows = self.conn.execute(
-                f"SELECT id FROM {table} WHERE 1=1{deleted_filter}"
-            ).fetchall()
+            changed_rows = self.conn.execute(f"SELECT id FROM {table} WHERE 1=1{deleted_filter}").fetchall()
 
         if not changed_rows:
             return 0
@@ -1789,10 +1805,7 @@ class OhmStore:
         )
 
         id_placeholders = ", ".join([f"'{cid}'" for cid in changed_ids])
-        self.conn.execute(
-            f"INSERT INTO {alias}.{table} ({common_str}) "
-            f"SELECT {common_str} FROM {table} WHERE id IN ({id_placeholders})"
-        )
+        self.conn.execute(f"INSERT INTO {alias}.{table} ({common_str}) SELECT {common_str} FROM {table} WHERE id IN ({id_placeholders})")
 
         return len(changed_ids)
 
@@ -1813,16 +1826,11 @@ class OhmStore:
         """
         if last_push:
             changes = self.conn.execute(
-                "SELECT table_name, row_id, operation, agent_name, "
-                "change_data, changed_at FROM ohm_change_log "
-                "WHERE changed_at > ?::TIMESTAMP",
+                "SELECT table_name, row_id, operation, agent_name, change_data, changed_at FROM ohm_change_log WHERE changed_at > ?::TIMESTAMP",
                 [last_push],
             ).fetchall()
         else:
-            changes = self.conn.execute(
-                "SELECT table_name, row_id, operation, agent_name, "
-                "change_data, changed_at FROM ohm_change_log"
-            ).fetchall()
+            changes = self.conn.execute("SELECT table_name, row_id, operation, agent_name, change_data, changed_at FROM ohm_change_log").fetchall()
 
         if not changes:
             return 0
@@ -1830,10 +1838,7 @@ class OhmStore:
         for change in changes:
             try:
                 self.conn.execute(
-                    f"INSERT INTO {alias}.ohm_change_feed "
-                    f"(table_name, change_row_id, operation, agent_name, "
-                    f"old_data, new_data, occurred_at) "
-                    f"VALUES (?, ?, ?, ?, NULL, ?, ?)",
+                    f"INSERT INTO {alias}.ohm_change_feed (table_name, change_row_id, operation, agent_name, old_data, new_data, occurred_at) VALUES (?, ?, ?, ?, NULL, ?, ?)",
                     [change[0], change[1], change[2], change[3], change[4], change[5]],
                 )
             except Exception:
@@ -1900,8 +1905,7 @@ class OhmStore:
                         (table_name, row_id, operation, agent_name, old_data, new_data, occurred_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?)
                         """,
-                        [table_name, row_id, operation, self.agent_name,
-                         None, change_data, changed_at],
+                        [table_name, row_id, operation, self.agent_name, None, change_data, changed_at],
                     )
                     inserted += 1
                 except Exception as _exc:
@@ -1932,8 +1936,7 @@ class OhmStore:
         # Check if DuckLake alias is attached on this connection
         try:
             attached = self.conn.execute(
-                "SELECT database_name FROM duckdb_databases() "
-                "WHERE database_name = ?",
+                "SELECT database_name FROM duckdb_databases() WHERE database_name = ?",
                 [alias],
             ).fetchone()
         except Exception:
@@ -1965,27 +1968,16 @@ class OhmStore:
             try:
                 # Find rows in DuckLake that are not in local table
                 # (new rows from other agents)
-                new_rows = self.conn.execute(
-                    f"SELECT dl.id FROM {alias}.{table} dl "
-                    f"LEFT JOIN {table} l ON dl.id = l.id "
-                    f"WHERE l.id IS NULL"
-                ).fetchall()
+                new_rows = self.conn.execute(f"SELECT dl.id FROM {alias}.{table} dl LEFT JOIN {table} l ON dl.id = l.id WHERE l.id IS NULL").fetchall()
 
                 logger.info("DuckLake pull: %s has %d new rows in mirror", table, len(new_rows))
 
                 if new_rows:
                     # Get common columns
-                    local_cols = self.conn.execute(
-                        f"SELECT column_name FROM information_schema.columns "
-                        f"WHERE table_name = '{table}' ORDER BY ordinal_position"
-                    ).fetchall()
+                    local_cols = self.conn.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table}' ORDER BY ordinal_position").fetchall()
                     local_col_names = [c[0] for c in local_cols]
 
-                    mirror_cols = self.conn.execute(
-                        f"SELECT column_name FROM information_schema.columns "
-                        f"WHERE table_schema = '{alias}' AND table_name = '{table}' "
-                        f"ORDER BY ordinal_position"
-                    ).fetchall()
+                    mirror_cols = self.conn.execute(f"SELECT column_name FROM information_schema.columns WHERE table_schema = '{alias}' AND table_name = '{table}' ORDER BY ordinal_position").fetchall()
                     mirror_col_names = [c[0] for c in mirror_cols]
 
                     common_cols = [c for c in local_col_names if c in mirror_col_names]
@@ -1994,10 +1986,7 @@ class OhmStore:
 
                     # Get local column types for casting DuckLake VARCHAR values
                     local_col_types = {}
-                    type_rows = self.conn.execute(
-                        f"SELECT column_name, data_type FROM information_schema.columns "
-                        f"WHERE table_name = '{table}' ORDER BY ordinal_position"
-                    ).fetchall()
+                    type_rows = self.conn.execute(f"SELECT column_name, data_type FROM information_schema.columns WHERE table_name = '{table}' ORDER BY ordinal_position").fetchall()
                     for col_name, col_type in type_rows:
                         local_col_types[col_name] = col_type
 
@@ -2021,22 +2010,18 @@ class OhmStore:
                     select_str = ", ".join(select_cols)
 
                     # Insert new rows from DuckLake into local table with type casting
-                    self.conn.execute(
-                        f"INSERT INTO {table} ({common_str}) "
-                        f"SELECT {select_str} FROM {alias}.{table} dl "
-                        f"WHERE dl.id IN ({id_list})"
-                    )
+                    self.conn.execute(f"INSERT INTO {table} ({common_str}) SELECT {select_str} FROM {alias}.{table} dl WHERE dl.id IN ({id_list})")
                     pulled += len(new_ids)
 
             except Exception as exc:
                 # Log the actual error instead of silently swallowing it
                 import logging
-                logging.getLogger("ohm").warning(
-                    "DuckLake pull failed for %s: %s", table, exc
-                )
+
+                logging.getLogger("ohm").warning("DuckLake pull failed for %s: %s", table, exc)
 
         # Record pull timestamp
         from datetime import datetime, timezone
+
         now = datetime.now(timezone.utc)
         self._set_last_pull_timestamp(now)
 
@@ -2090,13 +2075,12 @@ class OhmStore:
             applied = 0
             for change in changes:
                 table_name, row_id, operation, remote_agent, new_data, occurred_at = change
-                self._apply_remote_change(
-                    table_name, row_id, operation, remote_agent, new_data, occurred_at
-                )
+                self._apply_remote_change(table_name, row_id, operation, remote_agent, new_data, occurred_at)
                 applied += 1
 
             # Record pull timestamp
             from datetime import datetime, timezone
+
             now = datetime.now(timezone.utc)
             self._set_last_pull_timestamp(now)
 
@@ -2130,9 +2114,7 @@ class OhmStore:
             if operation == "INSERT":
                 # Check if already exists (including soft-deleted)
                 existing = self.get_node(row_id)
-                soft_deleted = self.conn.execute(
-                    "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NOT NULL", [row_id]
-                ).fetchone() if not existing else None
+                soft_deleted = self.conn.execute("SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NOT NULL", [row_id]).fetchone() if not existing else None
                 if not existing and not soft_deleted:
                     self.conn.execute(
                         """
@@ -2140,13 +2122,20 @@ class OhmStore:
                                                visibility, provenance, tags, metadata, created_at, updated_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                        [row_id, data.get("label", ""), data.get("type", "concept"),
-                         data.get("content"), remote_agent, data.get("confidence", 1.0),
-                         data.get("visibility", "team"), data.get("provenance"),
-                         json.dumps(data.get("tags", [])) if data.get("tags") else None,
-                         json.dumps(data.get("metadata", {})) if data.get("metadata") else None,
-                         occurred_at or self._now(),
-                         occurred_at or self._now()],
+                        [
+                            row_id,
+                            data.get("label", ""),
+                            data.get("type", "concept"),
+                            data.get("content"),
+                            remote_agent,
+                            data.get("confidence", 1.0),
+                            data.get("visibility", "team"),
+                            data.get("provenance"),
+                            json.dumps(data.get("tags", [])) if data.get("tags") else None,
+                            json.dumps(data.get("metadata", {})) if data.get("metadata") else None,
+                            occurred_at or self._now(),
+                            occurred_at or self._now(),
+                        ],
                     )
             elif operation == "UPDATE":
                 self.conn.execute(
@@ -2160,17 +2149,14 @@ class OhmStore:
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                     """,
-                    [data.get("label"), data.get("type"), data.get("content"),
-                     data.get("confidence"), data.get("visibility"), row_id],
+                    [data.get("label"), data.get("type"), data.get("content"), data.get("confidence"), data.get("visibility"), row_id],
                 )
 
         elif table_name == "ohm_edges":
             if operation == "INSERT":
                 # Check if already exists (including soft-deleted)
                 existing = self.get_edge(row_id)
-                soft_deleted = self.conn.execute(
-                    "SELECT id FROM ohm_edges WHERE id = ? AND deleted_at IS NOT NULL", [row_id]
-                ).fetchone() if not existing else None
+                soft_deleted = self.conn.execute("SELECT id FROM ohm_edges WHERE id = ? AND deleted_at IS NOT NULL", [row_id]).fetchone() if not existing else None
                 if not existing and not soft_deleted:
                     self.conn.execute(
                         """
@@ -2179,13 +2165,21 @@ class OhmStore:
                                                challenge_type, created_at, updated_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                        [row_id, data.get("from_node"), data.get("to_node"),
-                         data.get("layer", "L3"), data.get("edge_type"),
-                         data.get("confidence"), data.get("condition"),
-                         data.get("provenance"), remote_agent,
-                         data.get("challenge_of"), data.get("challenge_type"),
-                         occurred_at or self._now(),
-                         occurred_at or self._now()],
+                        [
+                            row_id,
+                            data.get("from_node"),
+                            data.get("to_node"),
+                            data.get("layer", "L3"),
+                            data.get("edge_type"),
+                            data.get("confidence"),
+                            data.get("condition"),
+                            data.get("provenance"),
+                            remote_agent,
+                            data.get("challenge_of"),
+                            data.get("challenge_type"),
+                            occurred_at or self._now(),
+                            occurred_at or self._now(),
+                        ],
                     )
                     self._increment_graph_generation()
 
@@ -2273,9 +2267,7 @@ class OhmStore:
             # Fallback for older DuckLake builds that expose snapshots() on
             # the attached alias rather than ducklake_snapshots(alias).
             try:
-                rows = self.conn.execute(
-                    f"SELECT * FROM {alias}.snapshots() ORDER BY snapshot_id ASC"
-                ).fetchall()
+                rows = self.conn.execute(f"SELECT * FROM {alias}.snapshots() ORDER BY snapshot_id ASC").fetchall()
                 columns = [desc[0] for desc in self.conn.description]
                 return [dict(zip(columns, row)) for row in rows]
             except Exception as e:
@@ -2315,18 +2307,14 @@ class OhmStore:
             raise OHMError("DuckLake is not attached — cannot query historical state")
 
         try:
-            nodes = self.conn.execute(
-                f"SELECT * FROM {alias}.ohm_nodes AT (VERSION => {int(version)})"
-            ).fetchall()
+            nodes = self.conn.execute(f"SELECT * FROM {alias}.ohm_nodes AT (VERSION => {int(version)})").fetchall()
             node_columns = [desc[0] for desc in self.conn.description]
             nodes_dicts = [dict(zip(node_columns, row)) for row in nodes]
         except Exception as e:
             raise OHMError(f"Failed to query nodes at version {version}: {e}") from e
 
         try:
-            edges = self.conn.execute(
-                f"SELECT * FROM {alias}.ohm_edges AT (VERSION => {int(version)})"
-            ).fetchall()
+            edges = self.conn.execute(f"SELECT * FROM {alias}.ohm_edges AT (VERSION => {int(version)})").fetchall()
             edge_columns = [desc[0] for desc in self.conn.description]
             edges_dicts = [dict(zip(edge_columns, row)) for row in edges]
         except Exception as e:
@@ -2377,26 +2365,18 @@ class OhmStore:
             raise OHMError("DuckLake is not attached — cannot query changes")
 
         try:
-            node_changes = self.conn.execute(
-                f"SELECT * FROM {alias}.table_changes('ohm_nodes', {int(from_version)}, {int(to_version)})"
-            ).fetchall()
+            node_changes = self.conn.execute(f"SELECT * FROM {alias}.table_changes('ohm_nodes', {int(from_version)}, {int(to_version)})").fetchall()
             nc_columns = [desc[0] for desc in self.conn.description]
             node_changes_dicts = [dict(zip(nc_columns, row)) for row in node_changes]
         except Exception as e:
-            raise OHMError(
-                f"Failed to query node changes between versions {from_version} and {to_version}: {e}"
-            ) from e
+            raise OHMError(f"Failed to query node changes between versions {from_version} and {to_version}: {e}") from e
 
         try:
-            edge_changes = self.conn.execute(
-                f"SELECT * FROM {alias}.table_changes('ohm_edges', {int(from_version)}, {int(to_version)})"
-            ).fetchall()
+            edge_changes = self.conn.execute(f"SELECT * FROM {alias}.table_changes('ohm_edges', {int(from_version)}, {int(to_version)})").fetchall()
             ec_columns = [desc[0] for desc in self.conn.description]
             edge_changes_dicts = [dict(zip(ec_columns, row)) for row in edge_changes]
         except Exception as e:
-            raise OHMError(
-                f"Failed to query edge changes between versions {from_version} and {to_version}: {e}"
-            ) from e
+            raise OHMError(f"Failed to query edge changes between versions {from_version} and {to_version}: {e}") from e
 
         return {
             "from_version": from_version,

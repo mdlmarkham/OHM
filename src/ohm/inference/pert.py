@@ -101,6 +101,7 @@ def scale_pert_variance(spread: float) -> float:
         Scaled uncertainty in [0, 1].
     """
     import math
+
     return 1.0 / (1.0 + math.exp(-10.0 * (spread - 0.3)))
 
 

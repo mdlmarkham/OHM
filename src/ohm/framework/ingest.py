@@ -228,9 +228,7 @@ def _ingest_edge(
     result: IngestResult,
 ) -> None:
     if not record.from_node or not record.to_node or not record.edge_type:
-        logger.warning(
-            "IngestAdapter: edge record missing from_node/to_node/edge_type — skipping"
-        )
+        logger.warning("IngestAdapter: edge record missing from_node/to_node/edge_type — skipping")
         result.skipped += 1
         return
 

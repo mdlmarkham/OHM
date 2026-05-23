@@ -98,7 +98,8 @@ def detect_contradictions(
         and 'contradictory_interpretations' lists.
     """
     # Type 1: Opposite observations on same node
-    opposite = conn.execute("""
+    opposite = conn.execute(
+        """
         SELECT
             a.node_id,
             n.label AS node_label,
@@ -123,10 +124,13 @@ def detect_contradictions(
           )
         ORDER BY gap DESC
         LIMIT ?
-    """, [limit]).fetchall()
+    """,
+        [limit],
+    ).fetchall()
 
     # Type 2: High-confidence challenges
-    challenges = conn.execute("""
+    challenges = conn.execute(
+        """
         SELECT
             c.id AS challenge_id,
             c.challenge_of AS target_edge_id,
@@ -142,12 +146,15 @@ def detect_contradictions(
           AND c.confidence >= ?
         ORDER BY c.confidence DESC, c.created_at DESC
         LIMIT ?
-    """, [confidence_threshold, limit]).fetchall()
+    """,
+        [confidence_threshold, limit],
+    ).fetchall()
 
     # Type 3: Same source, contradictory L3 interpretations
     # Two edges from the same source node, by different agents, with
     # opposing edge types (e.g., one CAUSES, one CONTRADICTS)
-    contradictory = conn.execute("""
+    contradictory = conn.execute(
+        """
         SELECT
             a.from_node AS source_node,
             n.label AS source_label,
@@ -173,7 +180,9 @@ def detect_contradictions(
           )
         ORDER BY (a.confidence + b.confidence) DESC
         LIMIT ?
-    """, [limit]).fetchall()
+    """,
+        [limit],
+    ).fetchall()
 
     def _to_dicts(result_rows, col_names):
         """Convert result rows to dicts using provided column names."""
@@ -186,16 +195,38 @@ def detect_contradictions(
     # Or just use hardcoded column lists from the SELECT statements
 
     opposite_cols = [
-        "node_id", "node_label", "agent_a", "agent_b",
-        "value_a", "value_b", "baseline", "gap", "time_a", "time_b",
+        "node_id",
+        "node_label",
+        "agent_a",
+        "agent_b",
+        "value_a",
+        "value_b",
+        "baseline",
+        "gap",
+        "time_a",
+        "time_b",
     ]
     challenge_cols = [
-        "challenge_id", "target_edge_id", "challenger", "original_author",
-        "challenge_confidence", "original_confidence", "challenge_reason", "created_at",
+        "challenge_id",
+        "target_edge_id",
+        "challenger",
+        "original_author",
+        "challenge_confidence",
+        "original_confidence",
+        "challenge_reason",
+        "created_at",
     ]
     contradict_cols = [
-        "source_node", "source_label", "edge_type_a", "edge_type_b",
-        "agent_a", "agent_b", "conf_a", "conf_b", "reason_a", "reason_b",
+        "source_node",
+        "source_label",
+        "edge_type_a",
+        "edge_type_b",
+        "agent_a",
+        "agent_b",
+        "conf_a",
+        "conf_b",
+        "reason_a",
+        "reason_b",
     ]
 
     return {
@@ -227,9 +258,7 @@ def agent_heartbeat(
     from ohm.queries import _log_change
 
     # Update agent_state with heartbeat
-    existing = conn.execute(
-        "SELECT 1 FROM ohm_agent_state WHERE agent_name = ?", [agent_name]
-    ).fetchone()
+    existing = conn.execute("SELECT 1 FROM ohm_agent_state WHERE agent_name = ?", [agent_name]).fetchone()
 
     if existing:
         set_parts = ["last_sync = CURRENT_TIMESTAMP", "updated_at = CURRENT_TIMESTAMP"]
@@ -253,15 +282,9 @@ def agent_heartbeat(
     _log_change(conn, "ohm_agent_state", agent_name, "HEARTBEAT", agent_name)
 
     # Return updated state
-    result = conn.execute(
-        "SELECT * FROM ohm_agent_state WHERE agent_name = ?", [agent_name]
-    ).fetchone()
+    result = conn.execute("SELECT * FROM ohm_agent_state WHERE agent_name = ?", [agent_name]).fetchone()
     if result:
-        columns = [
-            desc[0] for desc in conn.execute(
-                "SELECT * FROM ohm_agent_state WHERE agent_name = ?", [agent_name]
-            ).description
-        ]
+        columns = [desc[0] for desc in conn.execute("SELECT * FROM ohm_agent_state WHERE agent_name = ?", [agent_name]).description]
         return dict(zip(columns, result))
     return {}
 
@@ -403,12 +426,7 @@ def aggregate_observations(
     baselines = [r[1] for r in obs if r[1] is not None]
     if baselines:
         avg_baseline = sum(baselines) / len(baselines)
-        same_direction = sum(
-            1 for v in values
-            if (v > avg_baseline and agg_value > avg_baseline)
-            or (v < avg_baseline and agg_value < avg_baseline)
-            or (v == avg_baseline)
-        )
+        same_direction = sum(1 for v in values if (v > avg_baseline and agg_value > avg_baseline) or (v < avg_baseline and agg_value < avg_baseline) or (v == avg_baseline))
         agreement = same_direction / count
     else:
         agreement = 1.0
@@ -540,11 +558,13 @@ def monte_carlo_impact(
 
     affected_nodes = []
     for nid, count in sorted(impact_counts.items(), key=lambda x: -x[1]):
-        affected_nodes.append({
-            "id": nid,
-            "label": node_labels.get(nid, nid),
-            "impact_probability": round(count / simulations, 4),
-        })
+        affected_nodes.append(
+            {
+                "id": nid,
+                "label": node_labels.get(nid, nid),
+                "impact_probability": round(count / simulations, 4),
+            }
+        )
 
     return {
         "source_node": node_id,
@@ -617,21 +637,21 @@ def detect_near_duplicates(
     for row in pairs:
         similarity = row[9]
         if similarity is not None and similarity >= similarity_threshold:
-            result.append({
-                "obs_a_id": row[0],
-                "obs_b_id": row[1],
-                "node_id": row[2],
-                "node_label": row[3],
-                "obs_type": row[4],
-                "value_a": round(row[5], 4) if row[5] is not None else None,
-                "value_b": round(row[6], 4) if row[6] is not None else None,
-                "agent_a": row[7],
-                "agent_b": row[8],
-                "similarity": round(similarity, 4),
-                "time_gap_seconds": round(
-                    abs((row[11] - row[10]).total_seconds()) if row[10] and row[11] else 0, 1
-                ),
-            })
+            result.append(
+                {
+                    "obs_a_id": row[0],
+                    "obs_b_id": row[1],
+                    "node_id": row[2],
+                    "node_label": row[3],
+                    "obs_type": row[4],
+                    "value_a": round(row[5], 4) if row[5] is not None else None,
+                    "value_b": round(row[6], 4) if row[6] is not None else None,
+                    "agent_a": row[7],
+                    "agent_b": row[8],
+                    "similarity": round(similarity, 4),
+                    "time_gap_seconds": round(abs((row[11] - row[10]).total_seconds()) if row[10] and row[11] else 0, 1),
+                }
+            )
 
     return result
 
@@ -664,9 +684,7 @@ def compute_confidence_calibration(
         global_challenge_rate, base_rate_adjusted.
     """
     # Count total L3/L4 edges globally (for base rate normalization)
-    global_total_row = conn.execute(
-        "SELECT COUNT(*) FROM ohm_edges WHERE layer IN ('L3', 'L4') AND deleted_at IS NULL"
-    ).fetchone()
+    global_total_row = conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE layer IN ('L3', 'L4') AND deleted_at IS NULL").fetchone()
     global_total_edges = global_total_row[0] if global_total_row else 0
 
     # Count globally challenged edges (edges with a CHALLENGED_BY edge pointing to them)
@@ -723,8 +741,11 @@ def compute_confidence_calibration(
 
     # Band midpoints for expected rate calculation
     band_midpoints = {
-        "0.9-1.0": 0.95, "0.7-0.9": 0.8, "0.5-0.7": 0.6,
-        "0.3-0.5": 0.4, "0.0-0.3": 0.15,
+        "0.9-1.0": 0.95,
+        "0.7-0.9": 0.8,
+        "0.5-0.7": 0.6,
+        "0.3-0.5": 0.4,
+        "0.0-0.3": 0.15,
     }
 
     # Calibration score: higher-confidence bands should have LOWER challenge rates
@@ -751,13 +772,15 @@ def compute_confidence_calibration(
         # Clamp to [0, 1]
         expected_rate = min(1.0, max(0.0, expected_rate))
 
-        calibration_by_band.append({
-            "band": band_name,
-            "total_edges": total,
-            "challenged": challenged_in_band,
-            "challenge_rate": round(challenge_rate, 4),
-            "expected_rate": round(expected_rate, 4),
-        })
+        calibration_by_band.append(
+            {
+                "band": band_name,
+                "total_edges": total,
+                "challenged": challenged_in_band,
+                "challenge_rate": round(challenge_rate, 4),
+                "expected_rate": round(expected_rate, 4),
+            }
+        )
 
         # Error from perfect calibration
         error = abs(challenge_rate - expected_rate)
@@ -775,12 +798,7 @@ def compute_confidence_calibration(
         "base_rate_adjusted": global_total_edges > 0,
         "calibration_by_band": calibration_by_band,
         "calibration_score": calibration_score,
-        "interpretation": (
-            "well_calibrated" if calibration_score and calibration_score > 0.7
-            else "overconfident" if calibration_score and calibration_score < 0.3
-            else "underexamined" if total_edges < 5
-            else "needs_data"
-        ),
+        "interpretation": ("well_calibrated" if calibration_score and calibration_score > 0.7 else "overconfident" if calibration_score and calibration_score < 0.3 else "underexamined" if total_edges < 5 else "needs_data"),
     }
 
 
@@ -810,7 +828,8 @@ def apply_confidence_decay(
         Dict with decayed_count, affected_edges, and summary.
     """
     # Find edges eligible for decay: L3/L4, not already at floor, not challenged
-    affected = conn.execute("""
+    affected = conn.execute(
+        """
         SELECT id, edge_type, layer, confidence, created_by,
                created_at,
                EXTRACT(DAY FROM CURRENT_TIMESTAMP - created_at) AS age_days
@@ -819,7 +838,9 @@ def apply_confidence_decay(
           AND confidence > ?
           AND created_at < CURRENT_TIMESTAMP - INTERVAL '1 day'
         ORDER BY age_days DESC
-    """, [min_confidence]).fetchall()
+    """,
+        [min_confidence],
+    ).fetchall()
 
     if not affected:
         return {"decayed_count": 0, "affected_edges": [], "summary": "No edges to decay"}
@@ -833,15 +854,17 @@ def apply_confidence_decay(
         new_conf = max(new_conf, min_confidence)
 
         if new_conf < conf:
-            decayed.append({
-                "id": edge_id,
-                "edge_type": etype,
-                "layer": layer,
-                "original_confidence": conf,
-                "new_confidence": new_conf,
-                "age_days": round(age_days, 1),
-                "created_by": created_by,
-            })
+            decayed.append(
+                {
+                    "id": edge_id,
+                    "edge_type": etype,
+                    "layer": layer,
+                    "original_confidence": conf,
+                    "new_confidence": new_conf,
+                    "age_days": round(age_days, 1),
+                    "created_by": created_by,
+                }
+            )
 
             if not dry_run:
                 conn.execute(
@@ -855,10 +878,7 @@ def apply_confidence_decay(
         "half_life_days": half_life_days,
         "min_confidence": min_confidence,
         "dry_run": dry_run,
-        "summary": (
-            f"Decayed {len(decayed)} edges "
-            f"(half-life: {half_life_days}d, floor: {min_confidence})"
-        ),
+        "summary": (f"Decayed {len(decayed)} edges (half-life: {half_life_days}d, floor: {min_confidence})"),
     }
 
 
@@ -943,7 +963,7 @@ def composite_score(
             sigma = row[1]
             # Base weight from inverse-variance
             if sigma and sigma > 0:
-                w = 1.0 / (sigma ** 2)
+                w = 1.0 / (sigma**2)
             else:
                 w = 1.0
             # Apply temporal decay if enabled
@@ -977,8 +997,7 @@ def composite_score(
             # Weighted geometric mean for multiplicative factors
             total_w = observation_weight + evidence_weight
             if total_w > 0:
-                composite = round((obs_score ** (observation_weight / total_w) *
-                                   evidence_score ** (evidence_weight / total_w)), 4)
+                composite = round((obs_score ** (observation_weight / total_w) * evidence_score ** (evidence_weight / total_w)), 4)
             else:
                 composite = round((obs_score * evidence_score) ** 0.5, 4)
             # Apply baseline scaling
@@ -988,7 +1007,8 @@ def composite_score(
             # Default: weighted arithmetic mean (backwards compatible)
             total_w = observation_weight + evidence_weight
             composite = round(
-                (obs_score * observation_weight + evidence_score * evidence_weight) / total_w, 4,
+                (obs_score * observation_weight + evidence_score * evidence_weight) / total_w,
+                4,
             )
 
     return {
@@ -1066,15 +1086,17 @@ def decay_observations(
         decay_factor = 0.5 ** (age_hours / temporal_decay_hours)
         decayed_value = round(value * decay_factor, 6) if value is not None else None
 
-        results.append({
-            "id": obs_id,
-            "node_id": obs_node_id,
-            "original_value": value,
-            "decayed_value": decayed_value,
-            "age_hours": round(age_hours, 4),
-            "decay_factor": round(decay_factor, 6),
-            "sigma": sigma,
-        })
+        results.append(
+            {
+                "id": obs_id,
+                "node_id": obs_node_id,
+                "original_value": value,
+                "decayed_value": decayed_value,
+                "age_hours": round(age_hours, 4),
+                "decay_factor": round(decay_factor, 6),
+                "sigma": sigma,
+            }
+        )
 
         if not dry_run and decayed_value is not None:
             conn.execute(
@@ -1134,9 +1156,7 @@ def detect_trend(
             "r_squared": None,
             "observation_count": n,
             "window_days": window_days,
-            "observations": [
-                {"value": v, "created_at": str(t)} for v, t, _ in observations
-            ],
+            "observations": [{"value": v, "created_at": str(t)} for v, t, _ in observations],
         }
 
     # Simple linear regression: value = slope * x + intercept
@@ -1184,9 +1204,7 @@ def detect_trend(
         "r_squared": r_squared,
         "observation_count": n,
         "window_days": window_days,
-        "observations": [
-            {"value": v, "created_at": str(t)} for v, t, _ in observations
-        ],
+        "observations": [{"value": v, "created_at": str(t)} for v, t, _ in observations],
     }
 
 
@@ -1275,14 +1293,14 @@ def compound_confidence(
         product = 1.0
         for c, w in weighted_confidences:
             effective = min(1.0, w * c)  # Clamp to avoid negative probabilities
-            product *= (1.0 - effective)
+            product *= 1.0 - effective
         result = round(1.0 - product, 4)
     else:
         # Interpolate between independent and correlated
         product = 1.0
         for c, w in weighted_confidences:
             effective = min(1.0, w * c)  # Clamp to avoid negative probabilities
-            product *= (1.0 - effective)
+            product *= 1.0 - effective
         independent = 1.0 - product
         if use_weighting:
             correlated = max(c * w for c, w in weighted_confidences)
@@ -1387,14 +1405,16 @@ def differential_diagnosis(
             score = None
 
         is_ruled_out = cand_id in ruled_out_map
-        results.append({
-            "node_id": cand_id,
-            "label": cand_label,
-            "type": cand_type,
-            "composite_score": score,
-            "ruled_out": is_ruled_out,
-            "ruled_out_by": ruled_out_map.get(cand_id, []),
-        })
+        results.append(
+            {
+                "node_id": cand_id,
+                "label": cand_label,
+                "type": cand_type,
+                "composite_score": score,
+                "ruled_out": is_ruled_out,
+                "ruled_out_by": ruled_out_map.get(cand_id, []),
+            }
+        )
 
     # Sort: non-ruled-out first, then by composite_score descending
     results.sort(key=lambda r: (r["ruled_out"], -(r["composite_score"] or 0)))
@@ -1843,11 +1863,7 @@ def suggest_connections(
         ]
 
     else:
-        raise ValueError(
-            f"Unknown method: {method!r}. "
-            "Use 'shared_provenance', 'shared_type', 'shared_tags', 'semantic', "
-            "'orphan_connect', or 'cooccurrence'."
-        )
+        raise ValueError(f"Unknown method: {method!r}. Use 'shared_provenance', 'shared_type', 'shared_tags', 'semantic', 'orphan_connect', or 'cooccurrence'.")
 
 
 def graph_stats(
@@ -1862,12 +1878,8 @@ def graph_stats(
         Dict with graph statistics.
     """
     # Total counts
-    total_nodes = conn.execute(
-        "SELECT count(*) FROM ohm_nodes WHERE deleted_at IS NULL"
-    ).fetchone()[0]  # type: ignore[index]
-    total_edges = conn.execute(
-        "SELECT count(*) FROM ohm_edges WHERE deleted_at IS NULL"
-    ).fetchone()[0]  # type: ignore[index]
+    total_nodes = conn.execute("SELECT count(*) FROM ohm_nodes WHERE deleted_at IS NULL").fetchone()[0]  # type: ignore[index]
+    total_edges = conn.execute("SELECT count(*) FROM ohm_edges WHERE deleted_at IS NULL").fetchone()[0]  # type: ignore[index]
 
     # Orphan count
     orphan_count = conn.execute("""
@@ -1906,9 +1918,7 @@ def graph_stats(
     density = total_edges / total_nodes if total_nodes > 0 else 0
 
     # Average confidence
-    avg_conf = conn.execute(
-        "SELECT AVG(confidence) FROM ohm_nodes WHERE deleted_at IS NULL AND confidence IS NOT NULL"
-    ).fetchone()[0]  # type: ignore[index]
+    avg_conf = conn.execute("SELECT AVG(confidence) FROM ohm_nodes WHERE deleted_at IS NULL AND confidence IS NOT NULL").fetchone()[0]  # type: ignore[index]
 
     # Type distribution
     type_dist = conn.execute("""

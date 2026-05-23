@@ -72,6 +72,7 @@ class TestQuackTokenValidation:
     def test_valid_short_token(self):
         # 4 chars is minimum, but should warn
         import warnings
+
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             result = validate_quack_token("abcd")
@@ -137,6 +138,7 @@ class TestQuackAvailability:
     def test_reset_availability_clears_cache(self):
         reset_availability()
         from ohm import quack as qm
+
         assert qm._quack_available is None
 
     def test_is_available_with_mock_success(self):
@@ -414,6 +416,7 @@ class TestSDKRemoteConnection:
     def test_connect_remote_exists(self):
         """Verify connect_remote function exists in SDK."""
         from ohm.sdk import connect_remote
+
         assert callable(connect_remote)
 
     def test_connect_remote_fallback(self, tmp_path):
@@ -485,6 +488,7 @@ class TestServerQuackIntegration:
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         from tests.conftest import wait_for_port
+
         wait_for_port("127.0.0.1", port)
 
         try:

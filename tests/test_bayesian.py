@@ -36,10 +36,8 @@ def causal_graph(db):
     b = create_sample_node(db, label="effect_b")
     c = create_sample_node(db, label="outcome_c")
 
-    create_sample_edge(db, from_node=a, to_node=b, edge_type="CAUSES",
-                       layer="L3", confidence=0.8)
-    create_sample_edge(db, from_node=b, to_node=c, edge_type="CAUSES",
-                       layer="L3", confidence=0.7)
+    create_sample_edge(db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3", confidence=0.8)
+    create_sample_edge(db, from_node=b, to_node=c, edge_type="CAUSES", layer="L3", confidence=0.7)
     return {"a": a, "b": b, "c": c}
 
 
@@ -56,13 +54,11 @@ def causal_graph_no_prob(db):
 
     # Insert edges WITHOUT probability or confidence
     db.execute(
-        "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, created_by) "
-        "VALUES (?, ?, ?, 'L3', 'CAUSES', 'test_agent')",
+        "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, created_by) VALUES (?, ?, ?, 'L3', 'CAUSES', 'test_agent')",
         [f"edge_{a}_{b}", a, b],
     )
     db.execute(
-        "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, created_by) "
-        "VALUES (?, ?, ?, 'L3', 'CAUSES', 'test_agent')",
+        "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, created_by) VALUES (?, ?, ?, 'L3', 'CAUSES', 'test_agent')",
         [f"edge_{b}_{c}", b, c],
     )
     return {"a": a, "b": b, "c": c}
@@ -76,16 +72,14 @@ def multi_layer_graph(db):
     c = create_sample_node(db, label="l4_risk")
     d = create_sample_node(db, label="l4_outcome")
 
-    create_sample_edge(db, from_node=a, to_node=b, edge_type="CAUSES",
-                       layer="L3", confidence=0.8)
-    create_sample_edge(db, from_node=c, to_node=d, edge_type="THREATENS",
-                       layer="L4", confidence=0.6)
-    create_sample_edge(db, from_node=a, to_node=d, edge_type="DEPENDS_ON",
-                       layer="L4", confidence=0.5)
+    create_sample_edge(db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3", confidence=0.8)
+    create_sample_edge(db, from_node=c, to_node=d, edge_type="THREATENS", layer="L4", confidence=0.6)
+    create_sample_edge(db, from_node=a, to_node=d, edge_type="DEPENDS_ON", layer="L4", confidence=0.5)
     return {"a": a, "b": b, "c": c, "d": d}
 
 
 # ── Unit Tests: _safe_node_id ────────────────────────────────────────────
+
 
 class TestSafeNodeId:
     def test_hyphens(self):
@@ -106,6 +100,7 @@ class TestSafeNodeId:
 
 # ── Unit Tests: _find_acyclic_subgraph ────────────────────────────────────
 
+
 class TestFindAcyclicSubgraph:
     pytestmark = pytest.mark.skipif(not _NETWORKX_AVAILABLE, reason="networkx not installed")
 
@@ -121,6 +116,7 @@ class TestFindAcyclicSubgraph:
         assert len(result) < 3
         # Result should be a valid DAG
         import networkx as nx
+
         G = nx.DiGraph()
         G.add_edges_from(result)
         assert nx.is_directed_acyclic_graph(G)
@@ -143,6 +139,7 @@ class TestFindAcyclicSubgraph:
         edges = [("A", "B"), ("A", "C"), ("B", "D"), ("C", "D"), ("C", "B")]
         result = _find_acyclic_subgraph(edges)
         import networkx as nx
+
         G = nx.DiGraph()
         G.add_edges_from(result)
         assert nx.is_directed_acyclic_graph(G)
@@ -172,22 +169,18 @@ class TestFindAcyclicSubgraph:
         result_default = _find_acyclic_subgraph(edges, edge_probabilities=probs)
         assert ("A", "B") not in result_default  # wrong — removes the causal edge
         # With preferred_edges={(A,B)}: must keep A→B, removes B→A instead
-        result_preferred = _find_acyclic_subgraph(
-            edges, edge_probabilities=probs, preferred_edges={("A", "B")}
-        )
+        result_preferred = _find_acyclic_subgraph(edges, edge_probabilities=probs, preferred_edges={("A", "B")})
         assert ("A", "B") in result_preferred
         assert ("B", "A") not in result_preferred
 
 
 # ── Unit Tests: build_bayesian_network ────────────────────────────────────
 
+
 class TestBuildBayesianNetwork:
     """Test that build_bayesian_network correctly constructs networks."""
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_builds_network_from_causal_edges(self, db, causal_graph):
         """Network should include nodes connected by CAUSES edges."""
         try:
@@ -200,10 +193,7 @@ class TestBuildBayesianNetwork:
         assert result["n_nodes"] >= 3
         assert result["n_edges"] >= 2
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_includes_edges_without_probability(self, db, causal_graph_no_prob):
         """CRITICAL: Edges without probability/confidence should still be included.
 
@@ -220,10 +210,7 @@ class TestBuildBayesianNetwork:
         assert result["n_nodes"] >= 3, f"Expected >=3 nodes, got {result['n_nodes']}"
         assert result["n_edges"] >= 2, f"Expected >=2 edges, got {result['n_edges']}"
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_default_probability_used(self, db, causal_graph_no_prob):
         """Edges without probability should use default_probability=0.5."""
         try:
@@ -238,10 +225,7 @@ class TestBuildBayesianNetwork:
             if edge["confidence"] == 0.7:
                 assert edge["probability"] == 0.7
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_layer_filtering(self, db, multi_layer_graph):
         """Layer filter should scope the network to specified layers."""
         try:
@@ -265,10 +249,7 @@ class TestBuildBayesianNetwork:
         assert result_all is not None
         assert result_all["n_nodes"] >= 4
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_edge_deduplication(self, db):
         """Duplicate edges (same from→to) should be deduplicated, keeping highest probability."""
         try:
@@ -283,13 +264,11 @@ class TestBuildBayesianNetwork:
         # ADR-008: effective probability = probability * confidence
         # Edge 1: 0.5 * 0.8 = 0.4, Edge 2: 0.9 * 0.8 = 0.72
         db.execute(
-            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) "
-            "VALUES (?, ?, ?, 'L3', 'CAUSES', 0.5, 0.8, 'test_agent')",
+            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) VALUES (?, ?, ?, 'L3', 'CAUSES', 0.5, 0.8, 'test_agent')",
             [f"edge_{a}_{b}_1", a, b],
         )
         db.execute(
-            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) "
-            "VALUES (?, ?, ?, 'L3', 'CAUSES', 0.9, 0.8, 'test_agent')",
+            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) VALUES (?, ?, ?, 'L3', 'CAUSES', 0.9, 0.8, 'test_agent')",
             [f"edge_{a}_{b}_2", a, b],
         )
 
@@ -310,8 +289,7 @@ class TestBuildBayesianNetwork:
         """Should return None when edges exist but none match the requested types."""
         a = create_sample_node(db, label="node_a")
         b = create_sample_node(db, label="node_b")
-        create_sample_edge(db, from_node=a, to_node=b, edge_type="CONTAINS",
-                           layer="L1", confidence=0.9)
+        create_sample_edge(db, from_node=a, to_node=b, edge_type="CONTAINS", layer="L1", confidence=0.9)
 
         result = build_bayesian_network(db, edge_types=["CAUSES"])
         assert result is None
@@ -330,9 +308,7 @@ class TestBuildBayesianNetwork:
 
         # Edge with explicit probability and confidence
         db.execute(
-            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, "
-            "probability, confidence, created_by) "
-            "VALUES (?, ?, ?, 'L3', 'CAUSES', 0.9, 0.5, 'test_agent')",
+            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) VALUES (?, ?, ?, 'L3', 'CAUSES', 0.9, 0.5, 'test_agent')",
             [f"edge_{a}_{b}", a, b],
         )
 
@@ -341,16 +317,11 @@ class TestBuildBayesianNetwork:
         assert len(result["edges"]) == 1
         edge = result["edges"][0]
         # ADR-008: effective probability = probability * confidence = 0.9 * 0.5 = 0.45
-        assert abs(edge["probability"] - 0.45) < 0.01, \
-            f"effective probability must be probability * confidence = 0.45, got {edge['probability']}"
+        assert abs(edge["probability"] - 0.45) < 0.01, f"effective probability must be probability * confidence = 0.45, got {edge['probability']}"
         # ADR-008: confidence is preserved for leak modulation
-        assert abs(edge["confidence"] - 0.5) < 0.01, \
-            f"confidence must remain ~0.5, got {edge['confidence']}"
+        assert abs(edge["confidence"] - 0.5) < 0.01, f"confidence must remain ~0.5, got {edge['confidence']}"
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_root_nodes_scoping(self, db, multi_layer_graph):
         """root_nodes should scope the network to nearby nodes."""
         try:
@@ -364,10 +335,7 @@ class TestBuildBayesianNetwork:
         # Should include l3_cause and its neighbors
         assert multi_layer_graph["a"] in result["nodes"]
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_root_prior_configurable(self, db):
         """OHM-2y6: root_prior parameter controls default prior for root nodes."""
         try:
@@ -378,8 +346,7 @@ class TestBuildBayesianNetwork:
         # Create a simple chain: A -> B
         a = create_sample_node(db, label="root_prior_a")
         b = create_sample_node(db, label="root_prior_b")
-        create_sample_edge(db, from_node=a, to_node=b,
-                           edge_type="CAUSES", layer="L3", confidence=0.8)
+        create_sample_edge(db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3", confidence=0.8)
 
         # Default root_prior=0.3: root node A should have P(bad) ≈ 0.3
         result_default = build_bayesian_network(db, root_prior=0.3)
@@ -388,8 +355,7 @@ class TestBuildBayesianNetwork:
         safe_a = result_default["safe_names"][a]
         cpd_default = model_default.get_cpds(safe_a)
         # Root prior P(bad) should be 0.3
-        assert abs(float(cpd_default.values[0]) - 0.3) < 0.01, \
-            f"Default root prior should be 0.3, got {cpd_default.values[0]}"
+        assert abs(float(cpd_default.values[0]) - 0.3) < 0.01, f"Default root prior should be 0.3, got {cpd_default.values[0]}"
 
         # Custom root_prior=0.5: root node A should have P(bad) ≈ 0.5
         result_uniform = build_bayesian_network(db, root_prior=0.5)
@@ -398,11 +364,11 @@ class TestBuildBayesianNetwork:
         safe_a_u = result_uniform["safe_names"][a]
         cpd_uniform = model_uniform.get_cpds(safe_a_u)
         # Root prior P(bad) should be 0.5
-        assert abs(float(cpd_uniform.values[0]) - 0.5) < 0.01, \
-            f"Uniform root prior should be 0.5, got {cpd_uniform.values[0]}"
+        assert abs(float(cpd_uniform.values[0]) - 0.5) < 0.01, f"Uniform root prior should be 0.5, got {cpd_uniform.values[0]}"
 
 
 # ── Unit Tests: max_nodes truncation (OHM-u60) ──────────────────────────
+
 
 class TestMaxNodesTruncation:
     """Test that max_nodes truncation is deterministic and preserves high-degree nodes."""
@@ -416,11 +382,9 @@ class TestMaxNodesTruncation:
         for i in range(10):
             n = create_sample_node(db, label=f"target_{i}")
             targets.append(n)
-            create_sample_edge(db, from_node=hub, to_node=n, edge_type="CAUSES",
-                               layer="L3", confidence=0.8)
+            create_sample_edge(db, from_node=hub, to_node=n, edge_type="CAUSES", layer="L3", confidence=0.8)
         # Peripheral node has only one edge
-        create_sample_edge(db, from_node=periph, to_node=targets[0],
-                           edge_type="CAUSES", layer="L3", confidence=0.5)
+        create_sample_edge(db, from_node=periph, to_node=targets[0], edge_type="CAUSES", layer="L3", confidence=0.5)
 
         # With max_nodes=5, hub should be kept (degree 10) over peripheral (degree 1)
         result = build_bayesian_network(db, max_nodes=5)
@@ -434,8 +398,7 @@ class TestMaxNodesTruncation:
         hub = create_sample_node(db, label="det_hub")
         for i in range(10):
             t = create_sample_node(db, label=f"det_target_{i}")
-            create_sample_edge(db, from_node=hub, to_node=t,
-                              edge_type="CAUSES", layer="L3", confidence=0.7)
+            create_sample_edge(db, from_node=hub, to_node=t, edge_type="CAUSES", layer="L3", confidence=0.7)
 
         result1 = build_bayesian_network(db, max_nodes=5)
         result2 = build_bayesian_network(db, max_nodes=5)
@@ -452,11 +415,9 @@ class TestMaxNodesTruncation:
         for i in range(10):
             n = create_sample_node(db, label=f"target_{i}")
             targets.append(n)
-            create_sample_edge(db, from_node=hub, to_node=n,
-                              edge_type="CAUSES", layer="L3", confidence=0.8)
+            create_sample_edge(db, from_node=hub, to_node=n, edge_type="CAUSES", layer="L3", confidence=0.8)
         # Root has only one edge
-        create_sample_edge(db, from_node=root, to_node=hub,
-                           edge_type="CAUSES", layer="L3", confidence=0.5)
+        create_sample_edge(db, from_node=root, to_node=hub, edge_type="CAUSES", layer="L3", confidence=0.5)
 
         # With max_nodes=3, root should still be included because it's a root_node
         result = build_bayesian_network(db, root_nodes=[root], max_nodes=3)
@@ -466,13 +427,11 @@ class TestMaxNodesTruncation:
 
 # ── Integration Tests: bayesian_inference ─────────────────────────────────
 
+
 class TestBayesianInference:
     """Test the full inference pipeline."""
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_inference_with_evidence(self, db, causal_graph):
         """Inference should return posterior probabilities."""
         try:
@@ -493,10 +452,7 @@ class TestBayesianInference:
         if "error" not in result:
             assert "posterior" in result
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_inference_with_layers(self, db, multi_layer_graph):
         """Inference should accept layers parameter."""
         try:
@@ -527,13 +483,11 @@ class TestBayesianInference:
 
 # ── Integration Tests: causal_intervention ─────────────────────────────────
 
+
 class TestCausalIntervention:
     """Test the do-operator (causal intervention)."""
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_intervention_with_layers(self, db, multi_layer_graph):
         """Intervention should accept layers parameter."""
         try:
@@ -552,10 +506,7 @@ class TestCausalIntervention:
         assert result is not None
         assert "method" in result
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_intervention_comparison_does_not_rebuild_network(self, db):
         """OHM-1p8: comparison_with_observation should reuse the built network,
         not call build_bayesian_network per query node."""
@@ -574,9 +525,7 @@ class TestCausalIntervention:
         d = create_sample_node(db, label="chain_d")
         for src, dst, prob in [(a, b, 0.8), (b, c, 0.7), (c, d, 0.6)]:
             db.execute(
-                "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, "
-                "probability, confidence, created_by) "
-                "VALUES (?, ?, ?, 'L3', 'CAUSES', ?, 0.9, 'test_agent')",
+                "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) VALUES (?, ?, ?, 'L3', 'CAUSES', ?, 0.9, 'test_agent')",
                 [str(uuid.uuid4()), src, dst, prob],
             )
 
@@ -600,22 +549,18 @@ class TestCausalIntervention:
             )
 
         # build_bayesian_network should be called exactly once (not once per query node)
-        assert call_count["count"] == 1, (
-            f"Expected 1 call to build_bayesian_network, got {call_count['count']}"
-        )
+        assert call_count["count"] == 1, f"Expected 1 call to build_bayesian_network, got {call_count['count']}"
         assert result is not None
         assert result["method"] == "causal_intervention"
 
 
 # ── Integration Tests: compute_ate ────────────────────────────────────────
 
+
 class TestComputeAte:
     """Test Average Treatment Effect computation."""
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_ate_with_layers(self, db, multi_layer_graph):
         """ATE should accept layers parameter."""
         try:
@@ -637,6 +582,7 @@ class TestComputeAte:
 
 # ── BayesianContext Tests (OHM-5qk) ────────────────────────────────────
 
+
 class TestBayesianContextReuse:
     """Test that BayesianContext methods reuse the cached network.
 
@@ -645,10 +591,7 @@ class TestBayesianContextReuse:
     BayesianContext. Now they use the cached self._network directly.
     """
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_intervention_reuses_cached_network(self, db):
         """BayesianContext.intervention() should not call build_bayesian_network."""
         from unittest.mock import patch
@@ -660,9 +603,7 @@ class TestBayesianContextReuse:
         c = create_sample_node(db, label="ctx_c")
         for src, dst, prob in [(a, b, 0.8), (b, c, 0.7)]:
             db.execute(
-                "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, "
-                "probability, confidence, created_by) "
-                "VALUES (?, ?, ?, 'L3', 'CAUSES', ?, 0.9, 'test')",
+                "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) VALUES (?, ?, ?, 'L3', 'CAUSES', ?, 0.9, 'test')",
                 [str(uuid.uuid4()), src, dst, prob],
             )
 
@@ -680,16 +621,11 @@ class TestBayesianContextReuse:
                 result2 = ctx.intervention(b, 1, query_nodes=[c])
 
         # build_bayesian_network should be called exactly once (in __init__)
-        assert call_count["count"] == 1, (
-            f"Expected 1 call to build_bayesian_network, got {call_count['count']}"
-        )
+        assert call_count["count"] == 1, f"Expected 1 call to build_bayesian_network, got {call_count['count']}"
         assert result1["method"] == "causal_intervention"
         assert result2["method"] == "causal_intervention"
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_ate_reuses_cached_network(self, db):
         """BayesianContext.ate() should not call build_bayesian_network."""
         from unittest.mock import patch
@@ -698,9 +634,7 @@ class TestBayesianContextReuse:
         a = create_sample_node(db, label="ctx_ate_a")
         b = create_sample_node(db, label="ctx_ate_b")
         db.execute(
-            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, "
-            "probability, confidence, created_by) "
-            "VALUES (?, ?, ?, 'L3', 'CAUSES', 0.8, 0.9, 'test')",
+            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) VALUES (?, ?, ?, 'L3', 'CAUSES', 0.8, 0.9, 'test')",
             [str(uuid.uuid4()), a, b],
         )
 
@@ -716,16 +650,11 @@ class TestBayesianContextReuse:
                 ate = ctx.ate(a, b)
 
         # build_bayesian_network should be called exactly once
-        assert call_count["count"] == 1, (
-            f"Expected 1 call to build_bayesian_network, got {call_count['count']}"
-        )
+        assert call_count["count"] == 1, f"Expected 1 call to build_bayesian_network, got {call_count['count']}"
         assert ate["method"] == "model_based_ate"
         assert "ate" in ate
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_intervention_result_matches_standalone(self, db):
         """BayesianContext.intervention() result should match causal_intervention()."""
         from ohm.bayesian import BayesianContext, causal_intervention
@@ -735,18 +664,14 @@ class TestBayesianContextReuse:
         c = create_sample_node(db, label="ctx_match_c")
         for src, dst, prob in [(a, b, 0.8), (b, c, 0.7)]:
             db.execute(
-                "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, "
-                "probability, confidence, created_by) "
-                "VALUES (?, ?, ?, 'L3', 'CAUSES', ?, 0.9, 'test')",
+                "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) VALUES (?, ?, ?, 'L3', 'CAUSES', ?, 0.9, 'test')",
                 [str(uuid.uuid4()), src, dst, prob],
             )
 
         with BayesianContext(db, edge_types=["CAUSES"], layers=["L3"]) as ctx:
             ctx_result = ctx.intervention(b, 0, query_nodes=[c])
 
-        standalone_result = causal_intervention(
-            db, b, 0, query_nodes=[c], edge_types=["CAUSES"], layers=["L3"]
-        )
+        standalone_result = causal_intervention(db, b, 0, query_nodes=[c], edge_types=["CAUSES"], layers=["L3"])
 
         # Both should return causal_intervention method
         assert ctx_result["method"] == "causal_intervention"
@@ -760,10 +685,7 @@ class TestBayesianContextReuse:
             standalone_post = standalone_result["posterior"][node]
             assert abs(post["bad"] - standalone_post["bad"]) < 0.01
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_ate_result_matches_standalone(self, db):
         """BayesianContext.ate() result should match compute_ate()."""
         from ohm.bayesian import BayesianContext, compute_ate
@@ -771,9 +693,7 @@ class TestBayesianContextReuse:
         a = create_sample_node(db, label="ctx_ate_match_a")
         b = create_sample_node(db, label="ctx_ate_match_b")
         db.execute(
-            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, "
-            "probability, confidence, created_by) "
-            "VALUES (?, ?, ?, 'L3', 'CAUSES', 0.8, 0.9, 'test')",
+            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) VALUES (?, ?, ?, 'L3', 'CAUSES', 0.8, 0.9, 'test')",
             [str(uuid.uuid4()), a, b],
         )
 
@@ -786,10 +706,7 @@ class TestBayesianContextReuse:
         assert abs(ctx_ate["ate"] - standalone_ate["ate"]) < 0.01
         assert abs(ctx_ate["risk_ratio"] - standalone_ate["risk_ratio"]) < 0.01
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_sensitivity_result_matches_standalone(self, db):
         """BayesianContext.sensitivity() result should match compute_sensitivity()."""
         from ohm.bayesian import BayesianContext, compute_sensitivity
@@ -797,9 +714,7 @@ class TestBayesianContextReuse:
         a = create_sample_node(db, label="ctx_sens_a")
         b = create_sample_node(db, label="ctx_sens_b")
         db.execute(
-            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, "
-            "probability, confidence, created_by) "
-            "VALUES (?, ?, ?, 'L3', 'CAUSES', 0.8, 0.9, 'test')",
+            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) VALUES (?, ?, ?, 'L3', 'CAUSES', 0.8, 0.9, 'test')",
             [str(uuid.uuid4()), a, b],
         )
 
@@ -811,10 +726,7 @@ class TestBayesianContextReuse:
         assert ctx_sens["method"] == "e_value_sensitivity"
         assert abs(ctx_sens["e_value"] - standalone_sens["e_value"]) < 0.01
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_multiple_calls_use_same_network(self, db):
         """Multiple intervention/ate calls should all reuse the same network."""
         from unittest.mock import patch
@@ -825,9 +737,7 @@ class TestBayesianContextReuse:
         c = create_sample_node(db, label="ctx_multi_c")
         for src, dst, prob in [(a, b, 0.8), (b, c, 0.7)]:
             db.execute(
-                "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, "
-                "probability, confidence, created_by) "
-                "VALUES (?, ?, ?, 'L3', 'CAUSES', ?, 0.9, 'test')",
+                "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) VALUES (?, ?, ?, 'L3', 'CAUSES', ?, 0.9, 'test')",
                 [str(uuid.uuid4()), src, dst, prob],
             )
 
@@ -848,12 +758,11 @@ class TestBayesianContextReuse:
                 ctx.inference(c, {b: 0})
 
         # All 5 calls should reuse the same network built in __init__
-        assert call_count["count"] == 1, (
-            f"Expected 1 call to build_bayesian_network, got {call_count['count']}"
-        )
+        assert call_count["count"] == 1, f"Expected 1 call to build_bayesian_network, got {call_count['count']}"
 
 
 # ── PERT Distribution Tests (OHM-6mv.3) ─────────────────────────────────
+
 
 class TestPERTMean:
     """Test the pert_mean helper function."""
@@ -938,9 +847,15 @@ class TestPERTInBuildBayesianNetwork:
         # Edge with PERT probability: p05=0.2, p50=0.5, p95=0.8
         # PERT mean = (0.2 + 4*0.5 + 0.8) / 6 = 3.0/6 = 0.5
         create_sample_edge(
-            db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3",
+            db,
+            from_node=a,
+            to_node=b,
+            edge_type="CAUSES",
+            layer="L3",
             confidence=0.9,
-            probability_p05=0.2, probability_p50=0.5, probability_p95=0.8,
+            probability_p05=0.2,
+            probability_p50=0.5,
+            probability_p95=0.8,
         )
 
         result = build_bayesian_network(db)
@@ -959,9 +874,15 @@ class TestPERTInBuildBayesianNetwork:
         # Edge with PERT confidence: c05=0.6, c50=0.8, c95=0.95
         # PERT mean = (0.6 + 4*0.8 + 0.95) / 6 = 4.75/6 ≈ 0.792
         create_sample_edge(
-            db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3",
+            db,
+            from_node=a,
+            to_node=b,
+            edge_type="CAUSES",
+            layer="L3",
             probability=0.7,
-            confidence_p05=0.6, confidence_p50=0.8, confidence_p95=0.95,
+            confidence_p05=0.6,
+            confidence_p50=0.8,
+            confidence_p95=0.95,
         )
 
         result = build_bayesian_network(db)
@@ -982,7 +903,11 @@ class TestPERTInBuildBayesianNetwork:
         # Defaults: p05 = 0.5 * 0.6 = 0.3, p95 = min(1.0, 0.5 * 1.4) = 0.7
         # PERT mean = (0.3 + 4*0.5 + 0.7) / 6 = 3.0/6 = 0.5
         create_sample_edge(
-            db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3",
+            db,
+            from_node=a,
+            to_node=b,
+            edge_type="CAUSES",
+            layer="L3",
             confidence=0.9,
             probability_p50=0.5,
         )
@@ -1003,7 +928,11 @@ class TestPERTInBuildBayesianNetwork:
         # Defaults: c05 = 0.8 * 0.6 = 0.48, c95 = min(1.0, 0.8 * 1.4) = 1.0
         # PERT mean = (0.48 + 4*0.8 + 1.0) / 6 = 4.68/6 = 0.78
         create_sample_edge(
-            db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3",
+            db,
+            from_node=a,
+            to_node=b,
+            edge_type="CAUSES",
+            layer="L3",
             probability=0.6,
             confidence_p50=0.8,
         )
@@ -1022,8 +951,13 @@ class TestPERTInBuildBayesianNetwork:
 
         # Edge with only probability and confidence (no PERT)
         create_sample_edge(
-            db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3",
-            probability=0.7, confidence=0.8,
+            db,
+            from_node=a,
+            to_node=b,
+            edge_type="CAUSES",
+            layer="L3",
+            probability=0.7,
+            confidence=0.8,
         )
 
         result = build_bayesian_network(db)
@@ -1044,9 +978,17 @@ class TestPERTInBuildBayesianNetwork:
         # PERT mean = (0.5 + 4*0.7 + 0.9) / 6 = 4.2/6 = 0.7
         # effective = 0.6 * 0.7 = 0.42
         create_sample_edge(
-            db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3",
-            probability_p05=0.3, probability_p50=0.6, probability_p95=0.9,
-            confidence_p05=0.5, confidence_p50=0.7, confidence_p95=0.9,
+            db,
+            from_node=a,
+            to_node=b,
+            edge_type="CAUSES",
+            layer="L3",
+            probability_p05=0.3,
+            probability_p50=0.6,
+            probability_p95=0.9,
+            confidence_p05=0.5,
+            confidence_p50=0.7,
+            confidence_p95=0.9,
         )
 
         result = build_bayesian_network(db)
@@ -1064,7 +1006,11 @@ class TestPERTInBuildBayesianNetwork:
         # p05 default = max(0.01, 0.9 * 0.6) = 0.54
         # PERT mean = (0.54 + 4*0.9 + 1.0) / 6 = 5.14/6 ≈ 0.857
         create_sample_edge(
-            db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3",
+            db,
+            from_node=a,
+            to_node=b,
+            edge_type="CAUSES",
+            layer="L3",
             confidence=0.8,
             probability_p50=0.9,
         )
@@ -1088,9 +1034,15 @@ class TestPERTInBuildBayesianNetwork:
         b = create_sample_node(db, label="pert_cpt_b")
 
         create_sample_edge(
-            db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3",
+            db,
+            from_node=a,
+            to_node=b,
+            edge_type="CAUSES",
+            layer="L3",
             confidence=0.8,
-            probability_p05=0.1, probability_p50=0.3, probability_p95=0.7,
+            probability_p05=0.1,
+            probability_p50=0.3,
+            probability_p95=0.7,
         )
 
         result = build_bayesian_network(db)
@@ -1123,10 +1075,8 @@ class TestComputeVoI:
         b = create_sample_node(db, label="mediator", confidence=0.6)
         d = create_sample_node(db, label="my_decision")
 
-        create_sample_edge(db, from_node=a, to_node=b, edge_type="CAUSES",
-                           layer="L3", confidence=0.8)
-        create_sample_edge(db, from_node=b, to_node=d, edge_type="CAUSES",
-                           layer="L3", confidence=0.7)
+        create_sample_edge(db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3", confidence=0.8)
+        create_sample_edge(db, from_node=b, to_node=d, edge_type="CAUSES", layer="L3", confidence=0.7)
 
         result = compute_voi(db, decision_nodes=[d])
         assert result["method"] == "value_of_information"
@@ -1144,12 +1094,9 @@ class TestComputeVoI:
         d = create_sample_node(db, label="my_decision", node_type="decision")
 
         # Set utility_scale on the decision node
-        db.execute(
-            "UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d]
-        )
+        db.execute("UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d])
 
-        create_sample_edge(db, from_node=a, to_node=d, edge_type="CAUSES",
-                           layer="L3", confidence=0.8)
+        create_sample_edge(db, from_node=a, to_node=d, edge_type="CAUSES", layer="L3", confidence=0.8)
 
         result = compute_voi(db)
         assert result["method"] == "value_of_information"
@@ -1164,10 +1111,8 @@ class TestComputeVoI:
         d = create_sample_node(db, label="decision_node", node_type="decision")
         db.execute("UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d])
 
-        create_sample_edge(db, from_node=low_conf, to_node=d, edge_type="CAUSES",
-                           layer="L3", confidence=0.8)
-        create_sample_edge(db, from_node=high_conf, to_node=d, edge_type="CAUSES",
-                           layer="L3", confidence=0.8)
+        create_sample_edge(db, from_node=low_conf, to_node=d, edge_type="CAUSES", layer="L3", confidence=0.8)
+        create_sample_edge(db, from_node=high_conf, to_node=d, edge_type="CAUSES", layer="L3", confidence=0.8)
 
         result = compute_voi(db)
         rankings = result["rankings"]
@@ -1186,8 +1131,7 @@ class TestComputeVoI:
         db.execute("UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d])
 
         for n in nodes:
-            create_sample_edge(db, from_node=n, to_node=d, edge_type="CAUSES",
-                               layer="L3", confidence=0.7)
+            create_sample_edge(db, from_node=n, to_node=d, edge_type="CAUSES", layer="L3", confidence=0.7)
 
         result = compute_voi(db, top=3)
         assert len(result["rankings"]) == 3
@@ -1199,10 +1143,8 @@ class TestComputeVoI:
         d = create_sample_node(db, label="decision_node", node_type="decision")
         db.execute("UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d])
 
-        create_sample_edge(db, from_node=a, to_node=d, edge_type="CAUSES",
-                           layer="L3", confidence=0.8)
-        create_sample_edge(db, from_node=b, to_node=d, edge_type="CAUSES",
-                           layer="L4", confidence=0.8)
+        create_sample_edge(db, from_node=a, to_node=d, edge_type="CAUSES", layer="L3", confidence=0.8)
+        create_sample_edge(db, from_node=b, to_node=d, edge_type="CAUSES", layer="L4", confidence=0.8)
 
         # Only L3 edges
         result_l3 = compute_voi(db, layers=["L3"])
@@ -1231,13 +1173,11 @@ class TestComputeVoI:
         d = create_sample_node(db, label="decision_node", node_type="decision")
         db.execute("UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d])
 
-        create_sample_edge(db, from_node=a, to_node=d, edge_type="CAUSES",
-                           layer="L3", confidence=0.8)
+        create_sample_edge(db, from_node=a, to_node=d, edge_type="CAUSES", layer="L3", confidence=0.8)
 
         # Add an observation for node 'a'
         db.execute(
-            "INSERT INTO ohm_observations (id, node_id, value, source, type, created_by) "
-            "VALUES (?, ?, 0.5, 'test', 'measurement', 'test_agent')",
+            "INSERT INTO ohm_observations (id, node_id, value, source, type, created_by) VALUES (?, ?, 0.5, 'test', 'measurement', 'test_agent')",
             [str(uuid.uuid4()), a],
         )
 
@@ -1254,10 +1194,8 @@ class TestComputeVoI:
         db.execute("UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d1])
         db.execute("UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d2])
 
-        create_sample_edge(db, from_node=a, to_node=d1, edge_type="CAUSES",
-                           layer="L3", confidence=0.8)
-        create_sample_edge(db, from_node=a, to_node=d2, edge_type="CAUSES",
-                           layer="L3", confidence=0.7)
+        create_sample_edge(db, from_node=a, to_node=d1, edge_type="CAUSES", layer="L3", confidence=0.8)
+        create_sample_edge(db, from_node=a, to_node=d2, edge_type="CAUSES", layer="L3", confidence=0.7)
 
         result = compute_voi(db)
         # 'a' should appear in rankings and affect both decisions
@@ -1281,16 +1219,12 @@ class TestComputeVoI:
 
         # Edge A → decision with tight PERT
         db.execute(
-            "INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, confidence, "
-            "probability_p05, probability_p50, probability_p95, created_by) "
-            "VALUES (?, ?, ?, 'CAUSES', 'L3', 0.7, 0.48, 0.50, 0.52, 'test')",
+            "INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, confidence, probability_p05, probability_p50, probability_p95, created_by) VALUES (?, ?, ?, 'CAUSES', 'L3', 0.7, 0.48, 0.50, 0.52, 'test')",
             [str(uuid.uuid4()), a_tight, d],
         )
         # Edge B → decision with wide PERT
         db.execute(
-            "INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, confidence, "
-            "probability_p05, probability_p50, probability_p95, created_by) "
-            "VALUES (?, ?, ?, 'CAUSES', 'L3', 0.7, 0.10, 0.50, 0.90, 'test')",
+            "INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, confidence, probability_p05, probability_p50, probability_p95, created_by) VALUES (?, ?, ?, 'CAUSES', 'L3', 0.7, 0.10, 0.50, 0.90, 'test')",
             [str(uuid.uuid4()), a_wide, d],
         )
 
@@ -1310,8 +1244,7 @@ class TestComputeVoI:
         db.execute("UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d])
 
         # Edge without PERT columns
-        create_sample_edge(db, from_node=a, to_node=d, edge_type="CAUSES",
-                           layer="L3", confidence=0.8)
+        create_sample_edge(db, from_node=a, to_node=d, edge_type="CAUSES", layer="L3", confidence=0.8)
 
         result = compute_voi(db)
         ranking = result["rankings"][0]
@@ -1326,9 +1259,7 @@ class TestComputeVoI:
 
         # Edge with very tight PERT bounds (p05=0.49, p95=0.51)
         db.execute(
-            "INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, confidence, "
-            "probability_p05, probability_p50, probability_p95, created_by) "
-            "VALUES (?, ?, ?, 'CAUSES', 'L3', 0.9, 0.49, 0.50, 0.51, 'test')",
+            "INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, confidence, probability_p05, probability_p50, probability_p95, created_by) VALUES (?, ?, ?, 'CAUSES', 'L3', 0.9, 0.49, 0.50, 0.51, 'test')",
             [str(uuid.uuid4()), a, d],
         )
 
@@ -1358,8 +1289,7 @@ class TestGenerateVoITasks:
         d = create_sample_node(db, label="my_decision", node_type="decision")
         db.execute("UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d])
 
-        create_sample_edge(db, from_node=a, to_node=d, edge_type="CAUSES",
-                           layer="L3", confidence=0.8)
+        create_sample_edge(db, from_node=a, to_node=d, edge_type="CAUSES", layer="L3", confidence=0.8)
 
         result = generate_voi_tasks(db, top=5)
         assert result["method"] == "voi_task_assignment"
@@ -1380,8 +1310,7 @@ class TestGenerateVoITasks:
         db.execute("UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d])
 
         for n in nodes:
-            create_sample_edge(db, from_node=n, to_node=d, edge_type="CAUSES",
-                               layer="L3", confidence=0.7)
+            create_sample_edge(db, from_node=n, to_node=d, edge_type="CAUSES", layer="L3", confidence=0.7)
 
         result = generate_voi_tasks(db, top=2)
         assert len(result["tasks"]) <= 2
@@ -1395,10 +1324,8 @@ class TestGenerateVoITasks:
         db.execute("UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d])
 
         # Agent has CAPABLE_OF edge to a concept
-        create_sample_edge(db, from_node=agent, to_node=a, edge_type="CAPABLE_OF",
-                           layer="L2", confidence=0.9)
-        create_sample_edge(db, from_node=a, to_node=d, edge_type="CAUSES",
-                           layer="L3", confidence=0.8)
+        create_sample_edge(db, from_node=agent, to_node=a, edge_type="CAPABLE_OF", layer="L2", confidence=0.9)
+        create_sample_edge(db, from_node=a, to_node=d, edge_type="CAUSES", layer="L3", confidence=0.8)
 
         # With agent filter — should find tasks matching agent expertise
         result = generate_voi_tasks(db, agent=agent, top=5)
@@ -1415,8 +1342,7 @@ class TestGenerateVoITasks:
         d = create_sample_node(db, label="decision_node", node_type="decision")
         db.execute("UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d])
 
-        create_sample_edge(db, from_node=a, to_node=d, edge_type="CAUSES",
-                           layer="L3", confidence=0.8)
+        create_sample_edge(db, from_node=a, to_node=d, edge_type="CAUSES", layer="L3", confidence=0.8)
 
         result = generate_voi_tasks(db, top=5)
         assert len(result["tasks"]) >= 1
@@ -1430,8 +1356,7 @@ class TestGenerateVoITasks:
         d = create_sample_node(db, label="decision_node", node_type="decision")
         db.execute("UPDATE ohm_nodes SET utility_scale = 1.0 WHERE id = ?", [d])
 
-        create_sample_edge(db, from_node=a, to_node=d, edge_type="CAUSES",
-                           layer="L3", confidence=0.8)
+        create_sample_edge(db, from_node=a, to_node=d, edge_type="CAUSES", layer="L3", confidence=0.8)
 
         result = generate_voi_tasks(db, top=5)
         assert len(result["tasks"]) >= 1
@@ -1445,6 +1370,7 @@ class TestGenerateVoITasks:
 
 # ── Regression Tests: Cache poisoning + silent node dropping ─────────────────
 
+
 class TestCachePoisoningRegression:
     """Regression tests for bugs that caused /ate, /sensitivity, /refute to
     return 'Unknown error' on real data while /inference and /intervene worked.
@@ -1455,10 +1381,7 @@ class TestCachePoisoningRegression:
     safe_query_nodes, producing posteriors with only the cause node key.
     """
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_cache_key_includes_root_nodes(self, db):
         """Two build_bayesian_network calls with different root_nodes should
         produce different cache entries (not reuse the first)."""
@@ -1476,9 +1399,7 @@ class TestCachePoisoningRegression:
         d = create_sample_node(db, label="cache_d")
         for src, dst in [(a, b), (c, d)]:
             db.execute(
-                "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, "
-                "probability, confidence, created_by) "
-                "VALUES (?, ?, ?, 'L3', 'CAUSES', 0.8, 0.9, 'test')",
+                "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) VALUES (?, ?, ?, 'L3', 'CAUSES', 0.8, 0.9, 'test')",
                 [str(uuid.uuid4()), src, dst],
             )
 
@@ -1492,10 +1413,7 @@ class TestCachePoisoningRegression:
         assert net2 is not None
         assert c in net2["nodes"]
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_ate_after_inference_on_different_nodes(self, db):
         """ATE should work even after a prior /inference call scoped to
         different nodes (the cache should not poison the network)."""
@@ -1513,9 +1431,7 @@ class TestCachePoisoningRegression:
         d = create_sample_node(db, label="poison_d")
         for src, dst in [(a, b), (c, d)]:
             db.execute(
-                "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, "
-                "probability, confidence, created_by) "
-                "VALUES (?, ?, ?, 'L3', 'CAUSES', 0.8, 0.9, 'test')",
+                "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) VALUES (?, ?, ?, 'L3', 'CAUSES', 0.8, 0.9, 'test')",
                 [str(uuid.uuid4()), src, dst],
             )
 
@@ -1531,10 +1447,7 @@ class TestCachePoisoningRegression:
         assert ate_result["method"] == "model_based_ate"
         assert "ate" in ate_result
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_intervention_returns_error_when_query_node_missing(self, db):
         """causal_intervention should return an explicit error when a specified
         query node is not in the network, not silently drop it."""
@@ -1548,9 +1461,7 @@ class TestCachePoisoningRegression:
         a = create_sample_node(db, label="missing_a")
         b = create_sample_node(db, label="missing_b")
         db.execute(
-            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, "
-            "probability, confidence, created_by) "
-            "VALUES (?, ?, ?, 'L3', 'CAUSES', 0.8, 0.9, 'test')",
+            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) VALUES (?, ?, ?, 'L3', 'CAUSES', 0.8, 0.9, 'test')",
             [str(uuid.uuid4()), a, b],
         )
 
@@ -1560,16 +1471,17 @@ class TestCachePoisoningRegression:
         orphan = create_sample_node(db, label="orphan_node")
 
         result = causal_intervention(
-            db, a, 0, query_nodes=[orphan],
-            edge_types=["CAUSES"], layers=["L3"],
+            db,
+            a,
+            0,
+            query_nodes=[orphan],
+            edge_types=["CAUSES"],
+            layers=["L3"],
         )
         assert "error" in result, "Expected error when query node is not in network"
         assert orphan in result["error"]
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_ate_diagnostic_error_message(self, db):
         """compute_ate should return a diagnostic error message (not 'Unknown
         error') when the effect node is missing from posteriors."""
@@ -1583,9 +1495,7 @@ class TestCachePoisoningRegression:
         a = create_sample_node(db, label="diag_a")
         b = create_sample_node(db, label="diag_b")
         db.execute(
-            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, "
-            "probability, confidence, created_by) "
-            "VALUES (?, ?, ?, 'L3', 'CAUSES', 0.8, 0.9, 'test')",
+            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) VALUES (?, ?, ?, 'L3', 'CAUSES', 0.8, 0.9, 'test')",
             [str(uuid.uuid4()), a, b],
         )
 
@@ -1595,9 +1505,7 @@ class TestCachePoisoningRegression:
 
         result = compute_ate(db, a, orphan, edge_types=["CAUSES"], layers=["L3"])
         assert "error" in result
-        assert "Unknown error" not in result["error"], (
-            f"Error message should be diagnostic, got: {result['error']}"
-        )
+        assert "Unknown error" not in result["error"], f"Error message should be diagnostic, got: {result['error']}"
         assert "orphan" in result["error"] or "not found" in result["error"]
 
 
@@ -1610,10 +1518,7 @@ class TestBayesianContextMultiNodeExtraction:
     standalone causal_intervention does.
     """
 
-    @pytest.mark.skipif(
-        not pytest.importorskip("pgmpy", reason="pgmpy not installed"),
-        reason="pgmpy not available"
-    )
+    @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_context_multi_node_posteriors_match_standalone(self, db):
         """BayesianContext multi-query-node posteriors should match the
         standalone causal_intervention result."""
@@ -1630,9 +1535,7 @@ class TestBayesianContextMultiNodeExtraction:
         d = create_sample_node(db, label="multi_d")
         for src, dst, prob in [(a, b, 0.8), (b, c, 0.7), (c, d, 0.6)]:
             db.execute(
-                "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, "
-                "probability, confidence, created_by) "
-                "VALUES (?, ?, ?, 'L3', 'CAUSES', ?, 0.9, 'test')",
+                "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) VALUES (?, ?, ?, 'L3', 'CAUSES', ?, 0.9, 'test')",
                 [str(uuid.uuid4()), src, dst, prob],
             )
 
@@ -1643,9 +1546,7 @@ class TestBayesianContextMultiNodeExtraction:
 
         _bayesian_network_cache.clear()
 
-        standalone_result = causal_intervention(
-            db, b, 0, query_nodes=[c, d], edge_types=["CAUSES"], layers=["L3"]
-        )
+        standalone_result = causal_intervention(db, b, 0, query_nodes=[c, d], edge_types=["CAUSES"], layers=["L3"])
 
         assert ctx_result["method"] == "causal_intervention"
         assert standalone_result["method"] == "causal_intervention"
@@ -1655,12 +1556,11 @@ class TestBayesianContextMultiNodeExtraction:
             sa_post = standalone_result["posterior"].get(node, {})
             assert "error" not in ctx_post, f"Context posterior for {node} has error: {ctx_post}"
             assert "error" not in sa_post, f"Standalone posterior for {node} has error: {sa_post}"
-            assert abs(ctx_post["bad"] - sa_post["bad"]) < 0.01, (
-                f"Context P({node}=bad)={ctx_post['bad']} != standalone {sa_post['bad']}"
-            )
+            assert abs(ctx_post["bad"] - sa_post["bad"]) < 0.01, f"Context P({node}=bad)={ctx_post['bad']} != standalone {sa_post['bad']}"
 
 
 # ── Regression Tests: VoI PERT variance scaling + path enumeration ─────────
+
 
 class TestVoIPertVarianceScaling:
     """Regression tests for PERT variance scaling bugs:
@@ -1704,7 +1604,11 @@ class TestVoIPertVarianceScaling:
         b = create_sample_node(db, label="wide_default_b")
 
         create_sample_edge(
-            db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3",
+            db,
+            from_node=a,
+            to_node=b,
+            edge_type="CAUSES",
+            layer="L3",
             confidence=0.9,
             probability_p50=0.5,
         )
@@ -1738,25 +1642,19 @@ class TestVoIPertVarianceScaling:
 
         # A→B, A→C (with PERT — narrow spread)
         for src, dst in [(a, b), (a, c)]:
-            create_sample_edge(db, from_node=src, to_node=dst, edge_type="CAUSES",
-                               layer="L3", confidence=0.9,
-                               probability_p05=0.45, probability_p50=0.5, probability_p95=0.55)
+            create_sample_edge(db, from_node=src, to_node=dst, edge_type="CAUSES", layer="L3", confidence=0.9, probability_p05=0.45, probability_p50=0.5, probability_p95=0.55)
 
         # B→D (narrow PERT spread = 0.2)
-        create_sample_edge(db, from_node=b, to_node=d, edge_type="CAUSES",
-                           layer="L3", confidence=0.8,
-                           probability_p05=0.1, probability_p50=0.2, probability_p95=0.3)
+        create_sample_edge(db, from_node=b, to_node=d, edge_type="CAUSES", layer="L3", confidence=0.8, probability_p05=0.1, probability_p50=0.2, probability_p95=0.3)
         # C→D (wide PERT spread = 0.9 — this is the max)
-        create_sample_edge(db, from_node=c, to_node=d, edge_type="CAUSES",
-                           layer="L3", confidence=0.8,
-                           probability_p05=0.05, probability_p50=0.5, probability_p95=0.95)
+        create_sample_edge(db, from_node=c, to_node=d, edge_type="CAUSES", layer="L3", confidence=0.8, probability_p05=0.05, probability_p50=0.5, probability_p95=0.95)
 
         forward_adj = {a: [b, c], b: [d], c: [d]}
         edge_pert_variance = {}
-        edge_pert_variance[(a, b)] = scale_pert_variance(0.1)   # spread 0.55-0.45=0.1
-        edge_pert_variance[(a, c)] = scale_pert_variance(0.1)   # spread 0.55-0.45=0.1
-        edge_pert_variance[(b, d)] = scale_pert_variance(0.2)   # spread 0.3-0.1=0.2
-        edge_pert_variance[(c, d)] = scale_pert_variance(0.9)   # spread 0.95-0.05=0.9
+        edge_pert_variance[(a, b)] = scale_pert_variance(0.1)  # spread 0.55-0.45=0.1
+        edge_pert_variance[(a, c)] = scale_pert_variance(0.1)  # spread 0.55-0.45=0.1
+        edge_pert_variance[(b, d)] = scale_pert_variance(0.2)  # spread 0.3-0.1=0.2
+        edge_pert_variance[(c, d)] = scale_pert_variance(0.9)  # spread 0.95-0.05=0.9
 
         result = _max_edge_pert_variance_toward(a, d, forward_adj, edge_pert_variance)
         # The visited-set bug would only explore A→B→D (first path found),
@@ -1766,7 +1664,4 @@ class TestVoIPertVarianceScaling:
         # The C→D edge has much higher variance — should be the max
         c_d_var = edge_pert_variance[(c, d)]
         b_d_var = edge_pert_variance[(b, d)]
-        assert result == c_d_var, (
-            f"Should find C→D variance ({c_d_var:.4f}) as max, "
-            f"got {result:.4f} (B→D was {b_d_var:.4f})"
-        )
+        assert result == c_d_var, f"Should find C→D variance ({c_d_var:.4f}) as max, got {result:.4f} (B→D was {b_d_var:.4f})"

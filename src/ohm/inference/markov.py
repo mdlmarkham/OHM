@@ -62,15 +62,9 @@ def _build_transition_matrix(
 
     if state_nodes is not None:
         _node_set_filter = set(state_nodes)
-        _edge_records = [
-            e for e in _edge_records
-            if e.from_node in _node_set_filter and e.to_node in _node_set_filter
-        ]
+        _edge_records = [e for e in _edge_records if e.from_node in _node_set_filter and e.to_node in _node_set_filter]
 
-    edges = [
-        (e.from_node, e.to_node, e.probability, e.confidence)
-        for e in _edge_records
-    ]
+    edges = [(e.from_node, e.to_node, e.probability, e.confidence) for e in _edge_records]
 
     if not edges:
         return [], None, [], []
@@ -147,7 +141,9 @@ def markov_absorbing_risk(
 
     reader = _coerce_reader(conn)
     nodes, matrix, transient, absorbing = _build_transition_matrix(
-        reader, edge_types=edge_types, state_nodes=state_nodes,
+        reader,
+        edge_types=edge_types,
+        state_nodes=state_nodes,
         semantic_roles=semantic_roles,
     )
 
@@ -289,7 +285,9 @@ def markov_expected_steps(
 
     reader = _coerce_reader(conn)
     nodes, matrix, transient, absorbing = _build_transition_matrix(
-        reader, edge_types=edge_types, state_nodes=state_nodes,
+        reader,
+        edge_types=edge_types,
+        state_nodes=state_nodes,
         semantic_roles=semantic_roles,
     )
 
@@ -394,7 +392,10 @@ def markov_expected_steps(
     if target_state is not None:
         if target_state in absorbing:
             absorption = markov_absorbing_risk(
-                conn, start_node, edge_types=edge_types, state_nodes=state_nodes,
+                conn,
+                start_node,
+                edge_types=edge_types,
+                state_nodes=state_nodes,
                 semantic_roles=semantic_roles,
             )
             prob = absorption.get("absorption_probabilities", {}).get(target_state, 0.0)

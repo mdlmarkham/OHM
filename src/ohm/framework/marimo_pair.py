@@ -36,6 +36,7 @@ class OHMPair:
         """Convert list of dicts to a marimo table if marimo is available."""
         try:
             import marimo as mo
+
             return mo.ui.table(data)
         except ImportError:
             return data
@@ -44,6 +45,7 @@ class OHMPair:
         """Convert text to marimo markdown if available."""
         try:
             import marimo as mo
+
             return mo.md(text)
         except ImportError:
             return text
@@ -109,10 +111,10 @@ class OHMPair:
                 tl = entry.get("to_label", tn)[:20]
 
                 if fn not in seen_nodes:
-                    lines.append(f"    {fn}[\"{fl}\"]")
+                    lines.append(f'    {fn}["{fl}"]')
                     seen_nodes.add(fn)
                 if tn not in seen_nodes:
-                    lines.append(f"    {tn}[\"{tl}\"]")
+                    lines.append(f'    {tn}["{tl}"]')
                     seen_nodes.add(tn)
 
                 edge_key = f"{fn}-{tn}"
@@ -124,6 +126,7 @@ class OHMPair:
 
         try:
             import marimo as mo
+
             return mo.mermaid(mermaid_str)
         except ImportError:
             return mermaid_str

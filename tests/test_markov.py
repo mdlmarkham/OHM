@@ -13,6 +13,7 @@ pytestmark = pytest.mark.skipif(not NUMPY_AVAILABLE, reason="numpy not installed
 @pytest.fixture
 def test_db():
     from tests.conftest import create_test_db
+
     return create_test_db()
 
 
@@ -37,9 +38,7 @@ class TestAbsorbingRisk:
     def test_linear_chain_absorption(self, test_db):
         healthy, symptomatic, critical, deceased = _build_linear_chain(test_db)
 
-        result = markov_absorbing_risk(
-            test_db, healthy, edge_types=["TRANSITIONS_TO"]
-        )
+        result = markov_absorbing_risk(test_db, healthy, edge_types=["TRANSITIONS_TO"])
 
         assert result["method"] == "markov_absorbing_risk"
         assert result["start_node"] == healthy
@@ -66,9 +65,7 @@ class TestAbsorbingRisk:
     def test_absorption_probabilities_sum_to_one(self, test_db):
         healthy, symptomatic, critical, deceased = _build_linear_chain(test_db)
 
-        result = markov_absorbing_risk(
-            test_db, healthy, edge_types=["TRANSITIONS_TO"]
-        )
+        result = markov_absorbing_risk(test_db, healthy, edge_types=["TRANSITIONS_TO"])
 
         total = sum(result["absorption_probabilities"].values())
         assert abs(total - 1.0) < 0.01
@@ -91,9 +88,7 @@ class TestExpectedSteps:
     def test_linear_chain_steps(self, test_db):
         healthy, symptomatic, critical, deceased = _build_linear_chain(test_db)
 
-        result = markov_expected_steps(
-            test_db, healthy, edge_types=["TRANSITIONS_TO"]
-        )
+        result = markov_expected_steps(test_db, healthy, edge_types=["TRANSITIONS_TO"])
 
         assert result["method"] == "markov_expected_steps"
         assert result["expected_steps"] > 0
@@ -107,9 +102,7 @@ class TestExpectedSteps:
     def test_transient_steps_greater_than_closer_states(self, test_db):
         healthy, symptomatic, critical, deceased = _build_linear_chain(test_db)
 
-        result = markov_expected_steps(
-            test_db, healthy, edge_types=["TRANSITIONS_TO"]
-        )
+        result = markov_expected_steps(test_db, healthy, edge_types=["TRANSITIONS_TO"])
 
         healthy_steps = result["expected_steps_per_state"][healthy]
         symptomatic_steps = result["expected_steps_per_state"][symptomatic]
@@ -118,9 +111,7 @@ class TestExpectedSteps:
     def test_target_state(self, test_db):
         healthy, symptomatic, critical, deceased = _build_linear_chain(test_db)
 
-        result = markov_expected_steps(
-            test_db, healthy, target_state=deceased, edge_types=["TRANSITIONS_TO"]
-        )
+        result = markov_expected_steps(test_db, healthy, target_state=deceased, edge_types=["TRANSITIONS_TO"])
 
         assert "target_state" in result
         assert "target_probability" in result

@@ -52,9 +52,7 @@ class Graph:
 
         return {
             "node_types": sorted(VALID_NODE_TYPES),
-            "edge_types_by_layer": {
-                layer: sorted(types) for layer, types in LAYER_EDGE_TYPES.items()
-            },
+            "edge_types_by_layer": {layer: sorted(types) for layer, types in LAYER_EDGE_TYPES.items()},
             "schema_version": get_schema_version(self._conn),
         }
 
@@ -160,12 +158,12 @@ class Graph:
                 "challenge_workflow": [
                     'graph.challenge(edge_id, reason="Insufficient evidence", confidence=0.3)',
                     'graph.support(edge_id, reason="Confirmed by satellite data", confidence=0.9)',
-                    'audit = graph.confidence(edge_id)',
+                    "audit = graph.confidence(edge_id)",
                 ],
                 "discovery": [
-                    'schema = graph.schema()  # node types, edge types, version',
-                    'layers = graph.layers()  # L1-L4 descriptions',
-                    'help_info = graph.help()  # this complete guide',
+                    "schema = graph.schema()  # node types, edge types, version",
+                    "layers = graph.layers()  # L1-L4 descriptions",
+                    "help_info = graph.help()  # this complete guide",
                 ],
             },
         }
@@ -264,14 +262,17 @@ class Graph:
         """
         if filter_type or layer or owner or confidence_min is not None:
             return self.search_edges(
-                layer=layer, edge_type=filter_type,
-                confidence_min=confidence_min, limit=limit,
+                layer=layer,
+                edge_type=filter_type,
+                confidence_min=confidence_min,
+                limit=limit,
             )
         if text:
             return self.search_nodes(text, limit=limit)
         # No filters: return recent nodes
         result = self._conn.execute(
-            "SELECT * FROM ohm_nodes ORDER BY created_at DESC LIMIT ?", [limit],
+            "SELECT * FROM ohm_nodes ORDER BY created_at DESC LIMIT ?",
+            [limit],
         )
         columns = [desc[0] for desc in result.description]
         return [dict(zip(columns, row)) for row in result.fetchall()]
@@ -452,7 +453,8 @@ class Graph:
         params.append(self.actor)
         params.append(edge_id)
         self._conn.execute(
-            "UPDATE ohm_edges SET " + ", ".join(set_clauses) + " WHERE id = ?", params,
+            "UPDATE ohm_edges SET " + ", ".join(set_clauses) + " WHERE id = ?",
+            params,
         )
 
     def observe(
@@ -539,78 +541,88 @@ class Graph:
         )
 
         # Declare values (L1 — identity)
-        for v in (values or []):
+        for v in values or []:
             value_node = self.find_or_create_node(label=v, node_type="value")
             # Check if edge already exists
             existing = self._conn.execute(
-                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ?"
-                " AND edge_type = 'VALUES' AND created_by = ?",
+                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = 'VALUES' AND created_by = ?",
                 [me["id"], value_node["id"], self.actor],
             ).fetchone()
             if not existing:
                 self.create_edge(
-                    from_node=me["id"], to_node=value_node["id"],
-                    edge_type="VALUES", layer="L1", confidence=1.0,
+                    from_node=me["id"],
+                    to_node=value_node["id"],
+                    edge_type="VALUES",
+                    layer="L1",
+                    confidence=1.0,
                     provenance="self_declaration",
                 )
 
         # Declare goals (L1 — identity)
-        for g in (goals or []):
+        for g in goals or []:
             goal_node = self.find_or_create_node(label=g, node_type="goal")
             existing = self._conn.execute(
-                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ?"
-                " AND edge_type = 'GOALS' AND created_by = ?",
+                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = 'GOALS' AND created_by = ?",
                 [me["id"], goal_node["id"], self.actor],
             ).fetchone()
             if not existing:
                 self.create_edge(
-                    from_node=me["id"], to_node=goal_node["id"],
-                    edge_type="GOALS", layer="L1", confidence=1.0,
+                    from_node=me["id"],
+                    to_node=goal_node["id"],
+                    edge_type="GOALS",
+                    layer="L1",
+                    confidence=1.0,
                     provenance="self_declaration",
                 )
 
         # Declare capabilities (L1 — identity)
-        for c in (capabilities or []):
+        for c in capabilities or []:
             cap_node = self.find_or_create_node(label=c, node_type="skill")
             existing = self._conn.execute(
-                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ?"
-                " AND edge_type = 'CAPABLE_OF' AND created_by = ?",
+                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = 'CAPABLE_OF' AND created_by = ?",
                 [me["id"], cap_node["id"], self.actor],
             ).fetchone()
             if not existing:
                 self.create_edge(
-                    from_node=me["id"], to_node=cap_node["id"],
-                    edge_type="CAPABLE_OF", layer="L1", confidence=1.0,
+                    from_node=me["id"],
+                    to_node=cap_node["id"],
+                    edge_type="CAPABLE_OF",
+                    layer="L1",
+                    confidence=1.0,
                     provenance="self_declaration",
                 )
 
         # Declare interests / subscriptions (L1 — identity)
-        for i in (interests or []):
+        for i in interests or []:
             topic_node = self.find_or_create_node(label=i, node_type="topic")
             existing = self._conn.execute(
-                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ?"
-                " AND edge_type = 'INTERESTED_IN' AND created_by = ?",
+                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = 'INTERESTED_IN' AND created_by = ?",
                 [me["id"], topic_node["id"], self.actor],
             ).fetchone()
             if not existing:
                 self.create_edge(
-                    from_node=me["id"], to_node=topic_node["id"],
-                    edge_type="INTERESTED_IN", layer="L1", confidence=1.0,
+                    from_node=me["id"],
+                    to_node=topic_node["id"],
+                    edge_type="INTERESTED_IN",
+                    layer="L1",
+                    confidence=1.0,
                     provenance="self_declaration",
                 )
 
         # Declare agent subscriptions (L3 — challengeable preference)
-        for a in (listens_to or []):
+        for a in listens_to or []:
             other_agent = self.find_or_create_node(label=a, node_type="agent")
             existing = self._conn.execute(
-                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ?"
-                " AND edge_type = 'LISTENS_TO' AND created_by = ?",
+                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = 'LISTENS_TO' AND created_by = ?",
                 [me["id"], other_agent["id"], self.actor],
             ).fetchone()
             if not existing:
                 self.create_edge(
-                    from_node=me["id"], to_node=other_agent["id"],
-                    edge_type="LISTENS_TO", layer="L3", confidence=0.7,
+                    from_node=me["id"],
+                    to_node=other_agent["id"],
+                    edge_type="LISTENS_TO",
+                    layer="L3",
+                    confidence=0.7,
                     provenance="self_declaration",
                 )
 
@@ -625,9 +637,7 @@ class Graph:
         created_at, confidence, visibility, provenance, tags, metadata)
         or None if not found.
         """
-        result = self._conn.execute(
-            "SELECT * FROM ohm_nodes WHERE id = ?", [node_id]
-        ).fetchone()
+        result = self._conn.execute("SELECT * FROM ohm_nodes WHERE id = ?", [node_id]).fetchone()
         if result is None:
             return None
         columns = [desc[0] for desc in self._conn.description]
@@ -640,9 +650,7 @@ class Graph:
         confidence, condition, provenance, created_by, created_at, challenge_of,
         challenge_type) or None if not found.
         """
-        result = self._conn.execute(
-            "SELECT * FROM ohm_edges WHERE id = ?", [edge_id]
-        ).fetchone()
+        result = self._conn.execute("SELECT * FROM ohm_edges WHERE id = ?", [edge_id]).fetchone()
         if result is None:
             return None
         columns = [desc[0] for desc in self._conn.description]
@@ -708,11 +716,7 @@ class Graph:
             conditions.append("type = ?")
             params.append(node_type)
 
-        sql = (
-            "SELECT * FROM ohm_nodes WHERE "
-            + " AND ".join(conditions)
-            + " ORDER BY created_at DESC LIMIT ?"
-        )
+        sql = "SELECT * FROM ohm_nodes WHERE " + " AND ".join(conditions) + " ORDER BY created_at DESC LIMIT ?"
         params.append(limit)
         result = self._conn.execute(sql, params)
         columns = [desc[0] for desc in result.description]
@@ -754,11 +758,7 @@ class Graph:
             conditions.append("confidence <= ?")
             params.append(confidence_max)
 
-        sql = (
-            "SELECT * FROM ohm_edges WHERE "
-            + " AND ".join(conditions)
-            + " ORDER BY created_at DESC LIMIT ?"
-        )
+        sql = "SELECT * FROM ohm_edges WHERE " + " AND ".join(conditions) + " ORDER BY created_at DESC LIMIT ?"
         params.append(limit)
         result = self._conn.execute(sql, params)
         columns = [desc[0] for desc in result.description]
@@ -767,7 +767,8 @@ class Graph:
     def threat_cluster(
         self,
         ioc_node_id: str,
-        *, edge_type: str | None = None,
+        *,
+        edge_type: str | None = None,
     ) -> list[dict[str, Any]]:
         """Find all alerts sharing a given IOC (Indicator of Compromise).
 
@@ -859,7 +860,11 @@ class Graph:
         from ohm.queries import query_neighborhood
 
         return query_neighborhood(
-            self._conn, node_id, depth=depth, layer=layer, direction=direction,
+            self._conn,
+            node_id,
+            depth=depth,
+            layer=layer,
+            direction=direction,
         )
 
     def path(
@@ -918,9 +923,7 @@ class Graph:
 
     # ── Substrate Methods ────────────────────────────────────────────────
 
-    def aggregate(
-        self, node_id: str, *, method: str = "weighted"
-    ) -> dict[str, Any]:
+    def aggregate(self, node_id: str, *, method: str = "weighted") -> dict[str, Any]:
         """Combine multiple observations on a node into a single value.
 
         Strategies: weighted (inverse-variance), mean, max_confidence, consensus.
@@ -944,7 +947,10 @@ class Graph:
         from ohm.methods import detect_anomalies
 
         return detect_anomalies(
-            self._conn, sigma_threshold=sigma_threshold, layer=layer, limit=limit,
+            self._conn,
+            sigma_threshold=sigma_threshold,
+            layer=layer,
+            limit=limit,
         )
 
     def contradictions(
@@ -963,7 +969,9 @@ class Graph:
         from ohm.methods import detect_contradictions
 
         return detect_contradictions(
-            self._conn, confidence_threshold=confidence_threshold, limit=limit,
+            self._conn,
+            confidence_threshold=confidence_threshold,
+            limit=limit,
         )
 
     def composite_score(
@@ -1012,9 +1020,12 @@ class Graph:
         from ohm.methods import composite_score as _composite_score
 
         return _composite_score(
-            self._conn, node_id,
-            observation_weight=observation_weight, evidence_weight=evidence_weight,
-            method=method, baseline=baseline,
+            self._conn,
+            node_id,
+            observation_weight=observation_weight,
+            evidence_weight=evidence_weight,
+            method=method,
+            baseline=baseline,
             temporal_decay_hours=temporal_decay_hours,
         )
 
@@ -1044,7 +1055,8 @@ class Graph:
         from ohm.methods import decay_observations as _decay_observations
 
         return _decay_observations(
-            self._conn, node_id,
+            self._conn,
+            node_id,
             temporal_decay_hours=temporal_decay_hours,
             dry_run=dry_run,
         )
@@ -1083,7 +1095,11 @@ class Graph:
         )
 
     def detect_trend(
-        self, node_id: str, *, window_days: int = 60, min_observations: int = 3,
+        self,
+        node_id: str,
+        *,
+        window_days: int = 60,
+        min_observations: int = 3,
     ) -> dict[str, Any]:
         """Detect temporal trends in observations for a node.
 
@@ -1101,7 +1117,10 @@ class Graph:
         from ohm.methods import detect_trend as _detect_trend
 
         return _detect_trend(
-            self._conn, node_id, window_days=window_days, min_observations=min_observations,
+            self._conn,
+            node_id,
+            window_days=window_days,
+            min_observations=min_observations,
         )
 
     def rules_out(
@@ -1142,7 +1161,10 @@ class Graph:
         )
 
     def differential_diagnosis(
-        self, node_id: str, *, max_depth: int = 3,
+        self,
+        node_id: str,
+        *,
+        max_depth: int = 3,
     ) -> list[dict[str, Any]]:
         """Return candidate diagnoses for a patient node, ranked by evidence.
 
@@ -1263,13 +1285,16 @@ class Graph:
         cascade propagation, not Monte Carlo simulation.
         """
         import warnings
+
         warnings.warn(
             "cascade_scenario is deprecated, use deterministic_cascade instead",
             DeprecationWarning,
             stacklevel=2,
         )
         return self.deterministic_cascade(
-            node_id, failure_probability=failure_probability, max_depth=max_depth,
+            node_id,
+            failure_probability=failure_probability,
+            max_depth=max_depth,
         )
 
     def deterministic_cascade(
@@ -1411,7 +1436,9 @@ class Graph:
         from ohm.queries import query_stale_edges
 
         return query_stale_edges(
-            self._conn, half_life_days=half_life_days, stale_threshold=stale_threshold,
+            self._conn,
+            half_life_days=half_life_days,
+            stale_threshold=stale_threshold,
         )
 
     def batch_create_nodes(
@@ -1479,9 +1506,7 @@ class Graph:
         Config is admin-set and read-only for agents. Returns None if
         the agent has no config entry.
         """
-        result = self._conn.execute(
-            "SELECT * FROM ohm_agent_config WHERE agent_name = ?", [agent_name]
-        ).fetchone()
+        result = self._conn.execute("SELECT * FROM ohm_agent_config WHERE agent_name = ?", [agent_name]).fetchone()
         if result is None:
             return None
         columns = [desc[0] for desc in self._conn.description]
@@ -1493,9 +1518,7 @@ class Graph:
         Returns the full config for every registered agent, including
         optimization targets, available services, and thresholds.
         """
-        result = self._conn.execute(
-            "SELECT * FROM ohm_agent_config ORDER BY agent_name"
-        )
+        result = self._conn.execute("SELECT * FROM ohm_agent_config ORDER BY agent_name")
         columns = [desc[0] for desc in result.description]
         return [dict(zip(columns, row)) for row in result.fetchall()]
 
@@ -1564,6 +1587,7 @@ class Graph:
 
         # Update the old edge's metadata with the new edge ID
         import json
+
         self._conn.execute(
             "UPDATE ohm_edges SET metadata = ? WHERE id = ?",
             [json.dumps({"superseded": True, "superseded_by": new_edge["id"]}), edge_id],
@@ -1616,7 +1640,8 @@ class Graph:
             return []  # No identity declared
 
         # Find other agents with overlapping edges
-        other_agents = self._conn.execute("""
+        other_agents = self._conn.execute(
+            """
             SELECT
                 n.id AS agent_id,
                 n.label AS agent_name,
@@ -1637,11 +1662,14 @@ class Graph:
             GROUP BY n.id, n.label
             ORDER BY overlap_count DESC
             LIMIT 10
-        """, [me_id, me_id, me_id]).fetchall()
+        """,
+            [me_id, me_id, me_id],
+        ).fetchall()
 
         # Find agents with capabilities I might need (complementary)
         # (agents who can do what I can't)
-        complementary = self._conn.execute("""
+        complementary = self._conn.execute(
+            """
             SELECT
                 n.id AS agent_id,
                 n.label AS agent_name,
@@ -1656,26 +1684,32 @@ class Graph:
                 SELECT to_node FROM ohm_edges WHERE from_node = ? AND edge_type = 'CAPABLE_OF' AND layer = 'L1'
               )
             LIMIT 10
-        """, [me_id, me_id]).fetchall()
+        """,
+            [me_id, me_id],
+        ).fetchall()
 
         results = []
         for agent in other_agents:
-            results.append({
-                "agent_id": agent[0],
-                "agent_name": agent[1],
-                "shared_values_interests": agent[2],
-                "recommendation": "LISTENS_TO",
-            })
+            results.append(
+                {
+                    "agent_id": agent[0],
+                    "agent_name": agent[1],
+                    "shared_values_interests": agent[2],
+                    "recommendation": "LISTENS_TO",
+                }
+            )
 
         for cap in complementary:
             # Don't duplicate if already in results
             if not any(r["agent_id"] == cap[0] for r in results):
-                results.append({
-                    "agent_id": cap[0],
-                    "agent_name": cap[1],
-                    "complementary_capability": cap[3],
-                    "recommendation": "LISTENS_TO",
-                })
+                results.append(
+                    {
+                        "agent_id": cap[0],
+                        "agent_name": cap[1],
+                        "complementary_capability": cap[3],
+                        "recommendation": "LISTENS_TO",
+                    }
+                )
 
         return results
 
@@ -1838,8 +1872,7 @@ class Graph:
         if edge_ids:
             placeholders = ",".join(["?"] * len(edge_ids))
             rows = self._conn.execute(
-                f"SELECT id FROM ohm_edges WHERE id IN ({placeholders})"
-                f" AND urgency IN ({','.join(['?'] * len(urgency_filter))})",
+                f"SELECT id FROM ohm_edges WHERE id IN ({placeholders}) AND urgency IN ({','.join(['?'] * len(urgency_filter))})",
                 edge_ids + list(urgency_filter),
             ).fetchall()
             urgent_edge_ids = {row[0] for row in rows}
@@ -1851,9 +1884,7 @@ class Graph:
             table = change.get("table_name", "")
             if table == "ohm_edges" and row_id in urgent_edge_ids:
                 change["urgency"] = next(
-                    (r[1] for r in self._conn.execute(
-                        "SELECT id, urgency FROM ohm_edges WHERE id = ?", [row_id]
-                    ).fetchall() if r[1] in urgency_filter),
+                    (r[1] for r in self._conn.execute("SELECT id, urgency FROM ohm_edges WHERE id = ?", [row_id]).fetchall() if r[1] in urgency_filter),
                     "unknown",
                 )
                 result.append(change)
@@ -1894,8 +1925,10 @@ class Graph:
         from ohm.methods import monte_carlo_impact
 
         return monte_carlo_impact(
-            self._conn, node_id,
-            simulations=simulations, depth=depth,
+            self._conn,
+            node_id,
+            simulations=simulations,
+            depth=depth,
             confidence_threshold=confidence_threshold,
             default_probability=default_probability,
             seed=seed,
@@ -1921,8 +1954,10 @@ class Graph:
         from ohm.markov import markov_absorbing_risk
 
         return markov_absorbing_risk(
-            self._conn, start_node,
-            edge_types=edge_types, state_nodes=state_nodes,
+            self._conn,
+            start_node,
+            edge_types=edge_types,
+            state_nodes=state_nodes,
         )
 
     def markov_expected_steps(
@@ -1947,8 +1982,10 @@ class Graph:
         from ohm.markov import markov_expected_steps
 
         return markov_expected_steps(
-            self._conn, start_node,
-            target_state=target_state, edge_types=edge_types,
+            self._conn,
+            start_node,
+            target_state=target_state,
+            edge_types=edge_types,
             state_nodes=state_nodes,
         )
 
@@ -1975,7 +2012,8 @@ class Graph:
         from ohm.methods import detect_near_duplicates
 
         return detect_near_duplicates(
-            self._conn, similarity_threshold=similarity_threshold,
+            self._conn,
+            similarity_threshold=similarity_threshold,
         )
 
     def calibration(self, agent_name: str | None = None) -> dict[str, Any]:
@@ -1996,7 +2034,8 @@ class Graph:
         from ohm.methods import compute_confidence_calibration
 
         return compute_confidence_calibration(
-            self._conn, agent_name or self.actor,
+            self._conn,
+            agent_name or self.actor,
         )
 
     # ── Discovery & Export ──────────────────────────────────────────────
@@ -2021,7 +2060,8 @@ class Graph:
         suggestions = []
 
         # Strategy 1: Shared tags
-        shared_tag_pairs = self._conn.execute("""
+        shared_tag_pairs = self._conn.execute(
+            """
             SELECT
                 n1.id AS from_node, n1.label AS from_label,
                 n2.id AS to_node, n2.label AS to_label,
@@ -2039,20 +2079,25 @@ class Graph:
             HAVING COUNT(*) >= 2
             ORDER BY shared_tags DESC
             LIMIT ?
-        """, [limit]).fetchall()
+        """,
+            [limit],
+        ).fetchall()
 
         for row in shared_tag_pairs:
-            suggestions.append({
-                "from_node": row[0],
-                "from_label": row[1],
-                "to_node": row[2],
-                "to_label": row[3],
-                "reason": f"shared_tags({row[4]})",
-                "score": row[4] / 5.0,  # Normalize
-            })
+            suggestions.append(
+                {
+                    "from_node": row[0],
+                    "from_label": row[1],
+                    "to_node": row[2],
+                    "to_label": row[3],
+                    "reason": f"shared_tags({row[4]})",
+                    "score": row[4] / 5.0,  # Normalize
+                }
+            )
 
         # Strategy 2: Co-occurrence in neighborhoods
-        cooccur = self._conn.execute("""
+        cooccur = self._conn.execute(
+            """
             SELECT
                 e1.from_node AS from_node,
                 n1.label AS from_label,
@@ -2072,20 +2117,24 @@ class Graph:
             HAVING COUNT(*) >= 2
             ORDER BY cooccurrence DESC
             LIMIT ?
-        """, [limit]).fetchall()
+        """,
+            [limit],
+        ).fetchall()
 
         for row in cooccur:
             from_node, from_label, to_node, to_label, count = row
             # Don't duplicate if already in suggestions
             if not any(s["from_node"] == from_node and s["to_node"] == to_node for s in suggestions):
-                suggestions.append({
-                    "from_node": from_node,
-                    "from_label": from_label,
-                    "to_node": to_node,
-                    "to_label": to_label,
-                    "reason": f"cooccurrence({count})",
-                    "score": count / 5.0,
-                })
+                suggestions.append(
+                    {
+                        "from_node": from_node,
+                        "from_label": from_label,
+                        "to_node": to_node,
+                        "to_label": to_label,
+                        "reason": f"cooccurrence({count})",
+                        "score": count / 5.0,
+                    }
+                )
 
         return sorted(suggestions, key=lambda s: -s["score"])[:limit]
 
@@ -2105,7 +2154,7 @@ class Graph:
             d = dict(zip(node_cols, row))
             # Convert non-serializable types
             for k, v in d.items():
-                if hasattr(v, 'isoformat'):
+                if hasattr(v, "isoformat"):
                     d[k] = v.isoformat()
                 elif isinstance(v, (bytes, bytearray)):
                     d[k] = v.hex()
@@ -2117,7 +2166,7 @@ class Graph:
         for row in edges:
             d = dict(zip(edge_cols, row))
             for k, v in d.items():
-                if hasattr(v, 'isoformat'):
+                if hasattr(v, "isoformat"):
                     d[k] = v.isoformat()
                 elif isinstance(v, (bytes, bytearray)):
                     d[k] = v.hex()
@@ -2129,7 +2178,7 @@ class Graph:
         for row in obs:
             d = dict(zip(obs_cols, row))
             for k, v in d.items():
-                if hasattr(v, 'isoformat'):
+                if hasattr(v, "isoformat"):
                     d[k] = v.isoformat()
                 elif isinstance(v, (bytes, bytearray)):
                     d[k] = v.hex()
@@ -2141,7 +2190,7 @@ class Graph:
         for row in agent_state:
             d = dict(zip(as_cols, row))
             for k, v in d.items():
-                if hasattr(v, 'isoformat'):
+                if hasattr(v, "isoformat"):
                     d[k] = v.isoformat()
                 elif isinstance(v, (bytes, bytearray)):
                     d[k] = v.hex()
@@ -2151,9 +2200,13 @@ class Graph:
             "meta": {
                 "format": "ohm-export-v1",
                 "schema_version": (
-                    sv_row[0] if (sv_row := self._conn.execute(
-                        "SELECT value FROM ohm_meta WHERE key = 'schema_version'",
-                    ).fetchone()) else "unknown"
+                    sv_row[0]
+                    if (
+                        sv_row := self._conn.execute(
+                            "SELECT value FROM ohm_meta WHERE key = 'schema_version'",
+                        ).fetchone()
+                    )
+                    else "unknown"
                 ),
                 "exported_at": datetime.now(timezone.utc).isoformat(),
                 "node_count": len(nodes_json),
@@ -2186,9 +2239,7 @@ class Graph:
 
         # Import nodes
         for node in data.get("nodes", []):
-            existing = self._conn.execute(
-                "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node["id"]]
-            ).fetchone()
+            existing = self._conn.execute("SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node["id"]]).fetchone()
             if existing and merge:
                 import_count["skipped"] += 1
                 continue
@@ -2209,9 +2260,7 @@ class Graph:
         for edge in data.get("edges", []):
             existing = None
             if merge:
-                existing = self._conn.execute(
-                    "SELECT id FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [edge["id"]]
-                ).fetchone()
+                existing = self._conn.execute("SELECT id FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [edge["id"]]).fetchone()
             if existing:
                 import_count["skipped"] += 1
                 continue
@@ -2276,14 +2325,16 @@ class Graph:
         history = []
 
         # 1. Original creation
-        history.append({
-            "type": "created",
-            "agent": edge.get("created_by", "unknown"),
-            "timestamp": str(edge.get("created_at", "")),
-            "edge_type": edge.get("edge_type"),
-            "confidence": edge.get("confidence"),
-            "layer": edge.get("layer"),
-        })
+        history.append(
+            {
+                "type": "created",
+                "agent": edge.get("created_by", "unknown"),
+                "timestamp": str(edge.get("created_at", "")),
+                "edge_type": edge.get("edge_type"),
+                "confidence": edge.get("confidence"),
+                "layer": edge.get("layer"),
+            }
+        )
 
         # 2. Confidence updates — check change feed
         updates = self._conn.execute(
@@ -2296,11 +2347,13 @@ class Graph:
         ).fetchall()
 
         for agent, ts, new_data in updates:
-            history.append({
-                "type": "updated",
-                "agent": agent,
-                "timestamp": str(ts),
-            })
+            history.append(
+                {
+                    "type": "updated",
+                    "agent": agent,
+                    "timestamp": str(ts),
+                }
+            )
 
         # 3. Challenges and supports
         reactions = self._conn.execute(
@@ -2312,14 +2365,16 @@ class Graph:
         ).fetchall()
 
         for rid, rtype, rconf, ragent, rts, rreason in reactions:
-            history.append({
-                "type": rtype.lower() if rtype else "reaction",
-                "agent": ragent,
-                "timestamp": str(rts),
-                "confidence": rconf,
-                "reason": rreason,
-                "reaction_edge_id": rid,
-            })
+            history.append(
+                {
+                    "type": rtype.lower() if rtype else "reaction",
+                    "agent": ragent,
+                    "timestamp": str(rts),
+                    "confidence": rconf,
+                    "reason": rreason,
+                    "reaction_edge_id": rid,
+                }
+            )
 
         # 4. Identity evolution chain
         meta = edge.get("metadata")
@@ -2328,23 +2383,27 @@ class Graph:
                 meta_dict = _json.loads(meta) if isinstance(meta, str) else meta
                 if meta_dict.get("superseded"):
                     superseded_by = meta_dict.get("superseded_by")
-                    history.append({
-                        "type": "superseded",
-                        "agent": edge.get("created_by", "unknown"),
-                        "timestamp": str(edge.get("updated_at", "")),
-                        "superseded_by": superseded_by,
-                    })
+                    history.append(
+                        {
+                            "type": "superseded",
+                            "agent": edge.get("created_by", "unknown"),
+                            "timestamp": str(edge.get("updated_at", "")),
+                            "superseded_by": superseded_by,
+                        }
+                    )
                     # Follow the chain
                     if superseded_by:
                         next_edge = self.get_edge(superseded_by)
                         if next_edge:
-                            history.append({
-                                "type": "evolved_to",
-                                "agent": next_edge.get("created_by", "unknown"),
-                                "timestamp": str(next_edge.get("created_at", "")),
-                                "edge_id": superseded_by,
-                                "provenance": next_edge.get("provenance"),
-                            })
+                            history.append(
+                                {
+                                    "type": "evolved_to",
+                                    "agent": next_edge.get("created_by", "unknown"),
+                                    "timestamp": str(next_edge.get("created_at", "")),
+                                    "edge_id": superseded_by,
+                                    "provenance": next_edge.get("provenance"),
+                                }
+                            )
             except (ValueError, TypeError):
                 pass
 
@@ -2467,7 +2526,9 @@ class Graph:
         from ohm.queries import query_ticket_provenance
 
         return query_ticket_provenance(
-            self._conn, ticket_node, max_depth=max_depth,
+            self._conn,
+            ticket_node,
+            max_depth=max_depth,
         )
 
     def delete_node(self, node_id: str) -> dict[str, Any]:
@@ -2602,15 +2663,12 @@ def connect_remote(
             return graph
         except Exception as e:
             if strict:
-                raise ConnectionError(
-                    f"Failed to attach to remote Quack server at {uri}: {e}. "
-                    "Set strict=False to fall back to direct file connection."
-                ) from e
+                raise ConnectionError(f"Failed to attach to remote Quack server at {uri}: {e}. Set strict=False to fall back to direct file connection.") from e
             # Fall back to direct connection with warning
             import warnings
+
             warnings.warn(
-                f"Quack attach failed ({e}), falling back to local DB. "
-                "Data may be stale. Set strict=False to suppress this warning.",
+                f"Quack attach failed ({e}), falling back to local DB. Data may be stale. Set strict=False to suppress this warning.",
                 UserWarning,
             )
 
@@ -2624,9 +2682,9 @@ def connect_remote(
             "or install DuckDB with Quack extension support."
         )
     import warnings
+
     warnings.warn(
-        "Quack not available, connecting to local DB. "
-        "Set strict=False to suppress this warning.",
+        "Quack not available, connecting to local DB. Set strict=False to suppress this warning.",
         UserWarning,
     )
     db_path = os.environ.get("OHM_DB", str(Path.home() / ".ohm" / "ohm.duckdb"))
@@ -2690,9 +2748,10 @@ def connect_http(
             if self._token:
                 token_header = f"Bearer {self._token}"
                 try:
-                    token_header.encode('latin-1')
+                    token_header.encode("latin-1")
                 except UnicodeEncodeError:
                     from urllib.parse import quote
+
                     token_header = f"Bearer {quote(self._token, safe='-._~')}"
                 headers["Authorization"] = token_header
 
@@ -2702,13 +2761,14 @@ def connect_http(
                     # Force UTF-8 decoding to handle non-ASCII characters
                     raw = resp.read()
                     try:
-                        return json.loads(raw.decode('utf-8'))
+                        return json.loads(raw.decode("utf-8"))
                     except UnicodeDecodeError:
                         # Fallback to latin-1 with warning
                         import logging
+
                         logger = logging.getLogger(__name__)
-                        logger.warning(f'Latin-1 fallback for response from {method} {path}')
-                        return json.loads(raw.decode('latin-1'))
+                        logger.warning(f"Latin-1 fallback for response from {method} {path}")
+                        return json.loads(raw.decode("latin-1"))
             except urllib.error.HTTPError as e:
                 error_body = e.read().decode() if e.fp else str(e)
                 raise ConnectionError(f"HTTP {e.code} from {method} {path}: {error_body}") from e
@@ -2720,6 +2780,7 @@ def connect_http(
         def create_node(self, label: str, *, node_type: str = "concept", **kwargs) -> dict[str, Any]:
             """Create a node via HTTP API. Auto-generates ID from label."""
             import re
+
             node_id = re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")[:60]
             body = {
                 "id": node_id,
@@ -2736,8 +2797,7 @@ def connect_http(
             }
             return self._http_request("POST", "/node", body)
 
-        def create_edge(self, *, from_node: str, to_node: str, edge_type: str,
-                        layer: str = "L3", **kwargs) -> dict[str, Any]:
+        def create_edge(self, *, from_node: str, to_node: str, edge_type: str, layer: str = "L3", **kwargs) -> dict[str, Any]:
             """Create an edge via HTTP API. Maps from_node→from, to_node→to, edge_type→type."""
             body = {
                 "from": from_node,
@@ -2784,14 +2844,14 @@ def connect_http(
                 List of matching node records.
             """
             import urllib.parse
+
             params = [f"q={urllib.parse.quote(query)}", f"limit={limit}"]
             if node_type:
                 params.append(f"type={node_type}")
             path = "/search?" + "&".join(params)
             return self._http_request("GET", path)
 
-        def semantic_search(self, query: str, *, node_type: str | None = None,
-                           limit: int = 10, min_confidence: float | None = None) -> list[dict[str, Any]]:
+        def semantic_search(self, query: str, *, node_type: str | None = None, limit: int = 10, min_confidence: float | None = None) -> list[dict[str, Any]]:
             """Search nodes via semantic similarity using embeddings.
 
             Args:
@@ -2804,6 +2864,7 @@ def connect_http(
                 List of dicts with node_id, label, type, confidence, distance.
             """
             import urllib.parse
+
             params = [f"q={urllib.parse.quote(query)}", f"limit={limit}"]
             if node_type:
                 params.append(f"type={node_type}")
@@ -2838,9 +2899,7 @@ def connect_http(
                     return None
                 raise
 
-        def challenge(self, node_id: str, *, value: float | None = None,
-                      sigma: float = 0.5, notes: str | None = None,
-                      challenge_type: str | None = None) -> dict[str, Any]:
+        def challenge(self, node_id: str, *, value: float | None = None, sigma: float = 0.5, notes: str | None = None, challenge_type: str | None = None) -> dict[str, Any]:
             """Challenge a node with an observation (records observation on node)."""
             body = {"value": value, "sigma": sigma}
             if notes:
@@ -2849,9 +2908,7 @@ def connect_http(
                 body["challenge_type"] = challenge_type
             return self._http_request("POST", f"/challenge/{node_id}", body)
 
-        def challenge_edge(self, edge_id: str, *, reason: str = "",
-                          confidence: float = 0.5,
-                          challenge_type: str = "CHALLENGED_BY") -> dict[str, Any]:
+        def challenge_edge(self, edge_id: str, *, reason: str = "", confidence: float = 0.5, challenge_type: str = "CHALLENGED_BY") -> dict[str, Any]:
             """Challenge an existing edge (creates CHALLENGED_BY edge).
 
             This is the proper way to challenge an interpretation — it creates
@@ -2869,8 +2926,7 @@ def connect_http(
             body = {"reason": reason, "confidence": confidence, "challenge_type": challenge_type}
             return self._http_request("POST", f"/challenge/{edge_id}", body)
 
-        def support_edge(self, edge_id: str, *, reason: str = "",
-                        confidence: float = 0.8) -> dict[str, Any]:
+        def support_edge(self, edge_id: str, *, reason: str = "", confidence: float = 0.8) -> dict[str, Any]:
             """Support an existing edge (creates SUPPORTS edge).
 
             Args:
@@ -2956,6 +3012,7 @@ def connect_http(
                 weighted (bool).
             """
             from ohm.methods import compound_confidence as _cc
+
             return _cc(observations, correlation=correlation, source_weights=source_weights)
 
         def record_outcome(
@@ -2982,6 +3039,7 @@ def connect_http(
         ) -> dict[str, Any]:
             """Compute source reliability metrics from historical outcomes via HTTP."""
             import urllib.parse
+
             path = f"/reliability/{urllib.parse.quote(source_agent)}"
             return self._http_request("GET", path)
 
@@ -3024,6 +3082,7 @@ def connect_http(
                 Node record with 'created' key.
             """
             from .schema import VALID_TASK_STATUSES, VALID_PRIORITY
+
             if task_status not in VALID_TASK_STATUSES:
                 raise ValueError(f"Invalid task_status: {task_status} — must be one of: {', '.join(sorted(VALID_TASK_STATUSES))}")
             if priority not in VALID_PRIORITY:
@@ -3065,6 +3124,7 @@ def connect_http(
                 Dict with 'tasks' list, 'total', 'limit', 'offset'.
             """
             import urllib.parse
+
             params = [f"limit={limit}", f"offset={offset}"]
             if status:
                 params.append(f"status={urllib.parse.quote(status)}")
@@ -3086,6 +3146,7 @@ def connect_http(
                 Updated node record.
             """
             from .schema import VALID_TASK_STATUSES
+
             if status not in VALID_TASK_STATUSES:
                 raise ValueError(f"Invalid status: {status} — must be one of: {', '.join(sorted(VALID_TASK_STATUSES))}")
             # Get current node to preserve other fields
@@ -3138,6 +3199,7 @@ def connect_http(
                 Falls back to heuristic cascade if pgmpy is unavailable.
             """
             import urllib.parse
+
             params = [f"target={urllib.parse.quote(target)}"]
             if evidence:
                 evidence_str = ",".join(f"{k}:{v}" for k, v in evidence.items())
@@ -3178,6 +3240,7 @@ def connect_http(
                 observation-based inference (confounding bias), and network info.
             """
             import urllib.parse
+
             params = [f"target={urllib.parse.quote(target)}"]
             params.append(f"state={intervention_state}")
             if query_nodes:
@@ -3209,6 +3272,7 @@ def connect_http(
                 Dict with ATE, risk ratio, effect size, and interpretation.
             """
             import urllib.parse
+
             params = [f"cause={urllib.parse.quote(cause)}"]
             params.append(f"effect={urllib.parse.quote(effect)}")
             params.append(f"leak={leak_probability}")
@@ -3238,6 +3302,7 @@ def connect_http(
                 confounder perturbation analysis.
             """
             import urllib.parse
+
             params = [f"cause={urllib.parse.quote(cause)}"]
             params.append(f"effect={urllib.parse.quote(effect)}")
             params.append(f"leak={leak_probability}")
@@ -3266,6 +3331,7 @@ def connect_http(
                 instrumental variables, and adjusted estimates.
             """
             import urllib.parse
+
             params = [f"cause={urllib.parse.quote(cause)}"]
             params.append(f"effect={urllib.parse.quote(effect)}")
             params.append(f"leak={leak_probability}")
@@ -3320,6 +3386,7 @@ def connect_http(
                 Dict with refutation results for each method.
             """
             import urllib.parse
+
             params = [f"cause={urllib.parse.quote(cause)}"]
             params.append(f"effect={urllib.parse.quote(effect)}")
             params.append(f"n_samples={n_samples}")
@@ -3348,6 +3415,7 @@ def connect_http(
                 Dict with violations, summary, and contract info.
             """
             import urllib.parse
+
             params = [f"limit={limit}"]
             if node_types:
                 params.append(f"node_types={urllib.parse.quote(','.join(node_types))}")

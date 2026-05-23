@@ -34,11 +34,17 @@ class TestTopoCLIParsing:
 
     def test_topo_failure_analysis_with_edge_types(self):
         parser = build_parser()
-        args = parser.parse_args([
-            "topo", "failure-analysis", "pump_A",
-            "--edge-type", "FEEDS",
-            "--edge-type", "DEPENDS_ON",
-        ])
+        args = parser.parse_args(
+            [
+                "topo",
+                "failure-analysis",
+                "pump_A",
+                "--edge-type",
+                "FEEDS",
+                "--edge-type",
+                "DEPENDS_ON",
+            ]
+        )
         assert args.edge_types == ["FEEDS", "DEPENDS_ON"]
 
     def test_topo_compliance_map(self):
@@ -50,11 +56,17 @@ class TestTopoCLIParsing:
 
     def test_topo_compliance_map_with_options(self):
         parser = build_parser()
-        args = parser.parse_args([
-            "topo", "compliance-map", "reactor_1",
-            "--depth", "5",
-            "--direction", "incoming",
-        ])
+        args = parser.parse_args(
+            [
+                "topo",
+                "compliance-map",
+                "reactor_1",
+                "--depth",
+                "5",
+                "--direction",
+                "incoming",
+            ]
+        )
         assert args.depth == 5
         assert args.direction == "incoming"
 
@@ -118,26 +130,56 @@ class TestTopoCLIIntegration:
         db_path = os.path.join(tempfile.gettempdir(), "ohm_test_topo_fa.db")
         try:
             # Create a chain: pump_A FEEDS vessel_B FLOWS_TO reactor_C
-            c1, o1, _ = _run_cli([
-                "--db", db_path, "--actor", "topo-test",
-                "graph", "write",
-                "--from", "pump_A", "--to", "vessel_B",
-                "--type", "FEEDS", "--layer", "L2",
-            ])
+            c1, o1, _ = _run_cli(
+                [
+                    "--db",
+                    db_path,
+                    "--actor",
+                    "topo-test",
+                    "graph",
+                    "write",
+                    "--from",
+                    "pump_A",
+                    "--to",
+                    "vessel_B",
+                    "--type",
+                    "FEEDS",
+                    "--layer",
+                    "L2",
+                ]
+            )
             assert c1 == 0, f"write1 failed: {o1}"
 
-            c2, o2, _ = _run_cli([
-                "--db", db_path, "--actor", "topo-test",
-                "graph", "write",
-                "--from", "vessel_B", "--to", "reactor_C",
-                "--type", "FLOWS_TO", "--layer", "L2",
-            ])
+            c2, o2, _ = _run_cli(
+                [
+                    "--db",
+                    db_path,
+                    "--actor",
+                    "topo-test",
+                    "graph",
+                    "write",
+                    "--from",
+                    "vessel_B",
+                    "--to",
+                    "reactor_C",
+                    "--type",
+                    "FLOWS_TO",
+                    "--layer",
+                    "L2",
+                ]
+            )
             assert c2 == 0, f"write2 failed: {o2}"
 
             # Failure analysis should find downstream impacts
-            c3, o3, _ = _run_cli([
-                "--db", db_path, "topo", "failure-analysis", "pump_A",
-            ])
+            c3, o3, _ = _run_cli(
+                [
+                    "--db",
+                    db_path,
+                    "topo",
+                    "failure-analysis",
+                    "pump_A",
+                ]
+            )
             assert c3 == 0, f"failure-analysis failed: {o3}"
             assert "FEEDS" in o3 or "FLOWS_TO" in o3
         finally:
@@ -148,18 +190,37 @@ class TestTopoCLIIntegration:
         db_path = os.path.join(tempfile.gettempdir(), "ohm_test_topo_fa_json.db")
         try:
             # Create an edge
-            c1, o1, _ = _run_cli([
-                "--db", db_path, "--actor", "topo-test",
-                "graph", "write",
-                "--from", "pump_A", "--to", "vessel_B",
-                "--type", "FEEDS", "--layer", "L2",
-            ])
+            c1, o1, _ = _run_cli(
+                [
+                    "--db",
+                    db_path,
+                    "--actor",
+                    "topo-test",
+                    "graph",
+                    "write",
+                    "--from",
+                    "pump_A",
+                    "--to",
+                    "vessel_B",
+                    "--type",
+                    "FEEDS",
+                    "--layer",
+                    "L2",
+                ]
+            )
             assert c1 == 0
 
-            c2, o2, _ = _run_cli([
-                "--db", db_path, "--format", "json",
-                "topo", "failure-analysis", "pump_A",
-            ])
+            c2, o2, _ = _run_cli(
+                [
+                    "--db",
+                    db_path,
+                    "--format",
+                    "json",
+                    "topo",
+                    "failure-analysis",
+                    "pump_A",
+                ]
+            )
             assert c2 == 0
             data = json.loads(o2)
             assert data["node_id"] == "pump_A"
@@ -173,28 +234,60 @@ class TestTopoCLIIntegration:
         db_path = os.path.join(tempfile.gettempdir(), "ohm_test_topo_fa_filter.db")
         try:
             # Create two edges: one FEEDS, one CAUSES
-            c1, _, _ = _run_cli([
-                "--db", db_path, "--actor", "topo-test",
-                "graph", "write",
-                "--from", "pump_A", "--to", "vessel_B",
-                "--type", "FEEDS", "--layer", "L2",
-            ])
+            c1, _, _ = _run_cli(
+                [
+                    "--db",
+                    db_path,
+                    "--actor",
+                    "topo-test",
+                    "graph",
+                    "write",
+                    "--from",
+                    "pump_A",
+                    "--to",
+                    "vessel_B",
+                    "--type",
+                    "FEEDS",
+                    "--layer",
+                    "L2",
+                ]
+            )
             assert c1 == 0
 
-            c2, _, _ = _run_cli([
-                "--db", db_path, "--actor", "topo-test",
-                "graph", "write",
-                "--from", "pump_A", "--to", "sensor_X",
-                "--type", "CAUSES", "--layer", "L3",
-            ])
+            c2, _, _ = _run_cli(
+                [
+                    "--db",
+                    db_path,
+                    "--actor",
+                    "topo-test",
+                    "graph",
+                    "write",
+                    "--from",
+                    "pump_A",
+                    "--to",
+                    "sensor_X",
+                    "--type",
+                    "CAUSES",
+                    "--layer",
+                    "L3",
+                ]
+            )
             assert c2 == 0
 
             # Filter to only FEEDS
-            c3, o3, _ = _run_cli([
-                "--db", db_path, "--format", "json",
-                "topo", "failure-analysis", "pump_A",
-                "--edge-type", "FEEDS",
-            ])
+            c3, o3, _ = _run_cli(
+                [
+                    "--db",
+                    db_path,
+                    "--format",
+                    "json",
+                    "topo",
+                    "failure-analysis",
+                    "pump_A",
+                    "--edge-type",
+                    "FEEDS",
+                ]
+            )
             assert c3 == 0
             data = json.loads(o3)
             assert data["filtered_impacts"] >= 1
@@ -214,25 +307,55 @@ class TestTopoCLIIntegration:
         db_path = os.path.join(tempfile.gettempdir(), "ohm_test_topo_cm.db")
         try:
             # Create compliance-relevant edges
-            c1, o1, _ = _run_cli([
-                "--db", db_path, "--actor", "topo-test",
-                "graph", "write",
-                "--from", "area_1", "--to", "system_A",
-                "--type", "CONTAINS", "--layer", "L1",
-            ])
+            c1, o1, _ = _run_cli(
+                [
+                    "--db",
+                    db_path,
+                    "--actor",
+                    "topo-test",
+                    "graph",
+                    "write",
+                    "--from",
+                    "area_1",
+                    "--to",
+                    "system_A",
+                    "--type",
+                    "CONTAINS",
+                    "--layer",
+                    "L1",
+                ]
+            )
             assert c1 == 0, f"write1 failed: {o1}"
 
-            c2, o2, _ = _run_cli([
-                "--db", db_path, "--actor", "topo-test",
-                "graph", "write",
-                "--from", "system_A", "--to", "pump_B",
-                "--type", "DEPENDS_ON", "--layer", "L4",
-            ])
+            c2, o2, _ = _run_cli(
+                [
+                    "--db",
+                    db_path,
+                    "--actor",
+                    "topo-test",
+                    "graph",
+                    "write",
+                    "--from",
+                    "system_A",
+                    "--to",
+                    "pump_B",
+                    "--type",
+                    "DEPENDS_ON",
+                    "--layer",
+                    "L4",
+                ]
+            )
             assert c2 == 0, f"write2 failed: {o2}"
 
-            c3, o3, _ = _run_cli([
-                "--db", db_path, "topo", "compliance-map", "system_A",
-            ])
+            c3, o3, _ = _run_cli(
+                [
+                    "--db",
+                    db_path,
+                    "topo",
+                    "compliance-map",
+                    "system_A",
+                ]
+            )
             assert c3 == 0, f"compliance-map failed: {o3}"
             assert "compliance-relevant" in o3.lower() or "CONTAINS" in o3 or "DEPENDS_ON" in o3
         finally:
@@ -242,18 +365,37 @@ class TestTopoCLIIntegration:
     def test_topo_compliance_map_json(self):
         db_path = os.path.join(tempfile.gettempdir(), "ohm_test_topo_cm_json.db")
         try:
-            c1, _, _ = _run_cli([
-                "--db", db_path, "--actor", "topo-test",
-                "graph", "write",
-                "--from", "area_1", "--to", "system_A",
-                "--type", "CONTAINS", "--layer", "L1",
-            ])
+            c1, _, _ = _run_cli(
+                [
+                    "--db",
+                    db_path,
+                    "--actor",
+                    "topo-test",
+                    "graph",
+                    "write",
+                    "--from",
+                    "area_1",
+                    "--to",
+                    "system_A",
+                    "--type",
+                    "CONTAINS",
+                    "--layer",
+                    "L1",
+                ]
+            )
             assert c1 == 0
 
-            c2, o2, _ = _run_cli([
-                "--db", db_path, "--format", "json",
-                "topo", "compliance-map", "system_A",
-            ])
+            c2, o2, _ = _run_cli(
+                [
+                    "--db",
+                    db_path,
+                    "--format",
+                    "json",
+                    "topo",
+                    "compliance-map",
+                    "system_A",
+                ]
+            )
             assert c2 == 0
             data = json.loads(o2)
             assert data["node_id"] == "system_A"
@@ -273,25 +415,55 @@ class TestTopoCLIIntegration:
         db_path = os.path.join(tempfile.gettempdir(), "ohm_test_topo_is.db")
         try:
             # Create a chain of edges
-            c1, o1, _ = _run_cli([
-                "--db", db_path, "--actor", "topo-test",
-                "graph", "write",
-                "--from", "pump_A", "--to", "vessel_B",
-                "--type", "FEEDS", "--layer", "L2",
-            ])
+            c1, o1, _ = _run_cli(
+                [
+                    "--db",
+                    db_path,
+                    "--actor",
+                    "topo-test",
+                    "graph",
+                    "write",
+                    "--from",
+                    "pump_A",
+                    "--to",
+                    "vessel_B",
+                    "--type",
+                    "FEEDS",
+                    "--layer",
+                    "L2",
+                ]
+            )
             assert c1 == 0, f"write1 failed: {o1}"
 
-            c2, o2, _ = _run_cli([
-                "--db", db_path, "--actor", "topo-test",
-                "graph", "write",
-                "--from", "vessel_B", "--to", "reactor_C",
-                "--type", "FLOWS_TO", "--layer", "L2",
-            ])
+            c2, o2, _ = _run_cli(
+                [
+                    "--db",
+                    db_path,
+                    "--actor",
+                    "topo-test",
+                    "graph",
+                    "write",
+                    "--from",
+                    "vessel_B",
+                    "--to",
+                    "reactor_C",
+                    "--type",
+                    "FLOWS_TO",
+                    "--layer",
+                    "L2",
+                ]
+            )
             assert c2 == 0, f"write2 failed: {o2}"
 
-            c3, o3, _ = _run_cli([
-                "--db", db_path, "topo", "impact-study", "pump_A",
-            ])
+            c3, o3, _ = _run_cli(
+                [
+                    "--db",
+                    db_path,
+                    "topo",
+                    "impact-study",
+                    "pump_A",
+                ]
+            )
             assert c3 == 0, f"impact-study failed: {o3}"
             assert "Impact Study" in o3
             assert "Downstream Impact" in o3
@@ -303,18 +475,37 @@ class TestTopoCLIIntegration:
     def test_topo_impact_study_json(self):
         db_path = os.path.join(tempfile.gettempdir(), "ohm_test_topo_is_json.db")
         try:
-            c1, _, _ = _run_cli([
-                "--db", db_path, "--actor", "topo-test",
-                "graph", "write",
-                "--from", "pump_A", "--to", "vessel_B",
-                "--type", "FEEDS", "--layer", "L2",
-            ])
+            c1, _, _ = _run_cli(
+                [
+                    "--db",
+                    db_path,
+                    "--actor",
+                    "topo-test",
+                    "graph",
+                    "write",
+                    "--from",
+                    "pump_A",
+                    "--to",
+                    "vessel_B",
+                    "--type",
+                    "FEEDS",
+                    "--layer",
+                    "L2",
+                ]
+            )
             assert c1 == 0
 
-            c2, o2, _ = _run_cli([
-                "--db", db_path, "--format", "json",
-                "topo", "impact-study", "pump_A",
-            ])
+            c2, o2, _ = _run_cli(
+                [
+                    "--db",
+                    db_path,
+                    "--format",
+                    "json",
+                    "topo",
+                    "impact-study",
+                    "pump_A",
+                ]
+            )
             assert c2 == 0
             data = json.loads(o2)
             assert data["node_id"] == "pump_A"

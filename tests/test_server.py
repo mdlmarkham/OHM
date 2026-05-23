@@ -47,7 +47,9 @@ def _start_test_server(store, tokens=None, roles=None, no_auth=False, schema_con
 
     # Use TCPServer to get a random port
     server = socketserver.TCPServer(
-        ("127.0.0.1", 0), OhmHandler, bind_and_activate=False,
+        ("127.0.0.1", 0),
+        OhmHandler,
+        bind_and_activate=False,
     )
     server.allow_reuse_address = True
     server.server_bind()
@@ -57,6 +59,7 @@ def _start_test_server(store, tokens=None, roles=None, no_auth=False, schema_con
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     from tests.conftest import wait_for_port
+
     wait_for_port("127.0.0.1", port)
     return port, server, thread
 
@@ -125,8 +128,7 @@ class TestHealthEndpoints:
         assert status == 200
         graph = data.get("graph", {})
         # All graph stat fields must be present and non-None
-        for key in ("health_score", "node_count", "edge_count", "orphan_count",
-                    "orphan_rate", "low_confidence_count"):
+        for key in ("health_score", "node_count", "edge_count", "orphan_count", "orphan_rate", "low_confidence_count"):
             assert key in graph, f"Missing graph stat: {key}"
             assert graph[key] is not None, f"Graph stat null: {key}"
 
@@ -179,9 +181,16 @@ class TestNodeEndpoints:
 
     def test_create_and_get_node(self, test_server):
         port, store = test_server
-        status, data = _request("POST", port, "/node", body={
-            "id": "test_node_1", "label": "Test Node", "type": "concept",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "test_node_1",
+                "label": "Test Node",
+                "type": "concept",
+            },
+        )
         assert status == 201
         assert data["id"] == "test_node_1"
 
@@ -202,15 +211,37 @@ class TestEdgeEndpoints:
 
     def test_create_edge(self, test_server):
         port, store = test_server
-        _request("POST", port, "/node", body={
-            "id": "a", "label": "A", "type": "concept",
-        })
-        _request("POST", port, "/node", body={
-            "id": "b", "label": "B", "type": "concept",
-        })
-        status, data = _request("POST", port, "/edge", body={
-            "from": "a", "to": "b", "type": "CAUSES", "layer": "L3",
-        })
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "a",
+                "label": "A",
+                "type": "concept",
+            },
+        )
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "b",
+                "label": "B",
+                "type": "concept",
+            },
+        )
+        status, data = _request(
+            "POST",
+            port,
+            "/edge",
+            body={
+                "from": "a",
+                "to": "b",
+                "type": "CAUSES",
+                "layer": "L3",
+            },
+        )
         assert status == 201
         assert data["from_node"] == "a"
 
@@ -311,9 +342,14 @@ class TestAgentEndpoints:
 
     def test_update_state(self, test_server):
         port, store = test_server
-        status, data = _request("POST", port, "/state", body={
-            "focus": "testing OHM endpoints",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/state",
+            body={
+                "focus": "testing OHM endpoints",
+            },
+        )
         assert status == 200
         assert data["current_focus"] == "testing OHM endpoints"
 
@@ -329,9 +365,15 @@ class TestChallengeEndpoints:
         resp = _request("POST", port, "/edge", body={"from": "ch_a", "to": "ch_b", "type": "CAUSES", "layer": "L3"})
         edge_id = resp[1]["id"]
 
-        status, data = _request("POST", port, f"/challenge/{edge_id}", body={
-            "reason": "weak evidence", "confidence": 0.3,
-        })
+        status, data = _request(
+            "POST",
+            port,
+            f"/challenge/{edge_id}",
+            body={
+                "reason": "weak evidence",
+                "confidence": 0.3,
+            },
+        )
         assert status == 201
 
     def test_support_edge(self, test_server):
@@ -341,9 +383,15 @@ class TestChallengeEndpoints:
         resp = _request("POST", port, "/edge", body={"from": "su_a", "to": "su_b", "type": "CAUSES", "layer": "L3"})
         edge_id = resp[1]["id"]
 
-        status, data = _request("POST", port, f"/support/{edge_id}", body={
-            "reason": "additional evidence", "confidence": 0.8,
-        })
+        status, data = _request(
+            "POST",
+            port,
+            f"/support/{edge_id}",
+            body={
+                "reason": "additional evidence",
+                "confidence": 0.8,
+            },
+        )
         assert status == 201
 
 
@@ -354,9 +402,16 @@ class TestObservationEndpoints:
     def test_create_observation(self, test_server):
         port, store = test_server
         _request("POST", port, "/node", body={"id": "obs_node", "label": "O", "type": "concept"})
-        status, data = _request("POST", port, "/observe/obs_node", body={
-            "type": "measurement", "value": 1.5, "sigma": 0.3,
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/observe/obs_node",
+            body={
+                "type": "measurement",
+                "value": 1.5,
+                "sigma": 0.3,
+            },
+        )
         assert status == 201
 
 
@@ -366,31 +421,62 @@ class TestAuthEndpoints:
 
     def test_post_without_token_rejected(self, auth_server):
         port, _ = auth_server
-        status, data = _request("POST", port, "/node", body={
-            "id": "unauth", "label": "Unauth", "type": "concept",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "unauth",
+                "label": "Unauth",
+                "type": "concept",
+            },
+        )
         assert status == 401
         assert data["error"] == "authentication_error"
 
     def test_post_with_valid_token_accepted(self, auth_server):
         port, _ = auth_server
-        status, data = _request("POST", port, "/node", body={
-            "id": "auth_ok", "label": "AuthOK", "type": "concept",
-        }, headers={"Authorization": "Bearer test-token-abc"})
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "auth_ok",
+                "label": "AuthOK",
+                "type": "concept",
+            },
+            headers={"Authorization": "Bearer test-token-abc"},
+        )
         assert status == 201
 
     def test_post_with_invalid_token_rejected(self, auth_server):
         port, _ = auth_server
-        status, data = _request("POST", port, "/node", body={
-            "id": "bad", "label": "Bad", "type": "concept",
-        }, headers={"Authorization": "Bearer wrong-token"})
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "bad",
+                "label": "Bad",
+                "type": "concept",
+            },
+            headers={"Authorization": "Bearer wrong-token"},
+        )
         assert status == 401
 
     def test_readonly_cannot_write(self, auth_server):
         port, _ = auth_server
-        status, data = _request("POST", port, "/node", body={
-            "id": "ro_test", "label": "RO", "type": "concept",
-        }, headers={"Authorization": "Bearer readonly-token"})
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "ro_test",
+                "label": "RO",
+                "type": "concept",
+            },
+            headers={"Authorization": "Bearer readonly-token"},
+        )
         assert status == 403
         assert data["error"] == "permission_denied"
 
@@ -407,9 +493,17 @@ class TestAgentAttribution:
     def test_node_created_by_authenticated_agent(self, auth_server):
         """POST /node should set created_by to the authenticated agent, not 'ohmd'."""
         port, store = auth_server
-        status, data = _request("POST", port, "/node", body={
-            "id": "attr_node", "label": "Attributed", "type": "concept",
-        }, headers={"Authorization": "Bearer test-token-abc"})
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "attr_node",
+                "label": "Attributed",
+                "type": "concept",
+            },
+            headers={"Authorization": "Bearer test-token-abc"},
+        )
         assert status == 201
         # Verify created_by is 'metis' (the agent mapped to test-token-abc), not 'test_agent'
         node = store.get_node("attr_node")
@@ -419,45 +513,87 @@ class TestAgentAttribution:
         """POST /edge should set created_by to the authenticated agent."""
         port, store = auth_server
         # Create nodes first
-        _request("POST", port, "/node", body={
-            "id": "attr_from", "label": "From", "type": "concept",
-        }, headers={"Authorization": "Bearer test-token-abc"})
-        _request("POST", port, "/node", body={
-            "id": "attr_to", "label": "To", "type": "concept",
-        }, headers={"Authorization": "Bearer test-token-abc"})
-        status, data = _request("POST", port, "/edge", body={
-            "from": "attr_from", "to": "attr_to", "type": "CAUSES", "layer": "L3",
-        }, headers={"Authorization": "Bearer test-token-abc"})
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "attr_from",
+                "label": "From",
+                "type": "concept",
+            },
+            headers={"Authorization": "Bearer test-token-abc"},
+        )
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "attr_to",
+                "label": "To",
+                "type": "concept",
+            },
+            headers={"Authorization": "Bearer test-token-abc"},
+        )
+        status, data = _request(
+            "POST",
+            port,
+            "/edge",
+            body={
+                "from": "attr_from",
+                "to": "attr_to",
+                "type": "CAUSES",
+                "layer": "L3",
+            },
+            headers={"Authorization": "Bearer test-token-abc"},
+        )
         assert status == 201
         # Verify edge is attributed to 'metis'
-        edges = store.execute(
-            "SELECT * FROM ohm_edges WHERE from_node = 'attr_from' AND to_node = 'attr_to'"
-        )
+        edges = store.execute("SELECT * FROM ohm_edges WHERE from_node = 'attr_from' AND to_node = 'attr_to'")
         assert len(edges) == 1
         assert edges[0]["created_by"] == "metis"
 
     def test_observation_created_by_authenticated_agent(self, auth_server):
         """POST /observe should set created_by to the authenticated agent."""
         port, store = auth_server
-        _request("POST", port, "/node", body={
-            "id": "obs_attr_node", "label": "ObsNode", "type": "concept",
-        }, headers={"Authorization": "Bearer test-token-abc"})
-        status, data = _request("POST", port, "/observe/obs_attr_node", body={
-            "type": "measurement", "value": 0.85,
-        }, headers={"Authorization": "Bearer test-token-abc"})
-        assert status == 201
-        obs = store.execute(
-            "SELECT * FROM ohm_observations WHERE node_id = 'obs_attr_node' ORDER BY created_at DESC LIMIT 1"
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "obs_attr_node",
+                "label": "ObsNode",
+                "type": "concept",
+            },
+            headers={"Authorization": "Bearer test-token-abc"},
         )
+        status, data = _request(
+            "POST",
+            port,
+            "/observe/obs_attr_node",
+            body={
+                "type": "measurement",
+                "value": 0.85,
+            },
+            headers={"Authorization": "Bearer test-token-abc"},
+        )
+        assert status == 201
+        obs = store.execute("SELECT * FROM ohm_observations WHERE node_id = 'obs_attr_node' ORDER BY created_at DESC LIMIT 1")
         assert len(obs) == 1
         assert obs[0]["created_by"] == "metis"
 
     def test_state_updated_by_authenticated_agent(self, auth_server):
         """POST /state should update the authenticated agent's state, not 'ohmd'."""
         port, store = auth_server
-        status, data = _request("POST", port, "/state", body={
-            "focus": "testing attribution",
-        }, headers={"Authorization": "Bearer test-token-abc"})
+        status, data = _request(
+            "POST",
+            port,
+            "/state",
+            body={
+                "focus": "testing attribution",
+            },
+            headers={"Authorization": "Bearer test-token-abc"},
+        )
         assert status == 200
         # Verify state is for 'metis', not 'test_agent'
         state = store.get_agent_state("metis")
@@ -468,25 +604,55 @@ class TestAgentAttribution:
         """POST /challenge should create a CHALLENGED_BY edge attributed to the challenger."""
         port, store = auth_server
         # Create nodes and edge as metis
-        _request("POST", port, "/node", body={
-            "id": "ch_from", "label": "From", "type": "concept",
-        }, headers={"Authorization": "Bearer test-token-abc"})
-        _request("POST", port, "/node", body={
-            "id": "ch_to", "label": "To", "type": "concept",
-        }, headers={"Authorization": "Bearer test-token-abc"})
-        _, edge_data = _request("POST", port, "/edge", body={
-            "from": "ch_from", "to": "ch_to", "type": "CAUSES", "layer": "L3",
-        }, headers={"Authorization": "Bearer test-token-abc"})
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "ch_from",
+                "label": "From",
+                "type": "concept",
+            },
+            headers={"Authorization": "Bearer test-token-abc"},
+        )
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "ch_to",
+                "label": "To",
+                "type": "concept",
+            },
+            headers={"Authorization": "Bearer test-token-abc"},
+        )
+        _, edge_data = _request(
+            "POST",
+            port,
+            "/edge",
+            body={
+                "from": "ch_from",
+                "to": "ch_to",
+                "type": "CAUSES",
+                "layer": "L3",
+            },
+            headers={"Authorization": "Bearer test-token-abc"},
+        )
         edge_id = edge_data["id"]
         # Challenge as metis
-        status, data = _request("POST", port, f"/challenge/{edge_id}", body={
-            "reason": "doubtful", "confidence": 0.3,
-        }, headers={"Authorization": "Bearer test-token-abc"})
+        status, data = _request(
+            "POST",
+            port,
+            f"/challenge/{edge_id}",
+            body={
+                "reason": "doubtful",
+                "confidence": 0.3,
+            },
+            headers={"Authorization": "Bearer test-token-abc"},
+        )
         assert status == 201
         # Verify challenge edge is attributed to 'metis'
-        challenge_edges = store.execute(
-            "SELECT * FROM ohm_edges WHERE challenge_of = ?", [edge_id]
-        )
+        challenge_edges = store.execute("SELECT * FROM ohm_edges WHERE challenge_of = ?", [edge_id])
         assert len(challenge_edges) == 1
         assert challenge_edges[0]["created_by"] == "metis"
 
@@ -499,16 +665,30 @@ class TestNodeIdempotency:
         """POST /node with an existing ID should return 200 with updated data, not 409."""
         port, _ = test_server
         # Create a node
-        status, data = _request("POST", port, "/node", body={
-            "id": "idem_node", "label": "Original", "type": "concept",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "idem_node",
+                "label": "Original",
+                "type": "concept",
+            },
+        )
         assert status == 201
         assert data["created"] is True
 
         # Re-post same ID with updated data
-        status, data = _request("POST", port, "/node", body={
-            "id": "idem_node", "label": "Updated", "type": "concept",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "idem_node",
+                "label": "Updated",
+                "type": "concept",
+            },
+        )
         assert status == 200
         assert data["created"] is False
         assert data["label"] == "Updated"
@@ -517,16 +697,32 @@ class TestNodeIdempotency:
         """POST /node idempotency should work with authenticated agents."""
         port, _ = auth_server
         # Create a node as metis
-        status, data = _request("POST", port, "/node", body={
-            "id": "idem_auth", "label": "First", "type": "concept",
-        }, headers={"Authorization": "Bearer test-token-abc"})
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "idem_auth",
+                "label": "First",
+                "type": "concept",
+            },
+            headers={"Authorization": "Bearer test-token-abc"},
+        )
         assert status == 201
         assert data["created"] is True
 
         # Re-post same ID as metis — should update, not conflict
-        status, data = _request("POST", port, "/node", body={
-            "id": "idem_auth", "label": "Second", "type": "concept",
-        }, headers={"Authorization": "Bearer test-token-abc"})
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "idem_auth",
+                "label": "Second",
+                "type": "concept",
+            },
+            headers={"Authorization": "Bearer test-token-abc"},
+        )
         assert status == 200
         assert data["created"] is False
         assert data["label"] == "Second"
@@ -539,10 +735,15 @@ class TestFindOrCreateStatus:
     def test_find_or_create_returns_201_for_new_node(self, test_server):
         """POST /node/find_or_create returns 201 when creating a new node."""
         port, _ = test_server
-        status, data = _request("POST", port, "/node/find_or_create", body={
-            "label": "Find or Create Test",
-            "type": "concept",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/node/find_or_create",
+            body={
+                "label": "Find or Create Test",
+                "type": "concept",
+            },
+        )
         assert status == 201
         assert data["label"] == "Find or Create Test"
 
@@ -550,19 +751,29 @@ class TestFindOrCreateStatus:
         """POST /node/find_or_create returns 200 when finding an existing node."""
         port, _ = test_server
         # First call creates the node
-        status, data = _request("POST", port, "/node/find_or_create", body={
-            "label": "Existing Find Or Create",
-            "type": "concept",
-            "content": "Original content",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/node/find_or_create",
+            body={
+                "label": "Existing Find Or Create",
+                "type": "concept",
+                "content": "Original content",
+            },
+        )
         assert status == 201
 
         # Second call should find existing and return 200
-        status, data = _request("POST", port, "/node/find_or_create", body={
-            "label": "Existing Find Or Create",
-            "type": "concept",
-            "content": "Should not overwrite",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/node/find_or_create",
+            body={
+                "label": "Existing Find Or Create",
+                "type": "concept",
+                "content": "Should not overwrite",
+            },
+        )
         assert status == 200
         assert data["content"] == "Original content"  # Original preserved
 
@@ -602,6 +813,7 @@ class TestSecurity:
     def test_rate_limit_blocks_excessive_requests(self, test_server):
         """Sending many requests rapidly should trigger rate limiting."""
         import ohm.server as srv
+
         # Temporarily lower the limit for testing
         original_max = srv.RATE_LIMIT_MAX_REQUESTS
         srv.RATE_LIMIT_MAX_REQUESTS = 5
@@ -623,6 +835,7 @@ class TestSecurity:
     def test_body_size_limit_rejects_oversized(self, test_server):
         """Request body exceeding MAX_BODY_SIZE should be rejected."""
         import ohm.server as srv
+
         original_max = srv.MAX_BODY_SIZE
         srv.MAX_BODY_SIZE = 100  # 100 bytes for testing
         try:
@@ -642,9 +855,16 @@ class TestSecurity:
         port, server, thread = _start_test_server(store, tokens=tokens)
         try:
             # POST without token → 401
-            status, data = _request("POST", port, "/node", body={
-                "id": "unauth", "label": "Unauth", "type": "concept",
-            })
+            status, data = _request(
+                "POST",
+                port,
+                "/node",
+                body={
+                    "id": "unauth",
+                    "label": "Unauth",
+                    "type": "concept",
+                },
+            )
             assert status == 401
             assert data["error"] == "authentication_error"
         finally:
@@ -690,8 +910,7 @@ class TestSecurity:
         port, server, thread = _start_test_server(store, tokens=tokens)
         try:
             # GET /status with valid token → 200
-            status, data = _request("GET", port, "/status",
-                                     headers={"Authorization": "Bearer valid-token"})
+            status, data = _request("GET", port, "/status", headers={"Authorization": "Bearer valid-token"})
             assert status == 200
         finally:
             server.shutdown()
@@ -705,9 +924,16 @@ class TestSecurity:
         port, server, thread = _start_test_server(store, no_auth=True)
         try:
             # POST without token → allowed
-            status, data = _request("POST", port, "/node", body={
-                "id": "free", "label": "Free", "type": "concept",
-            })
+            status, data = _request(
+                "POST",
+                port,
+                "/node",
+                body={
+                    "id": "free",
+                    "label": "Free",
+                    "type": "concept",
+                },
+            )
             assert status == 201
         finally:
             server.shutdown()
@@ -756,9 +982,16 @@ class TestBodyValidation:
     def test_node_invalid_type(self, test_server):
         """POST /node with invalid node type should return 400."""
         port, _ = test_server
-        status, data = _request("POST", port, "/node", body={
-            "id": "bad_type", "label": "Bad", "type": "not_a_real_type",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "bad_type",
+                "label": "Bad",
+                "type": "not_a_real_type",
+            },
+        )
         assert status == 400
         assert data["error"] == "validation_error"
         assert "Invalid node type" in data["message"]
@@ -766,9 +999,16 @@ class TestBodyValidation:
     def test_node_invalid_visibility(self, test_server):
         """POST /node with invalid visibility should return 400."""
         port, _ = test_server
-        status, data = _request("POST", port, "/node", body={
-            "id": "bad_vis", "label": "Bad", "visibility": "secret",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "bad_vis",
+                "label": "Bad",
+                "visibility": "secret",
+            },
+        )
         assert status == 400
         assert data["error"] == "validation_error"
         assert "Invalid visibility" in data["message"]
@@ -776,9 +1016,16 @@ class TestBodyValidation:
     def test_edge_invalid_type(self, test_server):
         """POST /edge with invalid edge type should return 400."""
         port, _ = test_server
-        status, data = _request("POST", port, "/edge", body={
-            "from": "a", "to": "b", "type": "NOT_AN_EDGE_TYPE",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/edge",
+            body={
+                "from": "a",
+                "to": "b",
+                "type": "NOT_AN_EDGE_TYPE",
+            },
+        )
         assert status == 400
         assert data["error"] == "validation_error"
         assert "Invalid edge type" in data["message"]
@@ -786,9 +1033,17 @@ class TestBodyValidation:
     def test_edge_invalid_layer(self, test_server):
         """POST /edge with invalid layer should return 400."""
         port, _ = test_server
-        status, data = _request("POST", port, "/edge", body={
-            "from": "a", "to": "b", "type": "CAUSES", "layer": "L9",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/edge",
+            body={
+                "from": "a",
+                "to": "b",
+                "type": "CAUSES",
+                "layer": "L9",
+            },
+        )
         assert status == 400
         assert data["error"] == "validation_error"
         assert "Invalid layer" in data["message"]
@@ -796,9 +1051,16 @@ class TestBodyValidation:
     def test_node_confidence_out_of_range(self, test_server):
         """POST /node with confidence > 1.0 should return 400."""
         port, _ = test_server
-        status, data = _request("POST", port, "/node", body={
-            "id": "conf_bad", "label": "Conf", "confidence": 2.5,
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "conf_bad",
+                "label": "Conf",
+                "confidence": 2.5,
+            },
+        )
         assert status == 400
         assert data["error"] == "validation_error"
         assert "Invalid confidence" in data["message"]
@@ -806,9 +1068,17 @@ class TestBodyValidation:
     def test_edge_confidence_out_of_range(self, test_server):
         """POST /edge with negative confidence should return 400."""
         port, _ = test_server
-        status, data = _request("POST", port, "/edge", body={
-            "from": "a", "to": "b", "type": "CAUSES", "confidence": -0.5,
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/edge",
+            body={
+                "from": "a",
+                "to": "b",
+                "type": "CAUSES",
+                "confidence": -0.5,
+            },
+        )
         assert status == 400
         assert data["error"] == "validation_error"
         assert "Invalid confidence" in data["message"]
@@ -816,18 +1086,31 @@ class TestBodyValidation:
     def test_node_wrong_field_type(self, test_server):
         """POST /node with wrong field type should return 400."""
         port, _ = test_server
-        status, data = _request("POST", port, "/node", body={
-            "id": 123, "label": "WrongType",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": 123,
+                "label": "WrongType",
+            },
+        )
         assert status == 400
         assert data["error"] == "validation_error"
 
     def test_edge_wrong_field_type(self, test_server):
         """POST /edge with wrong field type should return 400."""
         port, _ = test_server
-        status, data = _request("POST", port, "/edge", body={
-            "from": 42, "to": "b", "type": "CAUSES",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/edge",
+            body={
+                "from": 42,
+                "to": "b",
+                "type": "CAUSES",
+            },
+        )
         assert status == 400
         assert data["error"] == "validation_error"
 
@@ -846,9 +1129,16 @@ class TestBodyValidation:
     def test_valid_node_still_works(self, test_server):
         """Valid POST /node should still succeed after validation."""
         port, _ = test_server
-        status, data = _request("POST", port, "/node", body={
-            "id": "valid_node", "label": "Valid", "type": "concept",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "valid_node",
+                "label": "Valid",
+                "type": "concept",
+            },
+        )
         assert status == 201
         assert data["id"] == "valid_node"
 
@@ -857,9 +1147,17 @@ class TestBodyValidation:
         port, _ = test_server
         _request("POST", port, "/node", body={"id": "e1", "label": "E1", "type": "concept"})
         _request("POST", port, "/node", body={"id": "e2", "label": "E2", "type": "concept"})
-        status, data = _request("POST", port, "/edge", body={
-            "from": "e1", "to": "e2", "type": "CAUSES", "layer": "L3",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/edge",
+            body={
+                "from": "e1",
+                "to": "e2",
+                "type": "CAUSES",
+                "layer": "L3",
+            },
+        )
         assert status == 201
 
     def test_challenge_confidence_validated(self, test_server):
@@ -870,38 +1168,60 @@ class TestBodyValidation:
         resp = _request("POST", port, "/edge", body={"from": "ch1", "to": "ch2", "type": "CAUSES", "layer": "L3"})
         edge_id = resp[1]["id"]
 
-        status, data = _request("POST", port, f"/challenge/{edge_id}", body={
-            "reason": "test", "confidence": 5.0,
-        })
+        status, data = _request(
+            "POST",
+            port,
+            f"/challenge/{edge_id}",
+            body={
+                "reason": "test",
+                "confidence": 5.0,
+            },
+        )
         assert status == 400
         assert data["error"] == "validation_error"
 
     def test_node_id_validation(self, test_server):
         """POST /node with unsafe ID should return 400."""
         port, _ = test_server
-        status, data = _request("POST", port, "/node", body={
-            "id": "'; DROP TABLE ohm_nodes;--", "label": "SQLi", "type": "concept",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "'; DROP TABLE ohm_nodes;--",
+                "label": "SQLi",
+                "type": "concept",
+            },
+        )
         assert status == 400
         assert data["error"] == "validation_error"
 
     def test_edge_from_validation(self, test_server):
         """POST /edge with unsafe from_node should return 400."""
         port, _ = test_server
-        status, data = _request("POST", port, "/edge", body={
-            "from": "../etc/passwd", "to": "b", "type": "CAUSES",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/edge",
+            body={
+                "from": "../etc/passwd",
+                "to": "b",
+                "type": "CAUSES",
+            },
+        )
         assert status == 400
         assert data["error"] == "validation_error"
 
     def test_size_limit_1mb_default(self, test_server):
         """Default MAX_BODY_SIZE should be 1MB."""
         import ohm.server as srv
+
         assert srv.MAX_BODY_SIZE == 1 * 1024 * 1024
 
     def test_oversized_body_rejected(self, test_server):
         """Request body exceeding MAX_BODY_SIZE should be rejected."""
         import ohm.server as srv
+
         original_max = srv.MAX_BODY_SIZE
         srv.MAX_BODY_SIZE = 100  # 100 bytes for testing
         try:
@@ -922,6 +1242,7 @@ class TestTokenSecurity:
     def test_hash_token_deterministic(self):
         """Same input produces same hash."""
         from ohm.server import _hash_token
+
         h1 = _hash_token("test-token-123")
         h2 = _hash_token("test-token-123")
         assert h1 == h2
@@ -929,6 +1250,7 @@ class TestTokenSecurity:
     def test_hash_token_different_inputs(self):
         """Different inputs produce different hashes."""
         from ohm.server import _hash_token
+
         h1 = _hash_token("token-a")
         h2 = _hash_token("token-b")
         assert h1 != h2
@@ -936,6 +1258,7 @@ class TestTokenSecurity:
     def test_hash_token_is_sha256_hex(self):
         """Hash should be a 64-character hex string (SHA-256)."""
         from ohm.server import _hash_token
+
         h = _hash_token("test-token")
         assert len(h) == 64
         assert all(c in "0123456789abcdef" for c in h)
@@ -943,6 +1266,7 @@ class TestTokenSecurity:
     def test_verify_token_correct(self):
         """Correct token should verify against its hash."""
         from ohm.server import _hash_token
+
         token = "my-secret-token"
         token_hash = _hash_token(token)
         assert _verify_token(token, token_hash) is True
@@ -950,6 +1274,7 @@ class TestTokenSecurity:
     def test_verify_token_wrong(self):
         """Wrong token should not verify."""
         from ohm.server import _hash_token
+
         token = "my-secret-token"
         token_hash = _hash_token(token)
         assert _verify_token("wrong-token", token_hash) is False
@@ -957,14 +1282,17 @@ class TestTokenSecurity:
     def test_verify_token_constant_time(self):
         """secrets.compare_digest is used (not dict lookup)."""
         import ohm.server as srv
+
         # Verify the module-level _verify_token uses compare_digest
         import inspect
+
         source = inspect.getsource(srv)
         assert "compare_digest" in source
 
     def test_build_token_lookup_plaintext(self):
         """Legacy plaintext tokens should be hashed on load."""
         from ohm.server import _hash_token
+
         config = {"metis": "plaintext-token-abc", "observer": "plaintext-token-xyz"}
         token_hashes, roles = _build_token_lookup(config)
         # Should have hashed the tokens
@@ -979,6 +1307,7 @@ class TestTokenSecurity:
     def test_build_token_lookup_hashed(self):
         """Hashed token format should be loaded directly."""
         from ohm.server import _hash_token
+
         token_hash = _hash_token("my-secret-token")
         config = {"metis": {"hash": token_hash, "role": "read-write"}}
         token_hashes, roles = _build_token_lookup(config)
@@ -989,6 +1318,7 @@ class TestTokenSecurity:
     def test_build_token_lookup_readonly_role(self):
         """Hashed format should support read-only role."""
         from ohm.server import _hash_token
+
         token_hash = _hash_token("readonly-token")
         config = {"observer": {"hash": token_hash, "role": "read-only"}}
         token_hashes, roles = _build_token_lookup(config)
@@ -1002,19 +1332,43 @@ class TestTokenSecurity:
         roles = {"metis": "read-write", "observer": "read-only"}
         port, server, thread = _start_test_server(store, tokens=tokens, roles=roles)
         try:
-            status, data = _request("POST", port, "/node", body={
-                "id": "auth_ok", "label": "AuthOK", "type": "concept",
-            }, headers={"Authorization": "Bearer hashed-token-abc"})
+            status, data = _request(
+                "POST",
+                port,
+                "/node",
+                body={
+                    "id": "auth_ok",
+                    "label": "AuthOK",
+                    "type": "concept",
+                },
+                headers={"Authorization": "Bearer hashed-token-abc"},
+            )
             assert status == 201, f"Expected 201, got {status}: {data}"
 
-            status, data = _request("POST", port, "/node", body={
-                "id": "bad", "label": "Bad", "type": "concept",
-            }, headers={"Authorization": "Bearer wrong-token"})
+            status, data = _request(
+                "POST",
+                port,
+                "/node",
+                body={
+                    "id": "bad",
+                    "label": "Bad",
+                    "type": "concept",
+                },
+                headers={"Authorization": "Bearer wrong-token"},
+            )
             assert status == 401
 
-            status, data = _request("POST", port, "/node", body={
-                "id": "ro_test", "label": "RO", "type": "concept",
-            }, headers={"Authorization": "Bearer hashed-token-xyz"})
+            status, data = _request(
+                "POST",
+                port,
+                "/node",
+                body={
+                    "id": "ro_test",
+                    "label": "RO",
+                    "type": "concept",
+                },
+                headers={"Authorization": "Bearer hashed-token-xyz"},
+            )
             assert status == 403
         finally:
             server.shutdown()
@@ -1034,6 +1388,7 @@ class TestTokenSecurity:
         """--init-token should store hashed token in config, not plaintext."""
         from ohm.server import _hash_token
         import secrets
+
         token = secrets.token_urlsafe(32)
         token_hash = _hash_token(token)
 
@@ -1087,17 +1442,31 @@ class TestTopoSchemaServer:
     def test_topo_node_types_accepted(self, topo_server):
         """TOPO-specific node types should be accepted by the server."""
         port, _ = topo_server
-        status, data = _request("POST", port, "/node", body={
-            "id": "pump_1", "label": "Main Pump", "type": "pump",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "pump_1",
+                "label": "Main Pump",
+                "type": "pump",
+            },
+        )
         assert status == 201
 
     def test_topo_node_type_rejected_by_default_schema(self, test_server):
         """TOPO-specific node types should be rejected by the default OHM schema."""
         port, _ = test_server
-        status, data = _request("POST", port, "/node", body={
-            "id": "pump_1", "label": "Main Pump", "type": "pump",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "pump_1",
+                "label": "Main Pump",
+                "type": "pump",
+            },
+        )
         assert status == 400
         assert "Invalid node type" in data.get("message", "")
 
@@ -1125,14 +1494,17 @@ class TestTopodEntryPoint:
     def test_topod_main_exists(self):
         """topod_main should be importable."""
         from ohm.server import topod_main
+
         assert callable(topod_main)
 
     def test_topod_main_passes_topo_schema(self):
         """topod_main should pass TOPO_SCHEMA to main()."""
         from ohm.server import topod_main
+
         # We can't actually run topod_main (it starts a server),
         # but we can verify it references TOPO_SCHEMA
         import inspect
+
         source = inspect.getsource(topod_main)
         assert "TOPO_SCHEMA" in source
 
@@ -1144,13 +1516,18 @@ class TestRegisterEndpoint:
     def test_register_creates_agent_node(self, test_server):
         """POST /register creates an agent node with identity edges."""
         port, store = test_server
-        status, data = _request("POST", port, "/register", body={
-            "name": "test-agent-reg",
-            "description": "Test agent for registration",
-            "values": ["accuracy", "transparency"],
-            "goals": ["help users"],
-            "capabilities": ["search"],
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/register",
+            body={
+                "name": "test-agent-reg",
+                "description": "Test agent for registration",
+                "values": ["accuracy", "transparency"],
+                "goals": ["help users"],
+                "capabilities": ["search"],
+            },
+        )
         assert status == 201
         assert "agent" in data
         assert data["agent"]["type"] == "agent"
@@ -1160,20 +1537,30 @@ class TestRegisterEndpoint:
     def test_register_with_interests(self, test_server):
         """POST /register creates INTERESTED_IN edges for interests."""
         port, store = test_server
-        status, data = _request("POST", port, "/register", body={
-            "name": "curious-agent",
-            "interests": ["climate", "energy"],
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/register",
+            body={
+                "name": "curious-agent",
+                "interests": ["climate", "energy"],
+            },
+        )
         assert status == 201
         assert data["edges_created"] >= 2
 
     def test_register_with_listens_to(self, test_server):
         """POST /register creates LISTENS_TO edges for listens_to."""
         port, store = test_server
-        status, data = _request("POST", port, "/register", body={
-            "name": "listener-agent",
-            "listens_to": ["metis", "clio"],
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/register",
+            body={
+                "name": "listener-agent",
+                "listens_to": ["metis", "clio"],
+            },
+        )
         assert status == 201
         assert data["edges_created"] >= 2
 
@@ -1181,18 +1568,28 @@ class TestRegisterEndpoint:
         """POST /register does not create duplicate edges on re-registration."""
         port, store = test_server
         # First registration
-        status1, data1 = _request("POST", port, "/register", body={
-            "name": "dedup-agent",
-            "values": ["accuracy"],
-        })
+        status1, data1 = _request(
+            "POST",
+            port,
+            "/register",
+            body={
+                "name": "dedup-agent",
+                "values": ["accuracy"],
+            },
+        )
         assert status1 == 201
         first_edges = data1["edges_created"]
 
         # Second registration with same values
-        status2, data2 = _request("POST", port, "/register", body={
-            "name": "dedup-agent",
-            "values": ["accuracy"],
-        })
+        status2, data2 = _request(
+            "POST",
+            port,
+            "/register",
+            body={
+                "name": "dedup-agent",
+                "values": ["accuracy"],
+            },
+        )
         assert status2 == 201
         # Should not create duplicate edges
         assert data2["edges_created"] <= first_edges
@@ -1206,12 +1603,26 @@ class TestNodesEndpoint:
         """GET /nodes returns paginated node list."""
         port, store = test_server
         # Create some nodes first
-        _request("POST", port, "/node", body={
-            "id": "test-node-1", "label": "Alpha", "type": "concept",
-        })
-        _request("POST", port, "/node", body={
-            "id": "test-node-2", "label": "Beta", "type": "source",
-        })
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "test-node-1",
+                "label": "Alpha",
+                "type": "concept",
+            },
+        )
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "test-node-2",
+                "label": "Beta",
+                "type": "source",
+            },
+        )
         status, data = _request("GET", port, "/nodes")
         assert status == 200
         assert "nodes" in data
@@ -1221,12 +1632,26 @@ class TestNodesEndpoint:
     def test_nodes_filter_by_type(self, test_server):
         """GET /nodes?type=source filters by node type."""
         port, store = test_server
-        _request("POST", port, "/node", body={
-            "id": "filter-source-1", "label": "Source A", "type": "source",
-        })
-        _request("POST", port, "/node", body={
-            "id": "filter-concept-1", "label": "Concept A", "type": "concept",
-        })
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "filter-source-1",
+                "label": "Source A",
+                "type": "source",
+            },
+        )
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "filter-concept-1",
+                "label": "Concept A",
+                "type": "concept",
+            },
+        )
         status, data = _request("GET", port, "/nodes?type=source")
         assert status == 200
         assert all(n["type"] == "source" for n in data["nodes"])
@@ -1234,9 +1659,16 @@ class TestNodesEndpoint:
     def test_nodes_filter_by_label(self, test_server):
         """GET /nodes?label=... filters by label text."""
         port, store = test_server
-        _request("POST", port, "/node", body={
-            "id": "label-test-1", "label": "UniqueLabelXYZ", "type": "concept",
-        })
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "label-test-1",
+                "label": "UniqueLabelXYZ",
+                "type": "concept",
+            },
+        )
         status, data = _request("GET", port, "/nodes?label=UniqueLabelXYZ")
         assert status == 200
         assert len(data["nodes"]) >= 1
@@ -1245,12 +1677,26 @@ class TestNodesEndpoint:
     def test_nodes_pagination(self, test_server):
         """GET /nodes supports limit and offset for pagination."""
         port, store = test_server
-        _request("POST", port, "/node", body={
-            "id": "page-node-1", "label": "PageTest1", "type": "concept",
-        })
-        _request("POST", port, "/node", body={
-            "id": "page-node-2", "label": "PageTest2", "type": "concept",
-        })
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "page-node-1",
+                "label": "PageTest1",
+                "type": "concept",
+            },
+        )
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "page-node-2",
+                "label": "PageTest2",
+                "type": "concept",
+            },
+        )
         status, data = _request("GET", port, "/nodes?limit=1&offset=0")
         assert status == 200
         assert len(data["nodes"]) <= 1
@@ -1266,9 +1712,17 @@ class TestChangeFeedAttribution:
         """POST /node should attribute change feed entry to the calling agent, not 'ohmd'."""
         port, store = auth_server
         headers = {"Authorization": "Bearer test-token-abc"}
-        status, data = _request("POST", port, "/node", body={
-            "id": "cf-attrib-node-1", "label": "Attribution Test", "type": "concept",
-        }, headers=headers)
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "cf-attrib-node-1",
+                "label": "Attribution Test",
+                "type": "concept",
+            },
+            headers=headers,
+        )
         assert status == 201
 
         # Check change feed — should show 'metis' (the agent from the token), not 'ohmd'
@@ -1284,23 +1738,46 @@ class TestChangeFeedAttribution:
         port, store = auth_server
         headers = {"Authorization": "Bearer test-token-abc"}
         # Create two nodes first
-        _request("POST", port, "/node", body={
-            "id": "cf-edge-from", "label": "From Node", "type": "concept",
-        }, headers=headers)
-        _request("POST", port, "/node", body={
-            "id": "cf-edge-to", "label": "To Node", "type": "concept",
-        }, headers=headers)
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "cf-edge-from",
+                "label": "From Node",
+                "type": "concept",
+            },
+            headers=headers,
+        )
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "cf-edge-to",
+                "label": "To Node",
+                "type": "concept",
+            },
+            headers=headers,
+        )
         # Create edge
-        status, data = _request("POST", port, "/edge", body={
-            "from": "cf-edge-from", "to": "cf-edge-to",
-            "type": "REFERENCES", "layer": "L2",
-        }, headers=headers)
+        status, data = _request(
+            "POST",
+            port,
+            "/edge",
+            body={
+                "from": "cf-edge-from",
+                "to": "cf-edge-to",
+                "type": "REFERENCES",
+                "layer": "L2",
+            },
+            headers=headers,
+        )
         assert status == 201
 
         # Check change feed for edge entries by 'metis'
         feed = store.execute(
-            "SELECT agent_name, table_name FROM ohm_change_feed "
-            "WHERE table_name = 'ohm_edges' AND agent_name = 'metis' ORDER BY occurred_at DESC LIMIT 1",
+            "SELECT agent_name, table_name FROM ohm_change_feed WHERE table_name = 'ohm_edges' AND agent_name = 'metis' ORDER BY occurred_at DESC LIMIT 1",
         )
         assert len(feed) >= 1
         assert feed[0]["agent_name"] == "metis"
@@ -1310,19 +1787,33 @@ class TestChangeFeedAttribution:
         port, store = auth_server
         headers = {"Authorization": "Bearer test-token-abc"}
         # Create a node first
-        _request("POST", port, "/node", body={
-            "id": "cf-obs-node", "label": "Obs Node", "type": "concept",
-        }, headers=headers)
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "cf-obs-node",
+                "label": "Obs Node",
+                "type": "concept",
+            },
+            headers=headers,
+        )
         # Create observation via /observe/{node_id}
-        status, data = _request("POST", port, "/observe/cf-obs-node", body={
-            "type": "measurement", "value": 42.0,
-        }, headers=headers)
+        status, data = _request(
+            "POST",
+            port,
+            "/observe/cf-obs-node",
+            body={
+                "type": "measurement",
+                "value": 42.0,
+            },
+            headers=headers,
+        )
         assert status == 201
 
         # Check change feed for observation entries by 'metis'
         feed = store.execute(
-            "SELECT agent_name, table_name FROM ohm_change_feed "
-            "WHERE table_name = 'ohm_observations' AND agent_name = 'metis' ORDER BY occurred_at DESC LIMIT 1",
+            "SELECT agent_name, table_name FROM ohm_change_feed WHERE table_name = 'ohm_observations' AND agent_name = 'metis' ORDER BY occurred_at DESC LIMIT 1",
         )
         assert len(feed) >= 1
         assert feed[0]["agent_name"] == "metis"
@@ -1331,9 +1822,17 @@ class TestChangeFeedAttribution:
         """ohm_change_log should also attribute to the calling agent, not 'ohmd'."""
         port, store = auth_server
         headers = {"Authorization": "Bearer test-token-abc"}
-        _request("POST", port, "/node", body={
-            "id": "cf-log-node", "label": "Log Test", "type": "concept",
-        }, headers=headers)
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "cf-log-node",
+                "label": "Log Test",
+                "type": "concept",
+            },
+            headers=headers,
+        )
 
         log = store.execute(
             "SELECT agent_name FROM ohm_change_log WHERE row_id = ? ORDER BY changed_at DESC LIMIT 1",
@@ -1387,16 +1886,37 @@ class TestCascadingDelete:
         """DELETE /node/{id} removes all edges referencing the node."""
         port, _ = test_server
         # Create two nodes and an edge between them
-        _request("POST", port, "/node", body={
-            "id": "del-node-a", "label": "Node A", "type": "concept",
-        })
-        _request("POST", port, "/node", body={
-            "id": "del-node-b", "label": "Node B", "type": "concept",
-        })
-        _request("POST", port, "/edge", body={
-            "from": "del-node-a", "to": "del-node-b",
-            "type": "CAUSES", "layer": "L1",
-        })
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "del-node-a",
+                "label": "Node A",
+                "type": "concept",
+            },
+        )
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "del-node-b",
+                "label": "Node B",
+                "type": "concept",
+            },
+        )
+        _request(
+            "POST",
+            port,
+            "/edge",
+            body={
+                "from": "del-node-a",
+                "to": "del-node-b",
+                "type": "CAUSES",
+                "layer": "L1",
+            },
+        )
         # Verify edge exists
         status, data = _request("GET", port, "/edge/del-edge-1")
         # Edge ID is auto-generated, so we need to find it
@@ -1414,13 +1934,25 @@ class TestCascadingDelete:
     def test_delete_node_removes_observations(self, test_server):
         """DELETE /node/{id} removes observations on the node."""
         port, _ = test_server
-        _request("POST", port, "/node", body={
-            "id": "del-obs-node", "label": "Obs Node", "type": "concept",
-        })
-        _request("POST", port, "/observe/del-obs-node", body={
-            "type": "metric",
-            "value": 42.0,
-        })
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "del-obs-node",
+                "label": "Obs Node",
+                "type": "concept",
+            },
+        )
+        _request(
+            "POST",
+            port,
+            "/observe/del-obs-node",
+            body={
+                "type": "metric",
+                "value": 42.0,
+            },
+        )
         # Delete the node
         status, data = _request("DELETE", port, "/node/del-obs-node")
         assert status == 200
@@ -1429,9 +1961,16 @@ class TestCascadingDelete:
     def test_delete_node_idempotent_404(self, test_server):
         """DELETE /node/{id} twice returns 404 on second call (idempotent)."""
         port, _ = test_server
-        _request("POST", port, "/node", body={
-            "id": "del-twice-node", "label": "Twice Node", "type": "concept",
-        })
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "del-twice-node",
+                "label": "Twice Node",
+                "type": "concept",
+            },
+        )
         # First delete succeeds
         status, data = _request("DELETE", port, "/node/del-twice-node")
         assert status == 200
@@ -1442,16 +1981,37 @@ class TestCascadingDelete:
     def test_delete_edge_idempotent_404(self, test_server):
         """DELETE /edge/{id} twice returns 404 on second call (idempotent)."""
         port, _ = test_server
-        _request("POST", port, "/node", body={
-            "id": "del-edge-node-a", "label": "A", "type": "concept",
-        })
-        _request("POST", port, "/node", body={
-            "id": "del-edge-node-b", "label": "B", "type": "concept",
-        })
-        resp = _request("POST", port, "/edge", body={
-            "from": "del-edge-node-a", "to": "del-edge-node-b",
-            "type": "CAUSES", "layer": "L1",
-        })
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "del-edge-node-a",
+                "label": "A",
+                "type": "concept",
+            },
+        )
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "del-edge-node-b",
+                "label": "B",
+                "type": "concept",
+            },
+        )
+        resp = _request(
+            "POST",
+            port,
+            "/edge",
+            body={
+                "from": "del-edge-node-a",
+                "to": "del-edge-node-b",
+                "type": "CAUSES",
+                "layer": "L1",
+            },
+        )
         edge_id = resp[1]["id"]
         # First delete succeeds
         status, data = _request("DELETE", port, f"/edge/{edge_id}")
@@ -1463,16 +2023,37 @@ class TestCascadingDelete:
     def test_delete_node_with_incoming_edges(self, test_server):
         """DELETE /node/{id} removes edges where node is the target."""
         port, _ = test_server
-        _request("POST", port, "/node", body={
-            "id": "del-target-node", "label": "Target", "type": "concept",
-        })
-        _request("POST", port, "/node", body={
-            "id": "del-source-node", "label": "Source", "type": "concept",
-        })
-        _request("POST", port, "/edge", body={
-            "from": "del-source-node", "to": "del-target-node",
-            "type": "CAUSES", "layer": "L1",
-        })
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "del-target-node",
+                "label": "Target",
+                "type": "concept",
+            },
+        )
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "del-source-node",
+                "label": "Source",
+                "type": "concept",
+            },
+        )
+        _request(
+            "POST",
+            port,
+            "/edge",
+            body={
+                "from": "del-source-node",
+                "to": "del-target-node",
+                "type": "CAUSES",
+                "layer": "L1",
+            },
+        )
         # Delete the target node — should remove the incoming edge
         status, data = _request("DELETE", port, "/node/del-target-node")
         assert status == 200
@@ -1507,15 +2088,26 @@ class TestListenWithoutSince:
         """GET /listen without 'since' but with agent_state.last_sync as datetime returns 200."""
         port, proc = test_server
         # Register an agent so it has state
-        _request("POST", port, "/register", body={
-            "name": "test-listen-agent",
-            "role": "analyst",
-        })
+        _request(
+            "POST",
+            port,
+            "/register",
+            body={
+                "name": "test-listen-agent",
+                "role": "analyst",
+            },
+        )
         # Create a node to generate a change feed entry
-        _request("POST", port, "/node", body={
-            "label": "test node for listen",
-            "type": "concept",
-        }, headers={"X-Agent": "test-listen-agent"})
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "label": "test node for listen",
+                "type": "concept",
+            },
+            headers={"X-Agent": "test-listen-agent"},
+        )
         # Calling /listen without since should use last_sync and convert it to string
         status, data = _request("GET", port, "/listen", headers={"X-Agent": "test-listen-agent"})
         assert status == 200
@@ -1529,17 +2121,23 @@ class TestEnrichedChangeFeed:
     def _make_timestamp(self):
         """Generate a recent ISO timestamp for testing."""
         from datetime import datetime, timedelta
+
         return (datetime.now() - timedelta(hours=1)).isoformat()
 
     def test_listen_without_enrich_returns_raw_entries(self, test_server):
         """GET /listen without enrich=true returns raw entries (backward compatible)."""
         port, store = test_server
         # Create a node to generate a change feed entry
-        _request("POST", port, "/node", body={
-            "id": "enrich-test-node",
-            "label": "Test Node",
-            "type": "concept",
-        })
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "enrich-test-node",
+                "label": "Test Node",
+                "type": "concept",
+            },
+        )
         # Use a timestamp from 1 hour ago
         since = self._make_timestamp()
         status, data = _request("GET", port, f"/listen?since={since}&agent=test_agent")
@@ -1553,12 +2151,17 @@ class TestEnrichedChangeFeed:
         """GET /listen?enrich=true includes node content in data field."""
         port, store = test_server
         # Create a node
-        _request("POST", port, "/node", body={
-            "id": "enrich-node-test",
-            "label": "Enriched Node",
-            "type": "pattern",
-            "content": "This is the content",
-        })
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "enrich-node-test",
+                "label": "Enriched Node",
+                "type": "pattern",
+                "content": "This is the content",
+            },
+        )
         # Use a timestamp from 1 hour ago
         since = self._make_timestamp()
         status, data = _request("GET", port, f"/listen?since={since}&agent=test_agent&enrich=true")
@@ -1576,22 +2179,37 @@ class TestEnrichedChangeFeed:
         """GET /listen?enrich=true includes edge data (from_node, to_node, edge_type)."""
         port, store = test_server
         # Create two nodes and an edge
-        _request("POST", port, "/node", body={
-            "id": "enrich-edge-from",
-            "label": "From Node",
-            "type": "concept",
-        })
-        _request("POST", port, "/node", body={
-            "id": "enrich-edge-to",
-            "label": "To Node",
-            "type": "concept",
-        })
-        _request("POST", port, "/edge", body={
-            "from": "enrich-edge-from",
-            "to": "enrich-edge-to",
-            "type": "CAUSES",
-            "layer": "L3",
-        })
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "enrich-edge-from",
+                "label": "From Node",
+                "type": "concept",
+            },
+        )
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "enrich-edge-to",
+                "label": "To Node",
+                "type": "concept",
+            },
+        )
+        _request(
+            "POST",
+            port,
+            "/edge",
+            body={
+                "from": "enrich-edge-from",
+                "to": "enrich-edge-to",
+                "type": "CAUSES",
+                "layer": "L3",
+            },
+        )
         # Use a timestamp from 1 hour ago
         since = self._make_timestamp()
         status, data = _request("GET", port, f"/listen?since={since}&agent=test_agent&enrich=true")
@@ -1614,13 +2232,18 @@ class TestNodeUrlField:
     def test_post_node_with_url(self, test_server):
         """POST /node accepts and persists url field."""
         port, store = test_server
-        status, data = _request("POST", port, "/node", body={
-            "id": "url-test-node",
-            "label": "Reuters Article",
-            "type": "source",
-            "content": "Summary of the article",
-            "url": "https://reuters.com/article/12345",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "url-test-node",
+                "label": "Reuters Article",
+                "type": "source",
+                "content": "Summary of the article",
+                "url": "https://reuters.com/article/12345",
+            },
+        )
         assert status == 201
         assert data["url"] == "https://reuters.com/article/12345"
 
@@ -1628,12 +2251,17 @@ class TestNodeUrlField:
         """GET /node/{id} returns url field."""
         port, store = test_server
         # Create node with URL
-        _request("POST", port, "/node", body={
-            "id": "url-get-test",
-            "label": "Research Paper",
-            "type": "source",
-            "url": "https://arxiv.org/pdf/1234.5678",
-        })
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "url-get-test",
+                "label": "Research Paper",
+                "type": "source",
+                "url": "https://arxiv.org/pdf/1234.5678",
+            },
+        )
         # Retrieve it
         status, data = _request("GET", port, "/node/url-get-test")
         assert status == 200
@@ -1642,11 +2270,16 @@ class TestNodeUrlField:
     def test_post_node_without_url_succeeds(self, test_server):
         """POST /node without url field still works (backward compatible)."""
         port, store = test_server
-        status, data = _request("POST", port, "/node", body={
-            "id": "no-url-node",
-            "label": "Concept Node",
-            "type": "concept",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "no-url-node",
+                "label": "Concept Node",
+                "type": "concept",
+            },
+        )
         assert status == 201
         assert data.get("url") is None
 
@@ -1659,12 +2292,17 @@ class TestDecisionNodeFields:
     def test_post_decision_node_with_utility_scale(self, test_server):
         """POST /node with utility_scale persists it to the database."""
         port, store = test_server
-        status, data = _request("POST", port, "/node", body={
-            "id": "decision-util-test",
-            "label": "Choose vendor",
-            "type": "decision",
-            "utility_scale": 0.8,
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "decision-util-test",
+                "label": "Choose vendor",
+                "type": "decision",
+                "utility_scale": 0.8,
+            },
+        )
         assert status == 201
         # Verify via GET
         status, data = _request("GET", port, "/node/decision-util-test")
@@ -1674,14 +2312,19 @@ class TestDecisionNodeFields:
     def test_post_decision_node_with_all_fields(self, test_server):
         """POST /node with all decision fields persists them."""
         port, store = test_server
-        status, data = _request("POST", port, "/node", body={
-            "id": "decision-all-fields",
-            "label": "Pick strategy",
-            "type": "decision",
-            "utility_scale": 0.6,
-            "current_best_action": "Strategy A",
-            "action_alternatives": ["Strategy B", "Strategy C"],
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "decision-all-fields",
+                "label": "Pick strategy",
+                "type": "decision",
+                "utility_scale": 0.6,
+                "current_best_action": "Strategy A",
+                "action_alternatives": ["Strategy B", "Strategy C"],
+            },
+        )
         assert status == 201
         # Verify via GET
         status, data = _request("GET", port, "/node/decision-all-fields")
@@ -1693,11 +2336,16 @@ class TestDecisionNodeFields:
     def test_post_decision_node_without_utility_scale(self, test_server):
         """POST /node for decision type without utility_scale works (backward compatible)."""
         port, store = test_server
-        status, data = _request("POST", port, "/node", body={
-            "id": "decision-no-util",
-            "label": "Decide later",
-            "type": "decision",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "decision-no-util",
+                "label": "Decide later",
+                "type": "decision",
+            },
+        )
         assert status == 201
         assert data.get("utility_scale") is None
         assert data.get("current_best_action") is None
@@ -1706,19 +2354,24 @@ class TestDecisionNodeFields:
     def test_batch_post_decision_node_with_utility_scale(self, test_server):
         """POST /batch with decision node passes utility_scale through."""
         port, store = test_server
-        status, data = _request("POST", port, "/batch", body={
-            "nodes": [
-                {
-                    "id": "batch-decision-1",
-                    "label": "Batch Decision",
-                    "type": "decision",
-                    "utility_scale": 0.75,
-                    "current_best_action": "Option A",
-                    "action_alternatives": ["Option B"],
-                },
-            ],
-            "edges": [],
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/batch",
+            body={
+                "nodes": [
+                    {
+                        "id": "batch-decision-1",
+                        "label": "Batch Decision",
+                        "type": "decision",
+                        "utility_scale": 0.75,
+                        "current_best_action": "Option A",
+                        "action_alternatives": ["Option B"],
+                    },
+                ],
+                "edges": [],
+            },
+        )
         assert status == 201
         assert data["nodes_created"] == 1
         # Verify via GET
@@ -1737,25 +2390,53 @@ class TestObservationNotes:
         """POST /observe/{id} with notes field persists and returns notes."""
         port, store = test_server
         # Create a node first
-        _request("POST", port, "/node", body={
-            "id": "obs-notes-node", "label": "Notes Test", "type": "concept",
-        })
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "obs-notes-node",
+                "label": "Notes Test",
+                "type": "concept",
+            },
+        )
         # Create observation with notes
-        status, data = _request("POST", port, "/observe/obs-notes-node", body={
-            "type": "measurement", "value": 42.0, "notes": "Anomalous reading",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/observe/obs-notes-node",
+            body={
+                "type": "measurement",
+                "value": 42.0,
+                "notes": "Anomalous reading",
+            },
+        )
         assert status == 201
         assert data.get("notes") == "Anomalous reading"
 
     def test_observe_notes_stored_in_db(self, test_server):
         """Notes are actually stored in the database, not just echoed."""
         port, store = test_server
-        _request("POST", port, "/node", body={
-            "id": "obs-notes-db", "label": "DB Notes Test", "type": "concept",
-        })
-        _request("POST", port, "/observe/obs-notes-db", body={
-            "type": "measurement", "value": 1.0, "notes": "Stored in DB",
-        })
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "obs-notes-db",
+                "label": "DB Notes Test",
+                "type": "concept",
+            },
+        )
+        _request(
+            "POST",
+            port,
+            "/observe/obs-notes-db",
+            body={
+                "type": "measurement",
+                "value": 1.0,
+                "notes": "Stored in DB",
+            },
+        )
         # Query the database directly
         obs = store.execute(
             "SELECT notes FROM ohm_observations WHERE node_id = ? ORDER BY created_at DESC LIMIT 1",
@@ -1767,12 +2448,25 @@ class TestObservationNotes:
     def test_observe_without_notes(self, test_server):
         """POST /observe/{id} without notes field works fine (notes is optional)."""
         port, store = test_server
-        _request("POST", port, "/node", body={
-            "id": "obs-no-notes", "label": "No Notes", "type": "concept",
-        })
-        status, data = _request("POST", port, "/observe/obs-no-notes", body={
-            "type": "measurement", "value": 5.0,
-        })
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "obs-no-notes",
+                "label": "No Notes",
+                "type": "concept",
+            },
+        )
+        status, data = _request(
+            "POST",
+            port,
+            "/observe/obs-no-notes",
+            body={
+                "type": "measurement",
+                "value": 5.0,
+            },
+        )
         assert status == 201
 
 
@@ -1783,13 +2477,27 @@ class TestSourceAttribution:
     def test_observe_with_source_name_and_url(self, test_server):
         """POST /observe/{id} with source_name and source_url persists them."""
         port, store = test_server
-        _request("POST", port, "/node", body={
-            "id": "src-attrib-node", "label": "Source Test", "type": "concept",
-        })
-        status, data = _request("POST", port, "/observe/src-attrib-node", body={
-            "type": "measurement", "value": 1.5,
-            "source_name": "Reuters", "source_url": "https://reuters.com/article/123",
-        })
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "src-attrib-node",
+                "label": "Source Test",
+                "type": "concept",
+            },
+        )
+        status, data = _request(
+            "POST",
+            port,
+            "/observe/src-attrib-node",
+            body={
+                "type": "measurement",
+                "value": 1.5,
+                "source_name": "Reuters",
+                "source_url": "https://reuters.com/article/123",
+            },
+        )
         assert status == 201
         assert data.get("source_name") == "Reuters"
         assert data.get("source_url") == "https://reuters.com/article/123"
@@ -1797,13 +2505,27 @@ class TestSourceAttribution:
     def test_observe_source_attribution_in_db(self, test_server):
         """source_name and source_url are stored in the database."""
         port, store = test_server
-        _request("POST", port, "/node", body={
-            "id": "src-attrib-db", "label": "DB Source Test", "type": "concept",
-        })
-        _request("POST", port, "/observe/src-attrib-db", body={
-            "type": "measurement", "value": 2.0,
-            "source_name": "AP News", "source_url": "https://apnews.com/article/456",
-        })
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "src-attrib-db",
+                "label": "DB Source Test",
+                "type": "concept",
+            },
+        )
+        _request(
+            "POST",
+            port,
+            "/observe/src-attrib-db",
+            body={
+                "type": "measurement",
+                "value": 2.0,
+                "source_name": "AP News",
+                "source_url": "https://apnews.com/article/456",
+            },
+        )
         obs = store.execute(
             "SELECT source_name, source_url FROM ohm_observations WHERE node_id = ? ORDER BY created_at DESC LIMIT 1",
             ["src-attrib-db"],
@@ -1815,12 +2537,25 @@ class TestSourceAttribution:
     def test_observe_without_source_attribution(self, test_server):
         """POST /observe/{id} without source fields works (backward compatible)."""
         port, store = test_server
-        _request("POST", port, "/node", body={
-            "id": "src-no-attrib", "label": "No Source", "type": "concept",
-        })
-        status, data = _request("POST", port, "/observe/src-no-attrib", body={
-            "type": "measurement", "value": 3.0,
-        })
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "src-no-attrib",
+                "label": "No Source",
+                "type": "concept",
+            },
+        )
+        status, data = _request(
+            "POST",
+            port,
+            "/observe/src-no-attrib",
+            body={
+                "type": "measurement",
+                "value": 3.0,
+            },
+        )
         assert status == 201
         assert data.get("source_name") is None
         assert data.get("source_url") is None
@@ -1836,16 +2571,21 @@ class TestPERTFields:
         # Create nodes first
         _request("POST", port, "/node", body={"id": "pert-cause-1", "label": "Cause 1", "type": "concept"})
         _request("POST", port, "/node", body={"id": "pert-effect-1", "label": "Effect 1", "type": "concept"})
-        status, data = _request("POST", port, "/edge", body={
-            "from": "pert-cause-1",
-            "to": "pert-effect-1",
-            "type": "CAUSES",
-            "layer": "L3",
-            "confidence": 0.7,
-            "probability_p05": 0.1,
-            "probability_p50": 0.5,
-            "probability_p95": 0.9,
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/edge",
+            body={
+                "from": "pert-cause-1",
+                "to": "pert-effect-1",
+                "type": "CAUSES",
+                "layer": "L3",
+                "confidence": 0.7,
+                "probability_p05": 0.1,
+                "probability_p50": 0.5,
+                "probability_p95": 0.9,
+            },
+        )
         assert status == 201
         assert abs(data["probability_p05"] - 0.1) < 0.01
         assert abs(data["probability_p50"] - 0.5) < 0.01
@@ -1856,19 +2596,24 @@ class TestPERTFields:
         port, store = test_server
         _request("POST", port, "/node", body={"id": "pert-cause-2", "label": "Cause 2", "type": "concept"})
         _request("POST", port, "/node", body={"id": "pert-effect-2", "label": "Effect 2", "type": "concept"})
-        status, data = _request("POST", port, "/edge", body={
-            "from": "pert-cause-2",
-            "to": "pert-effect-2",
-            "type": "CAUSES",
-            "layer": "L3",
-            "confidence": 0.7,
-            "probability_p05": 0.05,
-            "probability_p50": 0.4,
-            "probability_p95": 0.85,
-            "confidence_p05": 0.2,
-            "confidence_p50": 0.7,
-            "confidence_p95": 0.95,
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/edge",
+            body={
+                "from": "pert-cause-2",
+                "to": "pert-effect-2",
+                "type": "CAUSES",
+                "layer": "L3",
+                "confidence": 0.7,
+                "probability_p05": 0.05,
+                "probability_p50": 0.4,
+                "probability_p95": 0.85,
+                "confidence_p05": 0.2,
+                "confidence_p50": 0.7,
+                "confidence_p95": 0.95,
+            },
+        )
         assert status == 201
         assert abs(data["probability_p05"] - 0.05) < 0.01
         assert abs(data["confidence_p05"] - 0.2) < 0.01
@@ -1878,13 +2623,18 @@ class TestPERTFields:
         port, store = test_server
         _request("POST", port, "/node", body={"id": "pert-cause-3", "label": "Cause 3", "type": "concept"})
         _request("POST", port, "/node", body={"id": "pert-effect-3", "label": "Effect 3", "type": "concept"})
-        status, data = _request("POST", port, "/edge", body={
-            "from": "pert-cause-3",
-            "to": "pert-effect-3",
-            "type": "CAUSES",
-            "layer": "L3",
-            "confidence": 0.7,
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/edge",
+            body={
+                "from": "pert-cause-3",
+                "to": "pert-effect-3",
+                "type": "CAUSES",
+                "layer": "L3",
+                "confidence": 0.7,
+            },
+        )
         assert status == 201
         assert data.get("probability_p05") is None
         assert data.get("confidence_p05") is None
@@ -1897,13 +2647,18 @@ class TestBatchEndpoint:
     def test_batch_create_nodes(self, test_server):
         """POST /batch creates multiple nodes."""
         port, store = test_server
-        status, data = _request("POST", port, "/batch", body={
-            "nodes": [
-                {"id": "batch-n1", "label": "Node 1", "type": "concept"},
-                {"id": "batch-n2", "label": "Node 2", "type": "source"},
-            ],
-            "edges": [],
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/batch",
+            body={
+                "nodes": [
+                    {"id": "batch-n1", "label": "Node 1", "type": "concept"},
+                    {"id": "batch-n2", "label": "Node 2", "type": "source"},
+                ],
+                "edges": [],
+            },
+        )
         assert status == 201
         assert data["nodes_created"] == 2
         assert data["edges_created"] == 0
@@ -1911,15 +2666,20 @@ class TestBatchEndpoint:
     def test_batch_create_nodes_and_edges(self, test_server):
         """POST /batch creates nodes and edges together."""
         port, store = test_server
-        status, data = _request("POST", port, "/batch", body={
-            "nodes": [
-                {"id": "batch-n3", "label": "Node A", "type": "concept"},
-                {"id": "batch-n4", "label": "Node B", "type": "concept"},
-            ],
-            "edges": [
-                {"from": "batch-n3", "to": "batch-n4", "type": "CAUSES", "layer": "L3"},
-            ],
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/batch",
+            body={
+                "nodes": [
+                    {"id": "batch-n3", "label": "Node A", "type": "concept"},
+                    {"id": "batch-n4", "label": "Node B", "type": "concept"},
+                ],
+                "edges": [
+                    {"from": "batch-n3", "to": "batch-n4", "type": "CAUSES", "layer": "L3"},
+                ],
+            },
+        )
         assert status == 201
         assert data["nodes_created"] == 2
         assert data["edges_created"] == 1
@@ -1927,21 +2687,31 @@ class TestBatchEndpoint:
     def test_batch_validation_error(self, test_server):
         """POST /batch with missing required fields returns validation error."""
         port, store = test_server
-        status, data = _request("POST", port, "/batch", body={
-            "nodes": [
-                {"id": "batch-bad"},  # missing 'label'
-            ],
-            "edges": [],
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/batch",
+            body={
+                "nodes": [
+                    {"id": "batch-bad"},  # missing 'label'
+                ],
+                "edges": [],
+            },
+        )
         assert status == 400
 
     def test_batch_empty(self, test_server):
         """POST /batch with empty arrays returns zeros."""
         port, store = test_server
-        status, data = _request("POST", port, "/batch", body={
-            "nodes": [],
-            "edges": [],
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/batch",
+            body={
+                "nodes": [],
+                "edges": [],
+            },
+        )
         assert status == 201
         assert data["nodes_created"] == 0
         assert data["edges_created"] == 0
@@ -1949,18 +2719,20 @@ class TestBatchEndpoint:
     def test_batch_populates_change_feed(self, test_server):
         """POST /batch populates change feed for each created item."""
         port, store = test_server
-        _request("POST", port, "/batch", body={
-            "nodes": [
-                {"id": "cf-batch-1", "label": "CF1", "type": "concept"},
-                {"id": "cf-batch-2", "label": "CF2", "type": "concept"},
-            ],
-            "edges": [],
-        })
-        # Verify change feed entries
-        feed = store.execute(
-            "SELECT row_id FROM ohm_change_feed WHERE table_name = 'ohm_nodes' "
-            "AND row_id IN ('cf-batch-1', 'cf-batch-2') ORDER BY occurred_at DESC"
+        _request(
+            "POST",
+            port,
+            "/batch",
+            body={
+                "nodes": [
+                    {"id": "cf-batch-1", "label": "CF1", "type": "concept"},
+                    {"id": "cf-batch-2", "label": "CF2", "type": "concept"},
+                ],
+                "edges": [],
+            },
         )
+        # Verify change feed entries
+        feed = store.execute("SELECT row_id FROM ohm_change_feed WHERE table_name = 'ohm_nodes' AND row_id IN ('cf-batch-1', 'cf-batch-2') ORDER BY occurred_at DESC")
         assert len(feed) == 2
 
 
@@ -1971,12 +2743,17 @@ class TestIdempotentRegistration:
     def test_register_creates_agent_node(self, test_server):
         """POST /register creates an agent node with deterministic ID."""
         port, store = test_server
-        status, data = _request("POST", port, "/register", body={
-            "name": "testbot",
-            "description": "A test agent",
-            "values": ["accuracy"],
-            "goals": ["explore"],
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/register",
+            body={
+                "name": "testbot",
+                "description": "A test agent",
+                "values": ["accuracy"],
+                "goals": ["explore"],
+            },
+        )
         assert status == 201
         assert data["agent"]["label"] == "testbot"
         assert data["agent"]["type"] == "agent"
@@ -1986,18 +2763,28 @@ class TestIdempotentRegistration:
         """POST /register twice with same name reuses agent node (no duplicates)."""
         port, store = test_server
         # First registration
-        status1, data1 = _request("POST", port, "/register", body={
-            "name": "idem_agent",
-            "values": ["truth"],
-        })
+        status1, data1 = _request(
+            "POST",
+            port,
+            "/register",
+            body={
+                "name": "idem_agent",
+                "values": ["truth"],
+            },
+        )
         assert status1 == 201
         agent_id_1 = data1["agent"]["id"]
 
         # Second registration with same name
-        status2, data2 = _request("POST", port, "/register", body={
-            "name": "idem_agent",
-            "values": ["truth", "fairness"],
-        })
+        status2, data2 = _request(
+            "POST",
+            port,
+            "/register",
+            body={
+                "name": "idem_agent",
+                "values": ["truth", "fairness"],
+            },
+        )
         assert status2 == 201
         agent_id_2 = data2["agent"]["id"]
 
@@ -2005,41 +2792,57 @@ class TestIdempotentRegistration:
         assert agent_id_1 == agent_id_2
 
         # No duplicate agent nodes
-        agent_nodes = store.execute(
-            "SELECT * FROM ohm_nodes WHERE type = 'agent' AND label = 'idem_agent'"
-        )
+        agent_nodes = store.execute("SELECT * FROM ohm_nodes WHERE type = 'agent' AND label = 'idem_agent'")
         assert len(agent_nodes) == 1
 
     def test_register_reuses_value_nodes(self, test_server):
         """POST /register reuses existing value/goal/skill nodes."""
         port, store = test_server
-        _request("POST", port, "/register", body={
-            "name": "reuse_agent",
-            "values": ["courage"],
-        })
-        _request("POST", port, "/register", body={
-            "name": "other_agent",
-            "values": ["courage"],
-        })
-        # Only one "courage" value node should exist
-        courage_nodes = store.execute(
-            "SELECT * FROM ohm_nodes WHERE label = 'courage' AND type = 'value'"
+        _request(
+            "POST",
+            port,
+            "/register",
+            body={
+                "name": "reuse_agent",
+                "values": ["courage"],
+            },
         )
+        _request(
+            "POST",
+            port,
+            "/register",
+            body={
+                "name": "other_agent",
+                "values": ["courage"],
+            },
+        )
+        # Only one "courage" value node should exist
+        courage_nodes = store.execute("SELECT * FROM ohm_nodes WHERE label = 'courage' AND type = 'value'")
         assert len(courage_nodes) == 1
 
     def test_register_updates_edges(self, test_server):
         """POST /register replaces old edges on re-registration."""
         port, store = test_server
         # First registration with 1 value
-        _request("POST", port, "/register", body={
-            "name": "edge_agent",
-            "values": ["loyalty"],
-        })
+        _request(
+            "POST",
+            port,
+            "/register",
+            body={
+                "name": "edge_agent",
+                "values": ["loyalty"],
+            },
+        )
         # Second registration with 2 values
-        status, data = _request("POST", port, "/register", body={
-            "name": "edge_agent",
-            "values": ["loyalty", "honesty"],
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/register",
+            body={
+                "name": "edge_agent",
+                "values": ["loyalty", "honesty"],
+            },
+        )
         assert status == 201
         # Should have 2 active VALUES edges (old ones soft-deleted, new ones created)
         agent_id = data["agent"]["id"]
@@ -2080,9 +2883,16 @@ class TestSemanticSearchEndpoint:
         """GET /search?q= still works (ILIKE search unchanged)."""
         port, _ = test_server
         # Create a node
-        _request("POST", port, "/node", body={
-            "id": "search-test-node", "label": "Machine Learning", "type": "concept",
-        })
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "search-test-node",
+                "label": "Machine Learning",
+                "type": "concept",
+            },
+        )
         status, data = _request("GET", port, "/search?q=Machine")
         assert status == 200
 
@@ -2172,6 +2982,7 @@ class TestPublicReadAuthModel:
     def test_require_read_auth_blocks_unauthenticated_reads(self, tmp_path):
         """With require_read_auth=True, unauthenticated reads return 401."""
         from ohm.store import OhmStore
+
         db_path = str(tmp_path / "test_auth_read.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test_agent")
         tokens = {"read-auth-token": "test_agent"}
@@ -2191,6 +3002,7 @@ class TestPublicReadAuthModel:
     def test_default_allows_unauthenticated_reads_with_tokens(self, tmp_path):
         """With tokens configured but require_read_auth=False, reads are public."""
         from ohm.store import OhmStore
+
         db_path = str(tmp_path / "test_public_read.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test_agent")
         tokens = {"pub-read-token": "test_agent"}
@@ -2216,12 +3028,17 @@ class TestMetisBugFixes:
         """POST /edge should 404 when from_node doesn't exist (OHM-7298)."""
         port, store = test_server
         store.write_node("real-node", "Real Node", "concept", agent_name="test")
-        status, data = _request("POST", port, "/edge", body={
-            "from": "ghost-node",
-            "to": "real-node",
-            "type": "CAUSES",
-            "layer": "L3",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/edge",
+            body={
+                "from": "ghost-node",
+                "to": "real-node",
+                "type": "CAUSES",
+                "layer": "L3",
+            },
+        )
         assert status == 404
         assert "ghost-node" in data.get("message", "")
 
@@ -2229,12 +3046,17 @@ class TestMetisBugFixes:
         """POST /edge should 404 when to_node doesn't exist (OHM-7298)."""
         port, store = test_server
         store.write_node("src-node", "Source Node", "concept", agent_name="test")
-        status, data = _request("POST", port, "/edge", body={
-            "from": "src-node",
-            "to": "ghost-target",
-            "type": "CAUSES",
-            "layer": "L3",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/edge",
+            body={
+                "from": "src-node",
+                "to": "ghost-target",
+                "type": "CAUSES",
+                "layer": "L3",
+            },
+        )
         assert status == 404
         assert "ghost-target" in data.get("message", "")
 
@@ -2243,31 +3065,46 @@ class TestMetisBugFixes:
         port, store = test_server
         store.write_node("ei-src", "Source", "concept", agent_name="test")
         store.write_node("ei-dst", "Dest", "concept", agent_name="test")
-        status, data = _request("POST", port, "/edge", body={
-            "from": "ei-src",
-            "to": "ei-dst",
-            "type": "CAUSES",
-            "layer": "L3",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/edge",
+            body={
+                "from": "ei-src",
+                "to": "ei-dst",
+                "type": "CAUSES",
+                "layer": "L3",
+            },
+        )
         assert status == 201
 
     def test_observe_rejects_nonexistent_node(self, test_server):
         """POST /observe/{id} should 404 when node doesn't exist (OHM-7302)."""
         port, _ = test_server
-        status, data = _request("POST", port, "/observe/ghost-node-obs", body={
-            "type": "measurement",
-            "value": 42.0,
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/observe/ghost-node-obs",
+            body={
+                "type": "measurement",
+                "value": 42.0,
+            },
+        )
         assert status == 404
 
     def test_observe_valid_node_succeeds(self, test_server):
         """POST /observe/{id} should succeed when node exists (OHM-7302 no regression)."""
         port, store = test_server
         store.write_node("obs-node", "Observable", "concept", agent_name="test")
-        status, data = _request("POST", port, "/observe/obs-node", body={
-            "type": "measurement",
-            "value": 42.0,
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/observe/obs-node",
+            body={
+                "type": "measurement",
+                "value": 42.0,
+            },
+        )
         assert status == 201
 
     def test_deep_includes_edges(self, test_server):
@@ -2292,12 +3129,17 @@ class TestMetisBugFixes:
     def test_post_tasks_creates_task(self, test_server):
         """POST /tasks should create a task node (OHM-7304)."""
         port, store = test_server
-        status, data = _request("POST", port, "/tasks", body={
-            "id": "task-create-test",
-            "label": "Do the thing",
-            "task_status": "open",
-            "priority": "P1",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/tasks",
+            body={
+                "id": "task-create-test",
+                "label": "Do the thing",
+                "task_status": "open",
+                "priority": "P1",
+            },
+        )
         assert status == 201
         assert data.get("type") == "task"
         assert data.get("task_status") == "open"
@@ -2305,11 +3147,16 @@ class TestMetisBugFixes:
     def test_post_tasks_then_get_tasks(self, test_server):
         """Task created via POST /tasks is visible in GET /tasks (OHM-7304)."""
         port, store = test_server
-        _request("POST", port, "/tasks", body={
-            "id": "task-roundtrip",
-            "label": "Roundtrip task",
-            "task_status": "open",
-        })
+        _request(
+            "POST",
+            port,
+            "/tasks",
+            body={
+                "id": "task-roundtrip",
+                "label": "Roundtrip task",
+                "task_status": "open",
+            },
+        )
         status, data = _request("GET", port, "/tasks")
         assert status == 200
         ids = [t["id"] for t in data.get("tasks", [])]
@@ -2323,10 +3170,15 @@ class TestMetisBatch2Fixes:
     def test_post_task_auto_generates_id(self, test_server):
         """POST /tasks without 'id' field auto-generates one (OHM-7308)."""
         port, _ = test_server
-        status, data = _request("POST", port, "/tasks", body={
-            "label": "Auto-ID task",
-            "task_status": "open",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/tasks",
+            body={
+                "label": "Auto-ID task",
+                "task_status": "open",
+            },
+        )
         assert status == 201
         assert data.get("id"), "id should be auto-generated"
         assert data["id"].startswith("task_")
@@ -2334,10 +3186,15 @@ class TestMetisBatch2Fixes:
     def test_post_task_with_explicit_id(self, test_server):
         """POST /tasks with explicit 'id' uses that id (OHM-7308)."""
         port, _ = test_server
-        status, data = _request("POST", port, "/tasks", body={
-            "id": "explicit-task-id-7308",
-            "label": "Explicit ID task",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/tasks",
+            body={
+                "id": "explicit-task-id-7308",
+                "label": "Explicit ID task",
+            },
+        )
         assert status == 201
         assert data.get("id") == "explicit-task-id-7308"
 
@@ -2346,12 +3203,17 @@ class TestMetisBatch2Fixes:
         port, store = test_server
         store.write_node("alias-from", "Alias Source", "concept", agent_name="test")
         store.write_node("alias-to", "Alias Dest", "concept", agent_name="test")
-        status, data = _request("POST", port, "/edge", body={
-            "from_node": "alias-from",
-            "to_node": "alias-to",
-            "edge_type": "CAUSES",
-            "layer": "L3",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/edge",
+            body={
+                "from_node": "alias-from",
+                "to_node": "alias-to",
+                "edge_type": "CAUSES",
+                "layer": "L3",
+            },
+        )
         assert status == 201
         assert data.get("from_node") == "alias-from"
         assert data.get("to_node") == "alias-to"
@@ -2360,18 +3222,28 @@ class TestMetisBatch2Fixes:
         """PATCH /node/{id} can update node label (OHM-7319)."""
         port, store = test_server
         store.write_node("patch-test-node", "Original Label", "concept", agent_name="test")
-        status, data = _request("PATCH", port, "/node/patch-test-node", body={
-            "label": "Updated Label",
-        })
+        status, data = _request(
+            "PATCH",
+            port,
+            "/node/patch-test-node",
+            body={
+                "label": "Updated Label",
+            },
+        )
         assert status == 200
         assert data.get("label") == "Updated Label"
 
     def test_patch_node_404_for_missing(self, test_server):
         """PATCH /node/{id} returns 404 for non-existent node (OHM-7319)."""
         port, _ = test_server
-        status, data = _request("PATCH", port, "/node/nonexistent-patch-node", body={
-            "label": "Won't work",
-        })
+        status, data = _request(
+            "PATCH",
+            port,
+            "/node/nonexistent-patch-node",
+            body={
+                "label": "Won't work",
+            },
+        )
         assert status == 404
 
     def test_source_reliability_alias(self, test_server):
@@ -2408,10 +3280,8 @@ class TestMetisBatch2Fixes:
         """GET /suggest?method=shared_tags results have non-empty from_id/to_id (OHM-7313)."""
         port, store = test_server
         # Create tagged nodes to trigger shared_tags results
-        store.write_node("tagged-a", "Tagged A", "concept", agent_name="test",
-                         tags=["geopolitics", "energy"])
-        store.write_node("tagged-b", "Tagged B", "concept", agent_name="test",
-                         tags=["geopolitics", "security"])
+        store.write_node("tagged-a", "Tagged A", "concept", agent_name="test", tags=["geopolitics", "energy"])
+        store.write_node("tagged-b", "Tagged B", "concept", agent_name="test", tags=["geopolitics", "security"])
         status, data = _request("GET", port, "/suggest?method=shared_tags&min_shared=1")
         assert status == 200
         assert isinstance(data, list)
@@ -2432,34 +3302,35 @@ class TestMetisBatch2Fixes:
         if data.get("method") not in ("none", "error"):
             # pgmpy available — should detect disconnection and return method=error
             if data.get("ate") == 0.0 and data.get("risk_ratio") == 1.0:
-                assert data.get("method") == "error", (
-                    "ATE=0 with RR=1 must not be returned silently for disconnected nodes; "
-                    f"got {data}"
-                )
+                assert data.get("method") == "error", f"ATE=0 with RR=1 must not be returned silently for disconnected nodes; got {data}"
 
     def test_ate_connected_path_returns_nonzero(self, test_server):
         """GET /ate returns non-zero ATE when cause→effect edge exists (OHM-7320)."""
         import importlib.util
+
         if not importlib.util.find_spec("pgmpy"):
             pytest.skip("pgmpy not installed")
         port, store = test_server
         store.write_node("ate-cause-a", "Cause A", "concept", agent_name="test")
         store.write_node("ate-effect-b", "Effect B", "concept", agent_name="test")
         # Create a direct causal edge with high probability
-        _request("POST", port, "/edge", body={
-            "from": "ate-cause-a",
-            "to": "ate-effect-b",
-            "type": "CAUSES",
-            "layer": "L3",
-            "probability": 0.9,
-        })
+        _request(
+            "POST",
+            port,
+            "/edge",
+            body={
+                "from": "ate-cause-a",
+                "to": "ate-effect-b",
+                "type": "CAUSES",
+                "layer": "L3",
+                "probability": 0.9,
+            },
+        )
         status, data = _request("GET", port, "/ate?cause=ate-cause-a&effect=ate-effect-b")
         assert status == 200
         assert data.get("method") != "error", f"Unexpected error: {data}"
         # With a direct high-probability CAUSES edge, ATE should be detectably non-zero
-        assert abs(data.get("ate", 0.0)) > 0.01, (
-            f"ATE should be non-zero with direct causal edge, got {data}"
-        )
+        assert abs(data.get("ate", 0.0)) > 0.01, f"ATE should be non-zero with direct causal edge, got {data}"
 
 
 class TestGitHubBacklogFixes:
@@ -2494,31 +3365,31 @@ class TestGitHubBacklogFixes:
         port, _ = test_server
         status, data = _request("GET", port, "/voi?top=5")
         assert status == 200
-        assert "mixed_sensitivity_methods" in data, (
-            f"VoI response must include mixed_sensitivity_methods field: {data}"
-        )
+        assert "mixed_sensitivity_methods" in data, f"VoI response must include mixed_sensitivity_methods field: {data}"
         assert "sensitivity_methods_used" in data
 
     def test_voi_min_observations_flags_sparse_nodes(self, test_server):
         """GET /voi?min_observations=3 flags nodes with fewer than 3 observations (OHM-zn3s)."""
         port, store = test_server
-        store.write_node("dec-test-voi", "Test Decision", "decision",
-                         agent_name="test", utility_scale=1.0)
+        store.write_node("dec-test-voi", "Test Decision", "decision", agent_name="test", utility_scale=1.0)
         store.write_node("anc-test-voi", "Test Ancestor", "concept", agent_name="test")
-        _request("POST", port, "/edge", body={
-            "from": "anc-test-voi",
-            "to": "dec-test-voi",
-            "type": "CAUSES",
-            "layer": "L3",
-            "probability": 0.7,
-        })
+        _request(
+            "POST",
+            port,
+            "/edge",
+            body={
+                "from": "anc-test-voi",
+                "to": "dec-test-voi",
+                "type": "CAUSES",
+                "layer": "L3",
+                "probability": 0.7,
+            },
+        )
         status, data = _request("GET", port, "/voi?min_observations=3&decision=dec-test-voi")
         assert status == 200
         for entry in data.get("rankings", []):
             if entry["node_id"] == "anc-test-voi":
-                assert entry.get("low_data_warning") is True, (
-                    f"Node with 0 obs should have low_data_warning: {entry}"
-                )
+                assert entry.get("low_data_warning") is True, f"Node with 0 obs should have low_data_warning: {entry}"
                 break
 
     def test_voi_no_low_data_warning_when_threshold_zero(self, test_server):
@@ -2527,6 +3398,4 @@ class TestGitHubBacklogFixes:
         status, data = _request("GET", port, "/voi?top=5")
         assert status == 200
         for entry in data.get("rankings", []):
-            assert "low_data_warning" not in entry, (
-                f"low_data_warning should not appear when min_observations=0: {entry}"
-            )
+            assert "low_data_warning" not in entry, f"low_data_warning should not appear when min_observations=0: {entry}"

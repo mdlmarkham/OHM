@@ -58,11 +58,17 @@ class TestSchemaValidation:
     def test_l2_new_edge_types(self):
         """L2 edge types for multi-scenario support."""
         l2_new = [
-            "BATCH_EXPIRES_BEFORE", "TRANSFERRED_TO",
-            "OPENED_BY", "STARTED_BY", "AWAITING",
-            "RESOLVED_BY", "CLOSED_BY",
-            "INVESTIGATED_BY", "CONTAINED_BY",
-            "ERADICATED_BY", "RECOVERED_BY",
+            "BATCH_EXPIRES_BEFORE",
+            "TRANSFERRED_TO",
+            "OPENED_BY",
+            "STARTED_BY",
+            "AWAITING",
+            "RESOLVED_BY",
+            "CLOSED_BY",
+            "INVESTIGATED_BY",
+            "CONTAINED_BY",
+            "ERADICATED_BY",
+            "RECOVERED_BY",
             "NEGOTIATES_WITH",
         ]
         for et in l2_new:
@@ -71,8 +77,11 @@ class TestSchemaValidation:
     def test_l3_new_edge_types(self):
         """L3 edge types for multi-scenario support."""
         l3_new = [
-            "NEGATES", "EXPECTED_LIKELIHOOD",
-            "ESCALATED_TO", "DELEGATED_TO", "THREAT_CLUSTER",
+            "NEGATES",
+            "EXPECTED_LIKELIHOOD",
+            "ESCALATED_TO",
+            "DELEGATED_TO",
+            "THREAT_CLUSTER",
         ]
         for et in l3_new:
             assert validate_edge_type("L3", et) is True, f"{et} should be valid in L3"
@@ -110,10 +119,7 @@ class TestSchemaInitialization:
 
     def test_initialize_schema_creates_tables(self, test_db):
         """Verify all expected tables exist after initialization."""
-        tables = test_db.execute(
-            "SELECT table_name FROM information_schema.tables "
-            "WHERE table_schema = 'main'"
-        ).fetchall()
+        tables = test_db.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'").fetchall()
         table_names = {row[0] for row in tables}
 
         assert "ohm_nodes" in table_names
@@ -124,9 +130,7 @@ class TestSchemaInitialization:
 
     def test_initialize_schema_creates_indexes(self, test_db):
         """Verify indexes are created."""
-        indexes = test_db.execute(
-            "SELECT index_name FROM duckdb_indexes()"
-        ).fetchall()
+        indexes = test_db.execute("SELECT index_name FROM duckdb_indexes()").fetchall()
         index_names = {row[0] for row in indexes}
 
         assert "idx_edges_from" in index_names
@@ -137,10 +141,7 @@ class TestSchemaInitialization:
     def test_idempotent_initialization(self, test_db):
         """Running initialize_schema twice should not error."""
         initialize_schema(test_db)  # Second call
-        tables = test_db.execute(
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_schema = 'main'"
-        ).fetchone()[0]
+        tables = test_db.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'main'").fetchone()[0]
         assert tables >= 5  # At least our 5 tables
 
 
@@ -177,9 +178,7 @@ class TestSchemaVersion:
     def test_meta_table_exists(self, test_db):
         """The ohm_meta table should exist after initialization."""
         initialize_schema(test_db)
-        result = test_db.execute(
-            "SELECT COUNT(*) FROM ohm_meta WHERE key = 'schema_version'"
-        ).fetchone()
+        result = test_db.execute("SELECT COUNT(*) FROM ohm_meta WHERE key = 'schema_version'").fetchone()
         assert result[0] == 1
 
     def test_migrations_list_not_empty(self):
@@ -189,9 +188,11 @@ class TestSchemaVersion:
     def test_migrations_are_ordered(self):
         """Migrations should be in ascending version order."""
         versions = [m[0] for m in MIGRATIONS]
+
         # Use semantic version sorting (tuple of ints)
         def version_key(v: str) -> tuple[int, ...]:
             return tuple(int(x) for x in v.split("."))
+
         assert versions == sorted(versions, key=version_key)
 
     def test_get_schema_version_on_empty_db(self):

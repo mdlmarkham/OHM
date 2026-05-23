@@ -220,7 +220,10 @@ class DuckDBGraphReader:
 
         return [
             EdgeRecord(
-                from_node=r[0], to_node=r[1], edge_type=r[2], layer=r[3],
+                from_node=r[0],
+                to_node=r[1],
+                edge_type=r[2],
+                layer=r[3],
                 probability=float(r[4]) if r[4] is not None else None,
                 confidence=float(r[5]) if r[5] is not None else None,
                 probability_p05=float(r[6]) if r[6] is not None else None,
@@ -256,11 +259,7 @@ class DuckDBGraphReader:
             params.append(node_type)
 
         where = " AND ".join(conditions)
-        sql = (
-            f"SELECT id, label, type, confidence, utility_scale, "
-            f"utility_usd_per_day, utility_currency, content, tags, metadata, priority "
-            f"FROM ohm_nodes WHERE {where}"
-        )
+        sql = f"SELECT id, label, type, confidence, utility_scale, utility_usd_per_day, utility_currency, content, tags, metadata, priority FROM ohm_nodes WHERE {where}"
         rows = self._conn.execute(sql, params).fetchall()
 
         records = []
@@ -279,41 +278,43 @@ class DuckDBGraphReader:
                 except Exception:
                     metadata = None
 
-            records.append(NodeRecord(
-                id=r[0],
-                label=r[1],
-                type=r[2],
-                confidence=float(r[3]) if r[3] is not None else None,
-                utility_scale=float(r[4]) if r[4] is not None else None,
-                utility_usd_per_day=float(r[5]) if r[5] is not None else None,
-                utility_currency=r[6],
-                content=r[7],
-                tags=tags,
-                metadata=metadata,
-                priority=r[10],
-            ))
+            records.append(
+                NodeRecord(
+                    id=r[0],
+                    label=r[1],
+                    type=r[2],
+                    confidence=float(r[3]) if r[3] is not None else None,
+                    utility_scale=float(r[4]) if r[4] is not None else None,
+                    utility_usd_per_day=float(r[5]) if r[5] is not None else None,
+                    utility_currency=r[6],
+                    content=r[7],
+                    tags=tags,
+                    metadata=metadata,
+                    priority=r[10],
+                )
+            )
         return records
 
     def get_observations(self, node_id: str) -> list[ObservationRecord]:
         rows = self._conn.execute(
-            "SELECT id, node_id, edge_id, type, value, source, created_by "
-            "FROM ohm_observations "
-            "WHERE node_id = ? AND deleted_at IS NULL",
+            "SELECT id, node_id, edge_id, type, value, source, created_by FROM ohm_observations WHERE node_id = ? AND deleted_at IS NULL",
             [node_id],
         ).fetchall()
         return [
             ObservationRecord(
-                id=r[0], node_id=r[1], edge_id=r[2], type=r[3],
+                id=r[0],
+                node_id=r[1],
+                edge_id=r[2],
+                type=r[3],
                 value=float(r[4]) if r[4] is not None else None,
-                source=r[5], created_by=r[6],
+                source=r[5],
+                created_by=r[6],
             )
             for r in rows
         ]
 
     def get_meta(self, key: str) -> str | None:
-        row = self._conn.execute(
-            "SELECT value FROM ohm_meta WHERE key = ?", [key]
-        ).fetchone()
+        row = self._conn.execute("SELECT value FROM ohm_meta WHERE key = ?", [key]).fetchone()
         return str(row[0]) if row is not None else None
 
     def get_graph_generation(self) -> int:

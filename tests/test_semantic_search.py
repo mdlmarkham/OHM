@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 
-
 class TestVSSExtension:
     """Tests for VSS extension loading and HNSW index creation."""
 
@@ -18,10 +17,7 @@ class TestVSSExtension:
         _load_extensions(conn)
 
         # Verify VSS extension is loaded
-        result = conn.execute(
-            "SELECT extension_name FROM duckdb_extensions() "
-            "WHERE loaded = true AND extension_name = 'vss'"
-        ).fetchone()
+        result = conn.execute("SELECT extension_name FROM duckdb_extensions() WHERE loaded = true AND extension_name = 'vss'").fetchone()
         conn.close()
 
         if result is None:
@@ -36,10 +32,7 @@ class TestVSSExtension:
         conn = connect(db_path)
 
         # Check embedding column exists
-        columns = conn.execute(
-            "SELECT column_name, data_type FROM information_schema.columns "
-            "WHERE table_name = 'ohm_nodes' AND column_name = 'embedding'"
-        ).fetchall()
+        columns = conn.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'ohm_nodes' AND column_name = 'embedding'").fetchall()
 
         assert len(columns) == 1, "embedding column should exist"
         # DuckDB reports FLOAT[768] as a list type
@@ -57,9 +50,7 @@ class TestVSSExtension:
         # Check VSS is available first
         probe = duckdb.connect(str(tmp_path / "probe.duckdb"))
         _load_extensions(probe)
-        vss_loaded = probe.execute(
-            "SELECT extension_name FROM duckdb_extensions() WHERE loaded = true AND extension_name = 'vss'"
-        ).fetchone()
+        vss_loaded = probe.execute("SELECT extension_name FROM duckdb_extensions() WHERE loaded = true AND extension_name = 'vss'").fetchone()
         probe.close()
         if vss_loaded is None:
             pytest.skip("VSS extension not available in this environment")
@@ -68,16 +59,11 @@ class TestVSSExtension:
         conn = connect(db_path)
 
         # Check HNSW index exists
-        indexes = conn.execute(
-            "SELECT index_name FROM duckdb_indexes() "
-            "WHERE table_name = 'ohm_nodes'"
-        ).fetchall()
+        indexes = conn.execute("SELECT index_name FROM duckdb_indexes() WHERE table_name = 'ohm_nodes'").fetchall()
         index_names = {idx[0] for idx in indexes}
 
         # The HNSW index should be named idx_nodes_embedding
-        assert "idx_nodes_embedding" in index_names, (
-            f"HNSW index should exist, found: {index_names}"
-        )
+        assert "idx_nodes_embedding" in index_names, f"HNSW index should exist, found: {index_names}"
 
         conn.close()
 
@@ -93,15 +79,12 @@ class TestVSSExtension:
         embedding[0] = 1.0  # Set first dimension
 
         conn.execute(
-            "INSERT INTO ohm_nodes (id, label, type, created_by, embedding) "
-            "VALUES (?, ?, ?, ?, ?::FLOAT[768])",
+            "INSERT INTO ohm_nodes (id, label, type, created_by, embedding) VALUES (?, ?, ?, ?, ?::FLOAT[768])",
             ["test-1", "Test Node", "concept", "test_agent", embedding],
         )
 
         # Read it back
-        result = conn.execute(
-            "SELECT id, label, embedding FROM ohm_nodes WHERE id = 'test-1'"
-        ).fetchone()
+        result = conn.execute("SELECT id, label, embedding FROM ohm_nodes WHERE id = 'test-1'").fetchone()
 
         assert result is not None
         assert result[0] == "test-1"
@@ -117,14 +100,11 @@ class TestVSSExtension:
         conn = connect(db_path)
 
         conn.execute(
-            "INSERT INTO ohm_nodes (id, label, type, created_by) "
-            "VALUES (?, ?, ?, ?)",
+            "INSERT INTO ohm_nodes (id, label, type, created_by) VALUES (?, ?, ?, ?)",
             ["test-2", "No Embedding", "concept", "test_agent"],
         )
 
-        result = conn.execute(
-            "SELECT id, embedding FROM ohm_nodes WHERE id = 'test-2'"
-        ).fetchone()
+        result = conn.execute("SELECT id, embedding FROM ohm_nodes WHERE id = 'test-2'").fetchone()
 
         assert result is not None
         assert result[0] == "test-2"
@@ -222,9 +202,7 @@ class TestSemanticSearch:
 
         # Use direct cosine distance query (bypassing Ollama)
         results = test_db.execute(
-            "SELECT id, label, array_cosine_distance(embedding, ?::FLOAT[768]) AS distance "
-            "FROM ohm_nodes WHERE embedding IS NOT NULL "
-            "ORDER BY distance LIMIT 10",
+            "SELECT id, label, array_cosine_distance(embedding, ?::FLOAT[768]) AS distance FROM ohm_nodes WHERE embedding IS NOT NULL ORDER BY distance LIMIT 10",
             [query_embedding],
         ).fetchall()
 
@@ -260,9 +238,7 @@ class TestSemanticSearch:
 
         # Query with type filter
         results = test_db.execute(
-            "SELECT id, label, type, array_cosine_distance(embedding, ?::FLOAT[768]) AS distance "
-            "FROM ohm_nodes WHERE embedding IS NOT NULL AND type = ? "
-            "ORDER BY distance LIMIT 10",
+            "SELECT id, label, type, array_cosine_distance(embedding, ?::FLOAT[768]) AS distance FROM ohm_nodes WHERE embedding IS NOT NULL AND type = ? ORDER BY distance LIMIT 10",
             [embedding, "concept"],
         ).fetchall()
 

@@ -99,8 +99,7 @@ def _get_zettelkasten_notes(
     for candidate in table_candidates:
         try:
             result = metis_conn.execute(
-                "SELECT COUNT(*) FROM information_schema.tables "
-                "WHERE table_name = ?",
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = ?",
                 [candidate],
             ).fetchone()
             if result and result[0] > 0:
@@ -115,8 +114,7 @@ def _get_zettelkasten_notes(
     # Try to get columns that exist
     try:
         columns_result = metis_conn.execute(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = ?",
+            "SELECT column_name FROM information_schema.columns WHERE table_name = ?",
             [table_name],
         ).fetchall()
         available_cols = {col[0] for col in columns_result}
@@ -220,6 +218,7 @@ def project_zettelkasten(
         )
         try:
             import duckdb
+
             metis_conn = duckdb.connect(metis_db_path, read_only=True)
         except Exception:
             return {
@@ -291,6 +290,7 @@ def project_zettelkasten(
                 if tags:
                     try:
                         import json
+
                         tags_json = json.dumps(tags.split(",") if isinstance(tags, str) else [tags])
                         ohm_conn.execute(
                             "UPDATE ohm_nodes SET tags = ? WHERE id = ? AND tags IS NULL",
@@ -330,8 +330,7 @@ def project_zettelkasten(
                 else:
                     # Check if edge already exists (idempotency)
                     existing = ohm_conn.execute(
-                        "SELECT id FROM ohm_edges "
-                        "WHERE from_node = ? AND to_node = ? AND edge_type = ?",
+                        "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = ?",
                         [source_node_id, target_node_id, edge_type],
                     ).fetchone()
                     if existing is None:

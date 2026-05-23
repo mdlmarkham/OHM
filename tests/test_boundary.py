@@ -204,8 +204,13 @@ class TestMutationOperations:
         b = create_node(test_db, label="B", created_by="agent_x")
 
         result = create_edge(
-            test_db, from_node=a["id"], to_node=b["id"], layer="L3",
-            edge_type="CAUSES", created_by="agent_x", confidence=0.9,
+            test_db,
+            from_node=a["id"],
+            to_node=b["id"],
+            layer="L3",
+            edge_type="CAUSES",
+            created_by="agent_x",
+            confidence=0.9,
         )
         assert isinstance(result, dict)
         assert result["from_node"] == a["id"]
@@ -223,8 +228,12 @@ class TestMutationOperations:
 
         with pytest.raises(ValueError, match="Invalid edge type"):
             create_edge(
-                test_db, from_node=a, to_node=b, layer="L1",
-                edge_type="CAUSES", created_by="agent_x",
+                test_db,
+                from_node=a,
+                to_node=b,
+                layer="L1",
+                edge_type="CAUSES",
+                created_by="agent_x",
             )
 
     def test_create_challenge(self, test_db, sample_graph_small):
@@ -233,8 +242,11 @@ class TestMutationOperations:
 
         edge_ab = sample_graph_small["edges"]["ab"]
         result = create_challenge(
-            test_db, edge_id=edge_ab, reason="weak evidence",
-            created_by="critic", confidence=0.3,
+            test_db,
+            edge_id=edge_ab,
+            reason="weak evidence",
+            created_by="critic",
+            confidence=0.3,
         )
         assert isinstance(result, dict)
         assert result["edge_type"] == "CHALLENGED_BY"
@@ -251,7 +263,9 @@ class TestMutationOperations:
         edge_bc = sample_graph_small["edges"]["bc"]  # L2 edge
         with pytest.raises(PermissionDeniedError, match="L2"):
             create_challenge(
-                test_db, edge_id=edge_bc, reason="test",
+                test_db,
+                edge_id=edge_bc,
+                reason="test",
                 created_by="critic",
             )
 
@@ -261,15 +275,17 @@ class TestMutationOperations:
 
         edge_ab = sample_graph_small["edges"]["ab"]
         support = create_support(
-            test_db, edge_id=edge_ab, reason="additional evidence",
-            created_by="supporter", confidence=0.85,
+            test_db,
+            edge_id=edge_ab,
+            reason="additional evidence",
+            created_by="supporter",
+            confidence=0.85,
         )
         assert support["id"]
         assert support["edge_type"] == "SUPPORTS"
 
         result = test_db.execute(
-            "SELECT edge_type, challenge_of, challenge_type, condition, created_by "
-            "FROM ohm_edges WHERE id = ?",
+            "SELECT edge_type, challenge_of, challenge_type, condition, created_by FROM ohm_edges WHERE id = ?",
             [support["id"]],
         ).fetchone()
         assert result[0] == "SUPPORTS"
@@ -283,7 +299,9 @@ class TestMutationOperations:
         edge_bc = sample_graph_small["edges"]["bc"]  # L2 edge
         with pytest.raises(PermissionDeniedError, match="L2"):
             create_support(
-                test_db, edge_id=edge_bc, reason="test",
+                test_db,
+                edge_id=edge_bc,
+                reason="test",
                 created_by="supporter",
             )
 

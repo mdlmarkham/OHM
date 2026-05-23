@@ -3,6 +3,7 @@
 DuckDB raises InternalException (not IOException) for WAL replay
 failures. Both exception types must be caught for reliable recovery.
 """
+
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -52,11 +53,7 @@ class TestWALRecoveryStorePy:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                raise duckdb.InternalException(
-                    "INTERNAL Error: Failure while replaying WAL file "
-                    "'/var/lib/ohm/ohm.duckdb.wal': "
-                    "Calling DatabaseManager::GetDefaultDatabase with no default database set"
-                )
+                raise duckdb.InternalException("INTERNAL Error: Failure while replaying WAL file '/var/lib/ohm/ohm.duckdb.wal': Calling DatabaseManager::GetDefaultDatabase with no default database set")
             return mock_conn
 
         with patch("duckdb.connect", side_effect=mock_connect):
@@ -80,9 +77,7 @@ class TestWALRecoveryStorePy:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                raise duckdb.InternalException(
-                    "Error during log replay: corrupted entry"
-                )
+                raise duckdb.InternalException("Error during log replay: corrupted entry")
             return mock_conn
 
         with patch("duckdb.connect", side_effect=mock_connect):
@@ -138,9 +133,7 @@ class TestWALRecoveryDbPy:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                raise duckdb.InternalException(
-                    "Failure while replaying WAL file '/var/lib/ohm/ohm.duckdb.wal'"
-                )
+                raise duckdb.InternalException("Failure while replaying WAL file '/var/lib/ohm/ohm.duckdb.wal'")
             return mock_conn
 
         with patch("duckdb.connect", side_effect=mock_connect):
@@ -150,6 +143,7 @@ class TestWALRecoveryDbPy:
                         with patch("os.path.exists", return_value=True):
                             with patch("os.remove"):
                                 from ohm.db import connect
+
                                 result = connect(str(db_path))
                                 assert result is mock_conn
 
@@ -167,9 +161,7 @@ class TestWALRecoveryDbPy:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                raise duckdb.InternalException(
-                    "Failure while replaying WAL file"
-                )
+                raise duckdb.InternalException("Failure while replaying WAL file")
             return mock_conn
 
         with patch("duckdb.connect", side_effect=mock_connect):
@@ -177,5 +169,6 @@ class TestWALRecoveryDbPy:
                 with patch("ohm.db._auto_restore_if_empty"):
                     with patch("ohm.schema.initialize_schema"):
                         from ohm.db import connect
+
                         result = connect(str(db_path))
                         assert result is mock_conn

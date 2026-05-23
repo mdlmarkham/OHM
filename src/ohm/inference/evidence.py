@@ -104,9 +104,7 @@ def discretize_evidence(
         raw_value  the input value echoed back
     """
     if direction not in ("above_is_bad", "below_is_bad"):
-        raise ValueError(
-            f"direction must be 'above_is_bad' or 'below_is_bad', got {direction!r}"
-        )
+        raise ValueError(f"direction must be 'above_is_bad' or 'below_is_bad', got {direction!r}")
 
     # Auto-select method from inputs
     if method == "auto":
@@ -117,11 +115,7 @@ def discretize_evidence(
         elif threshold is not None:
             method = "threshold"
         else:
-            raise ValueError(
-                "discretize_evidence requires at least one of: "
-                "(baseline + sigma), (threshold + sigma), or threshold alone. "
-                "Provide the appropriate parameters for your method."
-            )
+            raise ValueError("discretize_evidence requires at least one of: (baseline + sigma), (threshold + sigma), or threshold alone. Provide the appropriate parameters for your method.")
 
     if method == "threshold":
         if threshold is None:
@@ -153,10 +147,7 @@ def discretize_evidence(
             p_bad = _norm_cdf(-z)
 
     else:
-        raise ValueError(
-            f"Unknown method: {method!r}. "
-            "Choose from: 'auto', 'threshold', 'soft_threshold', 'zscore'"
-        )
+        raise ValueError(f"Unknown method: {method!r}. Choose from: 'auto', 'threshold', 'soft_threshold', 'zscore'")
 
     p_bad = max(0.0, min(1.0, p_bad))
     p_good = 1.0 - p_bad

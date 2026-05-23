@@ -64,12 +64,13 @@ class TestDiscretizeEvidence:
             "flow": (5.0, None),
         }
         result = discretize_evidence(values, thresholds)
-        assert result["temp"] == 1    # in band
+        assert result["temp"] == 1  # in band
         assert result["pressure"] == 0  # above upper limit
-        assert result["flow"] == 1    # above lower limit
+        assert result["flow"] == 1  # above lower limit
 
     def test_importable_from_ohm_evidence(self):
         from ohm.evidence import discretize_evidence as de
+
         assert callable(de)
         r = de({"x": 50.0}, {"x": (0.0, 100.0)})
         assert r == {"x": 1}

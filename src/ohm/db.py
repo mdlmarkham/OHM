@@ -7,6 +7,7 @@ from ohm.graph.db import (  # noqa: F401
     _auto_restore_if_empty,
     _create_ducklake_tables,
 )
+
 try:
     from ohm.graph.db import __all__  # noqa: F401
 except ImportError:

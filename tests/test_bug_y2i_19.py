@@ -32,10 +32,7 @@ class TestAgentAttributionBug:
         """Nodes should be attributed to the agent that created them, not 'ohmd'."""
         store = OhmStore(shared_db, agent_name="metis")
         node = store.write_node(id="test_node", label="concept", type="note", content="test")
-        assert node["created_by"] == "metis", (
-            f"Node created_by should be 'metis', got '{node['created_by']}'. "
-            f"In production, this would be 'ohmd' instead of the authenticated agent."
-        )
+        assert node["created_by"] == "metis", f"Node created_by should be 'metis', got '{node['created_by']}'. In production, this would be 'ohmd' instead of the authenticated agent."
         store.close()
 
     def test_write_edge_attributed_to_agent(self, shared_db):
@@ -44,13 +41,13 @@ class TestAgentAttributionBug:
         store.write_node(id="n1", label="concept", type="note")
         store.write_node(id="n2", label="concept", type="note")
         edge = store.write_edge(
-            from_node="n1", to_node="n2",
-            edge_type="CLAIMS", layer="L3", confidence=0.8,
+            from_node="n1",
+            to_node="n2",
+            edge_type="CLAIMS",
+            layer="L3",
+            confidence=0.8,
         )
-        assert edge["created_by"] == "metis", (
-            f"Edge created_by should be 'metis', got '{edge['created_by']}'. "
-            f"Boundary enforcement is meaningless if all edges belong to 'ohmd'."
-        )
+        assert edge["created_by"] == "metis", f"Edge created_by should be 'metis', got '{edge['created_by']}'. Boundary enforcement is meaningless if all edges belong to 'ohmd'."
         store.close()
 
     def test_observation_attributed_to_agent(self, shared_db):
@@ -58,22 +55,18 @@ class TestAgentAttributionBug:
         store = OhmStore(shared_db, agent_name="clio")
         store.write_node(id="obs_node", label="metric", type="observation")
         obs = store.write_observation(
-            node_id="obs_node", type="reading", value=42.0,
+            node_id="obs_node",
+            type="reading",
+            value=42.0,
         )
-        assert obs["created_by"] == "clio", (
-            f"Observation created_by should be 'clio', got '{obs['created_by']}'. "
-            f"Provenance is lost if all observations belong to 'ohmd'."
-        )
+        assert obs["created_by"] == "clio", f"Observation created_by should be 'clio', got '{obs['created_by']}'. Provenance is lost if all observations belong to 'ohmd'."
         store.close()
 
     def test_agent_state_attributed_to_agent(self, shared_db):
         """Agent state should be recorded for the agent that set it."""
         store = OhmStore(shared_db, agent_name="socrates")
         state = store.update_agent_state(current_focus="challenging assumptions")
-        assert state["agent_name"] == "socrates", (
-            f"Agent state should belong to 'socrates', got '{state['agent_name']}'. "
-            f"Agent state is broken if all state is recorded under 'ohmd'."
-        )
+        assert state["agent_name"] == "socrates", f"Agent state should belong to 'socrates', got '{state['agent_name']}'. Agent state is broken if all state is recorded under 'ohmd'."
         store.close()
 
     def test_boundary_enforcement_across_agents(self, shared_db):
@@ -87,8 +80,11 @@ class TestAgentAttributionBug:
         store_a.write_node(id="node1", label="concept", type="note")
         store_a.write_node(id="node2", label="concept", type="note")
         edge = store_a.write_edge(
-            from_node="node1", to_node="node2",
-            edge_type="CLAIMS", layer="L3", confidence=0.9,
+            from_node="node1",
+            to_node="node2",
+            edge_type="CLAIMS",
+            layer="L3",
+            confidence=0.9,
         )
         assert edge["created_by"] == "agent_a"
 
@@ -96,10 +92,7 @@ class TestAgentAttributionBug:
         store_b = OhmStore(shared_db, agent_name="agent_b")
         with pytest.raises(Exception) as exc_info:
             store_b.update_edge_confidence(edge["id"], new_confidence=0.1)
-        assert "PermissionDeniedError" in type(exc_info.value).__name__ or "cannot update" in str(exc_info.value).lower(), (
-            "Agent B should NOT be able to update Agent A's edge, but no error was raised. "
-            "Boundary enforcement is broken."
-        )
+        assert "PermissionDeniedError" in type(exc_info.value).__name__ or "cannot update" in str(exc_info.value).lower(), "Agent B should NOT be able to update Agent A's edge, but no error was raised. Boundary enforcement is broken."
 
         store_a.close()
         store_b.close()
@@ -117,8 +110,11 @@ class TestAgentAttributionBug:
         store.write_node(id="x1", label="concept", type="note")
         store.write_node(id="x2", label="concept", type="note")
         edge = store.write_edge(
-            from_node="x1", to_node="x2",
-            edge_type="CLAIMS", layer="L3", confidence=0.9,
+            from_node="x1",
+            to_node="x2",
+            edge_type="CLAIMS",
+            layer="L3",
+            confidence=0.9,
         )
         assert edge["created_by"] == "ohmd"
 
@@ -128,11 +124,7 @@ class TestAgentAttributionBug:
         # This update should fail if agent were "metis", but it succeeds because
         # the store thinks it's "ohmd"
         result = store.update_edge_confidence(edge["id"], new_confidence=0.5)
-        assert result is not None, (
-            "This should succeed (store agent == edge owner), but demonstrates "
-            "the bug: in production, ANY authenticated agent's writes go through "
-            "the same 'ohmd' store, bypassing boundary enforcement."
-        )
+        assert result is not None, "This should succeed (store agent == edge owner), but demonstrates the bug: in production, ANY authenticated agent's writes go through the same 'ohmd' store, bypassing boundary enforcement."
 
         store.close()
 
@@ -142,12 +134,17 @@ class TestAgentAttributionBug:
         store.write_node(id="c1", label="concept", type="note")
         store.write_node(id="c2", label="concept", type="note")
         original = store.write_edge(
-            from_node="c1", to_node="c2",
-            edge_type="CLAIMS", layer="L3", confidence=0.9,
+            from_node="c1",
+            to_node="c2",
+            edge_type="CLAIMS",
+            layer="L3",
+            confidence=0.9,
         )
 
         challenge = store.challenge_edge(
-            original["id"], reason="I disagree", confidence=0.3,
+            original["id"],
+            reason="I disagree",
+            confidence=0.3,
         )
         assert challenge is not None
         assert challenge["id"] != original["id"], "Challenge must be a new edge"

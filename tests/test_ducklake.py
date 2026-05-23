@@ -118,11 +118,10 @@ class TestDuckLakeSync:
 
         # Read from DuckLake directly
         import duckdb
+
         dl = duckdb.connect(ducklake_path, read_only=True)
         try:
-            changes = dl.execute(
-                "SELECT COUNT(*) FROM ohm_change_feed WHERE agent_name = 'agent_a'"
-            ).fetchone()
+            changes = dl.execute("SELECT COUNT(*) FROM ohm_change_feed WHERE agent_name = 'agent_a'").fetchone()
             assert changes[0] >= 1
         finally:
             dl.close()
@@ -158,10 +157,7 @@ class TestDuckLakeExtension:
         _load_extensions(conn)
 
         # Verify DuckLake extension is loaded
-        result = conn.execute(
-            "SELECT extension_name FROM duckdb_extensions() "
-            "WHERE loaded = true AND extension_name = 'ducklake'"
-        ).fetchone()
+        result = conn.execute("SELECT extension_name FROM duckdb_extensions() WHERE loaded = true AND extension_name = 'ducklake'").fetchone()
         conn.close()
 
         if result is None:
@@ -183,9 +179,7 @@ class TestDuckLakeExtension:
             pytest.skip("DuckLake extension not available")
 
         # Verify mirror tables exist in the ohm_lake schema
-        tables = conn.execute(
-            "SELECT table_name FROM duckdb_tables() WHERE database_name = 'ohm_lake'"
-        ).fetchall()
+        tables = conn.execute("SELECT table_name FROM duckdb_tables() WHERE database_name = 'ohm_lake'").fetchall()
         table_names = {t[0] for t in tables}
 
         assert "ohm_nodes" in table_names, "ohm_nodes mirror table should exist"
@@ -210,15 +204,10 @@ class TestDuckLakeExtension:
 
         # Verify ohm_nodes has no PRIMARY KEY (DuckLake constraint)
         # DuckDB stores constraint info in duckdb_constraints()
-        constraints = conn.execute(
-            "SELECT constraint_type, table_name FROM duckdb_constraints() "
-            "WHERE database_name = 'ohm_lake'"
-        ).fetchall()
+        constraints = conn.execute("SELECT constraint_type, table_name FROM duckdb_constraints() WHERE database_name = 'ohm_lake'").fetchall()
 
         pk_constraints = [c for c in constraints if c[0] == "PRIMARY KEY"]
-        assert len(pk_constraints) == 0, (
-            f"DuckLake tables should have no PRIMARY KEY, found: {pk_constraints}"
-        )
+        assert len(pk_constraints) == 0, f"DuckLake tables should have no PRIMARY KEY, found: {pk_constraints}"
 
         conn.close()
 
@@ -236,15 +225,10 @@ class TestDuckLakeExtension:
             pytest.skip("DuckLake extension not available")
 
         # Check ohm_nodes columns are all VARCHAR (except id which is VARCHAR too)
-        columns = conn.execute(
-            "SELECT column_name, data_type FROM duckdb_columns() "
-            "WHERE database_name = 'ohm_lake' AND table_name = 'ohm_nodes'"
-        ).fetchall()
+        columns = conn.execute("SELECT column_name, data_type FROM duckdb_columns() WHERE database_name = 'ohm_lake' AND table_name = 'ohm_nodes'").fetchall()
 
         for col_name, col_type in columns:
-            assert col_type == "VARCHAR", (
-                f"Column {col_name} should be VARCHAR, got {col_type}"
-            )
+            assert col_type == "VARCHAR", f"Column {col_name} should be VARCHAR, got {col_type}"
 
         conn.close()
 
@@ -283,9 +267,7 @@ class TestDuckLakeExtension:
             pytest.skip("DuckLake extension not available")
 
         # Verify tables exist
-        tables = store.conn.execute(
-            "SELECT table_name FROM duckdb_tables() WHERE database_name = 'ohm_lake'"
-        ).fetchall()
+        tables = store.conn.execute("SELECT table_name FROM duckdb_tables() WHERE database_name = 'ohm_lake'").fetchall()
         table_names = {t[0] for t in tables}
         assert "ohm_nodes" in table_names
 
@@ -334,16 +316,10 @@ class TestDuckLakeExtension:
             pytest.skip("DuckLake extension not available")
 
         # Insert a row into the DuckLake mirror table
-        conn.execute(
-            "INSERT INTO ohm_lake.ohm_nodes "
-            "(id, label, type, created_by, created_at) "
-            "VALUES ('test-1', 'Test Node', 'concept', 'agent_a', '2026-01-01T00:00:00')"
-        )
+        conn.execute("INSERT INTO ohm_lake.ohm_nodes (id, label, type, created_by, created_at) VALUES ('test-1', 'Test Node', 'concept', 'agent_a', '2026-01-01T00:00:00')")
 
         # Read it back
-        result = conn.execute(
-            "SELECT id, label, type FROM ohm_lake.ohm_nodes WHERE id = 'test-1'"
-        ).fetchone()
+        result = conn.execute("SELECT id, label, type FROM ohm_lake.ohm_nodes WHERE id = 'test-1'").fetchone()
 
         assert result is not None
         assert result[0] == "test-1"
@@ -389,6 +365,7 @@ class TestDuckLakeTimeTravel:
     def test_graph_at_version_without_ducklake_raises(self, tmp_path):
         """graph_at_version raises OHMError when DuckLake is not attached."""
         from ohm.exceptions import OHMError
+
         db_path = str(tmp_path / "local.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test_agent")
         with pytest.raises(OHMError, match="DuckLake is not attached"):
@@ -398,6 +375,7 @@ class TestDuckLakeTimeTravel:
     def test_graph_changes_without_ducklake_raises(self, tmp_path):
         """graph_changes raises OHMError when DuckLake is not attached."""
         from ohm.exceptions import OHMError
+
         db_path = str(tmp_path / "local.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test_agent")
         with pytest.raises(OHMError, match="DuckLake is not attached"):
@@ -407,6 +385,7 @@ class TestDuckLakeTimeTravel:
     def test_list_snapshots_with_ducklake(self, tmp_path):
         """list_snapshots returns snapshots when DuckLake is attached."""
         from ohm.db import connect, attach_ducklake
+
         db_path = str(tmp_path / "local.duckdb")
         conn = connect(db_path)
         catalog_path = str(tmp_path / "ohm_lake.ducklake")
@@ -416,10 +395,7 @@ class TestDuckLakeTimeTravel:
             pytest.skip("DuckLake extension not available")
         store = OhmStore(db_path=db_path, agent_name="test_agent")
         store.attach_ducklake(catalog_path=catalog_path, data_path=data_path)
-        store.conn.execute(
-            "INSERT INTO ohm_lake.ohm_nodes (id, label, type, created_by, created_at, updated_at) "
-            "VALUES ('n1', 'Test', 'concept', 'test', '2026-01-01', '2026-01-01')"
-        )
+        store.conn.execute("INSERT INTO ohm_lake.ohm_nodes (id, label, type, created_by, created_at, updated_at) VALUES ('n1', 'Test', 'concept', 'test', '2026-01-01', '2026-01-01')")
         snapshots = store.list_snapshots()
         assert isinstance(snapshots, list)
         assert len(snapshots) >= 1
@@ -429,6 +405,7 @@ class TestDuckLakeTimeTravel:
     def test_graph_at_version_with_ducklake(self, tmp_path):
         """graph_at_version returns graph state at a specific snapshot."""
         from ohm.db import connect, attach_ducklake
+
         db_path = str(tmp_path / "local.duckdb")
         conn = connect(db_path)
         catalog_path = str(tmp_path / "ohm_lake.ducklake")
@@ -438,10 +415,7 @@ class TestDuckLakeTimeTravel:
             pytest.skip("DuckLake extension not available")
         store = OhmStore(db_path=db_path, agent_name="test_agent")
         store.attach_ducklake(catalog_path=catalog_path, data_path=data_path)
-        store.conn.execute(
-            "INSERT INTO ohm_lake.ohm_nodes (id, label, type, created_by, created_at, updated_at) "
-            "VALUES ('n1', 'Test', 'concept', 'test', '2026-01-01', '2026-01-01')"
-        )
+        store.conn.execute("INSERT INTO ohm_lake.ohm_nodes (id, label, type, created_by, created_at, updated_at) VALUES ('n1', 'Test', 'concept', 'test', '2026-01-01', '2026-01-01')")
         snapshots = store.list_snapshots()
         latest_version = snapshots[-1]["snapshot_id"]
         result = store.graph_at_version(latest_version)
@@ -483,9 +457,7 @@ class TestDuckLakeMirrorSync:
         assert result >= 2  # At least the two nodes
 
         # Verify mirror tables have data
-        mirror_count = store.conn.execute(
-            "SELECT COUNT(*) FROM ohm_lake.ohm_nodes"
-        ).fetchone()[0]
+        mirror_count = store.conn.execute("SELECT COUNT(*) FROM ohm_lake.ohm_nodes").fetchone()[0]
         assert mirror_count >= 2
 
         store.close()
@@ -513,9 +485,7 @@ class TestDuckLakeMirrorSync:
         assert result >= 3  # 2 nodes + 1 edge minimum
 
         # Verify edges in mirror
-        edge_count = store.conn.execute(
-            "SELECT COUNT(*) FROM ohm_lake.ohm_edges"
-        ).fetchone()[0]
+        edge_count = store.conn.execute("SELECT COUNT(*) FROM ohm_lake.ohm_edges").fetchone()[0]
         assert edge_count >= 1
 
         store.close()
@@ -542,9 +512,7 @@ class TestDuckLakeMirrorSync:
         assert result >= 2  # 1 node + 1 observation minimum
 
         # Verify observations in mirror
-        obs_count = store.conn.execute(
-            "SELECT COUNT(*) FROM ohm_lake.ohm_observations"
-        ).fetchone()[0]
+        obs_count = store.conn.execute("SELECT COUNT(*) FROM ohm_lake.ohm_observations").fetchone()[0]
         assert obs_count >= 1
 
         store.close()
@@ -573,9 +541,7 @@ class TestDuckLakeMirrorSync:
         assert result >= 1
 
         # Verify mirror tables have data
-        mirror_count = store.conn.execute(
-            "SELECT COUNT(*) FROM ohm_lake.ohm_nodes"
-        ).fetchone()[0]
+        mirror_count = store.conn.execute("SELECT COUNT(*) FROM ohm_lake.ohm_nodes").fetchone()[0]
         assert mirror_count >= 1
 
         store.close()
@@ -605,9 +571,7 @@ class TestDuckLakeMirrorSync:
         assert result["last_sync"] is not None
 
         # Verify mirror tables have data
-        mirror_count = store.conn.execute(
-            "SELECT COUNT(*) FROM ohm_lake.ohm_nodes"
-        ).fetchone()[0]
+        mirror_count = store.conn.execute("SELECT COUNT(*) FROM ohm_lake.ohm_nodes").fetchone()[0]
         assert mirror_count >= 1
 
         store.close()
@@ -634,9 +598,7 @@ class TestDuckLakeMirrorSync:
         assert result >= 5
 
         # Verify all 5 nodes in mirror
-        mirror_count = store.conn.execute(
-            "SELECT COUNT(*) FROM ohm_lake.ohm_nodes"
-        ).fetchone()[0]
+        mirror_count = store.conn.execute("SELECT COUNT(*) FROM ohm_lake.ohm_nodes").fetchone()[0]
         assert mirror_count >= 5
 
         store.close()
@@ -659,9 +621,7 @@ class TestDuckLakeMirrorSync:
         store.sync_to_ducklake(alias="ohm_lake")
 
         # Verify initial label in mirror
-        label = store.conn.execute(
-            "SELECT label FROM ohm_lake.ohm_nodes WHERE id = 'inc_node'"
-        ).fetchone()
+        label = store.conn.execute("SELECT label FROM ohm_lake.ohm_nodes WHERE id = 'inc_node'").fetchone()
         assert label is not None
         assert label[0] == "Original Label"
 
@@ -673,9 +633,7 @@ class TestDuckLakeMirrorSync:
         assert result >= 1  # At least the updated node
 
         # Verify updated label in mirror
-        updated_label = store.conn.execute(
-            "SELECT label FROM ohm_lake.ohm_nodes WHERE id = 'inc_node'"
-        ).fetchone()
+        updated_label = store.conn.execute("SELECT label FROM ohm_lake.ohm_nodes WHERE id = 'inc_node'").fetchone()
         assert updated_label is not None
         assert updated_label[0] == "Updated Label"
 

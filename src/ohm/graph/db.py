@@ -96,6 +96,7 @@ def connect(db_path: str | pathlib.Path | None = None) -> "duckdb.DuckDBPyConnec
 
     # Initialize schema
     from ohm.schema import initialize_schema
+
     initialize_schema(conn)
 
     # OHM-8n9: Auto-restore from DuckLake if tables are empty.
@@ -194,22 +195,15 @@ def _try_ducklake_recovery(db_path_str: str) -> bool:
             return False
 
         # Get latest snapshot
-        snapshots = tmp_conn.execute(
-            "SELECT snapshot_id FROM ducklake_snapshots('ohm_lake') "
-            "ORDER BY snapshot_time DESC LIMIT 1"
-        ).fetchone()
+        snapshots = tmp_conn.execute("SELECT snapshot_id FROM ducklake_snapshots('ohm_lake') ORDER BY snapshot_time DESC LIMIT 1").fetchone()
         if not snapshots:
             return False
 
         snapshot_id = snapshots[0]
 
         # Export nodes and edges from snapshot
-        nodes = tmp_conn.execute(
-            f"SELECT * FROM ohm_lake.ohm_nodes AT (VERSION => {snapshot_id})"
-        ).fetchall()
-        edges = tmp_conn.execute(
-            f"SELECT * FROM ohm_lake.ohm_edges AT (VERSION => {snapshot_id})"
-        ).fetchall()
+        nodes = tmp_conn.execute(f"SELECT * FROM ohm_lake.ohm_nodes AT (VERSION => {snapshot_id})").fetchall()
+        edges = tmp_conn.execute(f"SELECT * FROM ohm_lake.ohm_edges AT (VERSION => {snapshot_id})").fetchall()
 
         node_cols = [d[0] for d in tmp_conn.description]
         edge_cols = [d[0] for d in tmp_conn.description]
@@ -228,6 +222,7 @@ def _try_ducklake_recovery(db_path_str: str) -> bool:
         # Create fresh DB with OHM schema
         fresh_conn = duckdb.connect(db_path_str)
         from ohm.schema import initialize_schema
+
         initialize_schema(fresh_conn)
 
         # Import nodes
@@ -241,9 +236,7 @@ def _try_ducklake_recovery(db_path_str: str) -> bool:
             # which causes DuckDB FatalException (uncatchable abort)
             node_id = node_dict.get("id")
             if node_id:
-                existing = fresh_conn.execute(
-                    "SELECT id FROM ohm_nodes WHERE id = ?", [node_id]
-                ).fetchone()
+                existing = fresh_conn.execute("SELECT id FROM ohm_nodes WHERE id = ?", [node_id]).fetchone()
                 if existing:
                     continue  # Skip duplicates
             try:
@@ -264,9 +257,7 @@ def _try_ducklake_recovery(db_path_str: str) -> bool:
             # Check if already exists to avoid PK violation (DuckDB FatalException)
             edge_id = edge_dict.get("id")
             if edge_id:
-                existing = fresh_conn.execute(
-                    "SELECT id FROM ohm_edges WHERE id = ?", [edge_id]
-                ).fetchone()
+                existing = fresh_conn.execute("SELECT id FROM ohm_edges WHERE id = ?", [edge_id]).fetchone()
                 if existing:
                     continue
             try:
@@ -283,15 +274,18 @@ def _try_ducklake_recovery(db_path_str: str) -> bool:
                (table_name, row_id, operation, agent_name, new_data)
                VALUES (?, ?, ?, ?, ?)""",
             [
-                "ohm_meta", "recovery",
+                "ohm_meta",
+                "recovery",
                 "RECOVERY",
                 "ohmd",
-                json.dumps({
-                    "snapshot_id": snapshot_id,
-                    "nodes_restored": len(nodes),
-                    "edges_restored": len(edges),
-                    "corrupted_db": backup_path,
-                }),
+                json.dumps(
+                    {
+                        "snapshot_id": snapshot_id,
+                        "nodes_restored": len(nodes),
+                        "edges_restored": len(edges),
+                        "corrupted_db": backup_path,
+                    }
+                ),
             ],
         )
 
@@ -317,9 +311,7 @@ def _auto_restore_if_empty(conn: "duckdb.DuckDBPyConnection", db_path_str: str) 
     attempt to restore from the latest DuckLake snapshot.
     """
     try:
-        node_count = conn.execute(
-            "SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL"
-        ).fetchone()[0]  # type: ignore[index]
+        node_count = conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL").fetchone()[0]  # type: ignore[index]
     except Exception:
         return
 
@@ -347,24 +339,15 @@ def _auto_restore_if_empty(conn: "duckdb.DuckDBPyConnection", db_path_str: str) 
             logger.debug("Failed to attach DuckLake catalog for auto-restore: %s", e, exc_info=True)
             return
 
-        snapshots = tmp_conn.execute(
-            "SELECT snapshot_id FROM ducklake_snapshots('ohm_lake') "
-            "ORDER BY snapshot_time DESC LIMIT 1"
-        ).fetchone()
+        snapshots = tmp_conn.execute("SELECT snapshot_id FROM ducklake_snapshots('ohm_lake') ORDER BY snapshot_time DESC LIMIT 1").fetchone()
         if not snapshots:
             return
 
         snapshot_id = snapshots[0]
 
-        nodes = tmp_conn.execute(
-            f"SELECT * FROM ohm_lake.ohm_nodes AT (VERSION => {snapshot_id}) "
-            "WHERE deleted_at IS NULL"
-        ).fetchall()
+        nodes = tmp_conn.execute(f"SELECT * FROM ohm_lake.ohm_nodes AT (VERSION => {snapshot_id}) WHERE deleted_at IS NULL").fetchall()
         node_cols = [d[0] for d in tmp_conn.description]
-        edges = tmp_conn.execute(
-            f"SELECT * FROM ohm_lake.ohm_edges AT (VERSION => {snapshot_id}) "
-            "WHERE deleted_at IS NULL"
-        ).fetchall()
+        edges = tmp_conn.execute(f"SELECT * FROM ohm_lake.ohm_edges AT (VERSION => {snapshot_id}) WHERE deleted_at IS NULL").fetchall()
         edge_cols = [d[0] for d in tmp_conn.description]
 
         if not nodes and not edges:
@@ -415,15 +398,18 @@ def _auto_restore_if_empty(conn: "duckdb.DuckDBPyConnection", db_path_str: str) 
                    (table_name, row_id, operation, agent_name, new_data)
                    VALUES (?, ?, ?, ?, ?)""",
                 [
-                    "ohm_meta", "auto_restore",
+                    "ohm_meta",
+                    "auto_restore",
                     "AUTO_RESTORE",
                     "ohmd",
-                    json.dumps({
-                        "trigger": "empty_graph_on_startup",
-                        "snapshot_id": snapshot_id,
-                        "nodes_restored": node_count_restored,
-                        "edges_restored": edge_count_restored,
-                    }),
+                    json.dumps(
+                        {
+                            "trigger": "empty_graph_on_startup",
+                            "snapshot_id": snapshot_id,
+                            "nodes_restored": node_count_restored,
+                            "edges_restored": edge_count_restored,
+                        }
+                    ),
                 ],
             )
 
@@ -464,10 +450,7 @@ def attach_ducklake(
     """
     # Check if DuckLake extension is loaded
     try:
-        result = conn.execute(
-            "SELECT extension_name FROM duckdb_extensions()"
-            " WHERE loaded = true AND extension_name = 'ducklake'"
-        ).fetchone()
+        result = conn.execute("SELECT extension_name FROM duckdb_extensions() WHERE loaded = true AND extension_name = 'ducklake'").fetchone()
         if result is None:
             return False  # extension not loaded
     except Exception as e:

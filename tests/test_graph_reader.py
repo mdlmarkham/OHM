@@ -38,10 +38,18 @@ class TestEdgeRecord:
 
     def test_full_fields(self):
         e = EdgeRecord(
-            "A", "B", "CAUSES", layer="L3",
-            probability=0.7, confidence=0.9,
-            probability_p05=0.5, probability_p50=0.7, probability_p95=0.9,
-            confidence_p05=0.8, confidence_p50=0.9, confidence_p95=0.95,
+            "A",
+            "B",
+            "CAUSES",
+            layer="L3",
+            probability=0.7,
+            confidence=0.9,
+            probability_p05=0.5,
+            probability_p50=0.7,
+            probability_p95=0.9,
+            confidence_p05=0.8,
+            confidence_p50=0.9,
+            confidence_p95=0.95,
         )
         assert e.layer == "L3"
         assert e.probability_p50 == 0.7
@@ -62,7 +70,9 @@ class TestNodeRecord:
 
     def test_decision_node_with_utility(self):
         n = NodeRecord(
-            "dec-1", "Decision", "decision",
+            "dec-1",
+            "Decision",
+            "decision",
             utility_scale=0.8,
             utility_usd_per_day=1500.0,
             utility_currency="USD",
@@ -177,6 +187,7 @@ class TestProtocolConformance:
 
     def test_duckdb_reader_is_graph_reader(self):
         import duckdb
+
         conn = duckdb.connect(":memory:")
         reader = DuckDBGraphReader(conn)
         assert isinstance(reader, GraphReader)
@@ -192,6 +203,7 @@ class TestCoerceReader:
 
     def test_wraps_raw_conn(self):
         import duckdb
+
         conn = duckdb.connect(":memory:")
         reader = coerce_reader(conn)
         assert isinstance(reader, DuckDBGraphReader)
@@ -199,12 +211,14 @@ class TestCoerceReader:
 
     def test_raw_conn_extracts_from_duckdb_reader(self):
         import duckdb
+
         conn = duckdb.connect(":memory:")
         reader = DuckDBGraphReader(conn)
         assert raw_conn(reader) is conn
 
     def test_raw_conn_passthrough(self):
         import duckdb
+
         conn = duckdb.connect(":memory:")
         assert raw_conn(conn) is conn
 
@@ -239,8 +253,7 @@ class TestComputeVoiWithMock:
             edges=[EdgeRecord("A", "D", "CAUSES", probability=0.8)],
             nodes=[
                 NodeRecord("A", "Root", "concept"),
-                NodeRecord("D", "Decision", "decision",
-                           utility_usd_per_day=500.0, utility_currency="USD"),
+                NodeRecord("D", "Decision", "decision", utility_usd_per_day=500.0, utility_currency="USD"),
             ],
         )
         result = compute_voi(reader, decision_nodes=["D"])
