@@ -330,3 +330,101 @@ class TestLazySchemaMigration:
         # meta.json should be updated (atomic writes prevent partial reads)
         meta = json.loads(meta_path.read_text())
         assert meta["schema_version"] == SCHEMA_VERSION
+
+
+class TestCrashConsistentMigration:
+    def test_reconcile_detects_meta_behind(self, tm, tmp_path):
+        from ohm.schema import SCHEMA_VERSION
+
+        tm.provision("acme_hvac")
+
+        # Set meta.json behind (simulate stale after upgrade)
+        meta_path = tmp_path / "tenants" / "acme_hvac" / "meta.json"
+        meta = json.loads(meta_path.read_text())
+        meta["schema_version"] = "0.1.0"
+        meta_path.write_text(json.dumps(meta, indent=2))
+        tm._evict("acme_hvac")
+
+        results = tm.reconcile_tenants()
+        assert len(results) == 1
+        assert results[0]["customer_id"] == "acme_hvac"
+        assert results[0]["status"] == "meta_behind"
+
+        # meta.json should be auto-corrected
+        meta = json.loads(meta_path.read_text())
+        assert meta["schema_version"] == SCHEMA_VERSION
+
+    def test_reconcile_detects_half_migrated(self, tm, tmp_path):
+        tm.provision("acme_hvac")
+
+        # Simulate crash mid-migration: leave .migration_lock file
+        lock_path = tmp_path / "tenants" / "acme_hvac" / ".migration_lock"
+        lock_path.write_text(json.dumps({
+            "customer_id": "acme_hvac",
+            "from_version": "0.1.0",
+            "to_version": "0.18.0",
+            "started_at": "2026-05-24T00:00:00+00:00",
+        }))
+
+        results = tm.reconcile_tenants()
+        assert len(results) == 1
+        assert results[0]["status"] == "half_migrated"
+
+        meta_path = tmp_path / "tenants" / "acme_hvac" / "meta.json"
+        meta = json.loads(meta_path.read_text())
+        assert meta.get("needs_attention") is True
+
+    def test_reconcile_all_ok(self, tm):
+        tm.provision("acme_hvac")
+
+        results = tm.reconcile_tenants()
+        assert len(results) == 1
+        assert results[0]["status"] == "ok"
+
+    def test_migration_lock_created_during_migration(self, tm, tmp_path, monkeypatch):
+        from ohm.schema import SCHEMA_VERSION
+
+        tm.provision("acme_hvac")
+        store = tm.get_store("acme_hvac")
+        store.conn.execute("UPDATE ohm_meta SET value = '0.1.0' WHERE key = 'schema_version'")
+
+        meta_path = tmp_path / "tenants" / "acme_hvac" / "meta.json"
+        meta = json.loads(meta_path.read_text())
+        meta["schema_version"] = "0.1.0"
+        meta_path.write_text(json.dumps(meta, indent=2))
+
+        import ohm.schema as schema_mod
+        monkeypatch.setattr(schema_mod, "get_schema_version", lambda conn: "0.1.0")
+
+        lock_path = tmp_path / "tenants" / "acme_hvac" / ".migration_lock"
+
+        # Make _apply_migrations raise to simulate crash
+        monkeypatch.setattr(schema_mod, "_apply_migrations", lambda conn: (_ for _ in ()).throw(RuntimeError("crash")))
+
+        tm._apply_lazy_migrations("acme_hvac", store)
+
+        # Lock file should persist after failed migration
+        assert lock_path.exists()
+
+    def test_migration_lock_cleaned_after_success(self, tm, tmp_path, monkeypatch):
+        from ohm.schema import SCHEMA_VERSION
+
+        tm.provision("acme_hvac")
+
+        # Set meta behind, DB is already current (OhmStore init migrated it)
+        meta_path = tmp_path / "tenants" / "acme_hvac" / "meta.json"
+        meta = json.loads(meta_path.read_text())
+        meta["schema_version"] = "0.1.0"
+        meta_path.write_text(json.dumps(meta, indent=2))
+
+        # Simulate stale lock file from a previous crash
+        lock_path = tmp_path / "tenants" / "acme_hvac" / ".migration_lock"
+        lock_path.write_text("{}")
+
+        tm._evict("acme_hvac")
+        store = tm.get_store("acme_hvac")
+
+        # Lock file should be cleaned up (DB is already current)
+        assert not lock_path.exists()
+        meta = json.loads(meta_path.read_text())
+        assert meta["schema_version"] == SCHEMA_VERSION

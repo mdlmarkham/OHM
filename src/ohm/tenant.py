@@ -250,6 +250,109 @@ class TenantManager:
                     pass
             self._cache.clear()
 
+    def reconcile_tenants(self) -> list[dict]:
+        """Startup scan: detect tenants with drifted meta.json (OHM-xflr).
+
+        Compares each tenant's meta.json schema_version against the actual
+        DB schema version. Flags mismatches as needs_attention.
+
+        Also detects tenants left in a half-migrated state (kill -9 during
+        migration): the migration lock file persists and schema_version in
+        meta.json is behind the current version.
+
+        Returns a list of dicts with keys:
+            customer_id, meta_version, db_version, status
+        where status is one of: ok, meta_behind, db_behind, half_migrated.
+        """
+        from ohm.schema import SCHEMA_VERSION, get_schema_version
+
+        def _vtuple(v: str) -> tuple[int, ...]:
+            return tuple(int(x) for x in v.split("."))
+
+        target_key = _vtuple(SCHEMA_VERSION)
+        results = []
+
+        for meta in self.list_tenants():
+            cid = meta.get("customer_id", "")
+            if not cid:
+                continue
+
+            tenant_version = meta.get("schema_version", 1)
+            if isinstance(tenant_version, int):
+                tenant_version_str = f"0.{tenant_version}.0"
+            else:
+                tenant_version_str = str(tenant_version)
+            meta_key = _vtuple(tenant_version_str)
+
+            # Check for migration lock file (indicates crash mid-migration)
+            lock_path = self._tenant_dir(cid) / ".migration_lock"
+            if lock_path.exists():
+                results.append({
+                    "customer_id": cid,
+                    "meta_version": tenant_version_str,
+                    "db_version": "unknown",
+                    "status": "half_migrated",
+                })
+                meta["needs_attention"] = True
+                meta["migration_error"] = "Migration lock file found — previous migration may have crashed"
+                self._write_meta(cid, meta)
+                continue
+
+            # Open DB to check actual schema version
+            try:
+                db_path = self._tenant_dir(cid) / _DB_FILENAME
+                if not db_path.exists():
+                    results.append({
+                        "customer_id": cid,
+                        "meta_version": tenant_version_str,
+                        "db_version": "missing",
+                        "status": "meta_behind",
+                    })
+                    continue
+
+                store = self.get_store(cid)
+                db_version = get_schema_version(store.conn)
+                db_key = _vtuple(db_version)
+
+                if meta_key < db_key:
+                    status = "meta_behind"
+                    meta["schema_version"] = db_version
+                    meta.pop("needs_attention", None)
+                    meta.pop("migration_error", None)
+                    self._write_meta(cid, meta)
+                elif db_key < meta_key:
+                    status = "db_behind"
+                    meta["needs_attention"] = True
+                    meta["migration_error"] = f"DB version {db_version} behind meta version {tenant_version_str}"
+                    self._write_meta(cid, meta)
+                else:
+                    status = "ok"
+
+                results.append({
+                    "customer_id": cid,
+                    "meta_version": tenant_version_str,
+                    "db_version": db_version,
+                    "status": status,
+                })
+            except Exception as e:
+                results.append({
+                    "customer_id": cid,
+                    "meta_version": tenant_version_str,
+                    "db_version": "error",
+                    "status": "meta_behind",
+                })
+                meta["needs_attention"] = True
+                meta["migration_error"] = f"Reconciliation error: {e}"
+                self._write_meta(cid, meta)
+
+        drifted = [r for r in results if r["status"] != "ok"]
+        if drifted:
+            logger.warning("Reconciliation found %d drifted tenants: %s", len(drifted), [r["customer_id"] for r in drifted])
+        else:
+            logger.info("Reconciliation: all tenants OK")
+
+        return results
+
     # ── Internal helpers ──────────────────────────────────────────────────────
 
     def _write_meta(self, customer_id: str, meta: dict) -> None:
@@ -288,6 +391,10 @@ class TenantManager:
         If meta.json reports a version behind the DB, we update meta.json.
         If meta.json reports a version ahead of the DB (unlikely), we attempt
         to migrate and mark needs_attention on failure.
+
+        Migration lock file (.migration_lock) is created before applying
+        migrations and removed after success. If a crash occurs mid-migration,
+        the lock file persists and reconcile_tenants() detects it (OHM-xflr).
         """
         from ohm.schema import SCHEMA_VERSION, get_schema_version
 
@@ -312,6 +419,8 @@ class TenantManager:
         if entry is None:
             return
 
+        lock_path = self._tenant_dir(customer_id) / ".migration_lock"
+
         with entry.write_lock:
             db_version = get_schema_version(store.conn)
             db_key = _vtuple(db_version)
@@ -319,7 +428,12 @@ class TenantManager:
             if db_key >= target_key:
                 # DB is already current (OhmStore init migrated it) — sync meta.json
                 meta["schema_version"] = SCHEMA_VERSION
+                meta.pop("needs_attention", None)
+                meta.pop("migration_error", None)
                 self._write_meta(customer_id, meta)
+                # Clean up stale lock file if present
+                if lock_path.exists():
+                    lock_path.unlink(missing_ok=True)
                 logger.info("Synced meta.json for tenant %s to schema %s", customer_id, SCHEMA_VERSION)
                 return
 
@@ -327,17 +441,28 @@ class TenantManager:
                 "Migrating tenant %s from %s to %s",
                 customer_id, db_version, SCHEMA_VERSION,
             )
+            # Write migration lock file for crash detection
+            lock_path.write_text(json.dumps({
+                "customer_id": customer_id,
+                "from_version": db_version,
+                "to_version": SCHEMA_VERSION,
+                "started_at": datetime.now(timezone.utc).isoformat(),
+            }))
             try:
                 from ohm.schema import _apply_migrations
                 _apply_migrations(store.conn)
                 meta["schema_version"] = SCHEMA_VERSION
+                meta.pop("needs_attention", None)
+                meta.pop("migration_error", None)
                 self._write_meta(customer_id, meta)
+                lock_path.unlink(missing_ok=True)
                 logger.info("Migrated tenant %s to schema %s", customer_id, SCHEMA_VERSION)
             except Exception as e:
                 logger.error("Migration failed for tenant %s: %s", customer_id, e)
                 meta["needs_attention"] = True
                 meta["migration_error"] = str(e)
                 self._write_meta(customer_id, meta)
+                # Leave lock file in place — reconcile_tenants() will detect it
 
     def _evict(self, customer_id: str) -> None:
         """Remove *customer_id* from the cache and close its store."""
