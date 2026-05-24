@@ -16,6 +16,9 @@ _IDENTIFIER_RE = re.compile(r"^[a-zA-Z0-9_\-\.]+$")
 # Layer values: exactly L1, L2, L3, L4
 _LAYER_RE = re.compile(r"^L[1-4]$")
 
+# Customer ID: alphanumeric, underscore, hyphen — NO dots or path separators
+_CUSTOMER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{2,63}$")
+
 # ISO timestamp: basic format check
 _ISO_TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?)?(Z|[+-]\d{2}:?\d{2})?$")
 
@@ -30,6 +33,34 @@ def validate_identifier(value: str, *, name: str = "value") -> str:
     """
     if not value or not _IDENTIFIER_RE.match(value):
         raise ValueError(f"Invalid {name}: '{value}' — must contain only alphanumeric characters, underscores, hyphens, and dots")
+    return value
+
+
+def validate_customer_id(value: str) -> str:
+    """Validate that *value* is a safe customer_id for filesystem path construction.
+
+    Stricter than validate_identifier: no dots (path traversal via ``..``),
+    no slashes, no null bytes. Must start with alphanumeric, 3-64 chars,
+    lowercase alphanumeric + underscore + hyphen only.
+
+    Returns *value* unchanged if valid.
+
+    Raises:
+        ValueError: If *value* contains unsafe characters or patterns.
+    """
+    if not value:
+        raise ValueError("Invalid customer_id: empty value")
+    if "\x00" in value:
+        raise ValueError(f"Invalid customer_id: null byte detected in '{value}'")
+    if ".." in value:
+        raise ValueError(f"Invalid customer_id: path traversal sequence in '{value}'")
+    if "/" in value or "\\" in value:
+        raise ValueError(f"Invalid customer_id: path separator in '{value}'")
+    if not _CUSTOMER_ID_RE.match(value):
+        raise ValueError(
+            f"Invalid customer_id: '{value}' — must be 3-64 chars, "
+            "lowercase alphanumeric, underscore, or hyphen, starting with alphanumeric"
+        )
     return value
 
 
