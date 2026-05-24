@@ -105,16 +105,18 @@ class TenantManager:
         store = OhmStore(db_path=str(db_path), agent_name="ohmd", schema=schema)
         store.close()
 
+        from ohm.schema import SCHEMA_VERSION
+
         meta = {
             "customer_id": customer_id,
             "domain": domain,
             "tier": tier,
-            "schema_version": 1,
+            "schema_version": SCHEMA_VERSION,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "shared_patterns": False,
             "integrations": {},
         }
-        (tenant_dir / _META_FILENAME).write_text(json.dumps(meta, indent=2))
+        self._write_meta(customer_id, meta)
         logger.info("Provisioned tenant %s (domain=%s, tier=%s)", customer_id, domain, tier)
         return meta
 
@@ -123,14 +125,25 @@ class TenantManager:
 
         Raises TenantNotFoundError if the tenant has not been provisioned.
         Promotes the entry to MRU position in the LRU cache.
+
+        If the tenant's schema_version is behind the current OHM version,
+        pending migrations are applied automatically before returning the
+        store (OHM-tss4.5).
         """
         customer_id = validate_customer_id(customer_id)
+
         with self._cache_lock:
             if customer_id in self._cache:
                 entry = self._cache[customer_id]
                 self._cache.move_to_end(customer_id)
                 entry.touch()
-                return entry.store
+                store = entry.store
+            else:
+                store = None
+
+        if store is not None:
+            self._apply_lazy_migrations(customer_id, store)
+            return store
 
         # Not cached — open and insert (dropping LRU entry if at capacity)
         meta = self._read_meta(customer_id)
@@ -145,12 +158,13 @@ class TenantManager:
                 entry = self._cache[customer_id]
                 self._cache.move_to_end(customer_id)
                 entry.touch()
-                return entry.store
+                store = entry.store
+            else:
+                self._cache[customer_id] = _TenantEntry(store)
+                self._cache.move_to_end(customer_id)
+                self._evict_lru_unlocked()
 
-            self._cache[customer_id] = _TenantEntry(store)
-            self._cache.move_to_end(customer_id)
-            self._evict_lru_unlocked()
-
+        self._apply_lazy_migrations(customer_id, store)
         return store
 
     def get_write_lock(self, customer_id: str) -> threading.Lock:
@@ -238,6 +252,13 @@ class TenantManager:
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
+    def _write_meta(self, customer_id: str, meta: dict) -> None:
+        """Atomically write meta.json for a tenant (write to temp, then rename)."""
+        meta_path = self._tenant_dir(customer_id) / _META_FILENAME
+        tmp_path = meta_path.with_suffix(".tmp")
+        tmp_path.write_text(json.dumps(meta, indent=2))
+        tmp_path.replace(meta_path)
+
     def _tenant_dir(self, customer_id: str) -> Path:
         return self._tenants_dir / customer_id
 
@@ -256,6 +277,67 @@ class TenantManager:
                 except Exception as e:
                     logger.warning("Could not load template %s: %s — using default", json_path, e)
         return SchemaConfig.from_json_file(str(Path(__file__).parent / "graph" / "templates" / "ohm.json")) if (Path(__file__).parent / "graph" / "templates" / "ohm.json").exists() else SchemaConfig()
+
+    def _apply_lazy_migrations(self, customer_id: str, store: OhmStore) -> None:
+        """Apply pending schema migrations to a tenant instance (OHM-tss4.5).
+
+        On first access after an OHM upgrade, the OhmStore constructor already
+        runs initialize_schema + _apply_migrations, so the DB is at the current
+        version. This method syncs meta.json with the actual DB version.
+
+        If meta.json reports a version behind the DB, we update meta.json.
+        If meta.json reports a version ahead of the DB (unlikely), we attempt
+        to migrate and mark needs_attention on failure.
+        """
+        from ohm.schema import SCHEMA_VERSION, get_schema_version
+
+        meta = self._read_meta(customer_id)
+        tenant_version = meta.get("schema_version", 1)
+        if isinstance(tenant_version, int):
+            tenant_version_str = f"0.{tenant_version}.0"
+        else:
+            tenant_version_str = str(tenant_version)
+
+        def _vtuple(v: str) -> tuple[int, ...]:
+            return tuple(int(x) for x in v.split("."))
+
+        # Compare meta.json version against current OHM version
+        meta_key = _vtuple(tenant_version_str)
+        target_key = _vtuple(SCHEMA_VERSION)
+        if meta_key >= target_key:
+            return
+
+        # Acquire per-tenant write lock for migration
+        entry = self._cache.get(customer_id)
+        if entry is None:
+            return
+
+        with entry.write_lock:
+            db_version = get_schema_version(store.conn)
+            db_key = _vtuple(db_version)
+
+            if db_key >= target_key:
+                # DB is already current (OhmStore init migrated it) — sync meta.json
+                meta["schema_version"] = SCHEMA_VERSION
+                self._write_meta(customer_id, meta)
+                logger.info("Synced meta.json for tenant %s to schema %s", customer_id, SCHEMA_VERSION)
+                return
+
+            logger.info(
+                "Migrating tenant %s from %s to %s",
+                customer_id, db_version, SCHEMA_VERSION,
+            )
+            try:
+                from ohm.schema import _apply_migrations
+                _apply_migrations(store.conn)
+                meta["schema_version"] = SCHEMA_VERSION
+                self._write_meta(customer_id, meta)
+                logger.info("Migrated tenant %s to schema %s", customer_id, SCHEMA_VERSION)
+            except Exception as e:
+                logger.error("Migration failed for tenant %s: %s", customer_id, e)
+                meta["needs_attention"] = True
+                meta["migration_error"] = str(e)
+                self._write_meta(customer_id, meta)
 
     def _evict(self, customer_id: str) -> None:
         """Remove *customer_id* from the cache and close its store."""
