@@ -518,3 +518,5 @@
 {"id":"int-b9d37448","kind":"field_change","created_at":"2026-05-24T20:32:32.108311211Z","actor":"Claude","issue_id":"OHM-xbbi","extra":{"field":"assignee","new_value":"OpenCode","old_value":""}}
 {"id":"int-0990756e","kind":"field_change","created_at":"2026-05-24T20:32:32.747202015Z","actor":"Claude","issue_id":"OHM-uwl2","extra":{"field":"assignee","new_value":"OpenCode","old_value":""}}
 {"id":"int-fb9481d0","kind":"field_change","created_at":"2026-05-24T20:37:51.773833594Z","actor":"Claude","issue_id":"OHM-tss4.6","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
+{"id":"int-d16b9ae9","kind":"field_change","created_at":"2026-05-24T20:56:30.152728582Z","actor":"Claude","issue_id":"OHM-tss4.9","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
+{"id":"int-d9226396","kind":"field_change","created_at":"2026-05-24T20:56:30.655285847Z","actor":"Claude","issue_id":"OHM-s18r","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}

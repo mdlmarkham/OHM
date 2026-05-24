@@ -2835,7 +2835,24 @@ class OhmHandler(BaseHTTPRequestHandler):
                     method_name = mn
                     break
         if method_name:
-            getattr(self, method_name)(path, qs, body, agent)
+            # Acquire the per-tenant write lock for multi-tenant customer requests.
+            # DuckDB is single-writer; serializing at this layer prevents concurrent
+            # write conflicts within the same tenant's isolated DuckDB file.
+            # Agent token requests (customer_id=None) and single-tenant mode skip this.
+            customer_id = self._customer_id
+            if customer_id and self.tenant_manager:
+                from ohm.tenant import TenantNotFoundError
+
+                try:
+                    write_lock = self.tenant_manager.get_write_lock(customer_id)
+                except TenantNotFoundError:
+                    raise PermissionDeniedError(
+                        f"Tenant '{customer_id}' is not provisioned — contact your administrator"
+                    )
+                with write_lock:
+                    getattr(self, method_name)(path, qs, body, agent)
+            else:
+                getattr(self, method_name)(path, qs, body, agent)
         else:
             self._json_response(404, {"error": f"Unknown endpoint: {path}"})
 
