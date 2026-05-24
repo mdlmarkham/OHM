@@ -13,7 +13,7 @@ from http.client import HTTPConnection
 
 import pytest
 
-from ohm.server import OhmHandler, _hash_token, _verify_token, _build_token_lookup
+from ohm.server import OhmHandler, _hash_token, _verify_token, _build_token_lookup, _trigger_webhooks, _webhook_registry, _webhook_lock
 from ohm.schema import DEFAULT_SCHEMA, TOPO_SCHEMA
 from ohm.store import OhmStore
 
@@ -3399,3 +3399,83 @@ class TestGitHubBacklogFixes:
         assert status == 200
         for entry in data.get("rankings", []):
             assert "low_data_warning" not in entry, f"low_data_warning should not appear when min_observations=0: {entry}"
+
+
+class TestWebhookTenantIsolation:
+    """OHM-ym2f: Webhook registry must not fire cross-tenant (tenant A webhook ≠ tenant B events)."""
+
+    def setup_method(self):
+        with _webhook_lock:
+            _webhook_registry.clear()
+
+    def teardown_method(self):
+        with _webhook_lock:
+            _webhook_registry.clear()
+
+    def test_webhook_fires_for_matching_tenant(self):
+        """Webhook registered under customer_id='a' fires when event is triggered for 'a'."""
+        fired = []
+
+        def fake_deliver(url, event, timeout=5.0):
+            fired.append((url, event))
+            return True
+
+        import ohm.server as srv
+
+        original = srv._deliver_webhook
+        srv._deliver_webhook = fake_deliver
+        try:
+            with _webhook_lock:
+                _webhook_registry["tenant_a"] = {"agent1": {"url": "https://example.com/hook", "events": ["node.created"]}}
+
+            _trigger_webhooks({"type": "node.created", "agent": "agent1", "node": {}}, customer_id="tenant_a")
+            assert len(fired) == 1
+            assert fired[0][0] == "https://example.com/hook"
+        finally:
+            srv._deliver_webhook = original
+
+    def test_webhook_does_not_fire_for_different_tenant(self):
+        """Webhook registered under customer_id='a' must NOT fire for customer_id='b' events."""
+        fired = []
+
+        def fake_deliver(url, event, timeout=5.0):
+            fired.append(url)
+            return True
+
+        import ohm.server as srv
+
+        original = srv._deliver_webhook
+        srv._deliver_webhook = fake_deliver
+        try:
+            with _webhook_lock:
+                _webhook_registry["tenant_a"] = {"agent1": {"url": "https://example.com/hook", "events": ["*"]}}
+
+            _trigger_webhooks({"type": "node.created", "agent": "agent2", "node": {}}, customer_id="tenant_b")
+            assert fired == [], f"Cross-tenant webhook fired: {fired}"
+        finally:
+            srv._deliver_webhook = original
+
+    def test_webhook_none_tenant_fires_for_none_events(self):
+        """Single-tenant (customer_id=None) webhooks fire for customer_id=None events only."""
+        fired = []
+
+        def fake_deliver(url, event, timeout=5.0):
+            fired.append(url)
+            return True
+
+        import ohm.server as srv
+
+        original = srv._deliver_webhook
+        srv._deliver_webhook = fake_deliver
+        try:
+            with _webhook_lock:
+                _webhook_registry[None] = {"agent_st": {"url": "https://example.com/st", "events": ["*"]}}
+
+            _trigger_webhooks({"type": "edge.created", "agent": "agent_st"}, customer_id=None)
+            assert len(fired) == 1
+
+            fired.clear()
+            _trigger_webhooks({"type": "edge.created", "agent": "other"}, customer_id="some_tenant")
+            assert fired == [], "Single-tenant webhook must not fire for tenant-scoped event"
+        finally:
+            srv._deliver_webhook = original

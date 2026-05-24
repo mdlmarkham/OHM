@@ -64,6 +64,9 @@ RATE_LIMIT_WINDOW = 60  # seconds
 RATE_LIMIT_MAX_REQUESTS = 1000  # per window per IP
 
 # Simple in-memory rate limiter: {ip: [(timestamp, ...)]}
+# Keyed by client IP — provides DDoS/abuse protection at the network level.
+# Per-customer quota enforcement (keyed by customer_id) is tracked separately
+# in OHM-982m once tss4.3 customer API keys are available.
 _rate_limit_store: dict[str, list[float]] = {}
 _rate_limit_lock = threading.Lock()
 
@@ -83,16 +86,19 @@ _request_latencies: collections.deque = collections.deque(maxlen=1000)
 
 # ── Webhook Registry ──────────────────────────────────────
 
-# In-memory registry: {agent_name: {"url": str, "events": list[str]}}
-# Agents register their callback URL and the event types they want to receive.
-_webhook_registry: dict[str, dict] = {}
+# In-memory registry: {customer_id: {agent_name: {"url": str, "events": list[str]}}}
+# Nested by customer_id so webhooks only fire within the originating tenant.
+# customer_id=None is the single-tenant default (backward compat with pre-MT deployments).
+_webhook_registry: dict[str | None, dict[str, dict]] = {}
 _webhook_lock = threading.Lock()
 
 
 # ── SSE Subscriber Registry ──────────────────────────────────────────────────
 
-# In-memory registry: {subscription_id: {"agent_name": str, "since": str, "last_event_id": str}}
-# SSE subscribers receive real-time change feed events as they occur.
+# In-memory registry: {subscription_id: {"agent_name": str, "since": str, ..., "customer_id": str|None}}
+# SSE subscribers receive change feed events from their own tenant's store only.
+# customer_id is stored for audit; actual isolation is enforced by routing each
+# handler to the correct OhmStore (tss4.4). customer_id=None = single-tenant default.
 _sse_subscribers: dict[str, dict] = {}
 _sse_lock = threading.Lock()
 
@@ -158,12 +164,13 @@ def _deliver_webhook(url: str, event: dict, timeout: float = 5.0) -> bool:
         return False
 
 
-def _trigger_webhooks(event: dict) -> None:
-    """Trigger webhooks for all registered agents matching the event.
+def _trigger_webhooks(event: dict, customer_id: str | None = None) -> None:
+    """Trigger webhooks for agents registered in customer_id's tenant.
 
     Events are delivered asynchronously to avoid blocking the request that
-    triggered them. Each registered agent receives the event if they subscribed
-    to that event type.
+    triggered them. Only webhooks registered under the same customer_id
+    receive the event — preventing cross-tenant event leakage.
+    customer_id=None selects the single-tenant default bucket.
     """
     import concurrent.futures
 
@@ -175,11 +182,11 @@ def _trigger_webhooks(event: dict) -> None:
         if url and (event_type in events or "*" in events):
             _deliver_webhook(url, event)
 
-    # Snapshot registry under lock, then deliver without holding the lock
+    # Snapshot only the customer's bucket under lock, then deliver without holding the lock
     with _webhook_lock:
-        registry_snapshot = dict(_webhook_registry)
+        tenant_registry = dict(_webhook_registry.get(customer_id, {}))
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        for agent_name, config in registry_snapshot.items():
+        for agent_name, config in tenant_registry.items():
             executor.submit(deliver_to_agent, agent_name, config)
 
 
@@ -491,6 +498,17 @@ class OhmHandler(BaseHTTPRequestHandler):
     _POST_PREFIXES: list = []
     _DELETE_PREFIXES: list = []
 
+    @property
+    def _customer_id(self) -> str | None:
+        """Return the authenticated customer's tenant ID, or None in single-tenant mode.
+
+        In single-tenant mode (pre-tss4.3) this always returns None, which routes all
+        webhooks and SSE subscriptions into the shared default bucket — preserving
+        backward compatibility. tss4.4 overrides this by setting self._resolved_customer_id
+        from the customer API key validated during _authenticate().
+        """
+        return getattr(self, "_resolved_customer_id", None)
+
     def log_message(self, format, *args):
         """Structured request logging with correlation ID."""
         import re
@@ -627,6 +645,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                 "filter_layer": filter_layer,
                 "filter_node_type": filter_node_type,
                 "filter_node_id": filter_node_id,
+                "customer_id": self._customer_id,
             }
 
         # Send SSE headers
@@ -1227,7 +1246,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             self.store._log_change("ohm_nodes", node_id, "UPDATE", "L3", agent_name=agent)
             self.store._increment_graph_generation()
             updated = self.store.get_node(node_id)
-            _trigger_webhooks({"type": "node.updated", "agent": agent, "node": updated})
+            _trigger_webhooks({"type": "node.updated", "agent": agent, "node": updated}, customer_id=self._customer_id)
             self._json_response(200, updated)
 
         elif path.startswith("/edge/"):
@@ -1284,7 +1303,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             self.store._log_change("ohm_edges", edge_id, "UPDATE", edge["layer"], agent_name=agent)
             self.store._increment_graph_generation()  # Invalidate Bayesian network cache on edge update
             updated = self.store.get_edge(edge_id)
-            _trigger_webhooks({"type": "edge.updated", "agent": agent, "edge": updated})
+            _trigger_webhooks({"type": "edge.updated", "agent": agent, "edge": updated}, customer_id=self._customer_id)
             self._json_response(200, updated)
         else:
             raise ValidationError(f"Unknown PATCH path: {path}")
@@ -2767,7 +2786,8 @@ class OhmHandler(BaseHTTPRequestHandler):
                 "type": event_type,
                 "agent": agent,
                 "node": result,
-            }
+            },
+            customer_id=self._customer_id,
         )
         if result.get("created", True):
             self._json_response(201, result)
@@ -2820,7 +2840,8 @@ class OhmHandler(BaseHTTPRequestHandler):
                 "type": "edge.created",
                 "agent": agent,
                 "edge": result,
-            }
+            },
+            customer_id=self._customer_id,
         )
         self._json_response(201, result)
 
@@ -2841,7 +2862,8 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "agent": agent,
                     "edge": result,
                     "challenge_type": challenge_type,
-                }
+                },
+                customer_id=self._customer_id,
             )
             self._json_response(201, result)
         else:
@@ -2862,7 +2884,8 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "type": "edge.supported",
                     "agent": agent,
                     "edge": result,
-                }
+                },
+                customer_id=self._customer_id,
             )
             self._json_response(201, result)
         else:
@@ -2894,7 +2917,8 @@ class OhmHandler(BaseHTTPRequestHandler):
                 "type": "observation.created",
                 "agent": agent,
                 "observation": result,
-            }
+            },
+            customer_id=self._customer_id,
         )
         self._json_response(201, result)
 
@@ -3028,6 +3052,7 @@ class OhmHandler(BaseHTTPRequestHandler):
 
         # Record observation on the synthesis node
         from ohm.queries import create_observation
+
         obs_result = create_observation(
             self.store.conn,
             node_id=node_id,
@@ -3039,11 +3064,14 @@ class OhmHandler(BaseHTTPRequestHandler):
             created_by=agent,
         )
 
-        self._json_response(201, {
-            "node": node_result if isinstance(node_result, dict) else {"id": node_id, "label": label},
-            "edges_created": edges_created,
-            "observation": obs_result,
-        })
+        self._json_response(
+            201,
+            {
+                "node": node_result if isinstance(node_result, dict) else {"id": node_id, "label": label},
+                "edges_created": edges_created,
+                "observation": obs_result,
+            },
+        )
 
     def _post_batch(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /batch — batch node and edge creation (all-or-nothing transaction)."""
@@ -3138,7 +3166,9 @@ class OhmHandler(BaseHTTPRequestHandler):
             raise ValidationError("Webhook requires a 'url' field")
         _validate_webhook_url(url)
         with _webhook_lock:
-            _webhook_registry[agent] = {"url": url, "events": events}
+            if self._customer_id not in _webhook_registry:
+                _webhook_registry[self._customer_id] = {}
+            _webhook_registry[self._customer_id][agent] = {"url": url, "events": events}
         self._json_response(
             200,
             {
@@ -3350,7 +3380,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             utility_currency=body.get("utility_currency"),
             agent_name=agent,
         )
-        _trigger_webhooks({"type": "task.created", "agent": agent, "node": result})
+        _trigger_webhooks({"type": "task.created", "agent": agent, "node": result}, customer_id=self._customer_id)
         if result.get("created", True):
             self._json_response(201, result)
         else:
