@@ -35,6 +35,35 @@ _WAL_SIZE_THRESHOLD_BYTES = 100 * 1024 * 1024  # 100 MB
 _META_FILENAME = "meta.json"
 _DB_FILENAME = "ohm.duckdb"
 
+TIER_QUOTAS: dict[str, dict] = {
+    "starter": {
+        "max_nodes": 10_000,
+        "max_edges": 50_000,
+        "max_db_size_bytes": 500 * 1024 * 1024,  # 500 MB
+        "max_requests_per_day": 10_000,
+        "max_inference_timeout": 30,
+    },
+    "professional": {
+        "max_nodes": 100_000,
+        "max_edges": 500_000,
+        "max_db_size_bytes": 5 * 1024 * 1024 * 1024,  # 5 GB
+        "max_requests_per_day": 100_000,
+        "max_inference_timeout": 120,
+    },
+    "enterprise": {
+        "max_nodes": 1_000_000,
+        "max_edges": 5_000_000,
+        "max_db_size_bytes": 50 * 1024 * 1024 * 1024,  # 50 GB
+        "max_requests_per_day": 1_000_000,
+        "max_inference_timeout": 600,
+    },
+}
+
+
+class QuotaExceededError(Exception):
+    """Raised when a tenant exceeds their quota (OHM-982m)."""
+    pass
+
 
 class TenantNotFoundError(Exception):
     pass
@@ -150,6 +179,8 @@ class TenantManager:
 
         from ohm.schema import SCHEMA_VERSION
 
+        quotas = dict(TIER_QUOTAS.get(tier, TIER_QUOTAS["starter"]))
+
         meta = {
             "customer_id": customer_id,
             "domain": domain,
@@ -158,6 +189,7 @@ class TenantManager:
             "created_at": datetime.now(timezone.utc).isoformat(),
             "shared_patterns": False,
             "integrations": integrations or {},
+            "quotas": quotas,
         }
         self._write_meta(customer_id, meta)
         logger.info("Provisioned tenant %s (domain=%s, tier=%s)", customer_id, domain, tier)
@@ -267,6 +299,9 @@ class TenantManager:
 
     def list_tenants(self) -> list[dict]:
         """Return meta.json contents for all provisioned tenants."""
+        return self._list_tenants_impl()
+
+    def _list_tenants_impl(self) -> list[dict]:
         result = []
         if not self._tenants_dir.exists():
             return result
@@ -278,6 +313,82 @@ class TenantManager:
                 except Exception:
                     pass
         return result
+
+    def check_quota(self, customer_id: str, resource: str, amount: int = 1) -> None:
+        """Check if a tenant is within quota for a resource (OHM-982m).
+
+        Args:
+            customer_id: Tenant identifier.
+            resource: One of 'nodes', 'edges', 'db_size_bytes',
+                'requests_per_day'.
+            amount: Amount being requested (default 1).
+
+        Raises:
+            QuotaExceededError: If the quota would be exceeded.
+        """
+        customer_id = validate_customer_id(customer_id)
+        meta = self._read_meta(customer_id)
+        quotas = meta.get("quotas", TIER_QUOTAS.get(meta.get("tier", "starter"), {}))
+
+        quota_key = f"max_{resource}"
+        limit = quotas.get(quota_key)
+        if limit is None:
+            return  # No quota defined for this resource
+
+        if resource in ("nodes", "edges"):
+            with self._cache_lock:
+                entry = self._cache.get(customer_id)
+            if entry is not None:
+                try:
+                    current = entry.store.conn.execute(
+                        f"SELECT COUNT(*) FROM ohm_{resource} WHERE deleted_at IS NULL"
+                    ).fetchone()
+                    current_count = current[0] if current else 0
+                except Exception:
+                    current_count = 0
+            else:
+                current_count = 0
+
+            if current_count + amount > limit:
+                raise QuotaExceededError(
+                    f"Tenant '{customer_id}' would exceed {resource} quota: "
+                    f"{current_count + amount} > {limit}"
+                )
+
+        elif resource == "db_size_bytes":
+            db_path = self._tenant_dir(customer_id) / _DB_FILENAME
+            try:
+                current_size = db_path.stat().st_size
+            except Exception:
+                current_size = 0
+            if current_size + amount > limit:
+                raise QuotaExceededError(
+                    f"Tenant '{customer_id}' would exceed DB size quota: "
+                    f"{current_size + amount} > {limit}"
+                )
+
+        elif resource == "requests_per_day":
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            request_counts = meta.get("_request_counts", {})
+            current_count = request_counts.get(today, 0)
+            if current_count + amount > limit:
+                raise QuotaExceededError(
+                    f"Tenant '{customer_id}' would exceed daily request quota: "
+                    f"{current_count + amount} > {limit}"
+                )
+
+    def record_request(self, customer_id: str) -> int:
+        """Record a request for rate limiting (OHM-982m). Returns today's count."""
+        customer_id = validate_customer_id(customer_id)
+        meta = self._read_meta(customer_id)
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        request_counts = meta.get("_request_counts", {})
+        request_counts[today] = request_counts.get(today, 0) + 1
+        # Prune old days
+        request_counts = {k: v for k, v in request_counts.items() if k >= today[:7]}
+        meta["_request_counts"] = request_counts
+        self._write_meta(customer_id, meta)
+        return request_counts[today]
 
     def get_meta(self, customer_id: str) -> dict:
         """Return meta.json for a single tenant."""
@@ -751,25 +862,55 @@ class TenantManager:
         return 0
 
     def tenant_health(self, customer_id: str) -> dict:
-        """Return health info for a tenant (OHM-p7fv).
+        """Return health info for a tenant (OHM-p7fv/OHM-982m).
 
-        Includes WAL size, last checkpoint time, schema version, and
-        needs_attention status.
+        Includes WAL size, last checkpoint time, schema version,
+        needs_attention status, and quota usage.
         """
         customer_id = validate_customer_id(customer_id)
         meta = self._read_meta(customer_id)
+        quotas = meta.get("quotas", TIER_QUOTAS.get(meta.get("tier", "starter"), {}))
 
         with self._cache_lock:
             entry = self._cache.get(customer_id)
 
+        # Current usage
+        node_count = 0
+        edge_count = 0
+        db_size = 0
+        if entry is not None:
+            try:
+                node_count = entry.store.conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL").fetchone()[0]
+                edge_count = entry.store.conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE deleted_at IS NULL").fetchone()[0]
+            except Exception:
+                pass
+
+        db_path = self._tenant_dir(customer_id) / _DB_FILENAME
+        try:
+            db_size = db_path.stat().st_size
+        except Exception:
+            pass
+
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        request_counts = meta.get("_request_counts", {})
+        requests_today = request_counts.get(today, 0)
+
         result = {
             "customer_id": customer_id,
             "schema_version": meta.get("schema_version"),
+            "tier": meta.get("tier", "starter"),
             "needs_attention": meta.get("needs_attention", False),
             "wal_size_bytes": self._wal_size(customer_id),
             "last_checkpoint_at": None,
             "cached": entry is not None,
             "refcount": entry.refcount if entry else 0,
+            "quotas": quotas,
+            "usage": {
+                "nodes": node_count,
+                "edges": edge_count,
+                "db_size_bytes": db_size,
+                "requests_today": requests_today,
+            },
         }
 
         if entry is not None:

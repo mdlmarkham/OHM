@@ -693,3 +693,74 @@ class TestAgentMultiTenantRouting:
 
         store_a.close()
         store_b.close()
+
+
+class TestPerTenantQuotas:
+    def test_provision_includes_tier_quotas(self, tm):
+        meta = tm.provision("acme_hvac", tier="starter")
+        assert "quotas" in meta
+        assert meta["quotas"]["max_nodes"] == 10_000
+        assert meta["quotas"]["max_edges"] == 50_000
+
+    def test_professional_tier_higher_quotas(self, tm):
+        meta = tm.provision("acme_pro", tier="professional")
+        assert meta["quotas"]["max_nodes"] == 100_000
+        assert meta["quotas"]["max_edges"] == 500_000
+
+    def test_check_quota_allows_under_limit(self, tm):
+        tm.provision("acme_hvac")
+        store = tm.get_store("acme_hvac")
+        tm.check_quota("acme_hvac", "nodes", amount=1)
+
+    def test_check_quota_rejects_over_limit(self, tm, monkeypatch):
+        from ohm.tenant import QuotaExceededError, TIER_QUOTAS
+
+        monkeypatch.setitem(TIER_QUOTAS["starter"], "max_nodes", 5)
+        tm.provision("acme_hvac")
+        store = tm.get_store("acme_hvac")
+
+        for i in range(5):
+            store.write_node(id=f"n{i}", label=f"Node {i}", type="concept")
+
+        with pytest.raises(QuotaExceededError, match="nodes quota"):
+            tm.check_quota("acme_hvac", "nodes", amount=1)
+
+    def test_check_quota_db_size(self, tm, monkeypatch):
+        from ohm.tenant import QuotaExceededError, TIER_QUOTAS
+
+        monkeypatch.setitem(TIER_QUOTAS["starter"], "max_db_size_bytes", 1024)
+        tm.provision("acme_hvac")
+
+        with pytest.raises(QuotaExceededError, match="DB size quota"):
+            tm.check_quota("acme_hvac", "db_size_bytes", amount=1)
+
+    def test_check_quota_requests_per_day(self, tm, monkeypatch):
+        from ohm.tenant import QuotaExceededError, TIER_QUOTAS
+
+        monkeypatch.setitem(TIER_QUOTAS["starter"], "max_requests_per_day", 3)
+        tm.provision("acme_hvac")
+
+        for _ in range(3):
+            tm.record_request("acme_hvac")
+
+        with pytest.raises(QuotaExceededError, match="daily request quota"):
+            tm.check_quota("acme_hvac", "requests_per_day", amount=1)
+
+    def test_tenant_health_includes_quotas_and_usage(self, tm):
+        tm.provision("acme_hvac")
+        tm.get_store("acme_hvac")
+
+        health = tm.tenant_health("acme_hvac")
+        assert "quotas" in health
+        assert "usage" in health
+        assert health["usage"]["nodes"] >= 0
+        assert health["usage"]["edges"] >= 0
+        assert health["usage"]["db_size_bytes"] > 0
+        assert health["tier"] == "starter"
+
+    def test_record_request_tracks_daily_count(self, tm):
+        tm.provision("acme_hvac")
+        count = tm.record_request("acme_hvac")
+        assert count == 1
+        count = tm.record_request("acme_hvac")
+        assert count == 2
