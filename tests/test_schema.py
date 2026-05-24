@@ -405,3 +405,79 @@ class TestSchemaConfig:
         custom = SchemaConfig(name="custom", node_types=VALID_NODE_TYPES | {"custom_type"})
         assert "custom_type" in custom.node_types
         assert "custom_type" not in DEFAULT_SCHEMA.node_types
+
+
+class TestSchemaConfigSerialization:
+    """Tests for SchemaConfig.to_dict(), from_dict(), from_json_file()."""
+
+    def test_to_dict_roundtrip(self):
+        d = DEFAULT_SCHEMA.to_dict()
+        restored = SchemaConfig.from_dict(d)
+        assert restored.name == DEFAULT_SCHEMA.name
+        assert restored.node_types == DEFAULT_SCHEMA.node_types
+        assert restored.layer_descriptions == DEFAULT_SCHEMA.layer_descriptions
+        assert restored.observation_types == DEFAULT_SCHEMA.observation_types
+        assert restored.observation_sources == DEFAULT_SCHEMA.observation_sources
+        assert restored.provenances == DEFAULT_SCHEMA.provenances
+
+    def test_to_dict_roundtrip_topo(self):
+        d = TOPO_SCHEMA.to_dict()
+        restored = SchemaConfig.from_dict(d)
+        assert restored.name == "topo"
+        assert "sensor" in restored.node_types
+        assert "vibration" in restored.observation_types
+        assert "scada" in restored.observation_sources
+
+    def test_from_dict_missing_keys(self):
+        import pytest
+        with pytest.raises(ValueError, match="missing required keys"):
+            SchemaConfig.from_dict({"name": "broken"})
+
+    def test_from_dict_no_layer_edge_types(self):
+        d = DEFAULT_SCHEMA.to_dict()
+        del d["layer_edge_types"]
+        restored = SchemaConfig.from_dict(d)
+        assert restored.name == DEFAULT_SCHEMA.name
+
+    def test_from_json_file_ohm(self):
+        config = SchemaConfig.from_json_file("ohm.json")
+        assert config.name == "ohm"
+        assert config.node_types == DEFAULT_SCHEMA.node_types
+
+    def test_from_json_file_topo(self):
+        config = SchemaConfig.from_json_file("topo.json")
+        assert config.name == "topo"
+        assert "sensor" in config.node_types
+        assert "vibration" in config.observation_types
+
+    def test_from_json_file_beef_herd(self):
+        config = SchemaConfig.from_json_file("beef_herd.json")
+        assert config.name == "beef_herd"
+        assert "animal" in config.node_types
+        assert "weight" in config.observation_types
+
+    def test_from_json_file_not_found(self):
+        import pytest
+        with pytest.raises(FileNotFoundError, match="nonexistent.json"):
+            SchemaConfig.from_json_file("nonexistent.json")
+
+    def test_from_json_file_custom_search_path(self, tmp_path):
+        import json
+        template = {"name": "custom_test", "node_types": ["idea", "source"], "layer_descriptions": {"L1": "test"}, "observation_types": ["anomaly"], "observation_sources": ["owner"], "provenances": ["research"]}
+        template_path = tmp_path / "custom_test.json"
+        template_path.write_text(json.dumps(template))
+        config = SchemaConfig.from_json_file("custom_test.json", search_paths=[str(tmp_path)])
+        assert config.name == "custom_test"
+
+    def test_topo_classmethod_matches_json(self):
+        from_json = SchemaConfig.from_json_file("topo.json")
+        from_cls = SchemaConfig.topo()
+        assert from_json.node_types == from_cls.node_types
+        assert from_json.observation_types == from_cls.observation_types
+        assert from_json.provenances == from_cls.provenances
+
+    def test_beef_herd_classmethod_matches_json(self):
+        from_json = SchemaConfig.from_json_file("beef_herd.json")
+        from_cls = SchemaConfig.beef_herd()
+        assert from_json.node_types == from_cls.node_types
+        assert from_json.observation_types == from_cls.observation_types

@@ -72,6 +72,9 @@ topod = "ohm.server:topod_main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"ohm.graph" = ["templates/*.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ""

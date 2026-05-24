@@ -1,0 +1,130 @@
+{
+  "name": "ohm",
+  "node_types": [
+    "agent",
+    "area",
+    "concept",
+    "decision",
+    "equipment",
+    "event",
+    "goal",
+    "idea",
+    "institution",
+    "pattern",
+    "person",
+    "site",
+    "skill",
+    "source",
+    "system",
+    "task",
+    "technology",
+    "topic",
+    "value"
+  ],
+  "layer_edge_types": {
+    "L1": [
+      "BELONGS_TO",
+      "CAPABLE_OF",
+      "CONTAINS",
+      "GOALS",
+      "HAS_COMPONENT",
+      "INTERESTED_IN",
+      "PART_OF",
+      "VALUES"
+    ],
+    "L2": [
+      "AWAITING",
+      "BATCH_EXPIRES_BEFORE",
+      "CLOSED_BY",
+      "CONTAINED_BY",
+      "DERIVES_FROM",
+      "ERADICATED_BY",
+      "FEEDS",
+      "FLOWS_TO",
+      "INFLUENCES",
+      "INVESTIGATED_BY",
+      "NEGOTIATES_WITH",
+      "NOTIFIES",
+      "OPENED_BY",
+      "RECOVERED_BY",
+      "REFERENCES",
+      "RESOLVED_BY",
+      "SERVES",
+      "STARTED_BY",
+      "TRANSFERRED_TO",
+      "TRUSTS",
+      "USES"
+    ],
+    "L3": [
+      "APPLIES_TO",
+      "CAUSES",
+      "CHALLENGED_BY",
+      "COLLABORATES_WITH",
+      "CONTRADICTS",
+      "CORRELATES_WITH",
+      "DEFERS_TO",
+      "DELEGATED_TO",
+      "ESCALATED_TO",
+      "EXPECTED_LIKELIHOOD",
+      "EXPLAINS",
+      "LISTENS_TO",
+      "NEGATES",
+      "PREDICTS",
+      "REFINES",
+      "RELATED_TO",
+      "SUPPORTS",
+      "THREAT_CLUSTER",
+      "TRANSITIONS_TO"
+    ],
+    "L4": [
+      "BLOCKS",
+      "DEPENDS_ON",
+      "ENABLES",
+      "EXPECTS",
+      "EXPECTS_FROM",
+      "ORDERS_TEST",
+      "PLANS",
+      "PREDICTS",
+      "RISKS",
+      "THREATENS",
+      "TRIGGERS_INCIDENT"
+    ]
+  },
+  "layer_descriptions": {
+    "L1": "Structure \u2014 Fully shared, all agents read/write",
+    "L2": "Flow \u2014 Shared with attribution",
+    "L3": "Knowledge \u2014 Agent-owned, challengeable",
+    "L4": "Prospect \u2014 Agent-owned, visible"
+  },
+  "observation_types": [
+    "anomaly",
+    "challenge",
+    "measurement",
+    "pattern",
+    "sentiment",
+    "support"
+  ],
+  "observation_sources": [
+    "analysis",
+    "conversation",
+    "research",
+    "signal"
+  ],
+  "visibilities": [
+    "private",
+    "public",
+    "team"
+  ],
+  "provenances": [
+    "bookmark",
+    "clio-research",
+    "conversation",
+    "feed-ingest",
+    "metis-research",
+    "metis-review-request",
+    "metis-synthesis",
+    "observation",
+    "research",
+    "socrates-curriculum"
+  ]
+}

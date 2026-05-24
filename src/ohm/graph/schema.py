@@ -24,6 +24,7 @@ Schema customization:
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -440,6 +441,82 @@ class SchemaConfig:
             "visibilities": sorted(self.visibilities),
             "provenances": sorted(self.provenances),
         }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SchemaConfig":
+        """Deserialize a schema configuration from a dictionary.
+
+        Inverse of ``to_dict()`` — converts sorted lists back to frozensets.
+
+        Args:
+            data: Dict with keys matching ``to_dict()`` output.
+
+        Returns:
+            SchemaConfig instance.
+
+        Raises:
+            ValueError: If required keys are missing.
+        """
+        required = {"name", "node_types", "layer_descriptions", "observation_types", "observation_sources", "provenances"}
+        missing = required - set(data.keys())
+        if missing:
+            raise ValueError(f"Schema dict missing required keys: {sorted(missing)}")
+
+        layer_edge_types = None
+        if "layer_edge_types" in data:
+            layer_edge_types = {
+                layer: frozenset(types) for layer, types in data["layer_edge_types"].items()
+            }
+
+        return cls(
+            name=data["name"],
+            node_types=frozenset(data["node_types"]),
+            edge_types_by_layer=layer_edge_types,
+            layer_descriptions=data["layer_descriptions"],
+            observation_types=frozenset(data["observation_types"]),
+            observation_sources=frozenset(data["observation_sources"]),
+            visibilities=frozenset(data.get("visibilities", ["private", "team", "public"])),
+            provenances=frozenset(data["provenances"]),
+        )
+
+    @classmethod
+    def from_json_file(cls, filename: str, *, search_paths: list[str] | None = None) -> "SchemaConfig":
+        """Load a schema configuration from a JSON template file.
+
+        Search order:
+        1. Each directory in *search_paths* (if provided)
+        2. ``/var/lib/ohm/templates/`` (custom templates without code deploy)
+        3. Package-bundled ``ohm/graph/templates/`` directory
+
+        Args:
+            filename: Template filename (e.g., ``"topo.json"``).
+            search_paths: Optional list of directories to search first.
+
+        Returns:
+            SchemaConfig instance loaded from the JSON file.
+
+        Raises:
+            FileNotFoundError: If the template file is not found in any search path.
+            ValueError: If the JSON is invalid or missing required keys.
+        """
+        import json
+
+        candidates = []
+        if search_paths:
+            candidates.extend(search_paths)
+        candidates.append("/var/lib/ohm/templates")
+        candidates.append(str(Path(__file__).parent / "templates"))
+
+        for search_dir in candidates:
+            path = Path(search_dir) / filename
+            if path.exists():
+                with open(path) as f:
+                    data = json.load(f)
+                return cls.from_dict(data)
+
+        raise FileNotFoundError(
+            f"Schema template '{filename}' not found in: {candidates}"
+        )
 
 
 # Default OHM schema config instance
