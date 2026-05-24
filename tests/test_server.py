@@ -3543,3 +3543,109 @@ class TestMultiTenantFeatureFlag:
         import os
         monkeypatch.setenv("OHM_MULTI_TENANT", "1")
         assert os.environ.get("OHM_MULTI_TENANT", "").lower() in ("1", "true", "yes")
+
+
+class TestMarkovHTTPEndpoints:
+    """Tests for OHM-20bt: Markov HTTP endpoints in the daemon."""
+
+    def test_markov_absorbing_risk_endpoint(self, tmp_path):
+        """GET /markov/absorbing?start=<node_id> returns Markov analysis."""
+        db_path = str(tmp_path / "test_markov_http.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test")
+        port, server, thread = _start_test_server(store, no_auth=True)
+        try:
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("POST", "/node", json.dumps({"id": "healthy", "label": "healthy", "type": "state"}))
+            conn.getresponse().read()
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("POST", "/node", json.dumps({"id": "symptomatic", "label": "symptomatic", "type": "state"}))
+            conn.getresponse().read()
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("POST", "/node", json.dumps({"id": "deceased", "label": "deceased", "type": "state"}))
+            conn.getresponse().read()
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("POST", "/edge", json.dumps({"from_node": "healthy", "to_node": "symptomatic", "edge_type": "TRANSITIONS_TO", "layer": "L1", "probability": 0.3}))
+            conn.getresponse().read()
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("POST", "/edge", json.dumps({"from_node": "healthy", "to_node": "healthy", "edge_type": "TRANSITIONS_TO", "layer": "L1", "probability": 0.7}))
+            conn.getresponse().read()
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("POST", "/edge", json.dumps({"from_node": "symptomatic", "to_node": "deceased", "edge_type": "TRANSITIONS_TO", "layer": "L1", "probability": 0.1}))
+            conn.getresponse().read()
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("POST", "/edge", json.dumps({"from_node": "symptomatic", "to_node": "symptomatic", "edge_type": "TRANSITIONS_TO", "layer": "L1", "probability": 0.9}))
+            conn.getresponse().read()
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("GET", "/markov/absorbing?start=healthy")
+            resp = conn.getresponse()
+            assert resp.status == 200
+            data = json.loads(resp.read())
+            assert "method" in data
+            assert "absorbing" in data["method"]
+        finally:
+            server.shutdown()
+
+    def test_markov_expected_steps_endpoint(self, tmp_path):
+        """GET /markov/expected_steps?start=<node_id> returns expected steps."""
+        db_path = str(tmp_path / "test_markov_steps_http.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test")
+        port, server, thread = _start_test_server(store, no_auth=True)
+        try:
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("POST", "/node", json.dumps({"id": "healthy", "label": "healthy", "type": "state"}))
+            conn.getresponse().read()
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("POST", "/node", json.dumps({"id": "symptomatic", "label": "symptomatic", "type": "state"}))
+            conn.getresponse().read()
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("POST", "/node", json.dumps({"id": "deceased", "label": "deceased", "type": "state"}))
+            conn.getresponse().read()
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("POST", "/edge", json.dumps({"from_node": "healthy", "to_node": "symptomatic", "edge_type": "TRANSITIONS_TO", "layer": "L1", "probability": 0.3}))
+            conn.getresponse().read()
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("POST", "/edge", json.dumps({"from_node": "healthy", "to_node": "healthy", "edge_type": "TRANSITIONS_TO", "layer": "L1", "probability": 0.7}))
+            conn.getresponse().read()
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("POST", "/edge", json.dumps({"from_node": "symptomatic", "to_node": "deceased", "edge_type": "TRANSITIONS_TO", "layer": "L1", "probability": 0.1}))
+            conn.getresponse().read()
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("POST", "/edge", json.dumps({"from_node": "symptomatic", "to_node": "symptomatic", "edge_type": "TRANSITIONS_TO", "layer": "L1", "probability": 0.9}))
+            conn.getresponse().read()
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("GET", "/markov/expected_steps?start=healthy")
+            resp = conn.getresponse()
+            assert resp.status == 200
+            data = json.loads(resp.read())
+            assert "method" in data
+            assert "expected_steps" in data["method"]
+        finally:
+            server.shutdown()
+
+    def test_markov_absorbing_missing_start(self, tmp_path):
+        """GET /markov/absorbing without ?start= returns 400."""
+        db_path = str(tmp_path / "test_markov_no_start.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test")
+        port, server, thread = _start_test_server(store, no_auth=True)
+        try:
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("GET", "/markov/absorbing")
+            resp = conn.getresponse()
+            assert resp.status == 400
+        finally:
+            server.shutdown()
+
+    def test_markov_in_discovery_index(self, tmp_path):
+        """GET / discovery index includes Markov endpoints."""
+        db_path = str(tmp_path / "test_markov_index.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test")
+        port, server, thread = _start_test_server(store, no_auth=True)
+        try:
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("GET", "/")
+            resp = conn.getresponse()
+            data = json.loads(resp.read())
+            assert "/markov/absorbing" in data["endpoints"]
+            assert "/markov/expected_steps" in data["endpoints"]
+        finally:
+            server.shutdown()

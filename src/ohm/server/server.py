@@ -394,6 +394,8 @@ def _build_router() -> _RouteRegistry:
         "/admin/snapshots",
         "/graph/at",
         "/graph/changes",
+        "/markov/absorbing",
+        "/markov/expected_steps",
     ):
         r.add("GET", _p)
 
@@ -1433,6 +1435,8 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "/outcome": {"method": "POST", "description": "Record whether a source agent's claim was correct"},
                     "/agent/synthesis": {"method": "POST", "description": "Write a synthesis: one concept node + L3 edges + observation in one call"},
                     "/reliability/{source}": {"method": "GET", "description": "Compute source reliability metrics from historical outcomes"},
+                    "/markov/absorbing": {"method": "GET", "description": "Markov absorbing-state risk: probability of reaching an absorbing state. ?start=<node_id>&edge_types=TRANSITIONS_TO,LEADS_TO"},
+                    "/markov/expected_steps": {"method": "GET", "description": "Markov expected steps to absorption. ?start=<node_id>&target=<node_id>&edge_types=TRANSITIONS_TO"},
                     "/state": {"method": "POST", "description": "Update agent state/focus"},
                     "/register": {"method": "POST", "description": "Register a new agent"},
                     "/heartbeat": {"method": "POST", "description": "Agent heartbeat with sync"},
