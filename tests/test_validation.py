@@ -4,6 +4,7 @@ import pytest
 
 from ohm.validation import (
     validate_identifier,
+    validate_customer_id,
     validate_layer,
     validate_timestamp,
     validate_confidence,
@@ -51,6 +52,67 @@ class TestValidateIdentifier:
     def test_custom_name_in_error(self):
         with pytest.raises(ValueError, match="Invalid node_id"):
             validate_identifier("bad id", name="node_id")
+
+
+class TestValidateCustomerId:
+    """Tests for validate_customer_id — path traversal prevention."""
+
+    @pytest.mark.parametrize(
+        "input,expected",
+        [
+            ("acme_hvac", "acme_hvac"),
+            ("my-shop-123", "my-shop-123"),
+            ("abc", "abc"),
+            ("a_b-c-1234", "a_b-c-1234"),
+        ],
+    )
+    def test_valid_customer_ids(self, input, expected):
+        assert validate_customer_id(input) == expected
+
+    @pytest.mark.parametrize(
+        "input",
+        [
+            "",
+            "..",
+            "../etc",
+            "..\\windows",
+            "../../etc/passwd",
+            "acme/../../etc",
+            "acme\\..\\..\\etc",
+            "acme\0null",
+            "/absolute/path",
+            "\\absolute\\path",
+            "a.b",
+            "UPPERCASE",
+            "ab",
+            "x" * 65,
+            "-leading-hyphen",
+            "_leading_underscore",
+        ],
+    )
+    def test_invalid_customer_ids_path_traversal(self, input):
+        with pytest.raises(ValueError, match="Invalid customer_id"):
+            validate_customer_id(input)
+
+    def test_null_byte_detected(self):
+        with pytest.raises(ValueError, match="null byte"):
+            validate_customer_id("acme\0hvac")
+
+    def test_path_separator_forward(self):
+        with pytest.raises(ValueError, match="path separator"):
+            validate_customer_id("acme/hvac")
+
+    def test_path_separator_backward(self):
+        with pytest.raises(ValueError, match="path separator"):
+            validate_customer_id("acme\\hvac")
+
+    def test_traversal_sequence(self):
+        with pytest.raises(ValueError, match="path traversal"):
+            validate_customer_id("../../etc")
+
+    def test_dot_rejected(self):
+        with pytest.raises(ValueError, match="Invalid customer_id"):
+            validate_customer_id("acme.hvac")
 
 
 class TestValidateLayer:
