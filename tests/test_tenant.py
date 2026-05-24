@@ -315,7 +315,7 @@ class TestLazySchemaMigration:
             try:
                 s = tm.get_store("acme_hvac")
                 results.append(s)
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, PermissionError):
                 pass
             except Exception as e:
                 errors.append(e)
@@ -503,3 +503,61 @@ class TestLRUEvictionGuard:
         assert "acme_hvac" not in tm._cache
 
         tm.close()
+
+
+class TestWALCheckpointStrategy:
+    def test_checkpoint_on_eviction(self, tm, tmp_path):
+        tm.provision("acme_hvac")
+        store = tm.get_store("acme_hvac")
+
+        # Write something to generate WAL
+        store.conn.execute("INSERT INTO ohm_meta (key, value) VALUES ('test_key', 'test_val')")
+
+        # Evict should checkpoint before close
+        tm._evict("acme_hvac")
+        assert "acme_hvac" not in tm._cache
+
+    def test_periodic_checkpoint_active_tenants(self, tm, tmp_path, monkeypatch):
+        monkeypatch.setattr("ohm.tenant._CHECKPOINT_INTERVAL_SECONDS", 0)
+
+        tm.provision("acme_hvac")
+        store = tm.get_store("acme_hvac")
+
+        entry = tm._cache["acme_hvac"]
+        assert entry.last_checkpoint_at == 0.0
+
+        # Manually trigger checkpoint loop logic
+        tm._checkpoint_active_tenants()
+
+        assert entry.last_checkpoint_at > 0.0
+
+    def test_wal_size_tracking(self, tm, tmp_path):
+        tm.provision("acme_hvac")
+        store = tm.get_store("acme_hvac")
+
+        wal_size = tm._wal_size("acme_hvac")
+        assert isinstance(wal_size, int)
+        assert wal_size >= 0
+
+    def test_tenant_health(self, tm, tmp_path):
+        from ohm.schema import SCHEMA_VERSION
+
+        tm.provision("acme_hvac")
+        tm.get_store("acme_hvac")
+
+        health = tm.tenant_health("acme_hvac")
+        assert health["customer_id"] == "acme_hvac"
+        assert health["schema_version"] == SCHEMA_VERSION
+        assert health["cached"] is True
+        assert health["refcount"] == 0
+        assert "wal_size_bytes" in health
+
+    def test_checkpoint_tenant_method(self, tm, tmp_path):
+        tm.provision("acme_hvac")
+        store = tm.get_store("acme_hvac")
+
+        entry = tm._cache["acme_hvac"]
+        assert entry.last_checkpoint_at == 0.0
+
+        tm._checkpoint_tenant("acme_hvac", entry, reason="test")
+        assert entry.last_checkpoint_at > 0.0

@@ -30,6 +30,8 @@ from ohm.schema import SchemaConfig
 logger = logging.getLogger(__name__)
 
 _IDLE_EVICT_SECONDS = 600  # 10 min idle before eviction
+_CHECKPOINT_INTERVAL_SECONDS = 300  # 5 min periodic checkpoint
+_WAL_SIZE_THRESHOLD_BYTES = 100 * 1024 * 1024  # 100 MB
 _META_FILENAME = "meta.json"
 _DB_FILENAME = "ohm.duckdb"
 
@@ -50,7 +52,7 @@ class _TenantEntry:
     eviction instead (``evict_pending``).
     """
 
-    __slots__ = ("store", "write_lock", "last_accessed", "refcount", "evict_pending")
+    __slots__ = ("store", "write_lock", "last_accessed", "refcount", "evict_pending", "last_checkpoint_at")
 
     def __init__(self, store: OhmStore) -> None:
         self.store = store
@@ -58,6 +60,7 @@ class _TenantEntry:
         self.last_accessed = time.monotonic()
         self.refcount = 0
         self.evict_pending = False
+        self.last_checkpoint_at = 0.0
 
     def touch(self) -> None:
         self.last_accessed = time.monotonic()
@@ -89,17 +92,24 @@ class TenantManager:
         tenants_dir: str | Path,
         templates_dir: Optional[str | Path] = None,
         max_cached: int = 100,
+        checkpoint_interval: int = _CHECKPOINT_INTERVAL_SECONDS,
+        wal_size_threshold: int = _WAL_SIZE_THRESHOLD_BYTES,
     ) -> None:
         self._tenants_dir = Path(tenants_dir)
         self._tenants_dir.mkdir(parents=True, exist_ok=True)
         self._templates_dir = Path(templates_dir) if templates_dir else None
         self._max_cached = max_cached
+        self._checkpoint_interval = checkpoint_interval
+        self._wal_size_threshold = wal_size_threshold
 
         self._cache: OrderedDict[str, _TenantEntry] = OrderedDict()
         self._cache_lock = threading.Lock()
 
         self._eviction_thread = threading.Thread(target=self._eviction_loop, daemon=True, name="tenant-eviction")
         self._eviction_thread.start()
+
+        self._checkpoint_thread = threading.Thread(target=self._checkpoint_loop, daemon=True, name="tenant-checkpoint")
+        self._checkpoint_thread.start()
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -552,6 +562,7 @@ class TenantManager:
     def _evict(self, customer_id: str) -> None:
         """Remove *customer_id* from the cache and close its store.
 
+        Checkpoints the tenant before closing to flush WAL (OHM-p7fv).
         Skips eviction if the entry has in-flight requests (OHM-s18r),
         marking it for deferred eviction instead.
         """
@@ -564,6 +575,12 @@ class TenantManager:
                 logger.debug("Skip eviction of tenant %s (refcount=%d), marked for deferred eviction", customer_id, entry.refcount)
                 return
             self._cache.pop(customer_id, None)
+
+        # Checkpoint before close to flush WAL
+        try:
+            entry.store.conn.execute("CHECKPOINT")
+        except Exception:
+            pass
         try:
             entry.store.close()
         except Exception:
@@ -607,3 +624,76 @@ class TenantManager:
             for cid in idle:
                 self._evict(cid)
                 logger.info("Idle-evicted tenant %s", cid)
+
+    def _checkpoint_loop(self) -> None:
+        """Background thread: periodic checkpoint of active tenants (OHM-p7fv)."""
+        while True:
+            time.sleep(self._checkpoint_interval)
+            self._checkpoint_active_tenants()
+
+    def _checkpoint_active_tenants(self) -> None:
+        """Checkpoint all cached tenants whose interval has elapsed (OHM-p7fv).
+
+        Also checks WAL size and forces checkpoint if above threshold.
+        """
+        now = time.monotonic()
+        with self._cache_lock:
+            entries = list(self._cache.items())
+
+        for cid, entry in entries:
+            elapsed = now - entry.last_checkpoint_at
+            if elapsed < self._checkpoint_interval:
+                continue
+
+            wal_size = self._wal_size(cid)
+            if wal_size >= self._wal_size_threshold:
+                self._checkpoint_tenant(cid, entry, reason="wal_size_threshold")
+            elif elapsed >= self._checkpoint_interval:
+                self._checkpoint_tenant(cid, entry, reason="interval")
+
+    def _checkpoint_tenant(self, customer_id: str, entry: _TenantEntry, reason: str = "manual") -> None:
+        """Checkpoint a single tenant's DuckDB."""
+        with entry.write_lock:
+            try:
+                entry.store.conn.execute("CHECKPOINT")
+                entry.last_checkpoint_at = time.monotonic()
+                logger.debug("Checkpointed tenant %s (reason=%s)", customer_id, reason)
+            except Exception as e:
+                logger.warning("Checkpoint failed for tenant %s: %s", customer_id, e)
+
+    def _wal_size(self, customer_id: str) -> int:
+        """Return the WAL file size in bytes for a tenant."""
+        wal_path = self._tenant_dir(customer_id) / (_DB_FILENAME + ".wal")
+        if wal_path.exists():
+            try:
+                return wal_path.stat().st_size
+            except Exception:
+                return 0
+        return 0
+
+    def tenant_health(self, customer_id: str) -> dict:
+        """Return health info for a tenant (OHM-p7fv).
+
+        Includes WAL size, last checkpoint time, schema version, and
+        needs_attention status.
+        """
+        customer_id = validate_customer_id(customer_id)
+        meta = self._read_meta(customer_id)
+
+        with self._cache_lock:
+            entry = self._cache.get(customer_id)
+
+        result = {
+            "customer_id": customer_id,
+            "schema_version": meta.get("schema_version"),
+            "needs_attention": meta.get("needs_attention", False),
+            "wal_size_bytes": self._wal_size(customer_id),
+            "last_checkpoint_at": None,
+            "cached": entry is not None,
+            "refcount": entry.refcount if entry else 0,
+        }
+
+        if entry is not None:
+            result["last_checkpoint_at"] = entry.last_checkpoint_at
+
+        return result
