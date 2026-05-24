@@ -47,6 +47,7 @@ DEFAULT_CONFIG = {
         # Populated from config file or env vars
     },
     "log_level": "INFO",
+    "multi_tenant": False,
     "ducklake": {
         "path": "",  # DuckLake catalog path (e.g., /var/lib/ohm/ohm_lake.ducklake)
         "data_path": "",  # Parquet data path (e.g., /var/lib/ohm/ohm_lake_data)
@@ -489,6 +490,7 @@ class OhmHandler(BaseHTTPRequestHandler):
     no_auth: bool = False  # --no-auth flag: bypass all auth (dev mode)
     require_read_auth: bool = False  # OHM-gwg: require auth for reads (default: public reads)
     schema_config: SchemaConfig = DEFAULT_SCHEMA  # configurable schema (OHM or TOPO)
+    multi_tenant: bool = False  # OHM-l31g: feature flag for multi-tenancy (default: off)
 
     # ── Dispatch tables (set after class body) ────────────────
     # Maps path → method_name (string) for runtime getattr dispatch.
@@ -502,12 +504,24 @@ class OhmHandler(BaseHTTPRequestHandler):
     def _customer_id(self) -> str | None:
         """Return the authenticated customer's tenant ID, or None in single-tenant mode.
 
-        In single-tenant mode (pre-tss4.3) this always returns None, which routes all
-        webhooks and SSE subscriptions into the shared default bucket — preserving
-        backward compatibility. tss4.4 overrides this by setting self._resolved_customer_id
+        When multi-tenancy is disabled (OHM-l31g), always returns None —
+        zero overhead, no TenantManager lookup, no route ambiguity.
+        When enabled, tss4.4 overrides this by setting self._resolved_customer_id
         from the customer API key validated during _authenticate().
         """
+        if not self.multi_tenant:
+            return None
         return getattr(self, "_resolved_customer_id", None)
+
+    @property
+    def current_store(self) -> Optional[OhmStore]:
+        """Return the OhmStore for the current request context.
+
+        When multi-tenancy is disabled (OHM-l31g), returns self.store unconditionally
+        — zero indirection cost for existing single-tenant deployments.
+        When enabled, tss4.4 overrides this to route via TenantManager.
+        """
+        return self.store
 
     def log_message(self, format, *args):
         """Structured request logging with correlation ID."""
@@ -1629,6 +1643,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         status["version"] = "0.2.0"
         status["schema"] = self.schema_config.name
         status["quack"] = self.config.get("quack", False)
+        status["multi_tenant"] = self.multi_tenant
         self._json_response(200, status)
 
     def _get_schema(self, path: str, qs: dict) -> None:
@@ -3630,6 +3645,7 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     OhmHandler.no_auth = config.get("no_auth", False)
     OhmHandler.require_read_auth = config.get("require_read_auth", False)
     OhmHandler.schema_config = schema_config
+    OhmHandler.multi_tenant = config.get("multi_tenant", False)
 
     # ── Quack integration ──────────────────────────────────────────────
     quack_info: dict[str, Any] | None = None
@@ -3672,6 +3688,10 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
         _sync_thread = threading.Thread(target=_ducklake_sync_loop, daemon=True, name="ducklake-sync")
         _sync_thread.start()
     print(f"Schema: {schema_config.name}", file=sys.stderr)
+    if OhmHandler.multi_tenant:
+        print("Multi-tenancy: ENABLED", file=sys.stderr)
+    else:
+        print("Multi-tenancy: disabled (single-tenant mode)", file=sys.stderr)
     if quack_info:
         print("Concurrent access: Quack (multi-writer)", file=sys.stderr)
     else:
@@ -3749,6 +3769,11 @@ def main(schema_config: SchemaConfig | None = None):
         action="store_true",
         help="Report pending schema migrations without applying them, then exit",
     )
+    parser.add_argument(
+        "--multi-tenant",
+        action="store_true",
+        help="Enable multi-tenancy mode (per-tenant isolated DuckDB instances)",
+    )
     args = parser.parse_args()
 
     # Allow CLI override of schema
@@ -3778,6 +3803,10 @@ def main(schema_config: SchemaConfig | None = None):
         config["quack_uri"] = args.quack_uri
     if args.quack_token_env:
         config["quack_token_env"] = args.quack_token_env
+
+    # Multi-tenancy configuration (OHM-l31g)
+    if args.multi_tenant or os.environ.get("OHM_MULTI_TENANT", "").lower() in ("1", "true", "yes"):
+        config["multi_tenant"] = True
 
     # Handle token generation
     if args.init_token:

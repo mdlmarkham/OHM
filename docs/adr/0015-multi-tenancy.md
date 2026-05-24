@@ -47,7 +47,7 @@ ohmd (single process, ThreadingMixIn)
 
 5. **Lazy Migration**: `TenantManager.get_store()` checks `meta.json` `schema_version`, applies pending migrations automatically.
 
-6. **Feature Flag**: `ENABLE_MULTI_TENANCY=1` env var. When unset, ohmd behaves exactly as before — single tenant, no TenantManager, no customer tokens.
+6. **Feature Flag**: `OHM_MULTI_TENANT=1` env var or `--multi-tenant` CLI flag. When unset, ohmd behaves exactly as before — single tenant, no TenantManager, no customer tokens, `current_store` returns `self.store` unconditionally (zero indirection cost). `_customer_id` short-circuits to `None`. Instant rollback by toggling flag + restart.
 
 ### Data Model
 

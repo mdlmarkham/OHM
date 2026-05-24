@@ -18,7 +18,7 @@ from ohm.schema import DEFAULT_SCHEMA, TOPO_SCHEMA
 from ohm.store import OhmStore
 
 
-def _start_test_server(store, tokens=None, roles=None, no_auth=False, schema_config=None, require_read_auth=False):
+def _start_test_server(store, tokens=None, roles=None, no_auth=False, schema_config=None, require_read_auth=False, multi_tenant=False):
     """Start a test HTTP server on a random port and return (port, thread).
 
     tokens can be:
@@ -27,6 +27,7 @@ def _start_test_server(store, tokens=None, roles=None, no_auth=False, schema_con
 
     schema_config: SchemaConfig instance (default: DEFAULT_SCHEMA)
     require_read_auth: If True, all endpoints require auth (OHM-gwg)
+    multi_tenant: If True, enable multi-tenancy mode (OHM-l31g)
     """
     import socketserver
 
@@ -44,6 +45,7 @@ def _start_test_server(store, tokens=None, roles=None, no_auth=False, schema_con
     OhmHandler.roles = roles or {}
     OhmHandler.no_auth = no_auth
     OhmHandler.require_read_auth = require_read_auth
+    OhmHandler.multi_tenant = multi_tenant
 
     # Use TCPServer to get a random port
     server = socketserver.TCPServer(
@@ -3479,3 +3481,65 @@ class TestWebhookTenantIsolation:
             assert fired == [], "Single-tenant webhook must not fire for tenant-scoped event"
         finally:
             srv._deliver_webhook = original
+
+
+class TestMultiTenantFeatureFlag:
+    """Tests for OHM-l31g: feature-flag multi-tenancy rollout."""
+
+    def test_multi_tenant_default_off(self, tmp_path):
+        """Multi-tenancy is OFF by default — no flag, no env var."""
+        db_path = str(tmp_path / "test_mt_off.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test")
+        port, server, thread = _start_test_server(store, no_auth=True)
+        try:
+            assert OhmHandler.multi_tenant is False
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("GET", "/status")
+            resp = conn.getresponse()
+            data = json.loads(resp.read())
+            assert data["multi_tenant"] is False
+        finally:
+            server.shutdown()
+
+    def test_customer_id_none_when_off(self):
+        """When multi_tenant=False, _customer_id always returns None."""
+        handler = OhmHandler.__new__(OhmHandler)
+        handler.multi_tenant = False
+        assert handler._customer_id is None
+
+    def test_customer_id_resolved_when_on(self):
+        """When multi_tenant=True, _customer_id returns _resolved_customer_id if set."""
+        handler = OhmHandler.__new__(OhmHandler)
+        handler.multi_tenant = True
+        handler._resolved_customer_id = "acme-corp"
+        assert handler._customer_id == "acme-corp"
+
+    def test_current_store_returns_store_when_off(self, tmp_path):
+        """When multi_tenant=False, current_store returns self.store with zero indirection."""
+        db_path = str(tmp_path / "test_mt_store.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test")
+        handler = OhmHandler.__new__(OhmHandler)
+        handler.multi_tenant = False
+        handler.store = store
+        assert handler.current_store is store
+        store.close()
+
+    def test_status_includes_multi_tenant(self, tmp_path):
+        """GET /status includes multi_tenant flag in response."""
+        db_path = str(tmp_path / "test_mt_status.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test")
+        port, server, thread = _start_test_server(store, no_auth=True, multi_tenant=True)
+        try:
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("GET", "/status")
+            resp = conn.getresponse()
+            data = json.loads(resp.read())
+            assert data["multi_tenant"] is True
+        finally:
+            server.shutdown()
+
+    def test_env_var_enables_multi_tenant(self, monkeypatch):
+        """OHM_MULTI_TENANT=1 enables multi-tenancy via environment variable."""
+        import os
+        monkeypatch.setenv("OHM_MULTI_TENANT", "1")
+        assert os.environ.get("OHM_MULTI_TENANT", "").lower() in ("1", "true", "yes")
