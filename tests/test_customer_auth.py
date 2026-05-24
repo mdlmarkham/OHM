@@ -1,6 +1,6 @@
-"""Unit tests for OHM-tss4.3 — Customer API Key authentication.
+"""Unit tests for OHM-tss4.3/tss4.4 — Customer API Key authentication and routing.
 
-Acceptance criteria:
+Acceptance criteria (tss4.3):
   - _generate_customer_token() produces twai_live_{24-char} format
   - _build_customer_token_lookup() maps hash → customer_id
   - _authenticate() checks customer_tokens after agent tokens
@@ -217,3 +217,75 @@ class TestRunServerInitialisesCustomerTokens:
         assert token_hash in OhmHandler.customer_tokens
         assert OhmHandler.customer_tokens[token_hash] == "acme_hvac"
         store.close()
+
+
+# ── current_store routing (OHM-tss4.4) ───────────────────────────────────────
+
+
+class TestCurrentStoreRouting:
+    def test_single_tenant_returns_store(self, tmp_path):
+        """multi_tenant=False always returns self.store (no TenantManager)."""
+        db_path = str(tmp_path / "st.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test")
+        handler = OhmHandler.__new__(OhmHandler)
+        handler.multi_tenant = False
+        handler.store = store
+        assert handler.current_store is store
+        store.close()
+
+    def test_multi_tenant_agent_token_returns_core_store(self, tmp_path):
+        """Agent token (no _resolved_customer_id) returns core store."""
+        db_path = str(tmp_path / "core.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test")
+        handler = OhmHandler.__new__(OhmHandler)
+        handler.multi_tenant = True
+        handler.tenant_manager = None
+        handler.store = store
+        # No _resolved_customer_id set → _customer_id returns None → core store
+        assert handler.current_store is store
+        store.close()
+
+    def test_multi_tenant_customer_token_routes_to_tenant(self, tmp_path):
+        """Customer token routes to the provisioned tenant's OhmStore."""
+        from ohm.tenant import TenantManager
+
+        tenants_dir = tmp_path / "tenants"
+        tm = TenantManager(tenants_dir, max_cached=5)
+        tm.provision("acme_hvac")
+        tenant_store = tm.get_store("acme_hvac")
+
+        core_db = str(tmp_path / "core.duckdb")
+        core_store = OhmStore(db_path=core_db, agent_name="test")
+
+        handler = OhmHandler.__new__(OhmHandler)
+        handler.multi_tenant = True
+        handler.tenant_manager = tm
+        handler.store = core_store
+        handler._resolved_customer_id = "acme_hvac"
+
+        routed = handler.current_store
+        assert routed is tenant_store
+        assert routed is not core_store
+        tm.close()
+        core_store.close()
+
+    def test_multi_tenant_unprovisioned_tenant_raises(self, tmp_path):
+        """current_store raises PermissionDeniedError for an unprovisioned tenant."""
+        from ohm.exceptions import PermissionDeniedError
+        from ohm.tenant import TenantManager
+
+        tm = TenantManager(tmp_path / "tenants", max_cached=5)
+        core_db = str(tmp_path / "core.duckdb")
+        core_store = OhmStore(db_path=core_db, agent_name="test")
+
+        handler = OhmHandler.__new__(OhmHandler)
+        handler.multi_tenant = True
+        handler.tenant_manager = tm
+        handler.store = core_store
+        handler._resolved_customer_id = "ghost_tenant"
+
+        with pytest.raises(PermissionDeniedError):
+            _ = handler.current_store
+
+        tm.close()
+        core_store.close()
