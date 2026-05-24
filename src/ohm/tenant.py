@@ -640,6 +640,9 @@ class TenantManager:
         return json.loads(meta_path.read_text())
 
     def _load_schema(self, domain: str) -> SchemaConfig:
+        import re as _re
+        if not _re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,62}", domain):
+            raise ValueError(f"Invalid domain '{domain}' — must be lowercase alphanumeric/underscore/hyphen, 1-63 chars")
         # Try custom templates dir first
         if self._templates_dir:
             json_path = self._templates_dir / f"{domain}.json"

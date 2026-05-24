@@ -107,6 +107,9 @@ _webhook_lock = threading.Lock()
 _sse_subscribers: dict[str, dict] = {}
 _sse_lock = threading.Lock()
 
+# Guards mutations to OhmHandler.customer_tokens (class-level dict shared across threads).
+_customer_tokens_lock = threading.Lock()
+
 
 _PRIVATE_NETWORKS = [
     ipaddress.ip_network("10.0.0.0/8"),
@@ -3555,7 +3558,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         # Auth required for DELETE
         agent = self._authenticate()
         if agent is None:
-            if self.no_auth or not self.tokens:
+            if self.no_auth:
                 agent = "ohm"
             else:
                 raise AuthenticationError("Authentication required — provide Bearer token")
@@ -3566,7 +3569,20 @@ class OhmHandler(BaseHTTPRequestHandler):
                 method_name = mn
                 break
         if method_name:
-            getattr(self, method_name)(path, agent)
+            customer_id = self._customer_id
+            if customer_id and self.tenant_manager:
+                from ohm.tenant import TenantNotFoundError
+
+                try:
+                    write_lock = self.tenant_manager.get_write_lock(customer_id)
+                except TenantNotFoundError:
+                    raise PermissionDeniedError(
+                        f"Tenant '{customer_id}' is not provisioned — contact your administrator"
+                    )
+                with write_lock:
+                    getattr(self, method_name)(path, agent)
+            else:
+                getattr(self, method_name)(path, agent)
         else:
             self._json_response(404, {"error": f"Unknown endpoint: {path}"})
 
@@ -3653,8 +3669,17 @@ class OhmHandler(BaseHTTPRequestHandler):
         customer_id = body.get("customer_id", "")
         if not customer_id:
             raise ValidationError("customer_id is required")
+        from ohm.framework.validation import validate_customer_id as _validate_cid
+        try:
+            customer_id = _validate_cid(customer_id)
+        except ValueError as exc:
+            raise ValidationError(str(exc))
         domain = body.get("domain", "ohm")
         tier = body.get("tier", "starter")
+        # Validate domain to prevent path traversal into templates directory
+        import re as _re
+        if not _re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,62}", domain):
+            raise ValidationError(f"Invalid domain '{domain}' — must be lowercase alphanumeric/underscore/hyphen, 1-63 chars")
 
         try:
             meta = self.tenant_manager.provision(customer_id, domain=domain, tier=tier)
@@ -3662,8 +3687,8 @@ class OhmHandler(BaseHTTPRequestHandler):
             raise ConflictError(f"Tenant '{customer_id}' already exists")
 
         token, token_hash = _generate_customer_token(customer_id)
-        with threading.Lock():
-            self.customer_tokens[token_hash] = customer_id
+        with _customer_tokens_lock:
+            type(self).customer_tokens[token_hash] = customer_id
 
         self._json_response(
             201,
@@ -3699,8 +3724,13 @@ class OhmHandler(BaseHTTPRequestHandler):
         # Extract customer_id from /tenant/{id}[/schema]
         tail = path[len("/tenant/"):]  # e.g. "acme_hvac" or "acme_hvac/schema"
         parts = tail.split("/", 1)
-        customer_id = parts[0]
+        raw_id = parts[0]
         sub = parts[1] if len(parts) > 1 else ""
+        from ohm.framework.validation import validate_customer_id as _validate_cid
+        try:
+            customer_id = _validate_cid(raw_id)
+        except ValueError as exc:
+            raise ValidationError(str(exc))
 
         from ohm.tenant import TenantNotFoundError
 
@@ -3750,9 +3780,10 @@ class OhmHandler(BaseHTTPRequestHandler):
             raise NodeNotFoundError(f"Tenant '{customer_id}' not found")
 
         # Revoke all customer tokens for this tenant from the in-memory lookup
-        revoked = [h for h, cid in list(self.customer_tokens.items()) if cid == customer_id]
-        for h in revoked:
-            self.customer_tokens.pop(h, None)
+        with _customer_tokens_lock:
+            revoked = [h for h, cid in list(type(self).customer_tokens.items()) if cid == customer_id]
+            for h in revoked:
+                type(self).customer_tokens.pop(h, None)
 
         self._json_response(200, {"status": "deprovisioned", "customer_id": customer_id})
 
@@ -3770,10 +3801,16 @@ class OhmHandler(BaseHTTPRequestHandler):
         # path = /tenant/{customer_id}/export
         tail = path[len("/tenant/"):]  # e.g. "acme_hvac/export"
         parts = tail.split("/", 1)
-        customer_id = parts[0]
+        raw_id = parts[0]
         sub = parts[1] if len(parts) > 1 else ""
         if sub != "export":
             self._json_response(404, {"error": f"Unknown tenant endpoint: {path}"})
+            return
+        from ohm.framework.validation import validate_customer_id as _validate_cid
+        try:
+            customer_id = _validate_cid(raw_id)
+        except ValueError as exc:
+            raise ValidationError(str(exc))
 
         try:
             tenant_store = self.tenant_manager.get_store(customer_id)
