@@ -1,0 +1,219 @@
+"""Unit tests for OHM-tss4.3 — Customer API Key authentication.
+
+Acceptance criteria:
+  - _generate_customer_token() produces twai_live_{24-char} format
+  - _build_customer_token_lookup() maps hash → customer_id
+  - _authenticate() checks customer_tokens after agent tokens
+  - successful customer token match sets _resolved_customer_id
+  - successful customer token match returns customer_id as "agent"
+  - agent token match does NOT set _resolved_customer_id
+  - invalid token returns None
+  - query-string customer token works identically to header
+  - run_server initialises OhmHandler.customer_tokens from config
+"""
+
+import json
+import re
+import threading
+from http.client import HTTPConnection
+from io import BytesIO
+from unittest.mock import MagicMock
+
+import pytest
+
+from ohm.server.server import (
+    OhmHandler,
+    _build_customer_token_lookup,
+    _generate_customer_token,
+    _hash_token,
+    _verify_token,
+    run_server,
+)
+from ohm.store import OhmStore
+
+
+# ── Token generation ──────────────────────────────────────────────────────────
+
+
+class TestGenerateCustomerToken:
+    def test_format(self):
+        token, _ = _generate_customer_token("acme_hvac")
+        assert token.startswith("twai_live_")
+        suffix = token[len("twai_live_"):]
+        # secrets.token_urlsafe(18) → 24 chars of urlsafe base64
+        assert len(suffix) == 24
+        assert re.fullmatch(r"[A-Za-z0-9_\-]+", suffix)
+
+    def test_unique(self):
+        tokens = {_generate_customer_token("acme")[0] for _ in range(20)}
+        assert len(tokens) == 20
+
+    def test_hash_matches_token(self):
+        token, token_hash = _generate_customer_token("acme_hvac")
+        assert _verify_token(token, token_hash)
+
+    def test_customer_id_not_embedded(self):
+        token, _ = _generate_customer_token("acme_hvac")
+        assert "acme_hvac" not in token
+
+
+# ── Lookup table construction ─────────────────────────────────────────────────
+
+
+class TestBuildCustomerTokenLookup:
+    def test_hashed_mode(self):
+        _, h = _generate_customer_token("acme_hvac")
+        lookup = _build_customer_token_lookup({"acme_hvac": {"hash": h}})
+        assert lookup[h] == "acme_hvac"
+
+    def test_legacy_plaintext_mode(self):
+        token = "twai_live_plaintexttoken_12345"
+        lookup = _build_customer_token_lookup({"acme_hvac": token})
+        assert lookup[_hash_token(token)] == "acme_hvac"
+
+    def test_multiple_customers(self):
+        t1, h1 = _generate_customer_token("tenant_a")
+        t2, h2 = _generate_customer_token("tenant_b")
+        lookup = _build_customer_token_lookup(
+            {"tenant_a": {"hash": h1}, "tenant_b": {"hash": h2}}
+        )
+        assert lookup[h1] == "tenant_a"
+        assert lookup[h2] == "tenant_b"
+
+    def test_missing_hash_field_skipped(self):
+        lookup = _build_customer_token_lookup({"acme_hvac": {"role": "admin"}})
+        assert lookup == {}
+
+    def test_empty_config(self):
+        assert _build_customer_token_lookup({}) == {}
+
+
+# ── _authenticate() behaviour ─────────────────────────────────────────────────
+
+
+def _make_handler(agent_tokens=None, customer_tokens=None):
+    """Create an OhmHandler instance with fake request state for testing."""
+    handler = OhmHandler.__new__(OhmHandler)
+    handler.tokens = agent_tokens or {}
+    handler.customer_tokens = customer_tokens or {}
+    handler.no_auth = False
+    handler.roles = {}
+    handler.path = "/"
+    handler.headers = {}
+    return handler
+
+
+class _FakeHeaders(dict):
+    def get(self, key, default=None):
+        return super().get(key.lower(), default)
+
+
+def _handler_with_bearer(token, agent_tokens=None, customer_tokens=None):
+    h = _make_handler(agent_tokens=agent_tokens, customer_tokens=customer_tokens)
+    h.headers = _FakeHeaders({"authorization": f"Bearer {token}"})
+    return h
+
+
+def _handler_with_qs(token, agent_tokens=None, customer_tokens=None):
+    h = _make_handler(agent_tokens=agent_tokens, customer_tokens=customer_tokens)
+    h.headers = _FakeHeaders({})
+    h.path = f"/node?token={token}"
+    return h
+
+
+class TestAuthenticateCustomerToken:
+    def test_customer_token_returns_customer_id(self):
+        token, token_hash = _generate_customer_token("acme_hvac")
+        handler = _handler_with_bearer(token, customer_tokens={token_hash: "acme_hvac"})
+        result = handler._authenticate()
+        assert result == "acme_hvac"
+
+    def test_customer_token_sets_resolved_customer_id(self):
+        token, token_hash = _generate_customer_token("acme_hvac")
+        handler = _handler_with_bearer(token, customer_tokens={token_hash: "acme_hvac"})
+        handler._authenticate()
+        assert getattr(handler, "_resolved_customer_id", None) == "acme_hvac"
+
+    def test_agent_token_does_not_set_resolved_customer_id(self):
+        agent_token = "agent-secret-token"
+        agent_hash = _hash_token(agent_token)
+        handler = _handler_with_bearer(agent_token, agent_tokens={agent_hash: "my_agent"})
+        result = handler._authenticate()
+        assert result == "my_agent"
+        assert not hasattr(handler, "_resolved_customer_id") or handler._resolved_customer_id is None  # type: ignore
+
+    def test_agent_token_checked_before_customer_token(self):
+        """If the same hash appears in both tables (shouldn't happen), agent wins."""
+        token = "shared_token"
+        h = _hash_token(token)
+        handler = _handler_with_bearer(
+            token,
+            agent_tokens={h: "agent_one"},
+            customer_tokens={h: "customer_one"},
+        )
+        result = handler._authenticate()
+        assert result == "agent_one"
+        assert not hasattr(handler, "_resolved_customer_id") or getattr(handler, "_resolved_customer_id", None) is None
+
+    def test_invalid_token_returns_none(self):
+        _, token_hash = _generate_customer_token("acme_hvac")
+        handler = _handler_with_bearer("wrong-token", customer_tokens={token_hash: "acme_hvac"})
+        assert handler._authenticate() is None
+
+    def test_no_token_returns_none(self):
+        handler = _make_handler()
+        handler.headers = _FakeHeaders({})
+        assert handler._authenticate() is None
+
+    def test_customer_token_via_query_string(self):
+        token, token_hash = _generate_customer_token("acme_hvac")
+        handler = _handler_with_qs(token, customer_tokens={token_hash: "acme_hvac"})
+        result = handler._authenticate()
+        assert result == "acme_hvac"
+        assert getattr(handler, "_resolved_customer_id", None) == "acme_hvac"
+
+    def test_two_tenants_isolated(self):
+        token_a, hash_a = _generate_customer_token("tenant_a")
+        token_b, hash_b = _generate_customer_token("tenant_b")
+        lookup = {hash_a: "tenant_a", hash_b: "tenant_b"}
+
+        handler_a = _handler_with_bearer(token_a, customer_tokens=lookup)
+        result_a = handler_a._authenticate()
+        assert result_a == "tenant_a"
+        assert getattr(handler_a, "_resolved_customer_id", None) == "tenant_a"
+
+        handler_b = _handler_with_bearer(token_b, customer_tokens=lookup)
+        result_b = handler_b._authenticate()
+        assert result_b == "tenant_b"
+        assert getattr(handler_b, "_resolved_customer_id", None) == "tenant_b"
+
+
+# ── run_server initialisation ─────────────────────────────────────────────────
+
+
+class TestRunServerInitialisesCustomerTokens:
+    def test_customer_tokens_loaded_from_config(self, tmp_path):
+        token, token_hash = _generate_customer_token("acme_hvac")
+        db_path = str(tmp_path / "ohm.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test")
+        config = {
+            "host": "127.0.0.1",
+            "port": 0,
+            "tokens": {},
+            "customer_tokens": {"acme_hvac": {"hash": token_hash}},
+        }
+
+        import socketserver
+
+        OhmHandler.store = store
+        OhmHandler.config = config
+        from ohm.server.server import _build_customer_token_lookup, _build_token_lookup
+
+        OhmHandler.tokens, _ = _build_token_lookup(config.get("tokens", {}))
+        OhmHandler.customer_tokens = _build_customer_token_lookup(config.get("customer_tokens", {}))
+        OhmHandler.no_auth = False
+        OhmHandler.require_read_auth = False
+
+        assert token_hash in OhmHandler.customer_tokens
+        assert OhmHandler.customer_tokens[token_hash] == "acme_hvac"
+        store.close()

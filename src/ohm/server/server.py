@@ -46,6 +46,10 @@ DEFAULT_CONFIG = {
         # agent_name: token_string
         # Populated from config file or env vars
     },
+    "customer_tokens": {
+        # customer_id: {"hash": "sha256_hex"}
+        # Generated via --init-customer-token; plaintext never stored
+    },
     "log_level": "INFO",
     "multi_tenant": False,
     "ducklake": {
@@ -243,6 +247,44 @@ def _build_token_lookup(tokens_config: dict) -> tuple[dict, dict]:
             roles[agent_name] = "read-write"
 
     return token_hashes, roles
+
+
+def _generate_customer_token(customer_id: str) -> tuple[str, str]:
+    """Generate a customer API key for *customer_id*.
+
+    Returns (token, token_hash). The token is shown once at generation time;
+    only the hash is persisted in config.
+
+    Token format: ``twai_live_{24-char urlsafe-base64}``
+    (18 random bytes → 24 chars; total length ~33 chars)
+    """
+    token = f"twai_live_{secrets.token_urlsafe(18)}"
+    return token, _hash_token(token)
+
+
+def _build_customer_token_lookup(customer_tokens_config: dict) -> dict:
+    """Build customer token lookup table from config.
+
+    Config format (hashed, recommended)::
+
+        {"acme_hvac": {"hash": "sha256_hex"}}
+
+    Legacy plaintext format (hashed on load, plaintext discarded)::
+
+        {"acme_hvac": "plaintext_token"}
+
+    Returns:
+        {token_hash: customer_id} for O(1) lookup in _authenticate().
+    """
+    lookup: dict[str, str] = {}
+    for customer_id, value in customer_tokens_config.items():
+        if isinstance(value, dict):
+            token_hash = value.get("hash", "")
+            if token_hash:
+                lookup[token_hash] = customer_id
+        elif isinstance(value, str):
+            lookup[_hash_token(value)] = customer_id
+    return lookup
 
 
 def load_config(config_path: Optional[str] = None) -> dict:
@@ -487,7 +529,8 @@ class OhmHandler(BaseHTTPRequestHandler):
 
     store: Optional[OhmStore] = None
     config: dict = {}
-    tokens: dict = {}  # token -> agent_name
+    tokens: dict = {}  # token_hash → agent_name
+    customer_tokens: dict = {}  # token_hash → customer_id (OHM-tss4.3)
     roles: dict = {}  # agent_name -> role (read-write, read-only)
     no_auth: bool = False  # --no-auth flag: bypass all auth (dev mode)
     require_read_auth: bool = False  # OHM-gwg: require auth for reads (default: public reads)
@@ -537,15 +580,28 @@ class OhmHandler(BaseHTTPRequestHandler):
         sys.stderr.flush()
 
     def _authenticate(self) -> Optional[str]:
-        """Validate bearer token using constant-time comparison, return agent name or None."""
+        """Validate bearer token, return agent name or customer_id, or None.
+
+        Checks agent tokens first (existing behaviour), then customer API keys.
+        When a customer token matches, sets self._resolved_customer_id as a side
+        effect so that _customer_id property can route to the correct tenant.
+        Returns the customer_id string as the caller-visible "agent name" so that
+        all existing call sites (which do ``agent = self._authenticate()``) keep
+        working without modification.
+        """
+        from urllib.parse import unquote
+
         auth = self.headers.get("Authorization", "")
         if auth.startswith("Bearer "):
-            from urllib.parse import unquote
-
             token = unquote(auth[7:])
             for token_hash, agent_name in self.tokens.items():
                 if _verify_token(token, token_hash):
                     return agent_name
+            for token_hash, customer_id in self.customer_tokens.items():
+                if _verify_token(token, token_hash):
+                    self._resolved_customer_id = customer_id
+                    return customer_id
+
         from urllib.parse import parse_qs, urlparse
 
         qs = parse_qs(urlparse(self.path).query)
@@ -554,6 +610,10 @@ class OhmHandler(BaseHTTPRequestHandler):
             for token_hash, agent_name in self.tokens.items():
                 if _verify_token(token, token_hash):
                     return agent_name
+            for token_hash, customer_id in self.customer_tokens.items():
+                if _verify_token(token, token_hash):
+                    self._resolved_customer_id = customer_id
+                    return customer_id
         return None
 
     def _require_auth(self) -> str:
@@ -3645,6 +3705,7 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     OhmHandler.config = config
     token_hashes, config_roles = _build_token_lookup(config.get("tokens", {}))
     OhmHandler.tokens = token_hashes
+    OhmHandler.customer_tokens = _build_customer_token_lookup(config.get("customer_tokens", {}))
     OhmHandler.roles = config_roles if config_roles else config.get("roles", {})
     OhmHandler.no_auth = config.get("no_auth", False)
     OhmHandler.require_read_auth = config.get("require_read_auth", False)
@@ -3741,6 +3802,7 @@ def main(schema_config: SchemaConfig | None = None):
     parser.add_argument("--db", default=None, help="Path to DuckDB file")
     parser.add_argument("--config", default=None, help="Path to config file")
     parser.add_argument("--init-token", default=None, help="Create a token for an agent (agent_name)")
+    parser.add_argument("--init-customer-token", default=None, metavar="CUSTOMER_ID", help="Generate a customer API key for CUSTOMER_ID and save hash to config")
     parser.add_argument("--no-auth", action="store_true", help="Disable authentication (dev mode)")
     parser.add_argument(
         "--require-read-auth",
@@ -3826,6 +3888,22 @@ def main(schema_config: SchemaConfig | None = None):
         with open(config_path, "w") as f:
             json.dump(config, f, indent=2)
         print(f"Token for {args.init_token}: {token}")
+        print(f"Config saved to {config_path}")
+        print("WARNING: Store this token securely — it will not be shown again.")
+        return
+
+    # Handle customer token generation (OHM-tss4.3)
+    if args.init_customer_token:
+        from ohm.framework.validation import validate_customer_id
+
+        customer_id = validate_customer_id(args.init_customer_token)
+        token, token_hash = _generate_customer_token(customer_id)
+        config.setdefault("customer_tokens", {})[customer_id] = {"hash": token_hash}
+        config_path = Path(os.environ.get("OHM_CONFIG", str(Path.home() / ".ohm" / "ohmd.json")))
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(config_path, "w") as f:
+            json.dump(config, f, indent=2)
+        print(f"Customer token for {customer_id}: {token}")
         print(f"Config saved to {config_path}")
         print("WARNING: Store this token securely — it will not be shown again.")
         return
