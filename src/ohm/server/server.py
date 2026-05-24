@@ -514,6 +514,13 @@ def _build_router() -> _RouteRegistry:
 _ROUTER = _build_router()
 del _build_router
 
+# Tenant provisioning routes (OHM-tss4.6) — admin-only, only active with --multi-tenant
+_ROUTER.add("GET", "/tenants")
+_ROUTER.add("GET", "/tenant/")
+_ROUTER.add("POST", "/tenant/provision")
+_ROUTER.add("POST", "/tenant/")
+_ROUTER.add("DELETE", "/tenant/")
+
 
 # ── HTTP Handler ───────────────────────────────────────────
 
@@ -3593,15 +3600,195 @@ class OhmHandler(BaseHTTPRequestHandler):
         self._json_response(200, result)
 
 
+    # ── Tenant Provisioning Endpoints (OHM-tss4.6) ─────────────────────────
+
+    def _require_admin(self) -> str:
+        """Require admin role. Raises AuthenticationError or PermissionDeniedError."""
+        if self.no_auth:
+            return self._authenticate() or "ohm"
+        agent = self._authenticate()
+        if agent is None:
+            raise AuthenticationError("Authentication required — provide Bearer token")
+        if getattr(self, "_resolved_customer_id", None) is not None:
+            raise PermissionDeniedError("Admin endpoints require an agent token, not a customer key")
+        role = self.roles.get(agent, "read-write")
+        if role != "admin":
+            raise PermissionDeniedError(f"Agent '{agent}' requires 'admin' role for provisioning")
+        return agent
+
+    def _require_multi_tenant_active(self) -> None:
+        """Raise ValidationError if multi-tenancy or TenantManager is not active."""
+        if not self.multi_tenant or self.tenant_manager is None:
+            raise ValidationError("Multi-tenancy is not enabled — start ohmd with --multi-tenant")
+
+    def _post_tenant_provision(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /tenant/provision — create a new tenant instance and generate an API key.
+
+        Body: {"customer_id": str, "domain": str (default "ohm"), "tier": str (default "starter")}
+        Returns: {"customer_id", "domain", "tier", "token", "meta"}
+        Requires admin role. Customer keys are returned plaintext once — never stored.
+        """
+        self._require_admin()
+        self._require_multi_tenant_active()
+
+        from ohm.tenant import TenantAlreadyExistsError
+
+        customer_id = body.get("customer_id", "")
+        if not customer_id:
+            raise ValidationError("customer_id is required")
+        domain = body.get("domain", "ohm")
+        tier = body.get("tier", "starter")
+
+        try:
+            meta = self.tenant_manager.provision(customer_id, domain=domain, tier=tier)
+        except TenantAlreadyExistsError:
+            raise ConflictError(f"Tenant '{customer_id}' already exists")
+
+        token, token_hash = _generate_customer_token(customer_id)
+        with threading.Lock():
+            self.customer_tokens[token_hash] = customer_id
+
+        self._json_response(
+            201,
+            {
+                "customer_id": customer_id,
+                "domain": domain,
+                "tier": tier,
+                "token": token,
+                "meta": meta,
+                "warning": "Store this token securely — it will not be shown again.",
+            },
+        )
+
+    def _get_tenants(self, path: str, qs: dict) -> None:
+        """GET /tenants — list all provisioned tenants.
+
+        Returns: {"tenants": [{"customer_id", "domain", "tier", ...}]}
+        Requires admin role.
+        """
+        self._require_admin()
+        self._require_multi_tenant_active()
+        tenants = self.tenant_manager.list_tenants()
+        self._json_response(200, {"tenants": tenants, "count": len(tenants)})
+
+    def _get_tenant_prefix(self, path: str, qs: dict) -> None:
+        """GET /tenant/{id} or /tenant/{id}/schema — tenant status or domain schema.
+
+        Requires admin role.
+        """
+        self._require_admin()
+        self._require_multi_tenant_active()
+
+        # Extract customer_id from /tenant/{id}[/schema]
+        tail = path[len("/tenant/"):]  # e.g. "acme_hvac" or "acme_hvac/schema"
+        parts = tail.split("/", 1)
+        customer_id = parts[0]
+        sub = parts[1] if len(parts) > 1 else ""
+
+        from ohm.tenant import TenantNotFoundError
+
+        try:
+            meta = self.tenant_manager.get_meta(customer_id)
+        except TenantNotFoundError:
+            raise NodeNotFoundError(f"Tenant '{customer_id}' not found")
+
+        if sub == "schema":
+            try:
+                tenant_store = self.tenant_manager.get_store(customer_id)
+                sc = tenant_store.schema
+                schema_data = {
+                    "customer_id": customer_id,
+                    "domain": meta.get("domain", "ohm"),
+                    "node_types": sorted(sc.node_types) if sc else [],
+                    "edge_types": sorted(sc.all_edge_types) if sc else [],
+                }
+                self._json_response(200, schema_data)
+            except PermissionDeniedError:
+                raise
+            except Exception as e:
+                self._json_response(500, {"error": "schema_error", "message": str(e)})
+        else:
+            self._json_response(200, {"tenant": meta})
+
+    def _delete_tenant_prefix(self, path: str, agent: str) -> None:
+        """DELETE /tenant/{id} — deprovision a tenant.
+
+        Requires ?confirm=true and admin role.
+        """
+        self._require_admin()
+        self._require_multi_tenant_active()
+
+        from urllib.parse import parse_qs, urlparse
+        from ohm.tenant import TenantNotFoundError
+
+        qs = parse_qs(urlparse(self.path).query)
+        confirm = qs.get("confirm", ["false"])[0].lower() in ("true", "1", "yes")
+        if not confirm:
+            raise ValidationError("Pass ?confirm=true to deprovision a tenant — this is irreversible")
+
+        customer_id = path[len("/tenant/"):]
+        try:
+            self.tenant_manager.deprovision(customer_id, confirm=True)
+        except TenantNotFoundError:
+            raise NodeNotFoundError(f"Tenant '{customer_id}' not found")
+
+        # Revoke all customer tokens for this tenant from the in-memory lookup
+        revoked = [h for h, cid in list(self.customer_tokens.items()) if cid == customer_id]
+        for h in revoked:
+            self.customer_tokens.pop(h, None)
+
+        self._json_response(200, {"status": "deprovisioned", "customer_id": customer_id})
+
+    def _post_tenant_export(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /tenant/{id}/export — export a tenant's graph data as JSON.
+
+        Returns: {"customer_id", "nodes": [...], "edges": [...]}
+        Requires admin role. Use for backup or data portability.
+        """
+        self._require_admin()
+        self._require_multi_tenant_active()
+
+        from ohm.tenant import TenantNotFoundError
+
+        # path = /tenant/{customer_id}/export
+        tail = path[len("/tenant/"):]  # e.g. "acme_hvac/export"
+        parts = tail.split("/", 1)
+        customer_id = parts[0]
+        sub = parts[1] if len(parts) > 1 else ""
+        if sub != "export":
+            self._json_response(404, {"error": f"Unknown tenant endpoint: {path}"})
+
+        try:
+            tenant_store = self.tenant_manager.get_store(customer_id)
+        except TenantNotFoundError:
+            raise NodeNotFoundError(f"Tenant '{customer_id}' not found")
+
+        nodes = tenant_store.execute("SELECT * FROM ohm_nodes WHERE deleted_at IS NULL ORDER BY id")
+        edges = tenant_store.execute("SELECT * FROM ohm_edges WHERE deleted_at IS NULL ORDER BY id")
+        self._json_response(
+            200,
+            {
+                "customer_id": customer_id,
+                "exported_at": datetime.now(timezone.utc).isoformat(),
+                "nodes": nodes,
+                "edges": edges,
+                "node_count": len(nodes),
+                "edge_count": len(edges),
+            },
+        )
+
+
 # ── Dispatch table population ─────────────────────────────────────────────────
 # Populated after class body so method names are valid references.
 
 OhmHandler._DELETE_PREFIXES = [
     ("/node/", "_delete_node"),
     ("/edge/", "_delete_edge"),
+    ("/tenant/", "_delete_tenant_prefix"),
 ]
 
 OhmHandler._POST_EXACT = {
+    "/tenant/provision": "_post_tenant_provision",
     "/node": "_post_node",
     "/node/find_or_create": "_post_node_find_or_create",
     "/edge": "_post_edge",
@@ -3620,6 +3807,7 @@ OhmHandler._POST_EXACT = {
 }
 
 OhmHandler._POST_PREFIXES = [
+    ("/tenant/", "_post_tenant_export"),
     ("/challenge/", "_post_challenge"),
     ("/support/", "_post_support"),
     ("/observe/", "_post_observe"),
@@ -3675,10 +3863,12 @@ OhmHandler._GET_EXACT = {
     "/graph/changes": "_get_graph_changes",
     "/observations": "_get_observations",
     "/source_reliability": "_get_source_reliability",
+    "/tenants": "_get_tenants",
 }
 
 
 OhmHandler._GET_PREFIXES = [
+    ("/tenant/", "_get_tenant_prefix"),
     ("/node/", "_get_node"),
     ("/deep/", "_get_deep"),
     ("/edge/", "_get_edge"),
