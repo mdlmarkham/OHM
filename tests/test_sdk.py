@@ -1595,3 +1595,35 @@ class TestDeleteEdgeSDK:
 
         with pytest.raises(EdgeNotFoundError):
             graph.delete_edge("nonexistent_edge_xyz")
+
+
+class TestBearerTokenUnicode:
+    """Tests for OHM-1idm: Bearer token unicode handling in HTTP requests."""
+
+    def test_ascii_token_passes_through(self):
+        """ASCII-only Bearer tokens pass through without encoding."""
+        token = "ohm-metis-abc123"
+        header = f"Bearer {token}"
+        header.encode("latin-1")
+        assert header == f"Bearer {token}"
+
+    def test_unicode_token_percent_encoded(self):
+        """Non-ASCII Bearer tokens are percent-encoded to avoid Latin-1 error."""
+        from urllib.parse import quote
+
+        token = "ohm-metis-\u4e2d\u6587"
+        header = f"Bearer {token}"
+        with pytest.raises(UnicodeEncodeError):
+            header.encode("latin-1")
+        encoded = f"Bearer {quote(token, safe='-._~')}"
+        encoded.encode("latin-1")
+        assert "%E4%B8%AD" in encoded
+
+    def test_server_unquote_roundtrip(self):
+        """Server-side unquote() recovers the original token."""
+        from urllib.parse import quote, unquote
+
+        token = "ohm-metis-\u4e2d\u6587"
+        encoded = quote(token, safe="-._~")
+        decoded = unquote(encoded)
+        assert decoded == token

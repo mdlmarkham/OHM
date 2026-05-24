@@ -1299,7 +1299,14 @@ def _handle_events(args: argparse.Namespace) -> None:
 
     headers = {"Accept": "text/event-stream"}
     if token:
-        headers["Authorization"] = f"Bearer {token}"
+        token_header = f"Bearer {token}"
+        try:
+            token_header.encode("latin-1")
+        except UnicodeEncodeError:
+            from urllib.parse import quote
+
+            token_header = f"Bearer {quote(token, safe='-._~')}"
+        headers["Authorization"] = token_header
 
     print(f"Connecting to {url}...")
     print("Press Ctrl+C to stop streaming.\n")
