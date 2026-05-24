@@ -36,6 +36,7 @@ class Graph:
         self._conn = conn
         self.actor = actor
         self.token: str | None = None
+        self.tenant_id: str | None = None
 
     # ── Discovery (ADR-005) ───────────────────────────────────────────────
 
@@ -2679,6 +2680,7 @@ def connect(
     *,
     actor: str = "unknown",
     token: str | None = None,
+    tenant_id: str | None = None,
 ) -> Graph:
     """Open a connection to an OHM graph.
 
@@ -2687,6 +2689,10 @@ def connect(
         actor: Agent name for attribution.
         token: Bearer token for ohmd authentication. If not provided,
                reads from OHM_TOKEN environment variable.
+        tenant_id: Optional tenant identifier for multi-tenant routing
+            (OHM-xbbi). When provided, opens a tenant-scoped DB at
+            {db_path}/{actor}/{tenant_id}/ohm.duckdb. When db_path is
+            ':memory:', tenant_id is stored in graph metadata only.
 
     Returns:
         A Graph instance ready for use.
@@ -2696,9 +2702,19 @@ def connect(
     from ohm.db import connect as db_connect
 
     resolved_token = token or os.environ.get("OHM_TOKEN")
-    conn = db_connect(db_path)
+
+    # Resolve tenant-scoped path (OHM-xbbi)
+    if tenant_id is not None and db_path != ":memory:":
+        from pathlib import Path as _Path
+        tenant_db = str(_Path(db_path) / actor / tenant_id / "ohm.duckdb")
+        _Path(tenant_db).parent.mkdir(parents=True, exist_ok=True)
+        conn = db_connect(tenant_db)
+    else:
+        conn = db_connect(db_path)
+
     graph = Graph(conn, actor=actor)
     graph.token = resolved_token
+    graph.tenant_id = tenant_id
     return graph
 
 

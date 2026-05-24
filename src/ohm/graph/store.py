@@ -57,6 +57,7 @@ class OhmStore:
         ducklake_data_path: Optional[str] = None,
         schema: Optional["SchemaConfig"] = None,
         base_dir: Optional[str] = None,
+        tenant_id: Optional[str] = None,
     ) -> "OhmStore":
         """Create a per-agent local DuckDB with DuckLake sync.
 
@@ -79,6 +80,11 @@ class OhmStore:
             schema: SchemaConfig for domain-specific validation.
             base_dir: Base directory for agent DB files.
                 Defaults to ~/.ohm/agents/
+            tenant_id: Optional tenant identifier for multi-tenant routing
+                (OHM-xbbi). When provided, the DB path becomes
+                {base_dir}/{agent_name}/{tenant_id}/ohm.duckdb.
+                When None (default), uses {base_dir}/{agent_name}/ohm.duckdb
+                for backward compatibility.
 
         Returns:
             OhmStore instance with local DB and DuckLake configured.
@@ -86,8 +92,11 @@ class OhmStore:
         if base_dir is None:
             base_dir = os.environ.get("OHM_AGENTS_DIR", str(Path.home() / ".ohm" / "agents"))
 
-        # Per-agent DB path
-        db_path = os.path.join(base_dir, agent_name, "ohm.duckdb")
+        # Per-agent DB path — tenant-scoped when tenant_id provided (OHM-xbbi)
+        if tenant_id is not None:
+            db_path = os.path.join(base_dir, agent_name, tenant_id, "ohm.duckdb")
+        else:
+            db_path = os.path.join(base_dir, agent_name, "ohm.duckdb")
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
 
         # DuckLake paths

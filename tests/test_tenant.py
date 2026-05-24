@@ -630,3 +630,66 @@ class TestPerTenantIntegrations:
         meta = tm.provision("acme_hvac", domain="home_services", integrations=integrations)
         assert meta["domain"] == "home_services"
         assert meta["integrations"]["twilio"]["account_sid"] == "AC123"
+
+
+class TestAgentMultiTenantRouting:
+    def test_for_agent_tenant_id_creates_tenant_scoped_db(self, tmp_path):
+        from ohm.graph.store import OhmStore
+
+        base = str(tmp_path / "agents")
+        store = OhmStore.for_agent("metis", tenant_id="acme_hvac", base_dir=base)
+        assert "metis" in str(store.db_path)
+        assert "acme_hvac" in str(store.db_path)
+        store.close()
+
+        # Backward compat: no tenant_id
+        store2 = OhmStore.for_agent("metis", base_dir=base)
+        assert "acme_hvac" not in str(store2.db_path)
+        store2.close()
+
+    def test_for_agent_different_tenants_different_dbs(self, tmp_path):
+        from ohm.graph.store import OhmStore
+
+        base = str(tmp_path / "agents")
+        store_a = OhmStore.for_agent("metis", tenant_id="tenant_a", base_dir=base)
+        store_b = OhmStore.for_agent("metis", tenant_id="tenant_b", base_dir=base)
+
+        assert str(store_a.db_path) != str(store_b.db_path)
+        store_a.close()
+        store_b.close()
+
+    def test_connect_tenant_id_opens_scoped_db(self, tmp_path):
+        from ohm.sdk import connect
+
+        db_path = str(tmp_path / "graphs")
+        g = connect(db_path, actor="metis", tenant_id="acme_hvac")
+        assert g.tenant_id == "acme_hvac"
+        g._conn.close()
+
+    def test_connect_no_tenant_id_backward_compat(self, tmp_path):
+        from ohm.sdk import connect
+
+        db_path = str(tmp_path / "test.duckdb")
+        g = connect(db_path, actor="metis")
+        assert g.tenant_id is None
+        g._conn.close()
+
+    def test_tenant_scoped_stores_isolated(self, tmp_path):
+        from ohm.graph.store import OhmStore
+
+        base = str(tmp_path / "agents")
+        store_a = OhmStore.for_agent("metis", tenant_id="tenant_a", base_dir=base)
+        store_b = OhmStore.for_agent("metis", tenant_id="tenant_b", base_dir=base)
+
+        # Write to tenant_a
+        store_a.write_node(id="node_a", label="Tenant A Node", type="concept")
+
+        # Verify not visible in tenant_b
+        count_b = store_b.conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL").fetchone()
+        count_a = store_a.conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL").fetchone()
+
+        assert count_a[0] > 0
+        assert count_b[0] == 0
+
+        store_a.close()
+        store_b.close()
