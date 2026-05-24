@@ -561,3 +561,72 @@ class TestWALCheckpointStrategy:
 
         tm._checkpoint_tenant("acme_hvac", entry, reason="test")
         assert entry.last_checkpoint_at > 0.0
+
+
+class TestPerTenantIntegrations:
+    def test_provision_with_integrations(self, tm):
+        integrations = {
+            "twilio": {
+                "account_sid": "AC123",
+                "auth_token_ref": "TWILIO_AUTH_TOKEN_ACME",
+                "phone_number": "+15551234567",
+            }
+        }
+        meta = tm.provision("acme_hvac", integrations=integrations)
+        assert meta["integrations"]["twilio"]["account_sid"] == "AC123"
+
+    def test_load_integrations_resolves_ref(self, tm, monkeypatch):
+        monkeypatch.setenv("TWILIO_AUTH_TOKEN_ACME", "secret_token_value")
+
+        integrations = {
+            "twilio": {
+                "account_sid": "AC123",
+                "auth_token_ref": "TWILIO_AUTH_TOKEN_ACME",
+                "phone_number": "+15551234567",
+            }
+        }
+        tm.provision("acme_hvac", integrations=integrations)
+
+        loaded = tm.load_integrations("acme_hvac")
+        assert loaded["twilio"]["auth_token"] == "secret_token_value"
+        assert loaded["twilio"]["account_sid"] == "AC123"
+
+    def test_load_integrations_unresolved_ref(self, tm):
+        integrations = {
+            "twilio": {
+                "account_sid": "AC123",
+                "auth_token_ref": "TWILIO_AUTH_TOKEN_NONEXISTENT",
+                "phone_number": "+15551234567",
+            }
+        }
+        tm.provision("acme_hvac", integrations=integrations)
+
+        loaded = tm.load_integrations("acme_hvac")
+        assert loaded["twilio"]["auth_token_ref"] == "TWILIO_AUTH_TOKEN_NONEXISTENT"
+        assert loaded["twilio"].get("auth_token_ref_unresolved") is True
+
+    def test_update_integrations(self, tm):
+        tm.provision("acme_hvac")
+        meta = tm.update_integrations("acme_hvac", {
+            "sendgrid": {"api_key_ref": "SENDGRID_KEY_ACME", "from_email": "ops@acme.com"}
+        })
+        assert "sendgrid" in meta["integrations"]
+
+        loaded = tm.load_integrations("acme_hvac")
+        assert loaded["sendgrid"]["from_email"] == "ops@acme.com"
+
+    def test_provision_validates_required_integrations(self, tm):
+        with pytest.raises(ValueError, match="Missing required integrations"):
+            tm.provision("acme_hvac", domain="home_services")
+
+    def test_provision_home_services_with_twilio(self, tm):
+        integrations = {
+            "twilio": {
+                "account_sid": "AC123",
+                "auth_token_ref": "TWILIO_AUTH_TOKEN_ACME",
+                "phone_number": "+15551234567",
+            }
+        }
+        meta = tm.provision("acme_hvac", domain="home_services", integrations=integrations)
+        assert meta["domain"] == "home_services"
+        assert meta["integrations"]["twilio"]["account_sid"] == "AC123"

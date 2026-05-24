@@ -234,6 +234,8 @@ class SchemaConfig:
         observation_sources: frozenset[str] | None = None,
         visibilities: frozenset[str] | None = None,
         provenances: frozenset[str] | None = None,
+        required_integrations: dict | None = None,
+        optional_integrations: dict | None = None,
     ):
         self.name = name
         self.node_types = node_types if node_types is not None else VALID_NODE_TYPES
@@ -243,6 +245,8 @@ class SchemaConfig:
         self.observation_sources = observation_sources if observation_sources is not None else VALID_OBSERVATION_SOURCES
         self.visibilities = visibilities if visibilities is not None else VALID_VISIBILITIES
         self.provenances = provenances if provenances is not None else VALID_PROVENANCES
+        self.required_integrations = required_integrations if required_integrations is not None else {}
+        self.optional_integrations = optional_integrations if optional_integrations is not None else {}
 
     @property
     def all_edge_types(self) -> frozenset[str]:
@@ -431,7 +435,7 @@ class SchemaConfig:
 
     def to_dict(self) -> dict:
         """Serialize the schema configuration to a dictionary."""
-        return {
+        result = {
             "name": self.name,
             "node_types": sorted(self.node_types),
             "layer_edge_types": {layer: sorted(types) for layer, types in self.layer_edge_types.items()},
@@ -441,6 +445,11 @@ class SchemaConfig:
             "visibilities": sorted(self.visibilities),
             "provenances": sorted(self.provenances),
         }
+        if self.required_integrations:
+            result["required_integrations"] = self.required_integrations
+        if self.optional_integrations:
+            result["optional_integrations"] = self.optional_integrations
+        return result
 
     @classmethod
     def from_dict(cls, data: dict) -> "SchemaConfig":
@@ -477,6 +486,8 @@ class SchemaConfig:
             observation_sources=frozenset(data["observation_sources"]),
             visibilities=frozenset(data.get("visibilities", ["private", "team", "public"])),
             provenances=frozenset(data["provenances"]),
+            required_integrations=data.get("required_integrations", {}),
+            optional_integrations=data.get("optional_integrations", {}),
         )
 
     @classmethod

@@ -126,5 +126,24 @@
     "observation",
     "research",
     "socrates-curriculum"
-  ]
+  ],
+  "required_integrations": {},
+  "optional_integrations": {
+    "twilio": {
+      "fields": ["account_sid", "auth_token_ref", "phone_number"],
+      "env_prefix": "TWILIO"
+    },
+    "sendgrid": {
+      "fields": ["api_key_ref", "from_email"],
+      "env_prefix": "SENDGRID"
+    },
+    "slack": {
+      "fields": ["bot_token_ref", "signing_secret_ref", "channel_id"],
+      "env_prefix": "SLACK"
+    },
+    "teams": {
+      "fields": ["webhook_url_ref", "app_id", "tenant_id"],
+      "env_prefix": "TEAMS"
+    }
+  }
 }

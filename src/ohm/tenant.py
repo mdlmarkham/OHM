@@ -113,10 +113,11 @@ class TenantManager:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def provision(self, customer_id: str, domain: str = "ohm", tier: str = "starter") -> dict:
+    def provision(self, customer_id: str, domain: str = "ohm", tier: str = "starter", integrations: Optional[dict] = None) -> dict:
         """Create an isolated DuckDB instance for *customer_id*.
 
         Raises TenantAlreadyExistsError if the tenant already exists.
+        Raises ValueError if required integrations for the domain are missing.
         Returns the meta.json dict.
         """
         customer_id = validate_customer_id(customer_id)
@@ -128,6 +129,21 @@ class TenantManager:
         tenant_dir.mkdir(parents=True, exist_ok=True)
 
         schema = self._load_schema(domain)
+
+        # Validate required integrations for domain
+        schema_dict = schema.to_dict()
+        required = schema_dict.get("required_integrations", {})
+        if required:
+            integrations = integrations or {}
+            missing = []
+            for channel, spec in required.items():
+                provided = integrations.get(channel, {})
+                for field in spec.get("fields", []):
+                    if field not in provided:
+                        missing.append(f"{channel}.{field}")
+            if missing:
+                raise ValueError(f"Missing required integrations for domain '{domain}': {', '.join(missing)}")
+
         db_path = tenant_dir / _DB_FILENAME
         store = OhmStore(db_path=str(db_path), agent_name="ohmd", schema=schema)
         store.close()
@@ -141,7 +157,7 @@ class TenantManager:
             "schema_version": SCHEMA_VERSION,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "shared_patterns": False,
-            "integrations": {},
+            "integrations": integrations or {},
         }
         self._write_meta(customer_id, meta)
         logger.info("Provisioned tenant %s (domain=%s, tier=%s)", customer_id, domain, tier)
@@ -266,6 +282,52 @@ class TenantManager:
     def get_meta(self, customer_id: str) -> dict:
         """Return meta.json for a single tenant."""
         return self._read_meta(customer_id)
+
+    def load_integrations(self, customer_id: str) -> dict:
+        """Load and resolve integration config for a tenant (OHM-uwl2).
+
+        Reads the integrations dict from meta.json and resolves _ref fields
+        from environment variables. _ref fields contain env var names (e.g.,
+        ``TWILIO_AUTH_TOKEN_ACME_HVAC``) or vault paths. The resolved dict
+        contains the actual credential values.
+
+        Fields without ``_ref`` suffix are passed through as-is (e.g.,
+        account_sid, phone_number).
+        """
+        customer_id = validate_customer_id(customer_id)
+        meta = self._read_meta(customer_id)
+        raw = meta.get("integrations", {})
+        resolved = {}
+
+        for channel, config in raw.items():
+            channel_config = {}
+            for field, value in config.items():
+                if field.endswith("_ref") and isinstance(value, str):
+                    env_val = os.environ.get(value)
+                    if env_val is not None:
+                        channel_config[field[:-4]] = env_val
+                    else:
+                        channel_config[field] = value
+                        channel_config[f"{field}_unresolved"] = True
+                else:
+                    channel_config[field] = value
+            resolved[channel] = channel_config
+
+        return resolved
+
+    def update_integrations(self, customer_id: str, integrations: dict) -> dict:
+        """Update integrations for a tenant in meta.json (OHM-uwl2).
+
+        Merges the provided integrations dict into the existing one.
+        Returns the updated meta.json.
+        """
+        customer_id = validate_customer_id(customer_id)
+        meta = self._read_meta(customer_id)
+        existing = meta.get("integrations", {})
+        existing.update(integrations)
+        meta["integrations"] = existing
+        self._write_meta(customer_id, meta)
+        return meta
 
     def acquire_store(self, customer_id: str) -> _TenantEntry:
         """Get a store entry and mark it as in-use (OHM-s18r).
@@ -467,6 +529,7 @@ class TenantManager:
         return json.loads(meta_path.read_text())
 
     def _load_schema(self, domain: str) -> SchemaConfig:
+        # Try custom templates dir first
         if self._templates_dir:
             json_path = self._templates_dir / f"{domain}.json"
             if json_path.exists():
@@ -474,7 +537,23 @@ class TenantManager:
                     return SchemaConfig.from_json_file(str(json_path))
                 except Exception as e:
                     logger.warning("Could not load template %s: %s — using default", json_path, e)
-        return SchemaConfig.from_json_file(str(Path(__file__).parent / "graph" / "templates" / "ohm.json")) if (Path(__file__).parent / "graph" / "templates" / "ohm.json").exists() else SchemaConfig()
+
+        # Try package-bundled templates
+        package_template = Path(__file__).parent / "graph" / "templates" / f"{domain}.json"
+        if package_template.exists():
+            try:
+                return SchemaConfig.from_json_file(str(package_template))
+            except Exception as e:
+                logger.warning("Could not load package template %s: %s — using default", package_template, e)
+
+        # Fallback to base ohm schema
+        ohm_template = Path(__file__).parent / "graph" / "templates" / "ohm.json"
+        if ohm_template.exists():
+            try:
+                return SchemaConfig.from_json_file(str(ohm_template))
+            except Exception:
+                pass
+        return SchemaConfig()
 
     def _apply_lazy_migrations(self, customer_id: str, store: OhmStore) -> None:
         """Apply pending schema migrations to a tenant instance (OHM-tss4.5).
