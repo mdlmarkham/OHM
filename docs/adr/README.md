@@ -334,3 +334,27 @@ Use PERT three-point estimation (P05/P50/P95) as the elicitation protocol for ed
 - Decision nodes encode "how much does being wrong matter?"
 - Agents can self-optimize: research what matters, not what's easy
 - GIGO risk mitigated by conservative initial ranges and observation updates
+
+---
+
+## ADR-015: Multi-Tenancy — Single-Process Isolated DuckDB Instances
+
+**Date:** 2026-05-24
+**Status:** Accepted
+
+### Context
+
+OHM currently runs as a single-tenant system. The TeamWork AI platform needs to serve multiple customers from a single deployment with complete data isolation.
+
+### Decision
+
+One `ohmd` process, N isolated DuckDB files, per-tenant LRU cache. Customer API keys resolve to tenant instances. Domain templates replace `topod`. Feature flag (`ENABLE_MULTI_TENANCY`) ensures backward compatibility.
+
+### Consequences
+
+- Strong isolation — each tenant's data is a separate DuckDB file
+- Domain flexibility — each tenant uses a different SchemaConfig
+- Economical — one process, LRU cache manages memory
+- Single-writer serialization per tenant (concurrent reads OK)
+- Horizontal scaling path: consistent-hash router + N ohmd instances
+- See [full ADR](0015-multi-tenancy.md)
