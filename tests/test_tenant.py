@@ -428,3 +428,78 @@ class TestCrashConsistentMigration:
         assert not lock_path.exists()
         meta = json.loads(meta_path.read_text())
         assert meta["schema_version"] == SCHEMA_VERSION
+
+
+class TestLRUEvictionGuard:
+    def test_eviction_skips_in_flight_request(self, tm):
+        tm.provision("acme_hvac")
+        entry = tm.acquire_store("acme_hvac")
+        assert entry.refcount == 1
+
+        # Eviction should skip (refcount > 0)
+        tm._evict("acme_hvac")
+        assert "acme_hvac" in tm._cache
+
+        # After release, eviction should proceed
+        tm.release_store("acme_hvac")
+        assert entry.refcount == 0
+
+    def test_lru_skips_in_flight_and_marks_deferred(self, tm):
+        for i in range(5):
+            tm.provision(f"tenant_{i}")
+            tm.get_store(f"tenant_{i}")
+
+        # Acquire one tenant so it has an in-flight request
+        entry = tm.acquire_store("tenant_0")
+        assert entry.refcount == 1
+
+        # Add one more to exceed max_cached=5
+        tm.provision("tenant_5")
+        tm.get_store("tenant_5")
+
+        # tenant_0 should still be in cache (was marked evict_pending)
+        assert "tenant_0" in tm._cache
+
+        tm.release_store("tenant_0")
+        assert entry.refcount == 0
+
+    def test_using_store_context_manager(self, tm):
+        tm.provision("acme_hvac")
+
+        with tm.using_store("acme_hvac") as entry:
+            assert entry.refcount >= 1
+            store = entry.store
+            assert store is not None
+
+        assert entry.refcount == 0
+
+    def test_using_store_releases_on_exception(self, tm):
+        tm.provision("acme_hvac")
+
+        try:
+            with tm.using_store("acme_hvac") as entry:
+                assert entry.refcount >= 1
+                raise ValueError("test error")
+        except ValueError:
+            pass
+
+        assert tm._cache.get("acme_hvac") is not None and tm._cache["acme_hvac"].refcount == 0
+
+    def test_idle_eviction_skips_in_flight(self, tmp_path):
+        tm = TenantManager(tmp_path / "tenants", max_cached=10)
+        tm.provision("acme_hvac")
+        entry = tm.acquire_store("acme_hvac")
+
+        # Simulate idle eviction
+        tm._evict("acme_hvac")
+
+        # Should still be in cache
+        assert "acme_hvac" in tm._cache
+        assert entry.evict_pending is True
+
+        # Release should trigger deferred eviction
+        tm.release_store("acme_hvac")
+        assert entry.refcount == 0
+        assert "acme_hvac" not in tm._cache
+
+        tm.close()

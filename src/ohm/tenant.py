@@ -18,6 +18,7 @@ import secrets
 import threading
 import time
 from collections import OrderedDict
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -42,17 +43,33 @@ class TenantAlreadyExistsError(Exception):
 
 
 class _TenantEntry:
-    """One slot in the LRU cache."""
+    """One slot in the LRU cache.
 
-    __slots__ = ("store", "write_lock", "last_accessed")
+    Reference counting (OHM-s18r): ``refcount`` tracks in-flight requests.
+    Eviction skips entries with refcount > 0 and marks them for deferred
+    eviction instead (``evict_pending``).
+    """
+
+    __slots__ = ("store", "write_lock", "last_accessed", "refcount", "evict_pending")
 
     def __init__(self, store: OhmStore) -> None:
         self.store = store
         self.write_lock = threading.Lock()
         self.last_accessed = time.monotonic()
+        self.refcount = 0
+        self.evict_pending = False
 
     def touch(self) -> None:
         self.last_accessed = time.monotonic()
+
+    def acquire(self) -> None:
+        """Increment refcount — caller has an in-flight request."""
+        self.refcount += 1
+        self.evict_pending = False
+
+    def release(self) -> None:
+        """Decrement refcount. If refcount hits 0 and eviction is pending, evict."""
+        self.refcount = max(0, self.refcount - 1)
 
 
 class TenantManager:
@@ -239,6 +256,74 @@ class TenantManager:
     def get_meta(self, customer_id: str) -> dict:
         """Return meta.json for a single tenant."""
         return self._read_meta(customer_id)
+
+    def acquire_store(self, customer_id: str) -> _TenantEntry:
+        """Get a store entry and mark it as in-use (OHM-s18r).
+
+        Callers must call ``release_store()`` when done (typically via
+        a try/finally block or ``using_store()`` context manager).
+        """
+        customer_id = validate_customer_id(customer_id)
+        with self._cache_lock:
+            if customer_id in self._cache:
+                entry = self._cache[customer_id]
+                self._cache.move_to_end(customer_id)
+                entry.touch()
+                entry.acquire()
+                return entry
+
+        # Not cached — open and insert
+        meta = self._read_meta(customer_id)
+        schema = self._load_schema(meta.get("domain", "ohm"))
+        db_path = self._tenant_dir(customer_id) / _DB_FILENAME
+        store = OhmStore(db_path=str(db_path), agent_name="ohmd", schema=schema)
+
+        with self._cache_lock:
+            if customer_id in self._cache:
+                store.close()
+                entry = self._cache[customer_id]
+                self._cache.move_to_end(customer_id)
+                entry.touch()
+                entry.acquire()
+                return entry
+
+            entry = _TenantEntry(store)
+            entry.acquire()
+            self._cache[customer_id] = entry
+            self._cache.move_to_end(customer_id)
+            self._evict_lru_unlocked()
+
+        return entry
+
+    def release_store(self, customer_id: str) -> None:
+        """Release an in-flight reference on a tenant store (OHM-s18r)."""
+        with self._cache_lock:
+            entry = self._cache.get(customer_id)
+            if entry is not None:
+                entry.release()
+                if entry.refcount == 0 and entry.evict_pending:
+                    self._cache.pop(customer_id, None)
+
+        if entry is not None and entry.refcount == 0 and entry.evict_pending:
+            try:
+                entry.store.close()
+            except Exception:
+                pass
+
+    @contextmanager
+    def using_store(self, customer_id: str):
+        """Context manager: acquire/release a tenant store with refcounting.
+
+        Usage::
+
+            with tm.using_store("acme_hvac") as entry:
+                result = entry.store.conn.execute("SELECT ...")
+        """
+        entry = self.acquire_store(customer_id)
+        try:
+            yield entry
+        finally:
+            self.release_store(customer_id)
 
     def close(self) -> None:
         """Close all cached stores and checkpoint their WALs."""
@@ -465,25 +550,52 @@ class TenantManager:
                 # Leave lock file in place — reconcile_tenants() will detect it
 
     def _evict(self, customer_id: str) -> None:
-        """Remove *customer_id* from the cache and close its store."""
+        """Remove *customer_id* from the cache and close its store.
+
+        Skips eviction if the entry has in-flight requests (OHM-s18r),
+        marking it for deferred eviction instead.
+        """
         with self._cache_lock:
-            entry = self._cache.pop(customer_id, None)
-        if entry:
-            try:
-                entry.store.close()
-            except Exception:
-                pass
+            entry = self._cache.get(customer_id)
+            if entry is None:
+                return
+            if entry.refcount > 0:
+                entry.evict_pending = True
+                logger.debug("Skip eviction of tenant %s (refcount=%d), marked for deferred eviction", customer_id, entry.refcount)
+                return
+            self._cache.pop(customer_id, None)
+        try:
+            entry.store.close()
+        except Exception:
+            pass
 
     def _evict_lru_unlocked(self) -> None:
-        """Evict the LRU entry if cache is over capacity. Must hold _cache_lock."""
+        """Evict the LRU entry if cache is over capacity. Must hold _cache_lock.
+
+        Skips entries with in-flight requests (refcount > 0) and marks them
+        for deferred eviction instead (OHM-s18r).
+        """
         while len(self._cache) > self._max_cached:
-            oldest_id, entry = next(iter(self._cache.items()))
-            self._cache.pop(oldest_id)
-            try:
-                entry.store.close()
-            except Exception:
-                pass
-            logger.debug("LRU evicted tenant %s", oldest_id)
+            # Find LRU entry that isn't in-use
+            evicted = False
+            for cid, entry in self._cache.items():
+                if entry.refcount == 0:
+                    self._cache.pop(cid)
+                    try:
+                        entry.store.close()
+                    except Exception:
+                        pass
+                    logger.debug("LRU evicted tenant %s", cid)
+                    evicted = True
+                    break
+                else:
+                    entry.evict_pending = True
+                    logger.debug("LRU skip tenant %s (refcount=%d), marked for deferred eviction", cid, entry.refcount)
+
+            if not evicted:
+                # All entries have in-flight requests — can't evict any
+                logger.warning("LRU eviction: all %d cached tenants have in-flight requests", len(self._cache))
+                break
 
     def _eviction_loop(self) -> None:
         """Background thread: evict idle tenants every 60 seconds."""
