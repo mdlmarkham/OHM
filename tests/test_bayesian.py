@@ -1413,6 +1413,37 @@ class TestCachePoisoningRegression:
         assert net2 is not None
         assert c in net2["nodes"]
 
+    def test_cache_key_includes_customer_id(self, db):
+        """Two build_bayesian_network calls with different customer_id should
+        produce independent cache entries — cross-tenant bleed prevention (OHM-g4os)."""
+        try:
+            from pgmpy.models import DiscreteBayesianNetwork  # noqa: F401
+        except ImportError:
+            pytest.skip("pgmpy not available")
+
+        from ohm.bayesian import build_bayesian_network, _bayesian_network_cache
+
+        a = create_sample_node(db, label="tenant_a")
+        b = create_sample_node(db, label="tenant_b")
+        db.execute(
+            "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, probability, confidence, created_by) VALUES (?, ?, ?, 'L3', 'CAUSES', 0.8, 0.9, 'test')",
+            [str(uuid.uuid4()), a, b],
+        )
+
+        _bayesian_network_cache.clear()
+
+        net_core = build_bayesian_network(db, root_nodes=[a, b], edge_types=["CAUSES"], layers=["L3"], customer_id=None)
+        assert net_core is not None
+
+        net_t1 = build_bayesian_network(db, root_nodes=[a, b], edge_types=["CAUSES"], layers=["L3"], customer_id="tenant_alpha")
+        assert net_t1 is not None
+
+        net_t2 = build_bayesian_network(db, root_nodes=[a, b], edge_types=["CAUSES"], layers=["L3"], customer_id="tenant_beta")
+        assert net_t2 is not None
+
+        # Three distinct cache entries for same graph but different customer_id
+        assert len(_bayesian_network_cache) == 3
+
     @pytest.mark.skipif(not pytest.importorskip("pgmpy", reason="pgmpy not installed"), reason="pgmpy not available")
     def test_ate_after_inference_on_different_nodes(self, db):
         """ATE should work even after a prior /inference call scoped to

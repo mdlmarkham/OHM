@@ -150,6 +150,7 @@ def build_bayesian_network(
     root_prior: float = 0.3,
     semantic_roles: SemanticRoles | None = None,
     preferred_edges: set[tuple[str, str]] | None = None,
+    customer_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Build a BayesianNetwork from OHM edges with probability/confidence values.
 
@@ -204,7 +205,10 @@ def build_bayesian_network(
     # to prevent stale cache hits. root_nodes was previously omitted, causing
     # a network scoped to one set of nodes to be returned for a different set
     # (e.g., /inference?target=X cached network reused for /ate?cause=A&effect=B).
+    # customer_id (OHM-g4os) prevents cross-tenant cache bleed — two tenants
+    # with identical node IDs must get independent cached networks.
     cache_key = (
+        customer_id,
         tuple(sorted(edge_types)) if edge_types else None,
         tuple(sorted(layers)) if layers else None,
         tuple(sorted(root_nodes)) if root_nodes else None,
