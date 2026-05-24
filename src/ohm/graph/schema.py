@@ -528,6 +528,9 @@ TOPO_SCHEMA = SchemaConfig.topo()
 # Beef Herd schema config instance
 BEEF_SCHEMA = SchemaConfig.beef_herd()
 
+# Home Services schema config instance
+HOME_SERVICES_SCHEMA = SchemaConfig.from_json_file("home_services.json")
+
 # ── DDL Statements ──────────────────────────────────────────────────────────
 
 DDL_STATEMENTS: list[str] = [

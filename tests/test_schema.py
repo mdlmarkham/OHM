@@ -481,3 +481,41 @@ class TestSchemaConfigSerialization:
         from_cls = SchemaConfig.beef_herd()
         assert from_json.node_types == from_cls.node_types
         assert from_json.observation_types == from_cls.observation_types
+
+
+class TestHomeServicesSchema:
+    """Tests for OHM-tss4.10: Home Services domain template."""
+
+    def test_home_services_loads_from_json(self):
+        config = SchemaConfig.from_json_file("home_services.json")
+        assert config.name == "home_services"
+
+    def test_home_services_node_types(self):
+        config = SchemaConfig.from_json_file("home_services.json")
+        for expected in ["customer", "technician", "job", "appointment", "equipment",
+                         "service_contract", "warranty", "estimate", "invoice"]:
+            assert expected in config.node_types, f"Missing node type: {expected}"
+
+    def test_home_services_observation_types(self):
+        config = SchemaConfig.from_json_file("home_services.json")
+        for expected in ["call_duration", "job_completion_time", "first_time_fix_rate", "revenue_per_job"]:
+            assert expected in config.observation_types, f"Missing observation type: {expected}"
+
+    def test_home_services_provenances(self):
+        config = SchemaConfig.from_json_file("home_services.json")
+        for expected in ["dispatch_analyst", "schedule_coordinator", "parts_broker", "compliance_planner", "operations_manager"]:
+            assert expected in config.provenances, f"Missing provenance: {expected}"
+
+    def test_home_services_layer_descriptions(self):
+        config = SchemaConfig.from_json_file("home_services.json")
+        assert "technician" in config.layer_descriptions["L1"].lower() or "shop" in config.layer_descriptions["L1"].lower()
+        assert "invoice" in config.layer_descriptions["L2"].lower() or "dispatch" in config.layer_descriptions["L2"].lower()
+
+    def test_home_services_edge_types(self):
+        config = SchemaConfig.from_json_file("home_services.json")
+        assert "DISPATCHED_TO" in config.layer_edge_types.get("L2", frozenset())
+        assert "ASSIGNED_TO" in config.layer_edge_types.get("L1", frozenset())
+
+    def test_home_services_module_constant(self):
+        from ohm.schema import HOME_SERVICES_SCHEMA
+        assert HOME_SERVICES_SCHEMA.name == "home_services"
