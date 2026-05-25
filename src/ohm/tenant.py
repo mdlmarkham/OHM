@@ -267,15 +267,23 @@ class TenantManager:
 
         Callers must hold this lock for the duration of any write operation
         against the tenant's OhmStore.  Reads do not need the lock.
+
+        Raises:
+            KeyError: If the tenant does not exist.
         """
         customer_id = validate_customer_id(customer_id)
         with self._cache_lock:
             if customer_id in self._cache:
                 return self._cache[customer_id].write_lock
-        # Force the store into cache so we get a stable lock reference
+
+        # Not cached — get_store() may insert it; do the whole operation
+        # under lock to prevent a TOCTOU race where eviction happens between
+        # get_store() and the cache lookup below (OHM-g3g7).
         self.get_store(customer_id)
         with self._cache_lock:
-            return self._cache[customer_id].write_lock
+            if customer_id in self._cache:
+                return self._cache[customer_id].write_lock
+            raise KeyError(f"No cached entry for tenant: {customer_id}")
 
     def deprovision(self, customer_id: str, *, confirm: bool = False) -> None:
         """Permanently delete a tenant instance.
