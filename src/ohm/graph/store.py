@@ -479,7 +479,7 @@ class OhmStore:
         if not self.readonly:
             from .schema import initialize_schema
 
-            initialize_schema(self.conn)
+            initialize_schema(self.conn, self.schema)
 
     @staticmethod
     def _connect_with_wal_recovery(db_path_str: str, readonly: bool = False):

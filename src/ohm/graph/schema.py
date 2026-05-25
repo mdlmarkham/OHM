@@ -23,6 +23,8 @@ Schema customization:
 
 from __future__ import annotations
 
+import json
+import logging
 from types import MappingProxyType
 
 import uuid
@@ -31,6 +33,8 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
+
+logger = logging.getLogger(__name__)
 
 # ── Node Types ──────────────────────────────────────────────────────────────
 
@@ -969,13 +973,14 @@ INDEX_DDL: list[str] = [
 ]
 
 
-def initialize_schema(conn: "DuckDBPyConnection") -> None:
+def initialize_schema(conn: "DuckDBPyConnection", schema: "SchemaConfig | None" = None) -> None:
     """Create all tables and indexes if they don't exist.
 
     Then applies any pending migrations based on the stored schema version.
 
     Args:
         conn: An active DuckDB connection.
+        schema: Optional SchemaConfig for domain agent seeding (OHM-tss4.1.1).
     """
     # Safety: checkpoint before DDL to flush any prior WAL state (OHM-8n9).
     # Without this, stale WAL entries from a prior session could conflict
@@ -994,8 +999,9 @@ def initialize_schema(conn: "DuckDBPyConnection") -> None:
     _apply_migrations(conn)
     # Create HNSW index on embedding column (if VSS extension loaded)
     _create_hnsw_index(conn)
-    # Seed default agent configs
-    _seed_agent_configs(conn)
+    # Seed domain agents from schema config (OHM-tss4.1.1)
+    if schema:
+        _seed_domain_agents(conn, schema)
 
 
 def _ensure_meta_table(conn: "DuckDBPyConnection") -> None:
@@ -1118,6 +1124,78 @@ def _seed_agent_configs(conn: "DuckDBPyConnection") -> None:
     for future deployment-specific seeding scripts.
     """
     pass  # OHM is generic — no hardcoded agent configs
+
+
+def _seed_domain_agents(conn: "DuckDBPyConnection", schema: "SchemaConfig | None") -> None:
+    """Seed domain-specific agent role nodes from schema config (OHM-tss4.1.1).
+
+    Domain templates can declare a ``seed_agents`` list containing agent
+    role definitions. Each entry creates:
+    - An agent node (type='agent') with the role name as ID
+    - An agent state row (ohm_agent_state) with role metadata
+
+    Args:
+        conn: Active DuckDB connection.
+        schema: SchemaConfig with optional seed_agents list.
+    """
+    if schema is None or not schema.seed_agents:
+        return
+
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    for agent_def in schema.seed_agents:
+        agent_name = agent_def.get("agent_name")
+        if not agent_name:
+            continue
+
+        node_id = f"agent::{agent_name}"
+
+        existing = conn.execute(
+            "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+            [node_id]
+        ).fetchone()
+
+        if not existing:
+            conn.execute(
+                """
+                INSERT INTO ohm_nodes (id, type, label, created_by, created_at, visibility, provenance)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    node_id,
+                    "agent",
+                    agent_def.get("label", agent_name),
+                    "ohmd",
+                    now,
+                    "public",
+                    "system-seed",
+                ],
+            )
+
+        existing_state = conn.execute(
+            "SELECT agent_name FROM ohm_agent_state WHERE agent_name = ?",
+            [agent_name]
+        ).fetchone()
+
+        if not existing_state:
+            conn.execute(
+                """
+                INSERT INTO ohm_agent_state
+                (agent_name, current_focus, active_patterns, last_sync, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [
+                    agent_name,
+                    agent_def.get("current_focus", ""),
+                    json.dumps(agent_def.get("active_patterns", [])),
+                    now,
+                    now,
+                ],
+            )
+
+    logger.info("Seeded %d domain agents for schema '%s'", len(schema.seed_agents), schema.name)
 
 
 def get_schema_version(conn: "DuckDBPyConnection") -> str:

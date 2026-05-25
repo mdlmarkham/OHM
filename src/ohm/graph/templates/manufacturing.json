@@ -178,5 +178,25 @@
       ],
       "env_prefix": "SCADA"
     }
-  }
+  },
+  "seed_agents": [
+    {
+      "agent_name": "process_engineer",
+      "label": "Process Engineer",
+      "current_focus": "Optimizing manufacturing processes and workflow",
+      "active_patterns": ["process-optimization", "quality-control", "yield-improvement"]
+    },
+    {
+      "agent_name": "maintenance_supervisor",
+      "label": "Maintenance Supervisor",
+      "current_focus": "Coordinating equipment maintenance and downtime",
+      "active_patterns": ["preventive-maintenance", "equipment-reliability", "downtime-reduction"]
+    },
+    {
+      "agent_name": "shift_supervisor",
+      "label": "Shift Supervisor",
+      "current_focus": "Managing production floor operations and personnel",
+      "active_patterns": ["shift-management", "output-tracking", "personnel-coordination"]
+    }
+  ]
 }

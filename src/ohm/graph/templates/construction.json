@@ -152,5 +152,25 @@
       ],
       "env_prefix": "WEATHER"
     }
-  }
+  },
+  "seed_agents": [
+    {
+      "agent_name": "project_manager",
+      "label": "Project Manager",
+      "current_focus": "Tracking project timelines and resource allocation",
+      "active_patterns": ["schedule-tracking", "resource-management", "risk-assessment"]
+    },
+    {
+      "agent_name": "safety_officer",
+      "label": "Safety Officer",
+      "current_focus": "Monitoring site safety compliance and incidents",
+      "active_patterns": ["safety-compliance", "incident-tracking", "hazard-analysis"]
+    },
+    {
+      "agent_name": "estimator",
+      "label": "Estimator",
+      "current_focus": "Generating accurate project bids and cost estimates",
+      "active_patterns": ["cost-estimation", "bid-preparation", "materials-pricing"]
+    }
+  ]
 }

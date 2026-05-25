@@ -146,5 +146,37 @@
       "fields": ["webhook_url_ref", "app_id", "tenant_id"],
       "env_prefix": "TEAMS"
     }
-  }
+  },
+  "seed_agents": [
+    {
+      "agent_name": "metis",
+      "label": "Metis Research Agent",
+      "current_focus": "Synthesizing research findings and identifying knowledge gaps",
+      "active_patterns": ["research-synthesis", "knowledge-gap-analysis", "insight-generation"]
+    },
+    {
+      "agent_name": "clio",
+      "label": "Clio Research Agent",
+      "current_focus": "Conducting domain research and evidence gathering",
+      "active_patterns": ["research", "evidence-gathering", "source-verification"]
+    },
+    {
+      "agent_name": "socrates",
+      "label": "Socrates Challenge Agent",
+      "current_focus": "Challenging claims and identifying logical weaknesses",
+      "active_patterns": ["critical-analysis", "claim-challenging", "logical-reasoning"]
+    },
+    {
+      "agent_name": "hephaestus",
+      "label": "Hephaestus Audit Agent",
+      "current_focus": "Auditing patterns and detecting anomalies",
+      "active_patterns": ["pattern-detection", "anomaly-detection", "audit-analysis"]
+    },
+    {
+      "agent_name": "deepthought",
+      "label": "DeepThought Journalist Agent",
+      "current_focus": "Documenting observations and synthesizing narrative",
+      "active_patterns": ["observation-recording", "narrative-synthesis", "storytelling"]
+    }
+  ]
 }

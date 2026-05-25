@@ -150,5 +150,25 @@
       ],
       "env_prefix": "CLEARINGHOUSE"
     }
-  }
+  },
+  "seed_agents": [
+    {
+      "agent_name": "billing_specialist",
+      "label": "Billing Specialist",
+      "current_focus": "Managing claim submission and denial resolution",
+      "active_patterns": ["denial-management", "coding-accuracy", "collections"]
+    },
+    {
+      "agent_name": "clinical_coordinator",
+      "label": "Clinical Coordinator",
+      "current_focus": "Coordinating patient care and provider scheduling",
+      "active_patterns": ["patient-flow", "schedule-efficiency", "care-coordination"]
+    },
+    {
+      "agent_name": "practice_manager",
+      "label": "Practice Manager",
+      "current_focus": "Overseeing practice operations and compliance",
+      "active_patterns": ["operations-tracking", "compliance-monitoring", "revenue-cycle"]
+    }
+  ]
 }

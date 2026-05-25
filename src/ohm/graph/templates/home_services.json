@@ -167,5 +167,37 @@
       ],
       "env_prefix": "SLACK"
     }
-  }
+  },
+  "seed_agents": [
+    {
+      "agent_name": "dispatch_analyst",
+      "label": "Dispatch Analyst",
+      "current_focus": "Optimizing technician routing and job scheduling",
+      "active_patterns": ["route-efficiency", "callback-prevention", "first-time-fix"]
+    },
+    {
+      "agent_name": "compliance_planner",
+      "label": "Compliance Planner",
+      "current_focus": "Tracking regulatory changes and permit requirements",
+      "active_patterns": ["permit-tracker", "code-compliance"]
+    },
+    {
+      "agent_name": "operations_manager",
+      "label": "Operations Manager",
+      "current_focus": "Managing workflow and technician performance",
+      "active_patterns": ["performance-tracking", "capacity-planning"]
+    },
+    {
+      "agent_name": "parts_broker",
+      "label": "Parts Broker",
+      "current_focus": "Coordinating parts procurement and inventory",
+      "active_patterns": ["parts-availability", "cost-optimization"]
+    },
+    {
+      "agent_name": "schedule_coordinator",
+      "label": "Schedule Coordinator",
+      "current_focus": "Balancing technician availability and job demand",
+      "active_patterns": ["schedule-optimization", "demand-forecasting"]
+    }
+  ]
 }
