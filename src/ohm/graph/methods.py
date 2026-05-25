@@ -1477,6 +1477,63 @@ def find_orphans(
     ]
 
 
+def purge_orphans(
+    conn: DuckDBPyConnection,
+    *,
+    node_type: str | None = None,
+    older_than_days: int | None = None,
+    exclude_system: bool = True,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Soft-delete nodes with zero edges (orphans).
+
+    Args:
+        node_type: If set, only purge orphans of this type.
+        older_than_days: Only purge orphans created more than N days ago.
+        exclude_system: Skip agent/skill/value/goal nodes (default True).
+        dry_run: If True, return the list of candidates without deleting.
+
+    Returns:
+        Dict with 'purged' (count), 'dry_run' (bool), and 'nodes' (list of affected ids).
+    """
+    from datetime import datetime, timezone
+
+    excluded_types = ["agent", "skill", "value", "goal"] if exclude_system else []
+    type_clause = "AND n.type = ?" if node_type else ""
+    exclude_clause = "AND n.type NOT IN ({})".format(",".join("?" * len(excluded_types))) if excluded_types else ""
+    age_clause = "AND n.created_at < ?" if older_than_days is not None else ""
+
+    params: list[Any] = []
+    if node_type:
+        params.append(node_type)
+    params.extend(excluded_types)
+    if older_than_days is not None:
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - __import__("datetime").timedelta(days=older_than_days)
+        params.append(cutoff)
+
+    select_q = f"""
+        SELECT n.id FROM ohm_nodes n
+        LEFT JOIN ohm_edges e ON (e.from_node = n.id OR e.to_node = n.id)
+        WHERE e.id IS NULL
+          AND n.deleted_at IS NULL
+          {type_clause}
+          {exclude_clause}
+          {age_clause}
+    """
+    candidates = [row[0] for row in conn.execute(select_q, params).fetchall()]
+
+    if dry_run or not candidates:
+        return {"purged": 0, "dry_run": True, "nodes": candidates}
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+    placeholders = ",".join("?" * len(candidates))
+    conn.execute(
+        f"UPDATE ohm_nodes SET deleted_at = ? WHERE id IN ({placeholders})",
+        [now, *candidates],
+    )
+    return {"purged": len(candidates), "dry_run": False, "nodes": candidates}
+
+
 def find_hubs(
     conn: DuckDBPyConnection,
     *,

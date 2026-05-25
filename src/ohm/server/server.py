@@ -1902,6 +1902,682 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
                 },
             )
 
+    def _get_health_graph(self, path: str, qs: dict) -> None:
+        """GET /health/graph — graph health check."""
+        from ohm.queries import query_graph_health
+
+        result = query_graph_health(self.current_store.conn)
+        self._json_response(200, result)
+
+    def _get_health_agents(self, path: str, qs: dict) -> None:
+        """GET /health/agents — agent health check."""
+        from ohm.methods import query_agent_health
+
+        result = query_agent_health(self.current_store.conn)
+        self._json_response(200, result)
+
+    def _get_health_sync(self, path: str, qs: dict) -> None:
+        """GET /health/sync — DuckLake sync health check (OHM-qiio)."""
+        store = self.current_store
+        if not hasattr(store, "check_ducklake_health"):
+            self._json_response(503, {"healthy": False, "errors": ["DuckLake health check not available"]})
+            return
+        result = store.check_ducklake_health()
+        status = 200 if result.get("healthy") else 503
+        self._json_response(status, result)
+
+    def _get_contradictions(self, path: str, qs: dict) -> None:
+        """GET /contradictions — detect contradictions."""
+        from ohm.methods import detect_contradictions
+
+        conf_thresh = float(qs.get("confidence", [0.5])[0])
+        result = detect_contradictions(self.current_store.conn, confidence_threshold=conf_thresh)
+        self._json_response(200, result)
+
+    def _get_anomalies(self, path: str, qs: dict) -> None:
+        """GET /anomalies — detect anomalies."""
+        from ohm.methods import detect_anomalies
+
+        sigma = float(qs.get("sigma", [2.0])[0])
+        layer = qs.get("layer", [None])[0]
+        limit = int(qs.get("limit", [50])[0])
+        result = detect_anomalies(self.current_store.conn, sigma_threshold=sigma, layer=layer, limit=limit)
+        self._json_response(200, result)
+
+    def _get_aggregate(self, path: str, qs: dict) -> None:
+        """GET /aggregate/<id> — aggregate observations."""
+        node_id = path[11:]
+        from ohm.validation import validate_identifier
+
+        node_id = validate_identifier(node_id, name="node_id")
+        method = qs.get("method", ["weighted"])[0]
+        from ohm.methods import aggregate_observations
+
+        result = aggregate_observations(self.current_store.conn, node_id, method=method)
+        self._json_response(200, result)
+
+    def _get_provenance(self, path: str, qs: dict) -> None:
+        """GET /provenance/<id> — provenance trace."""
+        node_id = path[12:]
+        from ohm.validation import validate_identifier
+
+        node_id = validate_identifier(node_id, name="node_id")
+        max_depth = int(qs.get("depth", [10])[0])
+        from ohm.queries import query_provenance
+
+        result = query_provenance(self.current_store.conn, node_id, max_depth=max_depth)
+        self._json_response(200, result)
+
+    def _get_stale(self, path: str, qs: dict) -> None:
+        """GET /stale — list stale edges."""
+        from ohm.queries import query_stale_edges
+
+        threshold = float(qs.get("threshold", [0.1])[0])
+        result = query_stale_edges(self.current_store.conn, stale_threshold=threshold)
+        self._json_response(200, result)
+
+    def _get_decay(self, path: str, qs: dict) -> None:
+        """GET /decay — apply confidence decay."""
+        self._require_write_auth()
+        from ohm.queries import apply_confidence_decay
+
+        threshold = float(qs.get("threshold", [0.1])[0])
+        layer = qs.get("layer", [None])[0]
+        dry_run = qs.get("dry_run", ["false"])[0].lower() == "true"
+        result = apply_confidence_decay(
+            self.current_store.conn,
+            stale_threshold=threshold,
+            layer=layer,
+            dry_run=dry_run,
+        )
+        self._json_response(200, result)
+
+    def _get_monte_carlo(self, path: str, qs: dict) -> None:
+        """GET /monte-carlo/<id> — Monte Carlo impact simulation."""
+        node_id = path[13:]
+        from ohm.validation import validate_identifier
+
+        node_id = validate_identifier(node_id, name="node_id")
+        from ohm.methods import monte_carlo_impact
+
+        sims = int(qs.get("simulations", [1000])[0])
+        depth = int(qs.get("depth", [3])[0])
+        default_prob = float(qs.get("default_probability", [0.5])[0])
+        seed_val = qs.get("seed", [None])[0]
+        seed = int(seed_val) if seed_val is not None else None
+        result = monte_carlo_impact(
+            self.current_store.conn,
+            node_id,
+            simulations=sims,
+            depth=depth,
+            default_probability=default_prob,
+            seed=seed,
+        )
+        self._json_response(200, result)
+
+    def _get_duplicates(self, path: str, qs: dict) -> None:
+        """GET /duplicates — detect near-duplicate nodes."""
+        from ohm.methods import detect_near_duplicates
+
+        threshold = float(qs.get("similarity", [0.8])[0])
+        result = detect_near_duplicates(self.current_store.conn, similarity_threshold=threshold)
+        self._json_response(200, result)
+
+    def _get_calibration(self, path: str, qs: dict) -> None:
+        """GET /calibration/<agent> — confidence calibration."""
+        agent_name = path[13:]
+        from ohm.validation import validate_identifier
+
+        agent_name = validate_identifier(agent_name, name="agent_name")
+        from ohm.methods import compute_confidence_calibration
+
+        result = compute_confidence_calibration(self.current_store.conn, agent_name)
+        self._json_response(200, result)
+
+    def _get_orphans(self, path: str, qs: dict) -> None:
+        """GET /orphans — find disconnected nodes."""
+        # Find nodes with zero edges — completely disconnected from the graph
+        from ohm.methods import find_orphans
+
+        node_type = qs.get("type", [None])[0]
+        exclude_system = qs.get("exclude_system", ["true"])[0].lower() == "true"
+        limit = int(qs.get("limit", [50])[0])
+        result = find_orphans(self.current_store.conn, node_type=node_type, exclude_system=exclude_system, limit=limit)
+        self._json_response(200, result)
+
+    def _post_orphans_purge(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /orphans/purge — soft-delete orphan nodes (admin-only).
+
+        Body (all optional):
+          type: node type filter (e.g. "concept")
+          older_than_days: only purge orphans older than N days
+          exclude_system: bool, default true — skip agent/skill/value/goal nodes
+          dry_run: bool, default false — list candidates without deleting
+        """
+        from ohm.methods import purge_orphans
+
+        node_type = body.get("type") if body else None
+        older_than_days = body.get("older_than_days") if body else None
+        if older_than_days is not None:
+            older_than_days = int(older_than_days)
+        exclude_system = bool(body.get("exclude_system", True)) if body else True
+        dry_run = bool(body.get("dry_run", False)) if body else False
+
+        result = purge_orphans(
+            self.current_store.conn,
+            node_type=node_type,
+            older_than_days=older_than_days,
+            exclude_system=exclude_system,
+            dry_run=dry_run,
+        )
+        self._json_response(200, result)
+
+    def _get_hubs(self, path: str, qs: dict) -> None:
+        """GET /hubs — find most-connected nodes."""
+        # Find most-connected nodes — anchors of the graph
+        from ohm.methods import find_hubs
+
+        node_type = qs.get("type", [None])[0]
+        min_connections = int(qs.get("min_connections", [3])[0])
+        limit = int(qs.get("limit", [20])[0])
+        result = find_hubs(self.current_store.conn, node_type=node_type, min_connections=min_connections, limit=limit)
+        self._json_response(200, result)
+
+    def _get_dead_ends(self, path: str, qs: dict) -> None:
+        """GET /dead_ends — find sink nodes."""
+        # Find nodes with only incoming edges — sinks that don't lead anywhere
+        from ohm.methods import find_dead_ends
+
+        node_type = qs.get("type", [None])[0]
+        limit = int(qs.get("limit", [50])[0])
+        result = find_dead_ends(self.current_store.conn, node_type=node_type, limit=limit)
+        self._json_response(200, result)
+
+    def _get_suggest(self, path: str, qs: dict) -> None:
+        """GET /suggest — suggest connections."""
+        # Suggest connections between nodes that share context but aren't linked
+        from ohm.methods import suggest_connections
+
+        method = qs.get("method", ["shared_provenance"])[0]
+        min_shared = int(qs.get("min_shared", [2])[0])
+        limit = int(qs.get("limit", [20])[0])
+        result = suggest_connections(self.current_store.conn, method=method, min_shared=min_shared, limit=limit)
+        self._json_response(200, result)
+
+    def _get_graph_stats(self, path: str, qs: dict) -> None:
+        """GET /graph/stats — extended graph statistics."""
+        # Extended graph statistics (orphans, hubs, density, etc.)
+        from ohm.methods import graph_stats
+
+        result = graph_stats(self.current_store.conn)
+        self._json_response(200, result)
+
+    def _get_lint(self, path: str, qs: dict) -> None:
+        """GET /lint — lint graph against contract."""
+        # Contract layer linting: validate graph against naming conventions and required fields
+        from ohm.contract import ContractConfig, lint_graph
+
+        node_type_filter = qs.get("node_types", [None])[0]
+        node_types = node_type_filter.split(",") if node_type_filter else None
+        limit = int(qs.get("limit", ["1000"])[0])
+        contract = ContractConfig()
+        result = lint_graph(self.current_store.conn, contract, limit=limit, node_types=node_types)
+        self._json_response(200, result)
+
+    def _get_contract(self, path: str, qs: dict) -> None:
+        """GET /contract — return current contract configuration."""
+        from ohm.contract import ContractConfig
+
+        contract = ContractConfig()
+        self._json_response(200, contract.to_dict())
+
+    def _get_inference(self, path: str, qs: dict) -> None:
+        """GET /inference — Bayesian inference."""
+        # Bayesian inference: compute posterior probabilities given evidence
+        # Uses pgmpy Variable Elimination (optional dependency)
+        target = qs.get("target", [None])[0]
+        if not target:
+            self._json_response(400, {"error": "missing_parameter", "message": "?target=node_id required"})
+            return
+        from ohm.validation import validate_identifier
+
+        target = validate_identifier(target, name="target")
+        # Parse evidence from query params: ?evidence=node1:0,node2:1
+        evidence_str = qs.get("evidence", [""])[0]
+        leak_probability = float(qs.get("leak", ["0.15"])[0])
+        evidence = {}
+        if evidence_str:
+            for pair in evidence_str.split(","):
+                if ":" in pair:
+                    node_id, state = pair.split(":", 1)
+                    evidence[validate_identifier(node_id.strip(), name="evidence_node")] = int(state.strip())
+        # Parse optional layers filter: ?layers=L3,L4
+        layers_str = qs.get("layers", [""])[0]
+        layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
+        from ohm.bayesian import bayesian_inference
+
+        result = bayesian_inference(self.current_store.conn, target, evidence, edge_types=None, layers=layers, leak_probability=leak_probability)
+        self._json_response(200, result)
+
+    def _get_intervene(self, path: str, qs: dict) -> None:
+        """GET /intervene — causal intervention (do-operator)."""
+        # Causal intervention using Pearl's do-operator (graph surgery)
+        # Differs from /inference: severs incoming edges to target, sets value externally
+        # This isolates direct causal effect by removing confounder influence
+        target = qs.get("target", [None])[0]
+        if not target:
+            self._json_response(400, {"error": "missing_parameter", "message": "?target=node_id required"})
+            return
+        from ohm.validation import validate_identifier
+
+        target = validate_identifier(target, name="target")
+        # Parse intervention state: ?state=0 (force bad) or ?state=1 (force good)
+        state_str = qs.get("state", [None])[0]
+        if state_str is None:
+            self._json_response(400, {"error": "missing_parameter", "message": "?state=0 (bad) or ?state=1 (good) required"})
+            return
+        try:
+            intervention_state = int(state_str)
+        except ValueError:
+            self._json_response(400, {"error": "invalid_parameter", "message": "state must be 0 or 1"})
+            return
+        # Parse optional query nodes: ?query=node1,node2
+        query_str = qs.get("query", [""])[0]
+        query_nodes = None
+        if query_str:
+            query_nodes = [validate_identifier(q.strip(), name="query_node") for q in query_str.split(",") if q.strip()]
+        leak_probability = float(qs.get("leak", ["0.15"])[0])
+        # Parse optional layers filter: ?layers=L3,L4
+        layers_str = qs.get("layers", [""])[0]
+        layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
+        # Parse optional preferred_edges: ?preferred_edges=A:B,C:D (colon-separated pairs)
+        pe_str = qs.get("preferred_edges", [""])[0]
+        preferred_edges: set[tuple[str, str]] | None = None
+        if pe_str:
+            preferred_edges = set()
+            for pair in pe_str.split(","):
+                parts = pair.strip().split(":")
+                if len(parts) == 2 and parts[0].strip() and parts[1].strip():
+                    preferred_edges.add((parts[0].strip(), parts[1].strip()))
+        from ohm.bayesian import causal_intervention
+
+        result = causal_intervention(
+            self.current_store.conn,
+            target,
+            intervention_state,
+            query_nodes=query_nodes,
+            layers=layers,
+            leak_probability=leak_probability,
+            preferred_edges=preferred_edges,
+        )
+        self._json_response(200, result)
+
+    def _get_ate(self, path: str, qs: dict) -> None:
+        """GET /ate — average treatment effect."""
+        # Average Treatment Effect: model-based ATE from noisy-OR CPDs
+        # ATE = P(effect=bad|do(cause=bad)) - P(effect=bad|do(cause=good))
+        cause = qs.get("cause", [None])[0]
+        effect = qs.get("effect", [None])[0]
+        if not cause or not effect:
+            self._json_response(400, {"error": "missing_parameter", "message": "?cause=X&effect=Y required"})
+            return
+        from ohm.validation import validate_identifier
+
+        cause = validate_identifier(cause, name="cause")
+        effect = validate_identifier(effect, name="effect")
+        leak_probability = float(qs.get("leak", ["0.15"])[0])
+        # Parse optional layers filter: ?layers=L3,L4
+        layers_str = qs.get("layers", [""])[0]
+        layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
+        from ohm.bayesian import compute_ate
+
+        result = compute_ate(self.current_store.conn, cause, effect, layers=layers, leak_probability=leak_probability)
+        self._json_response(200, result)
+
+    def _get_sensitivity(self, path: str, qs: dict) -> None:
+        """GET /sensitivity — sensitivity analysis (E-value)."""
+        # Sensitivity analysis: E-value for causal robustness
+        # "How much unmeasured confounding would overturn this conclusion?"
+        cause = qs.get("cause", [None])[0]
+        effect = qs.get("effect", [None])[0]
+        if not cause or not effect:
+            self._json_response(400, {"error": "missing_parameter", "message": "?cause=X&effect=Y required"})
+            return
+        from ohm.validation import validate_identifier
+
+        cause = validate_identifier(cause, name="cause")
+        effect = validate_identifier(effect, name="effect")
+        leak_probability = float(qs.get("leak", ["0.15"])[0])
+        # Parse optional layers filter: ?layers=L3,L4
+        layers_str = qs.get("layers", [""])[0]
+        layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
+        from ohm.bayesian import compute_sensitivity
+
+        result = compute_sensitivity(self.current_store.conn, cause, effect, layers=layers, leak_probability=leak_probability)
+        self._json_response(200, result)
+
+    def _get_adjustment(self, path: str, qs: dict) -> None:
+        """GET /adjustment — find adjustment sets."""
+        # Find valid backdoor/frontdoor adjustment sets for causal identification
+        # Uses pgmpy's CausalInference for formal identification
+        cause = qs.get("cause", [None])[0]
+        effect = qs.get("effect", [None])[0]
+        if not cause or not effect:
+            self._json_response(400, {"error": "missing_parameter", "message": "?cause=X&effect=Y required"})
+            return
+        from ohm.validation import validate_identifier
+
+        cause = validate_identifier(cause, name="cause")
+        effect = validate_identifier(effect, name="effect")
+        leak_probability = float(qs.get("leak", ["0.15"])[0])
+        # Parse optional layers filter: ?layers=L3,L4
+        layers_str = qs.get("layers", [""])[0]
+        layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
+        from ohm.bayesian import find_adjustment_sets
+
+        result = find_adjustment_sets(self.current_store.conn, cause, effect, layers=layers, leak_probability=leak_probability)
+        self._json_response(200, result)
+
+    def _get_voi(self, path: str, qs: dict) -> None:
+        """GET /voi — value of information ranking."""
+        # Value of Information: rank nodes by research priority
+        # VoI = uncertainty × sensitivity_to_decision
+        # ?decision=node1,node2 to specify decision nodes (auto-detects if omitted)
+        # ?top=10 to limit results
+        # ?layers=L3,L4 to scope by layer
+        # ?edge_types=CAUSES,INFLUENCES,ENABLES,DEPENDS_ON to filter edge types
+        decision_str = qs.get("decision", [None])[0]
+        decision_nodes = [d.strip() for d in decision_str.split(",") if d.strip()] if decision_str else None
+        top = int(qs.get("top", ["10"])[0])
+        leak_probability = float(qs.get("leak", ["0.15"])[0])
+        root_prior = float(qs.get("root_prior", ["0.3"])[0])
+        # Parse optional layers filter: ?layers=L3,L4
+        layers_str = qs.get("layers", [""])[0]
+        layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
+        # Parse optional edge_types filter: ?edge_types=CAUSES,DEPENDS_ON
+        edge_types_str = qs.get("edge_types", [""])[0]
+        edge_types = [e.strip() for e in edge_types_str.split(",") if e.strip()] if edge_types_str else None
+        timeout = float(qs.get("timeout", ["0"])[0]) or None
+        min_observations = int(qs.get("min_observations", ["0"])[0])
+        from ohm.bayesian import compute_voi
+
+        result = compute_voi(
+            self.current_store.conn,
+            decision_nodes=decision_nodes,
+            edge_types=edge_types,
+            layers=layers,
+            top=top,
+            leak_probability=leak_probability,
+            root_prior=root_prior,
+            timeout=timeout,
+            min_observations=min_observations,
+        )
+        self._json_response(200, result)
+
+
+    def _get_voi_tasks(self, path: str, qs: dict) -> None:
+        """GET /voi/tasks — VoI task assignments."""
+        # OHM-8w2: Value of Information task assignment for agent routing.
+        # Generates research tasks from VoI rankings, matched to agent expertise.
+        # ?agent=metis to filter by agent
+        # ?decision=node1,node2 to specify decision nodes
+        # ?top=5 to limit results
+        # ?layers=L3,L4 to scope by layer
+        # ?leak=0.15&root_prior=0.3 for Bayesian parameters
+        agent = qs.get("agent", [None])[0]
+        decision_str = qs.get("decision", [None])[0]
+        decision_nodes = [d.strip() for d in decision_str.split(",") if d.strip()] if decision_str else None
+        top = int(qs.get("top", ["5"])[0])
+        leak_probability = float(qs.get("leak", ["0.15"])[0])
+        root_prior = float(qs.get("root_prior", ["0.3"])[0])
+        layers_str = qs.get("layers", [""])[0]
+        layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
+        from ohm.bayesian import generate_voi_tasks
+
+        result = generate_voi_tasks(
+            self.current_store.conn,
+            agent=agent,
+            decision_nodes=decision_nodes,
+            layers=layers,
+            top=top,
+            leak_probability=leak_probability,
+            root_prior=root_prior,
+        )
+        self._json_response(200, result)
+
+    def _get_suggest_causes(self, path: str, qs: dict) -> None:
+        """GET /suggest_causes — suggest candidate causal edges."""
+        # Suggest candidate CAUSES edges from existing non-causal relationships
+        # Identifies DEPENDS_ON/APPLIES_TO/REFINES/INFLUENCES edges that might be causal
+        min_confidence = float(qs.get("min_confidence", ["0.5"])[0])
+        layers_str = qs.get("layers", [""])[0]
+        layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
+        from ohm.bayesian import suggest_causes
+
+        result = suggest_causes(self.current_store.conn, min_confidence=min_confidence, layers=layers)
+        self._json_response(200, result)
+
+    def _get_deduplicate(self, path: str, qs: dict) -> None:
+        """GET /deduplicate — remove duplicate edges."""
+        # Remove duplicate edges (same from→to, type, layer), keeping most recent
+        self._require_write_auth()
+        layer = qs.get("layer", [None])[0]
+        if layer:
+            from ohm.validation import validate_layer
+
+            try:
+                validate_layer(layer)
+            except ValueError as e:
+                raise ValidationError(str(e))
+        removed = self.current_store.deduplicate_edges(layer=layer)
+        self._json_response(200, {"removed": removed, "layer": layer})
+
+    def _get_refute(self, path: str, qs: dict) -> None:
+        """GET /refute — causal refutation tests."""
+        # Causal refutation: test robustness of causal conclusions
+        # Uses DoWhy refutation methods (requires dowhy package)
+        cause = qs.get("cause", [None])[0]
+        effect = qs.get("effect", [None])[0]
+        if not cause or not effect:
+            self._json_response(400, {"error": "missing_parameter", "message": "?cause=X&effect=Y required"})
+            return
+        from ohm.validation import validate_identifier
+
+        cause = validate_identifier(cause, name="cause")
+        effect = validate_identifier(effect, name="effect")
+        n_samples = int(qs.get("n_samples", ["1000"])[0])
+        seed = int(qs.get("seed", ["42"])[0])
+        methods_str = qs.get("methods", [None])[0]
+        refutation_methods = methods_str.split(",") if methods_str else None
+        from ohm.causal_refutation import refute_causal_effect
+
+        result = refute_causal_effect(
+            self.current_store.conn,
+            cause,
+            effect,
+            n_samples=n_samples,
+            seed=seed,
+            refutation_methods=refutation_methods,
+        )
+        self._json_response(200, result)
+
+    def _get_admin_checkpoint(self, path: str, qs: dict) -> None:
+        """GET /admin/checkpoint — force DuckDB CHECKPOINT."""
+        # Force DuckDB CHECKPOINT to flush WAL to main DB file
+        self._require_write_auth()
+        try:
+            self.current_store.conn.execute("CHECKPOINT")
+            self._json_response(200, {"status": "ok", "message": "WAL flushed to main database"})
+        except Exception as e:
+            self._json_response(500, {"error": "checkpoint_failed", "message": str(e)})
+
+    def _get_admin_embeddings(self, path: str, qs: dict) -> None:
+        """GET /admin/embeddings — batch generate embeddings."""
+        # Batch generate embeddings for nodes missing them (OHM-emb)
+        # Processes in small batches with delays to avoid OOM/timeout crashes
+        try:
+            from ohm.queries import update_node_embedding
+
+            # Parse optional batch_size and delay_ms query params
+            batch_size = 5  # Process N nodes per request (small to avoid OOM)
+            delay_ms = 200  # Pause between each embedding (ms) to reduce memory pressure
+            if qs.get("batch_size"):
+                try:
+                    batch_size = int(qs["batch_size"][0])
+                    if batch_size < 1:
+                        batch_size = 1
+                    elif batch_size > 50:
+                        batch_size = 50
+                except ValueError:
+                    pass
+            if qs.get("delay_ms"):
+                try:
+                    delay_ms = int(qs["delay_ms"][0])
+                    if delay_ms < 0:
+                        delay_ms = 0
+                    elif delay_ms > 5000:
+                        delay_ms = 5000
+                except ValueError:
+                    pass
+
+            # Find all nodes without embeddings
+            rows = self.current_store.execute("SELECT id, label FROM ohm_nodes WHERE embedding IS NULL AND deleted_at IS NULL")
+            if not rows:
+                self._json_response(
+                    200,
+                    {
+                        "status": "ok",
+                        "updated": 0,
+                        "failed": 0,
+                        "total": 0,
+                        "message": "All nodes already have embeddings",
+                    },
+                )
+                return
+
+            updated = 0
+            failed = 0
+            processed = 0
+            for row in rows:
+                # Stop after batch_size nodes — client can re-call for more
+                if processed >= batch_size:
+                    break
+                try:
+                    if update_node_embedding(self.current_store.conn, row["id"]):
+                        updated += 1
+                    else:
+                        failed += 1
+                except Exception:
+                    failed += 1
+                processed += 1
+                # Small delay between embeddings to reduce memory pressure
+                if delay_ms > 0:
+                    time.sleep(delay_ms / 1000.0)
+
+            total_missing = len(rows)
+            remaining = total_missing - processed
+            self._json_response(
+                200,
+                {
+                    "status": "ok" if remaining == 0 else "partial",
+                    "updated": updated,
+                    "failed": failed,
+                    "processed": processed,
+                    "total": total_missing,
+                    "remaining": remaining,
+                    "message": f"Generated {updated} embeddings ({failed} failed). {remaining} remaining — re-call to continue.",
+                },
+            )
+        except Exception as e:
+            self._json_response(500, {"error": "embedding_backfill_failed", "message": str(e)})
+
+    def _get_admin_snapshots(self, path: str, qs: dict) -> None:
+        """GET /admin/snapshots — list DuckLake snapshots."""
+        # DuckLake time-travel: list available snapshots (OHM-kdk.3)
+        snapshots = self.current_store.list_snapshots()
+        self._json_response(200, {"snapshots": snapshots, "count": len(snapshots)})
+
+    def _get_graph_at(self, path: str, qs: dict) -> None:
+        """GET /graph/at — query graph at snapshot version."""
+        # DuckLake time-travel: query graph at specific snapshot version (OHM-kdk.3)
+        version = qs.get("version", [None])[0]
+        if not version:
+            raise ValidationError("?version=N is required for /graph/at")
+        try:
+            version_int = int(version)
+        except ValueError:
+            raise ValidationError("?version must be an integer snapshot ID")
+        result = self.current_store.graph_at_version(version_int)
+        self._json_response(200, result)
+
+    def _get_graph_changes(self, path: str, qs: dict) -> None:
+        """GET /graph/changes — changes between snapshot versions."""
+        # DuckLake time-travel: changes between two snapshot versions (OHM-kdk.3)
+        from_version = qs.get("from_version", [None])[0]
+        to_version = qs.get("to_version", [None])[0]
+        if not from_version or not to_version:
+            raise ValidationError("?from_version=M&to_version=N are required for /graph/changes")
+        try:
+            from_int = int(from_version)
+            to_int = int(to_version)
+        except ValueError:
+            raise ValidationError("?from_version and ?to_version must be integers")
+        result = self.current_store.graph_changes(from_int, to_int)
+        self._json_response(200, result)
+
+    def _get_reliability(self, path: str, qs: dict) -> None:
+        """GET /reliability/<agent> — source reliability metrics."""
+        source_agent = path[13:]  # strip /reliability/
+        from ohm.validation import validate_identifier
+
+        source_agent = validate_identifier(source_agent, name="source_agent")
+        from ohm.queries import query_source_reliability
+
+        result = query_source_reliability(self.current_store.conn, source_agent)
+        self._json_response(200, result)
+
+    def _get_source_reliability(self, path: str, qs: dict) -> None:
+        """GET /source_reliability — alias for /reliability/{source} accepting ?source= param (OHM-7310)."""
+        source_agent = qs.get("source", [None])[0]
+        if not source_agent:
+            raise ValidationError("?source=<agent_name> is required")
+        from ohm.validation import validate_identifier
+
+        source_agent = validate_identifier(source_agent, name="source_agent")
+        from ohm.queries import query_source_reliability
+
+        result = query_source_reliability(self.current_store.conn, source_agent)
+        self._json_response(200, result)
+
+    def _get_compound_confidence(self, path: str, qs: dict) -> None:
+        """GET /compound_confidence/<node_id> — compound confidence from node observations (OHM-7311)."""
+        node_id = path[21:]  # strip /compound_confidence/ (21 chars)
+        from ohm.validation import validate_identifier
+
+        node_id = validate_identifier(node_id, name="node_id")
+        node = self.current_store.get_node(node_id)
+        if not node:
+            raise NodeNotFoundError(f"Node not found: {node_id}")
+        correlation = float(qs.get("correlation", ["0.0"])[0])
+        observations = self.current_store.execute(
+            "SELECT * FROM ohm_observations WHERE node_id = ? AND deleted_at IS NULL ORDER BY created_at DESC",
+            [node_id],
+        )
+        from ohm.methods import compound_confidence
+
+        # Derive confidence from sigma (lower sigma = higher confidence) or default 1.0
+        def _obs_confidence(obs: dict) -> float:
+            sigma = obs.get("sigma")
+            if sigma is not None and sigma > 0:
+                return max(0.0, min(1.0, 1.0 / (1.0 + float(sigma))))
+            return 1.0
+
+        obs_with_confidence = [{"confidence": _obs_confidence(obs), "source": obs.get("created_by")} for obs in observations]
+        result = compound_confidence(obs_with_confidence, correlation=correlation)
+        result["node_id"] = node_id
+        result["observations"] = len(observations)
+        self._json_response(200, result)
+
     def _get_observations(self, path: str, qs: dict) -> None:
         """GET /observations — list observations with filtering."""
         obs_type = qs.get("type", [None])[0]
@@ -2779,6 +3455,7 @@ OhmHandler._POST_EXACT = {
     "/tasks": "_post_task",
     "/deduplicate": "_post_deduplicate",
     "/admin/checkpoint": "_post_admin_checkpoint",
+    "/orphans/purge": "_post_orphans_purge",
 }
 
 OhmHandler._POST_PREFIXES = [

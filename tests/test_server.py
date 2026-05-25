@@ -1472,3 +1472,59 @@ class TestMarkovHTTPEndpoints:
             assert "/markov/expected_steps" in data["endpoints"]
         finally:
             server.shutdown()
+
+
+@pytest.mark.xdist_group("server")
+class TestOrphansPurge:
+    """Tests for POST /orphans/purge (OHM-llw9)."""
+
+    def test_purge_dry_run_lists_candidates(self, test_server):
+        """POST /orphans/purge with dry_run=true returns candidates without deleting."""
+        port, store = test_server
+        # Create two isolated nodes (no edges)
+        _request("POST", port, "/node", body={"id": "orphan-a", "label": "Orphan A", "type": "concept"})
+        _request("POST", port, "/node", body={"id": "orphan-b", "label": "Orphan B", "type": "concept"})
+
+        status, data = _request("POST", port, "/orphans/purge", body={"dry_run": True})
+        assert status == 200
+        assert data["dry_run"] is True
+        assert data["purged"] == 0
+        node_ids = data["nodes"]
+        assert "orphan-a" in node_ids
+        assert "orphan-b" in node_ids
+
+    def test_purge_deletes_orphans(self, test_server):
+        """POST /orphans/purge soft-deletes orphan nodes."""
+        port, store = test_server
+        _request("POST", port, "/node", body={"id": "orphan-c", "label": "Orphan C", "type": "concept"})
+
+        # Confirm it exists
+        s, d = _request("GET", port, "/node/orphan-c")
+        assert s == 200
+
+        status, data = _request("POST", port, "/orphans/purge", body={"dry_run": False})
+        assert status == 200
+        assert data["dry_run"] is False
+        assert "orphan-c" in data["nodes"]
+        assert data["purged"] >= 1
+
+        # Node should be soft-deleted (not visible via GET)
+        s2, _ = _request("GET", port, "/node/orphan-c")
+        assert s2 == 404
+
+    def test_purge_skips_connected_nodes(self, test_server):
+        """POST /orphans/purge does not touch nodes that have edges."""
+        port, store = test_server
+        _request("POST", port, "/node", body={"id": "connected-src", "label": "Src", "type": "concept"})
+        _request("POST", port, "/node", body={"id": "connected-dst", "label": "Dst", "type": "concept"})
+        _request("POST", port, "/edge", body={
+            "from_node": "connected-src",
+            "to_node": "connected-dst",
+            "edge_type": "CAUSES",
+            "layer": "L3",
+        })
+
+        status, data = _request("POST", port, "/orphans/purge", body={"dry_run": True})
+        assert status == 200
+        assert "connected-src" not in data["nodes"]
+        assert "connected-dst" not in data["nodes"]
