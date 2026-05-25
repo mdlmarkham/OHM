@@ -888,6 +888,10 @@ class TenantManager:
                 if entry.refcount == 0:
                     self._cache.pop(cid)
                     try:
+                        entry.store.conn.execute("CHECKPOINT")
+                    except Exception:
+                        pass
+                    try:
                         entry.store.close()
                     except Exception:
                         pass
