@@ -1008,7 +1008,8 @@ def _apply_migrations(conn: "DuckDBPyConnection") -> None:
                         elif "not implemented" in err_msg and "index" in err_msg:
                             pass  # DuckDB version doesn't support this index type (e.g., partial indexes) — safe to skip
                         else:
-                            raise
+                            from ohm.framework.exceptions import MigrationError
+                            raise MigrationError(f"Migration {version} failed: {e}") from e
                 conn.execute("COMMIT")
             except Exception:
                 try:
