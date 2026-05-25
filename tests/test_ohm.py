@@ -6,6 +6,7 @@ import pytest
 
 from ohm.store import OhmStore
 from ohm.queries import query_neighborhood, query_path, query_impact
+from ohm.exceptions import PermissionDeniedError
 
 
 @pytest.fixture
@@ -105,7 +106,7 @@ class TestOhmStore:
 
         # Non-owner cannot update
         populated_store.agent_name = "socrates"
-        with pytest.raises(PermissionError):
+        with pytest.raises(PermissionDeniedError):
             populated_store.update_edge_confidence(edge["id"], 0.5)
 
     def test_update_edge_confidence_with_agent_name_override(self, populated_store):
@@ -116,7 +117,7 @@ class TestOhmStore:
         assert abs(result["confidence"] - 0.97) < 0.001
 
         # Non-owner cannot update even with agent_name parameter
-        with pytest.raises(PermissionError):
+        with pytest.raises(PermissionDeniedError):
             populated_store.update_edge_confidence(edge["id"], 0.5, agent_name="socrates")
 
     def test_write_observation(self, populated_store):
@@ -246,7 +247,7 @@ class TestOhmStore:
         # Try to update as socrates - should fail
         populated_store.agent_name = "socrates"
         edge = populated_store.execute_one("SELECT * FROM ohm_edges WHERE edge_type = 'EXPLAINS' AND created_by = 'metis'")
-        with pytest.raises(PermissionError):
+        with pytest.raises(PermissionDeniedError):
             populated_store.update_edge_confidence(edge["id"], 0.5)
 
         # But socrates CAN challenge

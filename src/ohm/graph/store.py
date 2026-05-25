@@ -622,6 +622,8 @@ class OhmStore:
         # Check if node exists (active)
         existing = self.get_node(id)
         if existing:
+            from ohm.server.boundary import check_can_update_l2_node
+            check_can_update_l2_node(actor, id, self.conn)
             self.conn.execute(
                 """
                 UPDATE ohm_nodes SET
@@ -1215,9 +1217,8 @@ class OhmStore:
         if not edge:
             return None
 
-        # Enforce ownership
-        if edge["created_by"] != actor:
-            raise PermissionError(f"Cannot update edge {edge_id}: owned by {edge['created_by']}, not {actor}. Use challenge_edge instead.")
+        from ohm.server.boundary import check_can_update_edge
+        check_can_update_edge(actor, edge["created_by"], edge_id)
 
         now = self._now()
         self.conn.execute(
@@ -1340,6 +1341,9 @@ class OhmStore:
         if not node:
             raise NodeNotFoundError(f"Node not found: {node_id}")
 
+        from ohm.server.boundary import check_can_delete_node
+        check_can_delete_node(deleted_by, node["created_by"], node_id)
+
         now = self._now()
 
         # Soft-delete edges (mark as deleted)
@@ -1377,6 +1381,9 @@ class OhmStore:
         edge = self.get_edge(edge_id)
         if not edge:
             raise EdgeNotFoundError(f"Edge not found: {edge_id}")
+
+        from ohm.server.boundary import check_can_delete_edge
+        check_can_delete_edge(deleted_by, edge["created_by"], edge_id)
 
         now = self._now()
 

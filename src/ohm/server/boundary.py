@@ -44,6 +44,12 @@ def check_can_update_edge(agent_name: str, edge_owner: str, edge_id: str) -> Non
         raise PermissionDeniedError(f"Agent '{agent_name}' cannot update edge '{edge_id}' owned by '{edge_owner}'. Use challenge/support edges instead.")
 
 
+def check_can_delete_node(agent_name: str, node_owner: str, node_id: str) -> None:
+    """Only the owning agent can delete their own nodes."""
+    if agent_name != node_owner:
+        raise PermissionDeniedError(f"Agent '{agent_name}' cannot delete node '{node_id}' owned by '{node_owner}'.")
+
+
 def check_can_delete_edge(agent_name: str, edge_owner: str, edge_id: str) -> None:
     """Only the owning agent can delete their own edges."""
     if agent_name != edge_owner:

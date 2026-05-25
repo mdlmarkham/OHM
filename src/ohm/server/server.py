@@ -3649,11 +3649,8 @@ class OhmHandler(BaseHTTPRequestHandler):
         if not node:
             raise NodeNotFoundError(f"Node not found: {node_id}")
 
-        # Only allow deletion of own nodes (unless no_auth mode)
-        if not self.no_auth and node[1] != agent:
-            raise PermissionDeniedError(f"Cannot delete node {node_id}: owned by {node[1]}, you are {agent}")
-
         # Use store method — splits edge deletion to avoid DuckDB index issues (OHM-cpi)
+        # Ownership enforced by OhmStore.delete_node() via boundary layer.
         result = self.current_store.delete_node(node_id, deleted_by=agent)
         self._json_response(200, result)
 
@@ -3672,11 +3669,7 @@ class OhmHandler(BaseHTTPRequestHandler):
         if not edge:
             raise EdgeNotFoundError(f"Edge not found: {edge_id}")
 
-        # Only allow deletion of own edges (unless no_auth mode)
-        if not self.no_auth and edge[1] != agent:
-            raise PermissionDeniedError(f"Cannot delete edge {edge_id}: owned by {edge[1]}, you are {agent}")
-
-        # Use store method
+        # Use store method — ownership enforced by OhmStore.delete_edge() via boundary layer.
         result = self.current_store.delete_edge(edge_id, deleted_by=agent)
         self._json_response(200, result)
 

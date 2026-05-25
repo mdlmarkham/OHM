@@ -6,6 +6,7 @@ import pytest
 
 from ohm.store import OhmStore
 from ohm.queries import query_neighborhood
+from ohm.exceptions import PermissionDeniedError
 
 
 @pytest.fixture
@@ -103,7 +104,7 @@ class TestFullWorkflow:
 
         # Socrates cannot update — must challenge instead
         populated_store.agent_name = "socrates"
-        with pytest.raises(PermissionError):
+        with pytest.raises(PermissionDeniedError):
             populated_store.update_edge_confidence(edge["id"], 0.5)
 
     def test_observations(self, populated_store):
@@ -154,7 +155,7 @@ class TestLayerModel:
 
         # Clio cannot update
         store.agent_name = "clio"
-        with pytest.raises(PermissionError):
+        with pytest.raises(PermissionDeniedError):
             store.update_edge_confidence(edge["id"], 0.5)
 
     def test_challenge_preserves_original(self, store):
