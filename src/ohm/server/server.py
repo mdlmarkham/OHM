@@ -3770,6 +3770,9 @@ class OhmHandler(BaseHTTPRequestHandler):
         elif sub == "health":
             health = self.tenant_manager.tenant_health(customer_id)
             self._json_response(200, health)
+        elif sub == "backups":
+            backups = self.tenant_manager.list_backups(customer_id)
+            self._json_response(200, {"customer_id": customer_id, "backups": backups})
         elif sub == "":
             self._json_response(200, {"tenant": meta})
         else:
@@ -3806,48 +3809,52 @@ class OhmHandler(BaseHTTPRequestHandler):
         self._json_response(200, {"status": "deprovisioned", "customer_id": customer_id})
 
     def _post_tenant_export(self, path: str, qs: dict, body: dict, agent: str) -> None:
-        """POST /tenant/{id}/export — export a tenant's graph data as JSON.
-
-        Returns: {"customer_id", "nodes": [...], "edges": [...]}
-        Requires admin role. Use for backup or data portability.
-        """
+        """POST /tenant/{id}/export, /backup, /restore — tenant data operations (OHM-kbwl)."""
         self._require_admin()
         self._require_multi_tenant_active()
 
         from ohm.tenant import TenantNotFoundError
 
-        # path = /tenant/{customer_id}/export
-        tail = path[len("/tenant/"):]  # e.g. "acme_hvac/export"
+        tail = path[len("/tenant/"):]
         parts = tail.split("/", 1)
         raw_id = parts[0]
         sub = parts[1] if len(parts) > 1 else ""
-        if sub != "export":
-            self._json_response(404, {"error": f"Unknown tenant endpoint: {path}"})
-            return
         from ohm.framework.validation import validate_customer_id as _validate_cid
         try:
             customer_id = _validate_cid(raw_id)
         except ValueError as exc:
             raise ValidationError(str(exc))
 
-        try:
-            tenant_store = self.tenant_manager.get_store(customer_id)
-        except TenantNotFoundError:
-            raise NodeNotFoundError(f"Tenant '{customer_id}' not found")
+        if sub == "export":
+            try:
+                tenant_store = self.tenant_manager.get_store(customer_id)
+            except TenantNotFoundError:
+                raise NodeNotFoundError(f"Tenant '{customer_id}' not found")
 
-        nodes = tenant_store.execute("SELECT * FROM ohm_nodes WHERE deleted_at IS NULL ORDER BY id")
-        edges = tenant_store.execute("SELECT * FROM ohm_edges WHERE deleted_at IS NULL ORDER BY id")
-        self._json_response(
-            200,
-            {
-                "customer_id": customer_id,
-                "exported_at": datetime.now(timezone.utc).isoformat(),
-                "nodes": nodes,
-                "edges": edges,
-                "node_count": len(nodes),
-                "edge_count": len(edges),
-            },
-        )
+            nodes = tenant_store.execute("SELECT * FROM ohm_nodes WHERE deleted_at IS NULL ORDER BY id")
+            edges = tenant_store.execute("SELECT * FROM ohm_edges WHERE deleted_at IS NULL ORDER BY id")
+            self._json_response(
+                200,
+                {
+                    "customer_id": customer_id,
+                    "exported_at": datetime.now(timezone.utc).isoformat(),
+                    "nodes": nodes,
+                    "edges": edges,
+                    "node_count": len(nodes),
+                    "edge_count": len(edges),
+                },
+            )
+        elif sub == "backup":
+            reason = body.get("reason", "manual") if body else "manual"
+            result = self.tenant_manager.backup_tenant(customer_id, reason=reason)
+            self._json_response(201, result)
+        elif sub == "restore":
+            if not body or "backup_id" not in body:
+                raise ValidationError("backup_id is required")
+            result = self.tenant_manager.restore_tenant(customer_id, body["backup_id"])
+            self._json_response(200, result)
+        else:
+            self._json_response(404, {"error": f"Unknown tenant endpoint: {path}"})
 
 
 # ── Dispatch table population ─────────────────────────────────────────────────

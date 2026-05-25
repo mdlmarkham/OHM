@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import secrets
+import shutil
 import threading
 import time
 from collections import OrderedDict
@@ -34,6 +35,9 @@ _CHECKPOINT_INTERVAL_SECONDS = 300  # 5 min periodic checkpoint
 _WAL_SIZE_THRESHOLD_BYTES = 100 * 1024 * 1024  # 100 MB
 _META_FILENAME = "meta.json"
 _DB_FILENAME = "ohm.duckdb"
+_BACKUP_DIR_NAME = "backups"
+_DEFAULT_BACKUP_RETENTION = 7
+_DEFAULT_BACKUP_INTERVAL_HOURS = 6
 
 TIER_QUOTAS: dict[str, dict] = {
     "starter": {
@@ -925,3 +929,201 @@ class TenantManager:
             result["last_checkpoint_at"] = entry.last_checkpoint_at
 
         return result
+
+    # ── Backup & Restore (OHM-kbwl) ─────────────────────────────────────
+
+    def backup_tenant(self, customer_id: str, *, reason: str = "manual") -> dict:
+        """Create a backup of a tenant's DuckDB + meta.json.
+
+        Checkpoints first, then evicts from LRU cache to release the file
+        handle (required on Windows), copies DB + WAL + meta, and re-opens.
+
+        Args:
+            customer_id: Tenant to back up.
+            reason: Why the backup was created (manual, scheduled, pre_migration, pre_deprovision).
+
+        Returns:
+            Dict with backup_id, timestamp, file sizes, and reason.
+        """
+        customer_id = validate_customer_id(customer_id)
+        tenant_dir = self._tenant_dir(customer_id)
+        backup_dir = tenant_dir / _BACKUP_DIR_NAME
+        backup_dir.mkdir(parents=True, exist_ok=True)
+
+        now = datetime.now(timezone.utc)
+        backup_id = now.strftime("%Y%m%dT%H%M%SZ")
+        existing = [e.name for e in backup_dir.iterdir()] if backup_dir.exists() else []
+        if backup_id in existing:
+            backup_id = f"{backup_id}_{secrets.token_hex(3)}"
+
+        backup_path = backup_dir / backup_id
+        backup_path.mkdir(parents=True, exist_ok=True)
+
+        with self._cache_lock:
+            entry = self._cache.get(customer_id)
+
+        if entry is not None:
+            self._checkpoint_tenant(customer_id, entry, reason="pre_backup")
+            with self._cache_lock:
+                self._cache.pop(customer_id, None)
+            try:
+                entry.store.close()
+            except Exception:
+                pass
+
+        import time as _time
+        _time.sleep(0.1)
+
+        db_src = tenant_dir / _DB_FILENAME
+        wal_src = tenant_dir / (_DB_FILENAME + ".wal")
+        meta_src = tenant_dir / _META_FILENAME
+
+        db_size = 0
+        wal_size = 0
+        meta_size = 0
+
+        if db_src.exists():
+            shutil.copy2(str(db_src), str(backup_path / _DB_FILENAME))
+            db_size = db_src.stat().st_size
+        if wal_src.exists():
+            shutil.copy2(str(wal_src), str(backup_path / (_DB_FILENAME + ".wal")))
+            wal_size = wal_src.stat().st_size
+        if meta_src.exists():
+            shutil.copy2(str(meta_src), str(backup_path / _META_FILENAME))
+            meta_size = meta_src.stat().st_size
+
+        backup_meta = {
+            "backup_id": backup_id,
+            "customer_id": customer_id,
+            "created_at": now.isoformat(),
+            "reason": reason,
+            "db_size_bytes": db_size,
+            "wal_size_bytes": wal_size,
+            "meta_size_bytes": meta_size,
+        }
+        meta_out = backup_meta.copy()
+        if meta_src.exists():
+            try:
+                original_meta = json.loads(meta_src.read_text())
+                meta_out = {**original_meta, **backup_meta}
+            except Exception:
+                pass
+        (backup_path / _META_FILENAME).write_text(json.dumps(meta_out, indent=2))
+
+        self._enforce_retention(customer_id)
+
+        logger.info("Backed up tenant %s → %s (reason=%s)", customer_id, backup_id, reason)
+        return backup_meta
+
+    def list_backups(self, customer_id: str) -> list[dict]:
+        """List all backups for a tenant, newest first."""
+        customer_id = validate_customer_id(customer_id)
+        backup_dir = self._tenant_dir(customer_id) / _BACKUP_DIR_NAME
+        if not backup_dir.exists():
+            return []
+
+        backups = []
+        for entry in sorted(backup_dir.iterdir(), reverse=True):
+            if entry.is_dir():
+                meta_path = entry / _META_FILENAME
+                if meta_path.exists():
+                    try:
+                        meta = json.loads(meta_path.read_text())
+                        backups.append({
+                            "backup_id": entry.name,
+                            "created_at": meta.get("created_at", ""),
+                            "reason": meta.get("reason", "unknown"),
+                            "db_size_bytes": meta.get("db_size_bytes", 0),
+                        })
+                    except Exception:
+                        backups.append({"backup_id": entry.name, "created_at": "", "reason": "unknown", "db_size_bytes": 0})
+
+        return backups
+
+    def restore_tenant(self, customer_id: str, backup_id: str) -> dict:
+        """Restore a tenant from a backup.
+
+        Replaces the current DuckDB and meta.json with the backup copies.
+        The tenant must NOT have in-flight requests (refcount must be 0).
+
+        Args:
+            customer_id: Tenant to restore.
+            backup_id: Backup timestamp ID (e.g., "20260524T180000Z").
+
+        Returns:
+            Dict with status and backup metadata.
+        """
+        customer_id = validate_customer_id(customer_id)
+        backup_path = self._tenant_dir(customer_id) / _BACKUP_DIR_NAME / backup_id
+        if not backup_path.exists():
+            raise ValueError(f"Backup '{backup_id}' not found for tenant '{customer_id}'")
+
+        with self._cache_lock:
+            entry = self._cache.get(customer_id)
+        if entry is not None and entry.refcount > 0:
+            raise RuntimeError(f"Cannot restore tenant '{customer_id}' — {entry.refcount} in-flight requests")
+
+        tenant_dir = self._tenant_dir(customer_id)
+
+        if entry is not None:
+            self._checkpoint_tenant(customer_id, entry, reason="pre_restore")
+            with self._cache_lock:
+                self._cache.pop(customer_id, None)
+            try:
+                entry.store.close()
+            except Exception:
+                pass
+
+        self.backup_tenant(customer_id, reason="pre_restore")
+
+        db_src = backup_path / _DB_FILENAME
+        wal_src = backup_path / (_DB_FILENAME + ".wal")
+        meta_src = backup_path / _META_FILENAME
+
+        db_dst = tenant_dir / _DB_FILENAME
+        wal_dst = tenant_dir / (_DB_FILENAME + ".wal")
+        meta_dst = tenant_dir / _META_FILENAME
+
+        if db_dst.exists():
+            db_dst.unlink()
+        if wal_dst.exists():
+            wal_dst.unlink()
+
+        if db_src.exists():
+            shutil.copy2(str(db_src), str(db_dst))
+        if wal_src.exists():
+            shutil.copy2(str(wal_src), str(wal_dst))
+        if meta_src.exists():
+            meta_content = json.loads(meta_src.read_text())
+            restore_meta = {k: v for k, v in meta_content.items() if k not in ("backup_id", "reason")}
+            meta_dst.write_text(json.dumps(restore_meta, indent=2))
+
+        backup_meta = {}
+        try:
+            backup_meta = json.loads((backup_path / _META_FILENAME).read_text())
+        except Exception:
+            pass
+
+        logger.info("Restored tenant %s from backup %s", customer_id, backup_id)
+        return {"status": "restored", "customer_id": customer_id, "backup_id": backup_id, "backup_meta": backup_meta}
+
+    def _enforce_retention(self, customer_id: str) -> None:
+        """Enforce backup retention policy — delete oldest beyond limit."""
+        customer_id = validate_customer_id(customer_id)
+        meta = self._read_meta(customer_id)
+        retention = meta.get("backup_retention_days", _DEFAULT_BACKUP_RETENTION)
+
+        backup_dir = self._tenant_dir(customer_id) / _BACKUP_DIR_NAME
+        if not backup_dir.exists():
+            return
+
+        cutoff = datetime.now(timezone.utc).timestamp() - (retention * 86400)
+        for entry in sorted(backup_dir.iterdir()):
+            if entry.is_dir():
+                try:
+                    ts = datetime.strptime(entry.name, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc).timestamp()
+                    if ts < cutoff:
+                        shutil.rmtree(str(entry), ignore_errors=True)
+                        logger.debug("Pruned backup %s for tenant %s (older than %d days)", entry.name, customer_id, retention)
+                except ValueError:
+                    pass

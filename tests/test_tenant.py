@@ -764,3 +764,99 @@ class TestPerTenantQuotas:
         assert count == 1
         count = tm.record_request("acme_hvac")
         assert count == 2
+
+
+class TestBackupRestore:
+    """Tests for OHM-kbwl: Per-tenant backup, restore, and disaster recovery."""
+
+    def test_backup_creates_backup_directory(self, tm):
+        tm.provision("acme_hvac")
+        result = tm.backup_tenant("acme_hvac")
+        assert "backup_id" in result
+        assert result["reason"] == "manual"
+        backup_dir = tm._tenant_dir("acme_hvac") / "backups"
+        assert backup_dir.exists()
+
+    def test_backup_copies_db_and_meta(self, tm):
+        tm.provision("acme_hvac")
+        store = tm.get_store("acme_hvac")
+        store.conn.execute("INSERT INTO ohm_nodes (id, label, type, created_by, created_at) VALUES ('n1', 'test', 'concept', 'agent', CURRENT_TIMESTAMP)")
+        store.conn.execute("CHECKPOINT")
+        tm.release_store("acme_hvac")
+
+        result = tm.backup_tenant("acme_hvac")
+        backup_id = result["backup_id"]
+        backup_path = tm._tenant_dir("acme_hvac") / "backups" / backup_id
+        assert (backup_path / "ohm.duckdb").exists()
+        assert (backup_path / "meta.json").exists()
+        assert result["db_size_bytes"] > 0
+
+    def test_backup_with_reason(self, tm):
+        tm.provision("acme_hvac")
+        result = tm.backup_tenant("acme_hvac", reason="pre_migration")
+        assert result["reason"] == "pre_migration"
+
+    def test_list_backups_returns_backups(self, tm):
+        tm.provision("acme_hvac")
+        tm.backup_tenant("acme_hvac")
+        tm.backup_tenant("acme_hvac")
+        backups = tm.list_backups("acme_hvac")
+        assert len(backups) == 2
+
+    def test_list_backups_empty_when_no_backups(self, tm):
+        tm.provision("acme_hvac")
+        backups = tm.list_backups("acme_hvac")
+        assert backups == []
+
+    def test_restore_replaces_db(self, tm):
+        tm.provision("acme_hvac")
+        store = tm.get_store("acme_hvac")
+        store.conn.execute("INSERT INTO ohm_nodes (id, label, type, created_by, created_at) VALUES ('n1', 'before_backup', 'concept', 'agent', CURRENT_TIMESTAMP)")
+        store.conn.execute("CHECKPOINT")
+        tm.release_store("acme_hvac")
+
+        result = tm.backup_tenant("acme_hvac")
+        backup_id = result["backup_id"]
+
+        store = tm.get_store("acme_hvac")
+        store.conn.execute("INSERT INTO ohm_nodes (id, label, type, created_by, created_at) VALUES ('n2', 'after_backup', 'concept', 'agent', CURRENT_TIMESTAMP)")
+        store.conn.execute("CHECKPOINT")
+        tm.release_store("acme_hvac")
+
+        restore_result = tm.restore_tenant("acme_hvac", backup_id)
+        assert restore_result["status"] == "restored"
+
+        store = tm.get_store("acme_hvac")
+        count = store.conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE label = 'after_backup'").fetchone()[0]
+        assert count == 0
+        count = store.conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE label = 'before_backup'").fetchone()[0]
+        assert count == 1
+        tm.release_store("acme_hvac")
+
+    def test_restore_nonexistent_backup_raises(self, tm):
+        tm.provision("acme_hvac")
+        with pytest.raises(ValueError, match="not found"):
+            tm.restore_tenant("acme_hvac", "nonexistent_backup")
+
+    def test_restore_creates_pre_restore_backup(self, tm):
+        tm.provision("acme_hvac")
+        result = tm.backup_tenant("acme_hvac")
+        backup_id = result["backup_id"]
+        tm.restore_tenant("acme_hvac", backup_id)
+        backups = tm.list_backups("acme_hvac")
+        reasons = [b["reason"] for b in backups]
+        assert "pre_restore" in reasons
+
+    def test_backup_retention_prunes_old(self, tm):
+        tm.provision("acme_hvac")
+        meta = tm._read_meta("acme_hvac")
+        meta["backup_retention_days"] = 0
+        tm._write_meta("acme_hvac", meta)
+
+        tm.backup_tenant("acme_hvac")
+        import time
+        time.sleep(1.1)
+        tm.backup_tenant("acme_hvac")
+
+        backups = tm.list_backups("acme_hvac")
+        assert len(backups) <= 1
