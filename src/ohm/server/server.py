@@ -1317,6 +1317,7 @@ class OhmHandler(BaseHTTPRequestHandler):
     def _do_PATCH(self):
         """Handle PATCH /node/{id} or PATCH /edge/{id} — partial update."""
         from urllib.parse import urlparse
+        from .boundary import enforce_write_boundary, enforce_l2_immutability
         from ohm.validation import validate_identifier
         from ohm.exceptions import NodeNotFoundError
 
@@ -1337,6 +1338,9 @@ class OhmHandler(BaseHTTPRequestHandler):
             node = self.current_store.get_node(node_id)
             if not node:
                 raise NodeNotFoundError(f"Node not found: {node_id}")
+
+            # Enforce L2 immutability — source nodes cannot be updated (OHM-k5wk)
+            enforce_l2_immutability(self.current_store.conn, agent, node_id)
 
             now = datetime.now(timezone.utc).isoformat()
             patchable = [
@@ -1390,6 +1394,9 @@ class OhmHandler(BaseHTTPRequestHandler):
             edge = self.current_store.get_edge(edge_id)
             if not edge:
                 raise NodeNotFoundError(f"Edge not found: {edge_id}")
+
+            # Enforce write boundary — only owner can update their edge (OHM-w9pj)
+            enforce_write_boundary(self.current_store.conn, agent, edge_id)
 
             now = datetime.now(timezone.utc).isoformat()
             pert_fields = [
