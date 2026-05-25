@@ -195,6 +195,8 @@ class AnalysisHandlerMixin:
     def _get_deduplicate(self, path: str, qs: dict) -> None:
         """GET /deduplicate — remove duplicate edges."""
         self._require_write_auth()
+        from ohm.exceptions import ValidationError
+
         layer = qs.get("layer", [None])[0]
         if layer:
             from ohm.validation import validate_layer
@@ -208,6 +210,8 @@ class AnalysisHandlerMixin:
 
     def _get_graph_at(self, path: str, qs: dict) -> None:
         """GET /graph/at — query graph at snapshot version."""
+        from ohm.exceptions import ValidationError
+
         version = qs.get("version", [None])[0]
         if not version:
             raise ValidationError("?version=N is required for /graph/at")
@@ -220,6 +224,8 @@ class AnalysisHandlerMixin:
 
     def _get_graph_changes(self, path: str, qs: dict) -> None:
         """GET /graph/changes — changes between snapshot versions."""
+        from ohm.exceptions import ValidationError
+
         from_version = qs.get("from_version", [None])[0]
         to_version = qs.get("to_version", [None])[0]
         if not from_version or not to_version:
@@ -245,6 +251,8 @@ class AnalysisHandlerMixin:
 
     def _get_source_reliability(self, path: str, qs: dict) -> None:
         """GET /source_reliability — alias for /reliability/{source} accepting ?source= param."""
+        from ohm.exceptions import ValidationError
+
         source_agent = qs.get("source", [None])[0]
         if not source_agent:
             raise ValidationError("?source=<agent_name> is required")

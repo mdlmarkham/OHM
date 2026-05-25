@@ -783,6 +783,31 @@ class TestPerTenantQuotas:
         count = tm.record_request("acme_hvac")
         assert count == 2
 
+    def test_quota_cache_avoids_meta_read(self, tm):
+        """check_quota uses in-memory cache, not meta.json read (OHM-8d54)."""
+        tm.provision("cache_test", tier="starter")
+        tm.get_store("cache_test")
+        with tm._cache_lock:
+            assert "cache_test" not in tm._quota_cache
+        tm.check_quota("cache_test", "nodes")
+        with tm._cache_lock:
+            assert "cache_test" in tm._quota_cache
+        tier, quotas = tm._quota_cache["cache_test"]
+        assert tier == "starter"
+        assert quotas["max_nodes"] == 10_000
+
+    def test_quota_cache_invalidated_on_integrations_update(self, tm):
+        """Updating integrations invalidates quota cache (OHM-8d54)."""
+        tm.provision("invalidate_test", tier="professional")
+        tm.get_store("invalidate_test")
+        tm.check_quota("invalidate_test", "nodes")
+        with tm._cache_lock:
+            cached_tier, _ = tm._quota_cache["invalidate_test"]
+            assert cached_tier == "professional"
+        tm.update_integrations("invalidate_test", {"slack": {"channel": "#test"}})
+        with tm._cache_lock:
+            assert "invalidate_test" not in tm._quota_cache
+
 
 class TestBackupRestore:
     """Tests for OHM-kbwl: Per-tenant backup, restore, and disaster recovery."""

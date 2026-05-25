@@ -150,6 +150,8 @@ class TenantManager:
         self._request_counts: dict[str, dict[str, int]] = {}
         self._request_counts_lock = threading.Lock()
         self._dirty_tenants: set[str] = set()
+        self._quota_cache: dict[str, tuple[str, dict]] = {}  # customer_id → (tier, quotas)
+        self._quota_cache_lock = threading.Lock()
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -346,6 +348,28 @@ class TenantManager:
                     pass
         return result
 
+    def _get_cached_quota(self, customer_id: str) -> tuple[str, dict]:
+        """Return (tier, quotas) from cache or meta.json (OHM-8d54).
+
+        Caches quota tier + limits in memory to avoid hot-reading meta.json
+        on every request. Cache is invalidated when tenant is updated.
+        """
+        with self._quota_cache_lock:
+            cached = self._quota_cache.get(customer_id)
+        if cached is not None:
+            return cached
+        meta = self._read_meta(customer_id)
+        tier = meta.get("tier", "starter")
+        quotas = meta.get("quotas", TIER_QUOTAS.get(tier, TIER_QUOTAS["starter"]))
+        with self._quota_cache_lock:
+            self._quota_cache[customer_id] = (tier, quotas)
+        return (tier, quotas)
+
+    def _invalidate_quota_cache(self, customer_id: str) -> None:
+        """Invalidate cached quota for a tenant (called on provision/update)."""
+        with self._quota_cache_lock:
+            self._quota_cache.pop(customer_id, None)
+
     def check_quota(self, customer_id: str, resource: str, amount: int = 1) -> None:
         """Check if a tenant is within quota for a resource (OHM-982m).
 
@@ -359,8 +383,7 @@ class TenantManager:
             QuotaExceededError: If the quota would be exceeded.
         """
         customer_id = validate_customer_id(customer_id)
-        meta = self._read_meta(customer_id)
-        quotas = meta.get("quotas", TIER_QUOTAS.get(meta.get("tier", "starter"), {}))
+        tier, quotas = self._get_cached_quota(customer_id)
 
         quota_key = f"max_{resource}"
         limit = quotas.get(quota_key)
@@ -408,6 +431,7 @@ class TenantManager:
 
         elif resource == "requests_per_day":
             today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            meta = self._read_meta(customer_id)
             request_counts = meta.get("_request_counts", {})
             with self._request_counts_lock:
                 in_mem = self._request_counts.get(customer_id, {})
@@ -485,6 +509,7 @@ class TenantManager:
         existing.update(integrations)
         meta["integrations"] = existing
         self._write_meta(customer_id, meta)
+        self._invalidate_quota_cache(customer_id)
         return meta
 
     def acquire_store(self, customer_id: str) -> _TenantEntry:
