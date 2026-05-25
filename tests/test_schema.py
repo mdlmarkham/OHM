@@ -1,5 +1,7 @@
 """Tests for the OHM database schema initialization."""
 
+import pytest
+
 from ohm.schema import (
     LAYER_EDGE_TYPES,
     MIGRATIONS,
@@ -8,6 +10,7 @@ from ohm.schema import (
     VALID_NODE_TYPES,
     VALID_OBSERVATION_TYPES,
     VALID_VISIBILITIES,
+    _apply_migrations,
     get_schema_version,
     initialize_schema,
     validate_edge_type,
@@ -194,6 +197,44 @@ class TestSchemaVersion:
             return tuple(int(x) for x in v.split("."))
 
         assert versions == sorted(versions, key=version_key)
+
+    def test_migration_failure_raises_not_silenced(self, test_db):
+        """A real migration failure must raise MigrationError, not be silently swallowed."""
+        from unittest.mock import patch
+
+        from ohm.framework.exceptions import MigrationError
+
+        initialize_schema(test_db)
+
+        bad_migrations = [
+            ("99.99.0", "broken", ["ALTER TABLE nonexistent_table ADD COLUMN x INT"]),
+        ]
+        with (
+            patch("ohm.graph.schema.MIGRATIONS", bad_migrations),
+            patch("ohm.graph.schema.SCHEMA_VERSION", "99.99.0"),
+            pytest.raises(MigrationError, match="Migration 99.99.0"),
+        ):
+            _apply_migrations(test_db)
+
+    def test_migration_idempotent_already_exists_is_safe(self, test_db):
+        """'already exists' errors during migration must be silently ignored (idempotency)."""
+        from unittest.mock import patch
+
+        initialize_schema(test_db)
+        first_stmt = MIGRATIONS[0][2][0] if MIGRATIONS else None
+        if first_stmt is None:
+            return
+
+        dup_migrations = [
+            ("99.99.0", "dup", [first_stmt]),
+        ]
+        with (
+            patch("ohm.graph.schema.MIGRATIONS", dup_migrations),
+            patch("ohm.graph.schema.SCHEMA_VERSION", "99.99.0"),
+        ):
+            _apply_migrations(test_db)
+        version = get_schema_version(test_db)
+        assert version == "99.99.0"
 
     def test_get_schema_version_on_empty_db(self):
         """get_schema_version on a database without ohm_meta should return 0.0.0."""

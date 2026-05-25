@@ -65,6 +65,12 @@ class ConfigurationError(OHMError):
     exit_code = 1
 
 
+class MigrationError(OHMError):
+    """Schema migration failure."""
+
+    exit_code = 1
+
+
 class ConflictError(OHMError):
     """Resource already exists (duplicate ID, constraint violation)."""
 
