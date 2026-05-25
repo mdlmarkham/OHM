@@ -126,7 +126,7 @@ class TestAuthenticateCustomerToken:
         token, token_hash = _generate_customer_token("acme_hvac")
         handler = _handler_with_bearer(token, customer_tokens={token_hash: "acme_hvac"})
         result = handler._authenticate()
-        assert result == "acme_hvac"
+        assert result == "customer:acme_hvac"
 
     def test_customer_token_sets_resolved_customer_id(self):
         token, token_hash = _generate_customer_token("acme_hvac")
@@ -169,7 +169,7 @@ class TestAuthenticateCustomerToken:
         token, token_hash = _generate_customer_token("acme_hvac")
         handler = _handler_with_qs(token, customer_tokens={token_hash: "acme_hvac"})
         result = handler._authenticate()
-        assert result == "acme_hvac"
+        assert result == "customer:acme_hvac"
         assert getattr(handler, "_resolved_customer_id", None) == "acme_hvac"
 
     def test_two_tenants_isolated(self):
@@ -179,12 +179,12 @@ class TestAuthenticateCustomerToken:
 
         handler_a = _handler_with_bearer(token_a, customer_tokens=lookup)
         result_a = handler_a._authenticate()
-        assert result_a == "tenant_a"
+        assert result_a == "customer:tenant_a"
         assert getattr(handler_a, "_resolved_customer_id", None) == "tenant_a"
 
         handler_b = _handler_with_bearer(token_b, customer_tokens=lookup)
         result_b = handler_b._authenticate()
-        assert result_b == "tenant_b"
+        assert result_b == "customer:tenant_b"
         assert getattr(handler_b, "_resolved_customer_id", None) == "tenant_b"
 
 

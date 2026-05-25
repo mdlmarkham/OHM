@@ -339,3 +339,77 @@ class TestMutationOperations:
         edge_ab = sample_graph_small["edges"]["ab"]
         assert edge_exists(test_db, edge_ab) is True
         assert edge_exists(test_db, "nonexistent") is False
+
+
+class TestCustomerIdentityBoundary:
+    """Tests for customer API identity boundary rules (OHM-l1vs)."""
+
+    def test_is_customer_identity(self):
+        from ohm.boundary import is_customer_identity
+
+        assert is_customer_identity("customer:acme_hvac") is True
+        assert is_customer_identity("metis") is False
+        assert is_customer_identity("customer:") is True
+        assert is_customer_identity("clio") is False
+
+    def test_customer_id_from_identity(self):
+        from ohm.boundary import customer_id_from_identity
+
+        assert customer_id_from_identity("customer:acme_hvac") == "acme_hvac"
+        assert customer_id_from_identity("customer:") == ""
+        assert customer_id_from_identity("metis") is None
+
+    def test_customer_can_update_own_edge(self):
+        from ohm.boundary import check_can_update_edge
+
+        check_can_update_edge("customer:acme_hvac", "customer:acme_hvac", "edge_1")
+
+    def test_customer_cannot_update_agent_edge(self):
+        from ohm.boundary import check_can_update_edge
+
+        with pytest.raises(PermissionDeniedError, match="customer:acme_hvac"):
+            check_can_update_edge("customer:acme_hvac", "metis", "edge_1")
+
+    def test_agent_cannot_update_customer_edge(self):
+        from ohm.boundary import check_can_update_edge
+
+        with pytest.raises(PermissionDeniedError, match="metis"):
+            check_can_update_edge("metis", "customer:acme_hvac", "edge_1")
+
+    def test_customer_can_delete_own_edge(self):
+        from ohm.boundary import check_can_delete_edge
+
+        check_can_delete_edge("customer:acme_hvac", "customer:acme_hvac", "edge_1")
+
+    def test_customer_can_challenge_l3(self):
+        from ohm.boundary import check_can_challenge
+
+        check_can_challenge("customer:acme_hvac", "L3")
+
+    def test_customer_can_challenge_l4(self):
+        from ohm.boundary import check_can_challenge
+
+        check_can_challenge("customer:acme_hvac", "L4")
+
+    def test_customer_cannot_challenge_l1(self):
+        from ohm.boundary import check_can_challenge
+
+        with pytest.raises(PermissionDeniedError, match="L1"):
+            check_can_challenge("customer:acme_hvac", "L1")
+
+    def test_customer_can_support_l3(self):
+        from ohm.boundary import check_can_support
+
+        check_can_support("customer:acme_hvac", "L3")
+
+    def test_customer_cannot_support_l2(self):
+        from ohm.boundary import check_can_support
+
+        with pytest.raises(PermissionDeniedError, match="L2"):
+            check_can_support("customer:acme_hvac", "L2")
+
+    def test_different_customers_cannot_update_each_others_edges(self):
+        from ohm.boundary import check_can_update_edge
+
+        with pytest.raises(PermissionDeniedError):
+            check_can_update_edge("customer:acme_hvac", "customer:wayne_mfg", "edge_1")

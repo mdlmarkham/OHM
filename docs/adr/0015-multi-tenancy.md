@@ -152,6 +152,22 @@ Each tenant gets its own `ohmd` process on a different port.
 - No cross-tenant queries — cannot aggregate across tenants in a single SQL statement
 - Per-tenant WAL management — need periodic CHECKPOINT for active tenants
 
+### Boundary Evolution (ADR-003 under Multi-Tenancy)
+
+ADR-003 boundary rules are agent-scoped. Under multi-tenancy, the model extends:
+
+1. **Tenant isolation is the outer boundary.** A customer in tenant-A cannot see or touch data in tenant-B. This is enforced by `current_store` routing (tss4.4), not by `boundary.py`. No `tenant_id` parameter is needed in boundary enforcement functions.
+
+2. **Customer API identity format.** When a customer API key authenticates, `_authenticate()` returns `customer:{customer_id}` (not bare `customer_id`). This `created_by` value:
+   - Is distinguishable from agent names (no agent is named `customer:*`)
+   - Follows the same L3/L4 ownership rules as agent names
+   - Is challengeable by agents within the same tenant
+   - Can challenge agent edges within its tenant
+
+3. **ADR-003 rules unchanged within tenant scope.** Within a tenant, agents and customer identities follow the same rules: any identity can challenge L3/L4 edges, only the owner can update/delete their own edges, L1/L2 cannot be challenged.
+
+4. **No code changes to boundary.py API.** The `customer:` prefix is opaque to boundary enforcement — it's just a string that happens to start with `customer:`. The existing `agent_name != edge_owner` check works correctly because `customer:acme_hvac` != `metis`.
+
 ### Security
 
 - `customer_id` validated against path traversal before filesystem use (OHM-c864)
