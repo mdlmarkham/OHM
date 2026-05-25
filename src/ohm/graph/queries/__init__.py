@@ -2833,3 +2833,196 @@ def update_node_embedding(
         [embedding, node_id],
     )
     return True
+
+
+def auto_pert_from_observations(
+    conn: "DuckDBPyConnection",
+    node_id: str,
+    *,
+    obs_type: str = "probability",
+    min_obs: int = 3,
+    bounds: tuple[float, float] = (0.0, 1.0),
+) -> dict[str, Any] | None:
+    """Derive a PERT three-point estimate from a node's observation history.
+
+    Collects all non-null ``value`` entries for the given observation type
+    on the node, sorts them, and reads off empirical percentiles (5th, 50th,
+    95th). Returns ``None`` when fewer than ``min_obs`` valid values exist.
+
+    Args:
+        conn: Database connection.
+        node_id: Node whose observations are queried.
+        obs_type: Observation type to filter (default: ``"probability"``).
+        min_obs: Minimum number of observations required (default: 3).
+        bounds: Clamp output percentiles to this range (default: ``[0, 1]``).
+
+    Returns:
+        Dict with ``p05``, ``p50``, ``p95``, ``mean``, ``variance``,
+        ``n_obs``, ``obs_type`` — or ``None`` if not enough data.
+    """
+    from ohm.inference.pert import compute_pert_mean, compute_pert_variance
+
+    rows = conn.execute(
+        """
+        SELECT value
+        FROM ohm_observations
+        WHERE node_id = ?
+          AND type    = ?
+          AND value IS NOT NULL
+          AND deleted_at IS NULL
+        ORDER BY value
+        """,
+        [node_id, obs_type],
+    ).fetchall()
+
+    values = [r[0] for r in rows]
+    if len(values) < min_obs:
+        return None
+
+    lo, hi = bounds
+    n = len(values)
+
+    def _emp_pct(pct: float) -> float:
+        idx = pct * (n - 1)
+        lo_idx = int(idx)
+        hi_idx = min(lo_idx + 1, n - 1)
+        v = values[lo_idx] + (idx - lo_idx) * (values[hi_idx] - values[lo_idx])
+        return max(lo, min(hi, v))
+
+    p05 = _emp_pct(0.05)
+    p50 = _emp_pct(0.50)
+    p95 = _emp_pct(0.95)
+
+    # Ensure strict ordering (can collapse when n is small or data clustered)
+    if p05 >= p95:
+        spread = max(0.01, (hi - lo) * 0.1)
+        p05 = max(lo, p50 - spread / 2)
+        p95 = min(hi, p50 + spread / 2)
+
+    return {
+        "p05": p05,
+        "p50": p50,
+        "p95": p95,
+        "mean": compute_pert_mean(p05, p50, p95),
+        "variance": compute_pert_variance(p05, p95),
+        "n_obs": n,
+        "obs_type": obs_type,
+        "source": "observations",
+    }
+
+
+def auto_pert_from_edges(
+    conn: "DuckDBPyConnection",
+    node_id: str,
+    *,
+    direction: str = "both",
+    edge_types: list[str] | None = None,
+    min_edges: int = 2,
+    use_existing_pert: bool = True,
+    default_spread: float = 0.2,
+    bounds: tuple[float, float] = (0.0, 1.0),
+) -> dict[str, Any] | None:
+    """Derive a PERT three-point estimate from adjacent edge probability distributions.
+
+    For each qualifying edge the function extracts a (p05, p50, p95) triple:
+
+    * If the edge already carries ``probability_p05/p50/p95`` and
+      ``use_existing_pert`` is ``True``, those values are used directly.
+    * Otherwise the point ``probability`` is treated as p50 and a symmetric
+      spread of ±``default_spread``/2 is applied to produce p05 and p95.
+
+    The per-edge triples are aggregated via a weighted mixture-of-experts
+    (weights = edge ``confidence``, uniform when absent).
+
+    Args:
+        conn: Database connection.
+        node_id: Node whose adjacent edges are queried.
+        direction: ``"in"``, ``"out"``, or ``"both"`` (default).
+        edge_types: Restrict to these edge types (``None`` = all).
+        min_edges: Minimum number of qualifying edges required (default: 2).
+        use_existing_pert: Prefer existing p05/p50/p95 on edges (default: True).
+        default_spread: Fallback symmetric spread when only a point probability
+            is available (default: 0.2, i.e. ±0.1 around p50).
+        bounds: Clamp output percentiles to this range (default: ``[0, 1]``).
+
+    Returns:
+        Dict with ``p05``, ``p50``, ``p95``, ``mean``, ``variance``,
+        ``n_edges``, ``direction`` — or ``None`` if not enough data.
+    """
+    from ohm.inference.pert import aggregate_mixture_of_experts
+
+    lo, hi = bounds
+
+    if direction not in ("in", "out", "both"):
+        raise ValueError(f"direction must be 'in', 'out', or 'both', got {direction!r}")
+
+    direction_clause = {
+        "in": "e.to_node = ?",
+        "out": "e.from_node = ?",
+        "both": "(e.from_node = ? OR e.to_node = ?)",
+    }[direction]
+    params: list[Any] = [node_id, node_id] if direction == "both" else [node_id]
+
+    type_clause = ""
+    if edge_types:
+        placeholders = ", ".join("?" * len(edge_types))
+        type_clause = f" AND e.edge_type IN ({placeholders})"
+        params.extend(edge_types)
+
+    rows = conn.execute(
+        f"""
+        SELECT e.probability, e.probability_p05, e.probability_p50, e.probability_p95,
+               e.confidence
+        FROM ohm_edges e
+        WHERE {direction_clause}
+          AND e.deleted_at IS NULL
+          AND (e.probability IS NOT NULL
+               OR (e.probability_p05 IS NOT NULL AND e.probability_p95 IS NOT NULL))
+        {type_clause}
+        """,
+        params,
+    ).fetchall()
+
+    if len(rows) < min_edges:
+        return None
+
+    estimates: list[tuple[float, float, float]] = []
+    weights: list[float] = []
+
+    for prob, p05, p50, p95, conf in rows:
+        weight = conf if conf is not None else 1.0
+
+        if use_existing_pert and p05 is not None and p95 is not None:
+            mid = p50 if p50 is not None else (p05 + p95) / 2.0
+            estimates.append((
+                max(lo, float(p05)),
+                max(lo, min(hi, float(mid))),
+                min(hi, float(p95)),
+            ))
+        elif prob is not None:
+            half = default_spread / 2.0
+            estimates.append((
+                max(lo, float(prob) - half),
+                max(lo, min(hi, float(prob))),
+                min(hi, float(prob) + half),
+            ))
+        else:
+            continue
+
+        weights.append(max(0.0, float(weight)))
+
+    if len(estimates) < min_edges:
+        return None
+
+    agg = aggregate_mixture_of_experts(estimates, weights if any(w > 0 for w in weights) else None)
+
+    return {
+        "p05": max(lo, min(hi, agg["p05"])),
+        "p50": max(lo, min(hi, agg["p50"])),
+        "p95": max(lo, min(hi, agg["p95"])),
+        "mean": agg["mean"],
+        "variance": agg["total_variance"],
+        "n_edges": len(estimates),
+        "direction": direction,
+        "source": "edges",
+    }

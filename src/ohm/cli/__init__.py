@@ -500,6 +500,54 @@ def build_parser() -> argparse.ArgumentParser:
         help="Default prior for root nodes (default: 0.3)",
     )
 
+    # graph pert-from-obs
+    pert_obs_parser = graph_sub.add_parser(
+        "pert-from-obs",
+        help="Derive PERT three-point estimate from a node's observation history",
+    )
+    pert_obs_parser.add_argument("node_id", help="Node ID to derive PERT from")
+    pert_obs_parser.add_argument(
+        "--obs-type",
+        default="probability",
+        help="Observation type to aggregate (default: probability)",
+    )
+    pert_obs_parser.add_argument(
+        "--min-obs",
+        type=int,
+        default=3,
+        help="Minimum observations required (default: 3)",
+    )
+
+    # graph pert-from-edges
+    pert_edges_parser = graph_sub.add_parser(
+        "pert-from-edges",
+        help="Derive PERT three-point estimate from adjacent edge probability distributions",
+    )
+    pert_edges_parser.add_argument("node_id", help="Node ID to derive PERT from")
+    pert_edges_parser.add_argument(
+        "--direction",
+        choices=["in", "out", "both"],
+        default="both",
+        help="Which edges to consider (default: both)",
+    )
+    pert_edges_parser.add_argument(
+        "--edge-types",
+        default=None,
+        help="Comma-separated edge types to include (default: all)",
+    )
+    pert_edges_parser.add_argument(
+        "--min-edges",
+        type=int,
+        default=2,
+        help="Minimum edges required (default: 2)",
+    )
+    pert_edges_parser.add_argument(
+        "--default-spread",
+        type=float,
+        default=0.2,
+        help="Fallback spread when only point probability is available (default: 0.2)",
+    )
+
     # ── state ────────────────────────────────────────────────────────────
     state_parser = subparsers.add_parser("state", help="Hive mind awareness")
     state_sub = state_parser.add_subparsers(dest="state_command", help="State commands")
@@ -827,6 +875,10 @@ def _handle_graph(args: argparse.Namespace) -> None:
         _handle_voi(args)
     elif cmd == "voi-tasks":
         _handle_voi_tasks(args)
+    elif cmd == "pert-from-obs":
+        _handle_pert_from_obs(args)
+    elif cmd == "pert-from-edges":
+        _handle_pert_from_edges(args)
     else:
         print(f"Unknown graph command: {cmd}")
 
@@ -1851,6 +1903,69 @@ def _handle_voi_tasks(args: argparse.Namespace) -> None:
                     print(f"     → {research}")
             if result.get("agent"):
                 print(f"  Agent: {result['agent']}")
+    finally:
+        conn.close()
+
+
+def _handle_pert_from_obs(args: argparse.Namespace) -> None:
+    """Derive PERT three-point estimate from observation history."""
+    import json
+
+    from ohm.queries import auto_pert_from_observations
+
+    conn = _get_db(args)
+    try:
+        result = auto_pert_from_observations(
+            conn,
+            args.node_id,
+            obs_type=args.obs_type,
+            min_obs=args.min_obs,
+        )
+        if args.format == "json":
+            print(json.dumps(result, indent=2, default=str))
+        elif result is None:
+            print(f"  Insufficient observations (need ≥{args.min_obs} of type '{args.obs_type}')")
+        else:
+            print(f"── PERT from observations ({result['n_obs']} × {result['obs_type']}) ──")
+            print(f"  p05 = {result['p05']:.4f}")
+            print(f"  p50 = {result['p50']:.4f}  (median)")
+            print(f"  p95 = {result['p95']:.4f}")
+            print(f"  mean     = {result['mean']:.4f}")
+            print(f"  variance = {result['variance']:.6f}")
+    finally:
+        conn.close()
+
+
+def _handle_pert_from_edges(args: argparse.Namespace) -> None:
+    """Derive PERT three-point estimate from adjacent edge probability distributions."""
+    import json
+
+    from ohm.queries import auto_pert_from_edges
+
+    conn = _get_db(args)
+    try:
+        edge_types = None
+        if args.edge_types:
+            edge_types = [e.strip() for e in args.edge_types.split(",") if e.strip()]
+        result = auto_pert_from_edges(
+            conn,
+            args.node_id,
+            direction=args.direction,
+            edge_types=edge_types,
+            min_edges=args.min_edges,
+            default_spread=args.default_spread,
+        )
+        if args.format == "json":
+            print(json.dumps(result, indent=2, default=str))
+        elif result is None:
+            print(f"  Insufficient edges (need ≥{args.min_edges} with probability data, direction={args.direction})")
+        else:
+            print(f"── PERT from edges ({result['n_edges']} edges, direction={result['direction']}) ──")
+            print(f"  p05 = {result['p05']:.4f}")
+            print(f"  p50 = {result['p50']:.4f}  (median)")
+            print(f"  p95 = {result['p95']:.4f}")
+            print(f"  mean     = {result['mean']:.4f}")
+            print(f"  variance = {result['variance']:.6f}")
     finally:
         conn.close()
 

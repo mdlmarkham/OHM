@@ -1017,6 +1017,87 @@ class Graph:
 
         return query_stats(self._conn)
 
+    # ── PERT Elicitation ─────────────────────────────────────────────────
+
+    def pert_from_observations(
+        self,
+        node_id: str,
+        *,
+        obs_type: str = "probability",
+        min_obs: int = 3,
+        bounds: tuple[float, float] = (0.0, 1.0),
+    ) -> dict[str, Any] | None:
+        """Derive a PERT three-point estimate from a node's observation history.
+
+        Collects all non-null ``value`` entries for the given observation type,
+        sorts them, and reads off empirical 5th / 50th / 95th percentiles.
+        Returns ``None`` when fewer than ``min_obs`` valid values exist.
+
+        Args:
+            node_id: Node whose observations are queried.
+            obs_type: Observation type to filter (default: ``"probability"``).
+            min_obs: Minimum number of observations required (default: 3).
+            bounds: Clamp output percentiles to this range (default: ``[0, 1]``).
+
+        Returns:
+            Dict with ``p05``, ``p50``, ``p95``, ``mean``, ``variance``,
+            ``n_obs``, ``obs_type`` — or ``None`` if insufficient data.
+        """
+        from ohm.queries import auto_pert_from_observations
+
+        return auto_pert_from_observations(
+            self._conn,
+            node_id,
+            obs_type=obs_type,
+            min_obs=min_obs,
+            bounds=bounds,
+        )
+
+    def pert_from_edges(
+        self,
+        node_id: str,
+        *,
+        direction: str = "both",
+        edge_types: list[str] | None = None,
+        min_edges: int = 2,
+        use_existing_pert: bool = True,
+        default_spread: float = 0.2,
+        bounds: tuple[float, float] = (0.0, 1.0),
+    ) -> dict[str, Any] | None:
+        """Derive a PERT three-point estimate from adjacent edge probability distributions.
+
+        For each qualifying edge extracts a (p05, p50, p95) triple (using existing
+        PERT columns when available, falling back to point probability ± spread).
+        Aggregates via weighted mixture-of-experts (weights = edge confidence).
+        Returns ``None`` when fewer than ``min_edges`` qualifying edges exist.
+
+        Args:
+            node_id: Node whose adjacent edges are queried.
+            direction: ``"in"``, ``"out"``, or ``"both"`` (default).
+            edge_types: Restrict to these edge types (``None`` = all).
+            min_edges: Minimum number of qualifying edges required (default: 2).
+            use_existing_pert: Prefer existing p05/p50/p95 on edges (default: True).
+            default_spread: Fallback symmetric spread when only a point probability
+                is available (default: 0.2).
+            bounds: Clamp output percentiles to this range (default: ``[0, 1]``).
+
+        Returns:
+            Dict with ``p05``, ``p50``, ``p95``, ``mean``, ``variance``,
+            ``n_edges``, ``direction`` — or ``None`` if insufficient data.
+        """
+        from ohm.queries import auto_pert_from_edges
+
+        return auto_pert_from_edges(
+            self._conn,
+            node_id,
+            direction=direction,
+            edge_types=edge_types,
+            min_edges=min_edges,
+            use_existing_pert=use_existing_pert,
+            default_spread=default_spread,
+            bounds=bounds,
+        )
+
     # ── Substrate Methods ────────────────────────────────────────────────
 
     def aggregate(self, node_id: str, *, method: str = "weighted") -> dict[str, Any]:
