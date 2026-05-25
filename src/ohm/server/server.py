@@ -538,10 +538,11 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     request_queue_size = 128  # OHM-yv35: avoid connection resets under burst load (default was 5)
 
 
+from ohm.server.handlers.graph import GraphHandlerMixin
 from ohm.server.handlers.markov import MarkovHandlerMixin
 
 
-class OhmHandler(MarkovHandlerMixin, BaseHTTPRequestHandler):
+class OhmHandler(GraphHandlerMixin, MarkovHandlerMixin, BaseHTTPRequestHandler):
     """HTTP request handler for OHM daemon."""
 
     store: Optional[OhmStore] = None  # single-tenant core store (always set)
@@ -3075,9 +3076,13 @@ class OhmHandler(MarkovHandlerMixin, BaseHTTPRequestHandler):
                 errors.append({"index": i, "error": str(e)})
                 continue
             try:
+                obs_type = obs.get("obs_type", obs.get("type", "measurement"))
+                if obs_type not in self.schema_config.observation_types:
+                    errors.append({"index": i, "error": f"Invalid observation type '{obs_type}' — must be one of: {', '.join(sorted(self.schema_config.observation_types))}"})
+                    continue
                 result = self.current_store.write_observation(
                     node_id=node_id,
-                    type=obs.get("obs_type", obs.get("type", "measurement")),
+                    type=obs_type,
                     value=obs.get("value"),
                     baseline=obs.get("baseline"),
                     sigma=obs.get("sigma"),
