@@ -3825,6 +3825,11 @@ class OhmHandler(BaseHTTPRequestHandler):
 
         customer_id = path[len("/tenant/"):]
         try:
+            from ohm.tenant import validate_customer_id
+            customer_id = validate_customer_id(customer_id)
+        except ValueError as exc:
+            raise ValidationError(f"Invalid customer_id: {exc}")
+        try:
             self.tenant_manager.deprovision(customer_id, confirm=True)
         except TenantNotFoundError:
             raise NodeNotFoundError(f"Tenant '{customer_id}' not found")
