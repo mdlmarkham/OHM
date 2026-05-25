@@ -2903,7 +2903,7 @@ class BayesianContext:
             Dict with adjustment sets and network info.
         """
         return find_adjustment_sets(
-            self._conn,
+            self._reader,
             cause,
             effect,
             edge_types=self._edge_types,

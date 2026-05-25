@@ -38,7 +38,7 @@ class TestBayesianContext:
             call_count["count"] += 1
             return original_build(*args, **kwargs)
 
-        with patch("ohm.bayesian.build_bayesian_network", side_effect=counting_build):
+        with patch("ohm.inference.bayesian.build_bayesian_network", side_effect=counting_build):
             ctx = BayesianContext(
                 db,
                 edge_types=["CAUSES"],
