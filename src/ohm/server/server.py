@@ -3617,6 +3617,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                 method_name = mn
                 break
         if method_name:
+            self._check_write_access(agent)
             customer_id = self._customer_id
             if customer_id and self.tenant_manager:
                 from ohm.tenant import TenantNotFoundError
