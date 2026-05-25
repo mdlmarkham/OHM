@@ -834,9 +834,14 @@ class TenantManager:
             entries = list(self._cache.items())
 
         for cid, entry in entries:
-            elapsed = now - entry.last_checkpoint_at
-            if elapsed < self._checkpoint_interval:
-                continue
+            # last_checkpoint_at == 0.0 means never checkpointed — always eligible.
+            # Otherwise skip if the interval hasn't elapsed yet.
+            if entry.last_checkpoint_at > 0.0:
+                elapsed = now - entry.last_checkpoint_at
+                if elapsed < self._checkpoint_interval:
+                    continue
+            else:
+                elapsed = self._checkpoint_interval  # treat as exactly due
 
             wal_size = self._wal_size(cid)
             if wal_size >= self._wal_size_threshold:
