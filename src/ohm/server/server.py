@@ -1550,13 +1550,13 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
                 "node_types": sorted(schema.node_types),
                 "edge_types": sorted(all_edge_types),
                 "edge_types_by_layer": {k: sorted(v) for k, v in schema.layer_edge_types.items()},
-                "layers": schema.layer_descriptions,
+                "layers": dict(schema.layer_descriptions),
             },
         )
 
     def _get_layers(self, path: str, qs: dict) -> None:
         """GET /layers — layer descriptions."""
-        self._json_response(200, self.schema_config.layer_descriptions)
+        self._json_response(200, dict(self.schema_config.layer_descriptions))
 
     def _get_node(self, path: str, qs: dict) -> None:
         """GET /node/<id> — fetch a node."""

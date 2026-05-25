@@ -743,6 +743,26 @@ class TestPerTenantQuotas:
         with pytest.raises(QuotaExceededError, match="store not in cache"):
             tm.check_quota("acme_hvac", "nodes", amount=1)
 
+    def test_check_quota_raises_on_broken_connection(self, tm, monkeypatch):
+        """check_quota raises QuotaExceededError when DB query fails (OHM-qo8z).
+
+        If the store is in cache but the connection throws, the old code silently
+        returned 0, bypassing quota enforcement. Now it raises conservatively.
+        """
+        from ohm.tenant import QuotaExceededError, TIER_QUOTAS
+
+        monkeypatch.setitem(TIER_QUOTAS["starter"], "max_nodes", 10)
+        tm.provision("acme_hvac")
+        tm.get_store("acme_hvac")
+
+        with tm._cache_lock:
+            entry = tm._cache["acme_hvac"]
+        # Close the connection so any execute() call raises.
+        entry.store.conn.close()
+
+        with pytest.raises(QuotaExceededError, match="store access failed"):
+            tm.check_quota("acme_hvac", "nodes", amount=1)
+
     def test_check_quota_db_size(self, tm, monkeypatch):
         from ohm.tenant import QuotaExceededError, TIER_QUOTAS
 

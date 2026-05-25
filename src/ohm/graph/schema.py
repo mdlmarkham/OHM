@@ -451,7 +451,7 @@ class SchemaConfig:
             "name": self.name,
             "node_types": sorted(self.node_types),
             "layer_edge_types": {layer: sorted(types) for layer, types in self.layer_edge_types.items()},
-            "layer_descriptions": self.layer_descriptions,
+            "layer_descriptions": dict(self.layer_descriptions),
             "observation_types": sorted(self.observation_types),
             "observation_sources": sorted(self.observation_sources),
             "visibilities": sorted(self.visibilities),
