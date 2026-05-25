@@ -135,12 +135,53 @@ Why: The SDK runs in-process (no subprocess overhead), returns structured data (
 This project uses **bd** (beads) for issue tracking. Issues use prefix `ohm-<hash>`.
 
 ```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --status in_progress  # Claim work
-bd close <id>         # Complete work
-bd create "title" -t feature -p 0 --parent <epic-id>  # Create child issue
+bd ready              # Find available work (no blockers, right now)
+bd show <id>          # View issue details including acceptance criteria
+bd update <id> --claim  # Claim work BEFORE writing any code
+bd close <id>         # Complete work AFTER pushing to remote
+bd search <keyword>   # Search issues before creating a new one
+bd create --title="..." --description="..." --type=task  # New issue
 ```
+
+### Avoiding Duplicate Work
+
+**This is the most common failure mode in multi-agent/multi-session workflows.**
+Duplicate work happens when two agents implement the same feature, or when a
+feature already in main is re-implemented because beads shows it as "open".
+
+**Before picking up any task:**
+
+1. **Claim first, code second** — run `bd update <id> --claim` the moment you
+   decide to work on an issue. This marks it `in_progress`, preventing another
+   session from picking it up simultaneously.
+
+2. **Check what's already in the codebase** — before implementing a feature,
+   `grep` for it. If `bd ready` shows OHM-xyz as open, it may still be
+   implemented in main (beads and code can diverge after branch resets):
+   ```bash
+   grep -rn "feature_name" src/ohm/ --include="*.py" | head -5
+   ```
+
+3. **Search before creating** — before filing a new issue, search:
+   ```bash
+   bd search "keyword"       # Find existing issues
+   bd list --status=closed   # Check if it was already done
+   ```
+
+4. **Verify closed issues have code** — when rebasing to main, some issues in
+   beads may show `closed` but the code may not be in main (e.g., after a branch
+   reset). Treat `bd list --status=closed` as a hint, not a guarantee:
+   ```bash
+   git log --oneline origin/main | grep "OHM-xyz"  # Confirm it landed
+   ```
+
+5. **Resolving beads conflicts during rebase** — `.beads/issues.jsonl` conflicts
+   arise on every rebase. Always take the target branch's version:
+   ```bash
+   git checkout --ours .beads/issues.jsonl  # In a rebase, --ours = target branch
+   git add .beads/issues.jsonl
+   git rebase --continue
+   ```
 
 ### Backlog Structure
 Active epics (use `bd list` for current state):

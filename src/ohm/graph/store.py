@@ -1652,14 +1652,12 @@ class OhmStore:
                     exc,
                 )
 
-        # Check DuckLake health after sync (OHM-qiio)
-        if ducklake_path or ducklake_attached:
+        # Check DuckLake health after sync (OHM-qiio) — only if push/pull succeeded
+        if (ducklake_path or ducklake_attached) and not self.sync_degraded:
             try:
                 dlh = self.check_ducklake_health(alias=alias)
-                self.sync_degraded = dlh.get("sync_degraded", False)
-                if self.sync_degraded:
-                    import logging
-                    logger = logging.getLogger("ohm.store")
+                if dlh.get("sync_degraded", False):
+                    self.sync_degraded = True
                     logger.warning("DuckLake sync degraded: %s", dlh.get("errors", []))
             except Exception:
                 self.sync_degraded = True
@@ -1685,6 +1683,15 @@ class OhmStore:
         ).fetchone()
         if row:
             last_sync = row[0]
+
+        return {
+            "pushed": pushed,
+            "pulled": pulled,
+            "last_sync": last_sync,
+            "agent": self.agent_name,
+            "sync_degraded": self.sync_degraded,
+            "sync_error": self.sync_error or None,
+        }
 
     def check_ducklake_health(self, alias: str = "ohm_lake") -> dict[str, Any]:
         """Check DuckLake sync health and detect corruption (OHM-qiio).
