@@ -538,11 +538,12 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     request_queue_size = 128  # OHM-yv35: avoid connection resets under burst load (default was 5)
 
 
+from ohm.server.handlers.admin import AdminHandlerMixin
 from ohm.server.handlers.graph import GraphHandlerMixin
 from ohm.server.handlers.markov import MarkovHandlerMixin
 
 
-class OhmHandler(GraphHandlerMixin, MarkovHandlerMixin, BaseHTTPRequestHandler):
+class OhmHandler(AdminHandlerMixin, GraphHandlerMixin, MarkovHandlerMixin, BaseHTTPRequestHandler):
     """HTTP request handler for OHM daemon."""
 
     store: Optional[OhmStore] = None  # single-tenant core store (always set)
@@ -2618,102 +2619,6 @@ class OhmHandler(GraphHandlerMixin, MarkovHandlerMixin, BaseHTTPRequestHandler):
         )
         self._json_response(200, result)
 
-    def _get_admin_checkpoint(self, path: str, qs: dict) -> None:
-        """GET /admin/checkpoint — force DuckDB CHECKPOINT."""
-        # Force DuckDB CHECKPOINT to flush WAL to main DB file
-        self._require_write_auth()
-        try:
-            self.current_store.conn.execute("CHECKPOINT")
-            self._json_response(200, {"status": "ok", "message": "WAL flushed to main database"})
-        except Exception as e:
-            self._json_response(500, {"error": "checkpoint_failed", "message": str(e)})
-
-    def _get_admin_embeddings(self, path: str, qs: dict) -> None:
-        """GET /admin/embeddings — batch generate embeddings."""
-        # Batch generate embeddings for nodes missing them (OHM-emb)
-        # Processes in small batches with delays to avoid OOM/timeout crashes
-        try:
-            from ohm.queries import update_node_embedding
-
-            # Parse optional batch_size and delay_ms query params
-            batch_size = 5  # Process N nodes per request (small to avoid OOM)
-            delay_ms = 200  # Pause between each embedding (ms) to reduce memory pressure
-            if qs.get("batch_size"):
-                try:
-                    batch_size = int(qs["batch_size"][0])
-                    if batch_size < 1:
-                        batch_size = 1
-                    elif batch_size > 50:
-                        batch_size = 50
-                except ValueError:
-                    pass
-            if qs.get("delay_ms"):
-                try:
-                    delay_ms = int(qs["delay_ms"][0])
-                    if delay_ms < 0:
-                        delay_ms = 0
-                    elif delay_ms > 5000:
-                        delay_ms = 5000
-                except ValueError:
-                    pass
-
-            # Find all nodes without embeddings
-            rows = self.current_store.execute("SELECT id, label FROM ohm_nodes WHERE embedding IS NULL AND deleted_at IS NULL")
-            if not rows:
-                self._json_response(
-                    200,
-                    {
-                        "status": "ok",
-                        "updated": 0,
-                        "failed": 0,
-                        "total": 0,
-                        "message": "All nodes already have embeddings",
-                    },
-                )
-                return
-
-            updated = 0
-            failed = 0
-            processed = 0
-            for row in rows:
-                # Stop after batch_size nodes — client can re-call for more
-                if processed >= batch_size:
-                    break
-                try:
-                    if update_node_embedding(self.current_store.conn, row["id"]):
-                        updated += 1
-                    else:
-                        failed += 1
-                except Exception:
-                    failed += 1
-                processed += 1
-                # Small delay between embeddings to reduce memory pressure
-                if delay_ms > 0:
-                    time.sleep(delay_ms / 1000.0)
-
-            total_missing = len(rows)
-            remaining = total_missing - processed
-            self._json_response(
-                200,
-                {
-                    "status": "ok" if remaining == 0 else "partial",
-                    "updated": updated,
-                    "failed": failed,
-                    "processed": processed,
-                    "total": total_missing,
-                    "remaining": remaining,
-                    "message": f"Generated {updated} embeddings ({failed} failed). {remaining} remaining — re-call to continue.",
-                },
-            )
-        except Exception as e:
-            self._json_response(500, {"error": "embedding_backfill_failed", "message": str(e)})
-
-    def _get_admin_snapshots(self, path: str, qs: dict) -> None:
-        """GET /admin/snapshots — list DuckLake snapshots."""
-        # DuckLake time-travel: list available snapshots (OHM-kdk.3)
-        snapshots = self.current_store.list_snapshots()
-        self._json_response(200, {"snapshots": snapshots, "count": len(snapshots)})
-
     def _get_graph_at(self, path: str, qs: dict) -> None:
         """GET /graph/at — query graph at snapshot version."""
         # DuckLake time-travel: query graph at specific snapshot version (OHM-kdk.3)
@@ -3555,14 +3460,6 @@ class OhmHandler(GraphHandlerMixin, MarkovHandlerMixin, BaseHTTPRequestHandler):
                 raise ValidationError(str(e))
         removed = self.current_store.deduplicate_edges(layer=layer)
         self._json_response(200, {"removed": removed, "layer": layer})
-
-    def _post_admin_checkpoint(self, path: str, qs: dict, body: dict, agent: str) -> None:
-        """POST /admin/checkpoint — force DuckDB CHECKPOINT to flush WAL to main DB file."""
-        try:
-            self.current_store.conn.execute("CHECKPOINT")
-            self._json_response(200, {"status": "ok", "message": "WAL flushed to main database"})
-        except Exception as e:
-            self._json_response(500, {"error": "checkpoint_failed", "message": str(e)})
 
     def _do_DELETE(self):
         """Handle DELETE requests — remove nodes or edges.

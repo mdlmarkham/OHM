@@ -20,3 +20,5 @@ class-level state of their own.
 
 See OHM-xily for the full migration plan and design rationale.
 """
+
+from ohm.server.handlers.admin import AdminHandlerMixin
