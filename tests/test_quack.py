@@ -13,6 +13,7 @@ import pytest
 from ohm.quack import (
     validate_quack_uri,
     validate_quack_token,
+    validate_quack_sql,
     reset_availability,
 )
 from ohm.schema import DEFAULT_SCHEMA
@@ -91,6 +92,197 @@ class TestQuackTokenValidation:
     def test_reject_single_quote(self):
         with pytest.raises(ValueError, match="single quotes"):
             validate_quack_token("abc'def12345678901234567890123")
+
+
+# ── SQL Validation (OHM-5gpr) ──────────────────────────────────────────────
+
+
+class TestQuackSQLValidation:
+    """Tests for Quack SQL validation (defense-in-depth for OHM-5gpr)."""
+
+    def test_valid_select(self):
+        assert validate_quack_sql("SELECT * FROM ohm_nodes LIMIT 10") == "SELECT * FROM ohm_nodes LIMIT 10"
+
+    def test_valid_select_with_where(self):
+        sql = "SELECT node_id, label FROM ohm_nodes WHERE layer = 'L3'"
+        assert validate_quack_sql(sql) == sql
+
+    def test_valid_select_with_semicolon_in_string(self):
+        sql = "SELECT * FROM ohm_nodes WHERE label LIKE '%;%'"
+        assert validate_quack_sql(sql) == sql
+
+    def test_reject_chained_drop(self):
+        with pytest.raises(ValueError, match="chained DDL/DML"):
+            validate_quack_sql("SELECT 1; DROP TABLE ohm_nodes")
+
+    def test_reject_chained_delete(self):
+        with pytest.raises(ValueError, match="chained DDL/DML"):
+            validate_quack_sql("SELECT 1; DELETE FROM ohm_nodes")
+
+    def test_reject_chained_insert(self):
+        with pytest.raises(ValueError, match="chained DDL/DML"):
+            validate_quack_sql("SELECT 1; INSERT INTO ohm_nodes VALUES ('evil')")
+
+    def test_reject_chained_alter(self):
+        with pytest.raises(ValueError, match="chained DDL/DML"):
+            validate_quack_sql("SELECT 1; ALTER TABLE ohm_nodes ADD COLUMN evil TEXT")
+
+    def test_reject_chained_update(self):
+        with pytest.raises(ValueError, match="chained DDL/DML"):
+            validate_quack_sql("SELECT 1; UPDATE ohm_nodes SET label = 'pwned'")
+
+    def test_reject_chained_truncate(self):
+        with pytest.raises(ValueError, match="chained DDL/DML"):
+            validate_quack_sql("SELECT 1; TRUNCATE ohm_nodes")
+
+    def test_reject_chained_grant(self):
+        with pytest.raises(ValueError, match="chained DDL/DML"):
+            validate_quack_sql("SELECT 1; GRANT ALL ON ohm_nodes TO public")
+
+    def test_reject_case_insensitive(self):
+        with pytest.raises(ValueError, match="chained DDL/DML"):
+            validate_quack_sql("SELECT 1; drop table ohm_nodes")
+
+    def test_reject_with_whitespace(self):
+        with pytest.raises(ValueError, match="chained DDL/DML"):
+            validate_quack_sql("SELECT 1;  \n  DROP TABLE ohm_nodes")
+
+
+# ── SQL Injection Prevention (OHM-5gpr) ─────────────────────────────────────
+
+
+class TestQueryRemoteInjectionPrevention:
+    """Tests that query_remote uses parameterized queries — no f-string injection.
+
+    These tests verify that the fix for OHM-5gpr works correctly:
+    - Tokens are stored as DuckDB secrets, never interpolated into SQL
+    - URI and SQL use parameterized queries (?), never f-string interpolated
+    """
+
+    def test_query_remote_uses_parameterized_query(self):
+        """Verify query_remote passes URI and SQL as parameters, not interpolated."""
+        from ohm.quack import query_remote
+
+        mock_conn = MagicMock()
+        mock_result = MagicMock()
+        mock_result.description = [("col1",), ("col2",)]
+        mock_result.fetchall.return_value = [(1, "a")]
+        mock_conn.execute.return_value = mock_result
+
+        with patch("ohm.quack.is_available", return_value=True):
+            result = query_remote(
+                mock_conn,
+                "quack:localhost",
+                "SELECT * FROM ohm_nodes LIMIT 10",
+            )
+            # Verify execute was called with parameterized query (? placeholders)
+            call_args = mock_conn.execute.call_args
+            sql_str = call_args[0][0]
+            params = call_args[0][1] if len(call_args[0]) > 1 else call_args[1].get("parameters", None)
+            assert "?" in sql_str
+            assert "ohm_nodes" not in sql_str
+            assert params is not None
+            assert params[0] == "quack:localhost"
+            assert params[1] == "SELECT * FROM ohm_nodes LIMIT 10"
+
+    def test_query_remote_token_uses_secret(self):
+        """Verify query_remote stores token as a secret, not inline in SQL."""
+        from ohm.quack import query_remote
+
+        mock_conn = MagicMock()
+        mock_result = MagicMock()
+        mock_result.description = [("col1",)]
+        mock_result.fetchall.return_value = [(1,)]
+        mock_conn.execute.return_value = mock_result
+
+        with patch("ohm.quack.is_available", return_value=True):
+            with patch.dict(os.environ, {"QUACK_TOKEN": "a" * 32}):
+                result = query_remote(
+                    mock_conn,
+                    "quack:localhost",
+                    "SELECT 1",
+                    token_env="QUACK_TOKEN",
+                )
+                # The first execute call should be create_secret (CREATE OR REPLACE SECRET)
+                # The second should be quack_query with parameterized ?
+                calls = mock_conn.execute.call_args_list
+                secret_call = calls[0][0][0]
+                query_call = calls[1][0][0]
+                assert "CREATE OR REPLACE SECRET" in secret_call
+                assert "TOKEN" in secret_call
+                # The quack_query call should NOT contain the token
+                assert "a" * 32 not in query_call
+                assert "?" in query_call
+
+    def test_query_remote_rejects_dangerous_sql(self):
+        """Verify query_remote validates SQL before executing."""
+        from ohm.quack import query_remote
+
+        mock_conn = MagicMock()
+
+        with patch("ohm.quack.is_available", return_value=True):
+            with pytest.raises(ValueError, match="chained DDL/DML"):
+                query_remote(
+                    mock_conn,
+                    "quack:localhost",
+                    "SELECT 1; DROP TABLE ohm_nodes",
+                )
+
+    def test_start_server_token_uses_secret(self):
+        """Verify start_server stores token as a secret, not inline in SQL."""
+        from ohm.quack import start_server
+
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value = None
+
+        with patch("ohm.quack.is_available", return_value=True):
+            with patch.dict(os.environ, {"QUACK_TOKEN": "a" * 32}):
+                result = start_server(mock_conn, "quack:localhost", token_env="QUACK_TOKEN")
+                # Check that quack_serve call does NOT contain the token
+                calls = mock_conn.execute.call_args_list
+                serve_call = [c for c in calls if "quack_serve" in c[0][0]]
+                assert len(serve_call) == 1
+                assert "a" * 32 not in serve_call[0][0][0]
+
+    def test_attach_remote_token_uses_secret(self):
+        """Verify attach_remote stores token as a secret, not inline in SQL."""
+        from ohm.quack import attach_remote
+
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value = None
+
+        with patch("ohm.quack.is_available", return_value=True):
+            with patch.dict(os.environ, {"QUACK_TOKEN": "a" * 32}):
+                attach_remote(mock_conn, "quack:localhost", token_env="QUACK_TOKEN")
+                # Check that ATTACH call does NOT contain the token inline
+                calls = mock_conn.execute.call_args_list
+                attach_call = [c for c in calls if "ATTACH" in c[0][0]]
+                assert len(attach_call) == 1
+                assert "TOKEN" not in attach_call[0][0][0]
+                assert "a" * 32 not in attach_call[0][0][0]
+
+    def test_create_secret_validates_scope(self):
+        """Verify create_secret rejects scope with injection characters."""
+        from ohm.quack import create_secret
+
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value = None
+
+        with patch("ohm.quack.is_available", return_value=True):
+            with pytest.raises(ValueError, match="invalid characters"):
+                create_secret(mock_conn, token="a" * 32, scope="quack:localhost'; DROP TABLE--")
+
+    def test_create_secret_uses_or_replace(self):
+        """Verify create_secret uses CREATE OR REPLACE SECRET (idempotent)."""
+        from ohm.quack import create_secret
+
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value = None
+
+        with patch("ohm.quack.is_available", return_value=True):
+            create_secret(mock_conn, token="a" * 32, scope="quack:localhost")
+            call_sql = mock_conn.execute.call_args[0][0]
+            assert "CREATE OR REPLACE SECRET" in call_sql
 
 
 # ── Availability Detection ───────────────────────────────────────────────────
@@ -316,7 +508,7 @@ class TestQuackClientMocked:
             create_secret(mock_conn, token="a" * 32, scope="quack:localhost")
             mock_conn.execute.assert_called()
             call_args = mock_conn.execute.call_args[0][0]
-            assert "CREATE SECRET" in call_args
+            assert "CREATE OR REPLACE SECRET" in call_args
             assert "TYPE quack" in call_args
 
     def test_create_secret_no_token_raises(self):

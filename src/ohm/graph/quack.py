@@ -169,6 +169,30 @@ def validate_quack_token(token: str) -> str:
     return token
 
 
+_DANGEROUS_SQL_RE = re.compile(r";\s*(?:DROP|ALTER|CREATE|INSERT|UPDATE|DELETE|TRUNCATE|GRANT|REVOKE)\b", re.IGNORECASE)
+
+
+def validate_quack_sql(sql: str) -> str:
+    """Validate SQL for use with quack_query().
+
+    Defense-in-depth check on SQL strings even when using parameterized
+    queries. Rejects statements that attempt to chain destructive DDL/DML
+    after the intended query.
+
+    Args:
+        sql: SQL query string.
+
+    Returns:
+        The validated SQL string.
+
+    Raises:
+        ValueError: If SQL contains dangerous multi-statement patterns.
+    """
+    if _DANGEROUS_SQL_RE.search(sql):
+        raise ValueError("Quack query SQL must not contain chained DDL/DML statements")
+    return sql
+
+
 # ── Server-Side ─────────────────────────────────────────────────────────────
 
 
@@ -215,14 +239,13 @@ def start_server(
     if resolved_token:
         resolved_token = validate_quack_token(resolved_token)
 
-    # Build the CALL quack_serve(...) SQL
-    # Use parameterized approach where possible, but Quack's CALL syntax
-    # requires string interpolation for the URI. The URI is validated above.
-    if resolved_token and allow_other_hostname:
-        conn.execute(f"CALL quack_serve('{uri}', token := '{resolved_token}', allow_other_hostname := true)")
-    elif resolved_token:
-        conn.execute(f"CALL quack_serve('{uri}', token := '{resolved_token}')")
-    elif allow_other_hostname:
+    # Register token as a DuckDB secret (OHM-5gpr: never interpolate tokens into SQL).
+    # quack_serve automatically picks up secrets matching the URI scope.
+    if resolved_token:
+        create_secret(conn, token=resolved_token, scope=uri)
+
+    # Build the CALL quack_serve(...) SQL — no token in the SQL string.
+    if allow_other_hostname:
         conn.execute(f"CALL quack_serve('{uri}', allow_other_hostname := true)")
     else:
         conn.execute(f"CALL quack_serve('{uri}')")
@@ -301,14 +324,16 @@ def attach_remote(
     if resolved_token:
         resolved_token = validate_quack_token(resolved_token)
 
-    # Build ATTACH statement
-    # The alias is validated to be a simple identifier
+    # Register token as a DuckDB secret (OHM-5gpr: never interpolate tokens into SQL).
+    # ATTACH automatically uses secrets whose scope matches the URI.
+    if resolved_token:
+        create_secret(conn, token=resolved_token, scope=uri)
+
+    # Build ATTACH statement — no inline TOKEN clause.
     if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", alias):
         raise ValueError(f"Invalid alias: {alias!r}")
 
     attach_sql = f"ATTACH '{uri}' AS {alias} (TYPE quack"
-    if resolved_token:
-        attach_sql += f", TOKEN '{resolved_token}'"
     if disable_ssl:
         attach_sql += ", DISABLE_SSL true"
     attach_sql += ")"
@@ -365,16 +390,19 @@ def query_remote(
 
     if resolved_token:
         resolved_token = validate_quack_token(resolved_token)
+        # Register token as a DuckDB secret (OHM-5gpr: never interpolate tokens into SQL).
+        # quack_query automatically picks up secrets matching the URI scope.
+        create_secret(conn, token=resolved_token, scope=uri)
 
-    # Validate SQL to prevent injection into f-string (OHM-5gpr)
-    # quack_query is a DuckDB macro — we can't parameterize the SQL argument,
-    # so we validate it the same way we validate URI/token.
-    if "'" in sql or ";" in sql.split("--")[0]:
-        raise ValueError("Quack query SQL must not contain single quotes or semicolons outside comments")
+    # Defense-in-depth: validate SQL even though we use parameterized queries.
+    validate_quack_sql(sql)
 
-    # Use quack_query function
-    token_clause = f", token := '{resolved_token}'" if resolved_token else ""
-    result = conn.execute(f"SELECT * FROM quack_query('{uri}', '{sql}'{token_clause})")
+    # Use parameterized queries — URI and SQL are never interpolated into the
+    # SQL string, eliminating injection vectors (OHM-5gpr).
+    result = conn.execute(
+        "SELECT * FROM quack_query(?, ?)",
+        [uri, sql],
+    )
 
     columns = [desc[0] for desc in result.description]
     return [dict(zip(columns, row)) for row in result.fetchall()]
@@ -410,5 +438,10 @@ def create_secret(
 
     resolved_token = validate_quack_token(resolved_token)
 
+    # Validate scope to prevent injection (scope comes from validated URIs
+    # in most call paths, but be defensive).
+    if scope and ("'" in scope or ";" in scope or "--" in scope):
+        raise ValueError(f"Quack secret scope contains invalid characters: {scope!r}")
+
     scope_clause = f", SCOPE '{scope}'" if scope else ""
-    conn.execute(f"CREATE SECRET (TYPE quack, TOKEN '{resolved_token}'{scope_clause})")
+    conn.execute(f"CREATE OR REPLACE SECRET (TYPE quack, TOKEN '{resolved_token}'{scope_clause})")
