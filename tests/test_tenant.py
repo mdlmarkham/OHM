@@ -727,6 +727,22 @@ class TestPerTenantQuotas:
         with pytest.raises(QuotaExceededError, match="nodes quota"):
             tm.check_quota("acme_hvac", "nodes", amount=1)
 
+    def test_check_quota_rejects_when_store_evicted(self, tm):
+        """check_quota raises QuotaExceededError when store is not in cache (OHM-qo8z).
+
+        Previously returned 0, bypassing quota enforcement. Now raises so callers
+        cannot accidentally allow writes when quota state is unknown.
+        """
+        from ohm.tenant import QuotaExceededError
+
+        tm.provision("acme_hvac")
+        tm.get_store("acme_hvac")
+
+        tm._evict("acme_hvac")
+
+        with pytest.raises(QuotaExceededError, match="store not in cache"):
+            tm.check_quota("acme_hvac", "nodes", amount=1)
+
     def test_check_quota_db_size(self, tm, monkeypatch):
         from ohm.tenant import QuotaExceededError, TIER_QUOTAS
 

@@ -380,7 +380,9 @@ class TenantManager:
                 except Exception:
                     current_count = 0
             else:
-                current_count = 0
+                raise QuotaExceededError(
+                    f"Tenant '{customer_id}' cannot verify {resource} quota — store not in cache"
+                )
 
             if current_count + amount > limit:
                 raise QuotaExceededError(
