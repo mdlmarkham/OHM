@@ -139,6 +139,7 @@ class TenantManager:
 
         self._cache: OrderedDict[str, _TenantEntry] = OrderedDict()
         self._cache_lock = threading.Lock()
+        self._schema_lock = threading.Lock()  # OHM-yzau: schema mutation lock
 
         self._eviction_thread = threading.Thread(target=self._eviction_loop, daemon=True, name="tenant-eviction")
         self._eviction_thread.start()
@@ -508,6 +509,10 @@ class TenantManager:
 
         if entry is not None and entry.refcount == 0 and entry.evict_pending:
             try:
+                entry.store.conn.execute("CHECKPOINT")  # OHM-7r9s
+            except Exception as e:
+                logger.warning("Checkpoint before evict failed: %s", e)
+            try:
                 entry.store.close()
             except Exception:
                 pass
@@ -721,8 +726,9 @@ class TenantManager:
         if meta_key >= target_key:
             return
 
-        # Acquire per-tenant write lock for migration
-        entry = self._cache.get(customer_id)
+        # Acquire per-tenant write lock for migration (OHM-cmao: cache read under lock)
+        with self._cache_lock:
+            entry = self._cache.get(customer_id)
         if entry is None:
             return
 
@@ -796,16 +802,17 @@ class TenantManager:
         if current_tv <= tenant_tv:
             return
 
-        old_schema = store.schema
-        merged = self._additive_merge(old_schema, current_schema)
-        store.schema = merged
+        with self._schema_lock:  # OHM-yzau
+            old_schema = store.schema
+            merged = self._additive_merge(old_schema, current_schema)
+            store.schema = merged
 
-        meta["template_version"] = current_tv
-        self._write_meta(customer_id, meta)
-        logger.info(
-            "Propagated template v%d → v%d for tenant %s (domain=%s)",
-            tenant_tv, current_tv, customer_id, domain,
-        )
+            meta["template_version"] = current_tv
+            self._write_meta(customer_id, meta)
+            logger.info(
+                "Propagated template v%d \u2192 v%d for tenant %s (domain=%s)",
+                tenant_tv, current_tv, customer_id, domain,
+            )
 
     @staticmethod
     def _additive_merge(old: "SchemaConfig", current: "SchemaConfig") -> "SchemaConfig":
@@ -908,21 +915,37 @@ class TenantManager:
                 break
 
     def _eviction_loop(self) -> None:
-        """Background thread: evict idle tenants every 60 seconds."""
+        """Background thread: evict idle tenants every 60 seconds (OHM-s8sg: resilient)."""
+        consecutive_errors = 0
         while True:
-            time.sleep(60)
-            now = time.monotonic()
-            with self._cache_lock:
-                idle = [cid for cid, entry in self._cache.items() if now - entry.last_accessed > _IDLE_EVICT_SECONDS]
-            for cid in idle:
-                self._evict(cid)
-                logger.info("Idle-evicted tenant %s", cid)
+            try:
+                time.sleep(60)
+                now = time.monotonic()
+                with self._cache_lock:
+                    idle = [cid for cid, entry in self._cache.items() if now - entry.last_accessed > _IDLE_EVICT_SECONDS]
+                for cid in idle:
+                    self._evict(cid)
+                    logger.info("Idle-evicted tenant %s", cid)
+                consecutive_errors = 0
+            except Exception:
+                consecutive_errors += 1
+                logger.exception("Eviction loop error (consecutive=%d)", consecutive_errors)
+                if consecutive_errors >= 3:
+                    time.sleep(60)  # backoff after repeated failures
 
     def _checkpoint_loop(self) -> None:
-        """Background thread: periodic checkpoint of active tenants (OHM-p7fv)."""
+        """Background thread: periodic checkpoint of active tenants (OHM-p7fv, OHM-s8sg: resilient)."""
+        consecutive_errors = 0
         while True:
-            time.sleep(self._checkpoint_interval)
-            self._checkpoint_active_tenants()
+            try:
+                time.sleep(self._checkpoint_interval)
+                self._checkpoint_active_tenants()
+                consecutive_errors = 0
+            except Exception:
+                consecutive_errors += 1
+                logger.exception("Checkpoint loop error (consecutive=%d)", consecutive_errors)
+                if consecutive_errors >= 3:
+                    time.sleep(60)  # backoff after repeated failures
 
     def _checkpoint_active_tenants(self) -> None:
         """Checkpoint all cached tenants whose interval has elapsed (OHM-p7fv).
