@@ -20,6 +20,13 @@ class AnalysisHandlerMixin:
         result = query_agent_health(self.current_store.conn)
         self._json_response(200, result)
 
+    def _get_health_sync(self, path: str, qs: dict) -> None:
+        """GET /health/sync — DuckLake sync health check."""
+        alias = qs.get("alias", ["ohm_lake"])[0]
+        result = self.current_store.check_ducklake_health(alias=alias)
+        status = 200 if result.get("healthy") and not result.get("sync_degraded") else 503
+        self._json_response(status, result)
+
     def _get_contradictions(self, path: str, qs: dict) -> None:
         """GET /contradictions — detect contradictions."""
         from ohm.methods import detect_contradictions

@@ -316,8 +316,8 @@ class OhmStore:
                             select_str = ", ".join(cast_parts)
                             local_cols = ", ".join(col_map.values())
 
-                            # Only pull non-deleted rows
-                            conn.execute(f"INSERT INTO {table} ({local_cols}, deleted_at) SELECT {select_str}, NULL::TIMESTAMP FROM ohm_lake.{table} WHERE deleted_at IS NULL OR CAST(deleted_at AS VARCHAR) = ''")
+                            # Pull all rows from DuckLake (DuckLake tables don't have deleted_at)
+                            conn.execute(f"INSERT INTO {table} ({local_cols}, deleted_at) SELECT {select_str}, NULL::TIMESTAMP FROM ohm_lake.{table}")
                             count = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]  # type: ignore[index]
                             logger.info("Recovered %d %s from DuckLake", count, table)
                         except Exception as e:
@@ -441,7 +441,8 @@ class OhmStore:
                     select_str = ", ".join(cast_parts)
                     local_cols = ", ".join(col_map.values())
 
-                    self.conn.execute(f"INSERT INTO {table} ({local_cols}, deleted_at) SELECT {select_str}, NULL::TIMESTAMP FROM ohm_lake.{table} WHERE deleted_at IS NULL OR CAST(deleted_at AS VARCHAR) = ''")
+                    # Pull all rows from DuckLake (DuckLake tables don't have deleted_at)
+                    self.conn.execute(f"INSERT INTO {table} ({local_cols}, deleted_at) SELECT {select_str}, NULL::TIMESTAMP FROM ohm_lake.{table}")
                     count = self.conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]  # type: ignore[index]
                     logger.info("Auto-restored %d %s from DuckLake", count, table)
                 except Exception as e:
@@ -1695,23 +1696,26 @@ class OhmStore:
             return health
 
         # Compare row counts
+        # Note: DuckLake tables don't have deleted_at, so we use unfiltered counts
+        # and compare against local active (non-deleted) counts.
         tables = ["ohm_nodes", "ohm_edges", "ohm_observations"]
         for table in tables:
             try:
                 local_count = self.conn.execute(
                     f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL"
                 ).fetchone()[0]
+                # DuckLake tables don't have deleted_at column — use unfiltered count
                 ducklake_count = self.conn.execute(
-                    f"SELECT COUNT(*) FROM {self._ducklake_table(table, alias)} WHERE deleted_at IS NULL"
+                    f"SELECT COUNT(*) FROM {self._ducklake_table(table, alias)}"
                 ).fetchone()[0]
                 health["local_counts"][table] = local_count
                 health["ducklake_counts"][table] = ducklake_count
 
-                # Detect orphans: rows in DuckLake not in local
+                # Detect orphans: rows in DuckLake not in local active rows
+                # DuckLake doesn't have deleted_at, so we compare against local active rows only
                 orphan_count = self.conn.execute(f"""
                     SELECT COUNT(*) FROM {self._ducklake_table(table, alias)} dl
-                    WHERE dl.deleted_at IS NULL
-                    AND NOT EXISTS (
+                    WHERE NOT EXISTS (
                         SELECT 1 FROM {table} l
                         WHERE l.id = dl.id AND l.deleted_at IS NULL
                     )
@@ -1828,18 +1832,17 @@ class OhmStore:
                 col_list = ", ".join(col_names)
 
                 # 1. Insert rows in DuckLake but not local
+                # DuckLake tables don't have deleted_at — all rows are active
                 missing_count = self.conn.execute(f"""
                     SELECT COUNT(*) FROM {mirror} dl
-                    WHERE dl.deleted_at IS NULL
-                    AND NOT EXISTS (SELECT 1 FROM {table} l WHERE l.id = dl.id)
+                    WHERE NOT EXISTS (SELECT 1 FROM {table} l WHERE l.id = dl.id AND l.deleted_at IS NULL)
                 """).fetchone()[0]
 
                 if missing_count > 0:
                     self.conn.execute(f"""
                         INSERT INTO {table} ({col_list})
                         SELECT {col_list} FROM {mirror} dl
-                        WHERE dl.deleted_at IS NULL
-                        AND NOT EXISTS (SELECT 1 FROM {table} l WHERE l.id = dl.id)
+                        WHERE NOT EXISTS (SELECT 1 FROM {table} l WHERE l.id = dl.id AND l.deleted_at IS NULL)
                     """)
                 result["inserted"] += missing_count
 
@@ -1848,8 +1851,7 @@ class OhmStore:
                 updated_count = self.conn.execute(f"""
                     SELECT COUNT(*) FROM {mirror} dl
                     JOIN {table} l ON l.{pk} = dl.{pk}
-                    WHERE dl.deleted_at IS NULL
-                    AND l.deleted_at IS NULL
+                    WHERE l.deleted_at IS NULL
                     AND dl.{ts_col} > l.{ts_col}
                 """).fetchone()[0]
 
@@ -1858,19 +1860,19 @@ class OhmStore:
                         UPDATE {table} l SET {set_clause}
                         FROM {mirror} dl
                         WHERE l.{pk} = dl.{pk}
-                        AND dl.deleted_at IS NULL
                         AND l.deleted_at IS NULL
                         AND dl.{ts_col} > l.{ts_col}
                     """)
                 result["updated"] += updated_count
 
-                # 3. Soft-delete rows deleted in DuckLake but still active locally
+                # 3. Soft-delete rows absent in DuckLake but still active locally
+                # (DuckLake is source of truth — rows not in mirror should be deleted locally)
                 soft_deleted_count = self.conn.execute(f"""
                     SELECT COUNT(*) FROM {table} l
                     WHERE l.deleted_at IS NULL
                     AND NOT EXISTS (
                         SELECT 1 FROM {mirror} dl
-                        WHERE dl.id = l.id AND dl.deleted_at IS NULL
+                        WHERE dl.id = l.id
                     )
                 """).fetchone()[0]
 
@@ -1882,7 +1884,7 @@ class OhmStore:
                         WHERE deleted_at IS NULL
                         AND NOT EXISTS (
                             SELECT 1 FROM {mirror} dl
-                            WHERE dl.id = {table}.id AND dl.deleted_at IS NULL
+                            WHERE dl.id = {table}.id
                         )
                     """)
                 result["soft_deleted"] += soft_deleted_count
@@ -1898,7 +1900,7 @@ class OhmStore:
                     f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL"
                 ).fetchone()[0]
                 dl_count = self.conn.execute(
-                    f"SELECT COUNT(*) FROM {self._ducklake_table(table, alias)} WHERE deleted_at IS NULL"
+                    f"SELECT COUNT(*) FROM {self._ducklake_table(table, alias)}"
                 ).fetchone()[0]
                 if local_count != dl_count:
                     result["verified"] = False

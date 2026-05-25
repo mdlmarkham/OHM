@@ -2142,6 +2142,7 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
         # Validate node exists before writing observation (OHM-7302)
         if not self.current_store.get_node(node_id):
             raise NodeNotFoundError(f"Node not found: {node_id}")
+        # Validate observation type against schema (OHM-jt98)
         obs_type = body.get("type", "measurement")
         if obs_type not in self.schema_config.observation_types:
             raise ValidationError(f"Invalid observation type '{obs_type}' — must be one of: {', '.join(sorted(self.schema_config.observation_types))}")
@@ -2883,7 +2884,7 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     OhmHandler.customer_tokens = _build_customer_token_lookup(config.get("customer_tokens", {}))
     OhmHandler.roles = config_roles if config_roles else config.get("roles", {})
     OhmHandler.no_auth = config.get("no_auth", False)
-    OhmHandler.require_read_auth = config.get("require_read_auth", False)
+    OhmHandler.require_read_auth = config.get("require_read_auth", OhmHandler.tenant_manager is not None)  # OHM-en2r: multi-tenant defaults to True
     OhmHandler.schema_config = schema_config
     OhmHandler.multi_tenant = config.get("multi_tenant", False)
 
@@ -2932,11 +2933,21 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     _sync_stop = threading.Event()
 
     def _ducklake_sync_loop():
+        consecutive_sync_errors = 0
         while not _sync_stop.wait(ducklake_sync_interval):
             try:
                 store.sync_heartbeat()
+                consecutive_sync_errors = 0  # Reset on success (OHM-nnu2)
             except Exception:
-                logger.exception("DuckLake sync failed — data may not be replicated to lake")
+                consecutive_sync_errors += 1
+                logger.exception(
+                    "DuckLake sync failed (attempt %d): ", consecutive_sync_errors
+                )
+                if consecutive_sync_errors >= 3:
+                    # Exponential backoff after 3 consecutive errors (OHM-nnu2, same pattern as OHM-s8sg)
+                    backoff = min(60, 5 * (2 ** (consecutive_sync_errors - 3)))
+                    logger.warning("DuckLake sync backing off %ds after %d consecutive errors", backoff, consecutive_sync_errors)
+                    _sync_stop.wait(backoff)  # Interruptible sleep
 
     if hasattr(store, "sync_heartbeat") and ducklake_sync_interval > 0:
         _sync_thread = threading.Thread(target=_ducklake_sync_loop, daemon=True, name="ducklake-sync")
