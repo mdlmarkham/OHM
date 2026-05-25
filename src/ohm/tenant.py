@@ -1143,26 +1143,46 @@ class TenantManager:
             except Exception:
                 pass
 
-        import time as _time
-        _time.sleep(0.1)
-
         db_src = tenant_dir / _DB_FILENAME
         wal_src = tenant_dir / (_DB_FILENAME + ".wal")
         meta_src = tenant_dir / _META_FILENAME
 
-        db_size = 0
-        wal_size = 0
-        meta_size = 0
+        import time as _time
 
-        if db_src.exists():
-            shutil.copy2(str(db_src), str(backup_path / _DB_FILENAME))
-            db_size = db_src.stat().st_size
-        if wal_src.exists():
-            shutil.copy2(str(wal_src), str(backup_path / (_DB_FILENAME + ".wal")))
-            wal_size = wal_src.stat().st_size
-        if meta_src.exists():
-            shutil.copy2(str(meta_src), str(backup_path / _META_FILENAME))
-            meta_size = meta_src.stat().st_size
+        def _wait_for_file_ready(path: Path, max_attempts: int = 10) -> bool:
+            for attempt in range(max_attempts):
+                try:
+                    with open(str(path), "r+b") as f:
+                        pass
+                    return True
+                except (IOError, OSError):
+                    if attempt < max_attempts - 1:
+                        _time.sleep(0.05 * (2 ** attempt))
+            return False
+
+        def _atomic_copy(src: Path, dst_dir: Path, name: str) -> tuple[int, str]:
+            dst = dst_dir / name
+            tmp = dst.with_suffix(".tmp")
+            checksum = ""
+            if src.exists():
+                import hashlib
+
+                with open(str(src), "rb") as sf:
+                    data = sf.read()
+                with open(str(tmp), "wb") as tf:
+                    tf.write(data)
+                os.replace(str(tmp), str(dst))
+                checksum = hashlib.sha256(data).hexdigest()
+            return (src.stat().st_size if src.exists() else 0, checksum)
+
+        for src in [db_src, wal_src, meta_src]:
+            if src.exists():
+                if not _wait_for_file_ready(src):
+                    logger.warning("File %s may still be locked during backup", src)
+
+        db_size, db_checksum = _atomic_copy(db_src, backup_path, _DB_FILENAME)
+        wal_size, wal_checksum = _atomic_copy(wal_src, backup_path, _DB_FILENAME + ".wal")
+        meta_size, meta_checksum = _atomic_copy(meta_src, backup_path, _META_FILENAME)
 
         backup_meta = {
             "backup_id": backup_id,
@@ -1172,6 +1192,9 @@ class TenantManager:
             "db_size_bytes": db_size,
             "wal_size_bytes": wal_size,
             "meta_size_bytes": meta_size,
+            "db_checksum": db_checksum,
+            "wal_checksum": wal_checksum,
+            "meta_checksum": meta_checksum,
         }
         meta_out = backup_meta.copy()
         if meta_src.exists():
@@ -1180,9 +1203,24 @@ class TenantManager:
                 meta_out = {**original_meta, **backup_meta}
             except Exception:
                 pass
-        (backup_path / _META_FILENAME).write_text(json.dumps(meta_out, indent=2))
+        meta_tmp = backup_path / (_META_FILENAME + ".tmp")
+        meta_tmp.write_text(json.dumps(meta_out, indent=2))
+        os.replace(str(meta_tmp), str(backup_path / _META_FILENAME))
 
         self._enforce_retention(customer_id)
+
+        with self._cache_lock:
+            from .store import OhmStore
+
+            try:
+                entry = _TenantEntry(
+                    store=OhmStore(str(tenant_dir / _DB_FILENAME)),
+                    write_lock=threading.RLock(),
+                    last_checkpoint_at=0.0,
+                )
+                self._cache[customer_id] = entry
+            except Exception:
+                pass
 
         logger.info("Backed up tenant %s → %s (reason=%s)", customer_id, backup_id, reason)
         return backup_meta
