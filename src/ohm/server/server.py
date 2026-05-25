@@ -25,6 +25,7 @@ from typing import Any, Optional
 
 from ohm.exceptions import (
     AuthenticationError,
+    ConfigurationError,
     ConflictError,
     EdgeNotFoundError,
     NodeNotFoundError,
@@ -337,6 +338,8 @@ def _map_exception_to_http(exc: Exception) -> tuple[int, str]:
         return 409, "conflict"
     if isinstance(exc, ValidationError):
         return 400, "validation_error"
+    if isinstance(exc, ConfigurationError):
+        return 501, "not_implemented"
     if isinstance(exc, OHMError):
         return 500, "internal_error"
     return 500, "internal_error"
@@ -2497,7 +2500,10 @@ class OhmHandler(BaseHTTPRequestHandler):
             raise ValidationError("?start=<node_id> is required")
         edge_types_str = qs.get("edge_types", [""])[0]
         markov_edge_types = [e.strip() for e in edge_types_str.split(",") if e.strip()] or None
-        from ohm.markov import markov_absorbing_risk
+        try:
+            from ohm.markov import markov_absorbing_risk
+        except ImportError as exc:
+            raise ConfigurationError(f"Markov analysis requires numpy: {exc}") from exc
 
         result = markov_absorbing_risk(
             self.current_store.conn,
@@ -2516,7 +2522,10 @@ class OhmHandler(BaseHTTPRequestHandler):
         target_state = qs.get("target", [None])[0]
         edge_types_str = qs.get("edge_types", [""])[0]
         markov_edge_types = [e.strip() for e in edge_types_str.split(",") if e.strip()] or None
-        from ohm.markov import markov_expected_steps
+        try:
+            from ohm.markov import markov_expected_steps
+        except ImportError as exc:
+            raise ConfigurationError(f"Markov analysis requires numpy: {exc}") from exc
 
         result = markov_expected_steps(
             self.current_store.conn,

@@ -3564,6 +3564,10 @@ class TestMultiTenantFeatureFlag:
 class TestMarkovHTTPEndpoints:
     """Tests for OHM-20bt: Markov HTTP endpoints in the daemon."""
 
+    @pytest.fixture(autouse=True)
+    def require_numpy(self):
+        pytest.importorskip("numpy")
+
     def test_markov_absorbing_risk_endpoint(self, tmp_path):
         """GET /markov/absorbing?start=<node_id> returns Markov analysis."""
         db_path = str(tmp_path / "test_markov_http.duckdb")
@@ -3571,13 +3575,13 @@ class TestMarkovHTTPEndpoints:
         port, server, thread = _start_test_server(store, no_auth=True)
         try:
             conn = HTTPConnection("127.0.0.1", port)
-            conn.request("POST", "/node", json.dumps({"id": "healthy", "label": "healthy", "type": "state"}))
+            conn.request("POST", "/node", json.dumps({"id": "healthy", "label": "healthy", "type": "concept"}))
             conn.getresponse().read()
             conn = HTTPConnection("127.0.0.1", port)
-            conn.request("POST", "/node", json.dumps({"id": "symptomatic", "label": "symptomatic", "type": "state"}))
+            conn.request("POST", "/node", json.dumps({"id": "symptomatic", "label": "symptomatic", "type": "concept"}))
             conn.getresponse().read()
             conn = HTTPConnection("127.0.0.1", port)
-            conn.request("POST", "/node", json.dumps({"id": "deceased", "label": "deceased", "type": "state"}))
+            conn.request("POST", "/node", json.dumps({"id": "deceased", "label": "deceased", "type": "concept"}))
             conn.getresponse().read()
             conn = HTTPConnection("127.0.0.1", port)
             conn.request("POST", "/edge", json.dumps({"from_node": "healthy", "to_node": "symptomatic", "edge_type": "TRANSITIONS_TO", "layer": "L1", "probability": 0.3}))
@@ -3608,13 +3612,13 @@ class TestMarkovHTTPEndpoints:
         port, server, thread = _start_test_server(store, no_auth=True)
         try:
             conn = HTTPConnection("127.0.0.1", port)
-            conn.request("POST", "/node", json.dumps({"id": "healthy", "label": "healthy", "type": "state"}))
+            conn.request("POST", "/node", json.dumps({"id": "healthy", "label": "healthy", "type": "concept"}))
             conn.getresponse().read()
             conn = HTTPConnection("127.0.0.1", port)
-            conn.request("POST", "/node", json.dumps({"id": "symptomatic", "label": "symptomatic", "type": "state"}))
+            conn.request("POST", "/node", json.dumps({"id": "symptomatic", "label": "symptomatic", "type": "concept"}))
             conn.getresponse().read()
             conn = HTTPConnection("127.0.0.1", port)
-            conn.request("POST", "/node", json.dumps({"id": "deceased", "label": "deceased", "type": "state"}))
+            conn.request("POST", "/node", json.dumps({"id": "deceased", "label": "deceased", "type": "concept"}))
             conn.getresponse().read()
             conn = HTTPConnection("127.0.0.1", port)
             conn.request("POST", "/edge", json.dumps({"from_node": "healthy", "to_node": "symptomatic", "edge_type": "TRANSITIONS_TO", "layer": "L1", "probability": 0.3}))
