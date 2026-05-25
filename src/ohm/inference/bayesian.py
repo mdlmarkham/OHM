@@ -478,6 +478,8 @@ def build_bayesian_network(
     # Root node CPTs (no parents)
     for safe_name in root_safe_names:
         prior = node_priors.get(safe_name, root_prior)
+        # Clamp prior to [0, 1] — observations could average outside range
+        prior = max(0.0, min(1.0, prior))
         cpd = TabularCPD(safe_name, 2, [[prior], [1 - prior]])
         cpds.append(cpd)
 
@@ -549,15 +551,30 @@ def build_bayesian_network(
             # Apply leak: even when all parents are good, there's a baseline risk
             p_good = (1 - leak) * survival
             p_bad = 1 - p_good
-            false_row.append(round(p_bad, 6))
-            true_row.append(round(p_good, 6))
+            # Clamp to [0, 1] — floating point accumulation can produce
+            # negative values when many parents multiply (1 - p_i) terms.
+            false_row.append(round(max(0.0, min(1.0, p_bad)), 6))
+            true_row.append(round(max(0.0, min(1.0, p_good)), 6))
 
         if n_parents == 0:
             # Leaf node with no parents — use leak as prior
-            cpd = TabularCPD(child_safe, 2, [[leak], [1 - leak]])
+            # Clamp leak to ensure valid CPT
+            cpd = TabularCPD(child_safe, 2, [[max(0.0, min(1.0, leak))], [max(0.0, min(1.0, 1 - leak))]])
         else:
             # pgmpy expects row 0 = state 0 (bad), row 1 = state 1 (good)
-            cpd = TabularCPD(child_safe, 2, [false_row, true_row], evidence=parents, evidence_card=[2] * n_parents)
+            # Ensure all CPT values are valid probabilities (floating point accumulation fix)
+            clamped_false = [max(0.0, min(1.0, v)) for v in false_row]
+            clamped_true = [max(0.0, min(1.0, v)) for v in true_row]
+            # Normalize each column to sum to 1.0
+            for i in range(len(clamped_false)):
+                col_sum = clamped_false[i] + clamped_true[i]
+                if col_sum > 0:
+                    clamped_false[i] /= col_sum
+                    clamped_true[i] /= col_sum
+                else:
+                    clamped_false[i] = 0.5
+                    clamped_true[i] = 0.5
+            cpd = TabularCPD(child_safe, 2, [clamped_false, clamped_true], evidence=parents, evidence_card=[2] * n_parents)
         cpds.append(cpd)
 
     model.add_cpds(*cpds)
