@@ -1078,18 +1078,18 @@ class TenantManager:
 
         with self._cache_lock:
             entry = self._cache.get(customer_id)
+            if entry is not None:
+                try:
+                    node_count = entry.store.conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL").fetchone()[0]
+                    edge_count = entry.store.conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE deleted_at IS NULL").fetchone()[0]
+                except Exception:
+                    node_count = 0
+                    edge_count = 0
+            else:
+                node_count = 0
+                edge_count = 0
 
-        # Current usage
-        node_count = 0
-        edge_count = 0
         db_size = 0
-        if entry is not None:
-            try:
-                node_count = entry.store.conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL").fetchone()[0]
-                edge_count = entry.store.conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE deleted_at IS NULL").fetchone()[0]
-            except Exception:
-                pass
-
         db_path = self._tenant_dir(customer_id) / _DB_FILENAME
         try:
             db_size = db_path.stat().st_size
