@@ -147,6 +147,10 @@ class TenantManager:
         self._checkpoint_thread = threading.Thread(target=self._checkpoint_loop, daemon=True, name="tenant-checkpoint")
         self._checkpoint_thread.start()
 
+        self._request_counts: dict[str, dict[str, int]] = {}
+        self._request_counts_lock = threading.Lock()
+        self._dirty_tenants: set[str] = set()
+
     # ── Public API ────────────────────────────────────────────────────────────
 
     def provision(self, customer_id: str, domain: str = "ohm", tier: str = "starter", integrations: Optional[dict] = None) -> dict:
@@ -405,6 +409,12 @@ class TenantManager:
         elif resource == "requests_per_day":
             today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             request_counts = meta.get("_request_counts", {})
+            with self._request_counts_lock:
+                in_mem = self._request_counts.get(customer_id, {})
+            for date, count in in_mem.items():
+                if date not in request_counts:
+                    request_counts[date] = 0
+                request_counts[date] += count
             current_count = request_counts.get(today, 0)
             if current_count + amount > limit:
                 raise QuotaExceededError(
@@ -413,17 +423,19 @@ class TenantManager:
                 )
 
     def record_request(self, customer_id: str) -> int:
-        """Record a request for rate limiting (OHM-982m). Returns today's count."""
+        """Record a request for rate limiting (OHM-982m). Returns today's count.
+
+        Buffered in memory — flushed to meta.json by the checkpoint loop.
+        """
         customer_id = validate_customer_id(customer_id)
-        meta = self._read_meta(customer_id)
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        request_counts = meta.get("_request_counts", {})
-        request_counts[today] = request_counts.get(today, 0) + 1
-        # Prune old days
-        request_counts = {k: v for k, v in request_counts.items() if k >= today[:7]}
-        meta["_request_counts"] = request_counts
-        self._write_meta(customer_id, meta)
-        return request_counts[today]
+        with self._request_counts_lock:
+            if customer_id not in self._request_counts:
+                self._request_counts[customer_id] = {}
+            counts = self._request_counts[customer_id]
+            counts[today] = counts.get(today, 0) + 1
+            self._dirty_tenants.add(customer_id)
+            return counts[today]
 
     def get_meta(self, customer_id: str) -> dict:
         """Return meta.json for a single tenant."""
@@ -956,6 +968,7 @@ class TenantManager:
             try:
                 time.sleep(self._checkpoint_interval)
                 self._checkpoint_active_tenants()
+                self._flush_request_counts()
                 consecutive_errors = 0
             except Exception:
                 consecutive_errors += 1
@@ -1007,6 +1020,30 @@ class TenantManager:
             except Exception:
                 return 0
         return 0
+
+    def _flush_request_counts(self) -> None:
+        """Flush buffered request counts to meta.json (OHM-8d54)."""
+        with self._request_counts_lock:
+            dirty = list(self._dirty_tenants)
+            self._dirty_tenants.clear()
+
+        for customer_id in dirty:
+            try:
+                meta = self._read_meta(customer_id)
+                today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                request_counts = meta.get("_request_counts", {})
+                with self._request_counts_lock:
+                    in_mem = self._request_counts.get(customer_id, {})
+                for date, count in in_mem.items():
+                    if date not in request_counts:
+                        request_counts[date] = 0
+                    request_counts[date] += count
+                request_counts = {k: v for k, v in request_counts.items() if k >= today[:7]}
+                meta["_request_counts"] = request_counts
+                self._write_meta(customer_id, meta)
+            except Exception:
+                with self._request_counts_lock:
+                    self._dirty_tenants.add(customer_id)
 
     def tenant_health(self, customer_id: str) -> dict:
         """Return health info for a tenant (OHM-p7fv/OHM-982m).
