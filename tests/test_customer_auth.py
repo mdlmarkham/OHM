@@ -292,3 +292,151 @@ class TestCurrentStoreRouting:
 
         tm.close()
         core_store.close()
+
+    def test_x_tenant_id_header_routes_to_tenant(self, tmp_path):
+        """Agent token + X-Tenant-ID header routes to the specified tenant (OHM-tss4.8)."""
+        from ohm.tenant import TenantManager
+
+        tenants_dir = tmp_path / "tenants"
+        tm = TenantManager(tenants_dir, max_cached=5)
+        tm.provision("acme_hvac")
+        tenant_store = tm.get_store("acme_hvac")
+
+        core_db = str(tmp_path / "core.duckdb")
+        core_store = OhmStore(db_path=core_db, agent_name="test")
+
+        handler = OhmHandler.__new__(OhmHandler)
+        handler.multi_tenant = True
+        handler.tenant_manager = tm
+        handler.store = core_store
+        handler.headers = {"X-Tenant-ID": "acme_hvac"}
+
+        routed = handler.current_store
+        assert routed is tenant_store
+        assert routed is not core_store
+        tm.close()
+        core_store.close()
+
+    def test_x_tenant_id_ignored_when_customer_token_present(self, tmp_path):
+        """Customer token resolution takes precedence over X-Tenant-ID header."""
+        from ohm.tenant import TenantManager
+
+        tenants_dir = tmp_path / "tenants"
+        tm = TenantManager(tenants_dir, max_cached=5)
+        tm.provision("acme_hvac")
+        tm.provision("wayne_mfg")
+        acme_store = tm.get_store("acme_hvac")
+
+        core_db = str(tmp_path / "core.duckdb")
+        core_store = OhmStore(db_path=core_db, agent_name="test")
+
+        handler = OhmHandler.__new__(OhmHandler)
+        handler.multi_tenant = True
+        handler.tenant_manager = tm
+        handler.store = core_store
+        handler._resolved_customer_id = "acme_hvac"
+        handler.headers = {"X-Tenant-ID": "wayne_mfg"}
+
+        routed = handler.current_store
+        assert routed is acme_store
+        tm.close()
+        core_store.close()
+
+    def test_x_tenant_id_ignored_in_single_tenant_mode(self, tmp_path):
+        """X-Tenant-ID header has no effect when multi-tenancy is disabled."""
+        core_db = str(tmp_path / "core.duckdb")
+        store = OhmStore(db_path=core_db, agent_name="test")
+        handler = OhmHandler.__new__(OhmHandler)
+        handler.multi_tenant = False
+        handler.store = store
+        handler.headers = {"X-Tenant-ID": "acme_hvac"}
+
+        assert handler.current_store is store
+        store.close()
+
+    def test_x_tenant_id_unprovisioned_raises(self, tmp_path):
+        """X-Tenant-ID for an unprovisioned tenant raises NodeNotFoundError."""
+        from ohm.exceptions import NodeNotFoundError
+        from ohm.tenant import TenantManager
+
+        tenants_dir = tmp_path / "tenants"
+        tm = TenantManager(tenants_dir, max_cached=5)
+
+        core_db = str(tmp_path / "core.duckdb")
+        core_store = OhmStore(db_path=core_db, agent_name="test")
+
+        handler = OhmHandler.__new__(OhmHandler)
+        handler.multi_tenant = True
+        handler.tenant_manager = tm
+        handler.store = core_store
+        handler.headers = {"X-Tenant-ID": "ghost_tenant"}
+
+        with pytest.raises(NodeNotFoundError):
+            _ = handler.current_store
+
+        tm.close()
+        core_store.close()
+
+
+class TestSDKConnectHttpTenantId:
+    """Tests for connect_http(tenant_id=...) SDK parameter (OHM-tss4.8)."""
+
+    def test_connect_http_accepts_tenant_id(self):
+        from ohm.sdk import connect_http
+
+        g = connect_http("http://127.0.0.1:8710", actor="test", tenant_id="acme_hvac")
+        assert g.tenant_id == "acme_hvac"
+        assert g._tenant_id == "acme_hvac"
+
+    def test_connect_http_tenant_id_none_by_default(self):
+        from ohm.sdk import connect_http
+
+        g = connect_http("http://127.0.0.1:8710", actor="test")
+        assert g.tenant_id is None
+        assert g._tenant_id is None
+
+    def test_http_request_includes_x_tenant_id_header(self):
+        from ohm.sdk import connect_http
+
+        g = connect_http("http://127.0.0.1:8710", actor="test", tenant_id="acme_hvac")
+        import json
+        import unittest.mock
+
+        mock_response = unittest.mock.MagicMock()
+        mock_response.read.return_value = json.dumps({"status": "ok"}).encode()
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = lambda s, *a: None
+
+        with unittest.mock.patch("urllib.request.urlopen", return_value=mock_response):
+            with unittest.mock.patch("urllib.request.Request") as mock_req:
+                try:
+                    g.stats()
+                except Exception:
+                    pass
+                if mock_req.called:
+                    _, kwargs = mock_req.call_args
+                    headers = kwargs.get("headers", {})
+                    assert headers.get("X-Tenant-ID") == "acme_hvac"
+
+    def test_http_request_no_x_tenant_id_when_none(self):
+        from ohm.sdk import connect_http
+
+        g = connect_http("http://127.0.0.1:8710", actor="test")
+        import json
+        import unittest.mock
+
+        mock_response = unittest.mock.MagicMock()
+        mock_response.read.return_value = json.dumps({"status": "ok"}).encode()
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = lambda s, *a: None
+
+        with unittest.mock.patch("urllib.request.urlopen", return_value=mock_response):
+            with unittest.mock.patch("urllib.request.Request") as mock_req:
+                try:
+                    g.stats()
+                except Exception:
+                    pass
+                if mock_req.called:
+                    _, kwargs = mock_req.call_args
+                    headers = kwargs.get("headers", {})
+                    assert "X-Tenant-ID" not in headers

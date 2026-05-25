@@ -563,10 +563,20 @@ class OhmHandler(BaseHTTPRequestHandler):
         When multi-tenancy is disabled (OHM-l31g), always returns None —
         zero overhead, no TenantManager lookup, no route ambiguity.
         When enabled, set by _authenticate() as self._resolved_customer_id.
+        Alternatively, an agent token can specify X-Tenant-ID header to act
+        on behalf of a tenant (OHM-tss4.8).
         """
         if not self.multi_tenant:
             return None
-        return getattr(self, "_resolved_customer_id", None)
+        resolved = getattr(self, "_resolved_customer_id", None)
+        if resolved is not None:
+            return resolved
+        x_tenant = getattr(self, "headers", None)
+        if x_tenant is not None:
+            x_tenant = x_tenant.get("X-Tenant-ID")
+        if x_tenant:
+            return x_tenant
+        return None
 
     @property
     def current_store(self) -> OhmStore:

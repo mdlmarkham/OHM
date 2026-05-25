@@ -2810,6 +2810,7 @@ def connect_http(
     *,
     actor: str = "unknown",
     token: str | None = None,
+    tenant_id: str | None = None,
 ) -> Graph:
     """Connect to an OHM daemon via HTTP REST API.
 
@@ -2825,10 +2826,17 @@ def connect_http(
     Field names are mapped: SDK uses from_node/to_node/edge_type,
     HTTP API uses from/to/type.
 
+    Multi-tenant usage:
+        - Customer API key (token='ohm-cust-...') auto-routes to the tenant
+          via server-side token resolution. No tenant_id needed.
+        - Agent token on behalf of a tenant: pass tenant_id to send
+          X-Tenant-ID header. The server routes to that tenant's store.
+
     Args:
         base_url: URL of the ohmd daemon (default: http://127.0.0.1:8710).
         actor: Agent name for attribution.
         token: Bearer token for authentication. Reads from OHM_TOKEN env if not provided.
+        tenant_id: Optional tenant ID. Sends X-Tenant-ID header for agent-acting-on-tenant.
 
     Returns:
         A Graph instance connected via HTTP.
@@ -2846,10 +2854,11 @@ def connect_http(
     class HttpGraph(Graph):
         """Graph subclass that routes all requests through HTTP API."""
 
-        def __init__(self, conn, actor, base_url, token):
+        def __init__(self, conn, actor, base_url, token, tenant_id=None):
             super().__init__(conn, actor=actor)
             self._base_url = base_url.rstrip("/")
             self._token = token
+            self._tenant_id = tenant_id
 
         def _http_request(self, method: str, path: str, body: dict | None = None) -> dict:
             """Make an HTTP request to the ohmd daemon with timeout."""
@@ -2865,6 +2874,8 @@ def connect_http(
 
                     token_header = f"Bearer {quote(self._token, safe='-._~')}"
                 headers["Authorization"] = token_header
+            if self._tenant_id:
+                headers["X-Tenant-ID"] = self._tenant_id
 
             req = urllib.request.Request(url, data=data, headers=headers, method=method)
             try:
@@ -3537,6 +3548,7 @@ def connect_http(
             """Return the current contract configuration."""
             return self._http_request("GET", "/contract")
 
-    graph = HttpGraph(conn, actor, base_url, resolved_token)
+    graph = HttpGraph(conn, actor, base_url, resolved_token, tenant_id=tenant_id)
+    graph.tenant_id = tenant_id
     graph.token = resolved_token
     return graph
