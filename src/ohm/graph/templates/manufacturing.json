@@ -1,31 +1,50 @@
 {
   "name": "manufacturing",
-  "template_version": 1,
+  "template_version": 2,
   "node_types": [
     "agent",
     "area",
     "bill_of_materials",
+    "bus",
+    "circuit",
+    "compressor",
     "concept",
+    "controller",
     "decision",
     "equipment",
     "event",
     "fixture",
+    "generator",
     "goal",
+    "heat_exchanger",
     "idea",
+    "instrument",
+    "line",
     "machine",
     "material",
+    "motor",
     "pattern",
     "person",
+    "pipeline",
     "process",
     "product",
+    "pump",
     "quality_check",
+    "reactor",
     "sensor",
     "shift",
+    "site",
     "skill",
     "source",
+    "system",
+    "tank",
     "task",
+    "technology",
     "tool",
     "topic",
+    "transformer",
+    "valve",
+    "vessel",
     "work_order",
     "workstation"
   ],
@@ -89,10 +108,10 @@
     ]
   },
   "layer_descriptions": {
-    "L1": "Structure — Plant, lines, machines, workstations, BOMs, tools",
-    "L2": "Flow — Work order lifecycle, quality checks, shift handoffs, material flow",
-    "L3": "Knowledge — Process optimization, defect patterns, OEE drivers, setup reduction",
-    "L4": "Prospect — Capacity planning, demand forecasting, supply risk, quality prediction"
+    "L1": "Structure \u2014 Plant, lines, machines, workstations, BOMs, tools",
+    "L2": "Flow \u2014 Work order lifecycle, quality checks, shift handoffs, material flow",
+    "L3": "Knowledge \u2014 Process optimization, defect patterns, OEE drivers, setup reduction",
+    "L4": "Prospect \u2014 Capacity planning, demand forecasting, supply risk, quality prediction"
   },
   "observation_types": [
     "anomaly",
@@ -144,11 +163,19 @@
   "required_integrations": {},
   "optional_integrations": {
     "erp": {
-      "fields": ["api_key_ref", "base_url", "plant_id"],
+      "fields": [
+        "api_key_ref",
+        "base_url",
+        "plant_id"
+      ],
       "env_prefix": "ERP"
     },
     "scada": {
-      "fields": ["host", "port", "poll_interval_seconds"],
+      "fields": [
+        "host",
+        "port",
+        "poll_interval_seconds"
+      ],
       "env_prefix": "SCADA"
     }
   }
