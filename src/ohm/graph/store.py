@@ -1615,6 +1615,18 @@ class OhmStore:
             # Pull remote changes from DuckLake
             pulled = self.pull_from_ducklake(ducklake_path or "", alias=alias)
 
+        # Check DuckLake health after sync (OHM-qiio)
+        if ducklake_path or ducklake_attached:
+            try:
+                dlh = self.check_ducklake_health(alias=alias)
+                self.sync_degraded = dlh.get("sync_degraded", False)
+                if self.sync_degraded:
+                    import logging
+                    logger = logging.getLogger("ohm.store")
+                    logger.warning("DuckLake sync degraded: %s", dlh.get("errors", []))
+            except Exception:
+                self.sync_degraded = True
+
         # Update last_sync timestamp — ensure agent row exists
         existing = self.conn.execute(
             "SELECT 1 FROM ohm_agent_state WHERE agent_name = ?",
@@ -1637,12 +1649,268 @@ class OhmStore:
         if row:
             last_sync = row[0]
 
-        return {
-            "pushed": pushed,
-            "pulled": pulled,
-            "last_sync": last_sync,
-            "agent": self.agent_name,
+    def check_ducklake_health(self, alias: str = "ohm_lake") -> dict[str, Any]:
+        """Check DuckLake sync health and detect corruption (OHM-qiio).
+
+        Compares local and DuckLake row counts, checks for orphaned records,
+        and verifies sync freshness. Returns a health dict with sync_degraded flag.
+
+        Returns:
+            Dict with: healthy, sync_degraded, local_counts, ducklake_counts,
+            orphan_counts, last_push, last_pull, staleness_seconds, errors.
+        """
+        import time as _time
+
+        health = {
+            "healthy": True,
+            "sync_degraded": False,
+            "local_counts": {},
+            "ducklake_counts": {},
+            "orphan_counts": {},
+            "last_push": None,
+            "last_pull": None,
+            "staleness_seconds": None,
+            "errors": [],
         }
+
+        # Check if DuckLake is attached
+        try:
+            attached = self.conn.execute(
+                "SELECT database_name FROM duckdb_databases() WHERE database_name = ?",
+                [alias],
+            ).fetchone()
+        except Exception as e:
+            health["healthy"] = False
+            health["sync_degraded"] = True
+            health["errors"].append(f"Cannot check DuckLake attachment: {e}")
+            return health
+
+        if not attached:
+            # No DuckLake configured — not degraded, just local-only
+            health["local_counts"] = self._table_counts()
+            return health
+
+        # Compare row counts
+        tables = ["ohm_nodes", "ohm_edges", "ohm_observations"]
+        for table in tables:
+            try:
+                local_count = self.conn.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL"
+                ).fetchone()[0]
+                ducklake_count = self.conn.execute(
+                    f"SELECT COUNT(*) FROM {alias}.{table} WHERE deleted_at IS NULL"
+                ).fetchone()[0]
+                health["local_counts"][table] = local_count
+                health["ducklake_counts"][table] = ducklake_count
+
+                # Detect orphans: rows in DuckLake not in local
+                orphan_count = self.conn.execute(f"""
+                    SELECT COUNT(*) FROM {alias}.{table} dl
+                    WHERE dl.deleted_at IS NULL
+                    AND NOT EXISTS (
+                        SELECT 1 FROM {table} l
+                        WHERE l.id = dl.id AND l.deleted_at IS NULL
+                    )
+                """).fetchone()[0]
+                health["orphan_counts"][table] = orphan_count
+
+            except Exception as e:
+                health["errors"].append(f"{table} count error: {e}")
+
+        # Check sync timestamps
+        try:
+            row = self.conn.execute(
+                "SELECT last_sync FROM ohm_agent_state WHERE agent_name = ?",
+                [self.agent_name],
+            ).fetchone()
+            if row and row[0]:
+                from datetime import datetime, timezone
+                last_sync = row[0]
+                if isinstance(last_sync, str):
+                    last_sync = datetime.fromisoformat(last_sync)
+                health["last_push"] = str(last_sync)
+                health["last_pull"] = str(last_sync)
+                # Normalize timezone for staleness calculation
+                now_utc = datetime.now(timezone.utc)
+                if last_sync.tzinfo is None:
+                    last_sync = last_sync.replace(tzinfo=timezone.utc)
+                staleness = (now_utc - last_sync).total_seconds()
+                health["staleness_seconds"] = staleness
+
+                # Stale if last sync > 5 minutes (configurable)
+                if staleness > 300:
+                    health["sync_degraded"] = True
+                    health["errors"].append(f"Last sync {staleness:.0f}s ago (>300s threshold)")
+
+        except Exception as e:
+            health["errors"].append(f"Timestamp check error: {e}")
+
+        # Determine overall health
+        total_orphans = sum(health["orphan_counts"].values())
+        if total_orphans > 0:
+            health["sync_degraded"] = True
+            health["errors"].append(f"{total_orphans} orphaned rows in DuckLake")
+
+        if health["errors"]:
+            health["healthy"] = not health["sync_degraded"]
+
+        return health
+
+    def _table_counts(self) -> dict[str, int]:
+        """Get row counts for all OHM tables (excluding soft-deleted)."""
+        counts = {}
+        for table in ["ohm_nodes", "ohm_edges", "ohm_observations"]:
+            try:
+                counts[table] = self.conn.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL"
+                ).fetchone()[0]
+            except Exception:
+                counts[table] = -1
+        return counts
+
+    def repair_from_ducklake(self, alias: str = "ohm_lake") -> dict[str, Any]:
+        """Repair local DuckDB from DuckLake mirror (OHM-qiio).
+
+        Rebuilds local tables from the DuckLake shared backend. Used when
+        local data is corrupted or missing. The DuckLake mirror is the
+        source of truth.
+
+        Strategy:
+        1. Detect which rows are missing locally but exist in DuckLake
+        2. INSERT missing rows from DuckLake mirror
+        3. UPDATE rows where DuckLake has newer timestamps
+        4. SOFT-DELETE rows that are deleted in DuckLake but not locally
+        5. Verify row counts match after repair
+
+        Args:
+            alias: Database alias for the attached DuckLake catalog.
+
+        Returns:
+            Dict with: inserted, updated, soft_deleted, verified, errors.
+        """
+        result = {"inserted": 0, "updated": 0, "soft_deleted": 0, "verified": True, "errors": []}
+
+        # Check if DuckLake is attached
+        try:
+            attached = self.conn.execute(
+                "SELECT database_name FROM duckdb_databases() WHERE database_name = ?",
+                [alias],
+            ).fetchone()
+        except Exception as e:
+            result["errors"].append(f"Cannot check DuckLake attachment: {e}")
+            result["verified"] = False
+            return result
+
+        if not attached:
+            result["errors"].append("DuckLake not attached — cannot repair")
+            result["verified"] = False
+            return result
+
+        # Per-table configuration: which timestamp column to use for update detection
+        table_config = {
+            "ohm_nodes": {"pk": "id", "timestamp_col": "updated_at"},
+            "ohm_edges": {"pk": "id", "timestamp_col": "updated_at"},
+            "ohm_observations": {"pk": "id", "timestamp_col": "created_at"},  # No updated_at
+        }
+
+        for table, cfg in table_config.items():
+            pk = cfg["pk"]
+            ts_col = cfg["timestamp_col"]
+            try:
+                # Get column list for explicit INSERT
+                cols = self.conn.execute(f"DESCRIBE {table}").fetchall()
+                col_names = [c[0] for c in cols]
+                col_list = ", ".join(col_names)
+
+                # 1. Insert rows in DuckLake but not local
+                missing_count = self.conn.execute(f"""
+                    SELECT COUNT(*) FROM {alias}.{table} dl
+                    WHERE dl.deleted_at IS NULL
+                    AND NOT EXISTS (SELECT 1 FROM {table} l WHERE l.id = dl.id)
+                """).fetchone()[0]
+
+                if missing_count > 0:
+                    self.conn.execute(f"""
+                        INSERT INTO {table} ({col_list})
+                        SELECT {col_list} FROM {alias}.{table} dl
+                        WHERE dl.deleted_at IS NULL
+                        AND NOT EXISTS (SELECT 1 FROM {table} l WHERE l.id = dl.id)
+                    """)
+                result["inserted"] += missing_count
+
+                # 2. Update rows where DuckLake has newer timestamps
+                set_clause = ", ".join(f"{c} = dl.{c}" for c in col_names if c != pk)
+                updated_count = self.conn.execute(f"""
+                    SELECT COUNT(*) FROM {alias}.{table} dl
+                    JOIN {table} l ON l.{pk} = dl.{pk}
+                    WHERE dl.deleted_at IS NULL
+                    AND l.deleted_at IS NULL
+                    AND dl.{ts_col} > l.{ts_col}
+                """).fetchone()[0]
+
+                if updated_count > 0:
+                    self.conn.execute(f"""
+                        UPDATE {table} l SET {set_clause}
+                        FROM {alias}.{table} dl
+                        WHERE l.{pk} = dl.{pk}
+                        AND dl.deleted_at IS NULL
+                        AND l.deleted_at IS NULL
+                        AND dl.{ts_col} > l.{ts_col}
+                    """)
+                result["updated"] += updated_count
+
+                # 3. Soft-delete rows deleted in DuckLake but still active locally
+                soft_deleted_count = self.conn.execute(f"""
+                    SELECT COUNT(*) FROM {table} l
+                    WHERE l.deleted_at IS NULL
+                    AND NOT EXISTS (
+                        SELECT 1 FROM {alias}.{table} dl
+                        WHERE dl.id = l.id AND dl.deleted_at IS NULL
+                    )
+                """).fetchone()[0]
+
+                if soft_deleted_count > 0:
+                    from datetime import datetime, timezone
+                    now = datetime.now(timezone.utc).isoformat()
+                    self.conn.execute(f"""
+                        UPDATE {table} SET deleted_at = '{now}'
+                        WHERE deleted_at IS NULL
+                        AND NOT EXISTS (
+                            SELECT 1 FROM {alias}.{table} dl
+                            WHERE dl.id = {table}.id AND dl.deleted_at IS NULL
+                        )
+                    """)
+                result["soft_deleted"] += soft_deleted_count
+
+            except Exception as e:
+                result["errors"].append(f"{table} repair error: {e}")
+                result["verified"] = False
+
+        # 4. Verify — check that counts match after repair
+        for table in table_config:
+            try:
+                local_count = self.conn.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL"
+                ).fetchone()[0]
+                dl_count = self.conn.execute(
+                    f"SELECT COUNT(*) FROM {alias}.{table} WHERE deleted_at IS NULL"
+                ).fetchone()[0]
+                if local_count != dl_count:
+                    result["verified"] = False
+                    result["errors"].append(
+                        f"{table} count mismatch after repair: local={local_count}, ducklake={dl_count}"
+                    )
+            except Exception as e:
+                result["errors"].append(f"{table} verification error: {e}")
+                result["verified"] = False
+
+        # Checkpoint after repair
+        try:
+            self.conn.execute("CHECKPOINT")
+        except Exception:
+            pass
+
+        return result
 
     def push_to_ducklake(self, ducklake_path: str, alias: str = "ohm_lake") -> int:
         """Push local data to DuckLake shared backend via mirror tables.

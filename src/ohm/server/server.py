@@ -2160,6 +2160,16 @@ class OhmHandler(GraphHandlerMixin, MarkovHandlerMixin, BaseHTTPRequestHandler):
         result = query_agent_health(self.current_store.conn)
         self._json_response(200, result)
 
+    def _get_health_sync(self, path: str, qs: dict) -> None:
+        """GET /health/sync — DuckLake sync health check (OHM-qiio)."""
+        store = self.current_store
+        if not hasattr(store, "check_ducklake_health"):
+            self._json_response(503, {"healthy": False, "errors": ["DuckLake health check not available"]})
+            return
+        result = store.check_ducklake_health()
+        status = 200 if result.get("healthy") else 503
+        self._json_response(status, result)
+
     def _get_contradictions(self, path: str, qs: dict) -> None:
         """GET /contradictions — detect contradictions."""
         from ohm.methods import detect_contradictions
@@ -3910,6 +3920,7 @@ OhmHandler._GET_EXACT = {
     "/semantic_search": "_get_semantic_search",
     "/health/graph": "_get_health_graph",
     "/health/agents": "_get_health_agents",
+    "/health/sync": "_get_health_sync",
     "/contradictions": "_get_contradictions",
     "/anomalies": "_get_anomalies",
     "/stale": "_get_stale",

@@ -529,6 +529,11 @@ def build_parser() -> argparse.ArgumentParser:
     diff_parser.add_argument("--agent", help="Filter by agent")
 
     # ── topo ─────────────────────────────────────────────────────────────
+    sync_parser = subparsers.add_parser("sync", help="DuckLake sync operations (OHM-qiio)")
+    sync_parser.add_argument("--health", action="store_true", help="Check DuckLake sync health")
+    sync_parser.add_argument("--repair", action="store_true", help="Repair local DB from DuckLake mirror")
+    sync_parser.add_argument("--alias", default="ohm_lake", help="DuckLake alias (default: ohm_lake)")
+
     topo_parser = subparsers.add_parser(
         "topo",
         help="Industrial knowledge graph commands (TOPO schema)",
@@ -640,8 +645,63 @@ def _dispatch(args: argparse.Namespace) -> None:
         _handle_snapshot(args)
     elif args.command == "diff":
         _handle_diff(args)
+    elif args.command == "sync":
+        _handle_sync(args)
     elif args.command == "topo":
         _handle_topo(args)
+
+
+def _handle_sync(args: argparse.Namespace) -> None:
+    """Handle 'ohm sync' subcommands (OHM-qiio)."""
+    from ohm.store import OhmStore
+
+    db_path = args.db or os.environ.get("OHM_DB_PATH", "ohm.duckdb")
+    store = OhmStore(db_path=db_path, agent_name=args.actor or "cli")
+
+    try:
+        if args.health:
+            result = store.check_ducklake_health(alias=args.alias)
+            if args.format == "json":
+                import json
+                print(json.dumps(result, indent=2, default=str))
+            else:
+                status = "✓ HEALTHY" if result.get("healthy") else "✗ DEGRADED"
+                print(f"DuckLake Sync Health: {status}")
+                if result.get("sync_degraded"):
+                    print(f"  ⚠ Sync degraded: {result.get('errors', [])}")
+                for table in ["ohm_nodes", "ohm_edges", "ohm_observations"]:
+                    lc = result.get("local_counts", {}).get(table, "?")
+                    dc = result.get("ducklake_counts", {}).get(table, "?")
+                    oc = result.get("orphan_counts", {}).get(table, "?")
+                    print(f"  {table}: local={lc} ducklake={dc} orphans={oc}")
+                if result.get("staleness_seconds") is not None:
+                    print(f"  Staleness: {result['staleness_seconds']:.0f}s")
+        elif args.repair:
+            result = store.repair_from_ducklake(alias=args.alias)
+            if args.format == "json":
+                import json
+                print(json.dumps(result, indent=2, default=str))
+            else:
+                print("DuckLake Repair Results:")
+                print(f"  Inserted:     {result.get('inserted', 0)}")
+                print(f"  Updated:      {result.get('updated', 0)}")
+                print(f"  Soft-deleted: {result.get('soft_deleted', 0)}")
+                print(f"  Verified:     {'✓' if result.get('verified') else '✗'}")
+                if result.get("errors"):
+                    for e in result["errors"]:
+                        print(f"  ⚠ {e}")
+        else:
+            # Default: run sync_heartbeat
+            result = store.sync_heartbeat()
+            if args.format == "json":
+                import json
+                print(json.dumps(result, indent=2, default=str))
+            else:
+                print(f"Synced: pushed={result.get('pushed', 0)} pulled={result.get('pulled', 0)}")
+                if result.get("last_sync"):
+                    print(f"Last sync: {result['last_sync']}")
+    finally:
+        store.close()
 
 
 def _handle_serve(args: argparse.Namespace) -> None:
