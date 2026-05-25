@@ -1564,6 +1564,10 @@ class OhmStore:
 
     # ── DuckLake Sync ────────────────────────────────────────────────
 
+    def _ducklake_table(self, table: str, alias: str) -> str:
+        """Return a safely quoted table reference for DuckLake sync."""
+        return f'"{alias}"."{table}"'
+
     def sync_heartbeat(
         self,
         ducklake_path: Optional[str] = None,
@@ -1698,14 +1702,14 @@ class OhmStore:
                     f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL"
                 ).fetchone()[0]
                 ducklake_count = self.conn.execute(
-                    f"SELECT COUNT(*) FROM {alias}.{table} WHERE deleted_at IS NULL"
+                    f"SELECT COUNT(*) FROM {self._ducklake_table(table, alias)} WHERE deleted_at IS NULL"
                 ).fetchone()[0]
                 health["local_counts"][table] = local_count
                 health["ducklake_counts"][table] = ducklake_count
 
                 # Detect orphans: rows in DuckLake not in local
                 orphan_count = self.conn.execute(f"""
-                    SELECT COUNT(*) FROM {alias}.{table} dl
+                    SELECT COUNT(*) FROM {self._ducklake_table(table, alias)} dl
                     WHERE dl.deleted_at IS NULL
                     AND NOT EXISTS (
                         SELECT 1 FROM {table} l
@@ -1816,6 +1820,7 @@ class OhmStore:
         for table, cfg in table_config.items():
             pk = cfg["pk"]
             ts_col = cfg["timestamp_col"]
+            mirror = self._ducklake_table(table, alias)
             try:
                 # Get column list for explicit INSERT
                 cols = self.conn.execute(f"DESCRIBE {table}").fetchall()
@@ -1824,7 +1829,7 @@ class OhmStore:
 
                 # 1. Insert rows in DuckLake but not local
                 missing_count = self.conn.execute(f"""
-                    SELECT COUNT(*) FROM {alias}.{table} dl
+                    SELECT COUNT(*) FROM {mirror} dl
                     WHERE dl.deleted_at IS NULL
                     AND NOT EXISTS (SELECT 1 FROM {table} l WHERE l.id = dl.id)
                 """).fetchone()[0]
@@ -1832,7 +1837,7 @@ class OhmStore:
                 if missing_count > 0:
                     self.conn.execute(f"""
                         INSERT INTO {table} ({col_list})
-                        SELECT {col_list} FROM {alias}.{table} dl
+                        SELECT {col_list} FROM {mirror} dl
                         WHERE dl.deleted_at IS NULL
                         AND NOT EXISTS (SELECT 1 FROM {table} l WHERE l.id = dl.id)
                     """)
@@ -1841,7 +1846,7 @@ class OhmStore:
                 # 2. Update rows where DuckLake has newer timestamps
                 set_clause = ", ".join(f"{c} = dl.{c}" for c in col_names if c != pk)
                 updated_count = self.conn.execute(f"""
-                    SELECT COUNT(*) FROM {alias}.{table} dl
+                    SELECT COUNT(*) FROM {mirror} dl
                     JOIN {table} l ON l.{pk} = dl.{pk}
                     WHERE dl.deleted_at IS NULL
                     AND l.deleted_at IS NULL
@@ -1851,7 +1856,7 @@ class OhmStore:
                 if updated_count > 0:
                     self.conn.execute(f"""
                         UPDATE {table} l SET {set_clause}
-                        FROM {alias}.{table} dl
+                        FROM {mirror} dl
                         WHERE l.{pk} = dl.{pk}
                         AND dl.deleted_at IS NULL
                         AND l.deleted_at IS NULL
@@ -1864,7 +1869,7 @@ class OhmStore:
                     SELECT COUNT(*) FROM {table} l
                     WHERE l.deleted_at IS NULL
                     AND NOT EXISTS (
-                        SELECT 1 FROM {alias}.{table} dl
+                        SELECT 1 FROM {mirror} dl
                         WHERE dl.id = l.id AND dl.deleted_at IS NULL
                     )
                 """).fetchone()[0]
@@ -1876,7 +1881,7 @@ class OhmStore:
                         UPDATE {table} SET deleted_at = '{now}'
                         WHERE deleted_at IS NULL
                         AND NOT EXISTS (
-                            SELECT 1 FROM {alias}.{table} dl
+                            SELECT 1 FROM {mirror} dl
                             WHERE dl.id = {table}.id AND dl.deleted_at IS NULL
                         )
                     """)
@@ -1893,7 +1898,7 @@ class OhmStore:
                     f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL"
                 ).fetchone()[0]
                 dl_count = self.conn.execute(
-                    f"SELECT COUNT(*) FROM {alias}.{table} WHERE deleted_at IS NULL"
+                    f"SELECT COUNT(*) FROM {self._ducklake_table(table, alias)} WHERE deleted_at IS NULL"
                 ).fetchone()[0]
                 if local_count != dl_count:
                     result["verified"] = False
@@ -1977,7 +1982,7 @@ class OhmStore:
         for table in ["ohm_nodes", "ohm_edges", "ohm_observations"]:
             try:
                 # Check if mirror table has any data (for initial sync)
-                mirror_count = self.conn.execute(f"SELECT COUNT(*) FROM {alias}.{table}").fetchone()[0]  # type: ignore[index]
+                mirror_count = self.conn.execute(f"SELECT COUNT(*) FROM {self._ducklake_table(table, alias)}").fetchone()[0]
 
                 if mirror_count == 0:
                     # Initial sync: copy all rows
@@ -2025,15 +2030,16 @@ class OhmStore:
 
         # Delete any existing rows from mirror (handles re-sync after crash/restart)
         # then INSERT all active (non-soft-deleted) local rows
-        self.conn.execute(f"DELETE FROM {alias}.{table}")
+        mirror = self._ducklake_table(table, alias)
+        self.conn.execute(f"DELETE FROM {mirror}")
 
         # Filter out soft-deleted rows from sync
         if "deleted_at" in local_col_names:
-            self.conn.execute(f"INSERT INTO {alias}.{table} ({common_str}) SELECT {common_str} FROM {table} WHERE deleted_at IS NULL")
+            self.conn.execute(f"INSERT INTO {mirror} ({common_str}) SELECT {common_str} FROM {table} WHERE deleted_at IS NULL")
         else:
-            self.conn.execute(f"INSERT INTO {alias}.{table} ({common_str}) SELECT {common_str} FROM {table}")
+            self.conn.execute(f"INSERT INTO {mirror} ({common_str}) SELECT {common_str} FROM {table}")
 
-        count = self.conn.execute(f"SELECT COUNT(*) FROM {alias}.{table}").fetchone()[0]  # type: ignore[index]
+        count = self.conn.execute(f"SELECT COUNT(*) FROM {mirror}").fetchone()[0]
         return count
 
     def _incremental_sync_table(self, table: str, alias: str, last_push: str | None) -> int:
@@ -2087,13 +2093,14 @@ class OhmStore:
         # Delete stale rows from mirror and re-insert
         # (upsert via delete + insert is simpler than MERGE for DuckLake)
         placeholders = ", ".join(["?"] * len(changed_ids))
+        mirror = self._ducklake_table(table, alias)
         self.conn.execute(
-            f"DELETE FROM {alias}.{table} WHERE id IN ({placeholders})",
+            f"DELETE FROM {mirror} WHERE id IN ({placeholders})",
             changed_ids,
         )
 
         id_placeholders = ", ".join([f"'{cid}'" for cid in changed_ids])
-        self.conn.execute(f"INSERT INTO {alias}.{table} ({common_str}) SELECT {common_str} FROM {table} WHERE id IN ({id_placeholders})")
+        self.conn.execute(f"INSERT INTO {mirror} ({common_str}) SELECT {common_str} FROM {table} WHERE id IN ({id_placeholders})")
 
         return len(changed_ids)
 
@@ -2126,7 +2133,7 @@ class OhmStore:
         for change in changes:
             try:
                 self.conn.execute(
-                    f"INSERT INTO {alias}.ohm_change_feed (table_name, change_row_id, operation, agent_name, old_data, new_data, occurred_at) VALUES (?, ?, ?, ?, NULL, ?, ?)",
+                    f"INSERT INTO {self._ducklake_table('ohm_change_feed', alias)} (table_name, change_row_id, operation, agent_name, old_data, new_data, occurred_at) VALUES (?, ?, ?, ?, NULL, ?, ?)",
                     [change[0], change[1], change[2], change[3], change[4], change[5]],
                 )
             except Exception:
@@ -2254,9 +2261,10 @@ class OhmStore:
 
         for table in ["ohm_nodes", "ohm_edges", "ohm_observations"]:
             try:
+                mirror = self._ducklake_table(table, alias)
                 # Find rows in DuckLake that are not in local table
                 # (new rows from other agents)
-                new_rows = self.conn.execute(f"SELECT dl.id FROM {alias}.{table} dl LEFT JOIN {table} l ON dl.id = l.id WHERE l.id IS NULL").fetchall()
+                new_rows = self.conn.execute(f"SELECT dl.id FROM {mirror} dl LEFT JOIN {table} l ON dl.id = l.id WHERE l.id IS NULL").fetchall()
 
                 logger.info("DuckLake pull: %s has %d new rows in mirror", table, len(new_rows))
 
@@ -2298,7 +2306,7 @@ class OhmStore:
                     select_str = ", ".join(select_cols)
 
                     # Insert new rows from DuckLake into local table with type casting
-                    self.conn.execute(f"INSERT INTO {table} ({common_str}) SELECT {select_str} FROM {alias}.{table} dl WHERE dl.id IN ({id_list})")
+                    self.conn.execute(f"INSERT INTO {table} ({common_str}) SELECT {select_str} FROM {mirror} dl WHERE dl.id IN ({id_list})")
                     pulled += len(new_ids)
 
             except Exception as exc:
