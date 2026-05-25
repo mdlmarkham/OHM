@@ -611,9 +611,10 @@ class OhmHandler(BaseHTTPRequestHandler):
         Checks agent tokens first (existing behaviour), then customer API keys.
         When a customer token matches, sets self._resolved_customer_id as a side
         effect so that _customer_id property can route to the correct tenant.
-        Returns the customer_id string as the caller-visible "agent name" so that
-        all existing call sites (which do ``agent = self._authenticate()``) keep
-        working without modification.
+        Returns ``customer:{customer_id}`` for customer tokens (OHM-l1vs) so that
+        boundary enforcement can distinguish customer writes from agent writes.
+        All existing call sites (which do ``agent = self._authenticate()``) keep
+        working without modification — the agent name is just a string.
         """
         from urllib.parse import unquote
 
@@ -626,7 +627,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             for token_hash, customer_id in self.customer_tokens.items():
                 if _verify_token(token, token_hash):
                     self._resolved_customer_id = customer_id
-                    return customer_id
+                    return f"customer:{customer_id}"
 
         from urllib.parse import parse_qs, urlparse
 
@@ -639,7 +640,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             for token_hash, customer_id in self.customer_tokens.items():
                 if _verify_token(token, token_hash):
                     self._resolved_customer_id = customer_id
-                    return customer_id
+                    return f"customer:{customer_id}"
         return None
 
     def _require_auth(self) -> str:

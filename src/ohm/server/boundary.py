@@ -10,9 +10,27 @@ Rules:
 6. L2 nodes are immutable after creation (no updates, only new edges)
 7. L1 identity edges (VALUES, GOALS, CAPABLE_OF, INTERESTED_IN) can be
    updated by the owning agent with evolution tracking
+
+Multi-tenancy (OHM-l1vs):
+8. Customer API writes use created_by='customer:{customer_id}' format
+9. Customer identities follow the same L3/L4 ownership rules as agents
+10. Tenant isolation (current_store routing) prevents cross-tenant violations
+    — boundary.py does not need a tenant_id parameter
 """
 
 from ohm.exceptions import EdgeNotFoundError, PermissionDeniedError
+
+
+def is_customer_identity(agent_name: str) -> bool:
+    """Check if agent_name is a customer API identity (OHM-l1vs)."""
+    return agent_name.startswith("customer:")
+
+
+def customer_id_from_identity(agent_name: str) -> str | None:
+    """Extract customer_id from a 'customer:{id}' identity string."""
+    if agent_name.startswith("customer:"):
+        return agent_name[len("customer:"):]
+    return None
 
 
 def check_can_write_layer(agent_name: str, layer: str) -> None:
@@ -33,13 +51,13 @@ def check_can_delete_edge(agent_name: str, edge_owner: str, edge_id: str) -> Non
 
 
 def check_can_challenge(agent_name: str, layer: str) -> None:
-    """Any agent can challenge L3/L4 edges. L1/L2 cannot be challenged."""
+    """Any agent or customer identity can challenge L3/L4 edges. L1/L2 cannot be challenged (OHM-l1vs)."""
     if layer in ("L1", "L2"):
         raise PermissionDeniedError(f"Cannot challenge {layer} edges. {layer} edges are shared and authoritative.")
 
 
 def check_can_support(agent_name: str, layer: str) -> None:
-    """Any agent can support L3/L4 edges. L1/L2 cannot be supported."""
+    """Any agent or customer identity can support L3/L4 edges. L1/L2 cannot be supported (OHM-l1vs)."""
     if layer in ("L1", "L2"):
         raise PermissionDeniedError(f"Cannot support {layer} edges. {layer} edges are shared and authoritative.")
 
