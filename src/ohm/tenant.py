@@ -127,6 +127,7 @@ class TenantManager:
         max_cached: int = 100,
         checkpoint_interval: int = _CHECKPOINT_INTERVAL_SECONDS,
         wal_size_threshold: int = _WAL_SIZE_THRESHOLD_BYTES,
+        shared_patterns_dir: Optional[str | Path] = None,
     ) -> None:
         self._tenants_dir = Path(tenants_dir)
         self._tenants_dir.mkdir(parents=True, exist_ok=True)
@@ -134,6 +135,7 @@ class TenantManager:
         self._max_cached = max_cached
         self._checkpoint_interval = checkpoint_interval
         self._wal_size_threshold = wal_size_threshold
+        self._shared_patterns_dir = Path(shared_patterns_dir) if shared_patterns_dir else None
 
         self._cache: OrderedDict[str, _TenantEntry] = OrderedDict()
         self._cache_lock = threading.Lock()
@@ -197,6 +199,16 @@ class TenantManager:
             "quotas": quotas,
         }
         self._write_meta(customer_id, meta)
+
+        if self._shared_patterns_dir is not None:
+            from ohm.patterns import load_patterns, seed_patterns
+            patterns = load_patterns(self._shared_patterns_dir, domain)
+            if patterns:
+                store = OhmStore(db_path=str(db_path), agent_name="ohmd", schema=schema)
+                seeded = seed_patterns(store, patterns, domain)
+                store.close()
+                logger.info("Seeded %d patterns for tenant %s (domain=%s)", seeded, customer_id, domain)
+
         logger.info("Provisioned tenant %s (domain=%s, tier=%s)", customer_id, domain, tier)
         return meta
 
