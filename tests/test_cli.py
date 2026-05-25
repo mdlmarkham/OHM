@@ -154,3 +154,57 @@ class TestCLIParsing:
         parser = build_parser()
         args = parser.parse_args(cli_args)
         assert getattr(args, attr) == expected
+
+    def test_tenant_flag_parsed(self):
+        parser = build_parser()
+        args = parser.parse_args(["--tenant", "acme_hvac", "graph", "schema"])
+        assert args.tenant == "acme_hvac"
+
+    def test_tenant_default_none(self):
+        parser = build_parser()
+        args = parser.parse_args(["graph", "schema"])
+        assert args.tenant is None
+
+    def test_db_takes_precedence_over_tenant(self, tmp_path):
+        from ohm.cli import _get_db
+
+        db_path = str(tmp_path / "custom.duckdb")
+        parser = build_parser()
+        args = parser.parse_args(["--db", db_path, "--tenant", "acme_hvac", "graph", "schema"])
+        conn = _get_db(args)
+        try:
+            result = conn.execute("SELECT 1").fetchone()
+            assert result[0] == 1
+        finally:
+            conn.close()
+
+    def test_tenant_uses_tenant_manager(self, tmp_path):
+        from ohm.cli import _get_db
+        from ohm.tenant import TenantManager
+
+        tenants_dir = tmp_path / "tenants"
+        tm = TenantManager(tenants_dir, max_cached=5)
+        tm.provision("acme_hvac")
+        tm.close()
+
+        parser = build_parser()
+        args = parser.parse_args(["--tenant", "acme_hvac", "graph", "schema"])
+        args.db = None
+        import os
+
+        os.environ["OHM_TENANTS_DIR"] = str(tenants_dir)
+        try:
+            conn = _get_db(args)
+            result = conn.execute("SELECT COUNT(*) FROM ohm_nodes").fetchone()
+            assert result[0] == 0
+        finally:
+            conn.close()
+            del os.environ["OHM_TENANTS_DIR"]
+
+    def test_tenant_invalid_rejected(self):
+        parser = build_parser()
+        args = parser.parse_args(["--tenant", "../etc/passwd", "graph", "schema"])
+        from ohm.cli import _get_db
+
+        with pytest.raises(ValueError, match="path traversal"):
+            _get_db(args)

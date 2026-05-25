@@ -47,6 +47,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Database path (default: auto-discover)",
     )
     parser.add_argument(
+        "--tenant",
+        default=None,
+        help="Tenant ID for tenant-scoped operations (uses TenantManager)",
+    )
+    parser.add_argument(
         "--version",
         action="store_true",
         help="Print version information",
@@ -908,8 +913,36 @@ def _handle_diff(args: argparse.Namespace) -> None:
 
 
 def _get_db(args: argparse.Namespace) -> "duckdb.DuckDBPyConnection":
-    """Open a database connection using args."""
+    """Open a database connection using args.
+
+    When --tenant is specified, uses TenantManager.get_store() for LRU cache,
+    lazy migration, and meta.json awareness. When --db is specified, opens
+    the database directly (--db takes precedence over --tenant).
+    """
     from ohm.db import connect
+
+    if args.db:
+        return connect(args.db)
+
+    tenant = getattr(args, "tenant", None)
+    if tenant:
+        from pathlib import Path
+
+        from ohm.framework.validation import validate_customer_id
+        from ohm.tenant import TenantManager
+
+        customer_id = validate_customer_id(tenant)
+        tenants_dir = os.environ.get("OHM_TENANTS_DIR", "")
+        if not tenants_dir:
+            db_default = os.environ.get("OHM_DB", "./ohm.db")
+            tenants_dir = str(Path(db_default).parent / "tenants")
+        tm = TenantManager(tenants_dir)
+        try:
+            store = tm.get_store(customer_id)
+            return store.conn
+        except Exception:
+            tm.close()
+            raise
 
     return connect(args.db)
 
