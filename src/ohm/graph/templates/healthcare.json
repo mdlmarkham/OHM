@@ -1,0 +1,143 @@
+{
+  "name": "healthcare",
+  "node_types": [
+    "agent",
+    "appointment",
+    "claim",
+    "concept",
+    "decision",
+    "diagnosis",
+    "equipment",
+    "event",
+    "goal",
+    "idea",
+    "lab_result",
+    "medication",
+    "patient",
+    "payer",
+    "pattern",
+    "person",
+    "prior_auth",
+    "procedure",
+    "provider",
+    "referral",
+    "skill",
+    "source",
+    "topic"
+  ],
+  "layer_edge_types": {
+    "L1": [
+      "ASSIGNED_TO",
+      "BELONGS_TO",
+      "COVERED_BY",
+      "HAS_COMPONENT",
+      "INTERESTED_IN",
+      "LOCATED_IN",
+      "OWNS",
+      "PART_OF",
+      "VALUES"
+    ],
+    "L2": [
+      "AWAITING",
+      "CLOSED_BY",
+      "CONTAINED_BY",
+      "DERIVES_FROM",
+      "FOLLOWS_UP",
+      "GENERATES",
+      "INFLUENCES",
+      "NOTIFIES",
+      "OPENED_BY",
+      "REFERENCES",
+      "RESOLVED_BY",
+      "SCHEDULED_FOR",
+      "STARTED_BY",
+      "TRANSFERRED_TO",
+      "TRUSTS",
+      "USES"
+    ],
+    "L3": [
+      "APPLIES_TO",
+      "CAUSES",
+      "CHALLENGED_BY",
+      "CORRELATES_WITH",
+      "DEFERS_TO",
+      "ESCALATED_TO",
+      "EXPLAINS",
+      "NEGATES",
+      "PREDICTS",
+      "REFINES",
+      "RELATED_TO",
+      "RULES_OUT",
+      "SUPPORTS",
+      "TRANSITIONS_TO"
+    ],
+    "L4": [
+      "BLOCKS",
+      "DEPENDS_ON",
+      "ENABLES",
+      "EXPECTS",
+      "ORDERS_TEST",
+      "PLANS",
+      "PREDICTS",
+      "RISKS",
+      "THREATENS",
+      "TRIGGERS_INCIDENT"
+    ]
+  },
+  "layer_descriptions": {
+    "L1": "Structure — Practice, providers, patients, payers, procedures, medications",
+    "L2": "Flow — Appointment scheduling, referrals, prior auth, claims, lab results",
+    "L3": "Knowledge — Diagnosis patterns, treatment efficacy, denial patterns, coding accuracy",
+    "L4": "Prospect — Revenue prediction, compliance risk, patient outcomes, capacity planning"
+  },
+  "observation_types": [
+    "anomaly",
+    "auth_turnaround_days",
+    "challenge",
+    "collections_rate",
+    "denial_rate",
+    "measurement",
+    "pattern",
+    "sentiment",
+    "support",
+    "wait_time"
+  ],
+  "observation_sources": [
+    "analysis",
+    "billling_specialist",
+    "clinical_coordinator",
+    "conversation",
+    "practice_manager",
+    "research",
+    "signal"
+  ],
+  "visibilities": [
+    "private",
+    "public",
+    "team"
+  ],
+  "provenances": [
+    "billing_specialist",
+    "bookmark",
+    "clinical_coordinator",
+    "clio-research",
+    "conversation",
+    "feed-ingest",
+    "metis-research",
+    "metis-synthesis",
+    "observation",
+    "practice_manager",
+    "socrates-curriculum"
+  ],
+  "required_integrations": {},
+  "optional_integrations": {
+    "epm": {
+      "fields": ["api_key_ref", "practice_id", "system_type"],
+      "env_prefix": "EPM"
+    },
+    "clearinghouse": {
+      "fields": ["api_key_ref", "payer_id"],
+      "env_prefix": "CLEARINGHOUSE"
+    }
+  }
+}

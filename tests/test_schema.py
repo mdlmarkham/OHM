@@ -519,3 +519,86 @@ class TestHomeServicesSchema:
     def test_home_services_module_constant(self):
         from ohm.schema import HOME_SERVICES_SCHEMA
         assert HOME_SERVICES_SCHEMA.name == "home_services"
+
+
+class TestManufacturingSchema:
+    """Tests for OHM-tss4.11: Manufacturing domain template."""
+
+    def test_manufacturing_loads_from_json(self):
+        config = SchemaConfig.from_json_file("manufacturing.json")
+        assert config.name == "manufacturing"
+
+    def test_manufacturing_node_types(self):
+        config = SchemaConfig.from_json_file("manufacturing.json")
+        for expected in ["work_order", "bill_of_materials", "quality_check",
+                         "machine", "tool", "fixture", "workstation", "product"]:
+            assert expected in config.node_types, f"Missing node type: {expected}"
+
+    def test_manufacturing_observation_types(self):
+        config = SchemaConfig.from_json_file("manufacturing.json")
+        for expected in ["cycle_time", "downtime_duration", "defect_rate", "oee", "setup_time"]:
+            assert expected in config.observation_types, f"Missing observation type: {expected}"
+
+    def test_manufacturing_provenances(self):
+        config = SchemaConfig.from_json_file("manufacturing.json")
+        for expected in ["quality_engineer", "shift_supervisor", "historian", "maintenance_log"]:
+            assert expected in config.provenances, f"Missing provenance: {expected}"
+
+    def test_manufacturing_module_constant(self):
+        from ohm.schema import MANUFACTURING_SCHEMA
+        assert MANUFACTURING_SCHEMA.name == "manufacturing"
+
+
+class TestConstructionSchema:
+    """Tests for OHM-tss4.12: Construction domain template."""
+
+    def test_construction_loads_from_json(self):
+        config = SchemaConfig.from_json_file("construction.json")
+        assert config.name == "construction"
+
+    def test_construction_node_types(self):
+        config = SchemaConfig.from_json_file("construction.json")
+        for expected in ["project", "phase", "crew", "subcontractor", "material",
+                         "permit", "inspection", "change_order", "site", "drawing", "specification"]:
+            assert expected in config.node_types, f"Missing node type: {expected}"
+
+    def test_construction_observation_types(self):
+        config = SchemaConfig.from_json_file("construction.json")
+        for expected in ["progress_pct", "crew_size", "weather_delay", "safety_incident"]:
+            assert expected in config.observation_types, f"Missing observation type: {expected}"
+
+    def test_construction_provenances(self):
+        config = SchemaConfig.from_json_file("construction.json")
+        for expected in ["field_superintendent", "project_manager", "safety_officer", "schedule_engineer"]:
+            assert expected in config.provenances, f"Missing provenance: {expected}"
+
+    def test_construction_module_constant(self):
+        from ohm.schema import CONSTRUCTION_SCHEMA
+        assert CONSTRUCTION_SCHEMA.name == "construction"
+
+
+class TestHealthcareSchema:
+    """Tests for OHM-tss4.13: Healthcare domain template."""
+
+    def test_healthcare_loads_from_json(self):
+        config = SchemaConfig.from_json_file("healthcare.json")
+        assert config.name == "healthcare"
+
+    def test_healthcare_node_types(self):
+        config = SchemaConfig.from_json_file("healthcare.json")
+        for expected in ["patient", "provider", "payer", "procedure", "diagnosis",
+                         "prior_auth", "claim", "referral", "medication", "lab_result", "appointment"]:
+            assert expected in config.node_types, f"Missing node type: {expected}"
+
+    def test_healthcare_observation_types(self):
+        config = SchemaConfig.from_json_file("healthcare.json")
+        for expected in ["auth_turnaround_days", "denial_rate", "collections_rate"]:
+            assert expected in config.observation_types, f"Missing observation type: {expected}"
+
+    def test_healthcare_edge_types(self):
+        config = SchemaConfig.from_json_file("healthcare.json")
+        assert "RULES_OUT" in config.layer_edge_types.get("L3", frozenset())
+
+    def test_healthcare_module_constant(self):
+        from ohm.schema import HEALTHCARE_SCHEMA
+        assert HEALTHCARE_SCHEMA.name == "healthcare"

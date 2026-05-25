@@ -1,0 +1,145 @@
+{
+  "name": "construction",
+  "node_types": [
+    "agent",
+    "change_order",
+    "concept",
+    "crew",
+    "decision",
+    "drawing",
+    "equipment",
+    "event",
+    "goal",
+    "idea",
+    "inspection",
+    "material",
+    "pattern",
+    "permit",
+    "person",
+    "phase",
+    "project",
+    "site",
+    "skill",
+    "source",
+    "specification",
+    "subcontractor",
+    "task",
+    "topic"
+  ],
+  "layer_edge_types": {
+    "L1": [
+      "ASSIGNED_TO",
+      "BELONGS_TO",
+      "CONTAINS",
+      "HAS_COMPONENT",
+      "INTERESTED_IN",
+      "LOCATED_IN",
+      "OWNS",
+      "PART_OF",
+      "VALUES"
+    ],
+    "L2": [
+      "AWAITING",
+      "CLOSED_BY",
+      "CONTAINED_BY",
+      "DERIVES_FROM",
+      "FOLLOWS_UP",
+      "GENERATES",
+      "INFLUENCES",
+      "NOTIFIES",
+      "OPENED_BY",
+      "REFERENCES",
+      "RESOLVED_BY",
+      "SCHEDULED_FOR",
+      "STARTED_BY",
+      "TRANSFERRED_TO",
+      "TRUSTS",
+      "USES"
+    ],
+    "L3": [
+      "APPLIES_TO",
+      "CAUSES",
+      "CHALLENGED_BY",
+      "CORRELATES_WITH",
+      "DEFERS_TO",
+      "ESCALATED_TO",
+      "EXPLAINS",
+      "NEGATES",
+      "PREDICTS",
+      "REFINES",
+      "RELATED_TO",
+      "SUPPORTS",
+      "TRANSITIONS_TO"
+    ],
+    "L4": [
+      "BLOCKS",
+      "DEPENDS_ON",
+      "ENABLES",
+      "EXPECTS",
+      "ORDERS_TEST",
+      "PLANS",
+      "PREDICTS",
+      "RISKS",
+      "THREATENS",
+      "TRIGGERS_INCIDENT"
+    ]
+  },
+  "layer_descriptions": {
+    "L1": "Structure — Project, phases, sites, crews, subcontractors, permits, drawings",
+    "L2": "Flow — Task lifecycle, inspection sequence, material delivery, change orders",
+    "L3": "Knowledge — Productivity patterns, weather impact, rework drivers, schedule risk",
+    "L4": "Prospect — Cost forecasting, safety prediction, resource optimization, claim risk"
+  },
+  "observation_types": [
+    "anomaly",
+    "challenge",
+    "crew_size",
+    "measurement",
+    "pattern",
+    "progress_pct",
+    "safety_incident",
+    "sentiment",
+    "support",
+    "weather_delay"
+  ],
+  "observation_sources": [
+    "analysis",
+    "conversation",
+    "field_superintendent",
+    "project_manager",
+    "research",
+    "safety_officer",
+    "schedule_engineer",
+    "signal"
+  ],
+  "visibilities": [
+    "private",
+    "public",
+    "team"
+  ],
+  "provenances": [
+    "bookmark",
+    "clio-research",
+    "conversation",
+    "feed-ingest",
+    "field_superintendent",
+    "metis-research",
+    "metis-synthesis",
+    "observation",
+    "project_manager",
+    "safety_officer",
+    "schedule_engineer",
+    "socrates-curriculum"
+  ],
+  "required_integrations": {},
+  "optional_integrations": {
+    "procore": {
+      "fields": ["api_key_ref", "company_id", "project_id"],
+      "env_prefix": "PROCORE"
+    },
+    "weather": {
+      "fields": ["api_key_ref", "station_id"],
+      "env_prefix": "WEATHER"
+    }
+  }
+}

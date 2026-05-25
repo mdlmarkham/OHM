@@ -1,0 +1,154 @@
+{
+  "name": "manufacturing",
+  "node_types": [
+    "agent",
+    "area",
+    "bill_of_materials",
+    "concept",
+    "decision",
+    "equipment",
+    "event",
+    "fixture",
+    "goal",
+    "idea",
+    "machine",
+    "material",
+    "pattern",
+    "person",
+    "process",
+    "product",
+    "quality_check",
+    "sensor",
+    "shift",
+    "skill",
+    "source",
+    "task",
+    "tool",
+    "topic",
+    "work_order",
+    "workstation"
+  ],
+  "layer_edge_types": {
+    "L1": [
+      "ASSIGNED_TO",
+      "BELONGS_TO",
+      "CONTAINS",
+      "HAS_COMPONENT",
+      "INTERESTED_IN",
+      "LOCATED_IN",
+      "PART_OF",
+      "PRODUCES",
+      "VALUES"
+    ],
+    "L2": [
+      "AWAITING",
+      "BATCH_EXPIRES_BEFORE",
+      "CLOSED_BY",
+      "CONTAINED_BY",
+      "DERIVES_FROM",
+      "FEEDS",
+      "FLOWS_TO",
+      "INFLUENCES",
+      "NOTIFIES",
+      "OPENED_BY",
+      "REFERENCES",
+      "RESOLVED_BY",
+      "SCHEDULED_FOR",
+      "STARTED_BY",
+      "TRANSFERRED_TO",
+      "TRUSTS",
+      "USES"
+    ],
+    "L3": [
+      "APPLIES_TO",
+      "CAUSES",
+      "CHALLENGED_BY",
+      "CORRELATES_WITH",
+      "DEFERS_TO",
+      "ESCALATED_TO",
+      "EXPLAINS",
+      "NEGATES",
+      "PREDICTS",
+      "REFINES",
+      "RELATED_TO",
+      "SUPPORTS",
+      "TRANSITIONS_TO"
+    ],
+    "L4": [
+      "BLOCKS",
+      "DEPENDS_ON",
+      "ENABLES",
+      "EXPECTS",
+      "ORDERS_TEST",
+      "PLANS",
+      "PREDICTS",
+      "RISKS",
+      "THREATENS",
+      "TRIGGERS_INCIDENT"
+    ]
+  },
+  "layer_descriptions": {
+    "L1": "Structure — Plant, lines, machines, workstations, BOMs, tools",
+    "L2": "Flow — Work order lifecycle, quality checks, shift handoffs, material flow",
+    "L3": "Knowledge — Process optimization, defect patterns, OEE drivers, setup reduction",
+    "L4": "Prospect — Capacity planning, demand forecasting, supply risk, quality prediction"
+  },
+  "observation_types": [
+    "anomaly",
+    "challenge",
+    "cycle_time",
+    "defect_rate",
+    "downtime_duration",
+    "measurement",
+    "oee",
+    "pattern",
+    "scrap_rate",
+    "sentiment",
+    "setup_time",
+    "support",
+    "throughput"
+  ],
+  "observation_sources": [
+    "analysis",
+    "conversation",
+    "dcs",
+    "historian",
+    "maintenance_log",
+    "mes",
+    "quality_engineer",
+    "research",
+    "scada",
+    "shift_supervisor",
+    "signal"
+  ],
+  "visibilities": [
+    "private",
+    "public",
+    "team"
+  ],
+  "provenances": [
+    "bookmark",
+    "clio-research",
+    "conversation",
+    "feed-ingest",
+    "historian",
+    "maintenance_log",
+    "metis-research",
+    "metis-synthesis",
+    "observation",
+    "quality_engineer",
+    "shift_supervisor",
+    "socrates-curriculum"
+  ],
+  "required_integrations": {},
+  "optional_integrations": {
+    "erp": {
+      "fields": ["api_key_ref", "base_url", "plant_id"],
+      "env_prefix": "ERP"
+    },
+    "scada": {
+      "fields": ["host", "port", "poll_interval_seconds"],
+      "env_prefix": "SCADA"
+    }
+  }
+}

@@ -541,6 +541,9 @@ BEEF_SCHEMA = SchemaConfig.beef_herd()
 
 # Home Services schema config instance
 HOME_SERVICES_SCHEMA = SchemaConfig.from_json_file("home_services.json")
+MANUFACTURING_SCHEMA = SchemaConfig.from_json_file("manufacturing.json")
+CONSTRUCTION_SCHEMA = SchemaConfig.from_json_file("construction.json")
+HEALTHCARE_SCHEMA = SchemaConfig.from_json_file("healthcare.json")
 
 # ── DDL Statements ──────────────────────────────────────────────────────────
 
