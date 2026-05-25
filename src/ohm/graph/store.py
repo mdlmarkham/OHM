@@ -184,25 +184,29 @@ class OhmStore:
             logger.error(f"DB connection failed: {e}. Attempting DuckLake recovery.")
             self._recover_from_ducklake(str(self.db_path))
             self.conn = self._connect_with_wal_recovery(str(self.db_path), readonly)
-        self._init_schema()
-
-        # OHM-8n9/OHM-6cz: Auto-restore from DuckLake if tables are empty.
-        self._auto_restore_if_empty()
-
-        # Try to load DuckDB markdown extension (optional)
-        # Enables rich content features: read_markdown, md_to_text, etc.
-        self.markdown_available = False
         try:
-            self.conn.execute("INSTALL markdown FROM community")
-            self.conn.execute("LOAD markdown")
-            self.markdown_available = True
-            logger.info("DuckDB markdown extension loaded — rich content features available")
-        except Exception:
-            logger.info("DuckDB markdown extension not available — rich content features disabled, OHM works fine without it")
+            self._init_schema()
 
-        # Start Quack server if requested and available
-        if self.quack and not self.readonly:
-            self._start_quack()
+            # OHM-8n9/OHM-6cz: Auto-restore from DuckLake if tables are empty.
+            self._auto_restore_if_empty()
+
+            # Try to load DuckDB markdown extension (optional)
+            # Enables rich content features: read_markdown, md_to_text, etc.
+            self.markdown_available = False
+            try:
+                self.conn.execute("INSTALL markdown FROM community")
+                self.conn.execute("LOAD markdown")
+                self.markdown_available = True
+                logger.info("DuckDB markdown extension loaded — rich content features available")
+            except Exception:
+                logger.info("DuckDB markdown extension not available — rich content features disabled, OHM works fine without it")
+
+            # Start Quack server if requested and available
+            if self.quack and not self.readonly:
+                self._start_quack()
+        except Exception:
+            self.conn.close()
+            raise
 
     def _recover_from_ducklake(self, db_path_str: str) -> None:
         """Attempt to recover from a corrupted DB by rebuilding from DuckLake.
