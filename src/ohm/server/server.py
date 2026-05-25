@@ -152,14 +152,15 @@ def _validate_webhook_url(url: str) -> None:
         raise ValidationError(f"Cannot resolve webhook host: {host!r}")
 
 
-def _deliver_webhook(url: str, event: dict, timeout: float = 5.0) -> bool:
+_OUTBOX_BACKOFFS = [5, 30, 300]  # seconds between attempts 0→1, 1→2, 2→dead
+
+
+def _deliver_webhook(url: str, event: dict, timeout: float = 5.0) -> tuple[bool, str]:
     """Deliver a webhook event to a callback URL.
 
-    Uses HTTP POST with JSON body. Returns True on success, False on failure.
-    Failures are logged but not raised — webhooks are fire-and-forget.
+    Returns (success, error_message). Failures are not raised.
     """
     import urllib.request
-    import urllib.error
 
     body = json.dumps(event).encode("utf-8")
     try:
@@ -170,18 +171,72 @@ def _deliver_webhook(url: str, event: dict, timeout: float = 5.0) -> bool:
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.status in (200, 201, 202, 204)
-    except Exception:
-        return False
+            return resp.status in (200, 201, 202, 204), ""
+    except Exception as exc:
+        return False, str(exc)
 
 
-def _trigger_webhooks(event: dict, customer_id: str | None = None) -> None:
+def _write_outbox(conn, agent_name: str, url: str, event: dict, error: str) -> None:
+    """Write a failed webhook delivery to the outbox for retry."""
+    from datetime import datetime, timedelta, timezone
+
+    next_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=_OUTBOX_BACKOFFS[0])
+    conn.execute(
+        """INSERT INTO ohm_webhook_outbox
+           (agent_name, url, event_type, payload, attempt_count, next_attempt_at, status, last_error)
+           VALUES (?, ?, ?, ?, 1, ?, 'pending', ?)""",
+        [agent_name, url, event.get("type", ""), json.dumps(event), next_at, error],
+    )
+
+
+def _process_outbox(conn) -> None:
+    """Retry pending outbox entries whose next_attempt_at has passed."""
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    rows = conn.execute(
+        """SELECT id, agent_name, url, payload, attempt_count
+           FROM ohm_webhook_outbox
+           WHERE status = 'pending' AND next_attempt_at <= ?""",
+        [now],
+    ).fetchall()
+
+    for row_id, agent_name, url, payload, attempt_count in rows:
+        try:
+            event = json.loads(payload)
+        except Exception:
+            conn.execute("UPDATE ohm_webhook_outbox SET status='dead' WHERE id=?", [row_id])
+            continue
+
+        success, error = _deliver_webhook(url, event)
+        if success:
+            conn.execute("UPDATE ohm_webhook_outbox SET status='delivered' WHERE id=?", [row_id])
+        else:
+            new_count = attempt_count + 1
+            if new_count > len(_OUTBOX_BACKOFFS):
+                conn.execute(
+                    "UPDATE ohm_webhook_outbox SET status='dead', attempt_count=?, last_error=? WHERE id=?",
+                    [new_count, error, row_id],
+                )
+            else:
+                backoff = _OUTBOX_BACKOFFS[new_count - 1] if new_count - 1 < len(_OUTBOX_BACKOFFS) else _OUTBOX_BACKOFFS[-1]
+                next_at = now + timedelta(seconds=backoff)
+                conn.execute(
+                    "UPDATE ohm_webhook_outbox SET attempt_count=?, next_attempt_at=?, last_error=? WHERE id=?",
+                    [new_count, next_at, error, row_id],
+                )
+
+
+def _trigger_webhooks(event: dict, customer_id: str | None = None, conn=None) -> None:
     """Trigger webhooks for agents registered in customer_id's tenant.
 
     Events are delivered asynchronously to avoid blocking the request that
     triggered them. Only webhooks registered under the same customer_id
     receive the event — preventing cross-tenant event leakage.
     customer_id=None selects the single-tenant default bucket.
+
+    If conn is provided, failed deliveries are written to ohm_webhook_outbox
+    for retry with exponential backoff (OHM-ufjk).
     """
     import concurrent.futures
 
@@ -191,7 +246,12 @@ def _trigger_webhooks(event: dict, customer_id: str | None = None) -> None:
         url = config.get("url", "")
         events = config.get("events", [])
         if url and (event_type in events or "*" in events):
-            _deliver_webhook(url, event)
+            success, error = _deliver_webhook(url, event)
+            if not success and conn is not None:
+                try:
+                    _write_outbox(conn, agent_name, url, event, error)
+                except Exception:
+                    pass  # Outbox write failure must not block the request
 
     # Snapshot only the customer's bucket under lock, then deliver without holding the lock
     with _webhook_lock:
@@ -1400,7 +1460,7 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
             self.current_store._log_change("ohm_nodes", node_id, "UPDATE", "L3", agent_name=agent)
             self.current_store._increment_graph_generation()
             updated = self.current_store.get_node(node_id)
-            _trigger_webhooks({"type": "node.updated", "agent": agent, "node": updated}, customer_id=self._customer_id)
+            _trigger_webhooks({"type": "node.updated", "agent": agent, "node": updated}, customer_id=self._customer_id, conn=self.current_store.conn)
             self._json_response(200, updated)
 
         elif path.startswith("/edge/"):
@@ -1460,7 +1520,7 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
             self.current_store._log_change("ohm_edges", edge_id, "UPDATE", edge["layer"], agent_name=agent)
             self.current_store._increment_graph_generation()  # Invalidate Bayesian network cache on edge update
             updated = self.current_store.get_edge(edge_id)
-            _trigger_webhooks({"type": "edge.updated", "agent": agent, "edge": updated}, customer_id=self._customer_id)
+            _trigger_webhooks({"type": "edge.updated", "agent": agent, "edge": updated}, customer_id=self._customer_id, conn=self.current_store.conn)
             self._json_response(200, updated)
         else:
             raise ValidationError(f"Unknown PATCH path: {path}")
@@ -2710,6 +2770,7 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
                 "node": result,
             },
             customer_id=self._customer_id,
+            conn=self.current_store.conn,
         )
         if result.get("created", True):
             self._json_response(201, result)
@@ -2764,6 +2825,7 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
                 "edge": result,
             },
             customer_id=self._customer_id,
+            conn=self.current_store.conn,
         )
         self._json_response(201, result)
 
@@ -2786,6 +2848,7 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
                     "challenge_type": challenge_type,
                 },
                 customer_id=self._customer_id,
+                conn=self.current_store.conn,
             )
             self._json_response(201, result)
         else:
@@ -2808,6 +2871,7 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
                     "edge": result,
                 },
                 customer_id=self._customer_id,
+                conn=self.current_store.conn,
             )
             self._json_response(201, result)
         else:
@@ -2845,6 +2909,7 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
                 "observation": result,
             },
             customer_id=self._customer_id,
+            conn=self.current_store.conn,
         )
         self._json_response(201, result)
 
@@ -3109,6 +3174,31 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
             },
         )
 
+    def _get_webhooks_dead_letter(self, path: str, qs: dict) -> None:
+        """GET /webhooks/dead-letter — list permanently failed webhook deliveries."""
+        limit = int(qs.get("limit", [50])[0])
+        rows = self.current_store.conn.execute(
+            """SELECT id, agent_name, url, event_type, attempt_count, last_error, created_at
+               FROM ohm_webhook_outbox
+               WHERE status = 'dead'
+               ORDER BY created_at DESC
+               LIMIT ?""",
+            [limit],
+        ).fetchall()
+        result = [
+            {
+                "id": r[0],
+                "agent_name": r[1],
+                "url": r[2],
+                "event_type": r[3],
+                "attempt_count": r[4],
+                "last_error": r[5],
+                "created_at": str(r[6]),
+            }
+            for r in rows
+        ]
+        self._json_response(200, {"dead_letters": result, "count": len(result)})
+
     def _post_state(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /state — update agent state/focus."""
         result = self.current_store.update_agent_state(
@@ -3310,7 +3400,7 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
             utility_currency=body.get("utility_currency"),
             agent_name=agent,
         )
-        _trigger_webhooks({"type": "task.created", "agent": agent, "node": result}, customer_id=self._customer_id)
+        _trigger_webhooks({"type": "task.created", "agent": agent, "node": result}, customer_id=self._customer_id, conn=self.current_store.conn)
         if result.get("created", True):
             self._json_response(201, result)
         else:
@@ -3511,6 +3601,7 @@ OhmHandler._GET_EXACT = {
     "/refute": "_get_refute",
     "/admin/checkpoint": "_get_admin_checkpoint",
     "/admin/embeddings": "_get_admin_embeddings",
+    "/webhooks/dead-letter": "_get_webhooks_dead_letter",
     "/admin/snapshots": "_get_admin_snapshots",
     "/graph/at": "_get_graph_at",
     "/graph/changes": "_get_graph_changes",
@@ -3637,6 +3728,18 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     if hasattr(store, "sync_heartbeat") and ducklake_sync_interval > 0:
         _sync_thread = threading.Thread(target=_ducklake_sync_loop, daemon=True, name="ducklake-sync")
         _sync_thread.start()
+
+    # Background webhook retry thread (OHM-ufjk): retry failed outbox entries every 5s.
+    def _webhook_retry_loop():
+        while not _sync_stop.wait(5):
+            try:
+                _process_outbox(store.conn)
+            except Exception:
+                pass
+
+    _retry_thread = threading.Thread(target=_webhook_retry_loop, daemon=True, name="webhook-retry")
+    _retry_thread.start()
+
     print(f"Schema: {schema_config.name}", file=sys.stderr)
     if OhmHandler.multi_tenant:
         print("Multi-tenancy: ENABLED", file=sys.stderr)

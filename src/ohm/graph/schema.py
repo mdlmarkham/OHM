@@ -763,7 +763,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.18.0"
+SCHEMA_VERSION = "0.19.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -938,6 +938,26 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
         )""",
             "CREATE INDEX IF NOT EXISTS idx_feed_agent ON ohm_change_feed(agent_name)",
             "CREATE INDEX IF NOT EXISTS idx_feed_time ON ohm_change_feed(occurred_at)",
+        ],
+    ),
+    (
+        "0.19.0",
+        "create ohm_webhook_outbox for retry-with-backoff delivery (OHM-ufjk)",
+        [
+            """CREATE TABLE IF NOT EXISTS ohm_webhook_outbox (
+            id            VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+            agent_name    VARCHAR NOT NULL,
+            url           VARCHAR NOT NULL,
+            event_type    VARCHAR NOT NULL,
+            payload       TEXT NOT NULL,
+            attempt_count INTEGER DEFAULT 0,
+            next_attempt_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            status        VARCHAR DEFAULT 'pending',
+            last_error    TEXT,
+            created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+            "CREATE INDEX IF NOT EXISTS idx_outbox_status ON ohm_webhook_outbox(status)",
+            "CREATE INDEX IF NOT EXISTS idx_outbox_next ON ohm_webhook_outbox(next_attempt_at)",
         ],
     ),
 ]

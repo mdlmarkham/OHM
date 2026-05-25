@@ -1528,3 +1528,65 @@ class TestOrphansPurge:
         assert status == 200
         assert "connected-src" not in data["nodes"]
         assert "connected-dst" not in data["nodes"]
+
+
+@pytest.mark.xdist_group("server")
+class TestWebhookOutbox:
+    """Tests for webhook retry outbox (OHM-ufjk)."""
+
+    def test_dead_letter_endpoint_returns_empty_initially(self, test_server):
+        """GET /webhooks/dead-letter returns empty list when no failures."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/webhooks/dead-letter")
+        assert status == 200
+        assert data["count"] == 0
+        assert data["dead_letters"] == []
+
+    def test_outbox_table_exists(self, test_server):
+        """ohm_webhook_outbox table is created by migration."""
+        port, store = test_server
+        result = store.conn.execute(
+            "SELECT COUNT(*) FROM ohm_webhook_outbox"
+        ).fetchone()
+        assert result is not None
+        assert result[0] == 0
+
+    def test_failed_delivery_writes_to_outbox(self, test_server):
+        """Webhook delivery failure writes an entry to ohm_webhook_outbox."""
+        port, store = test_server
+        from ohm.server.server import _write_outbox
+
+        _write_outbox(
+            store.conn,
+            agent_name="test-agent",
+            url="http://unreachable.example.com/hook",
+            event={"type": "node.created", "agent": "test-agent"},
+            error="connection refused",
+        )
+        row = store.conn.execute(
+            "SELECT agent_name, status, attempt_count FROM ohm_webhook_outbox WHERE agent_name='test-agent'"
+        ).fetchone()
+        assert row is not None
+        assert row[0] == "test-agent"
+        assert row[1] == "pending"
+        assert row[2] == 1
+
+    def test_dead_letter_endpoint_shows_dead_entries(self, test_server):
+        """GET /webhooks/dead-letter returns entries with status='dead'."""
+        port, store = test_server
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        store.conn.execute(
+            """INSERT INTO ohm_webhook_outbox
+               (id, agent_name, url, event_type, payload, attempt_count, next_attempt_at, status, last_error)
+               VALUES ('test-dead-1', 'agent-x', 'http://dead.example.com', 'node.created',
+                       '{"type":"node.created"}', 3, ?, 'dead', 'max retries exceeded')""",
+            [now],
+        )
+
+        status, data = _request("GET", port, "/webhooks/dead-letter")
+        assert status == 200
+        assert data["count"] >= 1
+        ids = [e["id"] for e in data["dead_letters"]]
+        assert "test-dead-1" in ids
