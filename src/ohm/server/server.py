@@ -538,7 +538,10 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     request_queue_size = 128  # OHM-yv35: avoid connection resets under burst load (default was 5)
 
 
-class OhmHandler(BaseHTTPRequestHandler):
+from ohm.server.handlers.markov import MarkovHandlerMixin
+
+
+class OhmHandler(MarkovHandlerMixin, BaseHTTPRequestHandler):
     """HTTP request handler for OHM daemon."""
 
     store: Optional[OhmStore] = None  # single-tenant core store (always set)
@@ -2517,49 +2520,6 @@ class OhmHandler(BaseHTTPRequestHandler):
         )
         self._json_response(200, result)
 
-    def _get_markov_absorbing(self, path: str, qs: dict) -> None:
-        """GET /markov/absorbing — Markov absorbing-state risk."""
-        # Markov absorbing-state risk (OHM-9bom)
-        # ?start=<node_id>&edge_types=TRANSITIONS_TO,LEADS_TO
-        start_node = qs.get("start", [None])[0]
-        if not start_node:
-            raise ValidationError("?start=<node_id> is required")
-        edge_types_str = qs.get("edge_types", [""])[0]
-        markov_edge_types = [e.strip() for e in edge_types_str.split(",") if e.strip()] or None
-        try:
-            from ohm.markov import markov_absorbing_risk
-        except ImportError as exc:
-            raise ConfigurationError(f"Markov analysis requires numpy: {exc}") from exc
-
-        result = markov_absorbing_risk(
-            self.current_store.conn,
-            start_node,
-            edge_types=markov_edge_types,
-        )
-        self._json_response(200, result)
-
-    def _get_markov_expected_steps(self, path: str, qs: dict) -> None:
-        """GET /markov/expected_steps — Markov expected steps to absorption."""
-        # Markov expected steps to absorption (OHM-9bom)
-        # ?start=<node_id>&target=<node_id>&edge_types=TRANSITIONS_TO
-        start_node = qs.get("start", [None])[0]
-        if not start_node:
-            raise ValidationError("?start=<node_id> is required")
-        target_state = qs.get("target", [None])[0]
-        edge_types_str = qs.get("edge_types", [""])[0]
-        markov_edge_types = [e.strip() for e in edge_types_str.split(",") if e.strip()] or None
-        try:
-            from ohm.markov import markov_expected_steps
-        except ImportError as exc:
-            raise ConfigurationError(f"Markov analysis requires numpy: {exc}") from exc
-
-        result = markov_expected_steps(
-            self.current_store.conn,
-            start_node,
-            target_state=target_state,
-            edge_types=markov_edge_types,
-        )
-        self._json_response(200, result)
 
     def _get_voi_tasks(self, path: str, qs: dict) -> None:
         """GET /voi/tasks — VoI task assignments."""
