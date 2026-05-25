@@ -4053,10 +4053,11 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     else:
         print("Concurrent access: HTTP (single-writer)", file=sys.stderr)
 
-    # Graceful shutdown — CHECKPOINT before exit (OHM-8n9)
+    # Graceful shutdown — CHECKPOINT before exit (OHM-8n9, OHM-xfqp)
     def shutdown_handler(signum, frame):
         print("Shutting down...", file=sys.stderr)
         _sync_stop.set()
+        # Checkpoint default store
         try:
             store.sync_heartbeat()
         except Exception:
@@ -4065,6 +4066,12 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
             store.conn.execute("CHECKPOINT")
         except Exception:
             pass
+        # Checkpoint all tenant stores (OHM-xfqp)
+        if OhmHandler.tenant_manager is not None:
+            try:
+                OhmHandler.tenant_manager.shutdown()
+            except Exception:
+                pass
         server.shutdown()
 
     signal.signal(signal.SIGTERM, shutdown_handler)

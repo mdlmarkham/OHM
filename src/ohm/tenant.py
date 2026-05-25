@@ -140,13 +140,13 @@ class TenantManager:
         self._cache: OrderedDict[str, _TenantEntry] = OrderedDict()
         self._cache_lock = threading.Lock()
         self._schema_lock = threading.Lock()  # OHM-yzau: schema mutation lock
+        self._stop_event = threading.Event()  # OHM-xfqp: signal for graceful shutdown (must be set before threads start)
 
         self._eviction_thread = threading.Thread(target=self._eviction_loop, daemon=True, name="tenant-eviction")
         self._eviction_thread.start()
 
         self._checkpoint_thread = threading.Thread(target=self._checkpoint_loop, daemon=True, name="tenant-checkpoint")
         self._checkpoint_thread.start()
-
         self._request_counts: dict[str, dict[str, int]] = {}
         self._request_counts_lock = threading.Lock()
         self._dirty_tenants: set[str] = set()
@@ -559,6 +559,22 @@ class TenantManager:
         finally:
             self.release_store(customer_id)
 
+    def shutdown(self) -> None:
+        """Signal background threads to stop and checkpoint all tenants (OHM-xfqp)."""
+        if not hasattr(self, '_stop_event') or not hasattr(self, '_eviction_thread'):
+            return  # Not fully initialized — nothing to shut down
+        self._stop_event.set()  # Signal threads to stop
+        self._eviction_thread.join(timeout=5)  # Wait for eviction to finish
+        self._checkpoint_thread.join(timeout=5)  # Wait for checkpoint to finish
+        # Checkpoint all cached tenants before exit
+        with self._cache_lock:
+            for cid, entry in list(self._cache.items()):
+                try:
+                    entry.store.conn.execute("CHECKPOINT")
+                    logger.info("Checkpointed tenant %s during shutdown", cid)
+                except Exception:
+                    logger.exception("Failed to checkpoint tenant %s during shutdown", cid)
+
     def close(self) -> None:
         """Close all cached stores and checkpoint their WALs."""
         with self._cache_lock:
@@ -943,11 +959,12 @@ class TenantManager:
                 break
 
     def _eviction_loop(self) -> None:
-        """Background thread: evict idle tenants every 60 seconds (OHM-s8sg: resilient)."""
+        """Background thread: evict idle tenants every 60 seconds (OHM-s8sg: resilient, OHM-xfqp: graceful shutdown)."""
         consecutive_errors = 0
-        while True:
+        stop_event = getattr(self, '_stop_event', None)
+        while not (stop_event and stop_event.is_set()):
             try:
-                time.sleep(60)
+                stop_event.wait(timeout=60) if stop_event else True  # OHM-xfqp: interruptible sleep
                 now = time.monotonic()
                 with self._cache_lock:
                     idle = [cid for cid, entry in self._cache.items() if now - entry.last_accessed > _IDLE_EVICT_SECONDS]
@@ -962,11 +979,12 @@ class TenantManager:
                     time.sleep(60)  # backoff after repeated failures
 
     def _checkpoint_loop(self) -> None:
-        """Background thread: periodic checkpoint of active tenants (OHM-p7fv, OHM-s8sg: resilient)."""
+        """Background thread: periodic checkpoint of active tenants (OHM-p7fv, OHM-s8sg: resilient, OHM-xfqp: graceful shutdown)."""
         consecutive_errors = 0
-        while True:
+        stop_event = getattr(self, '_stop_event', None)
+        while not (stop_event and stop_event.is_set()):
             try:
-                time.sleep(self._checkpoint_interval)
+                stop_event.wait(timeout=self._checkpoint_interval) if stop_event else True  # OHM-xfqp: interruptible sleep
                 self._checkpoint_active_tenants()
                 self._flush_request_counts()
                 consecutive_errors = 0

@@ -23,6 +23,8 @@ Schema customization:
 
 from __future__ import annotations
 
+from types import MappingProxyType
+
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -240,20 +242,22 @@ class SchemaConfig:
     ):
         self.name = name
         self.node_types = node_types if node_types is not None else VALID_NODE_TYPES
-        self.layer_edge_types = edge_types_by_layer if edge_types_by_layer is not None else dict(LAYER_EDGE_TYPES)
-        self.layer_descriptions = layer_descriptions if layer_descriptions is not None else dict(LAYER_DESCRIPTIONS)
+        self.layer_edge_types = MappingProxyType(edge_types_by_layer if edge_types_by_layer is not None else dict(LAYER_EDGE_TYPES))  # OHM-cyms: immutable
+        self.layer_descriptions = MappingProxyType(layer_descriptions if layer_descriptions is not None else dict(LAYER_DESCRIPTIONS))  # OHM-cyms: immutable
         self.observation_types = observation_types if observation_types is not None else VALID_OBSERVATION_TYPES
         self.observation_sources = observation_sources if observation_sources is not None else VALID_OBSERVATION_SOURCES
         self.visibilities = visibilities if visibilities is not None else VALID_VISIBILITIES
         self.provenances = provenances if provenances is not None else VALID_PROVENANCES
-        self.required_integrations = required_integrations if required_integrations is not None else {}
-        self.optional_integrations = optional_integrations if optional_integrations is not None else {}
+        self.required_integrations = MappingProxyType(required_integrations) if required_integrations else MappingProxyType({})  # OHM-cyms: immutable
+        self.optional_integrations = MappingProxyType(optional_integrations) if optional_integrations else MappingProxyType({})  # OHM-cyms: immutable
         self.template_version = template_version
 
     @property
     def all_edge_types(self) -> frozenset[str]:
-        """All edge types across all layers."""
-        return frozenset().union(*self.layer_edge_types.values())
+        """All edge types across all layers (cached, OHM-x3ar)."""
+        if not hasattr(self, '_all_edge_types_cache'):
+            self._all_edge_types_cache = frozenset().union(*self.layer_edge_types.values())
+        return self._all_edge_types_cache
 
     @property
     def valid_layers(self) -> frozenset[str]:
