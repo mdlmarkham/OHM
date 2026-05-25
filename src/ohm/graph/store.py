@@ -42,6 +42,7 @@ from typing import Any, Optional
 import duckdb
 
 from ohm.exceptions import NodeNotFoundError, OHMError
+from ohm.graph.embeddings import EmbeddingBackend
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +145,7 @@ class OhmStore:
         quack_uri: str = "quack:localhost",
         quack_token_env: str = "QUACK_TOKEN",
         schema: Optional["SchemaConfig"] = None,
+        embedding_backend: Optional["EmbeddingBackend"] = None,
     ):
         """Initialize the store.
 
@@ -158,6 +160,8 @@ class OhmStore:
             quack_token_env: Environment variable for Quack token
             schema: SchemaConfig for domain-specific validation.
                 Defaults to OHM schema if not provided.
+            embedding_backend: EmbeddingBackend instance for vector generation.
+                If None, auto-detects: tries Ollama, falls back to NullBackend.
         """
         self._lock = threading.RLock()
         self.agent_name = agent_name
@@ -167,6 +171,18 @@ class OhmStore:
         self.quack_token_env = quack_token_env
         self.quack_started = False
         self.schema = schema or DEFAULT_SCHEMA
+
+        # OHM-9zk7: Embedding backend (pluggable)
+        if embedding_backend is None:
+            from ohm.graph.embeddings import NullBackend, OllamaBackend
+
+            ollama = OllamaBackend()
+            if ollama.is_available():
+                self._embedding_backend = ollama
+            else:
+                self._embedding_backend = NullBackend(dimensions=768)
+        else:
+            self._embedding_backend = embedding_backend
 
         if db_path is None:
             db_path = os.environ.get("OHM_DB_PATH", str(Path.home() / ".ohm" / "ohm.duckdb"))
@@ -769,25 +785,23 @@ class OhmStore:
         """Best-effort embedding generation for a single node.
 
         Generates an embedding from label + content (if available).
-        Silently skips if Ollama is unavailable or embedding fails.
+        Uses the configured embedding backend (OHM-9zk7).
+        Silently skips if embedding fails.
         Never raises — embedding is not critical for node creation.
         """
         try:
-            from .queries import generate_embedding
-
-            # Prefer label + content for richer embeddings
             text = label
             if content:
-                text = f"{label}: {content[:800]}"  # Use up to 800 chars for richer embeddings (model supports ~2000)
-            embedding = generate_embedding(text)
-            if embedding:
+                text = f"{label}: {content[:800]}"
+            embeddings = self._embedding_backend.embed([text])
+            embedding = embeddings[0] if embeddings else None
+            if embedding and any(e != 0.0 for e in embedding):
                 self.conn.execute(
                     "UPDATE ohm_nodes SET embedding = ?::FLOAT[768] WHERE id = ?",
                     [embedding, node_id],
                 )
                 logger.debug("Auto-generated embedding for node %s", node_id)
         except Exception as e:
-            # Best-effort: never fail node creation because of embedding issues
             logger.debug("Auto-embed failed for node %s: %s", node_id, e)
 
     def deep_content(self, node_id: str) -> dict[str, Any]:

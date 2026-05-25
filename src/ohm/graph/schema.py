@@ -239,6 +239,7 @@ class SchemaConfig:
         required_integrations: dict | None = None,
         optional_integrations: dict | None = None,
         template_version: int = 0,
+        seed_agents: list[dict] | None = None,
     ):
         self.name = name
         self.node_types = node_types if node_types is not None else VALID_NODE_TYPES
@@ -251,6 +252,7 @@ class SchemaConfig:
         self.required_integrations = MappingProxyType(required_integrations) if required_integrations else MappingProxyType({})  # OHM-cyms: immutable
         self.optional_integrations = MappingProxyType(optional_integrations) if optional_integrations else MappingProxyType({})  # OHM-cyms: immutable
         self.template_version = template_version
+        self.seed_agents = seed_agents if seed_agents is not None else []  # OHM-tss4.1.1: domain agent pre-seeding
 
     @property
     def all_edge_types(self) -> frozenset[str]:
@@ -497,6 +499,7 @@ class SchemaConfig:
             required_integrations=data.get("required_integrations", {}),
             optional_integrations=data.get("optional_integrations", {}),
             template_version=int(data.get("template_version", 0)),
+            seed_agents=data.get("seed_agents", []),  # OHM-tss4.1.1: domain agent pre-seeding
         )
 
     @classmethod

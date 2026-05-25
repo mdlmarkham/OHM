@@ -2701,6 +2701,9 @@ def generate_embedding(
     Calls the Ollama API to generate an embedding for the given text.
     Returns None if Ollama is unavailable or the request fails.
 
+    Note: For pluggable embedding backends (OHM-9zk7), use ohm.graph.embeddings directly.
+    This function is kept for backward compatibility.
+
     Args:
         text: Text to embed.
         model: Ollama model name (default: nomic-embed-text, 768 dimensions).
@@ -2712,26 +2715,13 @@ def generate_embedding(
     if not text or not text.strip():
         return None
 
-    try:
-        import urllib.request
-        import json as _json
+    from ohm.graph.embeddings import OllamaBackend
 
-        url = f"{ollama_url.rstrip('/')}/api/embed"
-        payload = _json.dumps({"model": model, "input": text}).encode("utf-8")
-        req = urllib.request.Request(
-            url,
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = _json.loads(resp.read().decode("utf-8"))
-            embeddings = data.get("embeddings", [])
-            if embeddings and isinstance(embeddings[0], list):
-                return embeddings[0]
-        return None
-    except Exception:
-        return None
+    backend = OllamaBackend(model=model, ollama_url=ollama_url)
+    embeddings = backend.embed([text])
+    if embeddings and any(e != 0.0 for e in embeddings[0]):
+        return embeddings[0]
+    return None
 
 
 def semantic_search(
