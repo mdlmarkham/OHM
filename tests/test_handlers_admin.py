@@ -10,11 +10,29 @@ import pytest
 from tests.conftest import http_request, start_test_server
 
 
-@pytest.fixture
-def server(tmp_path):
-    """No-auth server for admin endpoint tests."""
+@pytest.fixture(autouse=True)
+def _restore_handler_state():
+    """Save/restore OhmHandler class state around every test.
+
+    Inline-server tests (e.g. test_get_checkpoint_requires_write_auth)
+    overwrite OhmHandler class attributes; without this, subsequent
+    module-fixture tests get a 500.
+    """
+    from ohm.server.server import OhmHandler
+
+    _attrs = ["store", "tokens", "roles", "no_auth", "require_read_auth", "config", "schema_config", "multi_tenant", "customer_tokens"]
+    saved = {a: getattr(OhmHandler, a, None) for a in _attrs}
+    yield
+    for a, v in saved.items():
+        setattr(OhmHandler, a, v)
+
+
+@pytest.fixture(scope="module")
+def server(tmp_path_factory):
+    """No-auth server — shared across all tests in this module."""
     from ohm.store import OhmStore
 
+    tmp_path = tmp_path_factory.mktemp("admin")
     store = OhmStore(db_path=str(tmp_path / "admin.duckdb"), agent_name="test_agent")
     port, srv, thread = start_test_server(store, no_auth=True)
     yield port, store
@@ -23,11 +41,12 @@ def server(tmp_path):
     store.close()
 
 
-@pytest.fixture
-def auth_server(tmp_path):
-    """Server with token auth — write token required for admin ops."""
+@pytest.fixture(scope="module")
+def auth_server(tmp_path_factory):
+    """Authenticated server — shared across all tests in this module."""
     from ohm.store import OhmStore
 
+    tmp_path = tmp_path_factory.mktemp("admin_auth")
     store = OhmStore(db_path=str(tmp_path / "admin_auth.duckdb"), agent_name="test_agent")
     tokens = {"admin-token": "admin_agent"}
     roles = {"admin_agent": "admin"}
@@ -38,6 +57,7 @@ def auth_server(tmp_path):
     store.close()
 
 
+@pytest.mark.xdist_group("server_admin")
 class TestAdminCheckpointGet:
     def test_get_checkpoint_returns_200(self, auth_server):
         """GET /admin/checkpoint with a write token flushes the WAL."""
@@ -68,6 +88,7 @@ class TestAdminCheckpointGet:
             store.close()
 
 
+@pytest.mark.xdist_group("server_admin")
 class TestAdminCheckpointPost:
     def test_post_checkpoint_returns_200(self, server):
         port, _ = server
@@ -82,6 +103,7 @@ class TestAdminCheckpointPost:
             assert status == 200
 
 
+@pytest.mark.xdist_group("server_admin")
 class TestAdminEmbeddings:
     def test_get_embeddings_returns_200(self, server):
         """GET /admin/embeddings returns a valid response even with no Ollama available."""
@@ -111,6 +133,7 @@ class TestAdminEmbeddings:
             assert data.get("status") == "ok"
 
 
+@pytest.mark.xdist_group("server_admin")
 class TestAdminSnapshots:
     def test_get_snapshots_returns_200(self, server):
         port, _ = server

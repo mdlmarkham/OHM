@@ -77,10 +77,11 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = ""
+addopts = "-n auto --dist=loadgroup --benchmark-disable"
 markers = [
     "benchmark: Performance benchmark tests (pytest-benchmark)",
     "slow: Tests that take >1s (excluded from fast CI runs)",
+    "xdist_group: Group tests to run on the same xdist worker (prevents OhmHandler state conflicts)",
 ]
 
 [tool.pytest-benchmark]

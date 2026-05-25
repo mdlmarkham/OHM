@@ -11,11 +11,28 @@ import pytest
 from tests.conftest import http_request, start_test_server
 
 
-@pytest.fixture
-def server(tmp_path):
-    """No-auth server with a few seed nodes/edges for analysis queries."""
+@pytest.fixture(autouse=True)
+def _restore_handler_state():
+    """Save/restore OhmHandler class state around every test.
+
+    TestDecay creates inline servers that overwrite OhmHandler class
+    attributes; without this, subsequent module-fixture tests get a 500.
+    """
+    from ohm.server.server import OhmHandler
+
+    _attrs = ["store", "tokens", "roles", "no_auth", "require_read_auth", "config", "schema_config", "multi_tenant", "customer_tokens"]
+    saved = {a: getattr(OhmHandler, a, None) for a in _attrs}
+    yield
+    for a, v in saved.items():
+        setattr(OhmHandler, a, v)
+
+
+@pytest.fixture(scope="module")
+def server(tmp_path_factory):
+    """No-auth server with seed nodes/edges — shared across all tests in this module."""
     from ohm.store import OhmStore
 
+    tmp_path = tmp_path_factory.mktemp("analysis")
     store = OhmStore(db_path=str(tmp_path / "analysis.duckdb"), agent_name="test_agent")
 
     # Seed data: two nodes connected by a causal edge with an observation
@@ -41,6 +58,7 @@ def server(tmp_path):
     store.close()
 
 
+@pytest.mark.xdist_group("server_analysis")
 class TestHealthGraph:
     def test_health_graph_returns_200(self, server):
         port, _ = server
@@ -55,6 +73,7 @@ class TestHealthGraph:
         assert data.get("total_nodes", 0) >= 2
 
 
+@pytest.mark.xdist_group("server_analysis")
 class TestHealthAgents:
     def test_health_agents_returns_200(self, server):
         port, _ = server
@@ -63,6 +82,7 @@ class TestHealthAgents:
         assert isinstance(data, (list, dict))
 
 
+@pytest.mark.xdist_group("server_analysis")
 class TestContradictions:
     def test_contradictions_returns_200(self, server):
         port, _ = server
@@ -76,6 +96,7 @@ class TestContradictions:
         assert status == 200
 
 
+@pytest.mark.xdist_group("server_analysis")
 class TestAnomalies:
     def test_anomalies_returns_200(self, server):
         port, _ = server
@@ -88,6 +109,7 @@ class TestAnomalies:
         assert status == 200
 
 
+@pytest.mark.xdist_group("server_analysis")
 class TestOrphans:
     def test_orphans_returns_200(self, server):
         port, _ = server
@@ -105,6 +127,7 @@ class TestOrphans:
         assert "n2" not in ids
 
 
+@pytest.mark.xdist_group("server_analysis")
 class TestHubs:
     def test_hubs_returns_200(self, server):
         port, _ = server
@@ -117,6 +140,7 @@ class TestHubs:
         assert status == 200
 
 
+@pytest.mark.xdist_group("server_analysis")
 class TestDeadEnds:
     def test_dead_ends_returns_200(self, server):
         port, _ = server
@@ -124,6 +148,7 @@ class TestDeadEnds:
         assert status == 200
 
 
+@pytest.mark.xdist_group("server_analysis")
 class TestStale:
     def test_stale_returns_200(self, server):
         port, _ = server
@@ -132,6 +157,7 @@ class TestStale:
         assert isinstance(data, (list, dict))
 
 
+@pytest.mark.xdist_group("server_analysis")
 class TestDecay:
     def test_decay_dry_run_returns_200(self, tmp_path):
         """GET /decay?dry_run=true with a write token returns 200."""
@@ -169,6 +195,7 @@ class TestDecay:
             store.close()
 
 
+@pytest.mark.xdist_group("server_analysis")
 class TestAggregate:
     def test_aggregate_returns_200(self, server):
         port, _ = server
@@ -182,6 +209,7 @@ class TestAggregate:
         assert status in (200, 404)  # returns empty aggregate or 404
 
 
+@pytest.mark.xdist_group("server_analysis")
 class TestProvenance:
     def test_provenance_returns_200(self, server):
         port, _ = server
@@ -190,6 +218,7 @@ class TestProvenance:
         assert isinstance(data, (list, dict))
 
 
+@pytest.mark.xdist_group("server_analysis")
 class TestGraphStats:
     def test_graph_stats_returns_200(self, server):
         port, _ = server
@@ -198,6 +227,7 @@ class TestGraphStats:
         assert isinstance(data, dict)
 
 
+@pytest.mark.xdist_group("server_analysis")
 class TestLint:
     def test_lint_returns_200(self, server):
         port, _ = server
@@ -206,6 +236,7 @@ class TestLint:
         assert isinstance(data, dict)
 
 
+@pytest.mark.xdist_group("server_analysis")
 class TestContract:
     def test_contract_returns_200(self, server):
         port, _ = server
@@ -214,6 +245,7 @@ class TestContract:
         assert isinstance(data, dict)
 
 
+@pytest.mark.xdist_group("server_analysis")
 class TestSuggest:
     def test_suggest_returns_200(self, server):
         port, _ = server
