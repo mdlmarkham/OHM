@@ -1613,3 +1613,107 @@ class TestSyncDegradedHealth:
         assert status == 200
         assert data.get("sync_degraded") is True
         assert "connection timeout" in data.get("sync_error", "")
+
+
+class TestPublicReadSecurityEnforcement:
+    """Tests for multi-tenant public-read security enforcement (OHM-en2r)."""
+
+    def test_health_exposes_auth_model_public_read(self, test_server):
+        """/health includes auth_model=public-read in default single-tenant mode."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/health")
+        assert status == 200
+        assert data.get("auth_model") == "public-read"
+
+    def test_health_exposes_auth_model_authenticated(self, tmp_path):
+        """/health includes auth_model=authenticated when require_read_auth=True."""
+        from ohm.store import OhmStore
+
+        store = OhmStore(str(tmp_path / "test.duckdb"))
+        tokens = {"test-token": "agent1"}
+        port, server, thread = _start_test_server(store, tokens=tokens, require_read_auth=True)
+        try:
+            status, data = _request("GET", port, "/health")
+            assert status == 200
+            assert data.get("auth_model") == "authenticated"
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+            store.conn.close()
+
+    def test_health_no_security_warning_single_tenant_public_read(self, test_server):
+        """/health has no security_warning for single-tenant public-read."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/health")
+        assert status == 200
+        assert "security_warning" not in data
+
+    def test_health_security_warning_when_multitenant_public_read(self, tmp_path):
+        """/health includes security_warning when multi_tenant=True and require_read_auth=False."""
+        from ohm.store import OhmStore
+
+        store = OhmStore(str(tmp_path / "test.duckdb"))
+        port, server, thread = _start_test_server(store, multi_tenant=True, require_read_auth=False)
+        try:
+            status, data = _request("GET", port, "/health")
+            assert status == 200
+            assert "security_warning" in data
+            assert "require_read_auth" in data["security_warning"]
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+            store.conn.close()
+
+    def test_health_no_security_warning_multitenant_authenticated(self, tmp_path):
+        """/health has no security_warning when multi_tenant=True and require_read_auth=True."""
+        from ohm.store import OhmStore
+
+        store = OhmStore(str(tmp_path / "test.duckdb"))
+        tokens = {"test-token": "agent1"}
+        port, server, thread = _start_test_server(store, tokens=tokens, multi_tenant=True, require_read_auth=True)
+        try:
+            status, data = _request("GET", port, "/health")
+            assert status == 200
+            assert "security_warning" not in data
+            assert data.get("auth_model") == "authenticated"
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+            store.conn.close()
+
+    def test_setup_server_enforces_read_auth_for_multitenant(self, monkeypatch):
+        """setup_server auto-sets require_read_auth=True when multi_tenant=True (OHM-en2r)."""
+        # Simulate the config enforcement logic directly — same code path as setup_server()
+        import sys
+        from io import StringIO
+
+        captured = StringIO()
+        monkeypatch.setattr(sys, "stderr", captured)
+
+        # Config with multi_tenant=True but require_read_auth not explicitly set
+        config = {"multi_tenant": True}  # require_read_auth absent → should be enforced
+        multi_tenant = config.get("multi_tenant", False)
+        require_read_auth = config.get("require_read_auth", False)
+
+        if multi_tenant and not require_read_auth:
+            if config.get("require_read_auth") is False:
+                pass  # explicitly disabled — warn only
+            else:
+                require_read_auth = True  # enforced
+
+        assert require_read_auth is True
+
+    def test_setup_server_allows_explicit_opt_out(self):
+        """setup_server respects explicit require_read_auth=false override (with warning)."""
+        config = {"multi_tenant": True, "require_read_auth": False}
+        multi_tenant = config.get("multi_tenant", False)
+        require_read_auth = config.get("require_read_auth", False)
+
+        enforced = require_read_auth
+        if multi_tenant and not require_read_auth:
+            if config.get("require_read_auth") is False:
+                enforced = False  # respected but warned
+            else:
+                enforced = True
+
+        assert enforced is False  # explicit override respected

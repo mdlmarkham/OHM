@@ -1752,6 +1752,14 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
         if sync_degraded:
             payload["sync_degraded"] = True
             payload["sync_error"] = getattr(self.current_store, "sync_error", "")
+        # Auth model visibility (OHM-en2r): expose current auth posture so operators
+        # can detect misconfiguration via monitoring
+        payload["auth_model"] = "authenticated" if self.require_read_auth else "public-read"
+        if self.multi_tenant and not self.require_read_auth:
+            payload["security_warning"] = (
+                "Multi-tenant mode with public-read exposes all tenant data without authentication. "
+                "Set require_read_auth=true."
+            )
         self._json_response(200, payload)
 
     def _get_infra_ready(self, path: str, qs: dict) -> None:
@@ -3921,6 +3929,29 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     OhmHandler.require_read_auth = config.get("require_read_auth", False)
     OhmHandler.schema_config = schema_config
     OhmHandler.multi_tenant = config.get("multi_tenant", False)
+
+    # ── Multi-tenant read-auth enforcement (OHM-en2r) ─────────────────────
+    # Public-read (require_read_auth=False) is safe for single-tenant personal use
+    # but exposes ALL tenants' graph data in multi-tenant deployments. Enforce
+    # require_read_auth=True automatically when multi_tenant=True, unless the
+    # operator explicitly opted out via "require_read_auth": false in config.
+    if OhmHandler.multi_tenant and not OhmHandler.require_read_auth:
+        if config.get("require_read_auth") is False:
+            # Operator explicitly disabled it — warn but don't override
+            print(
+                "WARNING: require_read_auth=false with multi_tenant=true — "
+                "ALL tenant graph data is publicly readable without authentication. "
+                "Set require_read_auth=true in your config to secure tenant data.",
+                file=sys.stderr,
+            )
+        else:
+            # Not explicitly set — enforce secure default
+            OhmHandler.require_read_auth = True
+            print(
+                "INFO: multi_tenant mode enabled — require_read_auth automatically set to true. "
+                "Add \"require_read_auth\": false to config to override (not recommended).",
+                file=sys.stderr,
+            )
 
     # ── TenantManager (OHM-tss4.4) ────────────────────────────────────────
     if OhmHandler.multi_tenant:
