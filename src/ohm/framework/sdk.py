@@ -2328,6 +2328,30 @@ class Graph:
         """
         import_count = {"nodes": 0, "edges": 0, "observations": 0, "skipped": 0}
 
+        # Column allowlists — only known schema columns are permitted as column
+        # names in the generated INSERT statements (OHM-ftwx).
+        _NODE_COLS = frozenset({
+            "label", "type", "content", "url", "created_by", "created_at",
+            "updated_at", "updated_by", "confidence", "visibility", "provenance",
+            "tags", "metadata", "priority", "task_status", "assigned_to",
+            "due_date", "utility_scale", "current_best_action",
+            "action_alternatives", "deleted_at", "embedding",
+            "utility_usd_per_day", "utility_currency",
+        })
+        _EDGE_COLS = frozenset({
+            "from_node", "to_node", "layer", "edge_type", "confidence",
+            "probability", "probability_p05", "probability_p50",
+            "probability_p95", "confidence_p05", "confidence_p50",
+            "confidence_p95", "urgency", "condition", "provenance",
+            "created_by", "created_at", "updated_at", "updated_by",
+            "challenge_of", "challenge_type", "metadata", "deleted_at",
+        })
+        _OBS_COLS = frozenset({
+            "node_id", "edge_id", "type", "value", "baseline", "sigma",
+            "source", "created_by", "created_at", "metadata", "notes",
+            "source_name", "source_url", "deleted_at", "sentiment",
+        })
+
         if not merge:
             # Destructive: clear all tables
             for table in ["ohm_observations", "ohm_edges", "ohm_nodes", "ohm_agent_state"]:
@@ -2340,8 +2364,8 @@ class Graph:
                 import_count["skipped"] += 1
                 continue
             try:
-                cols = [k for k in node.keys() if k not in ("id",)]
-                vals = [node[k] for k in node.keys() if k not in ("id",)]
+                cols = [k for k in node.keys() if k != "id" and k in _NODE_COLS]
+                vals = [node[k] for k in cols]
                 col_str = ", ".join(["id"] + cols)
                 val_str = ", ".join(["?"] * (1 + len(vals)))
                 self._conn.execute(
@@ -2361,8 +2385,8 @@ class Graph:
                 import_count["skipped"] += 1
                 continue
             try:
-                cols = [k for k in edge.keys() if k not in ("id",)]
-                vals = [edge[k] for k in edge.keys() if k not in ("id",)]
+                cols = [k for k in edge.keys() if k != "id" and k in _EDGE_COLS]
+                vals = [edge[k] for k in cols]
                 col_str = ", ".join(["id"] + cols)
                 val_str = ", ".join(["?"] * (1 + len(vals)))
                 self._conn.execute(
@@ -2376,8 +2400,8 @@ class Graph:
         # Import observations
         for obs in data.get("observations", []):
             try:
-                cols = [k for k in obs.keys() if k not in ("id",)]
-                vals = [obs[k] for k in obs.keys() if k not in ("id",)]
+                cols = [k for k in obs.keys() if k != "id" and k in _OBS_COLS]
+                vals = [obs[k] for k in cols]
                 col_str = ", ".join(["id"] + cols)
                 val_str = ", ".join(["?"] * (1 + len(vals)))
                 self._conn.execute(

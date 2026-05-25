@@ -3622,6 +3622,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                 agent = "ohm"
             else:
                 raise AuthenticationError("Authentication required — provide Bearer token")
+        self._check_write_access(agent)
 
         method_name = None
         for prefix, mn in self._DELETE_PREFIXES:
@@ -3841,7 +3842,12 @@ class OhmHandler(BaseHTTPRequestHandler):
         if not confirm:
             raise ValidationError("Pass ?confirm=true to deprovision a tenant — this is irreversible")
 
-        customer_id = path[len("/tenant/"):]
+        raw_customer_id = path[len("/tenant/"):]
+        from ohm.framework.validation import validate_customer_id as _vcid
+        try:
+            customer_id = _vcid(raw_customer_id)
+        except ValueError as exc:
+            raise ValidationError(f"Invalid tenant ID: {exc}") from exc
         try:
             self.tenant_manager.deprovision(customer_id, confirm=True)
         except TenantNotFoundError:
