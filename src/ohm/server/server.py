@@ -2884,7 +2884,7 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     OhmHandler.customer_tokens = _build_customer_token_lookup(config.get("customer_tokens", {}))
     OhmHandler.roles = config_roles if config_roles else config.get("roles", {})
     OhmHandler.no_auth = config.get("no_auth", False)
-    OhmHandler.require_read_auth = config.get("require_read_auth", OhmHandler.tenant_manager is not None)  # OHM-en2r: multi-tenant defaults to True
+    OhmHandler.require_read_auth = config.get("require_read_auth", False)
     OhmHandler.schema_config = schema_config
     OhmHandler.multi_tenant = config.get("multi_tenant", False)
 
@@ -2901,6 +2901,8 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
             max_cached=max_cached,
         )
         print(f"TenantManager: {tenants_dir} (cache={max_cached})", file=sys.stderr)
+        if "require_read_auth" not in config:
+            OhmHandler.require_read_auth = True
 
     # ── Quack integration ──────────────────────────────────────────────
     quack_info: dict[str, Any] | None = None

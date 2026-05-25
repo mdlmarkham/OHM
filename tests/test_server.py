@@ -44,8 +44,11 @@ def _start_test_server(store, tokens=None, roles=None, no_auth=False, schema_con
         OhmHandler.tokens = {}
     OhmHandler.roles = roles or {}
     OhmHandler.no_auth = no_auth
-    OhmHandler.require_read_auth = require_read_auth
     OhmHandler.multi_tenant = multi_tenant
+    if multi_tenant and not require_read_auth:
+        OhmHandler.require_read_auth = True
+    else:
+        OhmHandler.require_read_auth = require_read_auth
 
     # Use TCPServer to get a random port
     server = socketserver.TCPServer(
@@ -815,6 +818,22 @@ class TestPublicReadAuthModel:
             assert status == 200
             # Authenticated read should also succeed
             status, data = _request("GET", port, "/stats", token="pub-read-token")
+            assert status == 200
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+            store.close()
+
+    def test_multi_tenant_default_requires_auth(self, tmp_path):
+        """Multi-tenant mode defaults to require_read_auth=True (OHM-en2r)."""
+        db_path = str(tmp_path / "test_mt_auth.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test_agent")
+        tokens = {"mt-token": "test_agent"}
+        port, server, thread = _start_test_server(store, tokens=tokens, multi_tenant=True)
+        try:
+            status, data = _request("GET", port, "/stats")
+            assert status == 401, f"Multi-tenant should default to require_read_auth=True, got {status}"
+            status, data = _request("GET", port, "/stats", token="mt-token")
             assert status == 200
         finally:
             server.shutdown()
