@@ -6,7 +6,7 @@ isolated DuckDB instances. Each test starts a live server with multi_tenant=True
 Acceptance criteria:
   - provision → write → read → verify isolation
   - two tenants on same domain, no cross-contamination
-  - deprovision removes data, subsequent access returns 403
+  - deprovision removes data, revoked token returns 401, unprovisioned returns 404
   - customer key cannot read another tenant's data
   - agent token routes to core store, not tenant stores
   - concurrent writes to same tenant are consistent
@@ -253,8 +253,12 @@ class TestTokenRouting:
             core.close()
             tm.close()
 
-    def test_unprovisioned_customer_token_returns_403(self, tmp_path):
-        """A valid customer token for an unprovisioned tenant returns 403 on data access."""
+    def test_unprovisioned_customer_token_returns_404(self, tmp_path):
+        """A valid customer token for an unprovisioned tenant returns 404 on data access.
+
+        404 (not 403) is intentional: unprovisioned = resource doesn't exist from
+        the caller's view. 403 would leak existence info. See OHM-uahx.
+        """
         port, server, core, tm = _start_mt_server(tmp_path)
         try:
             # Manually add a token hash for a non-existent tenant
@@ -262,7 +266,7 @@ class TestTokenRouting:
             OhmHandler.customer_tokens[orphan_hash] = "ghost_tenant"
 
             status, data = _req("GET", port, "/stats", token=orphan_token)
-            assert status == 403, f"Expected 403 for unprovisioned tenant, got {status}: {data}"
+            assert status == 404, f"Expected 404 for unprovisioned tenant, got {status}: {data}"
         finally:
             OhmHandler.customer_tokens.pop(orphan_hash, None)
             server.shutdown()

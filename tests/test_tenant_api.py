@@ -263,6 +263,33 @@ class TestGetTenantEndpoint:
             store.close()
             tm.close()
 
+    def test_get_tenant_health(self, tmp_path):
+        port, server, store, tm = _start_mt_server(tmp_path)
+        try:
+            tm.provision("acme_hvac", tier="starter")
+            tm.get_store("acme_hvac")  # warm cache so health has full data
+            status, data = _req("GET", port, "/tenant/acme_hvac/health", token="admin-secret")
+            assert status == 200
+            assert data["customer_id"] == "acme_hvac"
+            assert data["tier"] == "starter"
+            assert "wal_size_bytes" in data
+            assert "quotas" in data
+        finally:
+            server.shutdown()
+            store.close()
+            tm.close()
+
+    def test_get_tenant_unknown_sub_resource_returns_404(self, tmp_path):
+        port, server, store, tm = _start_mt_server(tmp_path)
+        try:
+            tm.provision("acme_hvac")
+            status, _ = _req("GET", port, "/tenant/acme_hvac/bogus", token="admin-secret")
+            assert status == 404
+        finally:
+            server.shutdown()
+            store.close()
+            tm.close()
+
 
 # ── DELETE /tenant/{id} ───────────────────────────────────────────────────────
 

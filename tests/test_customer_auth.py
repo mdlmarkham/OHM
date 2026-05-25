@@ -270,8 +270,11 @@ class TestCurrentStoreRouting:
         core_store.close()
 
     def test_multi_tenant_unprovisioned_tenant_raises(self, tmp_path):
-        """current_store raises PermissionDeniedError for an unprovisioned tenant."""
-        from ohm.exceptions import PermissionDeniedError
+        """current_store raises NodeNotFoundError (→ 404) for an unprovisioned tenant.
+
+        404 not 403: unprovisioned = resource doesn't exist from the caller's view.
+        """
+        from ohm.exceptions import NodeNotFoundError
         from ohm.tenant import TenantManager
 
         tm = TenantManager(tmp_path / "tenants", max_cached=5)
@@ -284,7 +287,7 @@ class TestCurrentStoreRouting:
         handler.store = core_store
         handler._resolved_customer_id = "ghost_tenant"
 
-        with pytest.raises(PermissionDeniedError):
+        with pytest.raises(NodeNotFoundError):
             _ = handler.current_store
 
         tm.close()

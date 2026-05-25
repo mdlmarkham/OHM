@@ -576,7 +576,9 @@ class OhmHandler(BaseHTTPRequestHandler):
         Multi-tenant + agent token (_customer_id=None): returns the core store.
         Multi-tenant + customer token: routes to the tenant's isolated DuckDB via
           TenantManager.get_store(), which is LRU-cached (sub-millisecond on hit).
-        Raises PermissionDeniedError (→ HTTP 403) if the tenant is not provisioned.
+        Raises NodeNotFoundError (→ HTTP 404) if the tenant is not provisioned.
+        404 is intentional: unprovisioned = resource doesn't exist from caller's view.
+        403 is reserved for actual authorisation failures (wrong role, cross-tenant key).
         """
         if not self.multi_tenant:
             return self.store
@@ -588,8 +590,8 @@ class OhmHandler(BaseHTTPRequestHandler):
         try:
             return self.tenant_manager.get_store(customer_id)
         except TenantNotFoundError:
-            raise PermissionDeniedError(
-                f"Tenant '{customer_id}' is not provisioned — contact your administrator"
+            raise NodeNotFoundError(
+                f"Tenant not found — provision this tenant before use"
             )
 
     def log_message(self, format, *args):
@@ -2849,8 +2851,8 @@ class OhmHandler(BaseHTTPRequestHandler):
                 try:
                     write_lock = self.tenant_manager.get_write_lock(customer_id)
                 except TenantNotFoundError:
-                    raise PermissionDeniedError(
-                        f"Tenant '{customer_id}' is not provisioned — contact your administrator"
+                    raise NodeNotFoundError(
+                        f"Tenant not found — provision this tenant before use"
                     )
                 with write_lock:
                     getattr(self, method_name)(path, qs, body, agent)
@@ -3576,8 +3578,8 @@ class OhmHandler(BaseHTTPRequestHandler):
                 try:
                     write_lock = self.tenant_manager.get_write_lock(customer_id)
                 except TenantNotFoundError:
-                    raise PermissionDeniedError(
-                        f"Tenant '{customer_id}' is not provisioned — contact your administrator"
+                    raise NodeNotFoundError(
+                        f"Tenant not found — provision this tenant before use"
                     )
                 with write_lock:
                     getattr(self, method_name)(path, agent)
@@ -3754,8 +3756,13 @@ class OhmHandler(BaseHTTPRequestHandler):
                 raise
             except Exception as e:
                 self._json_response(500, {"error": "schema_error", "message": str(e)})
-        else:
+        elif sub == "health":
+            health = self.tenant_manager.tenant_health(customer_id)
+            self._json_response(200, health)
+        elif sub == "":
             self._json_response(200, {"tenant": meta})
+        else:
+            self._json_response(404, {"error": f"Unknown tenant sub-resource: {sub}"})
 
     def _delete_tenant_prefix(self, path: str, agent: str) -> None:
         """DELETE /tenant/{id} — deprovision a tenant.
