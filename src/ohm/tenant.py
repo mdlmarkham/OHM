@@ -691,10 +691,13 @@ class TenantManager:
     # ── Internal helpers ──────────────────────────────────────────────────────
 
     def _write_meta(self, customer_id: str, meta: dict) -> None:
-        """Atomically write meta.json for a tenant (write to temp, then rename)."""
+        """Atomically write meta.json for a tenant (write to temp, fsync, then rename) (OHM-2i4y)."""
         meta_path = self._tenant_dir(customer_id) / _META_FILENAME
         tmp_path = meta_path.with_suffix(".tmp")
-        tmp_path.write_text(json.dumps(meta, indent=2))
+        with tmp_path.open("w") as f:
+            f.write(json.dumps(meta, indent=2))
+            f.flush()
+            os.fsync(f.fileno())
         tmp_path.replace(meta_path)
 
     def _tenant_dir(self, customer_id: str) -> Path:
