@@ -1,5 +1,6 @@
 {
   "name": "home_services",
+  "template_version": 1,
   "node_types": [
     "agent",
     "appointment",

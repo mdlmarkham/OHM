@@ -860,3 +860,79 @@ class TestBackupRestore:
 
         backups = tm.list_backups("acme_hvac")
         assert len(backups) <= 1
+
+
+class TestTemplatePropagation:
+    """Tests for OHM-dcf3: Domain-template change propagation to existing tenants."""
+
+    def test_provision_stores_template_version(self, tm):
+        tm.provision("acme_hvac", domain="home_services", integrations={
+            "twilio": {"account_sid": "x", "auth_token_ref": "x", "phone_number": "+1"}
+        })
+        meta = tm._read_meta("acme_hvac")
+        assert "template_version" in meta
+        assert meta["template_version"] >= 1
+
+    def test_provision_default_template_version_zero(self, tm):
+        tm.provision("acme_basic")
+        meta = tm._read_meta("acme_basic")
+        assert meta["template_version"] >= 0
+
+    def test_no_propagation_when_template_current(self, tm):
+        tm.provision("acme_hvac", domain="home_services", integrations={
+            "twilio": {"account_sid": "x", "auth_token_ref": "x", "phone_number": "+1"}
+        })
+        store = tm.get_store("acme_hvac")
+        original_tv = store.schema.template_version
+        tm._propagate_template("acme_hvac", store)
+        assert store.schema.template_version == original_tv
+
+    def test_additive_merge_adds_node_types(self, tm):
+        from ohm.graph.schema import SchemaConfig
+        old = SchemaConfig(name="test", node_types=frozenset({"a", "b"}), template_version=1)
+        current = SchemaConfig(name="test", node_types=frozenset({"a", "b", "c"}), template_version=2)
+        merged = tm._additive_merge(old, current)
+        assert merged.node_types == frozenset({"a", "b", "c"})
+        assert merged.template_version == 2
+
+    def test_additive_merge_preserves_old_types(self, tm):
+        from ohm.graph.schema import SchemaConfig
+        old = SchemaConfig(name="test", node_types=frozenset({"a", "b", "custom"}), template_version=1)
+        current = SchemaConfig(name="test", node_types=frozenset({"a", "b", "c"}), template_version=2)
+        merged = tm._additive_merge(old, current)
+        assert "custom" in merged.node_types
+
+    def test_additive_merge_merges_edge_types(self, tm):
+        from ohm.graph.schema import SchemaConfig
+        old = SchemaConfig(
+            name="test",
+            edge_types_by_layer={"L1": frozenset({"A", "B"})},
+            template_version=1,
+        )
+        current = SchemaConfig(
+            name="test",
+            edge_types_by_layer={"L1": frozenset({"B", "C"}), "L5": frozenset({"X"})},
+            template_version=2,
+        )
+        merged = tm._additive_merge(old, current)
+        assert merged.layer_edge_types["L1"] == frozenset({"A", "B", "C"})
+        assert merged.layer_edge_types["L5"] == frozenset({"X"})
+
+    def test_additive_merge_merges_observation_types(self, tm):
+        from ohm.graph.schema import SchemaConfig
+        old = SchemaConfig(name="test", observation_types=frozenset({"temp"}), template_version=1)
+        current = SchemaConfig(name="test", observation_types=frozenset({"temp", "humidity"}), template_version=2)
+        merged = tm._additive_merge(old, current)
+        assert "humidity" in merged.observation_types
+
+    def test_propagation_updates_meta_template_version(self, tm):
+        tm.provision("acme_hvac", domain="home_services", integrations={
+            "twilio": {"account_sid": "x", "auth_token_ref": "x", "phone_number": "+1"}
+        })
+        meta = tm._read_meta("acme_hvac")
+        meta["template_version"] = 0
+        tm._write_meta("acme_hvac", meta)
+
+        store = tm.get_store("acme_hvac")
+        meta_after = tm._read_meta("acme_hvac")
+        assert meta_after["template_version"] > 0

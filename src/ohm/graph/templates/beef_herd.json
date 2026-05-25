@@ -1,5 +1,6 @@
 {
   "name": "beef_herd",
+  "template_version": 1,
   "node_types": [
     "agent",
     "animal",

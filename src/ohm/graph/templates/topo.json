@@ -1,5 +1,6 @@
 {
   "name": "topo",
+  "template_version": 1,
   "node_types": [
     "agent",
     "area",

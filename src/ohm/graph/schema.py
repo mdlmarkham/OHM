@@ -236,6 +236,7 @@ class SchemaConfig:
         provenances: frozenset[str] | None = None,
         required_integrations: dict | None = None,
         optional_integrations: dict | None = None,
+        template_version: int = 0,
     ):
         self.name = name
         self.node_types = node_types if node_types is not None else VALID_NODE_TYPES
@@ -247,6 +248,7 @@ class SchemaConfig:
         self.provenances = provenances if provenances is not None else VALID_PROVENANCES
         self.required_integrations = required_integrations if required_integrations is not None else {}
         self.optional_integrations = optional_integrations if optional_integrations is not None else {}
+        self.template_version = template_version
 
     @property
     def all_edge_types(self) -> frozenset[str]:
@@ -445,6 +447,8 @@ class SchemaConfig:
             "visibilities": sorted(self.visibilities),
             "provenances": sorted(self.provenances),
         }
+        if self.template_version > 0:
+            result["template_version"] = self.template_version
         if self.required_integrations:
             result["required_integrations"] = self.required_integrations
         if self.optional_integrations:
@@ -488,6 +492,7 @@ class SchemaConfig:
             provenances=frozenset(data["provenances"]),
             required_integrations=data.get("required_integrations", {}),
             optional_integrations=data.get("optional_integrations", {}),
+            template_version=int(data.get("template_version", 0)),
         )
 
     @classmethod

@@ -1,5 +1,6 @@
 {
   "name": "construction",
+  "template_version": 1,
   "node_types": [
     "agent",
     "change_order",

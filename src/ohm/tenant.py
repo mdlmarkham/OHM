@@ -190,6 +190,7 @@ class TenantManager:
             "domain": domain,
             "tier": tier,
             "schema_version": SCHEMA_VERSION,
+            "template_version": schema.template_version,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "shared_patterns": False,
             "integrations": integrations or {},
@@ -222,6 +223,7 @@ class TenantManager:
 
         if store is not None:
             self._apply_lazy_migrations(customer_id, store)
+            self._propagate_template(customer_id, store)
             return store
 
         # Not cached — open and insert (dropping LRU entry if at capacity)
@@ -244,6 +246,7 @@ class TenantManager:
                 self._evict_lru_unlocked()
 
         self._apply_lazy_migrations(customer_id, store)
+        self._propagate_template(customer_id, store)
         return store
 
     def get_write_lock(self, customer_id: str) -> threading.Lock:
@@ -755,6 +758,83 @@ class TenantManager:
                 meta["migration_error"] = str(e)
                 self._write_meta(customer_id, meta)
                 # Leave lock file in place — reconcile_tenants() will detect it
+
+    def _propagate_template(self, customer_id: str, store: OhmStore) -> None:
+        """Apply additive domain-template changes to an existing tenant (OHM-dcf3).
+
+        When a domain template gains new types (node, edge, observation, etc.),
+        existing tenants on that domain should receive those additions on next
+        access. This is safe because SchemaConfig is validation metadata, not
+        DDL — adding types only widens what the validator accepts.
+
+        Breaking changes (type renames, type removals) are NOT auto-propagated.
+        Those require manual migration via the upgrade guide.
+
+        Algorithm:
+        1. Read tenant's template_version from meta.json
+        2. Load the current domain template
+        3. If current > tenant's, apply additive merge and update meta.json
+        """
+        meta = self._read_meta(customer_id)
+        tenant_tv = meta.get("template_version", 0)
+        domain = meta.get("domain", "ohm")
+        current_schema = self._load_schema(domain)
+        current_tv = current_schema.template_version
+
+        if current_tv <= tenant_tv:
+            return
+
+        old_schema = store.schema
+        merged = self._additive_merge(old_schema, current_schema)
+        store.schema = merged
+
+        meta["template_version"] = current_tv
+        self._write_meta(customer_id, meta)
+        logger.info(
+            "Propagated template v%d → v%d for tenant %s (domain=%s)",
+            tenant_tv, current_tv, customer_id, domain,
+        )
+
+    @staticmethod
+    def _additive_merge(old: "SchemaConfig", current: "SchemaConfig") -> "SchemaConfig":
+        """Merge additive changes from current template into old schema.
+
+        New types in current are added to old. Types present in old but
+        absent in current are preserved (not removed — that's a breaking change).
+        """
+        from ohm.graph.schema import SchemaConfig
+
+        merged_node_types = old.node_types | current.node_types
+        merged_obs_types = old.observation_types | current.observation_types
+        merged_obs_sources = old.observation_sources | current.observation_sources
+        merged_visibilities = old.visibilities | current.visibilities
+        merged_provenances = old.provenances | current.provenances
+
+        merged_layer_edge_types = {}
+        all_layers = set(old.layer_edge_types.keys()) | set(current.layer_edge_types.keys())
+        for layer in all_layers:
+            old_types = old.layer_edge_types.get(layer, frozenset())
+            current_types = current.layer_edge_types.get(layer, frozenset())
+            merged_layer_edge_types[layer] = old_types | current_types
+
+        merged_layer_descriptions = {**old.layer_descriptions, **current.layer_descriptions}
+
+        merged_required = {**old.required_integrations, **current.required_integrations}
+        merged_optional = {**old.optional_integrations, **current.optional_integrations}
+
+        return SchemaConfig(
+            name=old.name,
+            node_types=merged_node_types,
+            edge_types_by_layer=merged_layer_edge_types,
+            layer_descriptions=merged_layer_descriptions,
+            observation_types=merged_obs_types,
+            observation_sources=merged_obs_sources,
+            visibilities=merged_visibilities,
+            provenances=merged_provenances,
+            required_integrations=merged_required,
+            optional_integrations=merged_optional,
+            template_version=current.template_version,
+        )
 
     def _evict(self, customer_id: str) -> None:
         """Remove *customer_id* from the cache and close its store.

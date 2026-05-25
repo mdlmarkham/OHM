@@ -1,5 +1,6 @@
 {
   "name": "healthcare",
+  "template_version": 1,
   "node_types": [
     "agent",
     "appointment",
