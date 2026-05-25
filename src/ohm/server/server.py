@@ -22,6 +22,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from pathlib import Path
 from typing import Any, Optional
+import logging
 
 from ohm.exceptions import (
     AuthenticationError,
@@ -61,6 +62,7 @@ DEFAULT_CONFIG = {
 }
 
 _START_TIME = time.time()
+logger = logging.getLogger(__name__)
 
 # ── Security Constants ─────────────────────────────────────
 
@@ -2934,7 +2936,7 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
             try:
                 store.sync_heartbeat()
             except Exception:
-                pass
+                logger.exception("DuckLake sync failed — data may not be replicated to lake")
 
     if hasattr(store, "sync_heartbeat") and ducklake_sync_interval > 0:
         _sync_thread = threading.Thread(target=_ducklake_sync_loop, daemon=True, name="ducklake-sync")
@@ -2953,21 +2955,19 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     def shutdown_handler(signum, frame):
         print("Shutting down...", file=sys.stderr)
         _sync_stop.set()
-        # Checkpoint default store
         try:
             store.sync_heartbeat()
         except Exception:
-            pass
+            logger.exception("Shutdown: sync_heartbeat failed")
         try:
             store.conn.execute("CHECKPOINT")
         except Exception:
-            pass
-        # Checkpoint all tenant stores (OHM-xfqp)
+            logger.exception("Shutdown: CHECKPOINT failed")
         if OhmHandler.tenant_manager is not None:
             try:
                 OhmHandler.tenant_manager.shutdown()
             except Exception:
-                pass
+                logger.exception("Shutdown: tenant_manager.shutdown failed")
         server.shutdown()
 
     signal.signal(signal.SIGTERM, shutdown_handler)
