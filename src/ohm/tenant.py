@@ -776,6 +776,7 @@ class TenantManager:
                 meta["migration_error"] = str(e)
                 self._write_meta(customer_id, meta)
                 # Leave lock file in place — reconcile_tenants() will detect it
+                raise  # OHM-dlnx: re-raise so caller doesn't use half-migrated store
 
     def _propagate_template(self, customer_id: str, store: OhmStore) -> None:
         """Apply additive domain-template changes to an existing tenant (OHM-dcf3).

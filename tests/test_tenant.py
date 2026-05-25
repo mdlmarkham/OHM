@@ -284,8 +284,9 @@ class TestLazySchemaMigration:
         monkeypatch.setattr(schema_mod, "get_schema_version", lambda conn: "0.1.0")
         monkeypatch.setattr(schema_mod, "_apply_migrations", lambda conn: (_ for _ in ()).throw(RuntimeError("simulated migration failure")))
 
-        # Call lazy migration directly (store is still cached)
-        tm._apply_lazy_migrations("acme_hvac", store)
+        # Call lazy migration — re-raises after writing needs_attention to meta.json (OHM-dlnx)
+        with pytest.raises(RuntimeError, match="simulated migration failure"):
+            tm._apply_lazy_migrations("acme_hvac", store)
         meta = json.loads(meta_path.read_text())
         assert meta.get("needs_attention") is True
         assert "simulated migration failure" in meta.get("migration_error", "")
@@ -398,10 +399,11 @@ class TestCrashConsistentMigration:
 
         lock_path = tmp_path / "tenants" / "acme_hvac" / ".migration_lock"
 
-        # Make _apply_migrations raise to simulate crash
+        # Make _apply_migrations raise to simulate crash — re-raises after failure (OHM-dlnx)
         monkeypatch.setattr(schema_mod, "_apply_migrations", lambda conn: (_ for _ in ()).throw(RuntimeError("crash")))
 
-        tm._apply_lazy_migrations("acme_hvac", store)
+        with pytest.raises(RuntimeError, match="crash"):
+            tm._apply_lazy_migrations("acme_hvac", store)
 
         # Lock file should persist after failed migration
         assert lock_path.exists()
