@@ -364,12 +364,17 @@ class TenantManager:
             return  # No quota defined for this resource
 
         if resource in ("nodes", "edges"):
+            # Use table name map to eliminate SQL interpolation entirely (OHM-f3mu)
+            _QUOTA_TABLE = {"nodes": "ohm_nodes", "edges": "ohm_edges"}
+            table_name = _QUOTA_TABLE.get(resource)
+            if not table_name:
+                return
             with self._cache_lock:
                 entry = self._cache.get(customer_id)
             if entry is not None:
                 try:
                     current = entry.store.conn.execute(
-                        f"SELECT COUNT(*) FROM ohm_{resource} WHERE deleted_at IS NULL"
+                        f"SELECT COUNT(*) FROM {table_name} WHERE deleted_at IS NULL"
                     ).fetchone()
                     current_count = current[0] if current else 0
                 except Exception:
