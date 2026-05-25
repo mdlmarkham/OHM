@@ -1590,3 +1590,26 @@ class TestWebhookOutbox:
         assert data["count"] >= 1
         ids = [e["id"] for e in data["dead_letters"]]
         assert "test-dead-1" in ids
+
+
+@pytest.mark.xdist_group("server")
+class TestSyncDegradedHealth:
+    """Tests for /health sync_degraded flag (OHM-qiio)."""
+
+    def test_health_shows_no_sync_degraded_by_default(self, test_server):
+        """GET /health has no sync_degraded when sync is healthy."""
+        port, store = test_server
+        status, data = _request("GET", port, "/health")
+        assert status == 200
+        assert data.get("sync_degraded") is not True
+
+    def test_health_shows_sync_degraded_when_set(self, test_server, monkeypatch):
+        """GET /health includes sync_degraded=true when store has sync failure."""
+        port, store = test_server
+        monkeypatch.setattr(store, "sync_degraded", True)
+        monkeypatch.setattr(store, "sync_error", "connection timeout")
+
+        status, data = _request("GET", port, "/health")
+        assert status == 200
+        assert data.get("sync_degraded") is True
+        assert "connection timeout" in data.get("sync_error", "")

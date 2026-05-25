@@ -638,3 +638,55 @@ class TestDuckLakeMirrorSync:
         assert updated_label[0] == "Updated Label"
 
         store.close()
+
+
+class TestSyncDegradedFlag:
+    """Tests for sync_degraded flag behavior (OHM-qiio)."""
+
+    def test_sync_degraded_false_by_default(self, tmp_path):
+        """sync_degraded is False on a fresh store."""
+        store = OhmStore(db_path=str(tmp_path / "t.duckdb"), agent_name="test")
+        assert store.sync_degraded is False
+        assert store.sync_error == ""
+        store.close()
+
+    def test_sync_degraded_set_on_failure(self, tmp_path, monkeypatch):
+        """sync_heartbeat sets sync_degraded=True when sync raises."""
+        store = OhmStore(db_path=str(tmp_path / "t.duckdb"), agent_name="test")
+
+        def bad_push(*args, **kwargs):
+            raise RuntimeError("simulated sync failure")
+
+        monkeypatch.setattr(store, "push_to_ducklake", bad_push)
+        # Force a ducklake path so sync is attempted
+        result = store.sync_heartbeat(ducklake_path="/fake/path.ducklake")
+
+        assert store.sync_degraded is True
+        assert "simulated sync failure" in store.sync_error
+        assert result["sync_degraded"] is True
+        assert result["sync_error"] is not None
+        store.close()
+
+    def test_sync_degraded_clears_on_recovery(self, tmp_path, monkeypatch):
+        """sync_degraded resets to False after a successful sync."""
+        store = OhmStore(db_path=str(tmp_path / "t.duckdb"), agent_name="test")
+        store.sync_degraded = True
+        store.sync_error = "old error"
+
+        # Monkeypatch to make sync succeed without actual DuckLake
+        monkeypatch.setattr(store, "push_to_ducklake", lambda *a, **kw: 0)
+        monkeypatch.setattr(store, "pull_from_ducklake", lambda *a, **kw: 0)
+        monkeypatch.setattr(store, "_check_sync_consistency", lambda *a, **kw: None)
+
+        result = store.sync_heartbeat(ducklake_path="/fake/path.ducklake")
+        assert store.sync_degraded is False
+        assert result["sync_degraded"] is False
+        store.close()
+
+    def test_sync_returns_degraded_in_result(self, tmp_path, monkeypatch):
+        """sync_heartbeat result includes sync_degraded=False on success."""
+        store = OhmStore(db_path=str(tmp_path / "t.duckdb"), agent_name="test")
+        result = store.sync_heartbeat(ducklake_path=None)
+        assert result["sync_degraded"] is False
+        assert result["sync_error"] is None
+        store.close()

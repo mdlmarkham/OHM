@@ -190,6 +190,9 @@ class OhmStore:
         # DuckLake path for recovery (set by server.py from config)
         self.ducklake_path = os.environ.get("OHM_DUCKLAKE_PATH", "")
         self.ducklake_data_path = os.environ.get("OHM_DUCKLAKE_DATA", "")
+        # Set to True when sync fails — exposed in /health for operator alerting (OHM-qiio)
+        self.sync_degraded: bool = False
+        self.sync_error: str = ""
 
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1629,10 +1632,25 @@ class OhmStore:
             pass
 
         if ducklake_path or ducklake_attached:
-            # Push local changes to DuckLake
-            pushed = self.push_to_ducklake(ducklake_path or "", alias=alias)
-            # Pull remote changes from DuckLake
-            pulled = self.pull_from_ducklake(ducklake_path or "", alias=alias)
+            try:
+                # Push local changes to DuckLake
+                pushed = self.push_to_ducklake(ducklake_path or "", alias=alias)
+                # Pull remote changes from DuckLake
+                pulled = self.pull_from_ducklake(ducklake_path or "", alias=alias)
+                # Consistency check: warn if local and mirror row counts diverge (OHM-qiio)
+                self._check_sync_consistency(alias)
+                if self.sync_degraded:
+                    logger.info("DuckLake sync recovered for agent %s", self.agent_name)
+                self.sync_degraded = False
+                self.sync_error = ""
+            except Exception as exc:
+                self.sync_degraded = True
+                self.sync_error = str(exc)
+                logger.warning(
+                    "DuckLake sync failed for agent %s — operating in local-only mode. Error: %s",
+                    self.agent_name,
+                    exc,
+                )
 
         # Check DuckLake health after sync (OHM-qiio)
         if ducklake_path or ducklake_attached:
@@ -1932,6 +1950,26 @@ class OhmStore:
             pass
 
         return result
+
+    def _check_sync_consistency(self, alias: str) -> None:
+        """Warn if local row counts diverge significantly from DuckLake mirror (OHM-qiio)."""
+        for table in ("ohm_nodes", "ohm_edges"):
+            try:
+                local_count = self.conn.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL"  # noqa: S608
+                ).fetchone()[0]
+                mirror_count = self.conn.execute(
+                    f"SELECT COUNT(*) FROM {alias}.{table} WHERE deleted_at IS NULL"  # noqa: S608
+                ).fetchone()[0]
+                if local_count > 0 and mirror_count > 0:
+                    ratio = abs(local_count - mirror_count) / max(local_count, mirror_count)
+                    if ratio > 0.10:
+                        logger.warning(
+                            "DuckLake consistency warning for agent %s: %s has %d local vs %d mirror rows (%.0f%% gap)",
+                            self.agent_name, table, local_count, mirror_count, ratio * 100,
+                        )
+            except Exception:
+                pass
 
     def push_to_ducklake(self, ducklake_path: str, alias: str = "ohm_lake") -> int:
         """Push local data to DuckLake shared backend via mirror tables.
