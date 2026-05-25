@@ -177,14 +177,32 @@ ADR-003 boundary rules are agent-scoped. Under multi-tenancy, the model extends:
 
 ### Scaling Path
 
-The single-process model scales to ~100-200 tenants per instance (bounded by RAM and LRU eviction rate). Horizontal scaling path:
+**Single-instance ceiling (from OHM-s2ao load testing):**
+
+| Metric | Value |
+|--------|-------|
+| Store resolution (warm LRU) p50 | ~0.7ms |
+| Store resolution (cold) p50 | ~35ms |
+| LRU eviction at capacity | ~250ms (includes checkpoint) |
+| 100 concurrent tenants (warm) | p50 ~0.7ms |
+| Memory: 50 tenants | < 2 GB RSS |
+| Memory: 10 tenants | < 500 MB RSS |
+| Cache hit rate (same-tenant) | > 90% |
+
+**Recommended ceiling: ~100-200 tenants per instance** (bounded by RAM for DuckDB buffer pools and LRU eviction rate). At 50 tenants the process uses ~2 GB; at 200 tenants expect ~8 GB. Beyond that, eviction storms degrade latency.
+
+**Failure mode at ceiling:** When `max_cached` is exceeded, LRU eviction closes the oldest tenant's DuckDB connection (~250ms overhead). Under heavy churn, repeated eviction/reopen cycles cause latency spikes. Memory pressure may trigger OOM if DuckDB buffer pools aren't released fast enough.
+
+**Horizontal-scaling design (future):**
 
 1. **Consistent-hash router** in front of N `ohmd` instances
-2. Each instance owns a shard of tenants (tenant filesystem isolation already enables this)
-3. No shared mutable state across instances except `shared_patterns/` directory
-4. Router maps `customer_id → ohmd instance` (static config or consistent hash)
+2. Each instance owns a shard of tenants (tenant filesystem isolation already enables this — each tenant is a directory)
+3. No shared mutable state across instances except `shared_patterns/` directory (cross-customer pattern extraction)
+4. Router maps `customer_id → ohmd instance` (static config or consistent hash ring)
+5. Tenant migration: move directory between instances, update router config, zero downtime (tenant DB is a single file)
+6. No architectural blocker to sharding — filesystem isolation means tenants never share a DuckDB instance
 
-This is document-only for now — no implementation until the ceiling is measured (OHM-s2ao load testing).
+This is document-only for now. Implementation awaits demand exceeding the single-instance ceiling.
 
 ## References
 
