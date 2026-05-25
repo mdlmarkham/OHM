@@ -704,6 +704,42 @@ DDL_STATEMENTS: list[str] = [
         value VARCHAR NOT NULL
     );
     """,
+    # ── Webhook Outbox ────────────────────────────────────────────────────
+    # Reliable webhook delivery with retry logic (OHM-ufjk)
+    """
+    CREATE SEQUENCE IF NOT EXISTS seq_webhook_outbox START 1
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS ohm_webhook_outbox (
+        id          BIGINT PRIMARY KEY DEFAULT nextval('seq_webhook_outbox'),
+        customer_id VARCHAR,
+        agent       VARCHAR NOT NULL,
+        url         VARCHAR NOT NULL,
+        event_type  VARCHAR NOT NULL,
+        event       JSON NOT NULL,
+        status      VARCHAR DEFAULT 'pending',
+        attempts    INTEGER DEFAULT 0,
+        next_retry  TIMESTAMP,
+        last_error  TEXT,
+        created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """,
+    # ── Webhook Dead Letter ─────────────────────────────────────────────
+    """
+    CREATE SEQUENCE IF NOT EXISTS seq_webhook_dead_letter START 1
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS webhook_dead_letter (
+        id           BIGINT PRIMARY KEY DEFAULT nextval('seq_webhook_dead_letter'),
+        agent_id     VARCHAR NOT NULL,
+        event_type   VARCHAR NOT NULL,
+        payload      JSON NOT NULL,
+        error        TEXT,
+        attempt_count INTEGER DEFAULT 0,
+        created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """,
     # ── Source Reliability Outcomes ──────────────────────────────────────
     """
     CREATE TABLE IF NOT EXISTS ohm_outcomes (

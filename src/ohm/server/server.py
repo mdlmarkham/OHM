@@ -499,6 +499,10 @@ def _build_router() -> _RouteRegistry:
     ):
         r.add("POST", _p)
 
+    # Webhook outbox routes (OHM-ufjk)
+    r.add("GET", "/webhooks/dead-letter")
+    r.add("GET", "/webhooks/outbox")
+
     # /tasks: GET (list) and POST (create)
     r.add("GET", "/tasks")
     r.add("POST", "/tasks")
@@ -2835,6 +2839,8 @@ OhmHandler._GET_EXACT = {
     "/graph/changes": "_get_graph_changes",
     "/observations": "_get_observations",
     "/source_reliability": "_get_source_reliability",
+    "/webhooks/dead-letter": "_get_webhooks_dead_letter",
+    "/webhooks/outbox": "_get_webhooks_outbox",
     "/tenants": "_get_tenants",
 }
 

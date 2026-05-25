@@ -260,3 +260,50 @@ class InfraHandlerMixin:
                     },
                 },
             )
+
+    def _get_webhooks_dead_letter(self, path: str, qs: dict) -> None:
+        """GET /webhooks/dead-letter — List failed webhook deliveries for manual retry."""
+        auth = self._get_auth_token()
+        self._get_allowed_agents(auth)
+        self._set_extra_cors_headers()
+        self._check_ready()
+
+        limit = int(qs.get("limit", ["50"])[0])
+        offset = int(qs.get("offset", ["0"])[0])
+
+        rows = self.current_store.db.execute(
+            "SELECT id, agent_id, event_type, payload, error, attempt_count, created_at FROM webhook_dead_letter ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (limit, offset),
+        ).fetchall()
+
+        items = [dict(zip(["id", "agent_id", "event_type", "payload", "error", "attempt_count", "created_at"], r)) for r in rows]
+        total = self.current_store.db.execute("SELECT count(*) FROM webhook_dead_letter").fetchone()[0]
+
+        self._write_json(200, {"items": items, "total": total, "limit": limit, "offset": offset})
+
+    def _get_webhooks_outbox(self, path: str, qs: dict) -> None:
+        """GET /webhooks/outbox — List pending/failed webhook deliveries."""
+        auth = self._get_auth_token()
+        self._get_allowed_agents(auth)
+        self._set_extra_cors_headers()
+        self._check_ready()
+
+        limit = int(qs.get("limit", ["50"])[0])
+        offset = int(qs.get("offset", ["0"])[0])
+        status = qs.get("status", [None])[0]
+
+        if status:
+            rows = self.current_store.db.execute(
+                "SELECT id, customer_id, agent, event_type, event, status, attempts, next_retry FROM ohm_webhook_outbox WHERE status = ? ORDER BY created_at ASC LIMIT ? OFFSET ?",
+                (status, limit, offset),
+            ).fetchall()
+        else:
+            rows = self.current_store.db.execute(
+                "SELECT id, customer_id, agent, event_type, event, status, attempts, next_retry FROM ohm_webhook_outbox ORDER BY created_at ASC LIMIT ? OFFSET ?",
+                (limit, offset),
+            ).fetchall()
+
+        items = [dict(zip(["id", "customer_id", "agent", "event_type", "event", "status", "attempts", "next_retry"], r)) for r in rows]
+        total = self.current_store.db.execute("SELECT count(*) FROM ohm_webhook_outbox").fetchone()[0]
+
+        self._write_json(200, {"items": items, "total": total, "limit": limit, "offset": offset})
