@@ -63,7 +63,17 @@ _Add your build and test commands here_
 
 ## Architecture Overview
 
-_Add a brief overview of your project architecture_
+OHM is a multi-agent knowledge graph using DuckDB + recursive CTEs. Key components:
+- **server.py**: HTTP daemon (`ohmd`) — single-writer per tenant, mutex-based
+- **quack.py**: DuckDB's concurrent multi-writer protocol (OHM-3ucw: production readiness criteria in `docs/adr/0016-quack-production-readiness.md`)
+- **store.py**: `OhmStore` ORM — owns connection, schema init
+- **queries/**: Parameterized CTE query functions — direct connection API
+- **tenant.py**: `TenantManager` — per-tenant provisioning, LRU cache, write locks
+
+## Known Issues
+
+- `test_ten_agents_concurrent_writes_no_data_loss` fails: HTTP 500 errors on concurrent POST /node — blocks Quack activation (see ADR-016)
+- `test_post_sync_returns_200` fails: `/sync` endpoint returns `None` body
 
 ## Conventions & Patterns
 
