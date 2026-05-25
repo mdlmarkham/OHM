@@ -293,8 +293,8 @@ class TestCurrentStoreRouting:
         tm.close()
         core_store.close()
 
-    def test_x_tenant_id_header_routes_to_tenant(self, tmp_path):
-        """Agent token + X-Tenant-ID header routes to the specified tenant (OHM-tss4.8)."""
+    def test_x_tenant_id_header_routes_to_tenant_no_auth(self, tmp_path):
+        """In no_auth mode X-Tenant-ID header routes to the specified tenant (OHM-tss4.8)."""
         from ohm.tenant import TenantManager
 
         tenants_dir = tmp_path / "tenants"
@@ -307,6 +307,7 @@ class TestCurrentStoreRouting:
 
         handler = OhmHandler.__new__(OhmHandler)
         handler.multi_tenant = True
+        handler.no_auth = True
         handler.tenant_manager = tm
         handler.store = core_store
         handler.headers = {"X-Tenant-ID": "acme_hvac"}
@@ -355,7 +356,7 @@ class TestCurrentStoreRouting:
         store.close()
 
     def test_x_tenant_id_unprovisioned_raises(self, tmp_path):
-        """X-Tenant-ID for an unprovisioned tenant raises NodeNotFoundError."""
+        """X-Tenant-ID for an unprovisioned tenant raises NodeNotFoundError (no_auth mode)."""
         from ohm.exceptions import NodeNotFoundError
         from ohm.tenant import TenantManager
 
@@ -367,6 +368,7 @@ class TestCurrentStoreRouting:
 
         handler = OhmHandler.__new__(OhmHandler)
         handler.multi_tenant = True
+        handler.no_auth = True
         handler.tenant_manager = tm
         handler.store = core_store
         handler.headers = {"X-Tenant-ID": "ghost_tenant"}
@@ -375,6 +377,71 @@ class TestCurrentStoreRouting:
             _ = handler.current_store
 
         tm.close()
+        core_store.close()
+
+    def test_non_admin_agent_x_tenant_id_raises_permission_denied(self, tmp_path):
+        """Non-admin agent token with X-Tenant-ID raises PermissionDeniedError (OHM-h20r)."""
+        from ohm.exceptions import PermissionDeniedError
+        from ohm.server.server import _hash_token
+
+        core_db = str(tmp_path / "core.duckdb")
+        core_store = OhmStore(db_path=core_db, agent_name="test")
+
+        handler = OhmHandler.__new__(OhmHandler)
+        handler.multi_tenant = True
+        handler.no_auth = False
+        handler.store = core_store
+        handler.tokens = {_hash_token("rw-token"): "rw-agent"}
+        handler.roles = {"rw-agent": "read-write"}
+        handler.headers = {"Authorization": "Bearer rw-token", "X-Tenant-ID": "acme_hvac"}
+
+        with pytest.raises(PermissionDeniedError, match="admin role"):
+            handler._authenticate()
+
+        core_store.close()
+
+    def test_admin_agent_x_tenant_id_resolves_tenant(self, tmp_path):
+        """Admin agent token with X-Tenant-ID sets _resolved_customer_id (OHM-h20r)."""
+        from ohm.server.server import _hash_token
+
+        core_db = str(tmp_path / "core.duckdb")
+        core_store = OhmStore(db_path=core_db, agent_name="test")
+
+        handler = OhmHandler.__new__(OhmHandler)
+        handler.multi_tenant = True
+        handler.no_auth = False
+        handler.store = core_store
+        handler.tokens = {_hash_token("admin-token"): "admin"}
+        handler.roles = {"admin": "admin"}
+        handler.customer_tokens = {}
+        handler.headers = {"Authorization": "Bearer admin-token", "X-Tenant-ID": "acme_hvac"}
+
+        agent = handler._authenticate()
+        assert agent == "admin"
+        assert handler._resolved_customer_id == "acme_hvac"
+
+        core_store.close()
+
+    def test_x_tenant_id_invalid_format_raises_validation_error(self, tmp_path):
+        """Invalid X-Tenant-ID value raises ValidationError (OHM-t614)."""
+        from ohm.exceptions import ValidationError
+        from ohm.server.server import _hash_token
+
+        core_db = str(tmp_path / "core.duckdb")
+        core_store = OhmStore(db_path=core_db, agent_name="test")
+
+        handler = OhmHandler.__new__(OhmHandler)
+        handler.multi_tenant = True
+        handler.no_auth = False
+        handler.store = core_store
+        handler.tokens = {_hash_token("admin-token"): "admin"}
+        handler.roles = {"admin": "admin"}
+        handler.customer_tokens = {}
+        handler.headers = {"Authorization": "Bearer admin-token", "X-Tenant-ID": "../../../etc/passwd"}
+
+        with pytest.raises(ValidationError):
+            handler._authenticate()
+
         core_store.close()
 
 

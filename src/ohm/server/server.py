@@ -565,20 +565,28 @@ class OhmHandler(BaseHTTPRequestHandler):
 
         When multi-tenancy is disabled (OHM-l31g), always returns None —
         zero overhead, no TenantManager lookup, no route ambiguity.
-        When enabled, set by _authenticate() as self._resolved_customer_id.
-        Alternatively, an agent token can specify X-Tenant-ID header to act
-        on behalf of a tenant (OHM-tss4.8).
+        When enabled, set by _authenticate() as self._resolved_customer_id:
+          - Customer tokens: resolved to their own tenant at auth time.
+          - Admin agent tokens: X-Tenant-ID header is honoured at auth time (OHM-tss4.8).
+          - Non-admin agent tokens: X-Tenant-ID is rejected at auth time (OHM-h20r).
+        In no_auth mode the header is accepted freely (no security model applies).
         """
         if not self.multi_tenant:
             return None
         resolved = getattr(self, "_resolved_customer_id", None)
         if resolved is not None:
             return resolved
-        x_tenant = getattr(self, "headers", None)
-        if x_tenant is not None:
-            x_tenant = x_tenant.get("X-Tenant-ID")
-        if x_tenant:
-            return x_tenant
+        # no_auth: honour X-Tenant-ID without an authentication gate.
+        if self.no_auth:
+            x_tenant = getattr(self, "headers", None)
+            if x_tenant is not None:
+                x_tenant = x_tenant.get("X-Tenant-ID")
+            if x_tenant:
+                from ohm.framework.validation import validate_customer_id as _vcid
+                try:
+                    return _vcid(x_tenant)
+                except ValueError:
+                    return None
         return None
 
     @property
@@ -618,6 +626,30 @@ class OhmHandler(BaseHTTPRequestHandler):
         sys.stderr.write(f"[{timestamp}] [{corr_id}] {message}\n")
         sys.stderr.flush()
 
+    def _resolve_x_tenant_for_agent(self, agent_name: str) -> None:
+        """Resolve X-Tenant-ID for an authenticated agent token (OHM-h20r, OHM-t614).
+
+        Only admin agents may use X-Tenant-ID to route into a tenant's store.
+        Non-admin agents receive a 403 — they must use a customer token instead.
+        The header value is validated with validate_customer_id() to prevent
+        path traversal or injection via the header (OHM-t614).
+        """
+        if not self.multi_tenant:
+            return
+        x_tenant = self.headers.get("X-Tenant-ID")
+        if not x_tenant:
+            return
+        role = self.roles.get(agent_name, "read-write")
+        if role != "admin":
+            raise PermissionDeniedError(
+                "X-Tenant-ID header requires admin role — use a customer token to access tenant data"
+            )
+        from ohm.framework.validation import validate_customer_id as _vcid
+        try:
+            self._resolved_customer_id = _vcid(x_tenant)
+        except ValueError as exc:
+            raise ValidationError(f"Invalid X-Tenant-ID: {exc}") from exc
+
     def _authenticate(self) -> Optional[str]:
         """Validate bearer token, return agent name or customer_id, or None.
 
@@ -636,6 +668,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             token = unquote(auth[7:])
             for token_hash, agent_name in self.tokens.items():
                 if _verify_token(token, token_hash):
+                    self._resolve_x_tenant_for_agent(agent_name)
                     return agent_name
             for token_hash, customer_id in self.customer_tokens.items():
                 if _verify_token(token, token_hash):
@@ -649,6 +682,7 @@ class OhmHandler(BaseHTTPRequestHandler):
             token = qs["token"][0]
             for token_hash, agent_name in self.tokens.items():
                 if _verify_token(token, token_hash):
+                    self._resolve_x_tenant_for_agent(agent_name)
                     return agent_name
             for token_hash, customer_id in self.customer_tokens.items():
                 if _verify_token(token, token_hash):
@@ -1318,6 +1352,8 @@ class OhmHandler(BaseHTTPRequestHandler):
             node = self.current_store.get_node(node_id)
             if not node:
                 raise NodeNotFoundError(f"Node not found: {node_id}")
+            from ohm.server.boundary import enforce_l2_immutability
+            enforce_l2_immutability(self.current_store.conn, agent, node_id)
 
             now = datetime.now(timezone.utc).isoformat()
             patchable = [
@@ -1371,6 +1407,8 @@ class OhmHandler(BaseHTTPRequestHandler):
             edge = self.current_store.get_edge(edge_id)
             if not edge:
                 raise NodeNotFoundError(f"Edge not found: {edge_id}")
+            from ohm.server.boundary import enforce_write_boundary
+            enforce_write_boundary(self.current_store.conn, agent, edge_id)
 
             now = datetime.now(timezone.utc).isoformat()
             pert_fields = [
