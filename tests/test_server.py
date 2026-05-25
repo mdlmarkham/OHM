@@ -1503,12 +1503,28 @@ class TestTopodEntryPoint:
         """topod_main should pass TOPO_SCHEMA to main()."""
         from ohm.server import topod_main
 
-        # We can't actually run topod_main (it starts a server),
-        # but we can verify it references TOPO_SCHEMA
         import inspect
 
         source = inspect.getsource(topod_main)
         assert "TOPO_SCHEMA" in source
+
+    def test_topod_main_emits_deprecation_warning(self):
+        """topod_main should emit DeprecationWarning (OHM-rzbg)."""
+        from ohm.server import topod_main
+
+        import warnings
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            try:
+                topod_main()
+            except SystemExit:
+                pass
+            except Exception:
+                pass
+        deprecation = [w for w in caught if issubclass(w.category, DeprecationWarning)]
+        assert len(deprecation) >= 1
+        assert "deprecated" in str(deprecation[0].message).lower()
 
 
 @pytest.mark.xdist_group("server")

@@ -150,11 +150,33 @@ This detects:
 
 ## TOPO Migration
 
-TOPO users currently run `topod` as a separate binary. To migrate to multi-tenant `ohmd`:
+**`topod` is deprecated.** It will continue to work for 2 releases but emits a `DeprecationWarning` on startup. Migrate to multi-tenant `ohmd` using one of these paths:
 
-1. Stop `topod`
-2. Enable `--multi-tenant` on `ohmd`
-3. Provision a tenant with the TOPO domain:
+### Path A: Single-tenant replacement (simplest)
+
+Replace `topod` with `ohmd --schema topo`:
+
+1. Stop `topod`: `systemctl stop topod`
+2. Start `ohmd` with TOPO schema: `ohmd --schema topo --db /var/lib/ohm/ohm.duckdb`
+3. Update your systemd unit:
+
+```ini
+# /etc/systemd/system/ohmd.service (was topod.service)
+[Service]
+ExecStart=/usr/local/bin/ohmd --schema topo --db /var/lib/ohm/ohm.duckdb
+```
+
+4. `systemctl daemon-reload && systemctl start ohmd`
+
+No data migration needed — same DDL, same tables, same DB path. Only the entry point changes.
+
+### Path B: Multi-tenant migration (recommended for new deployments)
+
+Move TOPO into an isolated tenant within a multi-tenant `ohmd`:
+
+1. Stop `topod`: `systemctl stop topod`
+2. Enable multi-tenant `ohmd`: `ohmd --multi-tenant` (or set `OHM_MULTI_TENANT=1`)
+3. Provision a TOPO tenant:
 
 ```bash
 curl -X POST http://127.0.0.1:8710/tenants \
@@ -163,11 +185,37 @@ curl -X POST http://127.0.0.1:8710/tenants \
   -d '{"customer_id": "topo_instance", "domain": "topo", "tier": "professional"}'
 ```
 
-4. Import existing TOPO data into the tenant DB (copy the DuckDB file or use DuckLake sync)
-5. Generate a customer API key for TOPO agents
-6. Update TOPO agents to use the customer API key instead of direct `topod` connection
+4. Import existing TOPO data:
 
-The TOPO domain template (`topo.json`) includes industrial node types (equipment, process, material, sensor) and edge types appropriate for manufacturing/industrial contexts.
+```bash
+# Copy the existing TOPO DuckDB into the tenant directory
+cp /var/lib/ohm/ohm.duckdb /var/lib/ohm/tenants/topo_instance/ohm.duckdb
+# Remove WAL if present (will be recreated on open)
+rm -f /var/lib/ohm/ohm.duckdb.wal
+```
+
+5. Generate a customer API key for TOPO agents:
+
+```bash
+# Add to /etc/ohm/ohmd.json under customers:
+"topo_instance": {
+  "token": "ohm-topo-<random>",
+  "role": "readwrite"
+}
+```
+
+6. Update TOPO agents to use the customer API key with `X-Tenant-ID` header (or via SDK: `connect_http(tenant_id="topo_instance")`)
+7. Disable the old `topod` systemd unit: `systemctl disable topod`
+
+### Deprecation timeline
+
+| Release | Status |
+|---------|--------|
+| v0.5.x (current) | `topod` works with deprecation warning |
+| v0.6.x | `topod` works with deprecation warning |
+| v0.7.x | `topod` removed; use `ohmd --schema topo` or multi-tenant |
+
+The TOPO domain template (`topo.json`) includes industrial node types (equipment, process, instrument, sensor, etc.) and edge types appropriate for manufacturing/industrial contexts.
 
 ## Per-Tenant Quotas
 

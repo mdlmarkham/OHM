@@ -3541,10 +3541,28 @@ def main(schema_config: SchemaConfig | None = None):
 def topod_main():
     """CLI entry point for topod — TOPO industrial knowledge graph daemon.
 
+    .. deprecated::
+        Use ``ohmd --schema topo`` or provision a multi-tenant instance with
+        domain='topo'. topod will be removed in a future release.
+
     Same as ohmd but defaults to the TOPO schema configuration.
     """
+    import warnings
+
     from .schema import TOPO_SCHEMA
 
+    warnings.warn(
+        "topod is deprecated. Use 'ohmd --schema topo' or provision a "
+        "multi-tenant instance with domain='topo'. See "
+        "docs/upgrade_multi_tenancy.md#topo-migration for migration steps. "
+        "topod will be removed in a future release.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    logger.warning(
+        "topod is deprecated. Use 'ohmd --schema topo' or multi-tenant "
+        "provisioning with domain='topo'."
+    )
     main(schema_config=TOPO_SCHEMA)
 
 
