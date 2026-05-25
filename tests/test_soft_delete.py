@@ -10,11 +10,9 @@ from ohm.store import OhmStore
 
 
 @pytest.fixture
-def store():
-    """Create a store with initialized schema using in-memory DB."""
-    s = OhmStore(db_path=":memory:", agent_name="test_agent")
-    yield s
-    s.conn.close()
+def store(in_memory_store):
+    """Alias in_memory_store for backward compatibility with existing test names."""
+    return in_memory_store
 
 
 class TestSoftDeleteNode:

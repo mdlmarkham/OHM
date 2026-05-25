@@ -5,16 +5,8 @@ from __future__ import annotations
 import pytest
 
 from ohm.queries import auto_pert_from_edges, auto_pert_from_observations
-from ohm.schema import initialize_schema
 
-
-@pytest.fixture
-def db():
-    import duckdb
-
-    conn = duckdb.connect(":memory:")
-    initialize_schema(conn)
-    return conn
+# db fixture comes from conftest.py (create_test_db → in-memory DuckDB with OHM schema)
 
 
 def _node(conn, label: str = "test-node", node_type: str = "concept") -> str:

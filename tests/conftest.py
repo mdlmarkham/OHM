@@ -197,6 +197,34 @@ def test_db():
 
 
 @pytest.fixture
+def in_memory_store():
+    """OhmStore backed by in-memory DuckDB — for tests that need the OhmStore API.
+
+    Use when tests exercise OhmStore methods (write_node, get_node, etc.) but
+    don't need data to persist across connections. Faster than temp_store.
+    """
+    from ohm.store import OhmStore
+
+    s = OhmStore(db_path=":memory:", agent_name="test_agent")
+    yield s
+    s.conn.close()
+
+
+@pytest.fixture
+def temp_store(tmp_path):
+    """OhmStore backed by a temp file — for tests that need real file persistence.
+
+    Use when tests exercise DuckLake, WAL recovery, or file-backed behaviour.
+    Prefer in_memory_store for pure OhmStore API tests.
+    """
+    from ohm.store import OhmStore
+
+    s = OhmStore(db_path=str(tmp_path / "test.duckdb"), agent_name="test_agent")
+    yield s
+    s.close()
+
+
+@pytest.fixture
 def db():
     """Create an in-memory test database with OHM schema for Bayesian tests."""
     return create_test_db()
@@ -295,3 +323,65 @@ def create_sample_graph(conn: "duckdb.DuckDBPyConnection", size: str = "small") 
         edges["cross_4"] = create_sample_edge(conn, from_node=nodes["G"], to_node=nodes["J"], edge_type="PREDICTS", layer="L3")
 
     return {"nodes": nodes, "edges": edges}
+
+
+# ── Test Server Helpers ──────────────────────────────────────────────────────
+# Shared by test_server.py, test_handlers_analysis.py, test_handlers_admin.py.
+# test_server.py imports these directly; new handler tests use them via import.
+
+
+def start_test_server(store, tokens=None, roles=None, no_auth=False, schema_config=None, require_read_auth=False, multi_tenant=False):
+    """Start a test HTTP server on a random port, return (port, server, thread).
+
+    tokens: dict of {plaintext_token: agent_name} — hashed automatically.
+    schema_config: SchemaConfig (default: DEFAULT_SCHEMA).
+    """
+    import socketserver
+    import threading
+
+    from ohm.schema import DEFAULT_SCHEMA
+    from ohm.server import OhmHandler, _hash_token
+
+    OhmHandler.store = store
+    OhmHandler.config = {"host": "127.0.0.1", "port": 0}
+    OhmHandler.schema_config = schema_config or DEFAULT_SCHEMA
+    OhmHandler.tokens = {_hash_token(t): name for t, name in (tokens or {}).items()}
+    OhmHandler.roles = roles or {}
+    OhmHandler.no_auth = no_auth
+    OhmHandler.require_read_auth = require_read_auth
+    OhmHandler.multi_tenant = multi_tenant
+    OhmHandler.customer_tokens = {}
+
+    server = socketserver.TCPServer(("127.0.0.1", 0), OhmHandler, bind_and_activate=False)
+    server.allow_reuse_address = True
+    server.server_bind()
+    server.server_activate()
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    wait_for_port("127.0.0.1", port)
+    return port, server, thread
+
+
+def http_request(method, port, path, body=None, headers=None, token=None):
+    """Make an HTTP request to a test server, return (status_code, parsed_body)."""
+    import json
+    from http.client import HTTPConnection
+
+    conn = HTTPConnection(f"127.0.0.1:{port}", timeout=5)
+    hdrs = dict(headers or {})
+    if token:
+        hdrs["Authorization"] = f"Bearer {token}"
+    if body is not None:
+        hdrs["Content-Type"] = "application/json"
+        body_bytes = json.dumps(body).encode()
+    else:
+        body_bytes = None
+    conn.request(method, path, body=body_bytes, headers=hdrs)
+    resp = conn.getresponse()
+    data = resp.read().decode()
+    conn.close()
+    try:
+        return resp.status, json.loads(data)
+    except Exception:
+        return resp.status, data
