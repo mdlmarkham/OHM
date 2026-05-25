@@ -1,6 +1,6 @@
 {
   "name": "healthcare",
-  "template_version": 1,
+  "template_version": 2,
   "node_types": [
     "agent",
     "appointment",
@@ -86,18 +86,21 @@
     ]
   },
   "layer_descriptions": {
-    "L1": "Structure — Practice, providers, patients, payers, procedures, medications",
-    "L2": "Flow — Appointment scheduling, referrals, prior auth, claims, lab results",
-    "L3": "Knowledge — Diagnosis patterns, treatment efficacy, denial patterns, coding accuracy",
-    "L4": "Prospect — Revenue prediction, compliance risk, patient outcomes, capacity planning"
+    "L1": "Structure \u2014 Practice, providers, patients, payers, procedures, medications",
+    "L2": "Flow \u2014 Appointment scheduling, referrals, prior auth, claims, lab results",
+    "L3": "Knowledge \u2014 Diagnosis patterns, treatment efficacy, denial patterns, coding accuracy",
+    "L4": "Prospect \u2014 Revenue prediction, compliance risk, patient outcomes, capacity planning"
   },
   "observation_types": [
     "anomaly",
     "auth_turnaround_days",
     "challenge",
+    "claim_amount",
     "collections_rate",
     "denial_rate",
     "measurement",
+    "no_show_rate",
+    "patient_wait_time",
     "pattern",
     "sentiment",
     "support",
@@ -133,11 +136,18 @@
   "required_integrations": {},
   "optional_integrations": {
     "epm": {
-      "fields": ["api_key_ref", "practice_id", "system_type"],
+      "fields": [
+        "api_key_ref",
+        "practice_id",
+        "system_type"
+      ],
       "env_prefix": "EPM"
     },
     "clearinghouse": {
-      "fields": ["api_key_ref", "payer_id"],
+      "fields": [
+        "api_key_ref",
+        "payer_id"
+      ],
       "env_prefix": "CLEARINGHOUSE"
     }
   }

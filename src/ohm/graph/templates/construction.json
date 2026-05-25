@@ -1,6 +1,6 @@
 {
   "name": "construction",
-  "template_version": 1,
+  "template_version": 2,
   "node_types": [
     "agent",
     "change_order",
@@ -86,18 +86,21 @@
     ]
   },
   "layer_descriptions": {
-    "L1": "Structure — Project, phases, sites, crews, subcontractors, permits, drawings",
-    "L2": "Flow — Task lifecycle, inspection sequence, material delivery, change orders",
-    "L3": "Knowledge — Productivity patterns, weather impact, rework drivers, schedule risk",
-    "L4": "Prospect — Cost forecasting, safety prediction, resource optimization, claim risk"
+    "L1": "Structure \u2014 Project, phases, sites, crews, subcontractors, permits, drawings",
+    "L2": "Flow \u2014 Task lifecycle, inspection sequence, material delivery, change orders",
+    "L3": "Knowledge \u2014 Productivity patterns, weather impact, rework drivers, schedule risk",
+    "L4": "Prospect \u2014 Cost forecasting, safety prediction, resource optimization, claim risk"
   },
   "observation_types": [
     "anomaly",
     "challenge",
+    "change_order_value",
     "crew_size",
+    "material_delivered",
     "measurement",
     "pattern",
     "progress_pct",
+    "rfi_count",
     "safety_incident",
     "sentiment",
     "support",
@@ -135,11 +138,18 @@
   "required_integrations": {},
   "optional_integrations": {
     "procore": {
-      "fields": ["api_key_ref", "company_id", "project_id"],
+      "fields": [
+        "api_key_ref",
+        "company_id",
+        "project_id"
+      ],
       "env_prefix": "PROCORE"
     },
     "weather": {
-      "fields": ["api_key_ref", "station_id"],
+      "fields": [
+        "api_key_ref",
+        "station_id"
+      ],
       "env_prefix": "WEATHER"
     }
   }

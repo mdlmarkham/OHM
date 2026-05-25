@@ -27,8 +27,6 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ohm.framework.exceptions import MigrationError
-
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
@@ -824,9 +822,9 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             "ALTER TABLE ohm_nodes ADD COLUMN task_status VARCHAR",
             "ALTER TABLE ohm_nodes ADD COLUMN due_date TIMESTAMP",
             "ALTER TABLE ohm_nodes ADD COLUMN assigned_to VARCHAR",
-            "CREATE INDEX IF NOT EXISTS idx_nodes_task_status ON ohm_nodes(task_status)",
-            "CREATE INDEX IF NOT EXISTS idx_nodes_assigned_to ON ohm_nodes(assigned_to)",
-            "CREATE INDEX IF NOT EXISTS idx_nodes_due_date ON ohm_nodes(due_date)",
+            "CREATE INDEX IF NOT EXISTS idx_nodes_task_status ON ohm_nodes(task_status) WHERE task_status IS NOT NULL",
+            "CREATE INDEX IF NOT EXISTS idx_nodes_assigned_to ON ohm_nodes(assigned_to) WHERE assigned_to IS NOT NULL",
+            "CREATE INDEX IF NOT EXISTS idx_nodes_due_date ON ohm_nodes(due_date) WHERE due_date IS NOT NULL",
         ],
     ),
     (
@@ -995,32 +993,22 @@ def _apply_migrations(conn: "DuckDBPyConnection") -> None:
                 pass
 
             # Run migration statements in a transaction for atomicity
-            migration_errors: list[tuple[str, Exception]] = []
             try:
                 conn.execute("BEGIN TRANSACTION")
                 for stmt in statements:
                     try:
                         conn.execute(stmt)
-                    except Exception as stmt_err:
-                        err_msg = str(stmt_err).lower()
-                        if any(
-                            safe in err_msg
-                            for safe in (
-                                "already exists",
-                                "duplicate",
-                                "duplicate key",
-                                "column name",
-                                "not implemented",
-                                "not supported",
-                            )
-                        ):
-                            continue
-                        migration_errors.append((stmt, stmt_err))
-                if migration_errors:
-                    raise MigrationError(
-                        f"Migration {version} ({description}) failed: "
-                        + "; ".join(f"{s[:80]}: {e}" for s, e in migration_errors)
-                    )
+                    except Exception as e:
+                        # DuckDB ALTER TABLE ADD COLUMN fails if column exists.
+                        # Only swallow CatalogException (duplicate column/table/index).
+                        # Re-raise everything else (disk full, type mismatch, etc.) (OHM-exur).
+                        err_msg = str(e).lower()
+                        if any(s in err_msg for s in ("already exists", "duplicate", "already a column", "column with name")):
+                            pass  # Idempotent — column/table/index already exists
+                        elif "not implemented" in err_msg and "index" in err_msg:
+                            pass  # DuckDB version doesn't support this index type (e.g., partial indexes) — safe to skip
+                        else:
+                            raise
                 conn.execute("COMMIT")
             except Exception:
                 try:

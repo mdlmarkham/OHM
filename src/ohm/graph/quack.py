@@ -366,20 +366,15 @@ def query_remote(
     if resolved_token:
         resolved_token = validate_quack_token(resolved_token)
 
-    # Use parameterised query for uri and sql to prevent SQL injection (OHM-l0cx).
-    # uri is also protected by validate_quack_uri(); token by validate_quack_token().
-    # Named-keyword syntax (token := $3) is required because quack_query's token
-    # param is keyword-only in the extension API.
-    if resolved_token:
-        result = conn.execute(
-            "SELECT * FROM quack_query($1, $2, token := $3)",
-            [uri, sql, resolved_token],
-        )
-    else:
-        result = conn.execute(
-            "SELECT * FROM quack_query($1, $2)",
-            [uri, sql],
-        )
+    # Validate SQL to prevent injection into f-string (OHM-5gpr)
+    # quack_query is a DuckDB macro — we can't parameterize the SQL argument,
+    # so we validate it the same way we validate URI/token.
+    if "'" in sql or ";" in sql.split("--")[0]:
+        raise ValueError("Quack query SQL must not contain single quotes or semicolons outside comments")
+
+    # Use quack_query function
+    token_clause = f", token := '{resolved_token}'" if resolved_token else ""
+    result = conn.execute(f"SELECT * FROM quack_query('{uri}', '{sql}'{token_clause})")
 
     columns = [desc[0] for desc in result.description]
     return [dict(zip(columns, row)) for row in result.fetchall()]

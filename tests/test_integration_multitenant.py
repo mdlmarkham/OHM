@@ -60,6 +60,7 @@ def _start_mt_server(tmp_path, admin_token="admin-secret", no_auth=False):
     )
     server.allow_reuse_address = True
     server.daemon_threads = True
+    server.request_queue_size = 128  # OHM-yv35: avoid connection resets under burst load
     server.server_bind()
     server.server_activate()
     port = server.server_address[1]
