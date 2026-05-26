@@ -130,6 +130,10 @@ class GraphReader(Protocol):
         """
         ...
 
+    def get_node(self, node_id: str) -> NodeRecord | None:
+        """Get a single node by ID, or None if not found."""
+        ...
+
     def get_observations(self, node_id: str) -> list[ObservationRecord]:
         """Return non-deleted observations attached to the given node."""
         ...
@@ -237,6 +241,11 @@ class DuckDBGraphReader:
             )
             for r in rows
         ]
+
+    def get_node(self, node_id: str) -> NodeRecord | None:
+        """Get a single node by ID, or None if not found."""
+        nodes = self.get_nodes(ids=[node_id])
+        return nodes[0] if nodes else None
 
     def get_nodes(
         self,
@@ -359,6 +368,11 @@ class MockGraphReader:
         if layers is not None:
             result = [e for e in result if e.layer in layers]
         return result
+
+    def get_node(self, node_id: str) -> NodeRecord | None:
+        """Get a single node by ID, or None if not found."""
+        nodes = self.get_nodes(ids=[node_id])
+        return nodes[0] if nodes else None
 
     def get_nodes(
         self,

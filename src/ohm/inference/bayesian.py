@@ -620,6 +620,12 @@ def build_bayesian_network(
     #   not when the parent is "bad" (state 0). This is the inverse of CAUSES.
     DEFAULT_LEAK = leak_probability  # Baseline probability of bad outcome when parents are good
 
+    # OHM-a689: Track capped edges for model cleanup.
+    # When parent capping removes edges, those edges must also be removed
+    # from the model to prevent pgmpy check_model() failing with
+    # "CPD doesn't have proper parents associated with it".
+    capped_parent_edges: list[tuple[str, str]] = []
+
     for child_safe, pedges in parent_edges.items():
         parents = [safe_names[e["from"]] for e in pedges]
         n_parents = len(parents)
@@ -646,6 +652,12 @@ def build_bayesian_network(
             for e in residual_edges:
                 residual_survival *= 1.0 - e["probability"]
             residual_leak = 1.0 - residual_survival
+
+            # Track capped edges for model cleanup.
+            # These edges are removed from the CPT but still in model.edges(),
+            # which causes pgmpy check_model() to fail.
+            for e in residual_edges:
+                capped_parent_edges.append((safe_names[e["from"]], child_safe))
 
         # Combine residual leak with base leak.
         # If we dropped parents, their combined effect is added to leak.
@@ -716,6 +728,13 @@ def build_bayesian_network(
                     clamped_true[i] = 0.5
             cpd = TabularCPD(child_safe, 2, [clamped_false, clamped_true], evidence=parents, evidence_card=[2] * n_parents)
         cpds.append(cpd)
+
+    # OHM-a689: Remove capped parent edges from the model before adding CPDs.
+    # When parent capping removes edges, those edges must be removed from the model
+    # to prevent pgmpy check_model() failing with "CPD doesn't have proper parents".
+    if capped_parent_edges:
+        model.remove_edges_from(capped_parent_edges)
+        logger.info(f"Removed {len(capped_parent_edges)} capped edges from Bayesian model")
 
     model.add_cpds(*cpds)
 
