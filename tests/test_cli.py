@@ -195,8 +195,10 @@ class TestCLIParsing:
         os.environ["OHM_TENANTS_DIR"] = str(tenants_dir)
         try:
             conn = _get_db(args)
-            result = conn.execute("SELECT COUNT(*) FROM ohm_nodes").fetchone()
-            assert result[0] == 0
+            total = conn.execute("SELECT COUNT(*) FROM ohm_nodes").fetchone()
+            non_agent = conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE type != 'agent'").fetchone()
+            assert total[0] > 0, "Tenant DB should have seed agents"
+            assert non_agent[0] == 0, "Tenant DB should have no user data, only seed agents"
         finally:
             conn.close()
             del os.environ["OHM_TENANTS_DIR"]
