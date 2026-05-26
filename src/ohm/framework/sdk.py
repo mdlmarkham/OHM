@@ -1002,6 +1002,67 @@ class Graph:
 
         return query_source_reliability(self._conn, source_agent)
 
+    def task_complete(
+        self,
+        task_node_id_or_label: str,
+        *,
+        completion_confidence: float = 1.0,
+        derived_pattern_ids: list[str] | None = None,
+        notes: str | None = None,
+    ) -> dict[str, Any]:
+        """Record task completion and link to any discovered patterns.
+
+        When an agent marks a task as done, this automatically:
+        1. Writes an observation on the task node with the completion confidence
+        2. Creates DERIVES_FROM edges from the task to any pattern nodes discovered
+
+        Args:
+            task_node_id_or_label: Node ID or label of the completed task.
+            completion_confidence: How confident we are in the task result (0-1).
+            derived_pattern_ids: Optional list of pattern node IDs discovered during this task.
+                DERIVES_FROM edges will be created from task -> pattern.
+            notes: Optional notes about the completion.
+
+        Returns:
+            Dict with task_id, observation_id, and any derived edges created.
+        """
+        task_id = self._resolve_label_or_id(task_node_id_or_label, create_if_missing=False)
+
+        result = {
+            "task_id": task_id,
+            "observation_id": None,
+            "derived_edges_created": 0,
+        }
+
+        obs = self.observe(
+            task_id,
+            obs_type="task_completion",
+            value=completion_confidence,
+            sigma=0.1 * (1.0 - completion_confidence),
+            notes=notes or f"Task completed by {self.actor}",
+        )
+        result["observation_id"] = obs.get("id")
+
+        if derived_pattern_ids:
+            from ohm.queries import create_edge
+
+            for pattern_id in derived_pattern_ids:
+                try:
+                    create_edge(
+                        self._conn,
+                        from_node=task_id,
+                        to_node=pattern_id,
+                        edge_type="DERIVES_FROM",
+                        layer="L2",
+                        created_by=self.actor,
+                        confidence=completion_confidence,
+                    )
+                    result["derived_edges_created"] += 1
+                except Exception:
+                    continue
+
+        return result
+
     def neighborhood(
         self,
         node_id: str,

@@ -591,6 +591,58 @@ class TestSourceReliability:
         assert result["p_accurate"] is None
 
 
+class TestTaskComplete:
+    """Tests for SDK task_complete() method."""
+
+    def test_task_complete_creates_observation(self, graph):
+        """task_complete creates a task_completion observation."""
+        task = graph.create_node(label="Test Task", node_type="task")
+
+        result = graph.task_complete(task["id"], completion_confidence=0.9)
+
+        assert result["task_id"] == task["id"]
+        assert result["observation_id"] is not None
+        assert result["derived_edges_created"] == 0
+
+        obs = graph._conn.execute(
+            "SELECT type, value FROM ohm_observations WHERE id = ?", [result["observation_id"]]
+        ).fetchone()
+        assert obs[0] == "task_completion"
+        assert obs[1] == pytest.approx(0.9, abs=0.001)
+
+    def test_task_complete_with_patterns(self, graph):
+        """task_complete links to discovered patterns via DERIVES_FROM edges."""
+        task = graph.create_node(label="Research Task", node_type="task")
+        pattern1 = graph.create_node(label="Pattern 1")
+        pattern2 = graph.create_node(label="Pattern 2")
+
+        result = graph.task_complete(
+            task["id"],
+            completion_confidence=0.8,
+            derived_pattern_ids=[pattern1["id"], pattern2["id"]],
+            notes="Found patterns",
+        )
+
+        assert result["task_id"] == task["id"]
+        assert result["observation_id"] is not None
+        assert result["derived_edges_created"] == 2
+
+        edges = graph._conn.execute(
+            "SELECT COUNT(*) FROM ohm_edges WHERE from_node = ? AND edge_type = ?",
+            [task["id"], "DERIVES_FROM"],
+        ).fetchone()
+        assert edges[0] == 2
+
+    def test_task_complete_by_label(self, graph):
+        """task_complete accepts a node label via _resolve_label_or_id."""
+        task = graph.create_node(label="Labeled Task", node_type="task")
+
+        result = graph.task_complete("Labeled Task", completion_confidence=0.75)
+
+        assert result["task_id"] == task["id"]
+        assert result["observation_id"] is not None
+
+
 class TestThreatClusterSDK:
     """Tests for SDK threat_cluster() method."""
 
