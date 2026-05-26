@@ -679,6 +679,7 @@ def bayesian_inference(
     leak_probability: float = 0.15,
     root_prior: float = 0.3,
     half_life_days: float = 0.0,
+    observation_window_days: float | None = None,
 ) -> dict[str, Any]:
     """Run Bayesian inference on the OHM graph.
 
@@ -717,7 +718,7 @@ def bayesian_inference(
 
     # Build the Bayesian network scoped around target and evidence nodes
     scope_nodes = [target] + list(evidence.keys())
-    network = build_bayesian_network(reader, edge_types=edge_types, layers=layers, root_nodes=scope_nodes, root_prior=root_prior, half_life_days=half_life_days)
+    network = build_bayesian_network(reader, edge_types=edge_types, layers=layers, root_nodes=scope_nodes, root_prior=root_prior, half_life_days=half_life_days, observation_window_days=observation_window_days)
 
     if network is None:
         return {
