@@ -326,3 +326,30 @@ class InferenceHandlerMixin:
 
         result = compute_nash(payoff_matrices, players)
         self._json_response(200, result)
+
+    def _get_discover(self, path: str, qs: dict) -> None:
+        """GET /discover — causal structure discovery from observation data."""
+        from ohm.validation import validate_identifier
+
+        nodes_str = qs.get("nodes", [""])[0]
+        node_ids = [validate_identifier(n.strip()) for n in nodes_str.split(",") if n.strip()] if nodes_str else None
+        method = qs.get("method", ["pc"])[0]
+        if method not in ("pc", "ges", "both"):
+            self._json_response(400, {"error": "invalid_parameter", "message": "?method must be pc, ges, or both"})
+            return
+        alpha = float(qs.get("alpha", ["0.05"])[0])
+        min_obs = int(qs.get("min_observations", ["5"])[0])
+        indep_test = qs.get("indep_test", ["fisherz"])[0]
+        score_class = qs.get("score_class", ["local_score_BIC"])[0]
+        from ohm.inference.discovery import discover_causal
+
+        result = discover_causal(
+            self.current_store.conn,
+            node_ids=node_ids,
+            method=method,
+            alpha=alpha,
+            min_observations=min_obs,
+            indep_test=indep_test,
+            score_class=score_class,
+        )
+        self._json_response(200, result)
