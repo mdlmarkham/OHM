@@ -28,7 +28,7 @@ ADR-009: NEGATES edges have inverted probability semantics.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from ohm.validation import validate_identifier
@@ -163,6 +163,7 @@ def build_bayesian_network(
     preferred_edges: set[tuple[str, str]] | None = None,
     customer_id: str | None = None,
     half_life_days: float = 0.0,
+    observation_window_days: float | None = None,
 ) -> dict[str, Any] | None:
     """Build a BayesianNetwork from OHM edges with probability/confidence values.
 
@@ -486,6 +487,13 @@ def build_bayesian_network(
                 o for o in reader.get_observations(node_id)
                 if o.value is not None and o.scale in ("probability", "unknown")
             ]
+            # Filter to observation_window_days if specified
+            if observation_window_days is not None and observation_window_days > 0:
+                cutoff = now - timedelta(days=observation_window_days)
+                _obs = [
+                    o for o in _obs
+                    if o.created_at and datetime.fromisoformat(str(o.created_at)) >= cutoff
+                ]
             if _obs:
                 total_weight = 0.0
                 weighted_sum = 0.0
