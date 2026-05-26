@@ -191,6 +191,49 @@ class Graph:
             "schema_version": get_schema_version(self._conn),
         }
 
+    def _resolve_label_or_id(
+        self, node_id_or_label: str, *, create_if_missing: bool = False
+    ) -> str:
+        """Resolve a node_id or label to a node_id.
+
+        Heuristic: if the string matches UUID pattern (36 chars with 4 hyphens),
+        treat as ID. Otherwise search by label first, then try as ID.
+
+        Args:
+            node_id_or_label: Node ID or label.
+            create_if_missing: If True and input is a label (not ID), create the node.
+
+        Returns:
+            The resolved node_id.
+
+        Raises:
+            NodeNotFoundError: If not found and create_if_missing=False.
+        """
+        import re
+
+        if len(node_id_or_label) == 36 and node_id_or_label.count("-") == 4:
+            return node_id_or_label
+
+        row = self._conn.execute(
+            "SELECT id FROM ohm_nodes WHERE label = ?", [node_id_or_label]
+        ).fetchone()
+        if row:
+            return row[0]
+
+        row = self._conn.execute(
+            "SELECT id FROM ohm_nodes WHERE id = ?", [node_id_or_label]
+        ).fetchone()
+        if row:
+            return row[0]
+
+        if create_if_missing:
+            result = self.create_node(label=node_id_or_label)
+            return result["id"]
+
+        from ohm.exceptions import NodeNotFoundError
+
+        raise NodeNotFoundError(f"No node found with label '{node_id_or_label}'")
+
     def upgrade(self, *, dry_run: bool = False) -> dict[str, Any]:
         """Apply pending schema migrations.
 
@@ -460,7 +503,7 @@ class Graph:
 
     def observe(
         self,
-        node_id: str,
+        node_id_or_label: str,
         *,
         obs_type: str = "measurement",
         value: float | None = None,
@@ -470,26 +513,41 @@ class Graph:
         notes: str | None = None,
         source_name: str | None = None,
         source_url: str | None = None,
+        create_if_missing: bool = False,
     ) -> dict[str, Any]:
         """Record an observation on a node. Returns the full observation record.
 
         Args:
-            node_id: Node to observe.
+            node_id_or_label: Node ID or label to observe. If label is provided
+                and create_if_missing=False (default), will raise if not found.
+                If create_if_missing=True, will create the node first.
             obs_type: Type of observation (measurement, anomaly, pattern, etc.).
                 Defaults to 'measurement' to match REST API default.
             value: Numeric observation value.
             baseline: Expected/baseline value for comparison.
             sigma: Standard deviation/confidence in the observation.
+                If not provided and value is given, auto-computes as 0.1 * (1 - value).
             source: Observation source (analysis, research, conversation, signal).
+                Defaults to 'analysis'.
             notes: Free-text notes about the observation.
             source_name: Name of the source agent or system.
             source_url: URL reference for the observation source.
+            create_if_missing: If True and node_id_or_label is a label (not an ID),
+                create the node first. Default False.
+
+        Returns:
+            The observation record.
         """
         from ohm.queries import create_observation
 
+        if sigma is None and value is not None:
+            sigma = 0.1 * (1.0 - value)
+
+        resolved_id = self._resolve_label_or_id(node_id_or_label, create_if_missing=create_if_missing)
+
         return create_observation(
             self._conn,
-            node_id=node_id,
+            node_id=resolved_id,
             obs_type=obs_type,
             value=value,
             baseline=baseline,

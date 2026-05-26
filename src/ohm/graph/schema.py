@@ -178,6 +178,16 @@ VALID_OBSERVATION_SOURCES = frozenset(
     }
 )
 
+VALID_OBSERVATION_SCALES = frozenset(
+    {
+        "probability",
+        "count",
+        "currency",
+        "percent",
+        "unknown",
+    }
+)
+
 # ── Urgency / Priority ──────────────────────────────────────────────────────
 
 VALID_URGENCY = frozenset({"low", "normal", "high", "critical"})
@@ -631,6 +641,7 @@ DDL_STATEMENTS: list[str] = [
         baseline    FLOAT,
         sigma       FLOAT,
         source      VARCHAR,
+        scale       VARCHAR DEFAULT 'unknown',
         created_by  VARCHAR NOT NULL,
         created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         metadata    JSON,
@@ -940,6 +951,14 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             "CREATE INDEX IF NOT EXISTS idx_feed_time ON ohm_change_feed(occurred_at)",
         ],
     ),
+    (
+        "0.19.0",
+        "add scale column to ohm_observations for value normalization (OHM-33)",
+        [
+            "ALTER TABLE ohm_observations ADD COLUMN scale VARCHAR DEFAULT 'unknown'",
+            "CREATE INDEX IF NOT EXISTS idx_obs_scale ON ohm_observations(scale)",
+        ],
+    ),
 ]
 
 # ── Indexes ─────────────────────────────────────────────────────────────────
@@ -962,6 +981,7 @@ INDEX_DDL: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_obs_edge ON ohm_observations(edge_id);",
     "CREATE INDEX IF NOT EXISTS idx_obs_type ON ohm_observations(type);",
     "CREATE INDEX IF NOT EXISTS idx_obs_created_by ON ohm_observations(created_by);",
+    "CREATE INDEX IF NOT EXISTS idx_obs_scale ON ohm_observations(scale);",
     # Change feed index
     "CREATE INDEX IF NOT EXISTS idx_feed_agent ON ohm_change_feed(agent_name);",
     "CREATE INDEX IF NOT EXISTS idx_feed_time ON ohm_change_feed(occurred_at);",

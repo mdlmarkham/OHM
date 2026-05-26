@@ -82,6 +82,7 @@ class ObservationRecord:
     value: float | None = None
     source: str | None = None
     created_by: str | None = None
+    scale: str = "unknown"
 
 
 # ── Protocol ──────────────────────────────────────────────────────────────────
@@ -297,7 +298,7 @@ class DuckDBGraphReader:
 
     def get_observations(self, node_id: str) -> list[ObservationRecord]:
         rows = self._conn.execute(
-            "SELECT id, node_id, edge_id, type, value, source, created_by FROM ohm_observations WHERE node_id = ? AND deleted_at IS NULL",
+            "SELECT id, node_id, edge_id, type, value, source, created_by, scale FROM ohm_observations WHERE node_id = ? AND deleted_at IS NULL",
             [node_id],
         ).fetchall()
         return [
@@ -309,6 +310,7 @@ class DuckDBGraphReader:
                 value=float(r[4]) if r[4] is not None else None,
                 source=r[5],
                 created_by=r[6],
+                scale=r[7] if len(r) > 7 and r[7] is not None else "unknown",
             )
             for r in rows
         ]

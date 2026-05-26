@@ -1257,6 +1257,7 @@ class OhmStore:
         notes: Optional[str] = None,
         source_name: Optional[str] = None,
         source_url: Optional[str] = None,
+        scale: Optional[str] = None,
         agent_name: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
         """Create an observation. Attributed to the given agent.
@@ -1266,17 +1267,28 @@ class OhmStore:
             notes: Optional free-text notes for the observation.
             source_name: Name of the source (e.g., 'Reuters').
             source_url: URL of the source (e.g., 'https://reuters.com/...').
+            scale: Measurement scale — 'probability' (0-1), 'count', 'currency', 'percent', or 'unknown'.
         """
+        from ohm.graph.schema import VALID_OBSERVATION_SCALES
+
+        if scale is not None and scale not in VALID_OBSERVATION_SCALES:
+            raise ValueError(
+                f"Invalid scale '{scale}' — must be one of: {', '.join(sorted(VALID_OBSERVATION_SCALES))}"
+            )
+        if scale == "probability" and value is not None and (value < 0.0 or value > 1.0):
+            raise ValueError(
+                f"Observation value {value} is outside [0, 1] for scale='probability'"
+            )
         actor = agent_name or self.agent_name
         now = self._now()
         self.conn.execute(
             """
             INSERT INTO ohm_observations
                 (node_id, edge_id, type, value, baseline, sigma, source,
-                 created_by, created_at, notes, source_name, source_url)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 created_by, created_at, notes, source_name, source_url, scale)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            [node_id, edge_id, type, value, baseline, sigma, source, actor, now, notes, source_name, source_url],
+            [node_id, edge_id, type, value, baseline, sigma, source, actor, now, notes, source_name, source_url, scale],
         )
 
         obs = self.execute_one(
