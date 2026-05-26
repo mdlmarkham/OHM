@@ -1059,6 +1059,36 @@ class TestDecisionNode:
         )
         assert node["utility_scale"] == pytest.approx(0.0)
 
+    def test_create_decision_node_with_usd_utility(self, test_db):
+        """Decision nodes should accept utility_usd_per_day and utility_currency."""
+        from ohm.queries import create_node
+
+        node = create_node(
+            test_db,
+            label="Hormuz Response",
+            node_type="decision",
+            created_by="metis",
+            utility_scale=0.9,
+            utility_usd_per_day=5_000_000.0,
+            utility_currency="USD",
+        )
+        assert node["utility_usd_per_day"] == pytest.approx(5_000_000.0)
+        assert node["utility_currency"] == "USD"
+
+    def test_usd_utility_null_by_default(self, test_db):
+        """utility_usd_per_day should be NULL when not specified."""
+        from ohm.queries import create_node
+
+        node = create_node(
+            test_db,
+            label="Plain Decision",
+            node_type="decision",
+            created_by="metis",
+            utility_scale=0.5,
+        )
+        assert node["utility_usd_per_day"] is None
+        assert node["utility_currency"] is None
+
     def test_utility_scale_one_accepted(self, test_db):
         """utility_scale=1.0 should be accepted (being wrong matters a lot)."""
         from ohm.queries import create_node

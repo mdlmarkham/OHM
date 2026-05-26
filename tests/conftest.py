@@ -117,15 +117,20 @@ def create_sample_node(
     visibility: str = "team",
     provenance: str = "conversation",
     confidence: float = 1.0,
+    utility_scale: float | None = None,
+    utility_usd_per_day: float | None = None,
+    utility_currency: str | None = None,
 ) -> str:
     """Insert a sample node and return its ID."""
     node_id = f"{label.lower().replace(' ', '_')}_{uuid.uuid4().hex[:6]}"
     conn.execute(
         """
-        INSERT INTO ohm_nodes (id, label, type, created_by, visibility, provenance, confidence)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO ohm_nodes (id, label, type, created_by, visibility, provenance, confidence,
+                               utility_scale, utility_usd_per_day, utility_currency)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        [node_id, label, node_type, created_by, visibility, provenance, confidence],
+        [node_id, label, node_type, created_by, visibility, provenance, confidence,
+         utility_scale, utility_usd_per_day, utility_currency],
     )
     return node_id
 

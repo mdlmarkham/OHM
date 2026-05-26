@@ -1680,6 +1680,14 @@ class OhmStore:
         if row:
             last_sync = row[0]
 
+        return {
+            "pushed": pushed,
+            "pulled": pulled,
+            "last_sync": last_sync,
+            "ducklake_attached": ducklake_attached,
+            "ducklake_path": ducklake_path,
+        }
+
     def check_ducklake_health(self, alias: str = "ohm_lake") -> dict[str, Any]:
         """Check DuckLake sync health and detect corruption (OHM-qiio).
 

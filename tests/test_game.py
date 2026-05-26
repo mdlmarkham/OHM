@@ -8,11 +8,12 @@ from ohm.game import compute_nash, extract_game, game_to_matrix
 
 
 class MockNode:
-    def __init__(self, id, type, utility_scale=None, utility_usd_per_day=None):
+    def __init__(self, id, type, utility_scale=None, utility_usd_per_day=None, utility_currency=None):
         self.id = id
         self.type = type
         self.utility_scale = utility_scale
         self.utility_usd_per_day = utility_usd_per_day
+        self.utility_currency = utility_currency
 
 
 class MockEdge:
@@ -148,3 +149,51 @@ class TestGameToMatrix:
         )
         assert result["n_players"] == 2
         assert len(result["payoff_matrices"]) == 2
+
+
+class TestUtilityUsdPerDay:
+    def test_extract_game_with_usd_payoffs(self):
+        nodes = [
+            MockNode("target", "concept", utility_scale=0.8),
+            MockNode("dec1", "decision", utility_scale=0.9, utility_usd_per_day=5_000_000, utility_currency="USD"),
+            MockNode("dec2", "decision", utility_scale=0.7, utility_usd_per_day=500_000, utility_currency="USD"),
+        ]
+        edges = [
+            MockEdge("dec1", "target", "CAUSES", confidence=0.8, probability=0.7),
+            MockEdge("dec2", "target", "CAUSES", confidence=0.6, probability=0.5),
+        ]
+        reader = MockReader(nodes, edges)
+        result = extract_game(reader, "target")
+        assert "error" not in result
+        assert result["decision_utilities"]["dec1"]["utility_usd"] == 5_000_000
+        assert result["decision_utilities"]["dec2"]["utility_usd"] == 500_000
+
+    def test_extract_game_falls_back_to_utility_scale(self):
+        nodes = [
+            MockNode("target", "concept", utility_scale=0.8),
+            MockNode("dec1", "decision", utility_scale=0.9),
+            MockNode("dec2", "decision", utility_scale=0.7),
+        ]
+        edges = [
+            MockEdge("dec1", "target", "CAUSES", confidence=0.8, probability=0.7),
+            MockEdge("dec2", "target", "CAUSES", confidence=0.6, probability=0.5),
+        ]
+        reader = MockReader(nodes, edges)
+        result = extract_game(reader, "target")
+        assert "error" not in result
+        assert result["decision_utilities"]["dec1"]["utility_usd"] is None
+        assert result["decision_utilities"]["dec2"]["utility_usd"] is None
+
+    def test_usd_payoff_normalizes_to_millions(self):
+        nodes = [
+            MockNode("target", "concept", utility_scale=0.8),
+            MockNode("dec1", "decision", utility_scale=0.9, utility_usd_per_day=5_000_000),
+        ]
+        edges = [
+            MockEdge("dec1", "target", "CAUSES", confidence=0.8, probability=0.7),
+        ]
+        reader = MockReader(nodes, edges)
+        result = extract_game(reader, "target")
+        assert "error" not in result
+        payoffs = result["payoff_matrices"][0][0]
+        assert all(abs(p - 5.0) < 0.01 for p in payoffs)

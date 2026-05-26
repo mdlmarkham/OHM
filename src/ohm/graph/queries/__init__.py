@@ -806,6 +806,8 @@ def create_node(
     priority: str | None = None,
     url: str | None = None,
     utility_scale: float | None = None,
+    utility_usd_per_day: float | None = None,
+    utility_currency: str | None = None,
     current_best_action: str | None = None,
     action_alternatives: list[str] | None = None,
 ) -> dict[str, Any]:
@@ -837,10 +839,11 @@ def create_node(
             """UPDATE ohm_nodes SET
                 label = ?, type = ?, content = ?, created_by = ?,
                 visibility = ?, provenance = ?, confidence = ?, priority = ?, url = ?,
-                utility_scale = ?, current_best_action = ?, action_alternatives = ?,
+                utility_scale = ?, utility_usd_per_day = ?, utility_currency = ?,
+                current_best_action = ?, action_alternatives = ?,
                 deleted_at = NULL, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?""",
-            [label, node_type, content, created_by, visibility, provenance, confidence, priority, url, utility_scale, current_best_action, alternatives_json, node_id],
+            [label, node_type, content, created_by, visibility, provenance, confidence, priority, url, utility_scale, utility_usd_per_day, utility_currency, current_best_action, alternatives_json, node_id],
         )
         _log_change(conn, "ohm_nodes", node_id, "UPDATE", created_by)
         return _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node_id]))[0]
@@ -848,9 +851,9 @@ def create_node(
     conn.execute(
         """INSERT INTO ohm_nodes
            (id, label, type, content, created_by, visibility, provenance, confidence, priority, url,
-            utility_scale, current_best_action, action_alternatives)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        [node_id, label, node_type, content, created_by, visibility, provenance, confidence, priority, url, utility_scale, current_best_action, alternatives_json],
+            utility_scale, utility_usd_per_day, utility_currency, current_best_action, action_alternatives)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [node_id, label, node_type, content, created_by, visibility, provenance, confidence, priority, url, utility_scale, utility_usd_per_day, utility_currency, current_best_action, alternatives_json],
     )
     _log_change(conn, "ohm_nodes", node_id, "INSERT", created_by)
     # Return full node record

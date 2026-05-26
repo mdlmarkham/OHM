@@ -363,6 +363,8 @@ class Graph:
         priority: str | None = None,
         url: str | None = None,
         utility_scale: float | None = None,
+        utility_usd_per_day: float | None = None,
+        utility_currency: str | None = None,
         current_best_action: str | None = None,
         action_alternatives: list[str] | None = None,
     ) -> dict[str, Any]:
@@ -373,7 +375,8 @@ class Graph:
         all fields (id, label, type, content, created_by, created_at, etc.).
 
         For decision nodes (node_type='decision'), set utility_scale (0-1),
-        current_best_action, and action_alternatives to enable VoI analysis.
+        utility_usd_per_day (dollar-valued payoff), and action_alternatives to
+        enable VoI analysis and game-theoretic payoffs.
         """
         from ohm.queries import create_node
 
@@ -389,6 +392,8 @@ class Graph:
             priority=priority,
             url=url,
             utility_scale=utility_scale,
+            utility_usd_per_day=utility_usd_per_day,
+            utility_currency=utility_currency,
             current_best_action=current_best_action,
             action_alternatives=action_alternatives,
         )
