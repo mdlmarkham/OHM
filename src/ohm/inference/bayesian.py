@@ -28,7 +28,7 @@ ADR-009: NEGATES edges have inverted probability semantics.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from ohm.validation import validate_identifier
@@ -222,6 +222,7 @@ def build_bayesian_network(
         root_prior,
         leak_probability,
         default_probability,
+        half_life_days,
     )
 
     # Check cache — invalidate if graph_generation has changed
@@ -463,7 +464,7 @@ def build_bayesian_network(
     # Get prior probabilities for root nodes
     node_priors = {}
     root_safe_names = set()
-    now = datetime.now(timezone.utc)
+    now = datetime.now()
     for node_id in node_ids:
         safe = safe_names[node_id]
         if safe not in model_node_set:
@@ -487,7 +488,7 @@ def build_bayesian_network(
                             weight = 0.5 ** (age_days / half_life_days)
                         except (ValueError, TypeError):
                             weight = 1.0
-                    weighted_sum += o.value * weight
+                    weighted_sum += float(o.value) * weight
                     total_weight += weight
                 prior = weighted_sum / total_weight if total_weight > 0 else None
             else:

@@ -172,15 +172,17 @@ def create_sample_observation(
     value: float = 1.0,
     source: str = "analysis",
     created_by: str = "test_agent",
+    scale: str = "probability",
+    created_at: str | None = None,
 ) -> str:
     """Insert a sample observation and return its ID."""
     obs_id = str(uuid.uuid4())
     conn.execute(
         """
-        INSERT INTO ohm_observations (id, node_id, type, value, source, created_by)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO ohm_observations (id, node_id, type, value, source, created_by, scale, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        [obs_id, node_id, obs_type, value, source, created_by],
+        [obs_id, node_id, obs_type, value, source, created_by, scale, created_at],
     )
     return obs_id
 

@@ -287,11 +287,11 @@ class AnalysisHandlerMixin:
             "SELECT * FROM ohm_observations WHERE node_id = ? AND deleted_at IS NULL ORDER BY created_at DESC",
             [node_id],
         )
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from ohm.methods import compound_confidence
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now()
 
         def _obs_confidence(obs: dict) -> float:
             sigma = obs.get("sigma")

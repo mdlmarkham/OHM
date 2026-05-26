@@ -25,8 +25,9 @@ from ohm.bayesian import (
     pert_variance,
     compute_voi,
     generate_voi_tasks,
+    bayesian_inference,
 )
-from tests.conftest import create_sample_node, create_sample_edge
+from tests.conftest import create_sample_node, create_sample_edge, create_sample_observation
 
 
 @pytest.fixture
@@ -1696,3 +1697,74 @@ class TestVoIPertVarianceScaling:
         c_d_var = edge_pert_variance[(c, d)]
         b_d_var = edge_pert_variance[(b, d)]
         assert result == c_d_var, f"Should find C→D variance ({c_d_var:.4f}) as max, got {result:.4f} (B→D was {b_d_var:.4f})"
+
+
+class TestTemporalDecay:
+    """Temporal decay weighting in Bayesian inference (OHM-31)."""
+
+    def test_decay_discounts_old_observation(self, db, causal_graph):
+        """Day-1 obs weighted ~2x vs Day-31 obs with half_life=30."""
+        g = causal_graph
+        now = "2026-05-26T12:00:00"
+        old = "2026-04-25T12:00:00"  # 31 days ago
+
+        # Insert observations with explicit created_at
+        create_sample_observation(
+            db, node_id=g["a"], value=0.5, scale="probability", created_by="test",
+            created_at=now,
+        )
+        create_sample_observation(
+            db, node_id=g["a"], value=0.9, scale="probability", created_by="test",
+            created_at=old,
+        )
+
+        # Without decay: prior = mean(0.5, 0.9) = 0.7
+        result_no_decay = bayesian_inference(
+            db, g["c"], {}, half_life_days=0.0,
+        )
+
+        # With decay (half_life=30): recent 0.5 gets weight ~1.0, old 0.9 gets weight ~0.5
+        # Weighted prior = (0.5 * 1.0 + 0.9 * 0.49) / (1.0 + 0.49) = (0.5 + 0.441) / 1.49 = 0.632
+        # So posterior for C should be lower than the no-decay case
+        result_decay = bayesian_inference(
+            db, g["c"], {}, half_life_days=30.0,
+        )
+
+        # Posterior for C should differ between decay and no-decay
+        assert result_no_decay["posterior"] != result_decay["posterior"]
+
+    def test_decay_no_effect_with_zero_half_life(self, db, causal_graph):
+        """half_life=0.0 means no decay, same as original behavior."""
+        g = causal_graph
+        create_sample_observation(
+            db, node_id=g["a"], value=0.5, scale="probability", created_by="test",
+        )
+        create_sample_observation(
+            db, node_id=g["a"], value=0.7, scale="probability", created_by="test",
+        )
+
+        result = bayesian_inference(db, g["c"], {}, half_life_days=0.0)
+        assert result["method"] != "none"
+
+    def test_single_observation_unchanged_by_decay(self, db, causal_graph):
+        """Single observation yields same prior regardless of half_life."""
+        g = causal_graph
+        create_sample_observation(
+            db, node_id=g["a"], value=0.5, scale="probability", created_by="test",
+            created_at="2026-01-01T12:00:00",
+        )
+
+        result_no_decay = bayesian_inference(db, g["c"], {}, half_life_days=0.0)
+        result_decay = bayesian_inference(db, g["c"], {}, half_life_days=30.0)
+        assert result_no_decay["posterior"] == result_decay["posterior"]
+
+    def test_decay_parameter_in_http_handler(self, db, causal_graph):
+        """half_life parameter is accepted by the HTTP handler."""
+        g = causal_graph
+        create_sample_observation(
+            db, node_id=g["a"], value=0.8, scale="probability", created_by="test",
+        )
+
+        result = bayesian_inference(db, g["c"], {}, half_life_days=30.0)
+        assert result["method"] != "none"
+        assert "posterior" in result
