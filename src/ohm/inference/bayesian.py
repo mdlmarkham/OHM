@@ -46,6 +46,8 @@ logger = logging.getLogger(__name__)
 # Invalidated when graph_generation counter increments.
 _bayesian_network_cache: dict[tuple, tuple[int, dict[str, Any]]] = {}
 
+MAX_CPT_PARENTS = 8
+
 from .pert import compute_pert_mean as _compute_pert_mean
 from .pert import compute_pert_variance as _compute_pert_variance
 from .pert import scale_pert_variance as _scale_pert_variance
@@ -536,6 +538,30 @@ def build_bayesian_network(
         # leak = leak_probability * (1 - avg_confidence)
         avg_confidence = sum(e["confidence"] for e in pedges) / len(pedges) if pedges else 0.0
         leak = DEFAULT_LEAK * (1.0 - avg_confidence)
+
+        # OHM-a689: Cap parents to prevent CPT explosion (2^16 = 65,536 entries).
+        # When a node has > MAX_CPT_PARENTS parents, keep the top N by confidence
+        # and aggregate the rest into a residual leak adjustment.
+        residual_leak = 0.0
+        if n_parents > MAX_CPT_PARENTS:
+            pedges_sorted = sorted(pedges, key=lambda e: e["confidence"], reverse=True)
+            residual_edges = pedges_sorted[MAX_CPT_PARENTS:]
+            pedges = pedges_sorted[:MAX_CPT_PARENTS]
+            n_parents = len(pedges)
+            parents = [safe_names[e["from"]] for e in pedges]
+            # Aggregate residual parents into a combined failure probability.
+            # Use noisy-OR aggregation: 1 - Π(1 - p_i) for residual parents only.
+            residual_survival = 1.0
+            for e in residual_edges:
+                residual_survival *= 1.0 - e["probability"]
+            residual_leak = 1.0 - residual_survival
+
+        # Combine residual leak with base leak.
+        # If we dropped parents, their combined effect is added to leak.
+        if residual_leak > 0.0:
+            leak = 1.0 - (1.0 - leak) * (1.0 - residual_leak)
+            leak = max(1e-6, min(0.5, leak))
+
         # Clamp leak to [1e-6, 0.5] to avoid degenerate CPTs.
         # OHM-m0h: Previous floor of 0.01 destroyed confidence modulation —
         # high-confidence edges (leak ~0.0075) were raised to 0.01, making

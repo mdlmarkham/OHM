@@ -64,6 +64,21 @@ DEFAULT_CONFIG = {
 _START_TIME = time.time()
 logger = logging.getLogger(__name__)
 
+
+def _prewarm_pgmpy() -> None:
+    """Pre-warm pgmpy imports to avoid 5.3s cold-import penalty on first inference call.
+
+    Called at daemon startup after DB initialization but before accepting connections.
+    Subsequent calls are no-ops (Python's module cache).
+    """
+    try:
+        from pgmpy.inference import VariableElimination
+        from pgmpy.models import BayesianNetwork
+        from pgmpy.factors.discrete import TabularCPD
+        logger.debug("pgmpy pre-warmed (imports loaded)")
+    except ImportError:
+        logger.info("pgmpy not available — Bayesian inference will be disabled")
+
 # ── Security Constants ─────────────────────────────────────
 
 MAX_BODY_SIZE = 1 * 1024 * 1024  # 1 MB — reject bodies larger than this
@@ -1770,6 +1785,9 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
         print(f"TenantManager: {tenants_dir} (cache={max_cached})", file=sys.stderr)
         if "require_read_auth" not in config:
             OhmHandler.require_read_auth = True
+
+    # ── pgmpy pre-warm (OHM-a689): avoid 5.3s cold-import penalty on first inference ──
+    _prewarm_pgmpy()
 
     # ── Quack integration ──────────────────────────────────────────────
     quack_info: dict[str, Any] | None = None
