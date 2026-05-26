@@ -678,3 +678,6 @@
 {"id":"int-16841128","kind":"field_change","created_at":"2026-05-26T14:17:50.793181174Z","actor":"root","issue_id":"OHM-od01.6","extra":{"field":"assignee","new_value":"clio","old_value":""}}
 {"id":"int-b2916972","kind":"field_change","created_at":"2026-05-26T14:17:54.735989699Z","actor":"root","issue_id":"OHM-od01.4","extra":{"field":"assignee","new_value":"clio","old_value":""}}
 {"id":"int-4a5aa1a5","kind":"field_change","created_at":"2026-05-26T14:28:13.424912Z","actor":"Matt Markham","issue_id":"OHM-a689","extra":{"field":"status","new_value":"closed","old_value":"open"}}
+{"id":"int-468df7cf","kind":"field_change","created_at":"2026-05-26T14:36:59.4673073Z","actor":"Matt Markham","issue_id":"OHM-od01.1","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
+{"id":"int-eb5fa663","kind":"field_change","created_at":"2026-05-26T14:40:29.4903147Z","actor":"Matt Markham","issue_id":"OHM-1779791713980-28-29e91d9c","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
+{"id":"int-501f7f07","kind":"field_change","created_at":"2026-05-26T14:49:56.7459821Z","actor":"Matt Markham","issue_id":"OHM-od01.1","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
