@@ -117,7 +117,7 @@ def _load_extensions(conn: "duckdb.DuckDBPyConnection") -> None:
     that are already cached locally. FORCE INSTALL re-downloads every time,
     leaving orphaned .tmp- files if interrupted.
     """
-    extensions = ["json"]
+    extensions = ["json", "ducklake"]
     for ext in extensions:
         try:
             conn.execute(f"INSTALL {ext}; LOAD {ext};")
@@ -350,6 +350,15 @@ def _auto_restore_if_empty(conn: "duckdb.DuckDBPyConnection", db_path_str: str) 
         edges = tmp_conn.execute(f"SELECT * FROM ohm_lake.ohm_edges AT (VERSION => {snapshot_id}) WHERE deleted_at IS NULL").fetchall()
         edge_cols = [d[0] for d in tmp_conn.description]
 
+        # Also restore observations if the table exists in DuckLake
+        obs = []
+        obs_cols = []
+        try:
+            obs = tmp_conn.execute(f"SELECT * FROM ohm_lake.ohm_observations AT (VERSION => {snapshot_id})").fetchall()
+            obs_cols = [d[0] for d in tmp_conn.description] if obs else []
+        except Exception:
+            logger.debug("No ohm_observations in DuckLake snapshot, skipping")
+
         if not nodes and not edges:
             return
 
@@ -391,7 +400,27 @@ def _auto_restore_if_empty(conn: "duckdb.DuckDBPyConnection", db_path_str: str) 
             except Exception as e:
                 logger.debug("Skipping duplicate edge %s during auto-restore: %s", edge_id, e, exc_info=True)
 
-        if node_count_restored > 0 or edge_count_restored > 0:
+        obs_count_restored = 0
+        for observation in obs:
+            obs_dict = dict(zip(obs_cols, observation))
+            obs_id = obs_dict.get("id")
+            if not obs_id:
+                continue
+            existing = conn.execute("SELECT id FROM ohm_observations WHERE id = ?", [obs_id]).fetchone()
+            if existing:
+                continue
+            # Only insert columns that exist in production schema and are non-NULL
+            cols = [c for c in obs_cols if c in obs_dict and obs_dict[c] is not None]
+            placeholders = ", ".join(["?"] * len(cols))
+            col_names = ", ".join(cols)
+            values = [obs_dict[c] for c in cols]
+            try:
+                conn.execute(f"INSERT INTO ohm_observations ({col_names}) VALUES ({placeholders})", values)
+                obs_count_restored += 1
+            except Exception as e:
+                logger.debug("Skipping duplicate observation %s during auto-restore: %s", obs_id, e, exc_info=True)
+
+        if node_count_restored > 0 or edge_count_restored > 0 or obs_count_restored:
             conn.execute("CHECKPOINT")
             conn.execute(
                 """INSERT INTO ohm_change_feed
@@ -403,11 +432,12 @@ def _auto_restore_if_empty(conn: "duckdb.DuckDBPyConnection", db_path_str: str) 
                     "AUTO_RESTORE",
                     "ohmd",
                     json.dumps(
-                        {
+                                                {
                             "trigger": "empty_graph_on_startup",
                             "snapshot_id": snapshot_id,
                             "nodes_restored": node_count_restored,
                             "edges_restored": edge_count_restored,
+                            "obs_restored": obs_count_restored,
                         }
                     ),
                 ],

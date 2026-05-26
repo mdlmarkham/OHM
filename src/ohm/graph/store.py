@@ -120,6 +120,8 @@ class OhmStore:
         # Attach DuckLake if available
         if os.path.exists(ducklake_path):
             try:
+                store.conn.execute("INSTALL ducklake FROM core")
+                store.conn.execute("LOAD ducklake")
                 store.conn.execute(f"ATTACH IF NOT EXISTS '{ducklake_path}' AS ohm_lake (TYPE ducklake)")
                 logger.info("DuckLake attached for agent %s at %s", agent_name, ducklake_path)
             except Exception as e:
@@ -266,10 +268,12 @@ class OhmStore:
             ducklake_path = self.ducklake_path
             if ducklake_path and os.path.exists(ducklake_path):
                 try:
+                    conn.execute("INSTALL ducklake FROM core")
+                    conn.execute("LOAD ducklake")
                     conn.execute(f"ATTACH IF NOT EXISTS '{ducklake_path}' AS ohm_lake (TYPE ducklake)")
                     logger.info("DuckLake attached for recovery")
 
-                    for table in ["ohm_nodes", "ohm_edges"]:
+                    for table in ["ohm_nodes", "ohm_edges", "ohm_observations"]:
                         try:
                             dl_cols = conn.execute(
                                 f"PRAGMA table_info('ohm_lake.{table}')"
@@ -363,9 +367,11 @@ class OhmStore:
             return
 
         try:
+            self.conn.execute("INSTALL ducklake FROM core")
+            self.conn.execute("LOAD ducklake")
             self.conn.execute(f"ATTACH IF NOT EXISTS '{ducklake_path}' AS ohm_lake (TYPE ducklake)")
 
-            for table in ["ohm_nodes", "ohm_edges"]:
+            for table in ["ohm_nodes", "ohm_edges", "ohm_observations"]:
                 try:
                     dl_cols = self.conn.execute(
                         f"PRAGMA table_info('ohm_lake.{table}')"

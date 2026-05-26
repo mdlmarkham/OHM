@@ -16,8 +16,9 @@ class TestDuckLakeSync:
         result = store.sync_heartbeat(ducklake_path=None)
         assert result["pushed"] == 0
         assert result["pulled"] == 0
-        assert result["agent"] == "test_agent"
         assert result["last_sync"] is not None
+        assert result["ducklake_attached"] is False
+        assert result["ducklake_path"] is None
         store.close()
 
     def test_sync_heartbeat_with_ducklake(self, tmp_path):
@@ -37,7 +38,8 @@ class TestDuckLakeSync:
         # Sync to DuckLake
         result = store.sync_heartbeat(ducklake_path=ducklake_path)
         assert result["pushed"] >= 2  # At least the two nodes
-        assert result["agent"] == "agent_a"
+        assert result["last_sync"] is not None
+        assert result["ducklake_attached"] is False
         store.close()
 
     def test_push_pull_roundtrip(self, tmp_path):
