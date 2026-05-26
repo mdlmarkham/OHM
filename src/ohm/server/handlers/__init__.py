@@ -22,5 +22,6 @@ See OHM-xily for the full migration plan and design rationale.
 """
 
 from ohm.server.handlers.admin import AdminHandlerMixin
+from ohm.server.handlers.graph import GraphHandlerMixin
 from ohm.server.handlers.infra import InfraHandlerMixin
 from ohm.server.handlers.tenant import TenantHandlerMixin
