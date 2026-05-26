@@ -116,3 +116,57 @@ class TestExpectedSteps:
         assert "target_state" in result
         assert "target_probability" in result
         assert result["target_probability"] > 0
+
+
+class TestSCCCollapse:
+    def test_scc_detection(self, test_db):
+        """Test that SCCs are properly detected in a graph with a cycle."""
+        node_a = create_sample_node(test_db, label="a")
+        node_b = create_sample_node(test_db, label="b")
+        node_c = create_sample_node(test_db, label="c")
+
+        create_sample_edge(test_db, from_node=node_a, to_node=node_b, edge_type="TRANSITIONS_TO", probability=1.0)
+        create_sample_edge(test_db, from_node=node_b, to_node=node_a, edge_type="TRANSITIONS_TO", probability=1.0)
+        create_sample_edge(test_db, from_node=node_b, to_node=node_c, edge_type="TRANSITIONS_TO", probability=1.0)
+
+        result = markov_absorbing_risk(test_db, node_a, edge_types=["TRANSITIONS_TO"])
+
+        assert result["method"] == "markov_absorbing_risk"
+        assert "sccs" in result
+        multi_node_sccs = [s for s in result["sccs"] if len(s) > 1]
+        assert len(multi_node_sccs) == 1
+        assert set(multi_node_sccs[0]) == {node_a, node_b}
+
+    def test_cycle_with_collapse_flag(self, test_db):
+        """Test that SCC collapse can be triggered via collapse_sccs flag."""
+        node_a = create_sample_node(test_db, label="a")
+        node_b = create_sample_node(test_db, label="b")
+        node_c = create_sample_node(test_db, label="c")
+
+        create_sample_edge(test_db, from_node=node_a, to_node=node_b, edge_type="TRANSITIONS_TO", probability=1.0)
+        create_sample_edge(test_db, from_node=node_b, to_node=node_a, edge_type="TRANSITIONS_TO", probability=1.0)
+        create_sample_edge(test_db, from_node=node_b, to_node=node_c, edge_type="TRANSITIONS_TO", probability=1.0)
+
+        from ohm.inference.markov import _build_transition_matrix
+        nodes, matrix, transient, absorbing, sccs = _build_transition_matrix(
+            test_db, edge_types=["TRANSITIONS_TO"], collapse_sccs=True
+        )
+
+        assert len(nodes) < 3
+        assert len(sccs) == 2
+        multi_node_sccs = [s for s in sccs if len(s) > 1]
+        assert len(multi_node_sccs) == 1
+
+    def test_sccs_detected_no_collapse(self, test_db):
+        """Test that SCCs are properly reported even without collapse needed."""
+        node_a = create_sample_node(test_db, label="a")
+        node_b = create_sample_node(test_db, label="b")
+        node_c = create_sample_node(test_db, label="c")
+
+        create_sample_edge(test_db, from_node=node_a, to_node=node_b, edge_type="TRANSITIONS_TO", probability=1.0)
+        create_sample_edge(test_db, from_node=node_b, to_node=node_c, edge_type="TRANSITIONS_TO", probability=1.0)
+
+        result = markov_absorbing_risk(test_db, node_a, edge_types=["TRANSITIONS_TO"])
+
+        assert "sccs" in result
+        assert all(len(scc) == 1 for scc in result["sccs"])
