@@ -149,6 +149,79 @@ def _find_acyclic_subgraph(
     return edges_list
 
 
+def _build_soft_evidence_factors(
+    reader,
+    model,
+    safe_names: dict[str, str],
+    *,
+    soft_edge_types: list[str] | None = None,
+    layers: list[str] | None = None,
+    default_confidence: float = 0.7,
+    customer_id: str | None = None,
+) -> list:
+    """Convert SUPPORTS/APPLIES_TO edges into pgmpy TabularCPD virtual evidence factors.
+
+    Each soft evidence edge creates a virtual evidence factor on its target node:
+    - SUPPORTS edge with confidence c: P(virtual_obs | target=good) = c, P(virtual_obs | target=bad) = 1-c
+    - APPLIES_TO edge with confidence c: same treatment, slightly weaker default
+
+    Virtual evidence factors are passed to VariableElimination.query() via the
+    ``virtual_evidence`` parameter, which applies Jeffrey's rule (likelihood
+    weighting) without adding structural edges to the DAG.
+
+    Args:
+        reader: Graph reader instance.
+        model: The pgmpy BayesianNetwork model (for node membership checks).
+        safe_names: Mapping from original node IDs to safe pgmpy names.
+        soft_edge_types: Edge types to treat as soft evidence (default: SUPPORTS, APPLIES_TO).
+        layers: Optional layer filter.
+        default_confidence: Confidence to use when edge has no confidence (default 0.7).
+        customer_id: Optional customer filter.
+
+    Returns:
+        List of TabularCPD objects suitable for virtual_evidence parameter.
+    """
+    if not PGMPY_AVAILABLE:
+        return []
+
+    if soft_edge_types is None:
+        soft_edge_types = ["SUPPORTS", "APPLIES_TO"]
+
+    model_nodes = set(model.nodes())
+    soft_records = reader.get_edges(edge_types=soft_edge_types, layers=layers, customer_id=customer_id)
+    if not soft_records:
+        return []
+
+    factors = []
+    for edge in soft_records:
+        if edge.to_node not in safe_names:
+            continue
+        safe_target = safe_names[edge.to_node]
+        if safe_target not in model_nodes:
+            continue
+
+        confidence = float(edge.confidence) if edge.confidence is not None else default_confidence
+        confidence = max(0.01, min(0.99, confidence))
+
+        if edge.edge_type == "SUPPORTS":
+            lik_good = confidence
+            lik_bad = 1.0 - confidence
+        elif edge.edge_type == "APPLIES_TO":
+            lik_good = confidence * 0.9
+            lik_bad = 1.0 - confidence * 0.9
+        else:
+            lik_good = confidence
+            lik_bad = 1.0 - confidence
+
+        factor = TabularCPD(
+            safe_target, 2,
+            [[lik_bad], [lik_good]],
+        )
+        factors.append(factor)
+
+    return factors
+
+
 def build_bayesian_network(
     conn,
     *,
@@ -164,6 +237,8 @@ def build_bayesian_network(
     customer_id: str | None = None,
     half_life_days: float = 0.0,
     observation_window_days: float | None = None,
+    include_soft_evidence: bool = False,
+    soft_edge_types: list[str] | None = None,
 ) -> dict[str, Any] | None:
     """Build a BayesianNetwork from OHM edges with probability/confidence values.
 
@@ -662,6 +737,20 @@ def build_bayesian_network(
         "n_edges": len(model_edge_tuples),
     }
 
+    if include_soft_evidence:
+        soft_types = soft_edge_types or ["SUPPORTS", "APPLIES_TO"]
+        soft_factors = _build_soft_evidence_factors(
+            reader, model, safe_names,
+            soft_edge_types=soft_types,
+            layers=layers,
+            customer_id=customer_id,
+        )
+        result["soft_evidence_factors"] = soft_factors
+        result["soft_edge_types"] = soft_types
+    else:
+        result["soft_evidence_factors"] = []
+        result["soft_edge_types"] = []
+
     # Store in module-level cache with current generation (OHM-omr)
     current_gen = reader.get_graph_generation()
     _bayesian_network_cache[cache_key] = (current_gen, result)
@@ -680,6 +769,8 @@ def bayesian_inference(
     root_prior: float = 0.3,
     half_life_days: float = 0.0,
     observation_window_days: float | None = None,
+    include_soft_evidence: bool = False,
+    soft_edge_types: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run Bayesian inference on the OHM graph.
 
@@ -718,7 +809,7 @@ def bayesian_inference(
 
     # Build the Bayesian network scoped around target and evidence nodes
     scope_nodes = [target] + list(evidence.keys())
-    network = build_bayesian_network(reader, edge_types=edge_types, layers=layers, root_nodes=scope_nodes, root_prior=root_prior, half_life_days=half_life_days, observation_window_days=observation_window_days)
+    network = build_bayesian_network(reader, edge_types=edge_types, layers=layers, root_nodes=scope_nodes, root_prior=root_prior, half_life_days=half_life_days, observation_window_days=observation_window_days, include_soft_evidence=include_soft_evidence, soft_edge_types=soft_edge_types)
 
     if network is None:
         return {
@@ -753,6 +844,10 @@ def bayesian_inference(
         }
 
     # Run Variable Elimination
+    soft_factors = network.get("soft_evidence_factors", [])
+    query_kwargs: dict[str, Any] = {"variables": [safe_target], "evidence": safe_evidence}
+    if soft_factors:
+        query_kwargs["virtual_evidence"] = soft_factors
     try:
         # OHM-a689.3: Cache VE instance
         _ve_key = id(model)
@@ -761,7 +856,7 @@ def bayesian_inference(
                 _ve_cache.clear()
             _ve_cache[_ve_key] = VariableElimination(model)
         infer = _ve_cache[_ve_key]
-        result = infer.query([safe_target], evidence=safe_evidence)
+        result = infer.query(**query_kwargs)
 
         # Extract probabilities: state 0 = "bad", state 1 = "good"
         p_bad = float(result.values[0])
@@ -2491,6 +2586,8 @@ class BayesianContext:
         leak_probability: float = 0.15,
         default_probability: float = 0.5,
         root_prior: float = 0.3,
+        include_soft_evidence: bool = False,
+        soft_edge_types: list[str] | None = None,
     ):
         self._reader = _coerce_reader(conn)
         self._edge_types = edge_types
@@ -2509,6 +2606,8 @@ class BayesianContext:
             leak_probability=leak_probability,
             default_probability=default_probability,
             root_prior=root_prior,
+            include_soft_evidence=include_soft_evidence,
+            soft_edge_types=soft_edge_types,
         )
 
     @property
@@ -2565,7 +2664,11 @@ class BayesianContext:
 
         try:
             infer = VariableElimination(model)
-            result = infer.query([safe_target], evidence=safe_evidence)
+            soft_factors = self._network.get("soft_evidence_factors", [])
+            query_kwargs: dict[str, Any] = {"variables": [safe_target], "evidence": safe_evidence}
+            if soft_factors:
+                query_kwargs["virtual_evidence"] = soft_factors
+            result = infer.query(**query_kwargs)
 
             p_bad = float(result.values[0])
             p_good = float(result.values[1])
