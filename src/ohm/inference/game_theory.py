@@ -106,13 +106,6 @@ def extract_game(
             "target": target,
         }
 
-    if len(players) > 2:
-        return {
-            "error": f"Game extraction only supports 2 players (found {len(players)}). Use ?players=a,b to specify exactly 2 decision nodes.",
-            "target": target,
-            "n_players": len(players),
-        }
-
     if len(players) == 1:
         return {
             "error": "Game extraction requires at least 2 players. Found only 1 decision node.",
@@ -164,47 +157,69 @@ def extract_game(
         }
 
     # Actions are binary: 0 = bad/intervention, 1 = good/no intervention
+    n_players = len(players)
     actions = [[0, 1] for _ in players]
 
-    # For each player pair, compute 2x2 payoff matrix
-    # For N players, we store payoff arrays per player
+    # Precompute adversarial relationships between players
+    is_adversarial: dict[tuple[int, int], bool] = {}
+    for i in range(n_players):
+        for j in range(n_players):
+            if i == j:
+                continue
+            blocks_edge = edge_map.get((players[i], players[j]))
+            reversed_blocks = edge_map.get((players[j], players[i]))
+            is_adversarial[(i, j)] = bool(
+                (blocks_edge and blocks_edge["edge_type"] == "BLOCKS")
+                or (reversed_blocks and reversed_blocks["edge_type"] == "BLOCKS")
+            )
+
+    # Build N-dimensional payoff arrays
+    # payoff_arrays[player_i][a_0][a_1]...[a_{n-1}] = payoff to player_i
+    # For binary actions, each dimension has size 2
     payoff_arrays: list[list[list[float]]] = []
-    for i, player_i in enumerate(players):
-        payoff_i: list[list[float]] = []
-        util_i = decision_utilities[player_i]
+    for i in range(n_players):
+        util_i = decision_utilities[players[i]]
         base_payoff_i = _payoff_from_utility(util_i, target_utility)
-        for a_i in [0, 1]:
-            row: list[float] = []
-            for j, player_j in enumerate(players):
-                if i == j:
-                    row.append(base_payoff_i)
+        infl_i = causal_influence(players[i])
+        # For each action combination, compute player i's payoff
+        n_combos = 2 ** n_players
+        payoff_flat: list[float] = []
+        for combo in range(n_combos):
+            action_profile = [(combo >> k) & 1 for k in range(n_players)]
+            a_i = action_profile[i]
+
+            # Base payoff from own action
+            own_contribution = base_payoff_i * (1.0 if a_i == 1 else 0.4)
+
+            # Influence from other players' actions
+            other_contribution = 0.0
+            for j in range(n_players):
+                if j == i:
                     continue
-                # Get relationship between player_i and player_j
-                # Check if player_i BLOCKS player_j or vice versa
-                blocks_edge = edge_map.get((player_i, player_j))
-                reversed_blocks = edge_map.get((player_j, player_i))
-                is_adversarial = (
-                    (blocks_edge and blocks_edge["edge_type"] == "BLOCKS")
-                    or (reversed_blocks and reversed_blocks["edge_type"] == "BLOCKS")
-                )
-                # Payoff depends on whether actions align
-                # For adversarial (BLOCKS): when player_j acts badly (0), player_i benefits
-                # For cooperative: aligned actions benefit both
-                # Action 1 = good, Action 0 = bad
-                if is_adversarial:
-                    # In adversarial game: if player_j chooses 0 (bad), player_i gets full payoff
-                    # if player_j chooses 1 (good), player_i gets reduced payoff
-                    payoff_if_j_bad = base_payoff_i
-                    payoff_if_j_good = base_payoff_i * 0.3  # opponent cooperating reduces benefit
-                    payoffs_for_j = [payoff_if_j_bad, payoff_if_j_good]
+                a_j = action_profile[j]
+                j_infl = causal_influence(players[j])
+                if is_adversarial.get((i, j), False):
+                    # Adversarial: player j acting badly (0) benefits player i
+                    other_contribution += j_infl * base_payoff_i * (1.0 if a_j == 0 else 0.3)
                 else:
-                    # Cooperative: aligned actions maximize payoff
-                    payoff_if_j_bad = base_payoff_i * 0.5
-                    payoff_if_j_good = base_payoff_i
-                    payoffs_for_j = [payoff_if_j_bad, payoff_if_j_good]
-                row.append(payoffs_for_j[j])
-            payoff_i.append(row)
-        payoff_arrays.append(payoff_i)
+                    # Cooperative: player j acting well (1) benefits player i
+                    other_contribution += j_infl * base_payoff_i * (1.0 if a_j == 1 else 0.5)
+
+            payoff = own_contribution * (1.0 - infl_i) + other_contribution * infl_i
+            payoff = max(payoff, 0.0)
+            payoff_flat.append(round(payoff, 6))
+
+        # Reshape flat array into nested lists
+        def _reshape(flat: list[float], dims: list[int]) -> list:
+            if len(dims) == 1:
+                return flat[:dims[0]]
+            stride = 1
+            for d in dims[1:]:
+                stride *= d
+            return [_reshape(flat[k * stride:(k + 1) * stride], dims[1:]) for k in range(dims[0])]
+
+        player_payoff = _reshape(payoff_flat, [2] * n_players)
+        payoff_arrays.append(player_payoff)
 
     return {
         "target": target,
@@ -235,7 +250,7 @@ def _payoff_from_utility(player_util: dict[str, float], target_util: float) -> f
     return util * target_util
 
 
-def compute_nash(payoff_matrices: list[list[list[float]]], players: list[str]) -> dict[str, Any]:
+def compute_nash(payoff_matrices: list[Any], players: list[str]) -> dict[str, Any]:
     """Compute Nash equilibria for a normal-form game.
 
     For 2-player games: enumerates pure-strategy equilibria first, then uses
