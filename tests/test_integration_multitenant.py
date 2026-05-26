@@ -361,9 +361,9 @@ class TestConcurrentAccess:
             assert not errors, f"Write errors: {errors[:5]}"
             assert len(written) == 50
 
-            # Verify all 50 nodes in the tenant store
+            # Verify all 50 nodes in the tenant store (OHM-tss4.1.1 may add seed nodes)
             tenant_store = tm.get_store("concurrent_tenant")
-            rows = tenant_store.execute("SELECT COUNT(*) AS n FROM ohm_nodes WHERE deleted_at IS NULL")
+            rows = tenant_store.execute("SELECT COUNT(*) AS n FROM ohm_nodes WHERE deleted_at IS NULL AND id LIKE 'cn-%'")
             assert rows[0]["n"] == 50
         finally:
             server.shutdown()

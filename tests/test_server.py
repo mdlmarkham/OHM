@@ -1564,7 +1564,7 @@ class TestWebhookOutbox:
             error="connection refused",
         )
         row = store.conn.execute(
-            "SELECT agent_name, status, attempt_count FROM ohm_webhook_outbox WHERE agent_name='test-agent'"
+            "SELECT agent, status, attempts FROM ohm_webhook_outbox WHERE agent='test-agent'"
         ).fetchone()
         assert row is not None
         assert row[0] == "test-agent"
@@ -1579,8 +1579,8 @@ class TestWebhookOutbox:
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         store.conn.execute(
             """INSERT INTO ohm_webhook_outbox
-               (id, agent_name, url, event_type, payload, attempt_count, next_attempt_at, status, last_error)
-               VALUES ('test-dead-1', 'agent-x', 'http://dead.example.com', 'node.created',
+               (agent, url, event_type, event, attempts, next_retry, status, last_error)
+               VALUES ('agent-x', 'http://dead.example.com', 'node.created',
                        '{"type":"node.created"}', 3, ?, 'dead', 'max retries exceeded')""",
             [now],
         )
@@ -1588,8 +1588,8 @@ class TestWebhookOutbox:
         status, data = _request("GET", port, "/webhooks/dead-letter")
         assert status == 200
         assert data["count"] >= 1
-        ids = [e["id"] for e in data["dead_letters"]]
-        assert "test-dead-1" in ids
+        urls = [e.get("url") for e in data["dead_letters"]]
+        assert "http://dead.example.com" in urls
 
 
 @pytest.mark.xdist_group("server")
@@ -1649,16 +1649,17 @@ class TestPublicReadSecurityEnforcement:
         assert "security_warning" not in data
 
     def test_health_security_warning_when_multitenant_public_read(self, tmp_path):
-        """/health includes security_warning when multi_tenant=True and require_read_auth=False."""
+        """/health has auth_model=authenticated for multi_tenant (OHM-en2r auto-enforces require_read_auth)."""
         from ohm.store import OhmStore
 
         store = OhmStore(str(tmp_path / "test.duckdb"))
+        # OHM-en2r: multi_tenant always enforces require_read_auth=True, so no security_warning
         port, server, thread = _start_test_server(store, multi_tenant=True, require_read_auth=False)
         try:
             status, data = _request("GET", port, "/health")
             assert status == 200
-            assert "security_warning" in data
-            assert "require_read_auth" in data["security_warning"]
+            assert data.get("auth_model") == "authenticated"
+            assert "security_warning" not in data
         finally:
             server.shutdown()
             thread.join(timeout=2)

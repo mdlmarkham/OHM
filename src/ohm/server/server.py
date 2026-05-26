@@ -183,27 +183,27 @@ def _write_outbox(conn, agent_name: str, url: str, event: dict, error: str) -> N
     next_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=_OUTBOX_BACKOFFS[0])
     conn.execute(
         """INSERT INTO ohm_webhook_outbox
-           (agent_name, url, event_type, payload, attempt_count, next_attempt_at, status, last_error)
+           (agent, url, event_type, event, attempts, next_retry, status, last_error)
            VALUES (?, ?, ?, ?, 1, ?, 'pending', ?)""",
         [agent_name, url, event.get("type", ""), json.dumps(event), next_at, error],
     )
 
 
 def _process_outbox(conn) -> None:
-    """Retry pending outbox entries whose next_attempt_at has passed."""
+    """Retry pending outbox entries whose next_retry has passed."""
     from datetime import datetime, timedelta, timezone
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     rows = conn.execute(
-        """SELECT id, agent_name, url, payload, attempt_count
+        """SELECT id, agent, url, event, attempts
            FROM ohm_webhook_outbox
-           WHERE status = 'pending' AND next_attempt_at <= ?""",
+           WHERE status = 'pending' AND next_retry <= ?""",
         [now],
     ).fetchall()
 
-    for row_id, agent_name, url, payload, attempt_count in rows:
+    for row_id, agent_name, url, payload, attempts in rows:
         try:
-            event = json.loads(payload)
+            event = json.loads(payload) if isinstance(payload, str) else payload
         except Exception:
             conn.execute("UPDATE ohm_webhook_outbox SET status='dead' WHERE id=?", [row_id])
             continue
@@ -212,17 +212,17 @@ def _process_outbox(conn) -> None:
         if success:
             conn.execute("UPDATE ohm_webhook_outbox SET status='delivered' WHERE id=?", [row_id])
         else:
-            new_count = attempt_count + 1
+            new_count = attempts + 1
             if new_count > len(_OUTBOX_BACKOFFS):
                 conn.execute(
-                    "UPDATE ohm_webhook_outbox SET status='dead', attempt_count=?, last_error=? WHERE id=?",
+                    "UPDATE ohm_webhook_outbox SET status='dead', attempts=?, last_error=? WHERE id=?",
                     [new_count, error, row_id],
                 )
             else:
                 backoff = _OUTBOX_BACKOFFS[new_count - 1] if new_count - 1 < len(_OUTBOX_BACKOFFS) else _OUTBOX_BACKOFFS[-1]
                 next_at = now + timedelta(seconds=backoff)
                 conn.execute(
-                    "UPDATE ohm_webhook_outbox SET attempt_count=?, next_attempt_at=?, last_error=? WHERE id=?",
+                    "UPDATE ohm_webhook_outbox SET attempts=?, next_retry=?, last_error=? WHERE id=?",
                     [new_count, next_at, error, row_id],
                 )
 
@@ -3446,7 +3446,7 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
         """GET /webhooks/dead-letter — list permanently failed webhook deliveries."""
         limit = int(qs.get("limit", [50])[0])
         rows = self.current_store.conn.execute(
-            """SELECT id, agent_name, url, event_type, attempt_count, last_error, created_at
+            """SELECT id, agent, url, event_type, attempts, last_error, created_at
                FROM ohm_webhook_outbox
                WHERE status = 'dead'
                ORDER BY created_at DESC
@@ -3456,10 +3456,10 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
         result = [
             {
                 "id": r[0],
-                "agent_name": r[1],
+                "agent": r[1],
                 "url": r[2],
                 "event_type": r[3],
-                "attempt_count": r[4],
+                "attempts": r[4],
                 "last_error": r[5],
                 "created_at": str(r[6]),
             }

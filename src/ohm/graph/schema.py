@@ -944,20 +944,9 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
         "0.19.0",
         "create ohm_webhook_outbox for retry-with-backoff delivery (OHM-ufjk)",
         [
-            """CREATE TABLE IF NOT EXISTS ohm_webhook_outbox (
-            id            VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
-            agent_name    VARCHAR NOT NULL,
-            url           VARCHAR NOT NULL,
-            event_type    VARCHAR NOT NULL,
-            payload       TEXT NOT NULL,
-            attempt_count INTEGER DEFAULT 0,
-            next_attempt_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            status        VARCHAR DEFAULT 'pending',
-            last_error    TEXT,
-            created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )""",
+            # Table already created by base schema; just ensure indexes exist
             "CREATE INDEX IF NOT EXISTS idx_outbox_status ON ohm_webhook_outbox(status)",
-            "CREATE INDEX IF NOT EXISTS idx_outbox_next ON ohm_webhook_outbox(next_attempt_at)",
+            "CREATE INDEX IF NOT EXISTS idx_outbox_next ON ohm_webhook_outbox(next_retry)",
         ],
     ),
 ]

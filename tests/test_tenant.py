@@ -177,6 +177,8 @@ class TestThreadSafety:
         tm.provision("concurrent_tenant")
         store = tm.get_store("concurrent_tenant")
         lock = tm.get_write_lock("concurrent_tenant")
+        # Capture seed-node count before concurrent writes (OHM-tss4.1.1 may seed nodes on provision)
+        initial_count = store.execute("SELECT COUNT(*) AS n FROM ohm_nodes")[0]["n"]
         errors = []
 
         def writer(i):
@@ -193,9 +195,9 @@ class TestThreadSafety:
             t.join()
 
         assert not errors, f"Write errors under concurrent load: {errors}"
-        # Verify all 50 nodes were written
+        # Verify all 50 nodes were written (seed nodes excluded)
         rows = store.execute("SELECT COUNT(*) AS n FROM ohm_nodes")
-        assert rows[0]["n"] == 50
+        assert rows[0]["n"] == initial_count + 50
 
 
 class TestIdleEviction:
