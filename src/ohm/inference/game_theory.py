@@ -379,56 +379,67 @@ def _compute_nash_general(
     n_players = len(players)
     actions = [len(payoff_matrices[i]) for i in range(n_players)]
 
-    # Iterated elimination of strictly dominated strategies
-    surviving_actions = [list(range(a)) for a in actions]
+    try:
+        # Iterated elimination of strictly dominated strategies
+        surviving_actions = [list(range(a)) for a in actions]
 
-    changed = True
-    while changed:
-        changed = False
-        for i in range(n_players):
-            if len(surviving_actions[i]) <= 1:
-                continue
-            # Check each action for strict domination
-            dominated: set[int] = set()
-            for a1 in surviving_actions[i]:
-                for a2 in surviving_actions[i]:
-                    if a1 == a2 or a1 in dominated:
-                        continue
-                    # Check if a2 dominates a1 (a1 gets less than a2 in all contingencies)
-                    dominates = True
-                    all_player_indices = list(range(n_players))
-                    for profile in _all_profiles(surviving_actions, all_player_indices):
-                        payoff_a1 = _get_payoff(payoff_matrices, i, profile, a1)
-                        payoff_a2 = _get_payoff(payoff_matrices, i, profile, a2)
-                        if payoff_a1 >= payoff_a2:
-                            dominates = False
-                            break
-                    if dominates:
-                        dominated.add(a1)
-                        changed = True
-            surviving_actions[i] = [a for a in surviving_actions[i] if a not in dominated]
+        changed = True
+        while changed:
+            changed = False
+            for i in range(n_players):
+                if len(surviving_actions[i]) <= 1:
+                    continue
+                # Check each action for strict domination
+                dominated: set[int] = set()
+                for a1 in surviving_actions[i]:
+                    for a2 in surviving_actions[i]:
+                        if a1 == a2 or a1 in dominated:
+                            continue
+                        # Check if a2 dominates a1 (a1 gets less than a2 in all contingencies)
+                        dominates = True
+                        all_player_indices = list(range(n_players))
+                        for profile in _all_profiles(surviving_actions, all_player_indices):
+                            payoff_a1 = _get_payoff(payoff_matrices, i, profile, a1)
+                            payoff_a2 = _get_payoff(payoff_matrices, i, profile, a2)
+                            if payoff_a1 >= payoff_a2:
+                                dominates = False
+                                break
+                        if dominates:
+                            dominated.add(a1)
+                            changed = True
+                surviving_actions[i] = [a for a in surviving_actions[i] if a not in dominated]
 
-    # Check if unique pure equilibrium exists
-    all_surviving = [len(s) for s in surviving_actions]
-    if all(n == 1 for n in all_surviving):
-        # Unique pure equilibrium
-        profile = [s[0] for s in surviving_actions]
-        return {
-            "equilibria": [{
-                "strategy_profile": {
-                    players[i]: [1.0 if k == profile[i] else 0.0 for k in range(actions[i])]
-                    for i in range(n_players)
-                },
-                "expected_payoffs": {
-                    players[i]: round(_get_payoff(payoff_matrices, i, profile, profile[i]), 4)
-                    for i in range(n_players)
-                },
-                "equilibrium_type": "pure_strategy_iterated_dominance",
-            }],
-            "n_players": n_players,
-            "solution_method": "iterated_dominance",
-            "game_type": "general_sum",
-        }
+        # Check if unique pure equilibrium exists
+        all_surviving = [len(s) for s in surviving_actions]
+        if all(n == 1 for n in all_surviving):
+            # Unique pure equilibrium
+            profile = [s[0] for s in surviving_actions]
+            return {
+                "equilibria": [{
+                    "strategy_profile": {
+                        players[i]: [1.0 if k == profile[i] else 0.0 for k in range(actions[i])]
+                        for i in range(n_players)
+                    },
+                    "expected_payoffs": {
+                        players[i]: round(_get_payoff(payoff_matrices, i, profile, profile[i]), 4)
+                        for i in range(n_players)
+                    },
+                    "equilibrium_type": "pure_strategy_iterated_dominance",
+                }],
+                "n_players": n_players,
+                "solution_method": "iterated_dominance",
+                "game_type": "general_sum",
+            }
+    except Exception:
+        pass
+
+    # Fallback: N-player mixed equilibrium not yet implemented
+    return {
+        "equilibria": [],
+        "n_players": n_players,
+        "solution_method": "indeterminate",
+        "message": f"N-player ({n_players}) mixed equilibrium computation not yet implemented. Use 2-player games.",
+    }
 
     # Fallback: return surviving action sets for mixed strategy computation
     return {
