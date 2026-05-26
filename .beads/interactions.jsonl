@@ -672,3 +672,4 @@
 {"id":"int-af9bc411","kind":"field_change","created_at":"2026-05-26T13:19:16.856958145Z","actor":"root","issue_id":"OHM-1779791713828-27-241de88a","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
 {"id":"int-4f695f51","kind":"field_change","created_at":"2026-05-26T13:21:49.0693418Z","actor":"Matt Markham","issue_id":"OHM-1779791713980-28-29e91d9c","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
 {"id":"int-4929a154","kind":"field_change","created_at":"2026-05-26T13:41:07.0739514Z","actor":"Matt Markham","issue_id":"OHM-1779791713980-28-29e91d9c","extra":{"field":"status","new_value":"closed","old_value":"in_progress"}}
+{"id":"int-1654705a","kind":"field_change","created_at":"2026-05-26T14:03:00.3580667Z","actor":"Matt Markham","issue_id":"OHM-a689","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"All 3 VE performance fixes complete"}}
