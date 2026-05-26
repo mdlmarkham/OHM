@@ -140,6 +140,53 @@ def _collapse_to_dag(
     return meta_nodes, dag_edges, meta_members
 
 
+def _map_probs_to_original(
+    meta_probs: dict[str, float],
+    meta_members: dict[str, list[str]],
+) -> dict[str, float]:
+    """Map meta-node absorption probabilities back to original node IDs.
+
+    For each meta-node in meta_probs:
+    - If it's a single original node (not in meta_members), keep as-is.
+    - If it's a collapsed SCC, distribute probability equally among members.
+    """
+    if not meta_members:
+        return dict(meta_probs)
+
+    result: dict[str, float] = {}
+    for meta_id, prob in meta_probs.items():
+        members = meta_members.get(meta_id)
+        if members is None:
+            result[meta_id] = prob
+        else:
+            for member in members:
+                result[member] = round(prob / len(members), 6)
+    return result
+
+
+def _map_steps_to_original(
+    meta_steps: dict[str, float],
+    meta_members: dict[str, list[str]],
+) -> dict[str, float]:
+    """Map meta-node expected steps back to original node IDs.
+
+    Each constituent node of a collapsed SCC gets the same expected-step
+    count as its meta-node (they are in the same equivalence class).
+    """
+    if not meta_members:
+        return dict(meta_steps)
+
+    result: dict[str, float] = {}
+    for meta_id, steps in meta_steps.items():
+        members = meta_members.get(meta_id)
+        if members is None:
+            result[meta_id] = steps
+        else:
+            for member in members:
+                result[member] = steps
+    return result
+
+
 def _build_transition_matrix(
     conn: "DuckDBPyConnection",
     *,
@@ -147,13 +194,20 @@ def _build_transition_matrix(
     state_nodes: list[str] | None = None,
     semantic_roles: "SemanticRoles | None" = None,
     collapse_sccs: bool = False,
-) -> tuple[list[str], Any, list[str], list[str], list[list[str]]]:
+) -> tuple[list[str], Any, list[str], list[str], list[list[str]], dict[str, list[str]]]:
     """Build transition matrix from OHM edges.
 
+    When ``collapse_sccs`` is True, strongly connected components with >1
+    node are collapsed into meta-nodes so the resulting transition graph
+    is a DAG — guaranteeing that (I - Q) is invertible.
+
     Returns:
-        Tuple of (node_list, transition_matrix, transient_states, absorbing_states, sccs)
+        Tuple of (node_list, transition_matrix, transient_states,
+        absorbing_states, sccs, meta_members)
         transition_matrix is a NumPy array if numpy is available, else None.
         sccs is a list of strongly connected components (cycles) found.
+        meta_members maps meta_node_id -> [original_node_ids] (empty dict
+        when no collapse was applied).
     """
     _require_numpy()
 
@@ -173,7 +227,7 @@ def _build_transition_matrix(
     edges = [(e.from_node, e.to_node, e.probability, e.confidence) for e in _edge_records]
 
     if not edges:
-        return [], None, [], [], []
+        return [], None, [], [], [], {}
 
     node_set: set[str] = set()
     for from_node, to_node, _, _ in edges:
@@ -231,7 +285,7 @@ def _build_transition_matrix(
             i = meta_to_idx[meta_id]
             matrix[i, i] = 1.0
 
-        return meta_nodes, matrix, meta_transient, meta_absorbing, sccs
+        return meta_nodes, matrix, meta_transient, meta_absorbing, sccs, meta_members
 
     matrix = np.zeros((n, n), dtype=np.float64)
 
@@ -259,7 +313,7 @@ def _build_transition_matrix(
         i = node_to_idx[node]
         matrix[i, i] = 1.0
 
-    return nodes, matrix, transient, absorbing, sccs
+    return nodes, matrix, transient, absorbing, sccs, {}
 
 
 def markov_absorbing_risk(
@@ -275,6 +329,10 @@ def markov_absorbing_risk(
     Uses absorbing Markov chain theory: N = (I - Q)^(-1), B = N @ R
     where Q = transient-to-transient, R = transient-to-absorbing.
 
+    Hybrid approach: try standard matrix first; on LinAlgError (singular
+    matrix from cycles without exits), fall back to SCC collapse and map
+    results back to original node IDs.
+
     Args:
         conn: Active DuckDB connection.
         start_node: Node ID to compute absorption from.
@@ -284,20 +342,21 @@ def markov_absorbing_risk(
 
     Returns:
         Dict with 'method', 'start_node', 'absorption_probabilities',
-        'transient_states', 'absorbing_states', 'n_states', 'sccs'.
+        'transient_states', 'absorbing_states', 'n_states', 'sccs',
+        'scc_collapsed' (bool), 'collapsed_sccs' (list of multi-node SCCs).
     """
     _require_numpy()
 
     reader = _coerce_reader(conn)
-    nodes, matrix, transient, absorbing, sccs = _build_transition_matrix(
+    nodes, matrix, transient, absorbing, sccs, meta_members = _build_transition_matrix(
         reader,
         edge_types=edge_types,
         state_nodes=state_nodes,
         semantic_roles=semantic_roles,
+        collapse_sccs=False,
     )
 
     if not nodes:
-        # No transition edges found. Check if start_node exists in ohm_nodes.
         existing = reader.get_nodes(ids=[start_node])
         if existing:
             return {
@@ -308,6 +367,8 @@ def markov_absorbing_risk(
                 "absorbing_states": [start_node],
                 "n_states": 1,
                 "sccs": [],
+                "scc_collapsed": False,
+                "collapsed_sccs": [],
             }
         return {
             "method": "markov_absorbing_risk",
@@ -317,8 +378,12 @@ def markov_absorbing_risk(
             "absorbing_states": [],
             "n_states": 0,
             "sccs": [],
+            "scc_collapsed": False,
+            "collapsed_sccs": [],
             "error": f"start_node '{start_node}' not in graph and no transition edges found",
         }
+
+    multi_sccs = [s for s in sccs if len(s) > 1]
 
     if start_node not in nodes:
         return {
@@ -329,12 +394,56 @@ def markov_absorbing_risk(
             "absorbing_states": absorbing,
             "n_states": len(nodes),
             "sccs": sccs,
+            "scc_collapsed": False,
+            "collapsed_sccs": [],
             "error": f"start_node '{start_node}' not in graph",
         }
 
     node_to_idx = {n: i for i, n in enumerate(nodes)}
 
     if not absorbing:
+        if multi_sccs:
+            nodes_c, matrix_c, transient_c, absorbing_c, sccs_c, meta_members_c = _build_transition_matrix(
+                reader,
+                edge_types=edge_types,
+                state_nodes=state_nodes,
+                semantic_roles=semantic_roles,
+                collapse_sccs=True,
+            )
+            if nodes_c and absorbing_c:
+                effective_start = start_node
+                if start_node not in nodes_c:
+                    for scc in multi_sccs:
+                        if start_node in scc:
+                            effective_start = ",".join(sorted(scc))
+                            break
+                if effective_start not in nodes_c:
+                    return {
+                        "method": "markov_absorbing_risk",
+                        "start_node": start_node,
+                        "absorption_probabilities": {},
+                        "transient_states": transient,
+                        "absorbing_states": [],
+                        "n_states": len(nodes),
+                        "sccs": sccs,
+                        "scc_collapsed": True,
+                        "collapsed_sccs": multi_sccs,
+                        "error": "no absorbing states — collapsed start node not in DAG",
+                    }
+                if effective_start in absorbing_c:
+                    raw_probs = {effective_start: 1.0}
+                    absorption_probs = _map_probs_to_original(raw_probs, meta_members_c)
+                    return {
+                        "method": "markov_absorbing_risk",
+                        "start_node": start_node,
+                        "absorption_probabilities": absorption_probs,
+                        "transient_states": transient_c,
+                        "absorbing_states": absorbing_c,
+                        "n_states": len(nodes_c),
+                        "sccs": sccs,
+                        "scc_collapsed": True,
+                        "collapsed_sccs": multi_sccs,
+                    }
         return {
             "method": "markov_absorbing_risk",
             "start_node": start_node,
@@ -343,6 +452,8 @@ def markov_absorbing_risk(
             "absorbing_states": [],
             "n_states": len(nodes),
             "sccs": sccs,
+            "scc_collapsed": False,
+            "collapsed_sccs": [],
             "error": "no absorbing states found — all states are transient",
         }
 
@@ -356,6 +467,8 @@ def markov_absorbing_risk(
                 "absorbing_states": absorbing,
                 "n_states": len(nodes),
                 "sccs": sccs,
+                "scc_collapsed": False,
+                "collapsed_sccs": [],
             }
         return {
             "method": "markov_absorbing_risk",
@@ -365,7 +478,22 @@ def markov_absorbing_risk(
             "absorbing_states": absorbing,
             "n_states": len(nodes),
             "sccs": sccs,
+            "scc_collapsed": False,
+            "collapsed_sccs": [],
             "error": "no transient states",
+        }
+
+    if start_node not in transient:
+        return {
+            "method": "markov_absorbing_risk",
+            "start_node": start_node,
+            "absorption_probabilities": {start_node: 1.0},
+            "transient_states": transient,
+            "absorbing_states": absorbing,
+            "n_states": len(nodes),
+            "sccs": sccs,
+            "scc_collapsed": False,
+            "collapsed_sccs": [],
         }
 
     transient_idx = [node_to_idx[n] for n in transient]
@@ -379,14 +507,14 @@ def markov_absorbing_risk(
     try:
         N = np.linalg.inv(eye_n - Q)
     except np.linalg.LinAlgError:
-        nodes_scc, matrix_scc, transient_scc, absorbing_scc, sccs_new = _build_transition_matrix(
+        nodes_c, matrix_c, transient_c, absorbing_c, sccs_c, meta_members_c = _build_transition_matrix(
             reader,
             edge_types=edge_types,
             state_nodes=state_nodes,
             semantic_roles=semantic_roles,
             collapse_sccs=True,
         )
-        if not nodes_scc:
+        if not nodes_c:
             return {
                 "method": "markov_absorbing_risk",
                 "start_node": start_node,
@@ -395,62 +523,65 @@ def markov_absorbing_risk(
                 "absorbing_states": absorbing,
                 "n_states": len(nodes),
                 "sccs": sccs,
+                "scc_collapsed": True,
+                "collapsed_sccs": multi_sccs,
                 "error": "singular matrix — SCC collapse also failed",
             }
-        node_to_idx_scc = {n: i for i, n in enumerate(nodes_scc)}
-        original_start = start_node
-        if start_node not in nodes_scc:
-            for scc in sccs:
+        node_to_idx_c = {n: i for i, n in enumerate(nodes_c)}
+        effective_start = start_node
+        if start_node not in nodes_c:
+            for scc in multi_sccs:
                 if start_node in scc:
-                    start_node = ",".join(sorted(scc))
+                    effective_start = ",".join(sorted(scc))
                     break
-        if start_node not in node_to_idx_scc:
+        if effective_start not in node_to_idx_c:
             return {
                 "method": "markov_absorbing_risk",
-                "start_node": original_start,
+                "start_node": start_node,
                 "absorption_probabilities": {},
                 "transient_states": transient,
                 "absorbing_states": absorbing,
                 "n_states": len(nodes),
                 "sccs": sccs,
+                "scc_collapsed": True,
+                "collapsed_sccs": multi_sccs,
                 "error": "singular matrix — collapsed start node not in DAG",
             }
-        transient_idx_scc = [node_to_idx_scc[n] for n in transient_scc]
-        absorbing_idx_scc = [node_to_idx_scc[n] for n in absorbing_scc]
-        Q_scc = matrix_scc[np.ix_(transient_idx_scc, transient_idx_scc)]
-        R_scc = matrix_scc[np.ix_(transient_idx_scc, absorbing_idx_scc)]
-        n_t_scc = len(transient_scc)
-        eye_n_scc = np.eye(n_t_scc)
-        N_scc = np.linalg.inv(eye_n_scc - Q_scc)
-        B_scc = N_scc @ R_scc
-        if start_node in transient_scc:
-            start_t_idx_scc = transient_scc.index(start_node)
-            absorption_probs_scc = {}
-            for j, abs_node in enumerate(absorbing_scc):
-                absorption_probs_scc[abs_node] = round(float(B_scc[start_t_idx_scc, j]), 6)
+
+        if effective_start in transient_c:
+            transient_idx_c = [node_to_idx_c[n] for n in transient_c]
+            absorbing_idx_c = [node_to_idx_c[n] for n in absorbing_c]
+            Q_c = matrix_c[np.ix_(transient_idx_c, transient_idx_c)]
+            R_c = matrix_c[np.ix_(transient_idx_c, absorbing_idx_c)]
+            n_t_c = len(transient_c)
+            N_c = np.linalg.inv(np.eye(n_t_c) - Q_c)
+            B_c = N_c @ R_c
+            start_t_idx_c = transient_c.index(effective_start)
+            raw_probs = {}
+            for j, abs_node in enumerate(absorbing_c):
+                raw_probs[abs_node] = round(float(B_c[start_t_idx_c, j]), 6)
         else:
-            absorption_probs_scc = {start_node: 1.0}
+            raw_probs = {effective_start: 1.0}
+
+        absorption_probs = _map_probs_to_original(raw_probs, meta_members_c)
         return {
             "method": "markov_absorbing_risk",
-            "start_node": original_start,
-            "absorption_probabilities": absorption_probs_scc,
-            "transient_states": transient_scc,
-            "absorbing_states": absorbing_scc,
-            "n_states": len(nodes_scc),
+            "start_node": start_node,
+            "absorption_probabilities": absorption_probs,
+            "transient_states": transient_c,
+            "absorbing_states": absorbing_c,
+            "n_states": len(nodes_c),
             "sccs": sccs,
             "scc_collapsed": True,
-            "collapsed_sccs": sccs_new,
+            "collapsed_sccs": multi_sccs,
         }
 
     B = N @ R
 
-    if start_node in transient:
-        start_t_idx = transient.index(start_node)
-        absorption_probs = {}
-        for j, abs_node in enumerate(absorbing):
-            absorption_probs[abs_node] = round(float(B[start_t_idx, j]), 6)
-    else:
-        absorption_probs = {start_node: 1.0}
+    start_t_idx = transient.index(start_node)
+    absorption_probs = {}
+    for j, abs_node in enumerate(absorbing):
+        absorption_probs[abs_node] = round(float(B[start_t_idx, j]), 6)
 
     return {
         "method": "markov_absorbing_risk",
@@ -460,6 +591,8 @@ def markov_absorbing_risk(
         "absorbing_states": absorbing,
         "n_states": len(nodes),
         "sccs": sccs,
+        "scc_collapsed": False,
+        "collapsed_sccs": [],
     }
 
 
@@ -477,6 +610,10 @@ def markov_expected_steps(
     Uses the fundamental matrix: t = N @ 1 (vector of expected steps
     from each transient state before absorption).
 
+    Hybrid approach: try standard matrix first; on LinAlgError (singular
+    matrix from cycles without exits), fall back to SCC collapse and map
+    results back to original node IDs.
+
     Args:
         conn: Active DuckDB connection.
         start_node: Node ID to compute from.
@@ -488,17 +625,19 @@ def markov_expected_steps(
 
     Returns:
         Dict with 'method', 'start_node', 'expected_steps',
-        'expected_steps_per_state', 'transient_states', 'absorbing_states', 'sccs'.
+        'expected_steps_per_state', 'transient_states', 'absorbing_states',
+        'sccs', 'scc_collapsed' (bool), 'collapsed_sccs'.
     """
     _require_numpy()
 
     reader = _coerce_reader(conn)
 
-    nodes, matrix, transient, absorbing, sccs = _build_transition_matrix(
+    nodes, matrix, transient, absorbing, sccs, meta_members = _build_transition_matrix(
         reader,
         edge_types=edge_types,
         state_nodes=state_nodes,
         semantic_roles=semantic_roles,
+        collapse_sccs=False,
     )
 
     if not nodes:
@@ -513,6 +652,8 @@ def markov_expected_steps(
                 "absorbing_states": [start_node],
                 "n_states": 1,
                 "sccs": [],
+                "scc_collapsed": False,
+                "collapsed_sccs": [],
             }
         return {
             "method": "markov_expected_steps",
@@ -523,8 +664,12 @@ def markov_expected_steps(
             "absorbing_states": [],
             "n_states": 0,
             "sccs": [],
+            "scc_collapsed": False,
+            "collapsed_sccs": [],
             "error": f"start_node '{start_node}' not in graph and no transition edges found",
         }
+
+    multi_sccs = [s for s in sccs if len(s) > 1]
 
     if start_node not in nodes:
         return {
@@ -536,6 +681,8 @@ def markov_expected_steps(
             "absorbing_states": absorbing,
             "n_states": len(nodes),
             "sccs": sccs,
+            "scc_collapsed": False,
+            "collapsed_sccs": [],
             "error": f"start_node '{start_node}' not in graph",
         }
 
@@ -551,22 +698,23 @@ def markov_expected_steps(
             "absorbing_states": absorbing,
             "n_states": len(nodes),
             "sccs": sccs,
+            "scc_collapsed": False,
+            "collapsed_sccs": [],
         }
 
     if not transient:
-        result = {
-            "method": "markov_absorbing_risk",
+        return {
+            "method": "markov_expected_steps",
             "start_node": start_node,
-            "absorption_probabilities": {start_node: 1.0},
+            "expected_steps": 0.0,
+            "expected_steps_per_state": {},
             "transient_states": [],
             "absorbing_states": absorbing,
             "n_states": len(nodes),
             "sccs": sccs,
+            "scc_collapsed": False,
+            "collapsed_sccs": [],
         }
-        if multi_sccs:
-            result["scc_collapsed"] = True
-            result["collapsed_sccs"] = multi_sccs
-        return result
 
     transient_idx = [node_to_idx[n] for n in transient]
     Q = matrix[np.ix_(transient_idx, transient_idx)]
@@ -576,14 +724,14 @@ def markov_expected_steps(
     try:
         N = np.linalg.inv(eye_n - Q)
     except np.linalg.LinAlgError:
-        nodes_scc, matrix_scc, transient_scc, absorbing_scc, sccs_new = _build_transition_matrix(
+        nodes_c, matrix_c, transient_c, absorbing_c, sccs_c, meta_members_c = _build_transition_matrix(
             reader,
             edge_types=edge_types,
             state_nodes=state_nodes,
             semantic_roles=semantic_roles,
             collapse_sccs=True,
         )
-        if not nodes_scc:
+        if not nodes_c:
             return {
                 "method": "markov_expected_steps",
                 "start_node": start_node,
@@ -593,15 +741,18 @@ def markov_expected_steps(
                 "absorbing_states": absorbing,
                 "n_states": len(nodes),
                 "sccs": sccs,
+                "scc_collapsed": True,
+                "collapsed_sccs": multi_sccs,
                 "error": "singular matrix — SCC collapse also failed",
             }
-        node_to_idx_scc = {n: i for i, n in enumerate(nodes_scc)}
-        if start_node not in nodes_scc:
-            for scc in sccs:
+        node_to_idx_c = {n: i for i, n in enumerate(nodes_c)}
+        effective_start = start_node
+        if start_node not in nodes_c:
+            for scc in multi_sccs:
                 if start_node in scc:
-                    start_node = ",".join(sorted(scc))
+                    effective_start = ",".join(sorted(scc))
                     break
-        if start_node not in node_to_idx_scc:
+        if effective_start not in node_to_idx_c:
             return {
                 "method": "markov_expected_steps",
                 "start_node": start_node,
@@ -611,32 +762,58 @@ def markov_expected_steps(
                 "absorbing_states": absorbing,
                 "n_states": len(nodes),
                 "sccs": sccs,
+                "scc_collapsed": True,
+                "collapsed_sccs": multi_sccs,
                 "error": "singular matrix — collapsed start node not in DAG",
             }
-        transient_idx_scc = [node_to_idx_scc[n] for n in transient_scc]
-        Q_scc = matrix_scc[np.ix_(transient_idx_scc, transient_idx_scc)]
-        n_t_scc = len(transient_scc)
-        eye_n_scc = np.eye(n_t_scc)
-        N_scc = np.linalg.inv(eye_n_scc - Q_scc)
-        ones_scc = np.ones(n_t_scc)
-        t_scc = N_scc @ ones_scc
-        steps_per_state_scc = {}
-        for i, state in enumerate(transient_scc):
-            steps_per_state_scc[state] = round(float(t_scc[i]), 4)
-        start_t_idx_scc = transient_scc.index(start_node)
-        expected_scc = round(float(t_scc[start_t_idx_scc]), 4)
-        return {
+
+        if effective_start in transient_c:
+            transient_idx_c = [node_to_idx_c[n] for n in transient_c]
+            Q_c = matrix_c[np.ix_(transient_idx_c, transient_idx_c)]
+            n_t_c = len(transient_c)
+            N_c = np.linalg.inv(np.eye(n_t_c) - Q_c)
+            ones_c = np.ones(n_t_c)
+            t_c = N_c @ ones_c
+            steps_per_state = {}
+            for i, state in enumerate(transient_c):
+                steps_per_state[state] = round(float(t_c[i]), 4)
+            steps_per_state = _map_steps_to_original(steps_per_state, meta_members_c)
+            start_t_idx_c = transient_c.index(effective_start)
+            expected = round(float(t_c[start_t_idx_c]), 4)
+        else:
+            expected = 0.0
+            steps_per_state = _map_steps_to_original({effective_start: 0.0}, meta_members_c)
+
+        result: dict[str, Any] = {
             "method": "markov_expected_steps",
             "start_node": start_node,
-            "expected_steps": expected_scc,
-            "expected_steps_per_state": steps_per_state_scc,
-            "transient_states": transient_scc,
-            "absorbing_states": absorbing_scc,
-            "n_states": len(nodes_scc),
+            "expected_steps": expected,
+            "expected_steps_per_state": steps_per_state,
+            "transient_states": transient_c,
+            "absorbing_states": absorbing_c,
+            "n_states": len(nodes_c),
             "sccs": sccs,
             "scc_collapsed": True,
-            "collapsed_sccs": sccs_new,
+            "collapsed_sccs": multi_sccs,
         }
+        if target_state is not None:
+            absorption = markov_absorbing_risk(
+                conn,
+                start_node,
+                edge_types=edge_types,
+                state_nodes=state_nodes,
+                semantic_roles=semantic_roles,
+            )
+            prob = absorption.get("absorption_probabilities", {}).get(target_state, 0.0)
+            if prob > 0:
+                result["target_state"] = target_state
+                result["target_probability"] = prob
+                result["expected_steps_to_target"] = round(expected / prob, 4) if prob > 0 else float("inf")
+            else:
+                result["target_state"] = target_state
+                result["target_probability"] = 0.0
+                result["expected_steps_to_target"] = float("inf")
+        return result
 
     ones = np.ones(n_t)
     t = N @ ones
@@ -657,6 +834,8 @@ def markov_expected_steps(
         "absorbing_states": absorbing,
         "n_states": len(nodes),
         "sccs": sccs,
+        "scc_collapsed": False,
+        "collapsed_sccs": [],
     }
 
     if target_state is not None:

@@ -148,7 +148,8 @@ class TestSCCCollapse:
         create_sample_edge(test_db, from_node=node_b, to_node=node_c, edge_type="TRANSITIONS_TO", probability=1.0)
 
         from ohm.inference.markov import _build_transition_matrix
-        nodes, matrix, transient, absorbing, sccs = _build_transition_matrix(
+
+        nodes, matrix, transient, absorbing, sccs, meta_members = _build_transition_matrix(
             test_db, edge_types=["TRANSITIONS_TO"], collapse_sccs=True
         )
 
@@ -156,6 +157,51 @@ class TestSCCCollapse:
         assert len(sccs) == 2
         multi_node_sccs = [s for s in sccs if len(s) > 1]
         assert len(multi_node_sccs) == 1
+        assert meta_members
+
+    def test_three_node_cycle_absorption(self, test_db):
+        """Test absorption from a 3-node cycle A->B->C->A with exit to sink.
+
+        This graph is invertible (cycle has exits), so no SCC collapse
+        is triggered — standard Markov absorption applies directly.
+        """
+        node_a = create_sample_node(test_db, label="a")
+        node_b = create_sample_node(test_db, label="b")
+        node_c = create_sample_node(test_db, label="c")
+        node_sink = create_sample_node(test_db, label="sink")
+
+        create_sample_edge(test_db, from_node=node_a, to_node=node_b, edge_type="TRANSITIONS_TO", probability=0.8)
+        create_sample_edge(test_db, from_node=node_b, to_node=node_c, edge_type="TRANSITIONS_TO", probability=0.8)
+        create_sample_edge(test_db, from_node=node_c, to_node=node_a, edge_type="TRANSITIONS_TO", probability=0.8)
+        create_sample_edge(test_db, from_node=node_a, to_node=node_sink, edge_type="TRANSITIONS_TO", probability=0.2)
+
+        result = markov_absorbing_risk(test_db, node_a, edge_types=["TRANSITIONS_TO"])
+
+        assert result["method"] == "markov_absorbing_risk"
+        assert node_sink in result["absorption_probabilities"]
+        total = sum(result["absorption_probabilities"].values())
+        assert abs(total - 1.0) < 0.02
+
+    def test_three_node_cycle_expected_steps(self, test_db):
+        """Test expected steps from a 3-node cycle A->B->C->A with exit to sink.
+
+        This graph is invertible (cycle has exits), so standard Markov
+        expected steps apply without SCC collapse.
+        """
+        node_a = create_sample_node(test_db, label="a")
+        node_b = create_sample_node(test_db, label="b")
+        node_c = create_sample_node(test_db, label="c")
+        node_sink = create_sample_node(test_db, label="sink")
+
+        create_sample_edge(test_db, from_node=node_a, to_node=node_b, edge_type="TRANSITIONS_TO", probability=0.8)
+        create_sample_edge(test_db, from_node=node_b, to_node=node_c, edge_type="TRANSITIONS_TO", probability=0.8)
+        create_sample_edge(test_db, from_node=node_c, to_node=node_a, edge_type="TRANSITIONS_TO", probability=0.8)
+        create_sample_edge(test_db, from_node=node_a, to_node=node_sink, edge_type="TRANSITIONS_TO", probability=0.2)
+
+        result = markov_expected_steps(test_db, node_a, edge_types=["TRANSITIONS_TO"])
+
+        assert result["method"] == "markov_expected_steps"
+        assert result["expected_steps"] > 0
 
     def test_sccs_detected_no_collapse(self, test_db):
         """Test that SCCs are properly reported even without collapse needed."""
@@ -169,4 +215,44 @@ class TestSCCCollapse:
         result = markov_absorbing_risk(test_db, node_a, edge_types=["TRANSITIONS_TO"])
 
         assert "sccs" in result
+        assert result["scc_collapsed"] is False
         assert all(len(scc) == 1 for scc in result["sccs"])
+
+    def test_singular_cycle_triggers_collapse(self, test_db):
+        """Test that a closed cycle (no exits) triggers LinAlgError fallback.
+
+        A<->B forms a cycle with no path to any absorbing state. The
+        transient submatrix (I-Q) is singular, so SCC collapse is
+        triggered. After collapse, A,B become a meta-node that is
+        absorbing (no exits after collapse), and probability is
+        distributed equally.
+        """
+        node_a = create_sample_node(test_db, label="a")
+        node_b = create_sample_node(test_db, label="b")
+
+        create_sample_edge(test_db, from_node=node_a, to_node=node_b, edge_type="TRANSITIONS_TO", probability=1.0)
+        create_sample_edge(test_db, from_node=node_b, to_node=node_a, edge_type="TRANSITIONS_TO", probability=1.0)
+
+        result = markov_absorbing_risk(test_db, node_a, edge_types=["TRANSITIONS_TO"])
+
+        assert result["method"] == "markov_absorbing_risk"
+        assert result["scc_collapsed"] is True
+        assert len(result["collapsed_sccs"]) == 1
+        assert set(result["collapsed_sccs"][0]) == {node_a, node_b}
+        assert node_a in result["absorption_probabilities"]
+        assert node_b in result["absorption_probabilities"]
+        assert abs(result["absorption_probabilities"][node_a] - 0.5) < 0.01
+        assert abs(result["absorption_probabilities"][node_b] - 0.5) < 0.01
+
+    def test_singular_cycle_expected_steps(self, test_db):
+        """Test expected steps from a closed cycle triggers collapse."""
+        node_a = create_sample_node(test_db, label="a")
+        node_b = create_sample_node(test_db, label="b")
+
+        create_sample_edge(test_db, from_node=node_a, to_node=node_b, edge_type="TRANSITIONS_TO", probability=1.0)
+        create_sample_edge(test_db, from_node=node_b, to_node=node_a, edge_type="TRANSITIONS_TO", probability=1.0)
+
+        result = markov_expected_steps(test_db, node_a, edge_types=["TRANSITIONS_TO"])
+
+        assert result["method"] == "markov_expected_steps"
+        assert result["scc_collapsed"] is True
