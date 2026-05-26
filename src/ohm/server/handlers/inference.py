@@ -270,3 +270,46 @@ class InferenceHandlerMixin:
             "regime": regime,
             "method": "bayesian_regime_detection",
         })
+
+    def _get_game(self, path: str, qs: dict) -> None:
+        """GET /game — extract normal-form game from causal graph."""
+        target = qs.get("target", [None])[0]
+        if not target:
+            self._json_response(400, {"error": "missing_parameter", "message": "?target=node_id required"})
+            return
+        from ohm.validation import validate_identifier
+
+        target = validate_identifier(target, name="target")
+        players_str = qs.get("players", [""])[0]
+        players = [p.strip() for p in players_str.split(",") if p.strip()] if players_str else None
+        layers_str = qs.get("layers", [""])[0]
+        layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
+        from ohm.graph_reader import coerce_reader
+
+        reader = coerce_reader(self.current_store.conn)
+        from ohm.game import extract_game
+
+        result = extract_game(reader, target, players=players, layers=layers)
+        self._json_response(200, result)
+
+    def _get_nash(self, path: str, qs: dict) -> None:
+        """GET /nash — compute Nash equilibrium for extracted game."""
+        players_str = qs.get("players", [""])[0]
+        if not players_str:
+            self._json_response(400, {"error": "missing_parameter", "message": "?players=a,b,... required"})
+            return
+        players = [p.strip() for p in players_str.split(",") if p.strip()]
+        payoff_str = qs.get("payoffs", [None])[0]
+        if not payoff_str:
+            self._json_response(400, {"error": "missing_parameter", "message": "?payoffs=matrix format required (use /game first)"})
+            return
+        try:
+            import json
+            payoff_matrices = json.loads(payoff_str)
+        except (json.JSONDecodeError, Exception):
+            self._json_response(400, {"error": "invalid_parameter", "message": "?payoffs must be a valid JSON array of payoff matrices"})
+            return
+        from ohm.game import compute_nash
+
+        result = compute_nash(payoff_matrices, players)
+        self._json_response(200, result)
