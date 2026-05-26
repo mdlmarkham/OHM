@@ -2698,7 +2698,12 @@ class BayesianContext:
         model = self._network["model"]
 
         try:
-            infer = VariableElimination(model)
+            _ve_key = id(model)
+            if _ve_key not in _ve_cache:
+                if len(_ve_cache) >= _MAX_VE_CACHE_SIZE:
+                    _ve_cache.clear()
+                _ve_cache[_ve_key] = VariableElimination(model)
+            infer = _ve_cache[_ve_key]
             soft_factors = self._network.get("soft_evidence_factors", [])
             query_kwargs: dict[str, Any] = {"variables": [safe_target], "evidence": safe_evidence}
             if soft_factors:
@@ -2890,7 +2895,12 @@ class BayesianContext:
         # Run inference on the mutilated graph
         soft_factors = network.get("soft_evidence_factors", [])
         try:
-            infer = VariableElimination(model_do)
+            _ve_key_do = id(model_do)
+            if _ve_key_do not in _ve_cache:
+                if len(_ve_cache) >= _MAX_VE_CACHE_SIZE:
+                    _ve_cache.clear()
+                _ve_cache[_ve_key_do] = VariableElimination(model_do)
+            infer = _ve_cache[_ve_key_do]
             do_kwargs: dict[str, Any] = {"variables": safe_query_nodes, "evidence": {safe_target: intervention_state}}
             if soft_factors:
                 do_kwargs["virtual_evidence"] = soft_factors
@@ -2931,7 +2941,12 @@ class BayesianContext:
             comparison = {}
             try:
                 obs_model = network["model"]
-                obs_infer = VariableElimination(obs_model)
+                _obs_ve_key = id(obs_model)
+                if _obs_ve_key not in _ve_cache:
+                    if len(_ve_cache) >= _MAX_VE_CACHE_SIZE:
+                        _ve_cache.clear()
+                    _ve_cache[_obs_ve_key] = VariableElimination(obs_model)
+                obs_infer = _ve_cache[_obs_ve_key]
                 for node_id, post in posteriors.items():
                     if isinstance(post, dict) and "error" not in post:
                         safe_qn = None

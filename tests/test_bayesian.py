@@ -1856,3 +1856,50 @@ class TestSoftEvidence:
             assert len(ctx.network.get("soft_evidence_factors", [])) > 0
             result = ctx.inference(c, {})
             assert result["method"] != "none"
+
+
+class TestVEReuse:
+    def test_bayesian_context_inference_reuses_ve(self, db):
+        a = create_sample_node(db, label="cause_a")
+        b = create_sample_node(db, label="effect_b")
+        create_sample_edge(db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3", confidence=0.8)
+
+        from ohm.inference.bayesian import BayesianContext as InfCtx, _ve_cache
+
+        _ve_cache.clear()
+        with InfCtx(db) as ctx:
+            r1 = ctx.inference(b, {})
+            assert r1["method"] != "none"
+            assert len(_ve_cache) >= 1
+            r2 = ctx.inference(b, {})
+            assert r2["method"] != "none"
+            assert abs(r1["posterior"]["bad"] - r2["posterior"]["bad"]) < 0.001
+
+    def test_bayesian_context_intervention_reuses_ve(self, db):
+        a = create_sample_node(db, label="cause_a")
+        b = create_sample_node(db, label="effect_b")
+        c = create_sample_node(db, label="outcome_c")
+        create_sample_edge(db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3", confidence=0.8)
+        create_sample_edge(db, from_node=b, to_node=c, edge_type="CAUSES", layer="L3", confidence=0.7)
+
+        from ohm.inference.bayesian import BayesianContext as InfCtx, _ve_cache
+
+        _ve_cache.clear()
+        with InfCtx(db) as ctx:
+            r1 = ctx.intervention(a, 0, query_nodes=[c])
+            assert r1["method"] != "none"
+            r2 = ctx.intervention(a, 1, query_nodes=[c])
+            assert r2["method"] != "none"
+            assert c in r1.get("posterior", {})
+
+    def test_ve_cache_bounded(self, db):
+        from ohm.inference.bayesian import _ve_cache, _MAX_VE_CACHE_SIZE
+
+        _ve_cache.clear()
+        a = create_sample_node(db, label="cause_a")
+        b = create_sample_node(db, label="effect_b")
+        create_sample_edge(db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3", confidence=0.8)
+
+        result = bayesian_inference(db, b, {})
+        assert result["method"] != "none"
+        assert len(_ve_cache) <= _MAX_VE_CACHE_SIZE
