@@ -251,6 +251,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="Aggregation strategy",
     )
 
+    # graph pert-auto
+    pert_auto_parser = graph_sub.add_parser(
+        "pert-auto",
+        help="Auto-derive PERT triple from observations or edge probabilities",
+    )
+    pert_auto_parser.add_argument(
+        "node_id",
+        help="Node ID to derive PERT for",
+    )
+    pert_auto_parser.add_argument(
+        "--source",
+        choices=["observations", "edges"],
+        default="observations",
+        help="Source for PERT derivation: observations (default) or edges",
+    )
+    pert_auto_parser.add_argument(
+        "--format",
+        choices=["human", "json"],
+        default="human",
+        help="Output format",
+    )
+
     # graph anomalies
     anomalies_parser = graph_sub.add_parser("anomalies", help="Detect anomalous observations")
     anomalies_parser.add_argument(
@@ -801,6 +823,8 @@ def _handle_graph(args: argparse.Namespace) -> None:
         _handle_observe(args)
     elif cmd == "aggregate":
         _handle_aggregate(args)
+    elif cmd == "pert-auto":
+        _handle_pert_auto(args)
     elif cmd == "anomalies":
         _handle_anomalies(args)
     elif cmd == "health":
@@ -1578,6 +1602,38 @@ def _handle_aggregate(args: argparse.Namespace) -> None:
             else:
                 print(f"  Combined value: {result['combined_value']}")
                 print(f"  Combined confidence: {result['combined_confidence']}")
+    finally:
+        conn.close()
+
+
+def _handle_pert_auto(args: argparse.Namespace) -> None:
+    """Handle auto-pert from observations or edges."""
+    import json
+
+    from ohm.sdk import Graph
+
+    conn = _get_db(args)
+    try:
+        graph = Graph(conn, actor=args.actor)
+        if args.source == "observations":
+            result = graph.auto_pert_from_observations(args.node_id)
+        else:
+            result = graph.auto_pert_from_edges(args.node_id)
+
+        if args.format == "json":
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            print(f"── Auto-PERT for {args.node_id} ──")
+            print(f"  Source:  {result['method']}")
+            print(f"  n:       {result['n']}")
+            if result["n"] > 0:
+                print(f"  p05:     {result['p05']}")
+                print(f"  p50:     {result['p50']}")
+                print(f"  p95:     {result['p95']}")
+                print(f"  mean:    {result['mean']}")
+                print(f"  variance: {result['variance']}")
+            else:
+                print(f"  (no data)")
     finally:
         conn.close()
 
