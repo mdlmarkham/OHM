@@ -669,3 +669,6 @@
 {"id":"int-82f880f2","kind":"field_change","created_at":"2026-05-26T12:15:38.2951317Z","actor":"Matt Markham","issue_id":"OHM-1779791710815-5-8495cc7b","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
 {"id":"int-954807b2","kind":"field_change","created_at":"2026-05-26T12:15:40.4141268Z","actor":"Matt Markham","issue_id":"OHM-1779791710930-6-8bb35f31","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
 {"id":"int-7b5d7699","kind":"field_change","created_at":"2026-05-26T12:48:05.044885338Z","actor":"root","issue_id":"OHM-1779791710930-6-8bb35f31","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
+{"id":"int-142b8347","kind":"field_change","created_at":"2026-05-26T12:59:52.3775214Z","actor":"Matt Markham","issue_id":"OHM-1779791713828-27-241de88a","extra":{"field":"status","new_value":"closed","old_value":"open"}}
+{"id":"int-d5a7dd41","kind":"field_change","created_at":"2026-05-26T13:00:01.6317644Z","actor":"Matt Markham","issue_id":"OHM-1779791710930-6-8bb35f31","extra":{"field":"status","new_value":"closed","old_value":"open"}}
+{"id":"int-ee5b4522","kind":"field_change","created_at":"2026-05-26T13:01:03.6642631Z","actor":"Matt Markham","issue_id":"OHM-1779791714823-33-070eb56f","extra":{"field":"status","new_value":"closed","old_value":"open"}}
