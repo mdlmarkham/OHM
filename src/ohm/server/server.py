@@ -1698,6 +1698,8 @@ OhmHandler._GET_EXACT = {
     "/centrality": "_get_centrality",
     "/communities": "_get_communities",
     "/bridges": "_get_bridges",
+    "/granger": "_get_granger",
+    "/edge_stability": "_get_edge_stability",
     "/suggest": "_get_suggest",
     "/graph/stats": "_get_graph_stats",
     "/lint": "_get_lint",

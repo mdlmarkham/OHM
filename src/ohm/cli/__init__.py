@@ -303,6 +303,47 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum results (default: 50)",
     )
 
+    # granger causality
+    granger_parser = graph_sub.add_parser("granger", help="Granger causality test between two nodes")
+    granger_parser.add_argument("from_node", help="Source node ID (potential cause)")
+    granger_parser.add_argument("to_node", help="Target node ID (potential effect)")
+    granger_parser.add_argument(
+        "--max-lag",
+        type=int,
+        default=3,
+        help="Maximum lag order for VAR (default: 3)",
+    )
+    granger_parser.add_argument(
+        "--min-observations",
+        type=int,
+        default=5,
+        help="Minimum overlapping observations (default: 5)",
+    )
+
+    # edge stability
+    edge_stability_parser = graph_sub.add_parser("edge-stability", help="Compute edge stability scores across time windows")
+    edge_stability_parser.add_argument(
+        "--edge-types",
+        help="Comma-separated edge types (default: CAUSES,INFLUENCES,ENABLES,DEPENDS_ON)",
+    )
+    edge_stability_parser.add_argument(
+        "--layer",
+        choices=["L1", "L2", "L3", "L4"],
+        help="Filter by layer",
+    )
+    edge_stability_parser.add_argument(
+        "--window-days",
+        type=int,
+        default=7,
+        help="Time window size in days (default: 7)",
+    )
+    edge_stability_parser.add_argument(
+        "--min-windows",
+        type=int,
+        default=3,
+        help="Minimum windows for stability (default: 3)",
+    )
+
     # graph health
     graph_sub.add_parser("health", help="Graph structural health metrics")
 
@@ -956,6 +997,10 @@ def _handle_graph(args: argparse.Namespace) -> None:
         _handle_pert_auto(args)
     elif cmd == "anomalies":
         _handle_anomalies(args)
+    elif cmd == "granger":
+        _handle_granger(args)
+    elif cmd == "edge-stability":
+        _handle_edge_stability(args)
     elif cmd == "health":
         _handle_health(args)
     elif cmd == "cleanup":
@@ -1795,6 +1840,72 @@ def _handle_anomalies(args: argparse.Namespace) -> None:
                     print(f"  [{a['node_label']}] {a['observation_count']} obs, σ={a['stddev']}, mean={a['mean_value']}")
                 elif a["anomaly_type"] == "low_confidence":
                     print(f"  Edge {a['edge_id']}: confidence={a['confidence']} ({a['layer']}/{a['edge_type']})")
+    finally:
+        conn.close()
+
+
+def _handle_granger(args: argparse.Namespace) -> None:
+    """Handle Granger causality test."""
+    from ohm.methods import granger_causality
+
+    conn = _get_db(args)
+    try:
+        result = granger_causality(
+            conn,
+            args.from_node,
+            args.to_node,
+            max_lag=args.max_lag,
+            min_observations=args.min_observations,
+        )
+        if args.format == "json":
+            import json
+
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            if result.get("error"):
+                print(f"Granger test failed: {result['error']}")
+                return
+            from_label = result["from_node"]
+            to_label = result["to_node"]
+            gc = "YES" if result["granger_causes"] else "no"
+            print(f"── Granger Causality: {from_label} → {to_label} ──")
+            print(f"  F-statistic:  {result['f_statistic']}")
+            print(f"  p-value:      {result['p_value']}")
+            print(f"  Granger causes: {gc}")
+            print(f"  Lag order:    {result['lag_order']}")
+            print(f"  Observations: {result['n_observations']}")
+    finally:
+        conn.close()
+
+
+def _handle_edge_stability(args: argparse.Namespace) -> None:
+    """Handle edge stability analysis."""
+    from ohm.methods import compute_edge_stability
+
+    edge_types = args.edge_types.split(",") if args.edge_types else None
+    conn = _get_db(args)
+    try:
+        result = compute_edge_stability(
+            conn,
+            edge_types=edge_types,
+            layer=args.layer,
+            window_days=args.window_days,
+            min_windows=args.min_windows,
+        )
+        if args.format == "json":
+            import json
+
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            print(f"── Edge Stability Analysis ──")
+            print(f"  Total edges: {result['n_edges']}")
+            print(f"  Stable:      {result['n_stable']}")
+            print(f"  Unstable:    {result['n_unstable']}")
+            print(f"  Unknown:     {result['n_unknown']}")
+            if result.get("edges"):
+                print("\n  Top unstable edges:")
+                for e in result["summary"]["most_unstable"]:
+                    print(f"    {e['from_label']} → {e['to_label']} ({e['edge_type']}) stability={e['stability']} variance={e['variance']}")
     finally:
         conn.close()
 

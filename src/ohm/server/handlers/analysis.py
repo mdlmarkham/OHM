@@ -202,6 +202,36 @@ class AnalysisHandlerMixin:
         result = find_bridges(self.current_store.conn, edge_types=edge_types, layer=layer)
         self._json_response(200, result)
 
+    def _get_granger(self, path: str, qs: dict) -> None:
+        """GET /granger — Granger causality test between two nodes."""
+        from_node = qs.get("from", [None])[0]
+        to_node = qs.get("to", [None])[0]
+        if not from_node or not to_node:
+            self._json_response(400, {"error": "missing_parameter", "message": "?from=node_id&to=node_id required"})
+            return
+        from ohm.validation import validate_identifier
+
+        from_node = validate_identifier(from_node, name="from")
+        to_node = validate_identifier(to_node, name="to")
+        max_lag = int(qs.get("max_lag", [3])[0])
+        min_obs = int(qs.get("min_observations", [5])[0])
+        from ohm.methods import granger_causality
+
+        result = granger_causality(self.current_store.conn, from_node, to_node, max_lag=max_lag, min_observations=min_obs)
+        self._json_response(200, result)
+
+    def _get_edge_stability(self, path: str, qs: dict) -> None:
+        """GET /edge_stability — compute edge stability scores across time windows."""
+        edge_types_raw = qs.get("edge_types", [None])[0]
+        edge_types = edge_types_raw.split(",") if edge_types_raw else None
+        layer = qs.get("layer", [None])[0]
+        window_days = int(qs.get("window_days", [7])[0])
+        min_windows = int(qs.get("min_windows", [3])[0])
+        from ohm.methods import compute_edge_stability
+
+        result = compute_edge_stability(self.current_store.conn, edge_types=edge_types, layer=layer, window_days=window_days, min_windows=min_windows)
+        self._json_response(200, result)
+
     def _get_suggest(self, path: str, qs: dict) -> None:
         """GET /suggest — suggest connections."""
         from ohm.methods import suggest_connections

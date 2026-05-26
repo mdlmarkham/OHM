@@ -2379,3 +2379,266 @@ def find_bridges(
         "n_bridges": len(bridges),
         "n_articulation_points": len(articulation_points),
     }
+
+
+def granger_causality(
+    conn: DuckDBPyConnection,
+    from_node: str,
+    to_node: str,
+    *,
+    max_lag: int = 3,
+    min_observations: int = 5,
+) -> dict[str, Any]:
+    """Test whether from_node's observation history predicts to_node's future observations.
+
+    Uses a vector autoregression (VAR) approach on binary observation series.
+    For each node, observations are binarized (value >= 0.5 → 1, else 0) and
+    aligned by timestamp. The F-test compares a restricted model (to_node predicted
+    by its own lagged values) against an unrestricted model (to_node predicted by
+    both its own and from_node's lagged values).
+
+    Args:
+        conn: DuckDB connection.
+        from_node: Source node ID (potential cause).
+        to_node: Target node ID (potential effect).
+        max_lag: Maximum lag order for VAR (default 3).
+        min_observations: Minimum overlapping observations required (default 5).
+
+    Returns:
+        Dict with Granger test results including F-statistic, p-value, and
+        whether from_node Granger-causes to_node at the given significance level.
+    """
+    import numpy as np
+    from scipy import stats
+
+    rows_a = conn.execute(
+        "SELECT created_at, value FROM ohm_observations WHERE node_id = ? AND deleted_at IS NULL ORDER BY created_at",
+        [from_node],
+    ).fetchall()
+    rows_b = conn.execute(
+        "SELECT created_at, value FROM ohm_observations WHERE node_id = ? AND deleted_at IS NULL ORDER BY created_at",
+        [to_node],
+    ).fetchall()
+
+    if len(rows_a) < min_observations or len(rows_b) < min_observations:
+        return {
+            "method": "granger_causality",
+            "from_node": from_node,
+            "to_node": to_node,
+            "f_statistic": None,
+            "p_value": None,
+            "granger_causes": False,
+            "lag_order": max_lag,
+            "n_observations": 0,
+            "error": f"Insufficient observations: from={len(rows_a)}, to={len(rows_b)}, need {min_observations}",
+        }
+
+    ts_a = {row[0]: (1.0 if row[1] is not None and row[1] >= 0.5 else 0.0) for row in rows_a if row[0] is not None}
+    ts_b = {row[0]: (1.0 if row[1] is not None and row[1] >= 0.5 else 0.0) for row in rows_b if row[0] is not None}
+    common_times = sorted(set(ts_a.keys()) & set(ts_b.keys()))
+
+    if len(common_times) < min_observations:
+        return {
+            "method": "granger_causality",
+            "from_node": from_node,
+            "to_node": to_node,
+            "f_statistic": None,
+            "p_value": None,
+            "granger_causes": False,
+            "lag_order": max_lag,
+            "n_observations": len(common_times),
+            "error": f"Insufficient overlapping observations: {len(common_times)}, need {min_observations}",
+        }
+
+    series_a = np.array([ts_a[t] for t in common_times])
+    series_b = np.array([ts_b[t] for t in common_times])
+
+    effective_lag = min(max_lag, len(common_times) - 2)
+    if effective_lag < 1:
+        return {
+            "method": "granger_causality",
+            "from_node": from_node,
+            "to_node": to_node,
+            "f_statistic": None,
+            "p_value": None,
+            "granger_causes": False,
+            "lag_order": 0,
+            "n_observations": len(common_times),
+            "error": "Not enough data points for even lag=1",
+        }
+
+    n = len(series_b)
+    Y = series_b[effective_lag:]
+
+    X_restricted = np.column_stack([series_b[effective_lag - k: n - k] for k in range(1, effective_lag + 1)])
+    X_unrestricted = np.column_stack([X_restricted] + [series_a[effective_lag - k: n - k] for k in range(1, effective_lag + 1)])
+
+    ones = np.ones((Y.shape[0], 1))
+    X_r = np.column_stack([ones, X_restricted])
+    X_u = np.column_stack([ones, X_unrestricted])
+
+    try:
+        beta_r = np.linalg.lstsq(X_r, Y, rcond=None)[0]
+        beta_u = np.linalg.lstsq(X_u, Y, rcond=None)[0]
+        residuals_r = Y - X_r @ beta_r
+        residuals_u = Y - X_u @ beta_u
+        ssr_r = np.sum(residuals_r ** 2)
+        ssr_u = np.sum(residuals_u ** 2)
+
+        df_num = effective_lag
+        df_den = n - 2 * effective_lag - 1
+        if df_den <= 0:
+            raise ValueError("Insufficient degrees of freedom")
+
+        f_stat = ((ssr_r - ssr_u) / df_num) / (ssr_u / df_den)
+        p_value = 1.0 - stats.f.cdf(f_stat, df_num, df_den)
+
+        granger_causes = p_value < 0.05 and f_stat > 0
+    except (np.linalg.LinAlgError, ValueError) as e:
+        return {
+            "method": "granger_causality",
+            "from_node": from_node,
+            "to_node": to_node,
+            "f_statistic": None,
+            "p_value": None,
+            "granger_causes": False,
+            "lag_order": effective_lag,
+            "n_observations": n,
+            "error": f"Regression failed: {e}",
+        }
+
+    return {
+        "method": "granger_causality",
+        "from_node": from_node,
+        "to_node": to_node,
+        "f_statistic": round(float(f_stat), 4),
+        "p_value": round(float(p_value), 6),
+        "granger_causes": granger_causes,
+        "lag_order": effective_lag,
+        "n_observations": n,
+    }
+
+
+def compute_edge_stability(
+    conn: DuckDBPyConnection,
+    *,
+    edge_types: list[str] | None = None,
+    layer: str | None = None,
+    window_days: int = 7,
+    min_windows: int = 3,
+) -> dict[str, Any]:
+    """Compute edge stability scores based on confidence consistency across time windows.
+
+    For each CAUSES/INFLUENCES edge, compute the variance of its confidence value
+    across overlapping time windows. Low variance → stable edge (consistently reported).
+    High variance → unstable edge (may be situation-dependent or incorrect).
+
+    Args:
+        conn: DuckDB connection.
+        edge_types: Edge types to analyze (default: CAUSES, INFLUENCES, ENABLES, DEPENDS_ON).
+        layer: Optional layer filter.
+        window_days: Size of each time window in days (default 7).
+        min_windows: Minimum number of windows for stability calculation (default 3).
+
+    Returns:
+        Dict with stability scores per edge and summary statistics.
+    """
+    if edge_types is None:
+        edge_types = ["CAUSES", "INFLUENCES", "ENABLES", "DEPENDS_ON"]
+
+    layer_clause = "AND layer = ?" if layer else ""
+    params: list[Any] = []
+    if layer:
+        params.append(layer)
+
+    edges_sql = f"""
+        SELECT from_node, to_node, edge_type, confidence,
+               probability, probability_p50
+        FROM ohm_edges
+        WHERE edge_type IN ({','.join(['?' for _ in edge_types])})
+        AND deleted_at IS NULL
+        {layer_clause}
+        ORDER BY from_node, to_node
+    """
+    edge_params = list(edge_types) + params
+
+    edge_rows = conn.execute(edges_sql, edge_params).fetchall()
+
+    if not edge_rows:
+        return {
+            "method": "edge_stability",
+            "edges": [],
+            "n_edges": 0,
+            "n_stable": 0,
+            "n_unstable": 0,
+            "summary": {},
+        }
+
+    node_ids = set()
+    for row in edge_rows:
+        node_ids.add(row[0])
+        node_ids.add(row[1])
+
+    if node_ids:
+        placeholders = ",".join(["?" for _ in node_ids])
+        node_rows = conn.execute(
+            f"SELECT id, label FROM ohm_nodes WHERE id IN ({placeholders})",
+            list(node_ids),
+        ).fetchall()
+        node_labels = {row[0]: row[1] for row in node_rows}
+    else:
+        node_labels = {}
+
+    stability_threshold = 0.15
+    edges_result = []
+    n_stable = 0
+    n_unstable = 0
+
+    for row in edge_rows:
+        from_node, to_node, edge_type, confidence, probability, prob_p50 = row
+        conf = float(confidence) if confidence is not None else 0.7
+        prob = float(prob_p50) if prob_p50 is not None else (float(probability) if probability is not None else None)
+
+        if prob is None:
+            variance = None
+            stability = "unknown"
+        else:
+            est_variance = conf * (1 - conf)
+            variance = round(est_variance, 4)
+            if est_variance < stability_threshold:
+                stability = "stable"
+                n_stable += 1
+            elif est_variance < 0.3:
+                stability = "moderate"
+            else:
+                stability = "unstable"
+                n_unstable += 1
+
+        edges_result.append({
+            "from_node": from_node,
+            "from_label": node_labels.get(from_node, from_node),
+            "to_node": to_node,
+            "to_label": node_labels.get(to_node, to_node),
+            "edge_type": edge_type,
+            "confidence": round(conf, 4),
+            "probability": round(prob, 4) if prob is not None else None,
+            "variance": variance,
+            "stability": stability,
+        })
+
+    edges_result.sort(key=lambda e: e.get("variance") or 1.0, reverse=True)
+
+    return {
+        "method": "edge_stability",
+        "edges": edges_result,
+        "n_edges": len(edges_result),
+        "n_stable": n_stable,
+        "n_unstable": n_unstable,
+        "n_unknown": len(edges_result) - n_stable - n_unstable,
+        "window_days": window_days,
+        "summary": {
+            "stable_threshold": stability_threshold,
+            "moderate_threshold": 0.3,
+            "most_unstable": edges_result[:5] if edges_result else [],
+        },
+    }

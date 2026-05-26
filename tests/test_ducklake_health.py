@@ -1,5 +1,6 @@
 """Tests for DuckLake corruption detection and repair (OHM-qiio)."""
 
+import duckdb
 import pytest
 from ohm.store import OhmStore
 
@@ -168,4 +169,76 @@ class TestDuckLakeRepair:
         result2 = store.repair_from_ducklake()
         assert result2["inserted"] == 0
         assert result2["verified"] is True
+        store.close()
+
+
+class TestDuckLakeAutoRestore:
+    """Tests for _auto_restore_if_empty() (OHM-cqrh)."""
+
+    def test_auto_restore_with_matching_schema(self, tmp_path):
+        """Auto-restore restores data from DuckLake when local is empty."""
+        from ohm.db import attach_ducklake
+
+        local_path = str(tmp_path / "local.duckdb")
+        ducklake_path = str(tmp_path / "ducklake.duckdb")
+        data_path = str(tmp_path / "ducklake_data")
+
+        dl_store = OhmStore(db_path=ducklake_path, agent_name="dl_init")
+        dl_store.write_node("auto_node_1", "Auto Node 1", "concept")
+        dl_store.write_node("auto_node_2", "Auto Node 2", "concept")
+        dl_store.conn.execute("CHECKPOINT")
+        dl_store.close()
+
+        conn_for_attach = duckdb.connect(local_path)
+        if not attach_ducklake(conn_for_attach, catalog_path=ducklake_path, data_path=data_path):
+            conn_for_attach.close()
+            pytest.skip("DuckLake not available")
+        conn_for_attach.close()
+
+        store = OhmStore(db_path=local_path, agent_name="test_auto_restore")
+        store.ducklake_path = ducklake_path
+        store.ducklake_data_path = data_path
+
+        initial_count = store.conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL").fetchone()[0]
+        assert initial_count == 0, "Local should be empty before restore"
+
+        store._auto_restore_if_empty()
+
+        restored_count = store.conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL").fetchone()[0]
+        assert restored_count == 2, f"Expected 2 nodes restored, got {restored_count}"
+        store.close()
+
+    def test_auto_restore_skips_when_data_exists(self, tmp_path):
+        """Auto-restore does nothing when local already has data."""
+        local_path = str(tmp_path / "local.duckdb")
+        ducklake_path = str(tmp_path / "ducklake.duckdb")
+        data_path = str(tmp_path / "ducklake_data")
+
+        dl_store = OhmStore(db_path=ducklake_path, agent_name="dl_init")
+        dl_store.write_node("dl_node", "DL Node", "concept")
+        dl_store.conn.execute("CHECKPOINT")
+        dl_store.close()
+
+        store = OhmStore(db_path=local_path, agent_name="test_skip_restore")
+        store.write_node("local_node", "Local Node", "concept")
+        store.ducklake_path = ducklake_path
+        store.ducklake_data_path = data_path
+
+        store._auto_restore_if_empty()
+
+        count = store.conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL").fetchone()[0]
+        assert count == 1, "Should keep local data, not restore from DuckLake"
+        store.close()
+
+    def test_auto_restore_skips_without_ducklake_path(self, tmp_path):
+        """Auto-restore skips when no DuckLake path is configured."""
+        local_path = str(tmp_path / "local.duckdb")
+
+        store = OhmStore(db_path=local_path, agent_name="test_no_path")
+        store.ducklake_path = ""
+
+        store._auto_restore_if_empty()
+
+        count = store.conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL").fetchone()[0]
+        assert count == 0, "Should remain empty without DuckLake"
         store.close()

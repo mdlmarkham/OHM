@@ -269,73 +269,42 @@ class OhmStore:
                     conn.execute(f"ATTACH IF NOT EXISTS '{ducklake_path}' AS ohm_lake (TYPE ducklake)")
                     logger.info("DuckLake attached for recovery")
 
-                    # Column mapping for DuckLake mirror -> local schema
-                    NODE_COLS = {
-                        "id": "id",
-                        "label": "label",
-                        "type": "type",
-                        "content": "content",
-                        "url": "url",
-                        "created_by": "created_by",
-                        "created_at": "created_at",
-                        "updated_at": "updated_at",
-                        "updated_by": "updated_by",
-                        "confidence": "confidence",
-                        "visibility": "visibility",
-                        "provenance": "provenance",
-                        "tags": "tags",
-                        "metadata": "metadata",
-                        "priority": "priority",
-                        "utility_scale": "utility_scale",
-                        "utility_usd_per_day": "utility_usd_per_day",
-                        "utility_currency": "utility_currency",
-                    }
-                    EDGE_COLS = {
-                        "id": "id",
-                        "from_node": "from_node",
-                        "to_node": "to_node",
-                        "edge_type": "edge_type",
-                        "layer": "layer",
-                        "confidence": "confidence",
-                        "condition": "condition",
-                        "probability": "probability",
-                        "probability_p05": "probability_p05",
-                        "probability_p50": "probability_p50",
-                        "probability_p95": "probability_p95",
-                        "confidence_p05": "confidence_p05",
-                        "confidence_p50": "confidence_p50",
-                        "confidence_p95": "confidence_p95",
-                        "urgency": "urgency",
-                        "challenge_of": "challenge_of",
-                        "challenge_type": "challenge_type",
-                        "provenance": "provenance",
-                        "created_by": "created_by",
-                        "created_at": "created_at",
-                        "updated_at": "updated_at",
-                        "updated_by": "updated_by",
-                        "metadata": "metadata",
-                    }
-
-                    for table, col_map in [("ohm_nodes", NODE_COLS), ("ohm_edges", EDGE_COLS)]:
+                    for table in ["ohm_nodes", "ohm_edges"]:
                         try:
-                            # Build SELECT with type casts
-                            cast_parts = []
-                            for dl_col, local_col in col_map.items():
-                                if local_col in ("confidence", "probability", "baseline", "value", "sigma"):
-                                    cast_parts.append(f"CAST({dl_col} AS FLOAT) AS {local_col}")
-                                elif local_col in ("created_at", "updated_at"):
-                                    cast_parts.append(f"CAST({dl_col} AS TIMESTAMP) AS {local_col}")
-                                elif local_col == "metadata":
-                                    cast_parts.append(f"CAST({dl_col} AS JSON) AS {local_col}")
-                                else:
-                                    cast_parts.append(f'"{dl_col}" AS {local_col}')
-                            select_str = ", ".join(cast_parts)
-                            local_cols = ", ".join(col_map.values())
+                            dl_cols = conn.execute(
+                                f"PRAGMA table_info('ohm_lake.{table}')"
+                            ).fetchall()
+                            dl_col_names = {r[1] for r in dl_cols}
+                            if not dl_col_names:
+                                logger.warning("No columns found in DuckLake for %s, skipping", table)
+                                continue
 
-                            # Pull all rows from DuckLake (DuckLake tables don't have deleted_at)
-                            conn.execute(f"INSERT INTO {table} ({local_cols}, deleted_at) SELECT {select_str}, NULL::TIMESTAMP FROM ohm_lake.{table}")
+                            local_cols = conn.execute(
+                                "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = ? ORDER BY ordinal_position",
+                                [table],
+                            ).fetchall()
+                            local_col_map = {r[0]: r[1] for r in local_cols}
+
+                            common = [c for c in dl_col_names if c in local_col_map and c != "deleted_at"]
+
+                            select_parts = []
+                            for col in common:
+                                ltype = local_col_map.get(col, "VARCHAR").upper()
+                                if ltype in ("FLOAT", "DOUBLE", "REAL"):
+                                    select_parts.append(f"CAST({col} AS FLOAT) AS {col}")
+                                elif ltype == "JSON":
+                                    select_parts.append(f"CAST({col} AS JSON) AS {col}")
+                                else:
+                                    select_parts.append(f'"{col}" AS {col}')
+
+                            select_str = ", ".join(select_parts)
+                            insert_cols = ", ".join(common)
+
+                            conn.execute(
+                                f"INSERT INTO {table} ({insert_cols}, deleted_at) SELECT {select_str}, NULL::TIMESTAMP FROM ohm_lake.{table}"
+                            )
                             count = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]  # type: ignore[index]
-                            logger.info("Recovered %d %s from DuckLake", count, table)
+                            logger.info("Recovered %d %s from DuckLake (%d columns)", count, table, len(common))
                         except Exception as e:
                             logger.warning("Failed to recover %s from DuckLake: %s", table, e)
 
@@ -396,71 +365,42 @@ class OhmStore:
         try:
             self.conn.execute(f"ATTACH IF NOT EXISTS '{ducklake_path}' AS ohm_lake (TYPE ducklake)")
 
-            NODE_COLS = {
-                "id": "id",
-                "label": "label",
-                "type": "type",
-                "content": "content",
-                "url": "url",
-                "created_by": "created_by",
-                "created_at": "created_at",
-                "updated_at": "updated_at",
-                "updated_by": "updated_by",
-                "confidence": "confidence",
-                "visibility": "visibility",
-                "provenance": "provenance",
-                "tags": "tags",
-                "metadata": "metadata",
-                "priority": "priority",
-                "utility_scale": "utility_scale",
-                "utility_usd_per_day": "utility_usd_per_day",
-                "utility_currency": "utility_currency",
-            }
-            EDGE_COLS = {
-                "id": "id",
-                "from_node": "from_node",
-                "to_node": "to_node",
-                "edge_type": "edge_type",
-                "layer": "layer",
-                "confidence": "confidence",
-                "condition": "condition",
-                "probability": "probability",
-                "probability_p05": "probability_p05",
-                "probability_p50": "probability_p50",
-                "probability_p95": "probability_p95",
-                "confidence_p05": "confidence_p05",
-                "confidence_p50": "confidence_p50",
-                "confidence_p95": "confidence_p95",
-                "urgency": "urgency",
-                "challenge_of": "challenge_of",
-                "challenge_type": "challenge_type",
-                "provenance": "provenance",
-                "created_by": "created_by",
-                "created_at": "created_at",
-                "updated_at": "updated_at",
-                "updated_by": "updated_by",
-                "metadata": "metadata",
-            }
-
-            for table, col_map in [("ohm_nodes", NODE_COLS), ("ohm_edges", EDGE_COLS)]:
+            for table in ["ohm_nodes", "ohm_edges"]:
                 try:
-                    cast_parts = []
-                    for dl_col, local_col in col_map.items():
-                        if local_col in ("confidence", "probability", "baseline", "value", "sigma", "utility_scale", "utility_usd_per_day"):
-                            cast_parts.append(f"CAST({dl_col} AS FLOAT) AS {local_col}")
-                        elif local_col in ("created_at", "updated_at"):
-                            cast_parts.append(f"CAST({dl_col} AS TIMESTAMP) AS {local_col}")
-                        elif local_col == "metadata":
-                            cast_parts.append(f"CAST({dl_col} AS JSON) AS {local_col}")
-                        else:
-                            cast_parts.append(f'"{dl_col}" AS {local_col}')
-                    select_str = ", ".join(cast_parts)
-                    local_cols = ", ".join(col_map.values())
+                    dl_cols = self.conn.execute(
+                        f"PRAGMA table_info('ohm_lake.{table}')"
+                    ).fetchall()
+                    dl_col_names = {r[1] for r in dl_cols}
+                    if not dl_col_names:
+                        logger.warning("No columns found in DuckLake for %s, skipping", table)
+                        continue
 
-                    # Pull all rows from DuckLake (DuckLake tables don't have deleted_at)
-                    self.conn.execute(f"INSERT INTO {table} ({local_cols}, deleted_at) SELECT {select_str}, NULL::TIMESTAMP FROM ohm_lake.{table}")
+                    local_cols = self.conn.execute(
+                        "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = ? ORDER BY ordinal_position",
+                        [table],
+                    ).fetchall()
+                    local_col_map = {r[0]: r[1] for r in local_cols}
+
+                    common = [c for c in dl_col_names if c in local_col_map and c != "deleted_at"]
+
+                    select_parts = []
+                    for col in common:
+                        ltype = local_col_map.get(col, "VARCHAR").upper()
+                        if ltype in ("FLOAT", "DOUBLE", "REAL"):
+                            select_parts.append(f"CAST({col} AS FLOAT) AS {col}")
+                        elif ltype == "JSON":
+                            select_parts.append(f"CAST({col} AS JSON) AS {col}")
+                        else:
+                            select_parts.append(f'"{col}" AS {col}')
+
+                    select_str = ", ".join(select_parts)
+                    insert_cols = ", ".join(common)
+
+                    self.conn.execute(
+                        f"INSERT INTO {table} ({insert_cols}, deleted_at) SELECT {select_str}, NULL::TIMESTAMP FROM ohm_lake.{table}"
+                    )
                     count = self.conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]  # type: ignore[index]
-                    logger.info("Auto-restored %d %s from DuckLake", count, table)
+                    logger.info("Auto-restored %d %s from DuckLake (%d columns)", count, table, len(common))
                 except Exception as e:
                     logger.warning("Failed to auto-restore %s from DuckLake: %s", table, e)
 
