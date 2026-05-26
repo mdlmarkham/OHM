@@ -554,16 +554,19 @@ def markov_expected_steps(
         }
 
     if not transient:
-        return {
-            "method": "markov_expected_steps",
+        result = {
+            "method": "markov_absorbing_risk",
             "start_node": start_node,
-            "expected_steps": 0.0,
-            "expected_steps_per_state": {},
+            "absorption_probabilities": {start_node: 1.0},
             "transient_states": [],
             "absorbing_states": absorbing,
             "n_states": len(nodes),
             "sccs": sccs,
         }
+        if multi_sccs:
+            result["scc_collapsed"] = True
+            result["collapsed_sccs"] = multi_sccs
+        return result
 
     transient_idx = [node_to_idx[n] for n in transient]
     Q = matrix[np.ix_(transient_idx, transient_idx)]
