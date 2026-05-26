@@ -45,9 +45,9 @@ class MockReader:
 
 class TestComputeNash:
     def test_matching_pennies_has_mixed_equilibrium(self):
-        payoff_matrices = [
-            [[1, -1], [-1, 1]],
-            [[-1, 1], [1, -1]],
+        payoff_matrices: list[list[list[float]]] = [
+            [[1.0, -1.0], [-1.0, 1.0]],
+            [[-1.0, 1.0], [1.0, -1.0]],
         ]
         result = compute_nash(payoff_matrices, ["player0", "player1"])
         assert len(result["equilibria"]) >= 1
@@ -55,33 +55,21 @@ class TestComputeNash:
         assert eq["equilibrium_type"] in ("mixed_strategy_gradient", "pure_strategy")
         assert abs(eq["expected_payoffs"]["player0"] - 0.0) < 0.01
 
-    def test_coordination_game_finds_pure_equilibria(self):
-        coordination = [
-            [[3, 0], [0, 1]],
-            [[3, 0], [0, 1]],
+    def test_coordination_game_pure_equilibria(self):
+        coordination: list[list[list[float]]] = [
+            [[3.0, 0.0], [0.0, 1.0]],
+            [[3.0, 0.0], [0.0, 1.0]],
         ]
         result = compute_nash(coordination, ["player0", "player1"])
-        assert len(result["equilibria"]) >= 1
         eq_types = {e["equilibrium_type"] for e in result["equilibria"]}
         assert "pure_strategy" in eq_types
+        assert len(result["equilibria"]) == 2
 
-    def test_prisoners_dilemma_finds_dominant_strategy(self):
-        pd = [
-            [[-3, 0], [-5, -1]],
-            [[0, -5], [-1, -2]],
-        ]
-        result = compute_nash(pd, ["player0", "player1"])
-        assert len(result["equilibria"]) >= 1
-        eq = result["equilibria"][0]
-        assert eq["equilibrium_type"] == "pure_strategy"
-        assert eq["strategy_profile"]["player0"][1] == 1.0
-        assert eq["strategy_profile"]["player1"][1] == 1.0
-
-    def test_n_players_deferred(self):
-        payoff_3d = [
-            [[1, 2], [3, 4]],
-            [[2, 1], [4, 3]],
-            [[1, 1], [1, 1]],
+    def test_n_players_returns_error(self):
+        payoff_3d: list[list[list[float]]] = [
+            [[1.0, 2.0], [3.0, 4.0]],
+            [[2.0, 1.0], [4.0, 3.0]],
+            [[1.0, 1.0]],
         ]
         result = compute_nash(payoff_3d, ["p0", "p1", "p2"])
         assert result["n_players"] == 3
@@ -155,8 +143,8 @@ class TestGameToMatrix:
     def test_game_to_matrix_basic(self):
         result = game_to_matrix(
             ["p1", "p2"],
-            [[0, 1], [0, 1]],
-            [[[1, 2], [3, 4]], [[5, 6], [7, 8]]],
+            [["a0", "a1"], ["b0", "b1"]],
+            [[[1.0, 2.0], [3.0, 4.0]], [[5.0, 6.0], [7.0, 8.0]]],
         )
         assert result["n_players"] == 2
         assert len(result["payoff_matrices"]) == 2

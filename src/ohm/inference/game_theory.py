@@ -242,7 +242,13 @@ def compute_nash(payoff_matrices: list[list[list[float]]], players: list[str]) -
     """
     n_players = len(players)
     if n_players != 2:
-        return _compute_nash_general(payoff_matrices, players)
+        return {
+            "equilibria": [],
+            "n_players": n_players,
+            "solution_method": "indeterminate",
+            "game_type": "general_sum",
+            "message": "N-player Nash computation not yet implemented for N>2",
+        }
 
     A = np.array(payoff_matrices[0])
     B = np.array(payoff_matrices[1])
@@ -390,7 +396,8 @@ def _compute_nash_general(
                         continue
                     # Check if a2 dominates a1 (a1 gets less than a2 in all contingencies)
                     dominates = True
-                    for profile in _all_profiles(surviving_actions, i):
+                    all_player_indices = list(range(n_players))
+                    for profile in _all_profiles(surviving_actions, all_player_indices):
                         payoff_a1 = _get_payoff(payoff_matrices, i, profile, a1)
                         payoff_a2 = _get_payoff(payoff_matrices, i, profile, a2)
                         if payoff_a1 >= payoff_a2:
@@ -435,16 +442,17 @@ def _compute_nash_general(
     }
 
 
-def _all_profiles(surviving: list[list[int]], exclude_player: int) -> list[list[int]]:
-    """Generate all action profiles given surviving actions, holding exclude_player fixed."""
-    if not surviving:
+def _all_profiles(surviving: list[list[int]], active_players: list[int]) -> list[list[int]]:
+    """Generate all action profiles for active_players (list of player indices to include)."""
+    if not active_players:
         return [[]]
-    result = []
-    first = surviving[0]
-    for a in first:
-        for rest in _all_profiles(surviving[1:], exclude_player - 1 if exclude_player > 0 else -1):
-            result.append([a] + rest)
-    return result
+    player_idx = active_players[0]
+    remaining = surviving[player_idx]
+    rest_profiles: list[list[int]] = []
+    for a in remaining:
+        for rest in _all_profiles(surviving, active_players[1:]):
+            rest_profiles.append([a] + rest)
+    return rest_profiles
 
 
 def _get_payoff(
