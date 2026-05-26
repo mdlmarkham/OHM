@@ -46,6 +46,14 @@ logger = logging.getLogger(__name__)
 # Invalidated when graph_generation counter increments.
 _bayesian_network_cache: dict[tuple, tuple[int, dict[str, Any]]] = {}
 
+# Module-level cache for VariableElimination instances (OHM-a689.3).
+# Keyed by a hash of the model's CPD values and structure.
+# This avoids creating 2 VE instances per causal_intervention call when
+# the same model is reused (e.g., VoI loop computes ATE for N candidates
+# against the same pre-built network).
+_ve_cache: dict[int, "VariableElimination"] = {}
+_MAX_VE_CACHE_SIZE = 20
+
 MAX_CPT_PARENTS = 8
 
 from .pert import compute_pert_mean as _compute_pert_mean
@@ -737,7 +745,13 @@ def bayesian_inference(
 
     # Run Variable Elimination
     try:
-        infer = VariableElimination(model)
+        # OHM-a689.3: Cache VE instance
+        _ve_key = id(model)
+        if _ve_key not in _ve_cache:
+            if len(_ve_cache) >= _MAX_VE_CACHE_SIZE:
+                _ve_cache.clear()
+            _ve_cache[_ve_key] = VariableElimination(model)
+        infer = _ve_cache[_ve_key]
         result = infer.query([safe_target], evidence=safe_evidence)
 
         # Extract probabilities: state 0 = "bad", state 1 = "good"
@@ -1013,7 +1027,13 @@ def causal_intervention(
     # Run inference per query node — query each individually to avoid a joint
     # distribution that is slow and can fail if any node is not connected.
     # Each individual query returns a marginal distribution for that node.
-    infer = VariableElimination(model_do)
+    # OHM-a689.3: Cache VE instances to avoid creating 2 per call.
+    _ve_key_do = id(model_do)
+    if _ve_key_do not in _ve_cache:
+        if len(_ve_cache) >= _MAX_VE_CACHE_SIZE:
+            _ve_cache.clear()
+        _ve_cache[_ve_key_do] = VariableElimination(model_do)
+    infer = _ve_cache[_ve_key_do]
     posteriors = {}
     for qn in safe_query_nodes:
         qn_original = next((orig for orig, safe in safe_names.items() if safe == qn), qn)
@@ -1032,7 +1052,13 @@ def causal_intervention(
     comparison = {}
     try:
         obs_model = network["model"]
-        obs_infer = VariableElimination(obs_model)
+        # OHM-a689.3: Cache observation VE instance
+        _obs_ve_key = id(obs_model)
+        if _obs_ve_key not in _ve_cache:
+            if len(_ve_cache) >= _MAX_VE_CACHE_SIZE:
+                _ve_cache.clear()
+            _ve_cache[_obs_ve_key] = VariableElimination(obs_model)
+        obs_infer = _ve_cache[_obs_ve_key]
         for node_id, post in posteriors.items():
             if isinstance(post, dict) and "error" not in post:
                 safe_qn = None
