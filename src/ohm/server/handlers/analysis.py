@@ -282,11 +282,16 @@ class AnalysisHandlerMixin:
         if not node:
             raise NodeNotFoundError(f"Node not found: {node_id}")
         correlation = float(qs.get("correlation", ["0.0"])[0])
+        half_life_days = float(qs.get("half_life", ["0.0"])[0])
         observations = self.current_store.execute(
             "SELECT * FROM ohm_observations WHERE node_id = ? AND deleted_at IS NULL ORDER BY created_at DESC",
             [node_id],
         )
+        from datetime import datetime, timezone
+
         from ohm.methods import compound_confidence
+
+        now = datetime.now(timezone.utc)
 
         def _obs_confidence(obs: dict) -> float:
             sigma = obs.get("sigma")
@@ -294,8 +299,29 @@ class AnalysisHandlerMixin:
                 return max(0.0, min(1.0, 1.0 / (1.0 + float(sigma))))
             return 1.0
 
-        obs_with_confidence = [{"confidence": _obs_confidence(obs), "source": obs.get("created_by")} for obs in observations]
+        def _decay_weight(obs: dict) -> float:
+            if half_life_days <= 0.0:
+                return 1.0
+            created_at = obs.get("created_at")
+            if not created_at:
+                return 1.0
+            try:
+                obs_time = datetime.fromisoformat(str(created_at))
+                age_days = max(0.0, (now - obs_time).total_seconds() / 86400.0)
+                return 0.5 ** (age_days / half_life_days)
+            except (ValueError, TypeError):
+                return 1.0
+
+        obs_with_confidence = [
+            {
+                "confidence": _obs_confidence(obs) * _decay_weight(obs),
+                "source": obs.get("created_by"),
+                "created_at": obs.get("created_at"),
+            }
+            for obs in observations
+        ]
         result = compound_confidence(obs_with_confidence, correlation=correlation)
         result["node_id"] = node_id
         result["observations"] = len(observations)
+        result["half_life_days"] = half_life_days
         self._json_response(200, result)

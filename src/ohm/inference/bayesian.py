@@ -28,6 +28,7 @@ ADR-009: NEGATES edges have inverted probability semantics.
 """
 
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from ohm.validation import validate_identifier
@@ -151,6 +152,7 @@ def build_bayesian_network(
     semantic_roles: SemanticRoles | None = None,
     preferred_edges: set[tuple[str, str]] | None = None,
     customer_id: str | None = None,
+    half_life_days: float = 0.0,
 ) -> dict[str, Any] | None:
     """Build a BayesianNetwork from OHM edges with probability/confidence values.
 
@@ -461,18 +463,35 @@ def build_bayesian_network(
     # Get prior probabilities for root nodes
     node_priors = {}
     root_safe_names = set()
+    now = datetime.now(timezone.utc)
     for node_id in node_ids:
         safe = safe_names[node_id]
         if safe not in model_node_set:
             continue  # Node was excluded from model edges — skip its CPD
         if safe not in parent_edges:
             root_safe_names.add(safe)
-            # Get prior from probability-scaled observations or default
-            _obs_values = [
-                o.value for o in reader.get_observations(node_id)
+            # Get prior from probability-scaled observations with temporal decay
+            _obs = [
+                o for o in reader.get_observations(node_id)
                 if o.value is not None and o.scale in ("probability", "unknown")
             ]
-            prior = (sum(_obs_values) / len(_obs_values)) if _obs_values else None
+            if _obs:
+                total_weight = 0.0
+                weighted_sum = 0.0
+                for o in _obs:
+                    weight = 1.0
+                    if half_life_days > 0.0 and o.created_at:
+                        try:
+                            obs_time = datetime.fromisoformat(str(o.created_at))
+                            age_days = max(0.0, (now - obs_time).total_seconds() / 86400.0)
+                            weight = 0.5 ** (age_days / half_life_days)
+                        except (ValueError, TypeError):
+                            weight = 1.0
+                    weighted_sum += o.value * weight
+                    total_weight += weight
+                prior = weighted_sum / total_weight if total_weight > 0 else None
+            else:
+                prior = None
             node_priors[safe] = float(prior) if prior is not None else root_prior
 
     # Build CPTs
@@ -616,6 +635,7 @@ def bayesian_inference(
     layers: list[str] | None = None,
     leak_probability: float = 0.15,
     root_prior: float = 0.3,
+    half_life_days: float = 0.0,
 ) -> dict[str, Any]:
     """Run Bayesian inference on the OHM graph.
 
@@ -654,7 +674,7 @@ def bayesian_inference(
 
     # Build the Bayesian network scoped around target and evidence nodes
     scope_nodes = [target] + list(evidence.keys())
-    network = build_bayesian_network(reader, edge_types=edge_types, layers=layers, root_nodes=scope_nodes, root_prior=root_prior)
+    network = build_bayesian_network(reader, edge_types=edge_types, layers=layers, root_nodes=scope_nodes, root_prior=root_prior, half_life_days=half_life_days)
 
     if network is None:
         return {

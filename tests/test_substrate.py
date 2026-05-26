@@ -965,6 +965,77 @@ class TestMedicalDiagnosis:
         # 1 - (1-0.5)(1-0.5) = 1 - 0.5*0.5 = 0.75
         assert result["compound_confidence"] == 0.75
 
+    def test_compound_confidence_diversity_correlation_single_agent_echo_chamber(self):
+        """Same agent same day produces high correlation, lower compound confidence."""
+        from ohm.methods import compound_confidence
+
+        obs = [
+            {"confidence": 0.9, "created_by": "metis", "created_at": "2026-05-26T10:00:00"},
+            {"confidence": 0.9, "created_by": "metis", "created_at": "2026-05-26T11:00:00"},
+            {"confidence": 0.9, "created_by": "metis", "created_at": "2026-05-26T12:00:00"},
+        ]
+        result = compound_confidence(obs, use_diversity_correlation=True)
+        assert result["correlation"] == 0.9
+        assert result["compound_confidence"] < 0.99  # Lower than independent
+        assert "diversity_correlation" in result
+        assert result["diversity_correlation"] == 0.9
+        assert result["source_diversity_metrics"]["agent_count"] == 1
+        assert result["source_diversity_metrics"]["unique_agents"] == ["metis"]
+
+    def test_compound_confidence_diversity_correlation_multi_agent(self):
+        """Different agents produce low correlation, higher compound confidence."""
+        from ohm.methods import compound_confidence
+
+        obs = [
+            {"confidence": 0.9, "created_by": "metis", "created_at": "2026-05-26T10:00:00"},
+            {"confidence": 0.9, "created_by": "clio", "created_at": "2026-05-26T11:00:00"},
+            {"confidence": 0.9, "created_by": "hephaestus", "created_at": "2026-05-26T12:00:00"},
+        ]
+        result = compound_confidence(obs, use_diversity_correlation=True)
+        assert result["correlation"] == 0.2
+        assert result["compound_confidence"] > 0.97  # Near independent
+        assert "diversity_correlation" in result
+        assert result["source_diversity_metrics"]["agent_count"] == 3
+
+    def test_compound_confidence_diversity_correlation_mixed(self):
+        """Same agent different days produces medium correlation."""
+        from ohm.methods import compound_confidence
+
+        obs = [
+            {"confidence": 0.9, "created_by": "metis", "created_at": "2026-05-26T10:00:00"},
+            {"confidence": 0.9, "created_by": "metis", "created_at": "2026-05-25T10:00:00"},
+            {"confidence": 0.9, "created_by": "clio", "created_at": "2026-05-24T10:00:00"},
+        ]
+        result = compound_confidence(obs, use_diversity_correlation=True)
+        assert 0.2 < result["correlation"] < 0.9  # Between single-agent and multi-agent
+        assert "diversity_correlation" in result
+
+    def test_compound_confidence_diversity_backward_compat_no_diversity_data(self):
+        """Without created_by/created_at, uses same-agent-different-day correlation=0.6."""
+        from ohm.methods import compound_confidence
+
+        obs = [
+            {"confidence": 0.9},
+            {"confidence": 0.9},
+        ]
+        result = compound_confidence(obs, use_diversity_correlation=True)
+        assert result["correlation"] == 0.6  # Same agent, unknown day -> 0.6
+        assert "diversity_correlation" in result
+        assert result["source_diversity_metrics"]["agent_count"] == 1
+        assert result["source_diversity_metrics"]["unique_agents"] == ["_unknown_"]
+
+    def test_compound_confidence_diversity_explicit_correlation_override(self):
+        """Explicit correlation parameter overrides diversity correlation."""
+        from ohm.methods import compound_confidence
+
+        obs = [
+            {"confidence": 0.9, "created_by": "metis", "created_at": "2026-05-26T10:00:00"},
+            {"confidence": 0.9, "created_by": "clio", "created_at": "2026-05-26T11:00:00"},
+        ]
+        result = compound_confidence(obs, correlation=0.5, use_diversity_correlation=True)
+        assert result["correlation"] == 0.5
+        assert "diversity_correlation" not in result
+
     def test_compound_confidence_weight_clamped_at_one(self):
         """Observation with w*c > 1.0 is clamped to avoid negative probabilities."""
         from ohm.methods import compound_confidence

@@ -1390,8 +1390,9 @@ class Graph:
         self,
         observations: list[dict[str, Any]],
         *,
-        correlation: float = 0.0,
+        correlation: float | None = None,
         source_weights: dict[str, float] | None = None,
+        use_diversity_correlation: bool = False,
     ) -> dict[str, Any]:
         """Combine multiple confidence values accounting for correlation and source reliability.
 
@@ -1403,24 +1404,39 @@ class Graph:
         multiplicatively. When perfectly correlated (correlation=1.0), only the
         strongest evidence matters. Values between interpolate.
 
-        Critical for medical diagnosis: two findings from the same modality
-        are correlated and shouldn't double-count evidence, while findings from
-        different modalities are independent and should compound.
+        When use_diversity_correlation is True, automatically computes effective
+        correlation from source diversity (created_by and created_at fields):
+        - Same agent, same day: 0.9 (near-duplicate)
+        - Same agent, different day: 0.6 (same perspective, different evidence)
+        - Different agent: 0.2 (independent perspective)
+
+        This helps distinguish single-agent echo chambers (high correlation, low
+        diversity) from well-validated nodes (low correlation, high diversity).
 
         Args:
             observations: List of dicts with 'confidence' key (0-1).
-                May also include 'source' or 'created_by' for weighting.
-            correlation: 0.0 = independent, 1.0 = perfectly correlated.
+                May also include 'source' or 'created_by' for diversity.
+                May include 'created_at' for temporal diversity.
+            correlation: Override correlation (0.0-1.0). If None and
+                use_diversity_correlation=False, defaults to 0.0 (independent).
             source_weights: Optional dict mapping source -> reliability weight.
                 E.g., {"agent_a": 0.9, "agent_b": 0.5}. Default weight=0.5.
+            use_diversity_correlation: If True, compute correlation from source
+                diversity. Helps distinguish echo chambers from multi-agent validation.
 
         Returns:
             Dict with compound_confidence, method, correlation, observation_count,
-            weighted (bool).
+            weighted (bool), diversity_correlation (if computed), and
+            source_diversity_metrics (if use_diversity_correlation=True).
         """
         from ohm.methods import compound_confidence as _cc
 
-        return _cc(observations, correlation=correlation, source_weights=source_weights)
+        return _cc(
+            observations,
+            correlation=correlation,
+            source_weights=source_weights,
+            use_diversity_correlation=use_diversity_correlation,
+        )
 
     def heartbeat(self, *, focus: str | None = None) -> dict[str, Any]:
         """Send an agent heartbeat. Updates last-seen timestamp.

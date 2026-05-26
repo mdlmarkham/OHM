@@ -1208,11 +1208,70 @@ def detect_trend(
     }
 
 
+def _compute_diversity_correlation(observations: list[dict[str, Any]]) -> float | None:
+    """Compute effective correlation from source diversity.
+
+    Examines created_by and created_at to estimate how correlated
+    observations are:
+    - Same agent, same day: 0.9 (near-duplicate)
+    - Same agent, different day: 0.6 (same perspective, different evidence)
+    - Different agent: 0.2 (independent perspective)
+
+    Returns None if insufficient data to compute diversity (all from
+    same source or missing timestamps), indicating correlation should
+    be user-specified or default (0.0).
+    """
+    if len(observations) < 2:
+        return None
+
+    pairs: list[tuple[str, str | None, float]] = []
+    for obs in observations:
+        source = obs.get("created_by") or obs.get("source") or "_unknown_"
+        day = None
+        created_at = obs.get("created_at")
+        if created_at:
+            day = str(created_at)[:10] if len(str(created_at)) >= 10 else None
+        pairs.append((source, day, obs.get("confidence", 0.5)))
+
+    same_agent_same_day_weighted: float = 0.0
+    same_agent_diff_day_weighted: float = 0.0
+    diff_agent_weighted: float = 0.0
+    total_weight: float = 0.0
+
+    for i in range(len(pairs)):
+        for j in range(i + 1, len(pairs)):
+            src_i, day_i, conf_i = pairs[i]
+            src_j, day_j, conf_j = pairs[j]
+            weight = (conf_i + conf_j) / 2.0
+            total_weight += weight
+
+            if src_i == src_j:
+                if day_i and day_j and day_i == day_j:
+                    same_agent_same_day_weighted += weight
+                else:
+                    same_agent_diff_day_weighted += weight
+            else:
+                diff_agent_weighted += weight
+
+    if total_weight <= 0.0:
+        return None
+
+    same_day_frac = same_agent_same_day_weighted / total_weight
+    same_agent_frac = same_agent_diff_day_weighted / total_weight
+    diff_agent_frac = diff_agent_weighted / total_weight
+
+    effective_corr = (
+        same_day_frac * 0.9 + same_agent_frac * 0.6 + diff_agent_frac * 0.2
+    )
+    return round(effective_corr, 3)
+
+
 def compound_confidence(
     observations: list[dict[str, Any]],
     *,
-    correlation: float = 0.0,
+    correlation: float | None = None,
     source_weights: dict[str, float] | None = None,
+    use_diversity_correlation: bool = False,
 ) -> dict[str, Any]:
     """Combine multiple confidence values accounting for correlation and source reliability.
 
@@ -1225,6 +1284,12 @@ def compound_confidence(
     the compound probability. Weights are normalized so they sum to the number
     of observations (maintaining backward compatibility).
 
+    When use_diversity_correlation is True, automatically computes effective
+    correlation from source diversity (created_by and created_at fields):
+    - Same agent, same day: 0.9 (near-duplicate)
+    - Same agent, different day: 0.6 (same perspective, different evidence)
+    - Different agent: 0.2 (independent perspective)
+
     This is critical for medical diagnosis where two findings from the same
     modality (e.g., two blood tests from the same lab) are correlated and
     shouldn't double-count evidence, while findings from different modalities
@@ -1232,26 +1297,126 @@ def compound_confidence(
 
     Args:
         observations: List of dicts with 'confidence' key (0-1).
-            May also include 'source' for source reliability weighting.
-        correlation: 0.0 = independent (geometric compounding),
-            1.0 = perfectly correlated (use max only).
-            Values between interpolate between the two extremes.
+            May also include 'source' or 'created_by' for source diversity.
+            May include 'created_at' for temporal diversity.
+        correlation: Override correlation (0.0-1.0). If None and
+            use_diversity_correlation=False, defaults to 0.0 (independent).
         source_weights: Optional dict mapping source_agent -> reliability
             weight (e.g., {"agent_a": 0.9, "agent_b": 0.5}). Default weight
             is 0.5 for unknown sources. Higher weights = more influence.
+        use_diversity_correlation: If True and correlation is None, compute
+            effective correlation from source diversity. This helps
+            distinguish single-agent echo chambers from multi-agent validation.
 
     Returns:
         Dict with compound_confidence, method, correlation, observation_count,
-        and weighted (bool — True when source_weights was used).
+        weighted (bool), diversity_correlation (float if computed), and
+        source_diversity_metrics (dict with agent_count, same_day_duplicates, etc.).
     """
     if not observations:
         return {
             "compound_confidence": None,
             "method": "compound",
-            "correlation": correlation,
+            "correlation": 0.0,
             "observation_count": 0,
             "weighted": source_weights is not None,
         }
+
+    diversity_correlation: float | None = None
+    diversity_metrics: dict[str, Any] = {}
+
+    if correlation is None:
+        if use_diversity_correlation:
+            diversity_correlation = _compute_diversity_correlation(observations)
+            if diversity_correlation is not None:
+                correlation = diversity_correlation
+            else:
+                correlation = 0.0
+        else:
+            correlation = 0.0
+    else:
+        correlation = max(0.0, min(1.0, correlation))
+
+    if use_diversity_correlation:
+        agents = set()
+        same_day_pairs = 0
+        agent_days: dict[str, set[str]] = {}
+        for obs in observations:
+            source = obs.get("created_by") or obs.get("source") or "_unknown_"
+            agents.add(source)
+            day = None
+            created_at = obs.get("created_at")
+            if created_at:
+                day = str(created_at)[:10] if len(str(created_at)) >= 10 else None
+            if source not in agent_days:
+                agent_days[source] = set()
+            if day:
+                agent_days[source].add(day)
+        total_day_pairs = sum(len(days) * (len(days) - 1) // 2 for days in agent_days.values())
+        same_day_pairs = total_day_pairs
+        diversity_metrics = {
+            "agent_count": len(agents),
+            "same_day_pairs": same_day_pairs,
+            "unique_agents": list(agents),
+        }
+
+    default_weight = 0.5
+    use_weighting = source_weights is not None
+
+    weighted_confidences: list[tuple[float, float]] = []
+    for obs in observations:
+        c = obs.get("confidence", 0.0)
+        try:
+            c = float(c)
+        except (TypeError, ValueError):
+            c = 0.0
+        c = max(0.0, min(1.0, c))
+
+        if use_weighting:
+            assert source_weights is not None
+            source = obs.get("source") or obs.get("created_by") or "_unknown_"
+            w = source_weights.get(source, default_weight)
+            weighted_confidences.append((c, w))
+        else:
+            weighted_confidences.append((c, 1.0))
+
+    n = len(weighted_confidences)
+
+    if correlation >= 1.0:
+        if use_weighting:
+            result = max(c * w for c, w in weighted_confidences)
+        else:
+            result = max(c for c, _ in weighted_confidences)
+    elif correlation <= 0.0:
+        product = 1.0
+        for c, w in weighted_confidences:
+            effective = min(1.0, w * c)
+            product *= 1.0 - effective
+        result = round(1.0 - product, 4)
+    else:
+        product = 1.0
+        for c, w in weighted_confidences:
+            effective = min(1.0, w * c)
+            product *= 1.0 - effective
+        independent = 1.0 - product
+        if use_weighting:
+            correlated = max(c * w for c, w in weighted_confidences)
+        else:
+            correlated = max(c for c, _ in weighted_confidences)
+        result = round(correlated * correlation + independent * (1.0 - correlation), 4)
+
+    ret: dict[str, Any] = {
+        "compound_confidence": result,
+        "method": "compound",
+        "correlation": correlation,
+        "observation_count": n,
+        "weighted": use_weighting,
+    }
+    if diversity_correlation is not None:
+        ret["diversity_correlation"] = diversity_correlation
+    if diversity_metrics:
+        ret["source_diversity_metrics"] = diversity_metrics
+    return ret
 
     # Clamp correlation to [0, 1]
     correlation = max(0.0, min(1.0, correlation))
