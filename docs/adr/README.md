@@ -317,7 +317,7 @@ Each agent gets its own local DuckDB file for zero-latency reads and writes, wit
 ## ADR-013: Value of Information for Knowledge Graphs
 
 **Date:** 2026-05-20
-**Status:** Proposed
+**Status:** Accepted
 
 ### Context
 
@@ -325,7 +325,9 @@ OHM knows which nodes are uncertain but not which uncertainties matter for decis
 
 ### Decision
 
-Use PERT three-point estimation (P05/P50/P95) as the elicitation protocol for edge probabilities. The derived PERT mean populates `probability` for Bayesian CPTs; the derived variance feeds VoI ranking (uncertainty × decision sensitivity = research priority). Add decision nodes with utility metadata. Implement `/voi` endpoint that traces causal paths backward from decision nodes to identify which observations would most reduce decision uncertainty.
+Use PERT three-point estimation (P05/P50/P95) as the elicitation protocol for edge probabilities. The derived PERT mean populates `probability` for Bayesian CPTs; the derived variance feeds VoI ranking (uncertainty × decision sensitivity = research priority). Add decision nodes with utility metadata. Implement `/voi` endpoint and `compute_voi()` function that traces causal paths backward from decision nodes to identify which observations would most reduce decision uncertainty.
+
+**Implementation:** `compute_voi(conn, decision_nodes=None, edge_types=None, layers=None, top=10, leak_probability=0.15, root_prior=0.3, timeout=30, semantic_roles=None, min_observations=0)` — VoI ranked by uncertainty × sensitivity with configurable leak probability and root prior.
 
 ### Consequences
 
@@ -334,6 +336,8 @@ Use PERT three-point estimation (P05/P50/P95) as the elicitation protocol for ed
 - Decision nodes encode "how much does being wrong matter?"
 - Agents can self-optimize: research what matters, not what's easy
 - GIGO risk mitigated by conservative initial ranges and observation updates
+- CLI: `ohm graph voi --decision d1,d2 --top 5 --layers L3,L4`
+- SDK: `graph.compute_voi(decision_nodes, top=10)` — see `ohm.bayesian.compute_voi`
 
 ---
 
