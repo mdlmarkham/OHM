@@ -764,6 +764,9 @@ def causal_intervention(
     root_prior: float = 0.3,
     semantic_roles: SemanticRoles | None = None,
     preferred_edges: set[tuple[str, str]] | None = None,
+    # Internal: pre-built Bayesian network for VoI batch optimization (OHM-27).
+    # When provided, graph construction is skipped and this network is used directly.
+    _pre_built_network: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run causal intervention using Pearl's do-operator (graph surgery).
 
@@ -821,27 +824,30 @@ def causal_intervention(
         }
 
     # Step 1: Build the original Bayesian network
-    # Auto-derive preferred_edges from query_nodes: protect target→query_node
-    # direction so the cycle breaker never removes the queried causal path.
-    auto_preferred: set[tuple[str, str]] = set()
-    if query_nodes:
-        for qn in query_nodes:
-            auto_preferred.add((target, qn))
-    effective_preferred = (preferred_edges or set()) | auto_preferred
+    if _pre_built_network is not None:
+        network = _pre_built_network
+    else:
+        # Auto-derive preferred_edges from query_nodes: protect target→query_node
+        # direction so the cycle breaker never removes the queried causal path.
+        auto_preferred: set[tuple[str, str]] = set()
+        if query_nodes:
+            for qn in query_nodes:
+                auto_preferred.add((target, qn))
+        effective_preferred = (preferred_edges or set()) | auto_preferred
 
-    scope_nodes = [target]
-    if query_nodes:
-        scope_nodes.extend(query_nodes)
-    network = build_bayesian_network(
-        reader,
-        edge_types=edge_types,
-        layers=layers,
-        root_nodes=scope_nodes,
-        leak_probability=leak_probability,
-        root_prior=root_prior,
-        semantic_roles=semantic_roles,
-        preferred_edges=effective_preferred or None,
-    )
+        scope_nodes = [target]
+        if query_nodes:
+            scope_nodes.extend(query_nodes)
+        network = build_bayesian_network(
+            reader,
+            edge_types=edge_types,
+            layers=layers,
+            root_nodes=scope_nodes,
+            leak_probability=leak_probability,
+            root_prior=root_prior,
+            semantic_roles=semantic_roles,
+            preferred_edges=effective_preferred or None,
+        )
 
     if network is None:
         return {
@@ -1056,6 +1062,10 @@ def compute_ate(
     leak_probability: float = 0.15,
     root_prior: float = 0.3,
     semantic_roles: SemanticRoles | None = None,
+    # Internal: pre-built network for VoI batch optimization (OHM-27).
+    # When provided, graph construction is skipped and this network is used
+    # for both do(bad) and do(good) interventions.
+    _pre_built_network: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compute Average Treatment Effect (ATE) from the Bayesian model.
 
@@ -1105,6 +1115,7 @@ def compute_ate(
         root_prior=root_prior,
         semantic_roles=semantic_roles,
         preferred_edges=_preferred,
+        _pre_built_network=_pre_built_network,
     )
     do_good = causal_intervention(
         reader,
@@ -1117,6 +1128,7 @@ def compute_ate(
         root_prior=root_prior,
         semantic_roles=semantic_roles,
         preferred_edges=_preferred,
+        _pre_built_network=_pre_built_network,
     )
 
     # Extract posteriors
@@ -1145,18 +1157,21 @@ def compute_ate(
         try:
             import networkx as nx
 
-            # Rebuild the scoped network to get the DAG — pass preferred_edges so
-            # the cycle breaker uses the same DAG as the actual VE computation.
-            _net = build_bayesian_network(
-                reader,
-                root_nodes=[cause, effect],
-                edge_types=edge_types,
-                layers=layers,
-                leak_probability=leak_probability,
-                root_prior=root_prior,
-                semantic_roles=semantic_roles,
-                preferred_edges=_preferred,
-            )
+            if _pre_built_network is not None:
+                _net = _pre_built_network
+            else:
+                # Rebuild the scoped network to get the DAG — pass preferred_edges so
+                # the cycle breaker uses the same DAG as the actual VE computation.
+                _net = build_bayesian_network(
+                    reader,
+                    root_nodes=[cause, effect],
+                    edge_types=edge_types,
+                    layers=layers,
+                    leak_probability=leak_probability,
+                    root_prior=root_prior,
+                    semantic_roles=semantic_roles,
+                    preferred_edges=_preferred,
+                )
             if _net is not None:
                 _model = _net["model"]
                 _safe_cause = _safe_node_id(cause)
@@ -1933,6 +1948,29 @@ def compute_voi(
     # Get observation counts for each candidate (proxy for information quality)
     obs_counts: dict[str, int] = {node_id: len(reader.get_observations(node_id)) for node_id in candidate_nodes}
 
+    # Build shared Bayesian networks per decision node (OHM-27).
+    # Instead of building a fresh network for each (candidate, decision) pair in
+    # compute_ate, build ONE network per decision that covers all its causal
+    # ancestors. Each ATE call then deep-copies and does surgery on the shared
+    # pre-built model — avoiding N individual ~500ms network builds.
+    _voi_networks: dict[str, dict[str, Any]] = {}
+    for decision in decision_nodes:
+        _candidates = [n for n in candidate_nodes if n in all_ancestors.get(decision, set())]
+        if _candidates:
+            _all_preferred: set[tuple[str, str]] = {(c, decision) for c in _candidates}
+            _shared = build_bayesian_network(
+                reader,
+                edge_types=edge_types,
+                layers=layers,
+                root_nodes=[decision] + _candidates,
+                leak_probability=leak_probability,
+                root_prior=root_prior,
+                semantic_roles=semantic_roles,
+                preferred_edges=_all_preferred or None,
+            )
+            if _shared is not None:
+                _voi_networks[decision] = _shared
+
     # Compute VoI for each candidate node
     # Track whether we used ATE or path-confidence fallback for each ranking
     import time as _time
@@ -1994,6 +2032,7 @@ def compute_voi(
                         leak_probability=leak_probability,
                         root_prior=root_prior,
                         semantic_roles=semantic_roles,
+                        _pre_built_network=_voi_networks.get(decision),
                     )
                 _du = decision_utility.get(decision, {})
                 _usd = _du.get("utility_usd_per_day")
