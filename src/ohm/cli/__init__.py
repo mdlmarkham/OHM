@@ -14,7 +14,11 @@ from __future__ import annotations
 
 import argparse
 import os
+import signal
+import subprocess
 import sys
+import time
+from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 from ohm.exceptions import OHMError
@@ -84,7 +88,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     serve_sub.add_parser("stop", help="Graceful shutdown")
     serve_sub.add_parser("status", help="Is ohmd running?")
-    serve_sub.add_parser("config", help="Show current config")
+    serve_config_parser = serve_sub.add_parser("config", help="Show current config")
+    serve_config_parser.add_argument(
+        "--config",
+        default=None,
+        help="Path to config file (default: ~/.ohm/ohmd.json)",
+    )
 
     # ── graph ────────────────────────────────────────────────────────────
     graph_parser = subparsers.add_parser("graph", help="Graph operations")
@@ -726,24 +735,144 @@ def _handle_sync(args: argparse.Namespace) -> None:
         store.close()
 
 
+def _get_pid_file() -> Path:
+    """Return the PID file path for the ohmd daemon."""
+    return Path(os.environ.get("OHM_STATE_DIR", str(Path.home() / ".ohm"))) / "ohmd.pid"
+
+
+def _is_process_running(pid: int) -> bool:
+    """Check if a process with the given PID is running."""
+    import signal
+
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
 def _handle_serve(args: argparse.Namespace) -> None:
     """Handle 'ohm serve' subcommands."""
+    import subprocess
+    import sys
+
     cmd = args.serve_command
+    pid_file = _get_pid_file()
+
     if cmd == "start":
-        quack_flag = " --quack" if getattr(args, "quack", False) else ""
-        quack_uri = f" --quack-uri {args.quack_uri}" if getattr(args, "quack_uri", None) else ""
-        quack_token = f" --quack-token-env {args.quack_token_env}" if getattr(args, "quack_token_env", None) else ""
-        print(f"Starting ohmd on port {args.port}{quack_flag}{quack_uri}{quack_token}...")
-        # TODO: Implement ohmd daemon startup (OHM-y2i.3)
-        print("ohmd started (placeholder)")
+        config_path = args.config or os.environ.get("OHM_CONFIG", str(Path.home() / ".ohm" / "ohmd.json"))
+
+        if pid_file.exists():
+            try:
+                pid = int(pid_file.read_text().strip())
+                if _is_process_running(pid):
+                    print(f"ohmd already running (PID {pid})")
+                    return
+                else:
+                    print(f"Stale PID file (process {pid} not running). Removing.")
+                    pid_file.unlink()
+            except (ValueError, OSError):
+                pid_file.unlink()
+
+        server_cmd = [
+            sys.executable,
+            "-m",
+            "ohm.server",
+            "--port",
+            str(args.port),
+            "--config",
+            config_path,
+        ]
+        if getattr(args, "quack", False):
+            server_cmd.append("--quack")
+        if getattr(args, "quack_uri", None):
+            server_cmd.extend(["--quack-uri", args.quack_uri])
+        if getattr(args, "quack_token_env", None):
+            server_cmd.extend(["--quack-token-env", args.quack_token_env])
+
+        print(f"Starting ohmd on port {args.port}...")
+        proc = subprocess.Popen(
+            server_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        pid_file.parent.mkdir(parents=True, exist_ok=True)
+        pid_file.write_text(str(proc.pid))
+        print(f"ohmd started (PID {proc.pid})")
+
     elif cmd == "stop":
-        print("Stopping ohmd...")
-        # TODO: Implement graceful shutdown
-        print("ohmd stopped (placeholder)")
+        if not pid_file.exists():
+            print("ohmd not running (no PID file)")
+            return
+
+        try:
+            pid = int(pid_file.read_text().strip())
+            if not _is_process_running(pid):
+                print(f"ohmd not running (stale PID file)")
+                pid_file.unlink()
+                return
+
+            print(f"Stopping ohmd (PID {pid})...")
+            try:
+                on_windows = sys.platform == "win32"
+                if on_windows:
+                    os.kill(pid, signal.CTRL_BREAK_EVENT if hasattr(signal, "CTRL_BREAK_EVENT") else signal.SIGTERM)
+                else:
+                    os.kill(pid, signal.SIGTERM)
+            except OSError as e:
+                print(f"Failed to send signal: {e}")
+                return
+
+            for _ in range(10):
+                if not _is_process_running(pid):
+                    break
+                time.sleep(0.2)
+
+            if _is_process_running(pid):
+                print("ohmd did not stop gracefully, forcing...")
+                try:
+                    if sys.platform == "win32":
+                        os.kill(pid, signal.SIGTERM)
+                    else:
+                        os.kill(pid, signal.SIGKILL)
+                except OSError:
+                    pass
+
+            pid_file.unlink()
+            print("ohmd stopped")
+
+        except (ValueError, OSError) as e:
+            print(f"Error stopping ohmd: {e}")
+            if pid_file.exists():
+                pid_file.unlink()
+
     elif cmd == "status":
-        print("ohmd status: not running (placeholder)")
+        if not pid_file.exists():
+            print("ohmd: not running (no PID file)")
+            return
+
+        try:
+            pid = int(pid_file.read_text().strip())
+            if _is_process_running(pid):
+                print(f"ohmd: running (PID {pid})")
+            else:
+                print(f"ohmd: not running (stale PID file for process {pid})")
+        except (ValueError, OSError):
+            print("ohmd: not running (invalid PID file)")
+
     elif cmd == "config":
-        print("ohmd config: (placeholder)")
+        config_path = args.config or os.environ.get("OHM_CONFIG", str(Path.home() / ".ohm" / "ohmd.json"))
+        config_file = Path(config_path)
+        if config_file.exists():
+            import json
+
+            with open(config_file) as f:
+                config = json.load(f)
+            print(f"Config: {config_path}")
+            print(json.dumps(config, indent=2))
+        else:
+            print(f"Config file not found: {config_path}")
+
     elif cmd == "token":
         _handle_serve_token(args)
     else:
