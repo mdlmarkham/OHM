@@ -119,9 +119,9 @@ class TestExtractGame:
             MockEdge("dec1", "target", "CAUSES", confidence=0.8, probability=0.7),
         ]
         reader = MockReader(nodes, edges)
-        result = extract_game(reader, "target", players=["dec1"])
-        assert result["players"] == ["dec1"]
-        assert result["n_players"] == 1
+        result = extract_game(reader, "target", players=["dec1", "dec2"])
+        assert result["players"] == ["dec1", "dec2"]
+        assert result["n_players"] == 2
 
     def test_extract_game_blocks_edge_adversarial(self):
         nodes = [
@@ -188,6 +188,7 @@ class TestUtilityUsdPerDay:
         nodes = [
             MockNode("target", "concept", utility_scale=0.8),
             MockNode("dec1", "decision", utility_scale=0.9, utility_usd_per_day=5_000_000),
+            MockNode("dec2", "decision", utility_scale=0.7),
         ]
         edges = [
             MockEdge("dec1", "target", "CAUSES", confidence=0.8, probability=0.7),
