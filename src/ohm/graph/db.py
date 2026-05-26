@@ -478,6 +478,14 @@ def attach_ducklake(
         True if DuckLake was attached successfully, False if the
         DuckLake extension is not available.
     """
+    # Ensure DuckLake extension is loaded
+    try:
+        conn.execute("INSTALL ducklake FROM core")
+        conn.execute("LOAD ducklake")
+        logger.debug("DuckLake extension loaded for attach")
+    except Exception as e:
+        logger.debug("DuckLake extension install/load failed: %s", e, exc_info=True)
+
     # Check if DuckLake extension is loaded
     try:
         result = conn.execute("SELECT extension_name FROM duckdb_extensions() WHERE loaded = true AND extension_name = 'ducklake'").fetchone()
