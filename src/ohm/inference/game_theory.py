@@ -106,6 +106,19 @@ def extract_game(
             "target": target,
         }
 
+    if len(players) > 2:
+        return {
+            "error": f"Game extraction only supports 2 players (found {len(players)}). Use ?players=a,b to specify exactly 2 decision nodes.",
+            "target": target,
+            "n_players": len(players),
+        }
+
+    if len(players) == 1:
+        return {
+            "error": "Game extraction requires at least 2 players. Found only 1 decision node.",
+            "target": target,
+        }
+
     # Build forward adjacency for causal influence computation
     forward_adj: dict[str, list[str]] = {}
     for (f, t), edata in edge_map.items():
