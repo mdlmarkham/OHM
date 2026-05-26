@@ -223,3 +223,50 @@ class InferenceHandlerMixin:
             refutation_methods=refutation_methods,
         )
         self._json_response(200, result)
+
+    def _get_regime(self, path: str, qs: dict) -> None:
+        """GET /regime — regime detection: compare full-history vs windowed inference posteriors."""
+        target = qs.get("target", [None])[0]
+        if not target:
+            self._json_response(400, {"error": "missing_parameter", "message": "?target=node_id required"})
+            return
+        from ohm.validation import validate_identifier
+
+        target = validate_identifier(target, name="target")
+        evidence_str = qs.get("evidence", [""])[0]
+        evidence = {}
+        if evidence_str:
+            for pair in evidence_str.split(","):
+                if ":" in pair:
+                    node_id, state = pair.split(":", 1)
+                    evidence[validate_identifier(node_id.strip(), name="evidence_node")] = int(state.strip())
+        leak_probability = float(qs.get("leak", ["0.15"])[0])
+        layers_str = qs.get("layers", [""])[0]
+        layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
+        from ohm.bayesian import bayesian_inference
+
+        full_result = bayesian_inference(
+            self.current_store.conn, target, evidence, layers=layers, leak_probability=leak_probability, observation_window_days=None
+        )
+        window_days = float(qs.get("window_days", ["30.0"])[0])
+        windowed_result = bayesian_inference(
+            self.current_store.conn, target, evidence, layers=layers, leak_probability=leak_probability, observation_window_days=window_days
+        )
+        full_posterior = full_result.get("posterior", {}).get(target, {})
+        windowed_posterior = windowed_result.get("posterior", {}).get(target, {})
+        full_good = full_posterior.get("good", 0.5)
+        windowed_good = windowed_posterior.get("good", 0.5)
+        shift = windowed_good - full_good
+        regime = "stable"
+        if abs(shift) > 0.15:
+            regime = "regime_shift" if shift > 0 else "deteriorating"
+        elif abs(shift) > 0.05:
+            regime = "drifting"
+        self._json_response(200, {
+            "target": target,
+            "full_history": {"good": round(full_good, 4), "bad": round(full_posterior.get("bad", 0.5), 4)},
+            "windowed": {"good": round(windowed_good, 4), "bad": round(windowed_posterior.get("bad", 0.5), 4), "window_days": window_days},
+            "shift": round(shift, 4),
+            "regime": regime,
+            "method": "bayesian_regime_detection",
+        })
