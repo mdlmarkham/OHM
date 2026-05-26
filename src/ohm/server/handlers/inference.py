@@ -20,6 +20,9 @@ class InferenceHandlerMixin:
         half_life_days = float(qs.get("half_life", ["0.0"])[0])
         obs_window_str = qs.get("observation_window", [""])[0]
         observation_window_days = float(obs_window_str) if obs_window_str else None
+        include_soft_evidence = qs.get("soft_evidence", ["0"])[0] == "1"
+        soft_edge_str = qs.get("soft_edges", [""])[0]
+        soft_edge_types = [e.strip() for e in soft_edge_str.split(",") if e.strip()] if soft_edge_str else None
         evidence = {}
         if evidence_str:
             for pair in evidence_str.split(","):
@@ -30,7 +33,7 @@ class InferenceHandlerMixin:
         layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
         from ohm.bayesian import bayesian_inference
 
-        result = bayesian_inference(self.current_store.conn, target, evidence, edge_types=None, layers=layers, leak_probability=leak_probability, half_life_days=half_life_days, observation_window_days=observation_window_days)
+        result = bayesian_inference(self.current_store.conn, target, evidence, edge_types=None, layers=layers, leak_probability=leak_probability, half_life_days=half_life_days, observation_window_days=observation_window_days, include_soft_evidence=include_soft_evidence, soft_edge_types=soft_edge_types)
         self._json_response(200, result)
 
     def _get_intervene(self, path: str, qs: dict) -> None:
@@ -56,6 +59,9 @@ class InferenceHandlerMixin:
         if query_str:
             query_nodes = [validate_identifier(q.strip(), name="query_node") for q in query_str.split(",") if q.strip()]
         leak_probability = float(qs.get("leak", ["0.15"])[0])
+        include_soft_evidence = qs.get("soft_evidence", ["0"])[0] == "1"
+        soft_edge_str = qs.get("soft_edges", [""])[0]
+        soft_edge_types = [e.strip() for e in soft_edge_str.split(",") if e.strip()] if soft_edge_str else None
         layers_str = qs.get("layers", [""])[0]
         layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
         pe_str = qs.get("preferred_edges", [""])[0]
@@ -76,6 +82,8 @@ class InferenceHandlerMixin:
             layers=layers,
             leak_probability=leak_probability,
             preferred_edges=preferred_edges,
+            include_soft_evidence=include_soft_evidence,
+            soft_edge_types=soft_edge_types,
         )
         self._json_response(200, result)
 
@@ -147,6 +155,9 @@ class InferenceHandlerMixin:
         layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
         edge_types_str = qs.get("edge_types", [""])[0]
         edge_types = [e.strip() for e in edge_types_str.split(",") if e.strip()] if edge_types_str else None
+        include_soft_evidence = qs.get("soft_evidence", ["0"])[0] == "1"
+        soft_edge_str = qs.get("soft_edges", [""])[0]
+        soft_edge_types = [e.strip() for e in soft_edge_str.split(",") if e.strip()] if soft_edge_str else None
         timeout = float(qs.get("timeout", ["0"])[0]) or None
         min_observations = int(qs.get("min_observations", ["0"])[0])
         from ohm.bayesian import compute_voi
@@ -161,6 +172,8 @@ class InferenceHandlerMixin:
             root_prior=root_prior,
             timeout=timeout,
             min_observations=min_observations,
+            include_soft_evidence=include_soft_evidence,
+            soft_edge_types=soft_edge_types,
         )
         self._json_response(200, result)
 

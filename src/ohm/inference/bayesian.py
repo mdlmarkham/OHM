@@ -893,6 +893,11 @@ def bayesian_inference(
                     "bad": round(p_bad, 4),
                 }
             },
+            "soft_evidence": {
+                "enabled": include_soft_evidence,
+                "n_factors": len(soft_factors),
+                "edge_types": network.get("soft_edge_types", []),
+            },
             "network_info": {
                 "n_nodes": network["n_nodes"],
                 "n_edges": network["n_edges"],
