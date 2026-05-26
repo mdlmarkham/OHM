@@ -1278,7 +1278,7 @@ class OhmHandler(BaseHTTPRequestHandler):
                     "/ready": {"method": "GET", "description": "Readiness check (no auth required)"},
                     "/metrics": {"method": "GET", "description": "Prometheus-style metrics"},
                     "/stats": {"method": "GET", "description": "Graph statistics (nodes, edges, layers)"},
-                    "/inference": {"method": "GET", "description": "Bayesian inference: compute posterior probabilities given evidence (observation, includes confounders). ?layers=L3,L4 to scope by layer"},
+                    "/inference": {"method": "GET", "description": "Bayesian inference: compute posterior probabilities given evidence (observation, includes confounders). ?layers=L3,L4 to scope by layer. ?soft_evidence=true to include SUPPORTS/APPLIES_TO edges as virtual evidence. ?soft_edge_types=SUPPORTS,APPLIES_TO to customize soft evidence types"},
                     "/intervene": {"method": "GET", "description": "Causal intervention using Pearl's do-operator: sever incoming edges to target, set value externally, propagate direct causal effect (no confounders). ?layers=L3,L4 to scope by layer"},
                     "/ate": {"method": "GET", "description": "Average Treatment Effect: model-based ATE from noisy-OR CPDs (ATE = P(effect=bad|do(cause=bad)) - P(effect=bad|do(cause=good))). ?layers=L3,L4 to scope by layer"},
                     "/sensitivity": {"method": "GET", "description": "Sensitivity analysis: E-value quantifying how much unmeasured confounding would overturn a causal conclusion. ?layers=L3,L4 to scope by layer"},
@@ -2073,7 +2073,15 @@ class OhmHandler(BaseHTTPRequestHandler):
         layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
         from .bayesian import bayesian_inference
 
-        result = bayesian_inference(self.store.conn, target, evidence, edge_types=None, layers=layers, leak_probability=leak_probability)
+        soft_evidence_str = qs.get("soft_evidence", [""])[0]
+        include_soft_evidence = soft_evidence_str.lower() in ("true", "1", "yes")
+        soft_edge_types = None
+        if include_soft_evidence:
+            soft_edge_types_str = qs.get("soft_edge_types", [""])[0]
+            if soft_edge_types_str:
+                soft_edge_types = [et.strip() for et in soft_edge_types_str.split(",") if et.strip()]
+
+        result = bayesian_inference(self.store.conn, target, evidence, edge_types=None, layers=layers, leak_probability=leak_probability, include_soft_evidence=include_soft_evidence, soft_edge_types=soft_edge_types)
         self._json_response(200, result)
 
     def _get_intervene(self, path: str, qs: dict) -> None:

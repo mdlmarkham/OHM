@@ -157,7 +157,6 @@ def _build_soft_evidence_factors(
     soft_edge_types: list[str] | None = None,
     layers: list[str] | None = None,
     default_confidence: float = 0.7,
-    customer_id: str | None = None,
 ) -> list:
     """Convert SUPPORTS/APPLIES_TO edges into pgmpy TabularCPD virtual evidence factors.
 
@@ -176,7 +175,6 @@ def _build_soft_evidence_factors(
         soft_edge_types: Edge types to treat as soft evidence (default: SUPPORTS, APPLIES_TO).
         layers: Optional layer filter.
         default_confidence: Confidence to use when edge has no confidence (default 0.7).
-        customer_id: Optional customer filter.
 
     Returns:
         List of TabularCPD objects suitable for virtual_evidence parameter.
@@ -188,7 +186,7 @@ def _build_soft_evidence_factors(
         soft_edge_types = ["SUPPORTS", "APPLIES_TO"]
 
     model_nodes = set(model.nodes())
-    soft_records = reader.get_edges(edge_types=soft_edge_types, layers=layers, customer_id=customer_id)
+    soft_records = reader.get_edges(edge_types=soft_edge_types, layers=layers)
     if not soft_records:
         return []
 
@@ -309,6 +307,8 @@ def build_bayesian_network(
         leak_probability,
         default_probability,
         half_life_days,
+        include_soft_evidence,
+        tuple(sorted(soft_edge_types)) if soft_edge_types else None,
     )
 
     # Check cache — invalidate if graph_generation has changed
@@ -762,7 +762,6 @@ def build_bayesian_network(
             reader, model, safe_names,
             soft_edge_types=soft_types,
             layers=layers,
-            customer_id=customer_id,
         )
         result["soft_evidence_factors"] = soft_factors
         result["soft_edge_types"] = soft_types
@@ -927,6 +926,8 @@ def causal_intervention(
     root_prior: float = 0.3,
     semantic_roles: SemanticRoles | None = None,
     preferred_edges: set[tuple[str, str]] | None = None,
+    include_soft_evidence: bool = False,
+    soft_edge_types: list[str] | None = None,
     # Internal: pre-built Bayesian network for VoI batch optimization (OHM-27).
     # When provided, graph construction is skipped and this network is used directly.
     _pre_built_network: dict[str, Any] | None = None,
@@ -1010,6 +1011,8 @@ def causal_intervention(
             root_prior=root_prior,
             semantic_roles=semantic_roles,
             preferred_edges=effective_preferred or None,
+            include_soft_evidence=include_soft_evidence,
+            soft_edge_types=soft_edge_types,
         )
 
     if network is None:
@@ -1157,11 +1160,15 @@ def causal_intervention(
             _ve_cache.clear()
         _ve_cache[_ve_key_do] = VariableElimination(model_do)
     infer = _ve_cache[_ve_key_do]
+    soft_factors = network.get("soft_evidence_factors", [])
     posteriors = {}
     for qn in safe_query_nodes:
         qn_original = next((orig for orig, safe in safe_names.items() if safe == qn), qn)
         try:
-            result_single = infer.query([qn], evidence={safe_target: intervention_state})
+            do_kwargs: dict[str, Any] = {"variables": [qn], "evidence": {safe_target: intervention_state}}
+            if soft_factors:
+                do_kwargs["virtual_evidence"] = soft_factors
+            result_single = infer.query(**do_kwargs)
             posteriors[qn_original] = {
                 "good": round(float(result_single.values[1]), 4),
                 "bad": round(float(result_single.values[0]), 4),
@@ -1192,7 +1199,10 @@ def causal_intervention(
                 if not safe_qn:
                     continue
                 try:
-                    obs_result = obs_infer.query([safe_qn], evidence={safe_target: intervention_state})
+                    obs_kwargs: dict[str, Any] = {"variables": [safe_qn], "evidence": {safe_target: intervention_state}}
+                    if soft_factors:
+                        obs_kwargs["virtual_evidence"] = soft_factors
+                    obs_result = obs_infer.query(**obs_kwargs)
                     obs_bad = round(float(obs_result.values[0]), 4)
                     int_bad = post.get("bad", None)
                     if int_bad is not None:
@@ -1237,6 +1247,8 @@ def compute_ate(
     leak_probability: float = 0.15,
     root_prior: float = 0.3,
     semantic_roles: SemanticRoles | None = None,
+    include_soft_evidence: bool = False,
+    soft_edge_types: list[str] | None = None,
     # Internal: pre-built network for VoI batch optimization (OHM-27).
     # When provided, graph construction is skipped and this network is used
     # for both do(bad) and do(good) interventions.
@@ -1290,6 +1302,8 @@ def compute_ate(
         root_prior=root_prior,
         semantic_roles=semantic_roles,
         preferred_edges=_preferred,
+        include_soft_evidence=include_soft_evidence,
+        soft_edge_types=soft_edge_types,
         _pre_built_network=_pre_built_network,
     )
     do_good = causal_intervention(
@@ -1303,6 +1317,8 @@ def compute_ate(
         root_prior=root_prior,
         semantic_roles=semantic_roles,
         preferred_edges=_preferred,
+        include_soft_evidence=include_soft_evidence,
+        soft_edge_types=soft_edge_types,
         _pre_built_network=_pre_built_network,
     )
 
@@ -2872,9 +2888,13 @@ class BayesianContext:
             }
 
         # Run inference on the mutilated graph
+        soft_factors = network.get("soft_evidence_factors", [])
         try:
             infer = VariableElimination(model_do)
-            result = infer.query(safe_query_nodes, evidence={safe_target: intervention_state})
+            do_kwargs: dict[str, Any] = {"variables": safe_query_nodes, "evidence": {safe_target: intervention_state}}
+            if soft_factors:
+                do_kwargs["virtual_evidence"] = soft_factors
+            result = infer.query(**do_kwargs)
 
             posteriors = {}
             if len(safe_query_nodes) == 1:
@@ -2896,7 +2916,10 @@ class BayesianContext:
                             qn_original = orig
                             break
                     try:
-                        result_single = infer.query([qn], evidence={safe_target: intervention_state})
+                        single_kwargs: dict[str, Any] = {"variables": [qn], "evidence": {safe_target: intervention_state}}
+                        if soft_factors:
+                            single_kwargs["virtual_evidence"] = soft_factors
+                        result_single = infer.query(**single_kwargs)
                         posteriors[qn_original or qn] = {
                             "good": round(float(result_single.values[1]), 4),
                             "bad": round(float(result_single.values[0]), 4),
@@ -2919,7 +2942,10 @@ class BayesianContext:
                         if not safe_qn:
                             continue
                         try:
-                            obs_result = obs_infer.query([safe_qn], evidence={safe_target: intervention_state})
+                            obs_kwargs: dict[str, Any] = {"variables": [safe_qn], "evidence": {safe_target: intervention_state}}
+                            if soft_factors:
+                                obs_kwargs["virtual_evidence"] = soft_factors
+                            obs_result = obs_infer.query(**obs_kwargs)
                             obs_bad = round(float(obs_result.values[0]), 4)
                             int_bad = post.get("bad", None)
                             if int_bad is not None:

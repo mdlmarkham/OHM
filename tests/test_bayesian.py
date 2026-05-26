@@ -1768,3 +1768,91 @@ class TestTemporalDecay:
         result = bayesian_inference(db, g["c"], {}, half_life_days=30.0)
         assert result["method"] != "none"
         assert "posterior" in result
+
+
+class TestSoftEvidence:
+    def test_soft_evidence_includes_supports_edges(self, db):
+        from ohm.bayesian import build_bayesian_network
+
+        a = create_sample_node(db, label="cause_a")
+        b = create_sample_node(db, label="effect_b")
+        create_sample_edge(db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3", confidence=0.8)
+        create_sample_edge(db, from_node=a, to_node=b, edge_type="SUPPORTS", layer="L3", confidence=0.9)
+
+        network = build_bayesian_network(db, include_soft_evidence=True)
+        assert network is not None
+        assert "soft_evidence_factors" in network
+        assert len(network["soft_evidence_factors"]) > 0
+
+    def test_soft_evidence_empty_without_supports(self, db):
+        from ohm.bayesian import build_bayesian_network
+
+        a = create_sample_node(db, label="cause_a")
+        b = create_sample_node(db, label="effect_b")
+        create_sample_edge(db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3", confidence=0.8)
+
+        network = build_bayesian_network(db, include_soft_evidence=True)
+        assert network is not None
+        assert "soft_evidence_factors" in network
+        assert len(network["soft_evidence_factors"]) == 0
+
+    def test_soft_evidence_disabled_by_default(self, db):
+        from ohm.bayesian import build_bayesian_network
+
+        a = create_sample_node(db, label="cause_a")
+        b = create_sample_node(db, label="effect_b")
+        create_sample_edge(db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3", confidence=0.8)
+        create_sample_edge(db, from_node=a, to_node=b, edge_type="SUPPORTS", layer="L3", confidence=0.9)
+
+        network = build_bayesian_network(db, include_soft_evidence=False)
+        assert network is not None
+        assert network["soft_evidence_factors"] == []
+
+    def test_soft_evidence_shifts_posterior(self, db):
+        a = create_sample_node(db, label="cause_a")
+        b = create_sample_node(db, label="effect_b")
+        c = create_sample_node(db, label="outcome_c")
+        create_sample_edge(db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3", confidence=0.8)
+        create_sample_edge(db, from_node=b, to_node=c, edge_type="CAUSES", layer="L3", confidence=0.7)
+
+        result_without = bayesian_inference(db, c, {}, include_soft_evidence=False)
+
+        create_sample_edge(db, from_node=a, to_node=c, edge_type="SUPPORTS", layer="L3", confidence=0.95)
+        result_with = bayesian_inference(db, c, {}, include_soft_evidence=True)
+
+        assert result_without["method"] != "none"
+        assert result_with["method"] != "none"
+        p_bad_without = result_without["posterior"][c]["bad"]
+        p_bad_with = result_with["posterior"][c]["bad"]
+
+        assert abs(p_bad_with - p_bad_without) > 0.001, (
+            f"Soft evidence should shift posterior: without={p_bad_without}, with={p_bad_with}"
+        )
+
+    def test_soft_evidence_applies_to_edge_type(self, db):
+        a = create_sample_node(db, label="cause_a")
+        b = create_sample_node(db, label="effect_b")
+        c = create_sample_node(db, label="outcome_c")
+        create_sample_edge(db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3", confidence=0.8)
+        create_sample_edge(db, from_node=b, to_node=c, edge_type="CAUSES", layer="L3", confidence=0.7)
+        create_sample_edge(db, from_node=a, to_node=b, edge_type="APPLIES_TO", layer="L3", confidence=0.7)
+
+        network = build_bayesian_network(db, include_soft_evidence=True, soft_edge_types=["APPLIES_TO"])
+        assert network is not None
+        assert len(network["soft_evidence_factors"]) > 0
+
+    def test_soft_evidence_context_manager(self, db):
+        a = create_sample_node(db, label="cause_a")
+        b = create_sample_node(db, label="effect_b")
+        c = create_sample_node(db, label="outcome_c")
+        create_sample_edge(db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3", confidence=0.8)
+        create_sample_edge(db, from_node=b, to_node=c, edge_type="CAUSES", layer="L3", confidence=0.7)
+        create_sample_edge(db, from_node=a, to_node=b, edge_type="SUPPORTS", layer="L3", confidence=0.9)
+
+        from ohm.bayesian import BayesianContext
+
+        with BayesianContext(db, include_soft_evidence=True) as ctx:
+            assert ctx.network is not None
+            assert len(ctx.network.get("soft_evidence_factors", [])) > 0
+            result = ctx.inference(c, {})
+            assert result["method"] != "none"
