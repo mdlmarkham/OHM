@@ -2118,3 +2118,264 @@ def graph_stats(
         "edges_by_type": {row[0]: row[1] for row in edge_dist},
         "edges_by_layer": {row[0]: row[1] for row in layer_dist},
     }
+
+
+def compute_centrality(
+    conn: DuckDBPyConnection,
+    *,
+    edge_types: list[str] | None = None,
+    layer: str | None = None,
+    weight_by_confidence: bool = True,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """Compute causal influence centrality using PageRank on directed causal edges.
+
+    This is NOT degree centrality — it's PageRank-style propagation on CAUSES/INFLUENCES
+    edges weighted by confidence. A node has high causal influence if it can reach
+    many downstream nodes through confident edges.
+
+    Args:
+        edge_types: Edge types to consider (default: CAUSES, INFLUENCES).
+        layer: Optional layer filter.
+        weight_by_confidence: Weight edges by confidence (default True).
+        limit: Maximum nodes to return.
+
+    Returns:
+        Dict with top nodes by causal influence, their scores, and reachability stats.
+    """
+    try:
+        import networkx as nx
+    except ImportError:
+        raise ImportError("networkx is required for centrality analysis. Install with: pip install networkx")
+
+    if edge_types is None:
+        edge_types = ["CAUSES", "INFLUENCES"]
+
+    layer_clause = "AND layer = ?" if layer else ""
+    params: list[Any] = []
+    if layer:
+        params.append(layer)
+
+    query = f"""
+        SELECT from_node, to_node, confidence
+        FROM ohm_edges
+        WHERE edge_type IN ({','.join('?' * len(edge_types))})
+        AND deleted_at IS NULL
+        {layer_clause}
+    """
+    params = edge_types + params
+    rows = conn.execute(query, params).fetchall()
+
+    G = nx.DiGraph()
+    for from_node, to_node, confidence in rows:
+        G.add_node(from_node)
+        G.add_node(to_node)
+        weight = float(confidence) if confidence is not None and weight_by_confidence else 1.0
+        if G.has_edge(from_node, to_node):
+            G[from_node][to_node]["weight"] = max(G[from_node][to_node]["weight"], weight)
+        else:
+            G.add_edge(from_node, to_node, weight=weight)
+
+    if G.number_of_nodes() == 0:
+        return {"method": "compute_centrality", "nodes": [], "n_nodes": 0, "n_edges": 0}
+
+    pagerank = nx.pagerank(G, weight="weight", alpha=0.85)
+
+    in_degree = dict(G.in_degree(weight="weight"))
+    out_degree = dict(G.out_degree(weight="weight"))
+
+    sorted_nodes = sorted(pagerank.keys(), key=lambda n: pagerank[n], reverse=True)[:limit]
+
+    node_labels: dict[str, str] = {}
+    label_rows = conn.execute(
+        "SELECT id, label FROM ohm_nodes WHERE deleted_at IS NULL AND id IN (" + ",".join("?" * len(sorted_nodes)) + ")",
+        sorted_nodes,
+    ).fetchall()
+    for row in label_rows:
+        node_labels[row[0]] = row[1]
+
+    nodes_result = []
+    for node_id in sorted_nodes:
+        nodes_result.append({
+            "id": node_id,
+            "label": node_labels.get(node_id, node_id),
+            "centrality": round(pagerank[node_id], 6),
+            "in_degree": in_degree.get(node_id, 0),
+            "out_degree": out_degree.get(node_id, 0),
+            "reachable_nodes": len(nx.descendants(G, node_id)),
+        })
+
+    return {
+        "method": "compute_centrality",
+        "nodes": nodes_result,
+        "n_nodes": G.number_of_nodes(),
+        "n_edges": G.number_of_edges(),
+        "weight_by_confidence": weight_by_confidence,
+        "edge_types": edge_types,
+    }
+
+
+def compute_communities(
+    conn: DuckDBPyConnection,
+    *,
+    edge_types: list[str] | None = None,
+    layer: str | None = None,
+) -> dict[str, Any]:
+    """Detect communities using Louvain community detection on undirected graph.
+
+    Communities are groups of nodes that are more tightly connected to each other
+    than to nodes outside the group. Useful for finding semi-independent subsystems.
+
+    Args:
+        edge_types: Edge types to consider (default: CAUSES, INFLUENCES, SUPPORTS).
+        layer: Optional layer filter.
+
+    Returns:
+        Dict with community labels and member nodes.
+    """
+    try:
+        import networkx as nx
+        from networkx.algorithms.community import louvain_communities
+    except ImportError:
+        raise ImportError("networkx is required for community detection. Install with: pip install networkx")
+
+    if edge_types is None:
+        edge_types = ["CAUSES", "INFLUENCES", "SUPPORTS", "ENABLES"]
+
+    layer_clause = "AND layer = ?" if layer else ""
+    params: list[Any] = []
+    if layer:
+        params.append(layer)
+
+    query = f"""
+        SELECT DISTINCT from_node, to_node, confidence
+        FROM ohm_edges
+        WHERE edge_type IN ({','.join('?' * len(edge_types))})
+        AND deleted_at IS NULL
+        {layer_clause}
+    """
+    params = edge_types + params
+    rows = conn.execute(query, params).fetchall()
+
+    G = nx.Graph()
+    for from_node, to_node, confidence in rows:
+        G.add_node(from_node)
+        G.add_node(to_node)
+        weight = float(confidence) if confidence is not None else 1.0
+        if G.has_edge(from_node, to_node):
+            G[from_node][to_node]["weight"] += weight
+        else:
+            G.add_edge(from_node, to_node, weight=weight)
+
+    if G.number_of_nodes() == 0:
+        return {"method": "compute_communities", "communities": [], "n_nodes": 0}
+
+    communities = louvain_communities(G, weight="weight", seed=42)
+
+    node_labels: dict[str, str] = {}
+    all_nodes = list(G.nodes())
+    if all_nodes:
+        label_rows = conn.execute(
+            "SELECT id, label FROM ohm_nodes WHERE deleted_at IS NULL AND id IN (" + ",".join("?" * len(all_nodes)) + ")",
+            all_nodes,
+        ).fetchall()
+        for row in label_rows:
+            node_labels[row[0]] = row[1]
+
+    communities_result = []
+    for i, community in enumerate(sorted(communities, key=len, reverse=True)):
+        community_list = sorted(community)
+        communities_result.append({
+            "id": i,
+            "size": len(community),
+            "nodes": [{"id": n, "label": node_labels.get(n, n)} for n in community_list],
+        })
+
+    return {
+        "method": "compute_communities",
+        "communities": communities_result,
+        "n_nodes": G.number_of_nodes(),
+        "n_communities": len(communities),
+    }
+
+
+def find_bridges(
+    conn: DuckDBPyConnection,
+    *,
+    edge_types: list[str] | None = None,
+    layer: str | None = None,
+) -> dict[str, Any]:
+    """Find bridge edges and articulation points in the graph.
+
+    Bridge edges are edges whose removal would disconnect the graph.
+    Articulation points are nodes whose removal would disconnect the graph.
+    These are critical vulnerabilities in the causal structure.
+
+    Args:
+        edge_types: Edge types to consider (default: CAUSES, INFLUENCES).
+        layer: Optional layer filter.
+
+    Returns:
+        Dict with bridge edges and articulation points.
+    """
+    try:
+        import networkx as nx
+    except ImportError:
+        raise ImportError("networkx is required for bridge detection. Install with: pip install networkx")
+
+    if edge_types is None:
+        edge_types = ["CAUSES", "INFLUENCES", "ENABLES", "DEPENDS_ON"]
+
+    layer_clause = "AND layer = ?" if layer else ""
+    params: list[Any] = []
+    if layer:
+        params.append(layer)
+
+    query = f"""
+        SELECT DISTINCT from_node, to_node
+        FROM ohm_edges
+        WHERE edge_type IN ({','.join('?' * len(edge_types))})
+        AND deleted_at IS NULL
+        {layer_clause}
+    """
+    params = edge_types + params
+    rows = conn.execute(query, params).fetchall()
+
+    G = nx.Graph()
+    for from_node, to_node in rows:
+        G.add_node(from_node)
+        G.add_node(to_node)
+        G.add_edge(from_node, to_node)
+
+    if G.number_of_nodes() == 0:
+        return {"method": "find_bridges", "bridges": [], "articulation_points": [], "n_nodes": 0}
+
+    bridges = list(nx.bridges(G))
+    articulation_points = list(nx.articulation_points(G))
+
+    node_labels: dict[str, str] = {}
+    all_nodes = list(G.nodes())
+    if all_nodes:
+        label_rows = conn.execute(
+            "SELECT id, label FROM ohm_nodes WHERE deleted_at IS NULL AND id IN (" + ",".join("?" * len(all_nodes)) + ")",
+            all_nodes,
+        ).fetchall()
+        for row in label_rows:
+            node_labels[row[0]] = row[1]
+
+    bridges_result = [
+        {"from": f, "to": t, "from_label": node_labels.get(f, f), "to_label": node_labels.get(t, t)}
+        for f, t in bridges
+    ]
+    articulation_result = [
+        {"id": n, "label": node_labels.get(n, n)} for n in articulation_points
+    ]
+
+    return {
+        "method": "find_bridges",
+        "bridges": bridges_result,
+        "articulation_points": articulation_result,
+        "n_nodes": G.number_of_nodes(),
+        "n_bridges": len(bridges),
+        "n_articulation_points": len(articulation_points),
+    }

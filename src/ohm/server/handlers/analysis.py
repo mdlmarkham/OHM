@@ -164,6 +164,44 @@ class AnalysisHandlerMixin:
         result = find_dead_ends(self.current_store.conn, node_type=node_type, limit=limit)
         self._json_response(200, result)
 
+    def _get_centrality(self, path: str, qs: dict) -> None:
+        """GET /centrality — compute causal influence centrality via PageRank."""
+        from ohm.methods import compute_centrality
+
+        edge_types_raw = qs.get("edge_types", [None])[0]
+        edge_types = edge_types_raw.split(",") if edge_types_raw else None
+        layer = qs.get("layer", [None])[0]
+        weight_by_confidence = qs.get("weight_by_confidence", ["true"])[0].lower() == "true"
+        limit = int(qs.get("limit", [20])[0])
+        result = compute_centrality(
+            self.current_store.conn,
+            edge_types=edge_types,
+            layer=layer,
+            weight_by_confidence=weight_by_confidence,
+            limit=limit,
+        )
+        self._json_response(200, result)
+
+    def _get_communities(self, path: str, qs: dict) -> None:
+        """GET /communities — detect communities via Louvain algorithm."""
+        from ohm.methods import compute_communities
+
+        edge_types_raw = qs.get("edge_types", [None])[0]
+        edge_types = edge_types_raw.split(",") if edge_types_raw else None
+        layer = qs.get("layer", [None])[0]
+        result = compute_communities(self.current_store.conn, edge_types=edge_types, layer=layer)
+        self._json_response(200, result)
+
+    def _get_bridges(self, path: str, qs: dict) -> None:
+        """GET /bridges — find bridge edges and articulation points."""
+        from ohm.methods import find_bridges
+
+        edge_types_raw = qs.get("edge_types", [None])[0]
+        edge_types = edge_types_raw.split(",") if edge_types_raw else None
+        layer = qs.get("layer", [None])[0]
+        result = find_bridges(self.current_store.conn, edge_types=edge_types, layer=layer)
+        self._json_response(200, result)
+
     def _get_suggest(self, path: str, qs: dict) -> None:
         """GET /suggest — suggest connections."""
         from ohm.methods import suggest_connections
