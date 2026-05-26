@@ -45,9 +45,9 @@ logger = logging.getLogger(__name__)
 # Invalidated when graph_generation counter increments.
 _bayesian_network_cache: dict[tuple, tuple[int, dict[str, Any]]] = {}
 
-from ohm.inference.pert import compute_pert_mean as _compute_pert_mean
-from ohm.inference.pert import compute_pert_variance as _compute_pert_variance
-from ohm.inference.pert import scale_pert_variance as _scale_pert_variance
+from .pert import compute_pert_mean as _compute_pert_mean
+from .pert import compute_pert_variance as _compute_pert_variance
+from .pert import scale_pert_variance as _scale_pert_variance
 
 try:
     from pgmpy.models import DiscreteBayesianNetwork as BayesianNetwork
