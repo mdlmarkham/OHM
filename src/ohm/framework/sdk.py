@@ -1029,6 +1029,54 @@ class Graph:
 
         return aggregate_observations(self._conn, node_id, method=method)
 
+    def auto_pert_from_observations(self, node_id: str, **kwargs) -> dict[str, Any]:
+        """Derive PERT triple from observations on a node.
+
+        Uses empirical percentiles of observation values to auto-generate
+        PERT estimates (OHM-8fg9). Requires at least 3 observations.
+
+        Args:
+            node_id: Node to derive PERT from.
+            bounds: Valid range (default [0, 1]).
+
+        Returns:
+            Dict with p05, p50, p95, mean, variance, n, method.
+        """
+        from ohm.inference.pert import auto_pert_from_observations as _auto_pert
+
+        obs = self._conn.execute(
+            "SELECT value FROM ohm_observations WHERE node_id = ? AND value IS NOT NULL AND deleted_at IS NULL ORDER BY created_at",
+            [node_id],
+        ).fetchall()
+        values = [r[0] for r in obs]
+        return _auto_pert(values, **kwargs)
+
+    def auto_pert_from_edges(self, node_id: str, **kwargs) -> dict[str, Any]:
+        """Derive PERT triple from edge probability distributions.
+
+        Analyzes incoming/outgoing edge probabilities to auto-generate
+        PERT estimates (OHM-8fg9). Uses edge probability_p50 values.
+
+        Args:
+            node_id: Node whose edges to analyze.
+            default_spread: Fallback spread for single probability.
+
+        Returns:
+            Dict with p05, p50, p95, mean, variance, n, method.
+        """
+        from ohm.inference.pert import auto_pert_from_edge_distribution as _auto_pert_edges
+
+        in_probs = self._conn.execute(
+            "SELECT probability FROM ohm_edges WHERE to_node = ? AND probability IS NOT NULL AND deleted_at IS NULL",
+            [node_id],
+        ).fetchall()
+        out_probs = self._conn.execute(
+            "SELECT probability FROM ohm_edges WHERE from_node = ? AND probability IS NOT NULL AND deleted_at IS NULL",
+            [node_id],
+        ).fetchall()
+        probs = [r[0] for r in in_probs] + [r[0] for r in out_probs]
+        return _auto_pert_edges(probs, **kwargs)
+
     def anomalies(
         self,
         *,

@@ -5,8 +5,11 @@ from ohm.pert import (
     PERTELError,
     anchored_pert,
     aggregate_mixture_of_experts,
+    auto_pert_from_observations,
+    auto_pert_from_edge_distribution,
     compute_pert_mean,
     compute_pert_variance,
+    scale_pert_variance,
     validate_pert,
 )
 
@@ -201,3 +204,118 @@ class TestAnchoredPert:
         result = anchored_pert(0.1, 0.5, 0.9, reference_class=0.5)
         expected_var = compute_pert_variance(result["p05"], result["p95"])
         assert abs(result["variance"] - expected_var) < 1e-10
+
+
+class TestAutoPertFromObservations:
+    """Tests for auto_pert_from_observations()."""
+
+    def test_insufficient_data_returns_zeros(self):
+        result = auto_pert_from_observations([0.5])
+        assert result["p05"] == 0.0
+        assert result["p50"] == 0.0
+        assert result["p95"] == 0.0
+        assert result["method"] == "insufficient_data"
+        assert result["n"] == 1
+
+    def test_three_observations_exact_percentiles(self):
+        values = [0.2, 0.5, 0.8]
+        result = auto_pert_from_observations(values)
+        assert result["n"] == 3
+        assert result["method"] == "empirical_percentiles"
+        assert result["p50"] == 0.5
+
+    def test_five_observations_interpolated_percentiles(self):
+        values = [0.1, 0.3, 0.5, 0.7, 0.9]
+        result = auto_pert_from_observations(values)
+        assert result["n"] == 5
+        assert 0.0 <= result["p05"] <= 0.5
+        assert 0.0 <= result["p50"] <= 1.0
+
+    def test_mean_bounded_by_p05_and_p95(self):
+        values = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+        result = auto_pert_from_observations(values)
+        mean = compute_pert_mean(result["p05"], result["p50"], result["p95"])
+        assert result["p05"] <= mean <= result["p95"]
+
+    def test_custom_bounds(self):
+        values = [2.0, 5.0, 8.0]
+        result = auto_pert_from_observations(values, bounds=(0.0, 10.0))
+        assert result["p05"] >= 0.0
+        assert result["p95"] <= 10.0
+
+    def test_empty_list_returns_zeros(self):
+        result = auto_pert_from_observations([])
+        assert result["p05"] == 0.0
+        assert result["p50"] == 0.0
+        assert result["p95"] == 0.0
+        assert result["method"] == "insufficient_data"
+        assert result["n"] == 0
+
+
+class TestAutoPertFromEdgeDistribution:
+    """Tests for auto_pert_from_edge_distribution()."""
+
+    def test_empty_probs_returns_no_data(self):
+        result = auto_pert_from_edge_distribution([None, None])
+        assert result["p05"] == 0.0
+        assert result["p50"] == 0.0
+        assert result["p95"] == 0.0
+        assert result["method"] == "no_data"
+        assert result["n"] == 0
+
+    def test_single_probability_uses_spread(self):
+        result = auto_pert_from_edge_distribution([0.5])
+        assert result["n"] == 1
+        assert result["p50"] == 0.5
+        assert result["method"] == "single_value_with_spread"
+        assert result["p05"] < result["p50"] < result["p95"]
+
+    def test_multiple_probabilities_uses_percentiles(self):
+        probs = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+        result = auto_pert_from_edge_distribution(probs)
+        assert result["n"] == 9
+        assert result["method"] == "edge_distribution_percentiles"
+        assert result["p05"] <= result["p50"] <= result["p95"]
+
+    def test_none_filtered_out(self):
+        probs = [0.2, 0.4, None, 0.6, 0.8, None]
+        result = auto_pert_from_edge_distribution(probs)
+        assert result["n"] == 4
+
+    def test_custom_default_spread(self):
+        result = auto_pert_from_edge_distribution([0.5], default_spread=0.3)
+        assert result["p50"] == 0.5
+        assert result["p05"] == pytest.approx(0.35)
+        assert result["p95"] == pytest.approx(0.65)
+
+    def test_mean_bounded_by_p05_and_p95(self):
+        probs = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+        result = auto_pert_from_edge_distribution(probs)
+        mean = compute_pert_mean(result["p05"], result["p50"], result["p95"])
+        assert result["p05"] <= mean <= result["p95"]
+
+
+class TestScalePertVariance:
+    """Tests for scale_pert_variance()."""
+
+    @pytest.mark.parametrize(
+        "spread,expected_min",
+        [
+            (0.1, 0.08),  # low spread → low uncertainty signal
+            (0.3, 0.46),  # moderate
+            (0.5, 0.86),  # wide
+            (1.0, 0.98),  # full range → high
+        ],
+    )
+    def test_spread_values(self, spread, expected_min):
+        result = scale_pert_variance(spread)
+        assert 0.0 <= result <= 1.0
+        assert result >= expected_min
+
+    def test_returns_float(self):
+        result = scale_pert_variance(0.4)
+        assert isinstance(result, float)
+
+    def test_zero_spread(self):
+        result = scale_pert_variance(0.0)
+        assert result < 0.5  # should be on the low side

@@ -255,3 +255,144 @@ def anchored_pert(
         "mean": adjusted_mean,
         "variance": compute_pert_variance(adjusted_p05, adjusted_p95),
     }
+
+
+def auto_pert_from_observations(
+    values: list[float],
+    *,
+    bounds: tuple[float, float] = (0.0, 1.0),
+) -> dict[str, float | int | str]:
+    """Derive PERT triple from a list of observation values.
+
+    Uses empirical percentiles (5th, 50th, 95th) of the observations
+    as the PERT triple. This automates PERT elicitation when multiple
+    observations exist for a node or edge.
+
+    Args:
+        values: List of observed values (e.g., observation values for a node).
+        bounds: Valid range for values (default [0, 1] for probabilities).
+
+    Returns:
+        Dict with 'p05', 'p50', 'p95', 'mean', 'variance', 'n', 'method'.
+        Returns zeros if fewer than 3 observations.
+
+    Example:
+        >>> result = auto_pert_from_observations([0.2, 0.3, 0.4, 0.5, 0.6])
+        >>> result['p50']
+        0.4
+    """
+    if len(values) < 3:
+        return {"p05": 0.0, "p50": 0.0, "p95": 0.0, "mean": 0.0, "variance": 0.0, "n": len(values), "method": "insufficient_data"}
+
+    sorted_vals = sorted(values)
+    n = len(sorted_vals)
+
+    def percentile(data: list[float], p: float) -> float:
+        idx = (len(data) - 1) * p
+        lower = int(idx)
+        upper = lower + 1
+        weight = idx - lower
+        if upper >= len(data):
+            return data[lower]
+        return data[lower] * (1 - weight) + data[upper] * weight
+
+    p05 = max(bounds[0], min(bounds[1], percentile(sorted_vals, 0.05)))
+    p50 = max(bounds[0], min(bounds[1], percentile(sorted_vals, 0.50)))
+    p95 = max(bounds[0], min(bounds[1], percentile(sorted_vals, 0.95)))
+
+    if p05 >= p50 or p50 >= p95:
+        p05 = min(sorted_vals)
+        p50 = sorted_vals[n // 2]
+        p95 = max(sorted_vals)
+
+    mean = compute_pert_mean(p05, p50, p95)
+    variance = compute_pert_variance(p05, p95)
+
+    return {
+        "p05": round(p05, 4),
+        "p50": round(p50, 4),
+        "p95": round(p95, 4),
+        "mean": round(mean, 4),
+        "variance": round(variance, 6),
+        "n": n,
+        "method": "empirical_percentiles",
+    }
+
+
+def auto_pert_from_edge_distribution(
+    probabilities: list[float | None],
+    *,
+    default_spread: float = 0.2,
+) -> dict[str, float | int | str]:
+    """Derive PERT triple from a distribution of edge probabilities.
+
+    Analyzes a list of probability values (e.g., from incoming/outgoing edges
+    of a node) to derive an automated PERT estimate. Uses the distribution's
+    5th/50th/95th percentiles, with fallback to median +/- spread if insufficient data.
+
+    Args:
+        probabilities: List of probability values from edges.
+            None values are filtered out.
+        default_spread: Fallback spread when only one probability available.
+
+    Returns:
+        Dict with 'p05', 'p50', 'p95', 'mean', 'variance', 'n', 'method'.
+
+    Example:
+        >>> probs = [0.3, 0.4, 0.5, 0.6, 0.7, None, 0.4]
+        >>> result = auto_pert_from_edge_distribution(probs)
+        >>> result['p50']
+        0.45
+    """
+    valid_probs = [p for p in probabilities if p is not None]
+
+    if len(valid_probs) == 0:
+        return {"p05": 0.0, "p50": 0.0, "p95": 0.0, "mean": 0.0, "variance": 0.0, "n": 0, "method": "no_data"}
+
+    if len(valid_probs) == 1:
+        p50 = valid_probs[0]
+        p05 = max(0.0, p50 - default_spread / 2)
+        p95 = min(1.0, p50 + default_spread / 2)
+        return {
+            "p05": round(p05, 4),
+            "p50": round(p50, 4),
+            "p95": round(p95, 4),
+            "mean": round(p50, 4),
+            "variance": round(compute_pert_variance(p05, p95), 6),
+            "n": 1,
+            "method": "single_value_with_spread",
+        }
+
+    sorted_probs = sorted(valid_probs)
+    n = len(sorted_probs)
+
+    def percentile(data: list[float], p: float) -> float:
+        idx = (len(data) - 1) * p
+        lower = int(idx)
+        upper = lower + 1
+        weight = idx - lower
+        if upper >= len(data):
+            return data[lower]
+        return data[lower] * (1 - weight) + data[upper] * weight
+
+    p05 = percentile(sorted_probs, 0.05)
+    p50 = percentile(sorted_probs, 0.50)
+    p95 = percentile(sorted_probs, 0.95)
+
+    if p05 >= p50 or p50 >= p95:
+        p05 = min(sorted_probs)
+        p50 = sorted_probs[n // 2]
+        p95 = max(sorted_probs)
+
+    mean = compute_pert_mean(p05, p50, p95)
+    variance = compute_pert_variance(p05, p95)
+
+    return {
+        "p05": round(p05, 4),
+        "p50": round(p50, 4),
+        "p95": round(p95, 4),
+        "mean": round(mean, 4),
+        "variance": round(variance, 6),
+        "n": n,
+        "method": "edge_distribution_percentiles",
+    }
