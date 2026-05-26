@@ -736,6 +736,21 @@ def query_stats(conn: DuckDBPyConnection) -> dict[str, Any]:
     """).fetchone()
     stats["active_agents"] = agents_row[0] if agents_row else 0
 
+    # Dead end count — nodes with incoming edges but no outgoing edges
+    dead_end_row = conn.execute("""
+        SELECT COUNT(*) FROM ohm_nodes n
+        WHERE NOT EXISTS (
+            SELECT 1 FROM ohm_edges e
+            WHERE e.from_node = n.id AND e.deleted_at IS NULL
+        )
+        AND EXISTS (
+            SELECT 1 FROM ohm_edges e2
+            WHERE e2.to_node = n.id AND e2.deleted_at IS NULL
+        )
+        AND n.deleted_at IS NULL
+    """).fetchone()
+    stats["dead_end_count"] = dead_end_row[0] if dead_end_row else 0
+
     # Observation stats — accumulate, don't collapse (ADR design note)
     # Observations stay as separate rows; consumers choose aggregation strategy.
     # These stats help consumers make informed decisions without querying every row.
