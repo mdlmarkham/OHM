@@ -596,6 +596,16 @@ class GraphHandlerMixin:
         obs_type = body.get("type", "measurement")
         if obs_type not in self.schema_config.observation_types:
             raise ValidationError(f"Invalid observation type '{obs_type}' — must be one of: {', '.join(sorted(self.schema_config.observation_types))}")
+        scale = body.get("scale")
+        if scale is not None:
+            from ohm.graph.schema import VALID_OBSERVATION_SCALES
+
+            if scale not in VALID_OBSERVATION_SCALES:
+                raise ValidationError(f"Invalid scale '{scale}' — must be one of: {', '.join(sorted(VALID_OBSERVATION_SCALES))}")
+            if scale == "probability":
+                value = body.get("value")
+                if value is not None and (value < 0.0 or value > 1.0):
+                    raise ValidationError(f"Observation value {value} is outside [0, 1] for scale='probability'")
         result = self.current_store.write_observation(
             node_id=node_id,
             type=obs_type,
@@ -606,6 +616,7 @@ class GraphHandlerMixin:
             notes=body.get("notes"),
             source_name=body.get("source_name"),
             source_url=body.get("source_url"),
+            scale=scale,
             agent_name=agent,
         )
         _server_module._trigger_webhooks(
@@ -647,6 +658,18 @@ class GraphHandlerMixin:
                 if obs_type not in self.schema_config.observation_types:
                     errors.append({"index": i, "error": f"Invalid observation type '{obs_type}' — must be one of: {', '.join(sorted(self.schema_config.observation_types))}"})
                     continue
+                scale = obs.get("scale")
+                if scale is not None:
+                    from ohm.graph.schema import VALID_OBSERVATION_SCALES
+
+                    if scale not in VALID_OBSERVATION_SCALES:
+                        errors.append({"index": i, "error": f"Invalid scale '{scale}' — must be one of: {', '.join(sorted(VALID_OBSERVATION_SCALES))}"})
+                        continue
+                    if scale == "probability":
+                        value = obs.get("value")
+                        if value is not None and (value < 0.0 or value > 1.0):
+                            errors.append({"index": i, "error": f"Observation value {value} is outside [0, 1] for scale='probability'"})
+                            continue
                 result = self.current_store.write_observation(
                     node_id=node_id,
                     type=obs_type,
@@ -657,6 +680,7 @@ class GraphHandlerMixin:
                     notes=obs.get("notes"),
                     source_name=obs.get("source_name"),
                     source_url=obs.get("source_url"),
+                    scale=scale,
                     agent_name=agent,
                 )
                 results.append(result)

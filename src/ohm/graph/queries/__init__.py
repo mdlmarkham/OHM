@@ -1166,16 +1166,27 @@ def create_observation(
     notes: str | None = None,
     source_name: str | None = None,
     source_url: str | None = None,
+    scale: str | None = None,
 ) -> dict[str, Any]:
     """Create an observation on a node or edge and return its full record."""
+    from ohm.graph.schema import VALID_OBSERVATION_SCALES
+
+    if scale is not None and scale not in VALID_OBSERVATION_SCALES:
+        raise ValueError(
+            f"Invalid scale '{scale}' — must be one of: {', '.join(sorted(VALID_OBSERVATION_SCALES))}"
+        )
+    if scale == "probability" and value is not None and (value < 0.0 or value > 1.0):
+        raise ValueError(
+            f"Observation value {value} is outside [0, 1] for scale='probability'"
+        )
     import uuid
 
     obs_id = str(uuid.uuid4())
     conn.execute(
         """INSERT INTO ohm_observations
-           (id, node_id, edge_id, type, value, baseline, sigma, source, created_by, notes, source_name, source_url)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        [obs_id, node_id, edge_id, obs_type, value, baseline, sigma, source, created_by, notes, source_name, source_url],
+           (id, node_id, edge_id, type, value, baseline, sigma, source, created_by, notes, source_name, source_url, scale)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [obs_id, node_id, edge_id, obs_type, value, baseline, sigma, source, created_by, notes, source_name, source_url, scale],
     )
     _log_change(conn, "ohm_observations", obs_id, "INSERT", created_by)
     # Return full observation record

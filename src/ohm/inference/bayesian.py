@@ -467,8 +467,11 @@ def build_bayesian_network(
             continue  # Node was excluded from model edges — skip its CPD
         if safe not in parent_edges:
             root_safe_names.add(safe)
-            # Get prior from observations or default
-            _obs_values = [o.value for o in reader.get_observations(node_id) if o.value is not None]
+            # Get prior from probability-scaled observations or default
+            _obs_values = [
+                o.value for o in reader.get_observations(node_id)
+                if o.value is not None and o.scale in ("probability", "unknown")
+            ]
             prior = (sum(_obs_values) / len(_obs_values)) if _obs_values else None
             node_priors[safe] = float(prior) if prior is not None else root_prior
 
