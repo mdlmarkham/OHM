@@ -789,6 +789,7 @@ def bayesian_inference(
     observation_window_days: float | None = None,
     include_soft_evidence: bool = False,
     soft_edge_types: list[str] | None = None,
+    customer_id: str | None = None,
 ) -> dict[str, Any]:
     """Run Bayesian inference on the OHM graph.
 
@@ -827,7 +828,7 @@ def bayesian_inference(
 
     # Build the Bayesian network scoped around target and evidence nodes
     scope_nodes = [target] + list(evidence.keys())
-    network = build_bayesian_network(reader, edge_types=edge_types, layers=layers, root_nodes=scope_nodes, root_prior=root_prior, half_life_days=half_life_days, observation_window_days=observation_window_days, include_soft_evidence=include_soft_evidence, soft_edge_types=soft_edge_types)
+    network = build_bayesian_network(reader, edge_types=edge_types, layers=layers, root_nodes=scope_nodes, root_prior=root_prior, half_life_days=half_life_days, observation_window_days=observation_window_days, include_soft_evidence=include_soft_evidence, soft_edge_types=soft_edge_types, customer_id=customer_id)
 
     if network is None:
         return {
@@ -933,6 +934,7 @@ def causal_intervention(
     preferred_edges: set[tuple[str, str]] | None = None,
     include_soft_evidence: bool = False,
     soft_edge_types: list[str] | None = None,
+    customer_id: str | None = None,
     # Internal: pre-built Bayesian network for VoI batch optimization (OHM-27).
     # When provided, graph construction is skipped and this network is used directly.
     _pre_built_network: dict[str, Any] | None = None,
@@ -1018,6 +1020,7 @@ def causal_intervention(
             preferred_edges=effective_preferred or None,
             include_soft_evidence=include_soft_evidence,
             soft_edge_types=soft_edge_types,
+            customer_id=customer_id,
         )
 
     if network is None:
@@ -1254,6 +1257,7 @@ def compute_ate(
     semantic_roles: SemanticRoles | None = None,
     include_soft_evidence: bool = False,
     soft_edge_types: list[str] | None = None,
+    customer_id: str | None = None,
     # Internal: pre-built network for VoI batch optimization (OHM-27).
     # When provided, graph construction is skipped and this network is used
     # for both do(bad) and do(good) interventions.
@@ -1309,6 +1313,7 @@ def compute_ate(
         preferred_edges=_preferred,
         include_soft_evidence=include_soft_evidence,
         soft_edge_types=soft_edge_types,
+        customer_id=customer_id,
         _pre_built_network=_pre_built_network,
     )
     do_good = causal_intervention(
@@ -1324,6 +1329,7 @@ def compute_ate(
         preferred_edges=_preferred,
         include_soft_evidence=include_soft_evidence,
         soft_edge_types=soft_edge_types,
+        customer_id=customer_id,
         _pre_built_network=_pre_built_network,
     )
 
@@ -1367,6 +1373,7 @@ def compute_ate(
                     root_prior=root_prior,
                     semantic_roles=semantic_roles,
                     preferred_edges=_preferred,
+                    customer_id=customer_id,
                 )
             if _net is not None:
                 _model = _net["model"]
@@ -1442,6 +1449,7 @@ def compute_sensitivity(
     layers: list[str] | None = None,
     leak_probability: float = 0.15,
     root_prior: float = 0.3,
+    customer_id: str | None = None,
 ) -> dict[str, Any]:
     """Compute sensitivity analysis (E-value) for a causal effect.
 
@@ -1486,6 +1494,7 @@ def compute_sensitivity(
         layers=layers,
         leak_probability=leak_probability,
         root_prior=root_prior,
+        customer_id=customer_id,
     )
 
     if "error" in ate_result:
@@ -1596,6 +1605,7 @@ def find_adjustment_sets(
     leak_probability: float = 0.15,
     root_prior: float = 0.3,
     max_network_size: int = 10,
+    customer_id: str | None = None,
 ) -> dict[str, Any]:
     """Find valid backdoor and frontdoor adjustment sets for causal identification.
 
@@ -1649,6 +1659,7 @@ def find_adjustment_sets(
             layers=layers,
             leak_probability=leak_probability,
             root_prior=root_prior,
+            customer_id=customer_id,
         )
     except Exception as e:
         return {"method": "none", "cause": cause, "effect": effect, "error": f"Failed to build Bayesian network: {e}"}
@@ -1969,6 +1980,9 @@ def compute_voi(
     timeout: float | None = None,
     semantic_roles: SemanticRoles | None = None,
     min_observations: int = 0,
+    include_soft_evidence: bool = False,
+    soft_edge_types: list[str] | None = None,
+    customer_id: str | None = None,
 ) -> dict[str, Any]:
     """Compute Value of Information (VoI) for research prioritization.
 
@@ -2165,6 +2179,9 @@ def compute_voi(
                 root_prior=root_prior,
                 semantic_roles=semantic_roles,
                 preferred_edges=_all_preferred or None,
+                include_soft_evidence=include_soft_evidence,
+                soft_edge_types=soft_edge_types,
+                customer_id=customer_id,
             )
             if _shared is not None:
                 _voi_networks[decision] = _shared
@@ -2230,6 +2247,7 @@ def compute_voi(
                         leak_probability=leak_probability,
                         root_prior=root_prior,
                         semantic_roles=semantic_roles,
+                        customer_id=customer_id,
                         _pre_built_network=_voi_networks.get(decision),
                     )
                 _du = decision_utility.get(decision, {})
@@ -2310,6 +2328,7 @@ def generate_voi_tasks(
     top: int = 5,
     leak_probability: float = 0.15,
     root_prior: float = 0.3,
+    customer_id: str | None = None,
 ) -> dict[str, Any]:
     """Generate research tasks from VoI rankings, matched to agent expertise.
 
@@ -2344,6 +2363,7 @@ def generate_voi_tasks(
         top=None,  # Get all candidates, we'll filter later
         leak_probability=leak_probability,
         root_prior=root_prior,
+        customer_id=customer_id,
     )
 
     if not voi_result.get("rankings"):

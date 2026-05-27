@@ -950,7 +950,7 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
         length = int(self.headers.get("Content-Length", 0))
         if length == 0:
             return {}
-        if length > MAX_BODY_SIZE:
+        if length < 0 or length > MAX_BODY_SIZE:
             raise ValidationError(f"Request body too large: {length} bytes (max {MAX_BODY_SIZE})")
         body = self.rfile.read(length)
         try:
