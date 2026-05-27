@@ -242,6 +242,10 @@ class DuckDBGraphReader:
             for r in rows
         ]
 
+    def get_all_nodes(self) -> list[NodeRecord]:
+        """Get all non-deleted nodes."""
+        return self.get_nodes()
+
     def get_node(self, node_id: str) -> NodeRecord | None:
         """Get a single node by ID, or None if not found."""
         nodes = self.get_nodes(ids=[node_id])

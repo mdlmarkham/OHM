@@ -296,7 +296,7 @@ def discover_causal(
         all_nodes = reader.get_all_nodes()
         node_ids = []
         for n in all_nodes:
-            nid = n.get("id", n.get("node_id", ""))
+            nid = n.id if hasattr(n, 'id') else n.get("id", n.get("node_id", ""))
             obs = reader.get_observations(nid)
             if len(obs) >= min_observations:
                 node_ids.append(nid)

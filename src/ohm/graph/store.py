@@ -267,16 +267,18 @@ class OhmStore:
             # Attach DuckLake if configured
             ducklake_path = self.ducklake_path
             if ducklake_path and os.path.exists(ducklake_path):
+                dl_catalog = "ohm_lake"
+                dl_schema_prefix = f"__ducklake_metadata_{dl_catalog}"
                 try:
                     conn.execute("INSTALL ducklake FROM core")
                     conn.execute("LOAD ducklake")
-                    conn.execute(f"ATTACH IF NOT EXISTS '{ducklake_path}' AS ohm_lake (TYPE ducklake)")
+                    conn.execute(f"ATTACH IF NOT EXISTS '{ducklake_path}' AS {dl_catalog} (TYPE ducklake)")
                     logger.info("DuckLake attached for recovery")
 
                     for table in ["ohm_nodes", "ohm_edges", "ohm_observations"]:
                         try:
                             dl_cols = conn.execute(
-                                f"PRAGMA table_info('ohm_lake.{table}')"
+                                f"PRAGMA table_info('{dl_schema_prefix}.{table}')"
                             ).fetchall()
                             dl_col_names = {r[1] for r in dl_cols}
                             if not dl_col_names:
@@ -305,7 +307,7 @@ class OhmStore:
                             insert_cols = ", ".join(common)
 
                             conn.execute(
-                                f"INSERT INTO {table} ({insert_cols}, deleted_at) SELECT {select_str}, NULL::TIMESTAMP FROM ohm_lake.{table}"
+                                f"INSERT INTO {table} ({insert_cols}, deleted_at) SELECT {select_str}, NULL::TIMESTAMP FROM {dl_schema_prefix}.{table}"
                             )
                             count = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]  # type: ignore[index]
                             logger.info("Recovered %d %s from DuckLake (%d columns)", count, table, len(common))
@@ -314,7 +316,7 @@ class OhmStore:
 
                     # Detach DuckLake
                     try:
-                        conn.execute("DETACH ohm_lake")
+                        conn.execute(f"DETACH {dl_catalog}")
                     except Exception:
                         pass
 
@@ -366,15 +368,19 @@ class OhmStore:
             logger.warning("DuckLake path not found, skipping auto-restore")
             return
 
+        dl_catalog = "ohm_lake"
         try:
             self.conn.execute("INSTALL ducklake FROM core")
             self.conn.execute("LOAD ducklake")
-            self.conn.execute(f"ATTACH IF NOT EXISTS '{ducklake_path}' AS ohm_lake (TYPE ducklake)")
+            self.conn.execute(f"ATTACH IF NOT EXISTS '{ducklake_path}' AS {dl_catalog} (TYPE ducklake)")
+
+            # DuckLake 0.3+ stores tables under __ducklake_metadata_{catalog} schema
+            dl_schema_prefix = f"__ducklake_metadata_{dl_catalog}"
 
             for table in ["ohm_nodes", "ohm_edges", "ohm_observations"]:
                 try:
                     dl_cols = self.conn.execute(
-                        f"PRAGMA table_info('ohm_lake.{table}')"
+                        f"PRAGMA table_info('{dl_schema_prefix}.{table}')"
                     ).fetchall()
                     dl_col_names = {r[1] for r in dl_cols}
                     if not dl_col_names:
@@ -403,7 +409,7 @@ class OhmStore:
                     insert_cols = ", ".join(common)
 
                     self.conn.execute(
-                        f"INSERT INTO {table} ({insert_cols}, deleted_at) SELECT {select_str}, NULL::TIMESTAMP FROM ohm_lake.{table}"
+                        f"INSERT INTO {table} ({insert_cols}, deleted_at) SELECT {select_str}, NULL::TIMESTAMP FROM {dl_schema_prefix}.{table}"
                     )
                     count = self.conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]  # type: ignore[index]
                     logger.info("Auto-restored %d %s from DuckLake (%d columns)", count, table, len(common))
@@ -411,7 +417,7 @@ class OhmStore:
                     logger.warning("Failed to auto-restore %s from DuckLake: %s", table, e)
 
             try:
-                self.conn.execute("DETACH ohm_lake")
+                self.conn.execute(f"DETACH {dl_catalog}")
             except Exception:
                 pass
 
