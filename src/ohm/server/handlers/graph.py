@@ -119,6 +119,19 @@ class GraphHandlerMixin:
         for e in edges:
             node_ids.add(e["from_node"])
             node_ids.add(e["to_node"])
+
+        # ADR-013: Add citation_status to L3 edges
+        # Check if any REFERENCES edges exist in the neighborhood for L3 edge anchoring
+        ref_from_nodes = set()
+        for e in edges:
+            if e.get("edge_type") == "REFERENCES" or e.get("type") == "REFERENCES":
+                ref_from_nodes.add(e.get("from_node"))
+        for e in edges:
+            layer_val = e.get("layer")
+            if layer_val == "L3":
+                from_node = e.get("from_node", "")
+                e["citation_status"] = "verified" if from_node in ref_from_nodes else "unverified"
+
         placeholders = ", ".join("?" * len(node_ids))
         node_rows = self.current_store.execute(
             f"SELECT id, label, type, created_by, created_at FROM ohm_nodes WHERE id IN ({placeholders}) AND deleted_at IS NULL",
@@ -432,6 +445,24 @@ class GraphHandlerMixin:
 
     def _post_node(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /node — create or upsert a node."""
+        # ADR-013: Source nodes require source_url
+        node_type = body.get("type", "concept")
+        if node_type == "source" and not body.get("source_url"):
+            # Check if this is an update (node already exists) — allow updates without source_url
+            existing = self.current_store.conn.execute(
+                "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                [body["id"]],
+            ).fetchone()
+            if not existing:
+                self._json_response(
+                    400,
+                    {
+                        "error": "validation_error",
+                        "message": "source_url is required for source nodes (ADR-013)",
+                    },
+                )
+                return
+
         create_only = qs.get("create_only", ["false"])[0].lower() in ("true", "1", "yes")
         if create_only:
             existing = self.current_store.conn.execute(

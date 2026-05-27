@@ -58,6 +58,7 @@ class AdminHandlerMixin:
                         "updated": 0,
                         "failed": 0,
                         "total": 0,
+                        "remaining": 0,
                         "message": "All nodes already have embeddings",
                     },
                 )

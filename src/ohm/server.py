@@ -3336,6 +3336,12 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
         else:
             print("Quack extension not available — using HTTP-only mode", file=sys.stderr)
 
+    # Pre-warm pgmpy imports so the first inference call doesn't pay 5.3s (OHM-a689.1)
+    try:
+        from pgmpy.inference import VariableElimination  # noqa: F401
+    except ImportError:
+        pass  # pgmpy not available — inference features disabled
+
     server = ThreadedHTTPServer((config["host"], config["port"]), OhmHandler)
     print(f"OHM daemon listening on {config['host']}:{config['port']}", file=sys.stderr)
 
