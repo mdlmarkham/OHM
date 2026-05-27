@@ -327,6 +327,29 @@ class InferenceHandlerMixin:
         result = compute_nash(payoff_matrices, players)
         self._json_response(200, result)
 
+    def _get_policy(self, path: str, qs: dict) -> None:
+        """GET /policy — belief-state decision: observe vs. act."""
+        target = qs.get("target", [None])[0]
+        if not target:
+            self._json_response(400, {"error": "missing_parameter", "message": "?target=node_id required"})
+            return
+        from ohm.validation import validate_identifier
+
+        target = validate_identifier(target, name="target")
+        obs_cost_str = qs.get("observation_cost", [None])[0]
+        observation_cost = float(obs_cost_str) if obs_cost_str else None
+        horizon = int(qs.get("horizon", [1])[0])
+        layers_str = qs.get("layers", [""])[0]
+        layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
+        leak_probability = float(qs.get("leak", ["0.15"])[0])
+        from ohm.methods import belief_state_decision
+
+        result = belief_state_decision(
+            self.current_store.conn, target, observation_cost=observation_cost,
+            horizon=horizon, layers=layers, leak_probability=leak_probability,
+        )
+        self._json_response(200, result)
+
     def _get_discover(self, path: str, qs: dict) -> None:
         """GET /discover — causal structure discovery from observation data."""
         from ohm.validation import validate_identifier

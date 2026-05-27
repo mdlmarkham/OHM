@@ -538,6 +538,33 @@ def build_parser() -> argparse.ArgumentParser:
         "voi-tasks",
         help="Generate research tasks from VoI rankings matched to agent expertise",
     )
+
+    # graph policy
+    policy_parser = graph_sub.add_parser("policy", help="Belief-state decision: observe vs. act")
+    policy_parser.add_argument("target", help="Decision node ID to compute policy for")
+    policy_parser.add_argument(
+        "--observation-cost",
+        type=float,
+        default=None,
+        help="Cost of one observation (auto-derived from utility if not set)",
+    )
+    policy_parser.add_argument(
+        "--horizon",
+        type=int,
+        default=1,
+        help="Decision horizon in steps (default: 1)",
+    )
+    policy_parser.add_argument(
+        "--layers",
+        default=None,
+        help="Comma-separated layer filter",
+    )
+    policy_parser.add_argument(
+        "--leak",
+        type=float,
+        default=0.15,
+        help="Leak probability for Bayesian network (default: 0.15)",
+    )
     voi_tasks_parser.add_argument(
         "--agent",
         default=None,
@@ -1025,6 +1052,8 @@ def _handle_graph(args: argparse.Namespace) -> None:
         _handle_voi(args)
     elif cmd == "voi-tasks":
         _handle_voi_tasks(args)
+    elif cmd == "policy":
+        _handle_policy(args)
     else:
         print(f"Unknown graph command: {cmd}")
 
@@ -2147,6 +2176,40 @@ def _handle_voi_tasks(args: argparse.Namespace) -> None:
                     print(f"     → {research}")
             if result.get("agent"):
                 print(f"  Agent: {result['agent']}")
+    finally:
+        conn.close()
+
+
+def _handle_policy(args: argparse.Namespace) -> None:
+    """Belief-state decision: observe vs. act."""
+    from ohm.methods import belief_state_decision
+
+    conn = _get_db(args)
+    try:
+        layers = None
+        if args.layers:
+            layers = [lyr.strip() for lyr in args.layers.split(",") if lyr.strip()]
+        result = belief_state_decision(
+            conn,
+            args.target,
+            observation_cost=args.observation_cost,
+            horizon=args.horizon,
+            layers=layers,
+            leak_probability=args.leak,
+        )
+        if args.format == "json":
+            import json
+
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            print(f"── Policy: {result['target']} ──")
+            print(f"  Action:     {result['action'].upper()}")
+            print(f"  EVPI:       {result['evpi']}")
+            print(f"  Obs cost:   {result['observation_cost']}")
+            print(f"  Reason:     {result['reason']}")
+            if result.get("top_target"):
+                tt = result["top_target"]
+                print(f"  Best obs:   {tt['label']} (VoI={tt['voi_score']})")
     finally:
         conn.close()
 

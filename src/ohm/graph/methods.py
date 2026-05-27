@@ -2642,3 +2642,153 @@ def compute_edge_stability(
             "most_unstable": edges_result[:5] if edges_result else [],
         },
     }
+
+
+def belief_state_decision(
+    conn: DuckDBPyConnection,
+    target: str,
+    *,
+    observation_cost: float | None = None,
+    horizon: int = 1,
+    edge_types: list[str] | None = None,
+    layers: list[str] | None = None,
+    leak_probability: float = 0.15,
+    root_prior: float = 0.3,
+) -> dict[str, Any]:
+    """Compute observe-vs-act recommendation using belief-state decision theory.
+
+    Phase 1 POMDP: compares Expected Value of Perfect Information (EVPI) against
+    the cost of making an observation. If EVPI exceeds observation cost, the agent
+    should observe (explore); otherwise, act (exploit) on the best known action.
+
+    EVPI is derived from VoI rankings: the top-ranked node's VoI score estimates
+    how much observing that node would improve downstream decision quality.
+
+    Args:
+        conn: DuckDB connection.
+        target: Decision node ID to compute policy for.
+        observation_cost: Cost of making one observation (in same units as utility).
+            If None, defaults to 0.01 × decision node's utility_usd_per_day (or 0.01).
+        horizon: Decision horizon in steps (default 1 for single-step).
+        edge_types: Edge types for causal traversal.
+        layers: Optional layer filter.
+        leak_probability: Bayesian leak probability.
+        root_prior: Prior probability for root nodes.
+
+    Returns:
+        Dict with action recommendation, EVPI, costs, and top observation targets.
+    """
+    from ohm.bayesian import compute_voi
+
+    voi_result = compute_voi(
+        conn,
+        decision_nodes=[target],
+        edge_types=edge_types,
+        layers=layers,
+        leak_probability=leak_probability,
+        root_prior=root_prior,
+    )
+
+    rankings = voi_result.get("rankings", [])
+    if not rankings:
+        target_node = _get_node(conn, target)
+        target_util = _node_utility_value(target_node)
+        return {
+            "method": "belief_state_decision",
+            "target": target,
+            "action": "act",
+            "reason": "no_ancestors",
+            "evpi": 0.0,
+            "observation_cost": observation_cost or 0.01,
+            "expected_utility": target_util,
+            "horizon": horizon,
+            "top_target": None,
+        }
+
+    # Get decision node utility for cost normalization
+    target_node = _get_node(conn, target)
+    target_utility = _node_utility_value(target_node)
+    voi_units = voi_result.get("units", "dimensionless")
+
+    # Determine observation cost
+    if observation_cost is None:
+        if voi_units == "usd" and target_node:
+            usd = _node_usd_value(target_node)
+            observation_cost = (usd or 1.0) * 0.01
+        else:
+            observation_cost = 0.01 * target_utility
+
+    # EVPI = sum of top-horizon VoI scores
+    top_n = min(horizon, len(rankings))
+    evpi = sum(r["voi_score"] for r in rankings[:top_n])
+
+    # Decision rule: observe if EVPI > observation_cost
+    if evpi > observation_cost:
+        action = "observe"
+        reason = f"evpi ({evpi:.4f}) > observation_cost ({observation_cost:.4f})"
+    else:
+        action = "act"
+        reason = f"evpi ({evpi:.4f}) <= observation_cost ({observation_cost:.4f})"
+
+    top_target = rankings[0] if rankings else None
+
+    return {
+        "method": "belief_state_decision",
+        "target": target,
+        "action": action,
+        "reason": reason,
+        "evpi": round(evpi, 6),
+        "observation_cost": round(observation_cost, 6),
+        "expected_utility": round(target_utility, 6),
+        "voi_units": voi_units,
+        "horizon": horizon,
+        "n_candidates": voi_result.get("n_candidates", 0),
+        "top_target": {
+            "node_id": top_target["node_id"],
+            "label": top_target["label"],
+            "voi_score": top_target["voi_score"],
+            "uncertainty": top_target["uncertainty"],
+            "sensitivity": top_target["sensitivity"],
+        } if top_target else None,
+        "top_rankings": [
+            {"node_id": r["node_id"], "label": r["label"], "voi_score": r["voi_score"]}
+            for r in rankings[:5]
+        ],
+    }
+
+
+def _get_node(conn: DuckDBPyConnection, node_id: str) -> dict[str, Any] | None:
+    rows = conn.execute(
+        "SELECT id, label, type, confidence, utility_scale, utility_usd_per_day FROM ohm_nodes WHERE id = ?",
+        [node_id],
+    ).fetchall()
+    if not rows:
+        return None
+    row = rows[0]
+    return {
+        "id": row[0],
+        "label": row[1],
+        "type": row[2],
+        "confidence": row[3],
+        "utility_scale": row[4],
+        "utility_usd_per_day": row[5],
+    }
+
+
+def _node_utility_value(node: dict[str, Any] | None) -> float:
+    if node is None:
+        return 1.0
+    usd = node.get("utility_usd_per_day")
+    if usd is not None and usd > 0:
+        return float(usd) / 1e6
+    scale = node.get("utility_scale")
+    if scale is not None and scale > 0:
+        return float(scale)
+    return 1.0
+
+
+def _node_usd_value(node: dict[str, Any] | None) -> float | None:
+    if node is None:
+        return None
+    usd = node.get("utility_usd_per_day")
+    return float(usd) if usd is not None else None

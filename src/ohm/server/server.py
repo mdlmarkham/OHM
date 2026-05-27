@@ -1719,6 +1719,7 @@ OhmHandler._GET_EXACT = {
     "/regime": "_get_regime",
     "/game": "_get_game",
     "/nash": "_get_nash",
+    "/policy": "_get_policy",
     "/discover": "_get_discover",
     "/admin/checkpoint": "_get_admin_checkpoint",
     "/admin/embeddings": "_get_admin_embeddings",
