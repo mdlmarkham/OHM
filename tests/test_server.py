@@ -1472,3 +1472,102 @@ class TestMarkovHTTPEndpoints:
             assert "/markov/expected_steps" in data["endpoints"]
         finally:
             server.shutdown()
+
+
+@pytest.mark.xdist_group("server")
+class TestTemporalHTTPEndpoints:
+    """Tests for /granger, /edge_stability, and /policy HTTP endpoints."""
+
+    def test_granger_endpoint(self, tmp_path):
+        """GET /granger?from=X&to=Y returns Granger causality test."""
+        db_path = str(tmp_path / "test_granger_http.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test")
+        port, server, thread = _start_test_server(store, no_auth=True)
+        try:
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("POST", "/node", json.dumps({"id": "node_a", "label": "A", "type": "concept"}))
+            conn.getresponse().read()
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("POST", "/node", json.dumps({"id": "node_b", "label": "B", "type": "concept"}))
+            conn.getresponse().read()
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("GET", "/granger?from=node_a&to=node_b")
+            resp = conn.getresponse()
+            assert resp.status == 200
+            data = json.loads(resp.read())
+            assert data["method"] == "granger_causality"
+            assert data["from_node"] == "node_a"
+            assert data["to_node"] == "node_b"
+        finally:
+            server.shutdown()
+
+    def test_granger_missing_params(self, tmp_path):
+        """GET /granger without ?from or ?to returns 400."""
+        db_path = str(tmp_path / "test_granger_400.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test")
+        port, server, thread = _start_test_server(store, no_auth=True)
+        try:
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("GET", "/granger?from=node_a")
+            resp = conn.getresponse()
+            assert resp.status == 400
+        finally:
+            server.shutdown()
+
+    def test_edge_stability_endpoint(self, tmp_path):
+        """GET /edge_stability returns stability analysis."""
+        db_path = str(tmp_path / "test_edgestab_http.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test")
+        port, server, thread = _start_test_server(store, no_auth=True)
+        try:
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("POST", "/node", json.dumps({"id": "n1", "label": "A", "type": "concept"}))
+            conn.getresponse().read()
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("POST", "/node", json.dumps({"id": "n2", "label": "B", "type": "concept"}))
+            conn.getresponse().read()
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("POST", "/edge", json.dumps({"from_node": "n1", "to_node": "n2", "edge_type": "CAUSES", "layer": "L3", "probability": 0.8, "confidence": 0.9}))
+            conn.getresponse().read()
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("GET", "/edge_stability")
+            resp = conn.getresponse()
+            assert resp.status == 200
+            data = json.loads(resp.read())
+            assert data["method"] == "edge_stability"
+            assert data["n_edges"] >= 1
+        finally:
+            server.shutdown()
+
+    def test_policy_endpoint(self, tmp_path):
+        """GET /policy?target=X returns observe-vs-act recommendation."""
+        db_path = str(tmp_path / "test_policy_http.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test")
+        port, server, thread = _start_test_server(store, no_auth=True)
+        try:
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("POST", "/node", json.dumps({"id": "dec1", "label": "Decision", "type": "decision", "utility_scale": 0.9}))
+            conn.getresponse().read()
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("GET", "/policy?target=dec1")
+            resp = conn.getresponse()
+            assert resp.status == 200
+            data = json.loads(resp.read())
+            assert data["method"] == "belief_state_decision"
+            assert data["action"] in ("observe", "act")
+            assert "evpi" in data
+        finally:
+            server.shutdown()
+
+    def test_policy_missing_target(self, tmp_path):
+        """GET /policy without ?target returns 400."""
+        db_path = str(tmp_path / "test_policy_400.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test")
+        port, server, thread = _start_test_server(store, no_auth=True)
+        try:
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("GET", "/policy")
+            resp = conn.getresponse()
+            assert resp.status == 400
+        finally:
+            server.shutdown()
