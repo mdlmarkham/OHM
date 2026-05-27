@@ -21,7 +21,6 @@ Strategy:
 import json
 import re
 import sys
-import requests
 from collections import defaultdict
 
 # Configuration
@@ -132,7 +131,7 @@ AGENT_SOURCES = {
 GENERIC_SOURCES = {"synthesis", "analysis", "web_research", "research", "market_data", "test", "test-script", "multi_source_may24", "multi_source_2026_05_27"}
 
 
-def parse_compound_source(source_str: str) -> list[str]:
+def parse_compound_source(source_str: str | None) -> list[str]:
     """Parse a compound source string like 'guardian_reuters_ap' into individual outlets."""
     if not source_str:
         return []
