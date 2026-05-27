@@ -497,6 +497,7 @@ def _build_router() -> _RouteRegistry:
     r.add("POST", "/deduplicate")
     r.add("GET", "/admin/checkpoint")
     r.add("POST", "/admin/checkpoint")
+    r.add("POST", "/admin/observation-source-urls")
 
     # /decay: write-in-GET (legacy); registered as GET to avoid spurious 405
     r.add("GET", "/decay")
@@ -1350,6 +1351,7 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
 
     def _do_PATCH(self):
         """Handle PATCH /node/{id} or PATCH /edge/{id} — partial update."""
+        from datetime import datetime, timezone
         from urllib.parse import urlparse
         from .boundary import enforce_write_boundary, enforce_l2_immutability
         from ohm.validation import validate_identifier
@@ -1483,8 +1485,6 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
             self._json_response(200, updated)
 
         elif path.startswith("/edges/"):
-            from datetime import datetime, timezone
-
             edges = body.get("edges", [])
             if not edges:
                 raise ValidationError("No edges provided in 'edges' array")
@@ -1743,6 +1743,7 @@ OhmHandler._POST_EXACT = {
     "/tasks": "_post_task",
     "/deduplicate": "_post_deduplicate",
     "/admin/checkpoint": "_post_admin_checkpoint",
+    "/admin/observation-source-urls": "_post_admin_observation_source_urls",
 }
 
 OhmHandler._POST_PREFIXES = [

@@ -98,6 +98,54 @@ class AdminHandlerMixin:
         except Exception as e:
             self._json_response(500, {"error": "embedding_backfill_failed", "message": str(e)})
 
+    def _post_admin_observation_source_urls(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /admin/observation-source-urls — bulk update source_url on observations (ADR-013 backfill).
+
+        Body: {"updates": [{"observation_id": "<uuid>", "source_url": "https://..."}, ...]}
+        Max 200 updates per call.
+        """
+        updates = body.get("updates", [])
+        if not isinstance(updates, list):
+            self._json_response(400, {"error": "updates must be an array"})
+            return
+        if len(updates) > 200:
+            self._json_response(400, {"error": f"Too many updates: {len(updates)} (max 200)"})
+            return
+
+        updated = 0
+        not_found = 0
+        errors = []
+        for item in updates:
+            obs_id = item.get("observation_id")
+            source_url = item.get("source_url")
+            if not obs_id or not source_url:
+                errors.append({"observation_id": obs_id, "error": "missing observation_id or source_url"})
+                continue
+            try:
+                self.current_store.conn.execute(
+                    "UPDATE ohm_observations SET source_url = ? WHERE id = ? AND deleted_at IS NULL",
+                    [source_url, obs_id],
+                )
+                # Check if row was updated
+                result = self.current_store.conn.execute(
+                    "SELECT id FROM ohm_observations WHERE id = ? AND source_url = ? AND deleted_at IS NULL",
+                    [obs_id, source_url],
+                ).fetchone()
+                if result:
+                    updated += 1
+                    self.current_store._log_change("ohm_observations", obs_id, "UPDATE", "L2", agent_name=agent)
+                else:
+                    not_found += 1
+            except Exception as e:
+                errors.append({"observation_id": obs_id, "error": str(e)})
+
+        self._json_response(200, {
+            "updated": updated,
+            "not_found": not_found,
+            "errors": errors[:10],
+            "total_requested": len(updates),
+        })
+
     def _get_admin_snapshots(self, path: str, qs: dict) -> None:
         """GET /admin/snapshots — list DuckLake snapshots."""
         snapshots = self.current_store.list_snapshots()
