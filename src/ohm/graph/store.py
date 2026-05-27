@@ -374,15 +374,47 @@ class OhmStore:
             self.conn.execute("LOAD ducklake")
             self.conn.execute(f"ATTACH IF NOT EXISTS '{ducklake_path}' AS {dl_catalog} (TYPE ducklake)")
 
-            # DuckLake 0.3+ stores tables under __ducklake_metadata_{catalog} schema
+            # Try DuckLake 0.3+ metadata schema first, then fall back to catalog-qualified names
             dl_schema_prefix = f"__ducklake_metadata_{dl_catalog}"
 
             for table in ["ohm_nodes", "ohm_edges", "ohm_observations"]:
                 try:
-                    dl_cols = self.conn.execute(
-                        f"PRAGMA table_info('{dl_schema_prefix}.{table}')"
-                    ).fetchall()
+                    # Try metadata schema first (DuckLake 0.3+)
+                    try:
+                        dl_cols = self.conn.execute(
+                            f"PRAGMA table_info('{dl_schema_prefix}.{table}')"
+                        ).fetchall()
+                    except Exception:
+                        # Fall back to catalog-qualified table name
+                        dl_cols = self.conn.execute(
+                            f"PRAGMA table_info('{dl_catalog}.{table}')"
+                        ).fetchall()
+
+                    # If still no columns, try direct table name
+                    if not dl_cols:
+                        try:
+                            dl_cols = self.conn.execute(
+                                f"PRAGMA table_info('{table}')"
+                            ).fetchall()
+                        except Exception:
+                            pass
                     dl_col_names = {r[1] for r in dl_cols}
+                    # Determine which source table name worked
+                    source_table = f"{dl_schema_prefix}.{table}"
+                    if not dl_cols or len(dl_cols) == 0:
+                        pass  # Will skip below
+                    else:
+                        # Check which prefix the columns came from
+                        try:
+                            self.conn.execute(f"SELECT 1 FROM {dl_schema_prefix}.{table} LIMIT 0")
+                            source_table = f"{dl_schema_prefix}.{table}"
+                        except Exception:
+                            try:
+                                self.conn.execute(f"SELECT 1 FROM {dl_catalog}.{table} LIMIT 0")
+                                source_table = f"{dl_catalog}.{table}"
+                            except Exception:
+                                source_table = table
+
                     if not dl_col_names:
                         logger.warning("No columns found in DuckLake for %s, skipping", table)
                         continue
@@ -409,7 +441,7 @@ class OhmStore:
                     insert_cols = ", ".join(common)
 
                     self.conn.execute(
-                        f"INSERT INTO {table} ({insert_cols}, deleted_at) SELECT {select_str}, NULL::TIMESTAMP FROM {dl_schema_prefix}.{table}"
+                        f"INSERT INTO {table} ({insert_cols}, deleted_at) SELECT {select_str}, NULL::TIMESTAMP FROM {source_table}"
                     )
                     count = self.conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]  # type: ignore[index]
                     logger.info("Auto-restored %d %s from DuckLake (%d columns)", count, table, len(common))

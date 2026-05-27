@@ -2397,7 +2397,9 @@ class OhmHandler(BaseHTTPRequestHandler):
                         "status": "ok",
                         "updated": 0,
                         "failed": 0,
+                        "processed": 0,
                         "total": 0,
+                        "remaining": 0,
                         "message": "All nodes already have embeddings",
                     },
                 )

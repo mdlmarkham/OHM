@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ohm.server import server as _server_module
+from ohm.server.nudges import generate_nudges, enrich_response
 
 
 class GraphHandlerMixin:
@@ -510,6 +511,14 @@ class GraphHandlerMixin:
             },
             customer_id=self._customer_id,
         )
+        # ADR-017: Cognitive nudge enrichment
+        nudges = generate_nudges(
+            action="node",
+            node_id=result.get("id"),
+            tags=body.get("tags"),
+            provenance=body.get("provenance"),
+        )
+        result = enrich_response(result, nudges)
         if result.get("created", True):
             self._json_response(201, result)
         else:
@@ -564,6 +573,15 @@ class GraphHandlerMixin:
             },
             customer_id=self._customer_id,
         )
+        # ADR-017: Cognitive nudge enrichment
+        nudges = generate_nudges(
+            action="edge",
+            edge_type=body.get("type"),
+            confidence=body.get("confidence"),
+            provenance=body.get("provenance"),
+            tags=None,
+        )
+        result = enrich_response(result, nudges)
         self._json_response(201, result)
 
     def _post_challenge(self, path: str, qs: dict, body: dict, agent: str) -> None:
@@ -658,6 +676,15 @@ class GraphHandlerMixin:
             },
             customer_id=self._customer_id,
         )
+        # ADR-017: Cognitive nudge enrichment
+        nudges = generate_nudges(
+            action="observation",
+            node_id=node_id,
+            confidence=body.get("value"),
+            provenance=body.get("source"),
+            source_url=body.get("source_url"),
+        )
+        result = enrich_response(result, nudges)
         self._json_response(201, result)
 
     def _post_observations(self, path: str, qs: dict, body: dict, agent: str) -> None:
