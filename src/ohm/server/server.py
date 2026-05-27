@@ -532,6 +532,7 @@ def _build_router() -> _RouteRegistry:
     # PATCH
     r.add("PATCH", "/node/")
     r.add("PATCH", "/edge/")
+    r.add("PATCH", "/edges/")
     r.add("PATCH", "/tasks/")
 
     # DELETE
@@ -1480,6 +1481,90 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
             updated = self.current_store.get_edge(edge_id)
             _trigger_webhooks({"type": "edge.updated", "agent": agent, "edge": updated}, customer_id=self._customer_id)
             self._json_response(200, updated)
+
+        elif path.startswith("/edges/"):
+            from datetime import datetime, timezone
+
+            edges = body.get("edges", [])
+            if not edges:
+                raise ValidationError("No edges provided in 'edges' array")
+
+            now = datetime.now(timezone.utc).isoformat()
+            results = []
+            errors = []
+            _pert_fields = [
+                "probability",
+                "probability_p05",
+                "probability_p50",
+                "probability_p95",
+                "confidence",
+                "confidence_p05",
+                "confidence_p50",
+                "confidence_p95",
+                "condition",
+                "provenance",
+                "urgency",
+            ]
+
+            for item in edges:
+                edge_id = item.get("id")
+                if not edge_id:
+                    errors.append({"error": "missing id field", "item": item})
+                    continue
+                try:
+                    edge_id = validate_identifier(edge_id, name="edge_id")
+                except Exception:
+                    errors.append({"error": f"Invalid edge id: {edge_id}"})
+                    continue
+                edge = self.current_store.get_edge(edge_id)
+                if not edge:
+                    errors.append({"error": f"Edge not found: {edge_id}"})
+                    continue
+
+                enforce_write_boundary(self.current_store.conn, agent, edge_id)
+
+                update_fields = []
+                update_params = []
+                for field in _pert_fields:
+                    if field in item:
+                        update_fields.append(f"{field} = ?")
+                        update_params.append(item[field])
+
+                if "probability_p50" in item and "probability" not in item:
+                    from ohm.pert import compute_pert_mean
+
+                    p05 = item.get("probability_p05", edge.get("probability_p05") or item["probability_p50"])
+                    p95 = item.get("probability_p95", edge.get("probability_p95") or item["probability_p50"])
+                    pert_mean = compute_pert_mean(p05, item["probability_p50"], p95)
+                    update_fields.append("probability = ?")
+                    update_params.append(pert_mean)
+
+                if not update_fields:
+                    errors.append({"error": "No updatable fields provided", "edge_id": edge_id})
+                    continue
+
+                update_fields.append("updated_at = ?")
+                update_params.append(now)
+                update_fields.append("updated_by = ?")
+                update_params.append(agent)
+                update_params.append(edge_id)
+
+                try:
+                    self.current_store.conn.execute(
+                        f"UPDATE ohm_edges SET {', '.join(update_fields)} WHERE id = ?",
+                        update_params,
+                    )
+                    self.current_store._log_change("ohm_edges", edge_id, "UPDATE", edge["layer"], agent_name=agent)
+                    self.current_store._increment_graph_generation()
+                    updated = self.current_store.get_edge(edge_id)
+                    results.append(updated)
+                except Exception as e:
+                    errors.append({"error": str(e), "edge_id": edge_id})
+
+            response = {"updated": results, "count": len(results)}
+            if errors:
+                response["errors"] = errors
+            self._json_response(200 if not errors else 207, response)
         else:
             raise ValidationError(f"Unknown PATCH path: {path}")
 
