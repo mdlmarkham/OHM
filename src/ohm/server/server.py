@@ -498,6 +498,8 @@ def _build_router() -> _RouteRegistry:
     r.add("GET", "/admin/checkpoint")
     r.add("POST", "/admin/checkpoint")
     r.add("POST", "/admin/observation-source-urls")
+    r.add("POST", "/admin/source-node-urls")
+    r.add("POST", "/admin/edge-layer-fix")
 
     # /decay: write-in-GET (legacy); registered as GET to avoid spurious 405
     r.add("GET", "/decay")
@@ -1747,6 +1749,8 @@ OhmHandler._POST_EXACT = {
     "/deduplicate": "_post_deduplicate",
     "/admin/checkpoint": "_post_admin_checkpoint",
     "/admin/observation-source-urls": "_post_admin_observation_source_urls",
+    "/admin/source-node-urls": "_post_admin_source_node_urls",
+    "/admin/edge-layer-fix": "_post_admin_edge_layer_fix",
 }
 
 OhmHandler._POST_PREFIXES = [
