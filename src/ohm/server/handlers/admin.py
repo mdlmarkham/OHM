@@ -266,6 +266,141 @@ class AdminHandlerMixin:
             "total_requested": len(updates),
         })
 
+    def _post_admin_pert_backfill(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /admin/pert-backfill — auto-populate PERT estimates on edges.
+
+        Derives probability_p05/p50/p95 from observation values or confidence.
+        Bypasses write boundary for admin-level backfill.
+
+        Body: {
+            "edge_types": ["CAUSES", "INFLUENCES", ...],  // optional, defaults to causal types
+            "method": "auto",  // "auto" | "observations" | "confidence"
+            "dry_run": false   // if true, returns what would be updated without applying
+        }
+        """
+        from ohm.inference.pert import auto_pert_from_observations, compute_pert_mean
+
+        edge_types = body.get("edge_types", ["CAUSES", "INFLUENCES", "BLOCKS", "DEPENDS_ON", "ENABLES", "THREATENS", "SUPPORTS", "APPLIES_TO"])
+        method = body.get("method", "auto")
+        dry_run = body.get("dry_run", False)
+
+        # Collect observations indexed by node_id
+        obs_rows = self.current_store.conn.execute(
+            "SELECT node_id, value FROM ohm_observations WHERE deleted_at IS NULL AND value IS NOT NULL"
+        ).fetchall()
+        obs_by_node = {}
+        for row in obs_rows:
+            nid, val = row[0], row[1]
+            if nid not in obs_by_node:
+                obs_by_node[nid] = []
+            obs_by_node[nid].append(float(val))
+
+        # Find edges that need PERT (have confidence but no p50)
+        edge_rows = self.current_store.conn.execute(
+            "SELECT id, edge_type, from_node, to_node, confidence, probability_p50 "
+            "FROM ohm_edges WHERE deleted_at IS NULL AND probability_p50 IS NULL"
+        ).fetchall()
+
+        candidates = []
+        for row in edge_rows:
+            eid, etype, from_n, to_n, conf, p50 = row
+            if etype not in edge_types:
+                continue
+            if p50 is not None:
+                continue
+            candidates.append({"id": eid, "edge_type": etype, "from": from_n, "to": to_n, "confidence": float(conf) if conf else None})
+
+        # Derive PERT estimates
+        updates = []
+        from_obs = 0
+        from_conf = 0
+
+        for c in candidates:
+            eid = c["id"]
+            to_node = c["to"]
+            conf = c["confidence"]
+
+            # Try observation-based first
+            obs_values = obs_by_node.get(to_node, [])
+            if len(obs_values) >= 3 and method in ("auto", "observations"):
+                result = auto_pert_from_observations(obs_values)
+                if result["method"] != "insufficient_data":
+                    updates.append({
+                        "id": eid,
+                        "probability_p05": result["p05"],
+                        "probability_p50": result["p50"],
+                        "probability_p95": result["p95"],
+                        "provenance": "auto_pert_from_observations",
+                    })
+                    from_obs += 1
+                    continue
+
+            # Fall back to confidence-based
+            if conf is not None and 0 < conf <= 1 and method in ("auto", "confidence"):
+                spread = 0.3 * (1.0 - conf)
+                p50 = round(float(conf), 4)
+                p05 = round(max(0.01, p50 - spread / 2), 4)
+                p95 = round(min(0.99, p50 + spread / 2), 4)
+                if p05 >= p50:
+                    p05 = round(max(0.01, p50 - 0.05), 4)
+                if p50 >= p95:
+                    p95 = round(min(0.99, p50 + 0.05), 4)
+                updates.append({
+                    "id": eid,
+                    "probability_p05": p05,
+                    "probability_p50": p50,
+                    "probability_p95": p95,
+                    "provenance": "auto_pert_from_confidence",
+                })
+                from_conf += 1
+
+        if dry_run:
+            self._json_response(200, {
+                "status": "dry_run",
+                "candidates": len(candidates),
+                "from_observations": from_obs,
+                "from_confidence": from_conf,
+                "total_updates": len(updates),
+                "sample": updates[:10],
+            })
+            return
+
+        # Apply updates directly (admin bypass)
+        updated = 0
+        errors = []
+        from ohm.validation import validate_identifier
+        for item in updates:
+            try:
+                eid = item["id"]
+                p05 = item["probability_p05"]
+                p50 = item["probability_p50"]
+                p95 = item["probability_p95"]
+                prov = item["provenance"]
+                pert_mean = compute_pert_mean(p05, p50, p95)
+
+                self.current_store.conn.execute(
+                    "UPDATE ohm_edges SET probability_p05 = ?, probability_p50 = ?, probability_p95 = ?, "
+                    "probability = ?, provenance = ?, updated_at = CURRENT_TIMESTAMP, updated_by = ? "
+                    "WHERE id = ? AND deleted_at IS NULL",
+                    [p05, p50, p95, pert_mean, prov, agent, eid],
+                )
+                self.current_store._log_change("ohm_edges", eid, "UPDATE", "L3", agent_name=agent)
+                updated += 1
+            except Exception as e:
+                errors.append({"edge_id": eid, "error": str(e)})
+
+        self.current_store._increment_graph_generation()
+
+        self._json_response(200, {
+            "status": "ok",
+            "candidates": len(candidates),
+            "from_observations": from_obs,
+            "from_confidence": from_conf,
+            "updated": updated,
+            "errors": errors[:10],
+            "total_updates": len(updates),
+        })
+
     def _get_admin_snapshots(self, path: str, qs: dict) -> None:
         """GET /admin/snapshots — list DuckLake snapshots."""
         snapshots = self.current_store.list_snapshots()

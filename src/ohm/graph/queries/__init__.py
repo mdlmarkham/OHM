@@ -136,6 +136,11 @@ def query_neighborhood(
             e.layer,
             e.edge_type,
             e.confidence,
+            e.probability,
+            e.probability_p05,
+            e.probability_p50,
+            e.probability_p95,
+            e.provenance,
             e.created_by,
             e.created_at,
             e.challenge_of,
@@ -146,7 +151,10 @@ def query_neighborhood(
           AND e.deleted_at IS NULL
         {layer_clause}
         GROUP BY e.id, e.from_node, e.to_node, e.layer, e.edge_type,
-                 e.confidence, e.created_by, e.created_at,
+                 e.confidence, e.probability,
+                 e.probability_p05, e.probability_p50, e.probability_p95,
+                 e.provenance,
+                 e.created_by, e.created_at,
                  e.challenge_of, e.challenge_type
         ORDER BY hop, e.edge_type
     """

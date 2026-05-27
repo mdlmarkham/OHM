@@ -500,6 +500,7 @@ def _build_router() -> _RouteRegistry:
     r.add("POST", "/admin/observation-source-urls")
     r.add("POST", "/admin/source-node-urls")
     r.add("POST", "/admin/edge-layer-fix")
+    r.add("POST", "/admin/pert-backfill")
 
     # /decay: write-in-GET (legacy); registered as GET to avoid spurious 405
     r.add("GET", "/decay")
@@ -1489,7 +1490,7 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
             _trigger_webhooks({"type": "edge.updated", "agent": agent, "edge": updated}, customer_id=self._customer_id)
             self._json_response(200, updated)
 
-        elif path.startswith("/edges/"):
+        elif path == "/edges" or path.startswith("/edges/"):
             edges = body.get("edges", [])
             if not edges:
                 raise ValidationError("No edges provided in 'edges' array")
@@ -1751,6 +1752,7 @@ OhmHandler._POST_EXACT = {
     "/admin/observation-source-urls": "_post_admin_observation_source_urls",
     "/admin/source-node-urls": "_post_admin_source_node_urls",
     "/admin/edge-layer-fix": "_post_admin_edge_layer_fix",
+    "/admin/pert-backfill": "_post_admin_pert_backfill",
 }
 
 OhmHandler._POST_PREFIXES = [
