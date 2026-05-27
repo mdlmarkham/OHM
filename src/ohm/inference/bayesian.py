@@ -2088,10 +2088,12 @@ def compute_voi(
     # For each decision node, find causal ancestors via BFS backward (following reverse_adj)
     all_ancestors: dict[str, set[str]] = {}
     for decision in decision_nodes:
+        from collections import deque
+
         visited: set[str] = set()
-        queue = [decision]
+        queue = deque([decision])
         while queue:
-            node = queue.pop(0)
+            node = queue.popleft()
             if node in visited:
                 continue
             visited.add(node)

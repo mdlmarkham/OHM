@@ -2081,8 +2081,8 @@ class OhmStore:
             changed_ids,
         )
 
-        id_placeholders = ", ".join([f"'{cid}'" for cid in changed_ids])
-        self.conn.execute(f"INSERT INTO {mirror} ({common_str}) SELECT {common_str} FROM {table} WHERE id IN ({id_placeholders})")
+        id_placeholders = ", ".join(["?"] * len(changed_ids))
+        self.conn.execute(f"INSERT INTO {mirror} ({common_str}) SELECT {common_str} FROM {table} WHERE id IN ({id_placeholders})", changed_ids)
 
         return len(changed_ids)
 
@@ -2269,9 +2269,8 @@ class OhmStore:
                         local_col_types[col_name] = col_type
 
                     new_ids = [r[0] for r in new_rows]
-                    id_list = ", ".join([f"'{i}'" for i in new_ids])
+                    id_list = ", ".join(["?"] * len(new_ids))
 
-                    # Build SELECT with explicit casts from DuckLake VARCHAR to local types
                     select_cols = []
                     for col in common_cols:
                         ltype = local_col_types.get(col, "VARCHAR")
@@ -2287,8 +2286,7 @@ class OhmStore:
                     common_str = ", ".join(common_cols)
                     select_str = ", ".join(select_cols)
 
-                    # Insert new rows from DuckLake into local table with type casting
-                    self.conn.execute(f"INSERT INTO {table} ({common_str}) SELECT {select_str} FROM {mirror} dl WHERE dl.id IN ({id_list})")
+                    self.conn.execute(f"INSERT INTO {table} ({common_str}) SELECT {select_str} FROM {mirror} dl WHERE dl.id IN ({id_list})", new_ids)
                     pulled += len(new_ids)
 
             except Exception as exc:

@@ -1418,69 +1418,6 @@ def compound_confidence(
         ret["source_diversity_metrics"] = diversity_metrics
     return ret
 
-    # Clamp correlation to [0, 1]
-    correlation = max(0.0, min(1.0, correlation))
-    # Default weight for unknown sources
-    default_weight = 0.5
-    use_weighting = source_weights is not None
-
-    # Build list of (confidence, weight) tuples
-    weighted_confidences: list[tuple[float, float]] = []
-    for obs in observations:
-        c = obs.get("confidence", 0.0)
-        try:
-            c = float(c)
-        except (TypeError, ValueError):
-            c = 0.0
-        c = max(0.0, min(1.0, c))
-
-        if use_weighting:
-            assert source_weights is not None
-            source = obs.get("source") or obs.get("created_by") or "_unknown_"
-            w = source_weights.get(source, default_weight)
-            weighted_confidences.append((c, w))
-        else:
-            weighted_confidences.append((c, 1.0))
-
-    n = len(weighted_confidences)
-
-    if correlation >= 1.0:
-        # Perfectly correlated: use maximum only (weighted by source)
-        if use_weighting:
-            result = max(c * w for c, w in weighted_confidences)
-        else:
-            result = max(c for c, _ in weighted_confidences)
-    elif correlation <= 0.0:
-        # Independent: compound multiplicatively with linear weight scaling.
-        # Correct formula: P(combined) = 1 - Π(1 - w_i * c_i)
-        # Weight scales confidence linearly: w*c represents evidence contribution.
-        # Clamp w*c to [0, 1] to avoid negative survival probabilities.
-        product = 1.0
-        for c, w in weighted_confidences:
-            effective = min(1.0, w * c)  # Clamp to avoid negative probabilities
-            product *= 1.0 - effective
-        result = round(1.0 - product, 4)
-    else:
-        # Interpolate between independent and correlated
-        product = 1.0
-        for c, w in weighted_confidences:
-            effective = min(1.0, w * c)  # Clamp to avoid negative probabilities
-            product *= 1.0 - effective
-        independent = 1.0 - product
-        if use_weighting:
-            correlated = max(c * w for c, w in weighted_confidences)
-        else:
-            correlated = max(c for c, _ in weighted_confidences)
-        result = round(correlated * correlation + independent * (1.0 - correlation), 4)
-
-    return {
-        "compound_confidence": result,
-        "method": "compound",
-        "correlation": correlation,
-        "observation_count": n,
-        "weighted": use_weighting,
-    }
-
 
 def differential_diagnosis(
     conn: DuckDBPyConnection,
