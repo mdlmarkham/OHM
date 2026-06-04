@@ -1578,7 +1578,7 @@ class TestTemporalHTTPEndpoints:
             server.shutdown()
 
     def test_policy_endpoint(self, tmp_path):
-        """GET /policy?target=X returns observe-vs-act recommendation."""
+        """GET /policy?target=X returns observe-vs-act recommendation (OHM-od01.5)."""
         db_path = str(tmp_path / "test_policy_http.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test")
         port, server, thread = _start_test_server(store, no_auth=True)
@@ -1591,9 +1591,14 @@ class TestTemporalHTTPEndpoints:
             resp = conn.getresponse()
             assert resp.status == 200
             data = json.loads(resp.read())
-            assert data["method"] == "belief_state_decision"
-            assert data["action"] in ("observe", "act")
+            # OHM-od01.5: HTTP /policy is now routed through the canonical
+            # compute_policy() in ohm.inference.pomdp. The richer response
+            # shape replaces the older belief_state_decision format.
+            assert data["method"] == "belief_state_policy"
+            assert data["recommendation"] in ("observe", "act")
             assert "evpi" in data
+            assert "current_belief" in data
+            assert "confidence" in data
         finally:
             server.shutdown()
 

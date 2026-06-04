@@ -2594,6 +2594,14 @@ def belief_state_decision(
 ) -> dict[str, Any]:
     """Compute observe-vs-act recommendation using belief-state decision theory.
 
+    .. deprecated::
+        Use :func:`ohm.inference.pomdp.compute_policy` instead. It supersedes
+        this function with a richer response shape (``current_belief``,
+        ``confidence``, ``top_voi_candidates``) and is the canonical Phase 1
+        POMDP. The HTTP ``GET /policy`` endpoint and the ``ohm graph policy``
+        CLI command now route through it (OHM-od01.5). This function is
+        retained for backward compatibility with the in-process API.
+
     Phase 1 POMDP: compares Expected Value of Perfect Information (EVPI) against
     the cost of making an observation. If EVPI exceeds observation cost, the agent
     should observe (explore); otherwise, act (exploit) on the best known action.

@@ -331,7 +331,12 @@ class InferenceHandlerMixin:
         self._json_response(200, result)
 
     def _get_policy(self, path: str, qs: dict) -> None:
-        """GET /policy — belief-state decision: observe vs. act."""
+        """GET /policy — belief-state decision: observe vs. act (OHM-od01.5 Phase 1).
+
+        Phase 1 POMDP: compare Expected Value of Perfect Information (EVPI)
+        against the cost of an observation. If EVPI > cost → observe
+        (explore); else → act (exploit) on the best known action.
+        """
         target = qs.get("target", [None])[0]
         if not target:
             self._json_response(400, {"error": "missing_parameter", "message": "?target=node_id required"})
@@ -345,12 +350,21 @@ class InferenceHandlerMixin:
         layers_str = qs.get("layers", [""])[0]
         layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
         leak_probability = float(qs.get("leak", ["0.15"])[0])
-        from ohm.methods import belief_state_decision
+        # OHM-od01.5: route through the canonical Phase 1 POMDP
+        # (compute_policy in ohm.inference.pomdp). It supersedes the older
+        # belief_state_decision in ohm.graph.methods and exposes the
+        # richer response (confidence, current_belief, top_voi_candidates).
+        from ohm.inference.pomdp import compute_policy
 
-        result = belief_state_decision(
-            self.current_store.conn, target, observation_cost=observation_cost,
-            horizon=horizon, layers=layers, leak_probability=leak_probability,
-        )
+        kwargs: dict = {
+            "horizon": horizon,
+            "leak_probability": leak_probability,
+        }
+        if observation_cost is not None:
+            kwargs["cost_of_observation"] = observation_cost
+        if layers is not None:
+            kwargs["layers"] = layers
+        result = compute_policy(self.current_store.conn, target, **kwargs)
         self._json_response(200, result)
 
     def _get_discover(self, path: str, qs: dict) -> None:

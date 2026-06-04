@@ -130,6 +130,39 @@ subprocess.run(["ohm", "graph", "write", "--from", node, ...])
 
 Why: The SDK runs in-process (no subprocess overhead), returns structured data (no text parsing), and supports batch operations. The CLI spawns a new process per command and returns text that must be parsed.
 
+## Decision Policy — Phase 1 POMDP (OHM-od01.5)
+
+When facing a decision, the agent should ask the policy endpoint whether to **observe** (gather more information) or **act** (exploit current belief).
+
+```python
+import ohm.sdk as ohm
+with ohm.connect("~/.ohm/ohm.duckdb", actor="metis") as graph:
+    policy = graph.policy("hormuz_and_gate", horizon=1, observation_cost=0.5)
+    if policy["recommendation"] == "observe":
+        # Reduce uncertainty — gather observation on top candidate
+        target = policy["top_voi_candidates"][0]["node_id"]
+        observation = graph.observe(target)
+    else:
+        # EVPI does not justify the cost — act on current belief
+        graph.act_on("hormuz_and_gate")
+```
+
+Under the hood: `GET /policy?target=<node_id>&horizon=1&observation_cost=0.5`
+
+Returns:
+- `method`: `"belief_state_policy"` (Phase 1 POMDP)
+- `recommendation`: `"observe"` or `"act"`
+- `confidence`: 0-1 score
+- `evpi`: Expected Value of Perfect Information (utility units)
+- `cost_of_observation`: the threshold used
+- `current_belief`: `{"good": 0.7, "bad": 0.3}` (Bayesian posterior on target)
+- `top_voi_candidates`: list of `{"node_id", "voi_score"}` — best observations
+- `reasoning`: human-readable explanation
+
+Decision rule (Phase 1, single-step POMDP): if `evpi > cost_of_observation` → observe (explore); else → act (exploit). Phase 2 (factored POMDP with PBVI) and Phase 3 (multi-agent POMDP) are tracked under OHM-od01.5 and are P4+ scope.
+
+CLI equivalent: `ohm graph policy <node_id> [--horizon 1] [--observation-cost 1.0]`.
+
 ## Beads Workflow
 
 This project uses **bd** (beads) for issue tracking. Issues use prefix `ohm-<hash>`.
