@@ -857,11 +857,25 @@ DDL_STATEMENTS: list[str] = [
         updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """,
+    """
+    CREATE TABLE IF NOT EXISTS ohm_hook_log (
+        id           VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        hook_id      VARCHAR NOT NULL,
+        event        VARCHAR NOT NULL,
+        payload      JSON,
+        exit_code    INTEGER,
+        stdout       TEXT,
+        stderr       TEXT,
+        duration_ms  FLOAT,
+        timed_out    BOOLEAN DEFAULT FALSE,
+        triggered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """,
 ]
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.21.0"
+SCHEMA_VERSION = "0.22.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -1084,6 +1098,26 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""",
             "CREATE INDEX IF NOT EXISTS idx_hooks_event_enabled ON ohm_hooks(event, enabled)",
+        ],
+    ),
+    (
+        "0.22.0",
+        "add hook invocation log for audit trail (OHM-aznh.7)",
+        [
+            """CREATE TABLE IF NOT EXISTS ohm_hook_log (
+            id           VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+            hook_id      VARCHAR NOT NULL,
+            event        VARCHAR NOT NULL,
+            payload      JSON,
+            exit_code    INTEGER,
+            stdout       TEXT,
+            stderr       TEXT,
+            duration_ms  FLOAT,
+            timed_out    BOOLEAN DEFAULT FALSE,
+            triggered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+            "CREATE INDEX IF NOT EXISTS idx_hook_log_hook ON ohm_hook_log(hook_id)",
+            "CREATE INDEX IF NOT EXISTS idx_hook_log_time ON ohm_hook_log(triggered_at)",
         ],
     ),
 ]

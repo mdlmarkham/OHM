@@ -691,4 +691,43 @@ class TestHookRegistryTable:
     def test_migration_v0_21_0(self, test_db):
         """Migration 0.21.0 creates ohm_hooks on existing DB."""
         from ohm.schema import SCHEMA_VERSION
-        assert SCHEMA_VERSION == "0.21.0"
+        assert SCHEMA_VERSION == "0.22.0"
+
+
+class TestHookLogTable:
+    """Tests for ohm_hook_log table (OHM-aznh.7)."""
+
+    def test_hook_log_table_exists(self, test_db):
+        tables = test_db.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'").fetchall()
+        table_names = {row[0] for row in tables}
+        assert "ohm_hook_log" in table_names
+
+    def test_hook_log_columns(self, test_db):
+        columns = test_db.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'ohm_hook_log'"
+        ).fetchall()
+        col_names = {row[0] for row in columns}
+        for col in ("id", "hook_id", "event", "payload", "exit_code", "stdout", "stderr", "duration_ms", "timed_out", "triggered_at"):
+            assert col in col_names
+
+    def test_hook_log_indexes(self, test_db):
+        indexes = test_db.execute("SELECT index_name FROM duckdb_indexes()").fetchall()
+        index_names = {row[0] for row in indexes}
+        assert "idx_hook_log_hook" in index_names
+        assert "idx_hook_log_time" in index_names
+
+    def test_insert_hook_log(self, test_db):
+        test_db.execute(
+            "INSERT INTO ohm_hook_log (hook_id, event, exit_code, duration_ms) VALUES (?, ?, ?, ?)",
+            ["h1", "pre_ingest", 0, 10.5],
+        )
+        rows = test_db.execute("SELECT hook_id, event, exit_code, duration_ms FROM ohm_hook_log").fetchall()
+        assert len(rows) == 1
+        assert rows[0][0] == "h1"
+        assert rows[0][2] == 0
+
+    def test_migration_v0_22_0(self, test_db):
+        from ohm.schema import MIGRATIONS
+        v022 = [m for m in MIGRATIONS if m[0] == "0.22.0"]
+        assert len(v022) == 1
+        assert "ohm_hook_log" in v022[0][2][0]

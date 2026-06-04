@@ -334,3 +334,62 @@ class TestDeleteHook:
         delete_hook(test_db, hook_id=h["id"], deleted_by="metis")
         hooks = query_hooks(test_db)
         assert hooks == []
+
+
+class TestHookInvocationLog:
+    """Tests for ohm_hook_log audit trail (OHM-aznh.7)."""
+
+    def test_shell_hook_creates_log_row(self, test_db):
+        hook = HookRecord(id="h1", event="pre_ingest", command="echo logged")
+        runner = HookRunner(test_db)
+        runner.run_hook(hook, {"agent": "metis"})
+        rows = test_db.execute("SELECT * FROM ohm_hook_log").fetchall()
+        assert len(rows) == 1
+        cols = [d[0] for d in test_db.description]
+        row = dict(zip(cols, rows[0]))
+        assert row["hook_id"] == "h1"
+        assert row["event"] == "pre_ingest"
+        assert row["exit_code"] == 0
+        assert "logged" in row["stdout"]
+        assert row["timed_out"] is False
+
+    def test_failed_hook_creates_log_row(self, test_db):
+        hook = HookRecord(id="h2", event="pre_ingest", command="exit 1")
+        runner = HookRunner(test_db)
+        runner.run_hook(hook, {})
+        rows = test_db.execute("SELECT exit_code, timed_out FROM ohm_hook_log").fetchall()
+        assert len(rows) == 1
+        assert rows[0][0] == 1
+
+    def test_timeout_hook_creates_log_row(self, test_db):
+        import sys
+
+        if sys.platform == "win32":
+            cmd = "ping -n 10 127.0.0.1"
+        else:
+            cmd = "sleep 10"
+        hook = HookRecord(id="h3", event="pre_ingest", command=cmd, timeout_ms=200)
+        runner = HookRunner(test_db)
+        runner.run_hook(hook, {})
+        rows = test_db.execute("SELECT timed_out FROM ohm_hook_log").fetchall()
+        assert len(rows) == 1
+        assert rows[0][0] is True
+
+    def test_payload_logged(self, test_db):
+        hook = HookRecord(id="h4", event="post_ingest", command="echo ok")
+        runner = HookRunner(test_db)
+        runner.run_hook(hook, {"agent": "clio", "action": "node"})
+        rows = test_db.execute("SELECT payload FROM ohm_hook_log").fetchall()
+        assert len(rows) == 1
+        import json
+
+        payload = json.loads(rows[0][0])
+        assert payload["agent"] == "clio"
+
+    def test_multiple_invocations_create_multiple_rows(self, test_db):
+        hook = HookRecord(id="h5", event="pre_ingest", command="echo ok")
+        runner = HookRunner(test_db)
+        runner.run_hook(hook, {})
+        runner.run_hook(hook, {})
+        rows = test_db.execute("SELECT COUNT(*) FROM ohm_hook_log").fetchone()
+        assert rows[0] == 2

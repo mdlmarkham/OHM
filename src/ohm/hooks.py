@@ -135,8 +135,32 @@ class HookRunner:
         returning (exit_code, stdout, stderr).
         """
         if hook.command.startswith("python:"):
-            return self._run_python_hook(hook, payload)
-        return self._run_shell_hook(hook, payload)
+            result = self._run_python_hook(hook, payload)
+        else:
+            result = self._run_shell_hook(hook, payload)
+        self._log_invocation(hook, payload, result)
+        return result
+
+    def _log_invocation(self, hook: HookRecord, payload: dict, result: HookResult) -> None:
+        """Insert a row into ohm_hook_log after each hook invocation."""
+        import uuid as _uuid
+
+        log_id = str(_uuid.uuid4())
+        payload_json = json.dumps(payload, default=str)
+        try:
+            self._conn.execute(
+                """INSERT INTO ohm_hook_log
+                   (id, hook_id, event, payload, exit_code, stdout, stderr,
+                    duration_ms, timed_out)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                [
+                    log_id, hook.id, hook.event, payload_json,
+                    result.exit_code, result.stdout, result.stderr,
+                    result.duration_ms, result.timed_out,
+                ],
+            )
+        except Exception:
+            logger.debug("Failed to log hook invocation to ohm_hook_log", exc_info=True)
 
     def _run_shell_hook(self, hook: HookRecord, payload: dict) -> HookResult:
         """Execute a shell command hook via subprocess."""
