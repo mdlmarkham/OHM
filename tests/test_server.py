@@ -950,6 +950,8 @@ class TestMetisBugFixes:
     def test_post_tasks_creates_task(self, test_server):
         """POST /tasks should create a task node (OHM-7304)."""
         port, store = test_server
+        # OHM-tjzh: tasks must link to existing structure. Create an anchor first.
+        store.write_node("task-anchor", "Task anchor concept", "concept", agent_name="test")
         status, data = _request(
             "POST",
             port,
@@ -959,6 +961,7 @@ class TestMetisBugFixes:
                 "label": "Do the thing",
                 "task_status": "open",
                 "priority": "P1",
+                "connects_to": ["task-anchor"],
             },
         )
         assert status == 201
@@ -968,6 +971,8 @@ class TestMetisBugFixes:
     def test_post_tasks_then_get_tasks(self, test_server):
         """Task created via POST /tasks is visible in GET /tasks (OHM-7304)."""
         port, store = test_server
+        # OHM-tjzh: tasks must link to existing structure. Create an anchor first.
+        store.write_node("task-roundtrip-anchor", "Anchor", "concept", agent_name="test")
         _request(
             "POST",
             port,
@@ -976,6 +981,7 @@ class TestMetisBugFixes:
                 "id": "task-roundtrip",
                 "label": "Roundtrip task",
                 "task_status": "open",
+                "connects_to": ["task-roundtrip-anchor"],
             },
         )
         status, data = _request("GET", port, "/tasks")
@@ -990,7 +996,9 @@ class TestMetisBatch2Fixes:
 
     def test_post_task_auto_generates_id(self, test_server):
         """POST /tasks without 'id' field auto-generates one (OHM-7308)."""
-        port, _ = test_server
+        port, store = test_server
+        # OHM-tjzh: tasks must link to existing structure. Create an anchor first.
+        store.write_node("auto-id-task-anchor", "Auto-id anchor", "concept", agent_name="test")
         status, data = _request(
             "POST",
             port,
@@ -998,6 +1006,7 @@ class TestMetisBatch2Fixes:
             body={
                 "label": "Auto-ID task",
                 "task_status": "open",
+                "connects_to": ["auto-id-task-anchor"],
             },
         )
         assert status == 201
@@ -1006,7 +1015,9 @@ class TestMetisBatch2Fixes:
 
     def test_post_task_with_explicit_id(self, test_server):
         """POST /tasks with explicit 'id' uses that id (OHM-7308)."""
-        port, _ = test_server
+        port, store = test_server
+        # OHM-tjzh: tasks must link to existing structure. Create an anchor first.
+        store.write_node("explicit-task-anchor", "Explicit task anchor", "concept", agent_name="test")
         status, data = _request(
             "POST",
             port,
@@ -1014,6 +1025,7 @@ class TestMetisBatch2Fixes:
             body={
                 "id": "explicit-task-id-7308",
                 "label": "Explicit ID task",
+                "connects_to": ["explicit-task-anchor"],
             },
         )
         assert status == 201

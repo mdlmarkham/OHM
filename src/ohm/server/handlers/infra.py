@@ -166,12 +166,15 @@ class InfraHandlerMixin:
             graph = query_graph_health(self.current_store.conn)
             total_nodes = graph.get("total_nodes") or 0
             orphan_nodes = graph.get("orphan_nodes") or 0
+            dead_end_count = graph.get("dead_end_count") or 0
             payload["graph"] = {
                 "health_score": graph.get("health_score"),
                 "node_count": total_nodes,
                 "edge_count": graph.get("total_edges"),
                 "orphan_count": orphan_nodes,
                 "orphan_rate": round(orphan_nodes / total_nodes, 4) if total_nodes else 0,
+                "dead_end_count": dead_end_count,
+                "dead_end_rate": round(dead_end_count / total_nodes, 4) if total_nodes else 0,
                 "low_confidence_count": graph.get("low_confidence_unchallenged"),
             }
         except Exception:

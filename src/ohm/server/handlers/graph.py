@@ -444,6 +444,83 @@ class GraphHandlerMixin:
         total = total_result[0]["cnt"] if total_result else len(results)
         self._json_response(200, {"observations": results, "total": total, "limit": limit, "offset": offset})
 
+    def _enforce_cross_link_requirement(self, node_id: str, body: dict) -> dict | None:
+        """Return a 422 response body if *body* describes a node that must link.
+
+        Per OHM-tjzh / ADR-018: synthesis-like node types (pattern, idea, task,
+        decision, and the forward-compat synthesis/observation/interpretation/
+        challenge types) cannot stand alone. They must reference an existing
+        node via `connects_to` so the claim is anchored to graph structure.
+
+        Exempt types (source, concept, entity) and updates of pre-existing
+        nodes pass through. The caller should ``_json_response(422, error)``
+        and ``return`` if a non-None error dict is returned.
+        """
+        from ohm.schema import requires_cross_link
+
+        node_type = body.get("type", "concept")
+        if not requires_cross_link(node_type):
+            return None
+
+        # Updates of pre-existing nodes are exempt — you cannot fix a
+        # historical dead-end by refusing to update it. The check only
+        # applies to new nodes.
+        existing = self.current_store.conn.execute(
+            "SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+            [node_id],
+        ).fetchone()
+        if existing:
+            return None
+
+        connects_to = body.get("connects_to")
+        if not connects_to:
+            return {
+                "error": "cross_link_required",
+                "message": (
+                    f"Nodes of type '{node_type}' must reference at least one existing "
+                    f"node via the 'connects_to' field. A bare claim cannot be reached "
+                    f"from context, cannot be challenged, and cannot propagate through "
+                    f"Bayesian inference. See OHM-tjzh / ADR-018."
+                ),
+                "node_type": node_type,
+                "hint": "Add a 'connects_to' field with one or more existing node ids, "
+                "or use POST /batch to atomically create the node and at least one edge.",
+            }
+
+        if not isinstance(connects_to, list) or not all(isinstance(c, str) for c in connects_to):
+            return {
+                "error": "validation_error",
+                "message": "connects_to must be a list of node id strings",
+            }
+        if not connects_to:
+            return {
+                "error": "cross_link_required",
+                "message": f"connects_to for type '{node_type}' must list at least one existing node id",
+                "node_type": node_type,
+            }
+
+        # Verify every referenced id actually exists. Reject 422 (not 404) —
+        # the request is well-formed but cannot be processed because the
+        # cross-link target is missing.
+        placeholders = ",".join(["?"] * len(connects_to))
+        rows = self.current_store.conn.execute(
+            f"SELECT id FROM ohm_nodes WHERE id IN ({placeholders}) AND deleted_at IS NULL",
+            connects_to,
+        ).fetchall()
+        existing_ids = {row[0] for row in rows}
+        missing = [cid for cid in connects_to if cid not in existing_ids]
+        if missing:
+            return {
+                "error": "cross_link_unknown_target",
+                "message": (
+                    f"connects_to references unknown node id(s): {missing}. "
+                    f"Cross-link targets must already exist in the graph."
+                ),
+                "missing": missing,
+            }
+
+        return None
+
     def _post_node(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /node — create or upsert a node."""
         # ADR-013: Source nodes require source_url
@@ -479,6 +556,14 @@ class GraphHandlerMixin:
                     },
                 )
                 return
+
+        # OHM-tjzh / ADR-018: derived-claim node types must link to existing graph
+        # structure. Enforced here for the direct POST /node entry point; the
+        # batch and synthesis endpoints handle cross-link via their own bodies.
+        cross_link_error = self._enforce_cross_link_requirement(body["id"], body)
+        if cross_link_error is not None:
+            self._json_response(422, cross_link_error)
+            return
 
         result = self.current_store.write_node(
             id=body["id"],
@@ -1137,6 +1222,18 @@ class GraphHandlerMixin:
         import uuid
 
         task_id = body.get("id") or ("task_" + re.sub(r"[^a-z0-9]+", "_", body["label"].lower()).strip("_")[:48] + "_" + str(uuid.uuid4())[:8])
+
+        # OHM-tjzh: tasks are derived claims (action items derived from context).
+        # They must link to existing structure. The synthesized body mirrors
+        # what /node would see so the same enforcement path runs.
+        synthesized_body = dict(body)
+        synthesized_body["id"] = task_id
+        synthesized_body.setdefault("type", "task")
+        cross_link_error = self._enforce_cross_link_requirement(task_id, synthesized_body)
+        if cross_link_error is not None:
+            self._json_response(422, cross_link_error)
+            return
+
         result = self.current_store.write_node(
             id=task_id,
             label=body["label"],

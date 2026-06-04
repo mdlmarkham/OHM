@@ -237,6 +237,73 @@ with connect("/var/lib/ohm/ohm.duckdb", actor="metis") as g:
 5. **Use `bd doctor`** to diagnose daemon issues; `bd list` and `bd show` for status
 6. **The `pyproject.toml` was converted from pixi format to PEP 621.** Don't revert to pixi-style `[package]`/`[dependencies]` sections
 
+## Writing Protocol — Cross-Link Required (OHM-tjzh / ADR-018)
+
+The shared graph today carries ~21% dead-end nodes (145 of 675) — claims that
+float free of any edge. They cannot be reached from context, cannot be
+challenged, and cannot propagate through Bayesian inference. Per ADR-018,
+derived-claim node types (`pattern`, `idea`, `task`, `decision`, and the
+forward-compat `synthesis`/`observation`/`interpretation`/`challenge` types)
+**must reference at least one existing node**.
+
+### Writing a claim
+
+Every synthesis/interpretation/decision you produce must do one of:
+
+1. **Reference existing nodes via `connects_to`** — pass a list of node ids
+   the claim is derived from. The server will verify each id exists and
+   reject the write with HTTP 422 if any are missing or empty.
+
+   ```python
+   g.create_node(
+       "AND→OR refactor enables cheaper retries",
+       node_type="pattern",
+       connects_to=["retries_are_expensive_a1b2c3", "and_or_split_d4e5f6"],
+   )
+   ```
+
+2. **Create the node and edge atomically** — use `POST /batch` with a
+   `nodes` and `edges` array. The all-or-nothing transaction makes the
+   claim reachable in the same write.
+
+   ```python
+   ohm_client.post("/batch", {
+       "nodes": [{"id": "claim_xyz", "label": "Claim", "type": "pattern"}],
+       "edges": [{"from": "claim_xyz", "to": "anchor_123", "type": "SUPPORTS",
+                  "layer": "L3"}],
+   })
+   ```
+
+3. **Use `POST /agent/synthesis`** — the L3 one-call endpoint creates a
+   concept node plus L3 edges in a single transaction. The cross-link
+   requirement is satisfied implicitly because edges are always created.
+
+### Exempt types
+
+`source`, `concept`, and `entity` nodes are allowed to exist as bare stubs —
+they are foundational or external references that legitimately stand alone
+until linked. Updates of pre-existing nodes are also exempt: you cannot fix
+a historical dead-end by refusing to update it.
+
+### HTTP response
+
+```json
+HTTP/1.1 422 Unprocessable Entity
+{
+  "error": "cross_link_required",
+  "message": "Nodes of type 'pattern' must reference at least one existing node via the 'connects_to' field. ...",
+  "node_type": "pattern",
+  "hint": "Add a 'connects_to' field with one or more existing node ids, or use POST /batch to atomically create the node and at least one edge."
+}
+```
+
+### Monitoring
+
+`GET /health` exposes `graph.dead_end_count` and `graph.dead_end_rate` —
+the legacy tail of pre-existing dead-ends. This number should decrease
+over time as agents migrate to the `connects_to` pattern; new dead-end
+creation is blocked.
+
 
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ccf33ec3 -->

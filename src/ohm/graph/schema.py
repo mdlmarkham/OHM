@@ -62,6 +62,42 @@ VALID_NODE_TYPES = frozenset(
     }
 )
 
+# ── Cross-link requirement (ADR-018 / OHM-tjzh) ──────────────────────────────
+# Node types in this set represent derived claims — synthesis, decisions, tasks.
+# A bare creation of one of these is a dead-end: it can never be reached from
+# context, can never be challenged, and cannot propagate through Bayesian
+# inference. The shared graph today has ~21% dead-end nodes (OHM-tjzh).
+#
+# Agents creating a node of one of these types MUST either:
+#   1. include a `connects_to` field referencing an existing node id, OR
+#   2. submit at least one edge in the same request body.
+#
+# This is enforced at the HTTP boundary in `server/handlers/graph.py`.
+# Forward-compatible types ("synthesis", "observation", "interpretation",
+# "challenge") from the OHM-tjzh spec are included so the policy takes effect
+# the moment they are added to VALID_NODE_TYPES.
+MUST_HAVE_EDGE_NODE_TYPES: frozenset[str] = frozenset(
+    {
+        # Active claim types in the current schema
+        "pattern",
+        "idea",
+        "task",
+        "decision",
+        # Forward-compat (per OHM-tjzh spec)
+        "synthesis",
+        "observation",
+        "interpretation",
+        "challenge",
+    }
+)
+
+# Node types that are allowed to exist as bare stubs. The spec (OHM-tjzh)
+# lists `source`, `concept`, `entity` as exempt — they are foundational or
+# external references that legitimately stand alone until linked.
+EXEMPT_CROSS_LINK_NODE_TYPES: frozenset[str] = frozenset(
+    {"source", "concept", "entity"}
+)
+
 VALID_VISIBILITIES = frozenset({"private", "team", "public"})
 
 VALID_PROVENANCES = frozenset(
@@ -1250,6 +1286,23 @@ def validate_edge_type(layer: str, edge_type: str) -> bool:
 def validate_node_type(node_type: str) -> bool:
     """Check that *node_type* is a known type."""
     return node_type in VALID_NODE_TYPES
+
+
+def requires_cross_link(node_type: str) -> bool:
+    """Return True if a node of *node_type* must include a `connects_to` reference.
+
+    Per OHM-tjzh / ADR-018: synthesis-like node types cannot stand alone. They
+    must be anchored to existing graph structure via a same-body edge or by
+    referencing an existing node through `connects_to`. Bare creation of these
+    types produces dead-end nodes that cannot be navigated to, challenged, or
+    used in Bayesian inference.
+
+    Exempt types (source, concept, entity) are explicitly allowed as stubs
+    because they represent foundational or external references.
+    """
+    if node_type in EXEMPT_CROSS_LINK_NODE_TYPES:
+        return False
+    return node_type in MUST_HAVE_EDGE_NODE_TYPES
 
 
 def generate_node_id(label: str) -> str:

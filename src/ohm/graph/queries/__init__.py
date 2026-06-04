@@ -818,11 +818,23 @@ def create_node(
     utility_currency: str | None = None,
     current_best_action: str | None = None,
     action_alternatives: list[str] | None = None,
+    connects_to: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Create a new node and return its full record."""
+    """Create a new node and return its full record.
+
+    Args:
+        connects_to: Optional list of existing node ids this node will be linked
+            to. Used by the cross-link requirement (OHM-tjzh / ADR-018) to prove
+            the agent has anchored a derived claim to existing graph structure.
+            Each id must already exist; the function does not auto-create edges.
+    """
     import json
-    from ohm.schema import generate_node_id, validate_node_type, VALID_PRIORITY
-    from ohm.validation import validate_confidence
+    from ohm.schema import (
+        generate_node_id,
+        validate_node_type,
+        VALID_PRIORITY,
+    )
+    from ohm.validation import validate_confidence, validate_identifier
 
     if not label or len(label) > 500:
         raise ValueError("Label must be non-empty and ≤ 500 characters")
@@ -833,6 +845,27 @@ def create_node(
         raise ValueError(f"Invalid priority: {priority}. Must be one of: {sorted(VALID_PRIORITY)}")
     if utility_scale is not None and not (0.0 <= utility_scale <= 1.0):
         raise ValueError(f"utility_scale must be between 0 and 1, got {utility_scale}")
+
+    # Validate connects_to references: each must be an existing node id.
+    if connects_to is not None:
+        if not isinstance(connects_to, list) or not all(isinstance(c, str) for c in connects_to):
+            raise ValueError("connects_to must be a list of node id strings")
+        if not connects_to:
+            raise ValueError("connects_to must contain at least one node id")
+        for cid in connects_to:
+            validate_identifier(cid, name="connects_to entry")
+        placeholders = ",".join(["?"] * len(connects_to))
+        existing = conn.execute(
+            f"SELECT id FROM ohm_nodes WHERE id IN ({placeholders}) AND deleted_at IS NULL",
+            connects_to,
+        ).fetchall()
+        existing_ids = {row[0] for row in existing}
+        missing = [cid for cid in connects_to if cid not in existing_ids]
+        if missing:
+            raise ValueError(
+                f"connects_to references unknown node id(s): {missing}. "
+                f"Cross-link targets must already exist in the graph."
+            )
 
     # Serialize action_alternatives to JSON if provided
     alternatives_json = json.dumps(action_alternatives) if action_alternatives is not None else None
@@ -1318,6 +1351,7 @@ def query_graph_health(
 
     Returns counts of common graph health issues:
     - orphan_nodes: nodes with 0 edges (isolated, invisible)
+    - dead_end_count: nodes with only incoming edges, no outgoing (sinks)
     - low_confidence_unchallenged: L3/L4 edges with confidence < 0.3 and no challenges
     - stale_agents: agents with last_sync > 2x their sync interval
     - disconnected_components: groups of nodes not connected to the main graph
@@ -1372,8 +1406,21 @@ def query_graph_health(
     total_edges_row = conn.execute("SELECT COUNT(*) FROM ohm_edges").fetchone()
     total_edges = total_edges_row[0] if total_edges_row else 0
 
+    # Dead-end nodes: have incoming edges but no outgoing edges. Reachable
+    # but cannot lead anywhere. Tracked separately from orphan_nodes (which
+    # have no edges at all). The cross-link requirement (OHM-tjzh) targets
+    # the prevention of new dead-ends; this metric tracks the legacy tail.
+    dead_end_row = conn.execute("""
+        SELECT COUNT(*) FROM ohm_nodes n
+        WHERE n.deleted_at IS NULL
+          AND EXISTS (SELECT 1 FROM ohm_edges e WHERE e.to_node = n.id AND e.deleted_at IS NULL)
+          AND NOT EXISTS (SELECT 1 FROM ohm_edges e WHERE e.from_node = n.id AND e.deleted_at IS NULL)
+    """).fetchone()
+    dead_end_count = dead_end_row[0] if dead_end_row else 0
+
     return {
         "orphan_nodes": orphans,
+        "dead_end_count": dead_end_count,
         "low_confidence_unchallenged": low_conf,
         "dense_clusters": dense_count,
         "stale_agents": stale_count,

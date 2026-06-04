@@ -367,6 +367,7 @@ class Graph:
         utility_currency: str | None = None,
         current_best_action: str | None = None,
         action_alternatives: list[str] | None = None,
+        connects_to: list[str] | None = None,
     ) -> dict[str, Any]:
         """Create a node and return its full record.
 
@@ -377,6 +378,11 @@ class Graph:
         For decision nodes (node_type='decision'), set utility_scale (0-1),
         utility_usd_per_day (dollar-valued payoff), and action_alternatives to
         enable VoI analysis and game-theoretic payoffs.
+
+        For cross-link-required node types (pattern, idea, task, decision, and
+        the forward-compat synthesis/observation/interpretation/challenge types),
+        pass `connects_to=[existing_node_id, ...]` to satisfy the OHM-tjzh /
+        ADR-018 cross-link requirement. Each id must already exist in the graph.
         """
         from ohm.queries import create_node
 
@@ -396,6 +402,7 @@ class Graph:
             utility_currency=utility_currency,
             current_best_action=current_best_action,
             action_alternatives=action_alternatives,
+            connects_to=connects_to,
         )
 
     def create_edge(
@@ -3144,6 +3151,9 @@ def connect_http(
                 "current_best_action": kwargs.get("current_best_action"),
                 "action_alternatives": kwargs.get("action_alternatives"),
             }
+            connects_to = kwargs.get("connects_to")
+            if connects_to is not None:
+                body["connects_to"] = connects_to
             return self._http_request("POST", "/node", body)
 
         def create_edge(self, *, from_node: str, to_node: str, edge_type: str, layer: str = "L3", **kwargs) -> dict[str, Any]:
