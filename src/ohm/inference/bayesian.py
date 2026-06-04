@@ -2189,7 +2189,20 @@ def compute_voi(
         voi_units = "mixed"
 
     # Get observation counts for each candidate (proxy for information quality)
-    obs_counts: dict[str, int] = {node_id: len(reader.get_observations(node_id)) for node_id in candidate_nodes}
+    # OHM-od01.8: batch query instead of N calls to get_observations()
+    _raw = _raw_conn(reader)
+    if candidate_nodes:
+        placeholders = ",".join(["?"] * len(candidate_nodes))
+        _obs_rows = _raw.execute(
+            f"SELECT node_id, COUNT(*) FROM ohm_observations WHERE node_id IN ({placeholders}) AND deleted_at IS NULL GROUP BY node_id",
+            list(candidate_nodes),
+        ).fetchall()
+        obs_counts: dict[str, int] = {r[0]: r[1] for r in _obs_rows}
+    else:
+        obs_counts = {}
+    # Nodes with zero observations won't appear in the GROUP BY result
+    for node_id in candidate_nodes:
+        obs_counts.setdefault(node_id, 0)
 
     # Build shared Bayesian networks per decision node (OHM-27).
     # Instead of building a fresh network for each (candidate, decision) pair in
