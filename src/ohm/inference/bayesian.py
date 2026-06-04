@@ -1201,19 +1201,41 @@ def causal_intervention(
     infer = _ve_cache[_ve_key_do]
     soft_factors = network.get("soft_evidence_factors", [])
     posteriors = {}
-    for qn in safe_query_nodes:
-        qn_original = next((orig for orig, safe in safe_names.items() if safe == qn), qn)
-        try:
-            do_kwargs: dict[str, Any] = {"variables": [qn], "evidence": {safe_target: intervention_state}}
-            if soft_factors:
-                do_kwargs["virtual_evidence"] = soft_factors
-            result_single = infer.query(**do_kwargs)
+
+    # OHM-od01.13: Batch query all variables at once instead of N separate
+    # infer.query() calls. Single VE pass is much faster for multi-node queries.
+    # Fall back to individual queries for any nodes that fail in the batch.
+    try:
+        do_kwargs: dict[str, Any] = {"variables": safe_query_nodes, "evidence": {safe_target: intervention_state}}
+        if soft_factors:
+            do_kwargs["virtual_evidence"] = soft_factors
+        joint_result = infer.query(**do_kwargs)
+        for qn in safe_query_nodes:
+            qn_original = next((orig for orig, safe in safe_names.items() if safe == qn), qn)
+            other_vars = [v for v in safe_query_nodes if v != qn]
+            if other_vars:
+                marginal = joint_result.marginalize(other_vars, inplace=False)
+            else:
+                marginal = joint_result
             posteriors[qn_original] = {
-                "good": round(float(result_single.values[1]), 4),
-                "bad": round(float(result_single.values[0]), 4),
+                "good": round(float(marginal.values[1]), 4),
+                "bad": round(float(marginal.values[0]), 4),
             }
-        except Exception as e:
-            posteriors[qn_original] = {"error": f"inference failed: {e}"}
+    except Exception:
+        # Fallback: query each node individually
+        for qn in safe_query_nodes:
+            qn_original = next((orig for orig, safe in safe_names.items() if safe == qn), qn)
+            try:
+                do_kwargs_single: dict[str, Any] = {"variables": [qn], "evidence": {safe_target: intervention_state}}
+                if soft_factors:
+                    do_kwargs_single["virtual_evidence"] = soft_factors
+                result_single = infer.query(**do_kwargs_single)
+                posteriors[qn_original] = {
+                    "good": round(float(result_single.values[1]), 4),
+                    "bad": round(float(result_single.values[0]), 4),
+                }
+            except Exception as e:
+                posteriors[qn_original] = {"error": f"inference failed: {e}"}
 
     # Step 5: Compare with observation-based inference for the same evidence
     # This shows the confounder effect: difference = confounding bias
@@ -1228,32 +1250,57 @@ def causal_intervention(
                 _ve_cache.clear()
             _ve_cache[_obs_ve_key] = VariableElimination(obs_model)
         obs_infer = _ve_cache[_obs_ve_key]
+        # OHM-od01.13: batch observation query for all successful posteriors
+        obs_safe_nodes = []
+        obs_orig_ids = []
         for node_id, post in posteriors.items():
             if isinstance(post, dict) and "error" not in post:
-                safe_qn = None
-                for orig, safe in safe_names.items():
-                    if orig == node_id:
-                        safe_qn = safe
-                        break
-                if not safe_qn:
-                    continue
-                try:
-                    obs_kwargs: dict[str, Any] = {"variables": [safe_qn], "evidence": {safe_target: intervention_state}}
-                    if soft_factors:
-                        obs_kwargs["virtual_evidence"] = soft_factors
-                    obs_result = obs_infer.query(**obs_kwargs)
-                    obs_bad = round(float(obs_result.values[0]), 4)
-                    int_bad = post.get("bad", None)
-                    if int_bad is not None:
+                safe_qn = next((safe for orig, safe in safe_names.items() if orig == node_id), None)
+                if safe_qn:
+                    obs_safe_nodes.append(safe_qn)
+                    obs_orig_ids.append(node_id)
+        if obs_safe_nodes:
+            try:
+                obs_kwargs: dict[str, Any] = {"variables": obs_safe_nodes, "evidence": {safe_target: intervention_state}}
+                if soft_factors:
+                    obs_kwargs["virtual_evidence"] = soft_factors
+                obs_joint = obs_infer.query(**obs_kwargs)
+                for safe_qn, node_id in zip(obs_safe_nodes, obs_orig_ids):
+                    int_bad = posteriors[node_id].get("bad", None)
+                    if int_bad is None:
+                        continue
+                    other_vars = [v for v in obs_safe_nodes if v != safe_qn]
+                    if other_vars:
+                        obs_marginal = obs_joint.marginalize(other_vars, inplace=False)
+                    else:
+                        obs_marginal = obs_joint
+                    obs_bad = round(float(obs_marginal.values[0]), 4)
+                    comparison[node_id] = {
+                        "intervention_bad": int_bad,
+                        "observation_bad": obs_bad,
+                        "confounding_bias": round(obs_bad - int_bad, 4),
+                        "interpretation": "positive bias = observation overestimates causal effect (confounders inflate)" if obs_bad > int_bad else "negative bias = observation underestimates causal effect (confounders suppress)",
+                    }
+            except Exception:
+                # Fallback: query each node individually
+                for safe_qn, node_id in zip(obs_safe_nodes, obs_orig_ids):
+                    int_bad = posteriors[node_id].get("bad", None)
+                    if int_bad is None:
+                        continue
+                    try:
+                        obs_kwargs_single: dict[str, Any] = {"variables": [safe_qn], "evidence": {safe_target: intervention_state}}
+                        if soft_factors:
+                            obs_kwargs_single["virtual_evidence"] = soft_factors
+                        obs_result = obs_infer.query(**obs_kwargs_single)
+                        obs_bad = round(float(obs_result.values[0]), 4)
                         comparison[node_id] = {
                             "intervention_bad": int_bad,
                             "observation_bad": obs_bad,
                             "confounding_bias": round(obs_bad - int_bad, 4),
                             "interpretation": "positive bias = observation overestimates causal effect (confounders inflate)" if obs_bad > int_bad else "negative bias = observation underestimates causal effect (confounders suppress)",
                         }
-                except Exception:
-                    # Skip nodes where observation inference fails
-                    pass
+                    except Exception:
+                        pass
     except Exception as e:
         logger.warning(f"Observation comparison failed: {e}")
 
@@ -2993,35 +3040,22 @@ class BayesianContext:
             result = infer.query(**do_kwargs)
 
             posteriors = {}
-            if len(safe_query_nodes) == 1:
-                qn = safe_query_nodes[0]
-                qn_original = None
-                for orig, safe in safe_names.items():
-                    if safe == qn:
-                        qn_original = orig
-                        break
-                posteriors[qn_original or qn] = {
-                    "good": round(float(result.values[1]), 4),
-                    "bad": round(float(result.values[0]), 4),
-                }
-            else:
-                for qn in safe_query_nodes:
-                    qn_original = None
-                    for orig, safe in safe_names.items():
-                        if safe == qn:
-                            qn_original = orig
-                            break
-                    try:
-                        single_kwargs: dict[str, Any] = {"variables": [qn], "evidence": {safe_target: intervention_state}}
-                        if soft_factors:
-                            single_kwargs["virtual_evidence"] = soft_factors
-                        result_single = infer.query(**single_kwargs)
-                        posteriors[qn_original or qn] = {
-                            "good": round(float(result_single.values[1]), 4),
-                            "bad": round(float(result_single.values[0]), 4),
-                        }
-                    except Exception:
-                        posteriors[qn_original or qn] = {"error": "inference failed for this node"}
+            # OHM-od01.13: marginalize the joint distribution instead of
+            # N separate infer.query() calls per query node.
+            for qn in safe_query_nodes:
+                qn_original = next((orig for orig, safe in safe_names.items() if safe == qn), qn)
+                other_vars = [v for v in safe_query_nodes if v != qn]
+                try:
+                    if other_vars:
+                        marginal = result.marginalize(other_vars, inplace=False)
+                    else:
+                        marginal = result
+                    posteriors[qn_original or qn] = {
+                        "good": round(float(marginal.values[1]), 4),
+                        "bad": round(float(marginal.values[0]), 4),
+                    }
+                except Exception:
+                    posteriors[qn_original or qn] = {"error": "inference failed for this node"}
 
             # Observation comparison using original model
             comparison = {}
@@ -3033,31 +3067,56 @@ class BayesianContext:
                         _ve_cache.clear()
                     _ve_cache[_obs_ve_key] = VariableElimination(obs_model)
                 obs_infer = _ve_cache[_obs_ve_key]
+                # OHM-od01.13: batch observation query
+                obs_safe_nodes = []
+                obs_orig_ids = []
                 for node_id, post in posteriors.items():
                     if isinstance(post, dict) and "error" not in post:
-                        safe_qn = None
-                        for orig, safe in safe_names.items():
-                            if orig == node_id:
-                                safe_qn = safe
-                                break
-                        if not safe_qn:
-                            continue
-                        try:
-                            obs_kwargs: dict[str, Any] = {"variables": [safe_qn], "evidence": {safe_target: intervention_state}}
-                            if soft_factors:
-                                obs_kwargs["virtual_evidence"] = soft_factors
-                            obs_result = obs_infer.query(**obs_kwargs)
-                            obs_bad = round(float(obs_result.values[0]), 4)
-                            int_bad = post.get("bad", None)
-                            if int_bad is not None:
+                        safe_qn = next((safe for orig, safe in safe_names.items() if orig == node_id), None)
+                        if safe_qn:
+                            obs_safe_nodes.append(safe_qn)
+                            obs_orig_ids.append(node_id)
+                if obs_safe_nodes:
+                    try:
+                        obs_kwargs: dict[str, Any] = {"variables": obs_safe_nodes, "evidence": {safe_target: intervention_state}}
+                        if soft_factors:
+                            obs_kwargs["virtual_evidence"] = soft_factors
+                        obs_joint = obs_infer.query(**obs_kwargs)
+                        for safe_qn, node_id in zip(obs_safe_nodes, obs_orig_ids):
+                            int_bad = posteriors[node_id].get("bad", None)
+                            if int_bad is None:
+                                continue
+                            other_vars = [v for v in obs_safe_nodes if v != safe_qn]
+                            if other_vars:
+                                obs_marginal = obs_joint.marginalize(other_vars, inplace=False)
+                            else:
+                                obs_marginal = obs_joint
+                            obs_bad = round(float(obs_marginal.values[0]), 4)
+                            comparison[node_id] = {
+                                "intervention_bad": int_bad,
+                                "observation_bad": obs_bad,
+                                "confounding_bias": round(obs_bad - int_bad, 4),
+                                "interpretation": "positive bias = observation overestimates causal effect" if obs_bad > int_bad else "negative bias = observation underestimates causal effect",
+                            }
+                    except Exception:
+                        for safe_qn, node_id in zip(obs_safe_nodes, obs_orig_ids):
+                            int_bad = posteriors[node_id].get("bad", None)
+                            if int_bad is None:
+                                continue
+                            try:
+                                obs_kwargs_single: dict[str, Any] = {"variables": [safe_qn], "evidence": {safe_target: intervention_state}}
+                                if soft_factors:
+                                    obs_kwargs_single["virtual_evidence"] = soft_factors
+                                obs_result = obs_infer.query(**obs_kwargs_single)
+                                obs_bad = round(float(obs_result.values[0]), 4)
                                 comparison[node_id] = {
                                     "intervention_bad": int_bad,
                                     "observation_bad": obs_bad,
                                     "confounding_bias": round(obs_bad - int_bad, 4),
                                     "interpretation": "positive bias = observation overestimates causal effect" if obs_bad > int_bad else "negative bias = observation underestimates causal effect",
                                 }
-                        except Exception:
-                            pass
+                            except Exception:
+                                pass
             except Exception as e:
                 logger.warning(f"Observation comparison failed: {e}")
 
