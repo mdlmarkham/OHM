@@ -50,6 +50,10 @@ def _start_test_server(store, tokens=None, roles=None, no_auth=False, schema_con
     else:
         OhmHandler.require_read_auth = require_read_auth
 
+    # Register built-in hooks (OHM-aznh.11)
+    from ohm.server.server import _register_builtin_hooks
+    _register_builtin_hooks(store)
+
     # Use TCPServer to get a random port
     server = socketserver.TCPServer(
         ("127.0.0.1", 0),
@@ -1653,8 +1657,8 @@ class TestHookEndpoints:
         _request("POST", port, "/hooks", body={"event": "post_ingest", "command": "echo b"})
         status, data = _request("GET", port, "/hooks")
         assert status == 200
-        assert data["count"] == 2
-        assert len(data["hooks"]) == 2
+        assert data["count"] == 4  # 2 user + 2 built-in (OHM-aznh.11)
+        assert len(data["hooks"]) == 4
 
     def test_get_hooks_filter_by_event(self, test_server):
         port, _ = test_server
@@ -1662,7 +1666,7 @@ class TestHookEndpoints:
         _request("POST", port, "/hooks", body={"event": "post_ingest", "command": "echo b"})
         status, data = _request("GET", port, "/hooks?event=pre_ingest")
         assert status == 200
-        assert data["count"] == 1
+        assert data["count"] == 3  # 1 user + 2 built-in (OHM-aznh.11)
         assert data["hooks"][0]["event"] == "pre_ingest"
 
     def test_get_hooks_invalid_event_returns_400(self, test_server):
@@ -1678,7 +1682,7 @@ class TestHookEndpoints:
         assert status == 200
         assert data["deleted"] == hook_id
         status, data = _request("GET", port, "/hooks")
-        assert data["count"] == 0
+        assert data["count"] == 2  # 2 built-in hooks remain (OHM-aznh.11)
 
     def test_delete_hooks_not_found_returns_400(self, test_server):
         port, _ = test_server
@@ -1784,3 +1788,48 @@ class TestPreQueryPostQueryHooks:
         status, data = _request("GET", port, "/stats")
         assert status == 200
         assert "hook_decorations" not in data
+
+
+class TestBuiltinHooks:
+    """Tests for built-in hooks registered on server startup (OHM-aznh.11)."""
+
+    def test_cross_link_enforced_via_hook(self, test_server):
+        port, _ = test_server
+        status, data = _request("POST", port, "/node", body={
+            "id": "bare-pattern", "label": "Bare", "type": "pattern",
+        })
+        assert status == 422
+        assert data["error"] == "hook_rejected"
+
+    def test_cross_link_passes_with_connects_to(self, test_server):
+        port, store = test_server
+        store.write_node("anchor1", "Anchor", "concept", agent_name="test")
+        status, data = _request("POST", port, "/node", body={
+            "id": "linked-pattern", "label": "Linked", "type": "pattern",
+            "connects_to": ["anchor1"],
+        })
+        assert status == 201
+
+    def test_source_url_enforced_via_hook(self, test_server):
+        port, _ = test_server
+        status, data = _request("POST", port, "/node", body={
+            "id": "bare-source", "label": "No URL", "type": "source",
+        })
+        assert status == 422
+        assert data["error"] == "hook_rejected"
+
+    def test_source_url_passes_with_url(self, test_server):
+        port, _ = test_server
+        status, data = _request("POST", port, "/node", body={
+            "id": "url-source", "label": "With URL", "type": "source",
+            "source_url": "https://example.com",
+        })
+        assert status == 201
+
+    def test_builtin_hooks_listed(self, test_server):
+        port, _ = test_server
+        status, data = _request("GET", port, "/hooks?event=pre_ingest")
+        assert status == 200
+        commands = [h["command"] for h in data["hooks"]]
+        assert "python:ohm.hooks_builtin.cross_link_check" in commands
+        assert "python:ohm.hooks_builtin.source_url_required" in commands

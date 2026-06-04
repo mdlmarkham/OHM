@@ -79,6 +79,31 @@ def _prewarm_pgmpy() -> None:
     except ImportError:
         logger.info("pgmpy not available — Bayesian inference will be disabled")
 
+
+def _register_builtin_hooks(store: OhmStore) -> None:
+    """Register built-in pre_ingest hooks on startup (OHM-aznh.11).
+
+    Idempotent — if the hook already exists (same event + command + created_by),
+    it is not duplicated.
+    """
+    from ohm.hooks import VALID_HOOK_EVENTS
+
+    builtins = [
+        ("pre_ingest", "python:ohm.hooks_builtin.cross_link_check", "system"),
+        ("pre_ingest", "python:ohm.hooks_builtin.source_url_required", "system"),
+    ]
+    for event, command, created_by in builtins:
+        existing = store.conn.execute(
+            "SELECT id FROM ohm_hooks WHERE event = ? AND command = ? AND created_by = ?",
+            [event, command, created_by],
+        ).fetchone()
+        if existing is None:
+            store.conn.execute(
+                "INSERT INTO ohm_hooks (event, command, created_by) VALUES (?, ?, ?)",
+                [event, command, created_by],
+            )
+            logger.debug("Registered built-in hook: %s (%s)", command, event)
+
 # ── Security Constants ─────────────────────────────────────
 
 MAX_BODY_SIZE = 1 * 1024 * 1024  # 1 MB — reject bodies larger than this
@@ -2055,6 +2080,9 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
 
     # ── pgmpy pre-warm (OHM-a689): avoid 5.3s cold-import penalty on first inference ──
     _prewarm_pgmpy()
+
+    # ── Register built-in hooks (OHM-aznh.11) ────────────────────────────
+    _register_builtin_hooks(store)
 
     # ── Quack integration ──────────────────────────────────────────────
     quack_info: dict[str, Any] | None = None

@@ -566,23 +566,8 @@ class GraphHandlerMixin:
 
     def _post_node(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /node — create or upsert a node."""
-        # ADR-013: Source nodes require source_url
-        node_type = body.get("type", "concept")
-        if node_type == "source" and not body.get("source_url"):
-            # Check if this is an update (node already exists) — allow updates without source_url
-            existing = self.current_store.conn.execute(
-                "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
-                [body["id"]],
-            ).fetchone()
-            if not existing:
-                self._json_response(
-                    400,
-                    {
-                        "error": "validation_error",
-                        "message": "source_url is required for source nodes (ADR-013)",
-                    },
-                )
-                return
+        # ADR-013 source_url enforcement migrated to built-in pre_ingest hook
+        # (python:ohm.hooks_builtin.source_url_required). See OHM-aznh.11.
 
         create_only = qs.get("create_only", ["false"])[0].lower() in ("true", "1", "yes")
         if create_only:
@@ -600,13 +585,10 @@ class GraphHandlerMixin:
                 )
                 return
 
-        # OHM-tjzh / ADR-018: derived-claim node types must link to existing graph
-        # structure. Enforced here for the direct POST /node entry point; the
-        # batch and synthesis endpoints handle cross-link via their own bodies.
-        cross_link_error = self._enforce_cross_link_requirement(body["id"], body)
-        if cross_link_error is not None:
-            self._json_response(422, cross_link_error)
-            return
+        # OHM-tjzh / ADR-018: cross-link enforcement migrated to
+        # built-in pre_ingest hook (python:ohm.hooks_builtin.cross_link_check).
+        # The hook is registered automatically on server startup (OHM-aznh.11).
+        # Inline _enforce_cross_link_requirement is no longer called here.
 
         hook_error = self._run_pre_ingest_hooks(agent, "node", body)
         if hook_error is not None:
