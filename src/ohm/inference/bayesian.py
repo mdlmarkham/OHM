@@ -40,11 +40,42 @@ _raw_conn = raw_conn
 
 logger = logging.getLogger(__name__)
 
+_MAX_BAYESIAN_NETWORK_CACHE_SIZE = 50
+
+
+class _LRUBayesianCache(dict):
+    """dict subclass that evicts the oldest entry when _maxsize is exceeded.
+
+    OHM-od01.15: The module-level Bayesian network cache grew without bound
+    in long-running ohmd. This subclass drops the first-inserted (oldest)
+    key when len() > maxsize, providing bounded memory use while preserving
+    the dict interface used by all existing callers (``in``, ``[]``, ``.clear()``).
+    """
+
+    def __init__(self, maxsize: int = _MAX_BAYESIAN_NETWORK_CACHE_SIZE):
+        super().__init__()
+        self._maxsize = maxsize
+        self._key_order: list[tuple] = []
+
+    def __setitem__(self, key, value):
+        if key not in self:
+            self._key_order.append(key)
+        super().__setitem__(key, value)
+        while len(self._key_order) > self._maxsize:
+            oldest = self._key_order.pop(0)
+            if oldest in self:
+                super().__delitem__(oldest)
+
+    def clear(self):
+        super().clear()
+        self._key_order.clear()
+
+
 # Module-level cache for Bayesian network construction (OHM-omr)
 # Key: (tuple(sorted(edge_types)), tuple(sorted(layers)) if layers else None, max_nodes)
 # Value: (generation_at_cache_time, result_dict)
 # Invalidated when graph_generation counter increments.
-_bayesian_network_cache: dict[tuple, tuple[int, dict[str, Any]]] = {}
+_bayesian_network_cache: _LRUBayesianCache = _LRUBayesianCache()
 
 # Module-level cache for VariableElimination instances (OHM-a689.3).
 # Keyed by a hash of the model's CPD values and structure.

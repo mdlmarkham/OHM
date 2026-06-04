@@ -1932,3 +1932,21 @@ class TestVEReuse:
         result = bayesian_inference(db, b, {})
         assert result["method"] != "none"
         assert len(_ve_cache) <= _MAX_VE_CACHE_SIZE
+
+    def test_bayesian_network_cache_lru_eviction(self, db):
+        """OHM-od01.15: _bayesian_network_cache evicts oldest entry when
+        maxsize exceeded, preventing unbounded memory growth in long-running
+        ohmd."""
+        from ohm.bayesian import _bayesian_network_cache
+        from ohm.inference.bayesian import _MAX_BAYESIAN_NETWORK_CACHE_SIZE
+
+        _bayesian_network_cache.clear()
+
+        a = create_sample_node(db, label="lru_a")
+        b = create_sample_node(db, label="lru_b")
+        create_sample_edge(db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3", confidence=0.8)
+
+        for i in range(_MAX_BAYESIAN_NETWORK_CACHE_SIZE + 10):
+            build_bayesian_network(db, edge_types=["CAUSES"], layers=[f"L{i % 3}"])
+
+        assert len(_bayesian_network_cache) <= _MAX_BAYESIAN_NETWORK_CACHE_SIZE
