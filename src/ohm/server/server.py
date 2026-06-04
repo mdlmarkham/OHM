@@ -589,6 +589,12 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
     require_read_auth: bool = False  # OHM-gwg: require auth for reads (default: public reads)
     schema_config: SchemaConfig = DEFAULT_SCHEMA  # configurable schema (OHM or TOPO)
     multi_tenant: bool = False  # OHM-l31g: feature flag for multi-tenancy (default: off)
+    # OHM-cwrc: per-instance write lock that serialises ALL writes through this
+    # server. DuckDB is single-writer per connection; without this, concurrent
+    # POST /node and POST /edge requests race against the same store and corrupt
+    # the graph (55 nodes from 50 writes, etc.). Multi-tenant mode nests the
+    # per-tenant write_lock inside this one.
+    _write_lock: "threading.RLock" = threading.RLock()
 
     # ── Dispatch tables (set after class body) ────────────────
     # Maps path → method_name (string) for runtime getattr dispatch.
@@ -1656,24 +1662,32 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
                     method_name = mn
                     break
         if method_name:
-            # Acquire the per-tenant write lock for multi-tenant customer requests.
-            # DuckDB is single-writer; serializing at this layer prevents concurrent
-            # write conflicts within the same tenant's isolated DuckDB file.
-            # Agent token requests (customer_id=None) and single-tenant mode skip this.
-            customer_id = self._customer_id
-            if customer_id and self.tenant_manager:
-                from ohm.tenant import TenantNotFoundError
+            # OHM-cwrc: serialise ALL writes through this server instance. DuckDB
+            # is single-writer per connection; without this, concurrent POSTs
+            # against the same store race and corrupt the graph (50 writes → 55
+            # nodes, ConstraintException on agent_name PK, etc.). The per-tenant
+            # lock (when present) nests inside this one as a re-entrant lock.
+            with self._write_lock:
+                # Acquire the per-tenant write lock for multi-tenant customer
+                # requests. DuckDB is single-writer; serializing at this layer
+                # prevents concurrent write conflicts within the same tenant's
+                # isolated DuckDB file. Agent token requests (customer_id=None)
+                # and single-tenant mode rely solely on the per-instance lock
+                # above.
+                customer_id = self._customer_id
+                if customer_id and self.tenant_manager:
+                    from ohm.tenant import TenantNotFoundError
 
-                try:
-                    write_lock = self.tenant_manager.get_write_lock(customer_id)
-                except TenantNotFoundError:
-                    raise NodeNotFoundError(
-                        f"Tenant not found — provision this tenant before use"
-                    )
-                with write_lock:
+                    try:
+                        write_lock = self.tenant_manager.get_write_lock(customer_id)
+                    except TenantNotFoundError:
+                        raise NodeNotFoundError(
+                            f"Tenant not found — provision this tenant before use"
+                        )
+                    with write_lock:
+                        getattr(self, method_name)(path, qs, body, agent)
+                else:
                     getattr(self, method_name)(path, qs, body, agent)
-            else:
-                getattr(self, method_name)(path, qs, body, agent)
         else:
             self._json_response(404, {"error": f"Unknown endpoint: {path}"})
 
@@ -1706,20 +1720,22 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
                 break
         if method_name:
             self._check_write_access(agent)
-            customer_id = self._customer_id
-            if customer_id and self.tenant_manager:
-                from ohm.tenant import TenantNotFoundError
+            # OHM-cwrc: serialise writes (see _do_POST).
+            with self._write_lock:
+                customer_id = self._customer_id
+                if customer_id and self.tenant_manager:
+                    from ohm.tenant import TenantNotFoundError
 
-                try:
-                    write_lock = self.tenant_manager.get_write_lock(customer_id)
-                except TenantNotFoundError:
-                    raise NodeNotFoundError(
-                        f"Tenant not found — provision this tenant before use"
-                    )
-                with write_lock:
+                    try:
+                        write_lock = self.tenant_manager.get_write_lock(customer_id)
+                    except TenantNotFoundError:
+                        raise NodeNotFoundError(
+                            f"Tenant not found — provision this tenant before use"
+                        )
+                    with write_lock:
+                        getattr(self, method_name)(path, agent)
+                else:
                     getattr(self, method_name)(path, agent)
-            else:
-                getattr(self, method_name)(path, agent)
         else:
             self._json_response(404, {"error": f"Unknown endpoint: {path}"})
 

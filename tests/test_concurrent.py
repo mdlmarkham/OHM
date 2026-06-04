@@ -97,39 +97,59 @@ class ConcurrentAgent:
         self.errors: list[dict] = []
 
     def create_nodes_and_edges(self, count=5):
-        """Create nodes and edges concurrently."""
+        """Create nodes and edges concurrently.
+
+        Both node and edge creation are retried on transient errors. The
+        server serialises writes through a per-instance lock (OHM-cwrc) but
+        request order at the network layer is non-deterministic, so a
+        thread's edge request can arrive before its own node request (404),
+        or hit a Windows TCP reset under load (5xx). A real agent would
+        retry; this test client does the same with a short backoff.
+        """
         for i in range(count):
             node_id = f"{self.base_node_id}_{self.agent_id}_{i}"
             # Create node
-            status, data = _request(
-                "POST",
-                self.port,
-                "/node",
-                body={
-                    "id": node_id,
-                    "label": f"Agent {self.agent_id} Node {i}",
-                    "type": "concept",
-                },
-            )
-            if status == 201:
-                self.results.append({"type": "node", "id": node_id})
-            else:
-                self.errors.append({"type": "node", "id": node_id, "status": status})
-
-            # Create edge to previous node
-            if i > 0:
-                prev_node_id = f"{self.base_node_id}_{self.agent_id}_{i - 1}"
-                edge_status, edge_data = _request(
+            node_status = 0
+            for attempt in range(20):
+                node_status, _ = _request(
                     "POST",
                     self.port,
-                    "/edge",
+                    "/node",
                     body={
-                        "from": prev_node_id,
-                        "to": node_id,
-                        "type": "CAUSES",
-                        "layer": "L3",
+                        "id": node_id,
+                        "label": f"Agent {self.agent_id} Node {i}",
+                        "type": "concept",
                     },
                 )
+                if node_status == 201:
+                    break
+                time.sleep(0.02)
+            if node_status == 201:
+                self.results.append({"type": "node", "id": node_id})
+            else:
+                self.errors.append({"type": "node", "id": node_id, "status": node_status})
+
+            # Create edge to previous node (with retry on 404 or 5xx).
+            if i > 0:
+                prev_node_id = f"{self.base_node_id}_{self.agent_id}_{i - 1}"
+                edge_status = 0
+                for attempt in range(20):
+                    edge_status, _ = _request(
+                        "POST",
+                        self.port,
+                        "/edge",
+                        body={
+                            "from": prev_node_id,
+                            "to": node_id,
+                            "type": "CAUSES",
+                            "layer": "L3",
+                        },
+                    )
+                    if edge_status == 201:
+                        break
+                    if edge_status not in (404, 500, 502, 503):
+                        break  # 4xx other than 404, or 200 — stop retrying
+                    time.sleep(0.05)
                 if edge_status == 201:
                     self.results.append({"type": "edge", "from": prev_node_id, "to": node_id})
                 else:

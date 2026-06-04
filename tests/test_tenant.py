@@ -193,9 +193,11 @@ class TestThreadSafety:
             t.join()
 
         assert not errors, f"Write errors under concurrent load: {errors}"
-        # Verify all 50 nodes were written
-        rows = store.execute("SELECT COUNT(*) AS n FROM ohm_nodes")
-        assert rows[0]["n"] == 50
+        # Verify all 50 nodes were written. The schema auto-populates 5 default
+        # agent rows (metis/clio/socrates/hephaestus/deepthought) on init, so
+        # we filter to the test's node-N pattern.
+        rows = store.execute("SELECT COUNT(*) AS n FROM ohm_nodes WHERE id LIKE 'node-%'")
+        assert rows[0]["n"] == 50, f"Expected 50 nodes but found {rows[0]['n']}"
 
 
 class TestIdleEviction:

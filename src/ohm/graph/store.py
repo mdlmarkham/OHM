@@ -1301,28 +1301,24 @@ class OhmStore:
         services_json = json.dumps(available_services or [])
         now = self._now()
 
-        # Check if agent state exists
-        existing = self.get_agent_state(actor)
-        if existing:
-            self.conn.execute(
-                """
-                UPDATE ohm_agent_state SET
-                    current_focus = ?, active_patterns = ?, available_services = ?,
-                    current_session_id = ?, last_sync = ?, updated_at = ?
-                WHERE agent_name = ?
-                """,
-                [current_focus, patterns_json, services_json, session_id, now, now, actor],
-            )
-        else:
-            self.conn.execute(
-                """
-                INSERT INTO ohm_agent_state (agent_name, current_focus, active_patterns,
-                                               confidence_threshold, available_services,
-                                               current_session_id, last_sync, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                [actor, current_focus, patterns_json, 0.7, services_json, session_id, now, now],
-            )
+        # OHM-cwrc: upsert instead of check-then-insert. The check-then-insert
+        # path raced under concurrent writes (same race that bit _log_change).
+        self.conn.execute(
+            """
+            INSERT INTO ohm_agent_state (agent_name, current_focus, active_patterns,
+                                          confidence_threshold, available_services,
+                                          current_session_id, last_sync, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (agent_name) DO UPDATE SET
+                current_focus = excluded.current_focus,
+                active_patterns = excluded.active_patterns,
+                available_services = excluded.available_services,
+                current_session_id = excluded.current_session_id,
+                last_sync = excluded.last_sync,
+                updated_at = excluded.updated_at
+            """,
+            [actor, current_focus, patterns_json, 0.7, services_json, session_id, now, now],
+        )
 
         return self.get_agent_state(actor)
 
@@ -1484,22 +1480,20 @@ class OhmStore:
             )
         except Exception:
             pass
-        # Update agent's last_sync so they appear in active_agents
-        existing = self.conn.execute(
-            "SELECT COUNT(*) FROM ohm_agent_state WHERE agent_name = ?",
-            [actor],
-        ).fetchone()
-        if existing and existing[0] > 0:
-            self.conn.execute(
-                "UPDATE ohm_agent_state SET last_sync = ?, updated_at = ? WHERE agent_name = ?",
-                [now, now, actor],
-            )
-        else:
-            self.conn.execute(
-                """INSERT INTO ohm_agent_state (agent_name, last_sync, updated_at)
-                   VALUES (?, ?, ?)""",
-                [actor, now, now],
-            )
+        # Update agent's last_sync so they appear in active_agents.
+        # OHM-cwrc: use ON CONFLICT upsert instead of check-then-insert; the
+        # check-then-insert path raced under concurrent writes and produced
+        # ConstraintException('Duplicate key "agent_name: ..."').
+        self.conn.execute(
+            """
+            INSERT INTO ohm_agent_state (agent_name, last_sync, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT (agent_name) DO UPDATE SET
+                last_sync = excluded.last_sync,
+                updated_at = excluded.updated_at
+            """,
+            [actor, now, now],
+        )
 
     def _increment_graph_generation(self) -> int:
         """Increment the graph_generation counter and return the new value.
@@ -1642,21 +1636,20 @@ class OhmStore:
             except Exception:
                 self.sync_degraded = True
 
-        # Update last_sync timestamp — ensure agent row exists
-        existing = self.conn.execute(
-            "SELECT 1 FROM ohm_agent_state WHERE agent_name = ?",
-            [self.agent_name],
-        ).fetchone()
-        if existing:
-            self.conn.execute(
-                "UPDATE ohm_agent_state SET last_sync = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE agent_name = ?",
-                [self.agent_name],
-            )
-        else:
-            self.conn.execute(
-                "INSERT INTO ohm_agent_state (agent_name, last_sync, updated_at) VALUES (?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-                [self.agent_name],
-            )
+        # Update last_sync timestamp — ensure agent row exists.
+        # OHM-cwrc: upsert instead of check-then-insert (same race fix as
+        # _log_change and update_agent_state).
+        now = self._now()
+        self.conn.execute(
+            """
+            INSERT INTO ohm_agent_state (agent_name, last_sync, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT (agent_name) DO UPDATE SET
+                last_sync = excluded.last_sync,
+                updated_at = excluded.updated_at
+            """,
+            [self.agent_name, now, now],
+        )
         row = self.conn.execute(
             "SELECT last_sync FROM ohm_agent_state WHERE agent_name = ?",
             [self.agent_name],
