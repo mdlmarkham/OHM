@@ -1,10 +1,72 @@
-"""Admin handler mixin — checkpoint, embeddings, and snapshot endpoints."""
+"""Admin handler mixin — checkpoint, embeddings, snapshot, and hook endpoints."""
 
 import time
 
 
 class AdminHandlerMixin:
     """Handler mixin for administrative operations (OHM-brry)."""
+
+    def _post_hooks(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /hooks — register a new hook.
+
+        Body: {event, command, timeout_ms?, enabled?}
+        """
+        from ohm.queries import create_hook
+        from ohm.exceptions import ValidationError
+
+        event = body.get("event")
+        command = body.get("command")
+        timeout_ms = body.get("timeout_ms", 5000)
+        enabled = body.get("enabled", True)
+
+        if not event:
+            raise ValidationError("event is required")
+        if not command:
+            raise ValidationError("command is required")
+
+        try:
+            hook = create_hook(
+                self.current_store.conn,
+                event=event,
+                command=command,
+                created_by=agent,
+                timeout_ms=int(timeout_ms),
+                enabled=bool(enabled),
+            )
+            self._json_response(201, hook)
+        except ValueError as e:
+            raise ValidationError(str(e))
+
+    def _get_hooks(self, path: str, qs: dict) -> None:
+        """GET /hooks — list registered hooks. Optional ?event= filter."""
+        from ohm.queries import query_hooks
+        from ohm.exceptions import ValidationError
+
+        event = qs.get("event", [None])[0]
+        try:
+            hooks = query_hooks(self.current_store.conn, event=event)
+            self._json_response(200, {"hooks": hooks, "count": len(hooks)})
+        except ValueError as e:
+            raise ValidationError(str(e))
+
+    def _delete_hook(self, path: str, agent: str) -> None:
+        """DELETE /hooks/{id} — remove a hook."""
+        from ohm.queries import delete_hook
+        from ohm.exceptions import ValidationError
+
+        hook_id = path[len("/hooks/"):]
+        if not hook_id:
+            raise ValidationError("Hook ID is required")
+
+        try:
+            result = delete_hook(
+                self.current_store.conn,
+                hook_id=hook_id,
+                deleted_by=agent,
+            )
+            self._json_response(200, result)
+        except ValueError as e:
+            raise ValidationError(str(e))
 
     def _get_admin_checkpoint(self, path: str, qs: dict) -> None:
         """GET /admin/checkpoint — force DuckDB CHECKPOINT."""

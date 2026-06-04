@@ -160,3 +160,103 @@ class TestHookRunnerRunHooks:
         runner = HookRunner(test_db)
         results = runner.run_hooks("pre_ingest", {"agent": "metis"})
         assert results == []
+
+
+class TestCreateHook:
+    """Tests for queries.create_hook()."""
+
+    def test_create_hook_basic(self, test_db):
+        from ohm.queries import create_hook
+
+        hook = create_hook(test_db, event="pre_ingest", command="echo validate", created_by="metis")
+        assert hook["event"] == "pre_ingest"
+        assert hook["command"] == "echo validate"
+        assert hook["created_by"] == "metis"
+        assert hook["timeout_ms"] == 5000
+        assert hook["enabled"] is True
+
+    def test_create_hook_custom_timeout(self, test_db):
+        from ohm.queries import create_hook
+
+        hook = create_hook(test_db, event="post_ingest", command="echo done", created_by="clio", timeout_ms=10000, enabled=False)
+        assert hook["timeout_ms"] == 10000
+        assert hook["enabled"] is False
+
+    def test_create_hook_invalid_event(self, test_db):
+        from ohm.queries import create_hook
+
+        with pytest.raises(ValueError, match="Invalid hook event"):
+            create_hook(test_db, event="bad_event", command="echo", created_by="metis")
+
+    def test_create_hook_empty_command(self, test_db):
+        from ohm.queries import create_hook
+
+        with pytest.raises(ValueError, match="non-empty string"):
+            create_hook(test_db, event="pre_ingest", command="", created_by="metis")
+
+    def test_create_hook_timeout_out_of_range(self, test_db):
+        from ohm.queries import create_hook
+
+        with pytest.raises(ValueError, match="timeout_ms"):
+            create_hook(test_db, event="pre_ingest", command="echo", created_by="metis", timeout_ms=50)
+        with pytest.raises(ValueError, match="timeout_ms"):
+            create_hook(test_db, event="pre_ingest", command="echo", created_by="metis", timeout_ms=70000)
+
+
+class TestQueryHooks:
+    """Tests for queries.query_hooks()."""
+
+    def test_query_hooks_empty(self, test_db):
+        from ohm.queries import query_hooks
+
+        hooks = query_hooks(test_db)
+        assert hooks == []
+
+    def test_query_hooks_returns_all(self, test_db):
+        from ohm.queries import create_hook, query_hooks
+
+        create_hook(test_db, event="pre_ingest", command="echo a", created_by="metis")
+        create_hook(test_db, event="post_ingest", command="echo b", created_by="clio")
+        hooks = query_hooks(test_db)
+        assert len(hooks) == 2
+
+    def test_query_hooks_filter_by_event(self, test_db):
+        from ohm.queries import create_hook, query_hooks
+
+        create_hook(test_db, event="pre_ingest", command="echo a", created_by="metis")
+        create_hook(test_db, event="post_ingest", command="echo b", created_by="clio")
+        hooks = query_hooks(test_db, event="pre_ingest")
+        assert len(hooks) == 1
+        assert hooks[0]["event"] == "pre_ingest"
+
+    def test_query_hooks_invalid_event(self, test_db):
+        from ohm.queries import query_hooks
+
+        with pytest.raises(ValueError, match="Invalid hook event"):
+            query_hooks(test_db, event="bad_event")
+
+
+class TestDeleteHook:
+    """Tests for queries.delete_hook()."""
+
+    def test_delete_hook_existing(self, test_db):
+        from ohm.queries import create_hook, delete_hook
+
+        hook = create_hook(test_db, event="pre_ingest", command="echo", created_by="metis")
+        result = delete_hook(test_db, hook_id=hook["id"], deleted_by="metis")
+        assert result["deleted"] == hook["id"]
+        assert result["type"] == "hook"
+
+    def test_delete_hook_not_found(self, test_db):
+        from ohm.queries import delete_hook
+
+        with pytest.raises(ValueError, match="Hook not found"):
+            delete_hook(test_db, hook_id="nonexistent", deleted_by="metis")
+
+    def test_delete_hook_removes_from_list(self, test_db):
+        from ohm.queries import create_hook, delete_hook, query_hooks
+
+        h = create_hook(test_db, event="pre_ingest", command="echo", created_by="metis")
+        delete_hook(test_db, hook_id=h["id"], deleted_by="metis")
+        hooks = query_hooks(test_db)
+        assert hooks == []

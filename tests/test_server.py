@@ -1609,3 +1609,83 @@ class TestTemporalHTTPEndpoints:
             assert resp.status == 400
         finally:
             server.shutdown()
+
+
+@pytest.mark.xdist_group("server")
+class TestHookEndpoints:
+    """Tests for POST /hooks, GET /hooks, DELETE /hooks/{id} (OHM-aznh.3)."""
+
+    def test_post_hooks_creates_hook(self, test_server):
+        port, _ = test_server
+        status, data = _request("POST", port, "/hooks", body={
+            "event": "pre_ingest",
+            "command": "echo validate",
+        })
+        assert status == 201
+        assert data["event"] == "pre_ingest"
+        assert data["command"] == "echo validate"
+        assert data["timeout_ms"] == 5000
+        assert data["enabled"] is True
+
+    def test_post_hooks_invalid_event_returns_400(self, test_server):
+        port, _ = test_server
+        status, data = _request("POST", port, "/hooks", body={
+            "event": "bad_event",
+            "command": "echo",
+        })
+        assert status == 400
+
+    def test_post_hooks_missing_command_returns_400(self, test_server):
+        port, _ = test_server
+        status, data = _request("POST", port, "/hooks", body={
+            "event": "pre_ingest",
+        })
+        assert status == 400
+
+    def test_get_hooks_returns_list(self, test_server):
+        port, _ = test_server
+        _request("POST", port, "/hooks", body={"event": "pre_ingest", "command": "echo a"})
+        _request("POST", port, "/hooks", body={"event": "post_ingest", "command": "echo b"})
+        status, data = _request("GET", port, "/hooks")
+        assert status == 200
+        assert data["count"] == 2
+        assert len(data["hooks"]) == 2
+
+    def test_get_hooks_filter_by_event(self, test_server):
+        port, _ = test_server
+        _request("POST", port, "/hooks", body={"event": "pre_ingest", "command": "echo a"})
+        _request("POST", port, "/hooks", body={"event": "post_ingest", "command": "echo b"})
+        status, data = _request("GET", port, "/hooks?event=pre_ingest")
+        assert status == 200
+        assert data["count"] == 1
+        assert data["hooks"][0]["event"] == "pre_ingest"
+
+    def test_get_hooks_invalid_event_returns_400(self, test_server):
+        port, _ = test_server
+        status, data = _request("GET", port, "/hooks?event=bad_event")
+        assert status == 400
+
+    def test_delete_hooks_removes_hook(self, test_server):
+        port, _ = test_server
+        _, hook = _request("POST", port, "/hooks", body={"event": "pre_ingest", "command": "echo x"})
+        hook_id = hook["id"]
+        status, data = _request("DELETE", port, f"/hooks/{hook_id}")
+        assert status == 200
+        assert data["deleted"] == hook_id
+        status, data = _request("GET", port, "/hooks")
+        assert data["count"] == 0
+
+    def test_delete_hooks_not_found_returns_400(self, test_server):
+        port, _ = test_server
+        status, data = _request("DELETE", port, "/hooks/nonexistent-id")
+        assert status == 400
+
+    def test_hooks_require_auth(self, auth_server):
+        port, _ = auth_server
+        status, _ = _request("POST", port, "/hooks", body={"event": "pre_ingest", "command": "echo"})
+        assert status == 401
+
+    def test_hooks_readonly_cannot_write(self, auth_server):
+        port, _ = auth_server
+        status, _ = _request("POST", port, "/hooks", body={"event": "pre_ingest", "command": "echo"}, token="readonly-token")
+        assert status == 403

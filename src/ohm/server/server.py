@@ -460,6 +460,7 @@ def _build_router() -> _RouteRegistry:
         "/stale",
         "/admin/embeddings",
         "/admin/snapshots",
+        "/hooks",
         "/graph/at",
         "/graph/changes",
         "/markov/absorbing",
@@ -518,6 +519,7 @@ def _build_router() -> _RouteRegistry:
         "/register",
         "/heartbeat",
         "/sync",
+        "/hooks",
     ):
         r.add("POST", _p)
 
@@ -542,6 +544,7 @@ def _build_router() -> _RouteRegistry:
     # DELETE
     r.add("DELETE", "/node/")
     r.add("DELETE", "/edge/")
+    r.add("DELETE", "/hooks/")
 
     return r
 
@@ -1779,6 +1782,7 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
 OhmHandler._DELETE_PREFIXES = [
     ("/node/", "_delete_node"),
     ("/edge/", "_delete_edge"),
+    ("/hooks/", "_delete_hook"),
     ("/tenant/", "_delete_tenant_prefix"),
 ]
 
@@ -1804,6 +1808,7 @@ OhmHandler._POST_EXACT = {
     "/admin/edge-layer-fix": "_post_admin_edge_layer_fix",
     "/admin/pert-backfill": "_post_admin_pert_backfill",
     "/discover/queue/review": "_post_discovery_review",
+    "/hooks": "_post_hooks",
 }
 
 OhmHandler._POST_PREFIXES = [
@@ -1868,6 +1873,7 @@ OhmHandler._GET_EXACT = {
     "/policy": "_get_policy",
     "/discover": "_get_discover",
     "/discover/queue": "_get_discovery_queue",
+    "/hooks": "_get_hooks",
     "/admin/checkpoint": "_get_admin_checkpoint",
     "/admin/embeddings": "_get_admin_embeddings",
     "/admin/snapshots": "_get_admin_snapshots",
