@@ -2,7 +2,7 @@
 
 import pytest
 
-from ohm.hooks import HookRecord, HookResult, HookRunner, VALID_HOOK_EVENTS
+from ohm.hooks import HookRecord, HookResult, HookRunner, VALID_HOOK_EVENTS, _SHELL_NOT_FOUND_EXIT, _TIMEOUT_EXIT
 
 
 class TestHookRecord:
@@ -128,15 +128,89 @@ class TestHookRunnerGetHooks:
 
 
 class TestHookRunnerRunHook:
-    """Tests for HookRunner.run_hook() stub."""
+    """Tests for HookRunner.run_hook() — subprocess execution engine."""
 
-    def test_run_hook_stub_returns_success(self, test_db):
-        hook = HookRecord(id="h1", event="pre_ingest", command="echo ok")
+    def test_shell_hook_captures_stdout(self, test_db):
+        hook = HookRecord(id="h1", event="pre_ingest", command="echo hello")
         runner = HookRunner(test_db)
-        result = runner.run_hook(hook, {"agent": "metis", "action": "node"})
-        assert result.success is True
+        result = runner.run_hook(hook, {"agent": "metis"})
+        assert result.success
+        assert "hello" in result.stdout
         assert result.exit_code == 0
-        assert result.hook_id == "h1"
+
+    def test_shell_hook_nonzero_exit(self, test_db):
+        hook = HookRecord(id="h2", event="pre_ingest", command="exit 1")
+        runner = HookRunner(test_db)
+        result = runner.run_hook(hook, {})
+        assert not result.success
+        assert result.exit_code == 1
+
+    def test_shell_hook_command_not_found(self, test_db):
+        hook = HookRecord(id="h3", event="pre_ingest", command="nonexistent_command_xyz_12345")
+        runner = HookRunner(test_db)
+        result = runner.run_hook(hook, {})
+        assert not result.success
+        assert result.exit_code != 0
+
+    def test_shell_hook_timeout(self, test_db):
+        import sys
+
+        if sys.platform == "win32":
+            cmd = "ping -n 10 127.0.0.1"
+        else:
+            cmd = "sleep 10"
+        hook = HookRecord(id="h4", event="pre_ingest", command=cmd, timeout_ms=200)
+        runner = HookRunner(test_db)
+        result = runner.run_hook(hook, {})
+        assert not result.success
+        assert result.timed_out is True
+        assert result.exit_code == _TIMEOUT_EXIT
+
+    def test_shell_hook_reads_stdin_payload(self, test_db):
+        import json
+
+        hook = HookRecord(id="h5", event="pre_ingest", command="python -c \"import sys,json; d=json.load(sys.stdin); print(d.get('agent',''))\"")
+        runner = HookRunner(test_db)
+        result = runner.run_hook(hook, {"agent": "metis"})
+        assert result.success
+        assert "metis" in result.stdout
+
+    def test_python_hook_import_and_call(self, test_db):
+        hook = HookRecord(id="h6", event="pre_ingest", command="python:os.getcwd")
+        runner = HookRunner(test_db)
+        result = runner.run_hook(hook, {})
+        assert result.exit_code == 1
+        assert result.stderr
+
+    def test_python_hook_with_valid_callable(self, test_db):
+        import types
+
+        mod = types.ModuleType("_test_hook_mod")
+        mod.test_hook = lambda payload: (0, "ok", "")
+        import sys
+
+        sys.modules["_test_hook_mod"] = mod
+        try:
+            hook = HookRecord(id="h7", event="pre_ingest", command="python:_test_hook_mod.test_hook")
+            runner = HookRunner(test_db)
+            result = runner.run_hook(hook, {"key": "value"})
+            assert result.success
+            assert result.stdout == "ok"
+        finally:
+            del sys.modules["_test_hook_mod"]
+
+    def test_python_hook_invalid_format(self, test_db):
+        hook = HookRecord(id="h8", event="pre_ingest", command="python:nodots")
+        runner = HookRunner(test_db)
+        result = runner.run_hook(hook, {})
+        assert result.exit_code == 1
+        assert "Invalid python: hook format" in result.stderr
+
+    def test_python_hook_import_error(self, test_db):
+        hook = HookRecord(id="h9", event="pre_ingest", command="python:nonexistent_module.func")
+        runner = HookRunner(test_db)
+        result = runner.run_hook(hook, {})
+        assert result.exit_code == 1
 
 
 class TestHookRunnerRunHooks:

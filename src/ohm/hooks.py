@@ -12,13 +12,20 @@ Hook events:
 
 from __future__ import annotations
 
+import importlib
+import json
 import logging
+import subprocess
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 VALID_HOOK_EVENTS = frozenset({"pre_ingest", "post_ingest", "pre_query", "post_query"})
+
+_SHELL_NOT_FOUND_EXIT = 127
+_TIMEOUT_EXIT = 124
 
 
 @dataclass
@@ -120,11 +127,93 @@ class HookRunner:
     def run_hook(self, hook: HookRecord, payload: dict) -> HookResult:
         """Execute a single hook.
 
-        Stub implementation: returns exit_code=0 without executing the command.
-        The real subprocess runner is implemented in OHM-aznh.4.
+        Shell command hooks: spawn subprocess, write JSON payload to stdin,
+        capture stdout/stderr, enforce timeout.
+
+        python: prefix hooks: import and call the named function.
+        Callable signature: def hook(payload: dict) -> tuple[int, str, str]
+        returning (exit_code, stdout, stderr).
         """
-        logger.debug("Hook stub: %s (%s) — would run: %s", hook.id, hook.event, hook.command)
-        return HookResult(hook_id=hook.id, exit_code=0)
+        if hook.command.startswith("python:"):
+            return self._run_python_hook(hook, payload)
+        return self._run_shell_hook(hook, payload)
+
+    def _run_shell_hook(self, hook: HookRecord, payload: dict) -> HookResult:
+        """Execute a shell command hook via subprocess."""
+        timeout_sec = hook.timeout_ms / 1000.0
+        payload_json = json.dumps(payload, default=str)
+        start = time.monotonic()
+        try:
+            proc = subprocess.Popen(
+                hook.command,
+                shell=True,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            try:
+                stdout_bytes, stderr_bytes = proc.communicate(
+                    input=payload_json.encode(),
+                    timeout=timeout_sec,
+                )
+                duration_ms = (time.monotonic() - start) * 1000
+                return HookResult(
+                    hook_id=hook.id,
+                    exit_code=proc.returncode or 0,
+                    stdout=stdout_bytes.decode(errors="replace"),
+                    stderr=stderr_bytes.decode(errors="replace"),
+                    duration_ms=round(duration_ms, 2),
+                )
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+                duration_ms = (time.monotonic() - start) * 1000
+                return HookResult(
+                    hook_id=hook.id,
+                    exit_code=_TIMEOUT_EXIT,
+                    stderr="Hook timed out",
+                    duration_ms=round(duration_ms, 2),
+                    timed_out=True,
+                )
+        except OSError as exc:
+            duration_ms = (time.monotonic() - start) * 1000
+            return HookResult(
+                hook_id=hook.id,
+                exit_code=_SHELL_NOT_FOUND_EXIT,
+                stderr=str(exc),
+                duration_ms=round(duration_ms, 2),
+            )
+
+    def _run_python_hook(self, hook: HookRecord, payload: dict) -> HookResult:
+        """Execute a python: prefix hook by importing and calling the function."""
+        module_path, _, func_name = hook.command[len("python:"):].rpartition(".")
+        if not module_path or not func_name:
+            return HookResult(
+                hook_id=hook.id,
+                exit_code=1,
+                stderr=f"Invalid python: hook format: {hook.command!r} — expected python:module.function",
+            )
+        start = time.monotonic()
+        try:
+            mod = importlib.import_module(module_path)
+            func = getattr(mod, func_name)
+            exit_code, stdout, stderr = func(payload)
+            duration_ms = (time.monotonic() - start) * 1000
+            return HookResult(
+                hook_id=hook.id,
+                exit_code=exit_code,
+                stdout=stdout,
+                stderr=stderr,
+                duration_ms=round(duration_ms, 2),
+            )
+        except Exception as exc:
+            duration_ms = (time.monotonic() - start) * 1000
+            return HookResult(
+                hook_id=hook.id,
+                exit_code=1,
+                stderr=str(exc),
+                duration_ms=round(duration_ms, 2),
+            )
 
     def run_hooks(self, event: str, payload: dict) -> list[HookResult]:
         """Execute all hooks for the given event.
