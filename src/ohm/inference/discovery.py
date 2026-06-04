@@ -291,20 +291,17 @@ def discover_causal(
     from ohm.graph_reader import coerce_reader
     reader = coerce_reader(conn)
 
-    # Auto-select nodes with sufficient observations if none provided
     if node_ids is None:
         all_nodes = reader.get_all_nodes()
-        node_ids = []
-        for n in all_nodes:
-            nid = n.id if hasattr(n, 'id') else n.get("id", n.get("node_id", ""))
-            obs = reader.get_observations(nid)
-            if len(obs) >= min_observations:
-                node_ids.append(nid)
+        all_ids = [n.id if hasattr(n, 'id') else n.get("id", n.get("node_id", "")) for n in all_nodes]
+        obs_counts = reader.get_observation_counts(all_ids)
+        node_ids = [nid for nid, cnt in obs_counts.items() if cnt >= min_observations]
         if len(node_ids) < 2:
             return {
                 "method": method,
                 "n_nodes": len(node_ids),
                 "candidate_edges": [],
+                "metadata": {"observation_counts": obs_counts},
                 "error": f"Only {len(node_ids)} nodes have ≥{min_observations} observations; need ≥2",
             }
 
@@ -322,12 +319,25 @@ def discover_causal(
             score_class=score_class,
         )
 
-    # If both methods, merge edges
+    if method == "pc":
+        pc_result = results["pc"]
+        if pc_result.get("error") or not pc_result.get("candidate_edges"):
+            logger.info("PC produced no edges, falling back to GES")
+            results["ges"] = discover_ges(
+                conn, node_ids, min_observations=min_observations,
+                score_class=score_class,
+            )
+            ges_result = results["ges"]
+            if ges_result.get("candidate_edges"):
+                ges_result["fallback_from"] = "pc"
+                ges_result["pc_error"] = pc_result.get("error", "no candidate edges found")
+                return ges_result
+        return pc_result
+
     if method == "both":
         pc_edges = results.get("pc", {}).get("candidate_edges", [])
         ges_edges = results.get("ges", {}).get("candidate_edges", [])
 
-        # Deduplicate: prefer PC edges, add GES-only edges
         seen = set()
         merged = []
         for e in pc_edges:

@@ -1493,3 +1493,126 @@ class TestPERTFields:
                 confidence_p50=0.5,
                 confidence_p95=0.95,
             )
+
+
+class TestDiscoveryQueue:
+    """Tests for discovery queue functions (OHM-od01.4)."""
+
+    def test_queue_discovery_candidates(self, test_db):
+        """queue_discovery_candidates inserts candidate edges."""
+        from ohm.queries import queue_discovery_candidates, query_discovery_queue
+
+        edges = [
+            {"from": "node_a", "to": "node_b", "edge_type": "directed", "confidence": 0.8, "method": "pc"},
+            {"from": "node_b", "to": "node_c", "edge_type": "undirected", "confidence": 0.6, "method": "ges"},
+        ]
+        ids = queue_discovery_candidates(test_db, edges, created_by="test")
+        assert len(ids) == 2
+        assert all(isinstance(i, str) and len(i) > 0 for i in ids)
+
+        queue = query_discovery_queue(test_db)
+        assert len(queue) == 2
+        assert all(q["status"] == "pending" for q in queue)
+
+    def test_query_discovery_queue_filters_by_status(self, test_db):
+        """query_discovery_queue filters by status."""
+        from ohm.queries import queue_discovery_candidates, query_discovery_queue
+
+        edges = [{"from": "a", "to": "b", "edge_type": "directed", "method": "pc"}]
+        queue_discovery_candidates(test_db, edges)
+
+        pending = query_discovery_queue(test_db, status="pending")
+        accepted = query_discovery_queue(test_db, status="accepted")
+        assert len(pending) == 1
+        assert len(accepted) == 0
+
+    def test_query_discovery_queue_filters_by_method(self, test_db):
+        """query_discovery_queue filters by method."""
+        from ohm.queries import queue_discovery_candidates, query_discovery_queue
+
+        edges = [
+            {"from": "a", "to": "b", "edge_type": "directed", "method": "pc"},
+            {"from": "c", "to": "d", "edge_type": "directed", "method": "ges"},
+        ]
+        queue_discovery_candidates(test_db, edges)
+
+        pc = query_discovery_queue(test_db, method="pc")
+        ges = query_discovery_queue(test_db, method="ges")
+        assert len(pc) == 1
+        assert len(ges) == 1
+        assert pc[0]["method"] == "pc"
+        assert ges[0]["method"] == "ges"
+
+    def test_review_accept_creates_edge(self, test_db):
+        """Accepting a discovery candidate creates an edge in ohm_edges."""
+        from ohm.queries import (
+            create_node,
+            queue_discovery_candidates,
+            query_discovery_queue,
+            review_discovery_candidate,
+        )
+
+        n1 = create_node(test_db, label="NodeX", node_type="concept", created_by="test")
+        n2 = create_node(test_db, label="NodeY", node_type="concept", created_by="test")
+
+        edges = [{"from": n1["id"], "to": n2["id"], "edge_type": "directed", "confidence": 0.8, "method": "pc"}]
+        ids = queue_discovery_candidates(test_db, edges, created_by="test")
+
+        result = review_discovery_candidate(
+            test_db, ids[0], action="accept", reviewed_by="metis", edge_layer="L3",
+        )
+        assert result["action"] == "accepted"
+        assert "edge_id" in result
+
+        queue = query_discovery_queue(test_db, status="accepted")
+        assert len(queue) == 1
+        assert queue[0]["reviewed_by"] == "metis"
+
+    def test_review_reject_marks_rejected(self, test_db):
+        """Rejecting a discovery candidate marks it as rejected."""
+        from ohm.queries import queue_discovery_candidates, query_discovery_queue, review_discovery_candidate
+
+        edges = [{"from": "a", "to": "b", "edge_type": "directed", "method": "pc"}]
+        ids = queue_discovery_candidates(test_db, edges)
+
+        result = review_discovery_candidate(
+            test_db, ids[0], action="reject", reviewed_by="clio", review_notes="insufficient evidence",
+        )
+        assert result["action"] == "rejected"
+
+        queue = query_discovery_queue(test_db, status="rejected")
+        assert len(queue) == 1
+        assert queue[0]["reviewed_by"] == "clio"
+
+    def test_review_already_reviewed_returns_error(self, test_db):
+        """Reviewing an already-reviewed entry returns error dict."""
+        from ohm.queries import queue_discovery_candidates, review_discovery_candidate
+
+        edges = [{"from": "a", "to": "b", "edge_type": "directed", "method": "pc"}]
+        ids = queue_discovery_candidates(test_db, edges)
+
+        review_discovery_candidate(test_db, ids[0], action="accept", reviewed_by="metis")
+        result = review_discovery_candidate(test_db, ids[0], action="reject", reviewed_by="clio")
+        assert "error" in result
+        assert result["error"] == "already_reviewed"
+
+    def test_review_nonexistent_raises(self, test_db):
+        """Reviewing a non-existent queue entry raises EdgeNotFoundError."""
+        from ohm.queries import review_discovery_candidate
+        from ohm.exceptions import EdgeNotFoundError
+
+        with pytest.raises(EdgeNotFoundError):
+            review_discovery_candidate(test_db, "nonexistent_id", action="accept", reviewed_by="metis")
+
+    def test_review_invalid_action_returns_error(self, test_db):
+        """Review with invalid action returns error dict."""
+        from ohm.queries import queue_discovery_candidates, review_discovery_candidate
+
+        edges = [{"from": "a", "to": "b", "edge_type": "directed", "method": "pc"}]
+        ids = queue_discovery_candidates(test_db, edges)
+
+        result = review_discovery_candidate(
+            test_db, ids[0], action="maybe", reviewed_by="metis",
+        )
+        assert "error" in result
+        assert result["error"] == "invalid_action"

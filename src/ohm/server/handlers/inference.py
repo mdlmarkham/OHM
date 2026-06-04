@@ -367,15 +367,87 @@ class InferenceHandlerMixin:
         min_obs = int(qs.get("min_observations", ["5"])[0])
         indep_test = qs.get("indep_test", ["fisherz"])[0]
         score_class = qs.get("score_class", ["local_score_BIC"])[0]
+        queue = qs.get("queue", ["false"])[0].lower() in ("true", "1", "yes")
         from ohm.inference.discovery import discover_causal
 
-        result = discover_causal(
-            self.current_store.conn,
-            node_ids=node_ids,
-            method=method,
-            alpha=alpha,
-            min_observations=min_obs,
-            indep_test=indep_test,
-            score_class=score_class,
-        )
+        try:
+            result = discover_causal(
+                self.current_store.conn,
+                node_ids=node_ids,
+                method=method,
+                alpha=alpha,
+                min_observations=min_obs,
+                indep_test=indep_test,
+                score_class=score_class,
+            )
+        except (ValueError, TypeError) as e:
+            self._json_response(400, {"error": "invalid_parameter", "message": str(e)})
+            return
+        except Exception as e:
+            self._json_response(500, {"error": "internal_error", "message": str(e)})
+            return
+
+        if queue and result.get("candidate_edges"):
+            from ohm.graph.queries import queue_discovery_candidates
+
+            actor = getattr(self, "_actor", None) or "system"
+            queued_ids = queue_discovery_candidates(
+                self.current_store.conn,
+                result["candidate_edges"],
+                created_by=actor,
+            )
+            result["queued_ids"] = queued_ids
+
         self._json_response(200, result)
+
+    def _get_discovery_queue(self, path: str, qs: dict) -> None:
+        """GET /discover/queue — list pending discovery candidates for agent review."""
+        from ohm.graph.queries import query_discovery_queue
+
+        status = qs.get("status", [None])[0]
+        method = qs.get("method", [None])[0]
+        limit = int(qs.get("limit", ["100"])[0])
+
+        result = query_discovery_queue(
+            self.current_store.conn,
+            status=status,
+            method=method,
+            limit=limit,
+        )
+        self._json_response(200, {"queue": result, "count": len(result)})
+
+    def _post_discovery_review(self, path: str, body: dict) -> None:
+        """POST /discover/queue/review — accept or reject a discovery candidate."""
+        from ohm.graph.queries import review_discovery_candidate
+        from ohm.exceptions import EdgeNotFoundError, ValidationError
+
+        queue_id = body.get("queue_id", "")
+        action = body.get("action", "")
+        reviewed_by = body.get("reviewed_by", "unknown")
+        review_notes = body.get("review_notes")
+        edge_layer = body.get("edge_layer", "L3")
+
+        if not queue_id:
+            self._json_response(400, {"error": "missing_parameter", "message": "queue_id required"})
+            return
+        if action not in ("accept", "reject"):
+            self._json_response(400, {"error": "invalid_parameter", "message": "action must be 'accept' or 'reject'"})
+            return
+
+        try:
+            result = review_discovery_candidate(
+                self.current_store.conn,
+                queue_id,
+                action=action,
+                reviewed_by=reviewed_by,
+                review_notes=review_notes,
+                edge_layer=edge_layer,
+            )
+            if "error" in result:
+                self._json_response(409, result)
+            else:
+                self._json_response(200, result)
+        except EdgeNotFoundError as e:
+            self._json_response(404, {"error": "not_found", "message": str(e)})
+        except ValidationError as e:
+            self._json_response(400, {"error": "validation_error", "message": str(e)})

@@ -138,6 +138,14 @@ class GraphReader(Protocol):
         """Return non-deleted observations attached to the given node."""
         ...
 
+    def get_observation_counts(self, node_ids: list[str]) -> dict[str, int]:
+        """Return observation count per node for the given node IDs.
+
+        More efficient than calling get_observations() per node when
+        you only need the count (e.g. auto-select in discovery).
+        """
+        ...
+
     def get_meta(self, key: str) -> str | None:
         """Return the string value stored in ohm_meta for key, or None."""
         ...
@@ -330,6 +338,18 @@ class DuckDBGraphReader:
             for r in rows
         ]
 
+    def get_observation_counts(self, node_ids: list[str]) -> dict[str, int]:
+        if not node_ids:
+            return {}
+        placeholders = ",".join(["?"] * len(node_ids))
+        rows = self._conn.execute(
+            f"SELECT node_id, COUNT(*) FROM ohm_observations WHERE node_id IN ({placeholders}) AND deleted_at IS NULL GROUP BY node_id",
+            node_ids,
+        ).fetchall()
+        counts = {r[0]: int(r[1]) for r in rows}
+        counts.update({nid: 0 for nid in node_ids if nid not in counts})
+        return counts
+
     def get_meta(self, key: str) -> str | None:
         row = self._conn.execute("SELECT value FROM ohm_meta WHERE key = ?", [key]).fetchone()
         return str(row[0]) if row is not None else None
@@ -394,6 +414,15 @@ class MockGraphReader:
 
     def get_observations(self, node_id: str) -> list[ObservationRecord]:
         return [o for o in self.observations if o.node_id == node_id]
+
+    def get_all_nodes(self) -> list[NodeRecord]:
+        """Get all nodes."""
+        return self.get_nodes()
+
+    def get_observation_counts(self, node_ids: list[str]) -> dict[str, int]:
+        from collections import Counter
+        counts = Counter(o.node_id for o in self.observations if o.node_id in set(node_ids))
+        return {nid: counts.get(nid, 0) for nid in node_ids}
 
     def get_meta(self, key: str) -> str | None:
         return self.meta.get(key)

@@ -821,11 +821,32 @@ DDL_STATEMENTS: list[str] = [
         notes        TEXT
     );
     """,
+    # ── Discovery Queue (OHM-od01.4) ────────────────────────────────────
+    # Candidate edges from structure learning, pending agent review.
+    # Not auto-added to ohm_edges — agents accept or reject via API.
+    """
+    CREATE TABLE IF NOT EXISTS ohm_discovery_queue (
+        id           VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        from_node    VARCHAR NOT NULL,
+        to_node      VARCHAR NOT NULL,
+        edge_type    VARCHAR NOT NULL,
+        layer        VARCHAR NOT NULL DEFAULT 'L3',
+        confidence   FLOAT,
+        provenance   VARCHAR NOT NULL DEFAULT 'structure_learning',
+        method       VARCHAR NOT NULL,
+        status       VARCHAR NOT NULL DEFAULT 'pending',
+        reviewed_by  VARCHAR,
+        reviewed_at  TIMESTAMP,
+        review_notes TEXT,
+        created_by   VARCHAR NOT NULL DEFAULT 'system',
+        created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """,
 ]
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.19.0"
+SCHEMA_VERSION = "0.20.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -1008,6 +1029,29 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
         [
             "ALTER TABLE ohm_observations ADD COLUMN scale VARCHAR DEFAULT 'unknown'",
             "CREATE INDEX IF NOT EXISTS idx_obs_scale ON ohm_observations(scale)",
+        ],
+    ),
+    (
+        "0.20.0",
+        "add discovery queue table for structure learning candidate edges (OHM-od01.4)",
+        [
+            """CREATE TABLE IF NOT EXISTS ohm_discovery_queue (
+            id           VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+            from_node    VARCHAR NOT NULL,
+            to_node      VARCHAR NOT NULL,
+            edge_type    VARCHAR NOT NULL,
+            layer        VARCHAR NOT NULL DEFAULT 'L3',
+            confidence   FLOAT,
+            provenance   VARCHAR NOT NULL DEFAULT 'structure_learning',
+            method       VARCHAR NOT NULL,
+            status       VARCHAR NOT NULL DEFAULT 'pending',
+            reviewed_by  VARCHAR,
+            reviewed_at  TIMESTAMP,
+            review_notes TEXT,
+            created_by   VARCHAR NOT NULL DEFAULT 'system',
+            created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+            "CREATE INDEX IF NOT EXISTS idx_discovery_queue_status ON ohm_discovery_queue(status)",
         ],
     ),
 ]

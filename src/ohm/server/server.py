@@ -1803,6 +1803,7 @@ OhmHandler._POST_EXACT = {
     "/admin/source-node-urls": "_post_admin_source_node_urls",
     "/admin/edge-layer-fix": "_post_admin_edge_layer_fix",
     "/admin/pert-backfill": "_post_admin_pert_backfill",
+    "/discover/queue/review": "_post_discovery_review",
 }
 
 OhmHandler._POST_PREFIXES = [
@@ -1866,6 +1867,7 @@ OhmHandler._GET_EXACT = {
     "/nash": "_get_nash",
     "/policy": "_get_policy",
     "/discover": "_get_discover",
+    "/discover/queue": "_get_discovery_queue",
     "/admin/checkpoint": "_get_admin_checkpoint",
     "/admin/embeddings": "_get_admin_embeddings",
     "/admin/snapshots": "_get_admin_snapshots",
