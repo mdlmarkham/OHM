@@ -87,6 +87,11 @@ _MAX_VE_CACHE_SIZE = 20
 
 MAX_CPT_PARENTS = 8
 
+# Maximum parents per node in noisy-OR CPT (OHM-a689)
+# 2^8 = 256 entries per state vs 2^16 = 65,536 for 16 parents.
+# Parents beyond this cap contribute via residual leak probability.
+MAX_CPT_PARENTS = 8
+
 from .pert import compute_pert_mean as _compute_pert_mean
 from .pert import compute_pert_variance as _compute_pert_variance
 from .pert import scale_pert_variance as _scale_pert_variance
@@ -694,7 +699,6 @@ def build_bayesian_network(
         # If we dropped parents, their combined effect is added to leak.
         if residual_leak > 0.0:
             leak = 1.0 - (1.0 - leak) * (1.0 - residual_leak)
-            leak = max(1e-6, min(0.5, leak))
 
         # Clamp leak to [1e-6, 0.5] to avoid degenerate CPTs.
         # OHM-m0h: Previous floor of 0.01 destroyed confidence modulation —
@@ -969,6 +973,10 @@ def causal_intervention(
     # Internal: pre-built Bayesian network for VoI batch optimization (OHM-27).
     # When provided, graph construction is skipped and this network is used directly.
     _pre_built_network: dict[str, Any] | None = None,
+    # Internal: pre-built VariableElimination instance for the original (non-mutilated)
+    # model's observation comparison (OHM-a689, Fix 3). When provided, the observation
+    # VE is reused from the caller (e.g., compute_voi) instead of constructed fresh.
+    _pre_built_ve: Any | None = None,
 ) -> dict[str, Any]:
     """Run causal intervention using Pearl's do-operator (graph surgery).
 
@@ -1240,6 +1248,7 @@ def causal_intervention(
     # Step 5: Compare with observation-based inference for the same evidence
     # This shows the confounder effect: difference = confounding bias
     # Reuse the already-built network instead of rebuilding per query node (OHM-1p8)
+    # OHM-a689 Fix 3: reuse pre-built VE from caller to avoid ~1.1s VE construction.
     comparison = {}
     try:
         obs_model = network["model"]
@@ -1340,6 +1349,9 @@ def compute_ate(
     # When provided, graph construction is skipped and this network is used
     # for both do(bad) and do(good) interventions.
     _pre_built_network: dict[str, Any] | None = None,
+    # Internal: pre-built VariableElimination instance for observation comparison
+    # reuse (OHM-a689 Fix 3). Passed through to causal_intervention.
+    _pre_built_ve: Any | None = None,
 ) -> dict[str, Any]:
     """Compute Average Treatment Effect (ATE) from the Bayesian model.
 
@@ -1393,6 +1405,7 @@ def compute_ate(
         soft_edge_types=soft_edge_types,
         customer_id=customer_id,
         _pre_built_network=_pre_built_network,
+        _pre_built_ve=_pre_built_ve,
     )
     do_good = causal_intervention(
         reader,
@@ -1409,6 +1422,7 @@ def compute_ate(
         soft_edge_types=soft_edge_types,
         customer_id=customer_id,
         _pre_built_network=_pre_built_network,
+        _pre_built_ve=_pre_built_ve,
     )
 
     # Extract posteriors
@@ -2256,7 +2270,10 @@ def compute_voi(
     # compute_ate, build ONE network per decision that covers all its causal
     # ancestors. Each ATE call then deep-copies and does surgery on the shared
     # pre-built model — avoiding N individual ~500ms network builds.
+    # OHM-a689 Fix 3: also build one VariableElimination instance per shared network
+    # for observation-comparison reuse, avoiding ~1.1s VE construction per do() call.
     _voi_networks: dict[str, dict[str, Any]] = {}
+    _voi_ves: dict[str, Any] = {}
     for decision in decision_nodes:
         _candidates = [n for n in candidate_nodes if n in all_ancestors.get(decision, set())]
         if _candidates:
@@ -2276,6 +2293,10 @@ def compute_voi(
             )
             if _shared is not None:
                 _voi_networks[decision] = _shared
+                try:
+                    _voi_ves[decision] = VariableElimination(_shared["model"])
+                except Exception:
+                    _voi_ves[decision] = None
 
     # Compute VoI for each candidate node
     # Track whether we used ATE or path-confidence fallback for each ranking
@@ -2340,6 +2361,7 @@ def compute_voi(
                         semantic_roles=semantic_roles,
                         customer_id=customer_id,
                         _pre_built_network=_voi_networks.get(decision),
+                        _pre_built_ve=_voi_ves.get(decision),
                     )
                 _du = decision_utility.get(decision, {})
                 _usd = _du.get("utility_usd_per_day")

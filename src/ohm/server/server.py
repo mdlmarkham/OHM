@@ -2052,6 +2052,21 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     store.close()
 
 
+def _prewarm_pgmpy() -> None:
+    """Pre-warm pgmpy imports to avoid 5.3s cold-import penalty on first inference call.
+
+    Called at daemon startup after DB initialization but before accepting connections.
+    Subsequent calls are no-ops (Python's module cache).
+    """
+    try:
+        from pgmpy.inference import VariableElimination
+        from pgmpy.models import BayesianNetwork
+        from pgmpy.factors.discrete import TabularCPD
+        logger.debug("pgmpy pre-warmed (imports loaded)")
+    except ImportError:
+        logger.info("pgmpy not available — Bayesian inference will be disabled")
+
+
 def main(schema_config: SchemaConfig | None = None):
     """CLI entry point for ohmd.
 
@@ -2233,6 +2248,9 @@ def main(schema_config: SchemaConfig | None = None):
             print(f"DuckLake attached: {ducklake_path}", file=sys.stderr)
         else:
             print("DuckLake extension not available — lakehouse features disabled", file=sys.stderr)
+
+    # Pre-warm pgmpy to avoid 5.3s cold-import penalty on first inference call (OHM-a689)
+    _prewarm_pgmpy()
 
     # Run server
     try:
