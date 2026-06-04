@@ -1443,6 +1443,35 @@ class OhmStore:
             "db_path": str(self.db_path),
         }
 
+    def load_webhook_subscriptions(self) -> dict[str, dict[str, dict]]:
+        """Load persisted webhook subscriptions (OHM-whbk).
+
+        Returns the same nested dict shape that the server's in-memory
+        ``_webhook_registry`` uses: ``{customer_id: {agent: {url, events}}}``.
+        Customer id ``""`` (empty string) represents the single-tenant
+        default; callers should translate that to ``None`` for the in-memory
+        key.
+        """
+        import json as _json
+
+        result: dict[str, dict[str, dict]] = {}
+        try:
+            rows = self.conn.execute(
+                "SELECT customer_id, agent, url, events FROM ohm_webhook_subscriptions"
+            ).fetchall()
+        except Exception:
+            return result
+        for row in rows:
+            cid = row[0] or ""
+            agent = row[1]
+            url = row[2]
+            try:
+                events = _json.loads(row[3]) if row[3] else []
+            except (ValueError, TypeError):
+                events = []
+            result.setdefault(cid, {})[agent] = {"url": url, "events": events}
+        return result
+
     def _log_change(
         self,
         table_name: str,

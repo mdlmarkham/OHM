@@ -589,6 +589,11 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
     require_read_auth: bool = False  # OHM-gwg: require auth for reads (default: public reads)
     schema_config: SchemaConfig = DEFAULT_SCHEMA  # configurable schema (OHM or TOPO)
     multi_tenant: bool = False  # OHM-l31g: feature flag for multi-tenancy (default: off)
+    # OHM-rlfw: IPs allowed to set X-Forwarded-For / X-Real-IP. Empty
+    # (default) = never trust forwarded headers = always use socket IP.
+    # Operators behind nginx/Caddy should populate this with the proxy's IP
+    # range or set OHM_TRUSTED_PROXIES=10.0.0.0/8,192.168.1.0/24.
+    TRUSTED_PROXIES: frozenset[str] = frozenset()
     # OHM-cwrc: per-instance write lock that serialises ALL writes through this
     # server. DuckDB is single-writer per connection; without this, concurrent
     # POST /node and POST /edge requests race against the same store and corrupt
@@ -920,9 +925,38 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
         self._response_code = code
         super().send_response(code, message)
 
+    def _get_client_ip(self) -> str:
+        """Resolve the real client IP, honouring X-Forwarded-For / X-Real-IP.
+
+        OHM-rlfw: a raw socket IP (self.client_address[0]) is the proxy's
+        loopback when running behind nginx/Caddy/etc, so a single agent
+        can exhaust the per-IP bucket for everyone. We trust forwarded
+        headers only when the immediate peer is in TRUSTED_PROXIES.
+        The socket IP is the fallback.
+
+        `TRUSTED_PROXIES` is a class-level set; populate via
+        ``OhmHandler.TRUSTED_PROXIES = {"127.0.0.1", "10.0.0.0/8"}`` or
+        via the ``OHM_TRUSTED_PROXIES`` env var (comma-separated). An
+        empty set disables forwarded-header trust entirely.
+        """
+        peer = self.client_address[0]
+        trusted = getattr(self, "TRUSTED_PROXIES", None)
+        if not trusted:
+            return peer
+        if peer not in trusted:
+            return peer
+        # Peer is a trusted proxy — honour forwarded headers.
+        xff = self.headers.get("X-Forwarded-For")
+        if xff:
+            return xff.split(",")[0].strip()
+        xri = self.headers.get("X-Real-IP")
+        if xri:
+            return xri.strip()
+        return peer
+
     def _check_rate_limit(self) -> bool:
         """Check if the requesting IP is within rate limits. Returns True if allowed."""
-        client_ip = self.client_address[0]
+        client_ip = self._get_client_ip()
         now = time.time()
         with _rate_limit_lock:
             if client_ip not in _rate_limit_store:
@@ -1893,6 +1927,20 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     OhmHandler.require_read_auth = config.get("require_read_auth", False)
     OhmHandler.schema_config = schema_config
     OhmHandler.multi_tenant = config.get("multi_tenant", False)
+    # OHM-rlfw: trust X-Forwarded-For only from explicitly configured proxies.
+    trusted = config.get("trusted_proxies")
+    if trusted is None:
+        trusted = os.environ.get("OHM_TRUSTED_PROXIES", "")
+    OhmHandler.TRUSTED_PROXIES = frozenset(
+        p.strip() for p in trusted.split(",") if p.strip()
+    )
+
+    # OHM-whbk: hydrate the in-memory webhook registry from DuckDB so
+    # registrations survive restarts. Single-tenant mode keys on "".
+    persisted = store.load_webhook_subscriptions()
+    for cid, agents in persisted.items():
+        cid_key: str | None = cid or None
+        OhmHandler._webhook_registry[cid_key] = dict(agents)
 
     # ── TenantManager (OHM-tss4.4) ────────────────────────────────────────
     if OhmHandler.multi_tenant:

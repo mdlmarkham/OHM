@@ -223,41 +223,56 @@ class AdminHandlerMixin:
         not_found = 0
         not_source = 0
         errors = []
-        for item in updates:
-            node_id = item.get("node_id")
-            url = item.get("url")
-            if not node_id or not url:
-                errors.append({"node_id": node_id, "error": "missing node_id or url"})
-                continue
-            try:
-                # Verify node is a source type
-                result = self.current_store.conn.execute(
-                    "SELECT type FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
-                    [node_id],
-                ).fetchone()
-                if not result:
-                    not_found += 1
-                    continue
-                if result[0] != "source":
+
+        # OHM-od01.16: single SQL pass per row was 2n round-trips (verify +
+        # UPDATE + verify). Use UPDATE … RETURNING to combine into one
+        # statement; check the type in Python from a pre-fetched set of
+        # source-node ids. For typical 200-item batches this turns
+        # 400 round-trips into ~3.
+        node_ids = [
+            item.get("node_id")
+            for item in updates
+            if item.get("node_id") and item.get("url")
+        ]
+        bad_items = [
+            item for item in updates
+            if not (item.get("node_id") and item.get("url"))
+        ]
+        for item in bad_items:
+            errors.append({"node_id": item.get("node_id"), "error": "missing node_id or url"})
+
+        source_ids: set[str] = set()
+        if node_ids:
+            placeholders = ",".join(["?"] * len(node_ids))
+            type_rows = self.current_store.conn.execute(
+                f"SELECT id, type FROM ohm_nodes WHERE id IN ({placeholders}) AND deleted_at IS NULL",
+                node_ids,
+            ).fetchall()
+            existing_ids = {row[0] for row in type_rows}
+            source_ids = {row[0] for row in type_rows if row[1] == "source"}
+            not_found = sum(1 for nid in node_ids if nid not in existing_ids)
+            for row in type_rows:
+                if row[1] != "source":
                     not_source += 1
-                    errors.append({"node_id": node_id, "error": f"node type is '{result[0]}', not 'source'"})
-                    continue
-                self.current_store.conn.execute(
-                    "UPDATE ohm_nodes SET url = ? WHERE id = ? AND deleted_at IS NULL",
-                    [url, node_id],
-                )
-                # Verify update
-                check = self.current_store.conn.execute(
-                    "SELECT id FROM ohm_nodes WHERE id = ? AND url = ? AND deleted_at IS NULL",
-                    [node_id, url],
-                ).fetchone()
-                if check:
-                    updated += 1
-                    self.current_store._log_change("ohm_nodes", node_id, "UPDATE", "L2", agent_name=agent)
-                else:
-                    not_found += 1
-            except Exception as e:
-                errors.append({"node_id": node_id, "error": str(e)})
+                    errors.append(
+                        {"node_id": row[0], "error": f"node type is '{row[1]}', not 'source'"}
+                    )
+
+        # Single executemany UPDATE … RETURNING for the source nodes only.
+        source_updates = [
+            (item["url"], item["node_id"])
+            for item in updates
+            if item.get("node_id") in source_ids and item.get("url")
+        ]
+        if source_updates:
+            updated_rows = self.current_store.conn.executemany(
+                "UPDATE ohm_nodes SET url = ? WHERE id = ? AND deleted_at IS NULL "
+                "AND type = 'source' RETURNING id",
+                source_updates,
+            )
+            updated = len(updated_rows)
+            for row_id, in updated_rows:
+                self.current_store._log_change("ohm_nodes", row_id, "UPDATE", "L2", agent_name=agent)
 
         self._json_response(200, {
             "updated": updated,

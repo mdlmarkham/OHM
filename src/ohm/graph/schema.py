@@ -794,6 +794,21 @@ DDL_STATEMENTS: list[str] = [
         created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """,
+    # ── Webhook Subscriptions (OHM-whbk) ────────────────────────────────────
+    # Persists agent→URL webhook registrations across server restarts. The
+    # previous in-memory dict was lost on every restart, breaking deliveries
+    # for any agent that registered after the last boot.
+    """
+    CREATE TABLE IF NOT EXISTS ohm_webhook_subscriptions (
+        customer_id VARCHAR NOT NULL,
+        agent       VARCHAR NOT NULL,
+        url         VARCHAR NOT NULL,
+        events      VARCHAR NOT NULL DEFAULT '["node.created","node.updated","edge.created"]',
+        created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (customer_id, agent)
+    );
+    """,
     # ── Source Reliability Outcomes ──────────────────────────────────────
     """
     CREATE TABLE IF NOT EXISTS ohm_outcomes (

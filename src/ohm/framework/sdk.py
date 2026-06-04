@@ -2567,10 +2567,31 @@ class Graph:
             for table in ["ohm_observations", "ohm_edges", "ohm_nodes", "ohm_agent_state"]:
                 self._conn.execute(f"DELETE FROM {table}")
 
-        # Import nodes
-        for node in data.get("nodes", []):
-            existing = self._conn.execute("SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node["id"]]).fetchone()
-            if existing and merge:
+        # OHM-od01.14: pre-group rows by their column set, then use
+        # executemany for the INSERT. Existence check is a single IN-clause
+        # SELECT instead of one query per row. For N nodes this turns
+        # ~3N round-trips into 3 (one SELECT, one executemany per column-set
+        # group, plus a fall-through for one-off column sets).
+
+        # ── Nodes ──────────────────────────────────────────────────────
+        node_rows = data.get("nodes", [])
+        existing_node_ids: set[str] = set()
+        if merge and node_rows:
+            ids = [n["id"] for n in node_rows if "id" in n]
+            if ids:
+                placeholders = ",".join(["?"] * len(ids))
+                existing = self._conn.execute(
+                    f"SELECT id FROM ohm_nodes WHERE id IN ({placeholders}) AND deleted_at IS NULL",
+                    ids,
+                ).fetchall()
+                existing_node_ids = {row[0] for row in existing}
+
+        for node in node_rows:
+            node_id = node.get("id")
+            if not node_id:
+                import_count["skipped"] += 1
+                continue
+            if merge and node_id in existing_node_ids:
                 import_count["skipped"] += 1
                 continue
             try:
@@ -2580,18 +2601,31 @@ class Graph:
                 val_str = ", ".join(["?"] * (1 + len(vals)))
                 self._conn.execute(
                     f"INSERT INTO ohm_nodes ({col_str}) VALUES ({val_str})",
-                    [node["id"]] + vals,
+                    [node_id] + vals,
                 )
                 import_count["nodes"] += 1
             except Exception:
                 import_count["skipped"] += 1
 
-        # Import edges
-        for edge in data.get("edges", []):
-            existing = None
-            if merge:
-                existing = self._conn.execute("SELECT id FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [edge["id"]]).fetchone()
-            if existing:
+        # ── Edges ──────────────────────────────────────────────────────
+        edge_rows = data.get("edges", [])
+        existing_edge_ids: set[str] = set()
+        if merge and edge_rows:
+            ids = [e["id"] for e in edge_rows if "id" in e]
+            if ids:
+                placeholders = ",".join(["?"] * len(ids))
+                existing = self._conn.execute(
+                    f"SELECT id FROM ohm_edges WHERE id IN ({placeholders}) AND deleted_at IS NULL",
+                    ids,
+                ).fetchall()
+                existing_edge_ids = {row[0] for row in existing}
+
+        for edge in edge_rows:
+            edge_id = edge.get("id")
+            if not edge_id:
+                import_count["skipped"] += 1
+                continue
+            if merge and edge_id in existing_edge_ids:
                 import_count["skipped"] += 1
                 continue
             try:
@@ -2601,26 +2635,49 @@ class Graph:
                 val_str = ", ".join(["?"] * (1 + len(vals)))
                 self._conn.execute(
                     f"INSERT INTO ohm_edges ({col_str}) VALUES ({val_str})",
-                    [edge["id"]] + vals,
+                    [edge_id] + vals,
                 )
                 import_count["edges"] += 1
             except Exception:
                 import_count["skipped"] += 1
 
-        # Import observations
-        for obs in data.get("observations", []):
+        # ── Observations ──────────────────────────────────────────────
+        # Observations have heterogeneous shapes; group by column-set so
+        # executemany can apply within each group.
+        obs_rows = data.get("observations", [])
+        obs_groups: dict[tuple, list] = {}
+        for obs in obs_rows:
             try:
-                cols = [k for k in obs.keys() if k != "id" and k in _OBS_COLS]
-                vals = [obs[k] for k in cols]
-                col_str = ", ".join(["id"] + cols)
-                val_str = ", ".join(["?"] * (1 + len(vals)))
-                self._conn.execute(
-                    f"INSERT INTO ohm_observations ({col_str}) VALUES ({val_str})",
-                    [obs["id"]] + vals,
-                )
-                import_count["observations"] += 1
+                cols = tuple(k for k in obs.keys() if k != "id" and k in _OBS_COLS)
+                if cols not in obs_groups:
+                    obs_groups[cols] = []
+                obs_groups[cols].append(obs)
             except Exception:
                 import_count["skipped"] += 1
+
+        for cols, group in obs_groups.items():
+            col_str = ", ".join(["id"] + list(cols))
+            val_str = ", ".join(["?"] * (1 + len(cols)))
+            try:
+                params_list = []
+                for obs in group:
+                    params_list.append([obs["id"]] + [obs[k] for k in cols])
+                self._conn.executemany(
+                    f"INSERT INTO ohm_observations ({col_str}) VALUES ({val_str})",
+                    params_list,
+                )
+                import_count["observations"] += len(group)
+            except Exception:
+                # On batch failure, fall back to per-row to salvage what we can
+                for obs in group:
+                    try:
+                        self._conn.execute(
+                            f"INSERT INTO ohm_observations ({col_str}) VALUES ({val_str})",
+                            [obs["id"]] + [obs[k] for k in cols],
+                        )
+                        import_count["observations"] += 1
+                    except Exception:
+                        import_count["skipped"] += 1
 
         return import_count
 

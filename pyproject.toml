@@ -12,7 +12,7 @@ authors = [
 ]
 license = {text = "MIT"}
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "duckdb>=1.5.2",
     "click>=8.0",
@@ -55,7 +55,7 @@ ignore = ["E402"]
 "tests/**" = ["F401"]
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.11"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

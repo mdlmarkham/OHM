@@ -1028,6 +1028,7 @@ class GraphHandlerMixin:
 
     def _post_webhook(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /webhook — register or update webhook callback URL for this agent."""
+        import json as _json
         from ohm.exceptions import ValidationError
 
         url = body.get("url", "")
@@ -1035,6 +1036,21 @@ class GraphHandlerMixin:
         if not url:
             raise ValidationError("Webhook requires a 'url' field")
         _server_module._validate_webhook_url(url)
+        # OHM-whbk: persist to DuckDB so registrations survive restarts.
+        # Single-tenant mode uses customer_id="" as the key.
+        customer_id = self._customer_id or ""
+        events_json = _json.dumps(list(events))
+        self.current_store.conn.execute(
+            """
+            INSERT INTO ohm_webhook_subscriptions (customer_id, agent, url, events, updated_at)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT (customer_id, agent) DO UPDATE SET
+                url = excluded.url,
+                events = excluded.events,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            [customer_id, agent, url, events_json],
+        )
         with _server_module._webhook_lock:
             if self._customer_id not in _server_module._webhook_registry:
                 _server_module._webhook_registry[self._customer_id] = {}
