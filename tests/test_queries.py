@@ -527,6 +527,30 @@ class TestDecayQuery:
         assert l4_row[0] < 0.8
         assert abs(l3_row[0] - 0.8) < 0.0001  # L3 not decayed (100-day half-life still above threshold)
 
+    def test_stale_edges_sql_push_uses_configurable_half_life(self, test_db, sample_graph_small):
+        """OHM-od01.11: query_stale_edges computes decay in SQL, including
+        custom half_life_days overrides."""
+        from ohm.queries import query_stale_edges
+
+        node_a = sample_graph_small["nodes"]["a"]
+        node_b = sample_graph_small["nodes"]["b"]
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+        edge_id = f"custom_hl_{uuid.uuid4().hex[:6]}"
+        test_db.execute(
+            """INSERT INTO ohm_edges
+               (id, from_node, to_node, layer, edge_type, created_by, confidence,
+                created_at)
+               VALUES (?, ?, ?, 'L3', 'CAUSES', 'test_agent', 0.8,
+                       ?::TIMESTAMP - INTERVAL '5 days')""",
+            [edge_id, node_a, node_b, now],
+        )
+
+        stale_default = query_stale_edges(test_db, stale_threshold=0.5)
+        assert not any(e["id"] == edge_id for e in stale_default), "5-day-old L3 with 90-day hl should not be stale"
+
+        stale_fast = query_stale_edges(test_db, stale_threshold=0.5, half_life_days={"L3": 2.0})
+        assert any(e["id"] == edge_id for e in stale_fast), "5-day-old L3 with 2-day hl should be stale"
+
 
 class TestProbabilityCascade:
     """Tests for probability-weighted edges and cascade scenarios (OHM-af8.1)."""

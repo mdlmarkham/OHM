@@ -1462,7 +1462,7 @@ def query_stale_edges(
 ) -> list[dict[str, Any]]:
     """Find edges whose effective confidence has decayed below a threshold.
 
-    Confidence decay is computed at read time (no data mutation):
+    Confidence decay is computed entirely in SQL (OHM-od01.11):
     - L1/L2: no decay (shared facts and citations are permanent)
     - L3: 90-day half-life (interpretations age slowly)
     - L4: 30-day half-life (predictions age fast)
@@ -1478,66 +1478,50 @@ def query_stale_edges(
     Returns:
         List of stale edge records with original and effective confidence.
     """
-    from datetime import datetime, timezone
-
     defaults = {"L1": float("inf"), "L2": float("inf"), "L3": 90.0, "L4": 30.0}
     if half_life_days:
         defaults.update(half_life_days)
-    half_lives = defaults
 
-    now = datetime.now(timezone.utc)
+    when_clauses = " ".join(
+        f"WHEN '{k}' THEN {999999.0 if v == float('inf') or v <= 0 else v}"
+        for k, v in defaults.items()
+    )
+    hl_case = f"CASE layer {when_clauses} ELSE 90.0 END"
 
-    # Get all edges with their layer and creation time
-    result = conn.execute("""
-        SELECT id, from_node, to_node, layer, edge_type, confidence,
-               created_by, created_at, challenge_of
-        FROM ohm_edges
-        ORDER BY created_at ASC
-    """)
+    result = conn.execute(f"""
+        WITH decayed AS (
+            SELECT
+                id, from_node, to_node, layer, edge_type,
+                created_by, confidence, created_at, challenge_of,
+                {hl_case} AS half_life,
+                GREATEST(date_diff('day', created_at, CURRENT_TIMESTAMP), 0)::DOUBLE AS age_days,
+                COALESCE(confidence, 1.0) * power(0.5,
+                    GREATEST(date_diff('day', created_at, CURRENT_TIMESTAMP), 0)::DOUBLE /
+                    {hl_case}
+                ) AS effective_confidence,
+                power(0.5,
+                    GREATEST(date_diff('day', created_at, CURRENT_TIMESTAMP), 0)::DOUBLE /
+                    {hl_case}
+                ) AS decay_factor
+            FROM ohm_edges
+            WHERE created_at IS NOT NULL
+              AND (deleted_at IS NULL OR deleted_at = '')
+              AND {hl_case} > 0
+              AND {hl_case} < 999999.0
+        )
+        SELECT * FROM decayed
+        WHERE effective_confidence < ?
+        ORDER BY effective_confidence ASC
+    """, [stale_threshold])
 
-    edges = _rows_to_dicts(result)
-    stale = []
+    rows = _rows_to_dicts(result)
 
-    for edge in edges:
-        layer = edge.get("layer", "L3")
-        hl = half_lives.get(layer, 90.0)
+    for edge in rows:
+        edge["effective_confidence"] = round(edge["effective_confidence"], 4)
+        edge["decay_factor"] = round(edge["decay_factor"], 4)
+        edge["age_days"] = round(edge["age_days"], 1)
 
-        # L1/L2 never decay
-        if hl == float("inf") or hl <= 0:
-            continue
-
-        created_at = edge.get("created_at")
-        if created_at is None:
-            continue
-
-        # Parse timestamp
-        if isinstance(created_at, str):
-            try:
-                created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-            except (ValueError, TypeError):
-                continue
-
-        # Calculate age in days
-        if hasattr(created_at, "tzinfo") and created_at.tzinfo is None:
-            created_at = created_at.replace(tzinfo=timezone.utc)
-
-        age_days = (now - created_at).total_seconds() / 86400
-        if age_days < 0:
-            age_days = 0
-
-        # Decay formula: effective = confidence * 0.5^(age/half_life)
-        original_conf = edge.get("confidence", 1.0) or 1.0
-        decay_factor = 0.5 ** (age_days / hl)
-        effective_conf = original_conf * decay_factor
-
-        edge["effective_confidence"] = round(effective_conf, 4)
-        edge["decay_factor"] = round(decay_factor, 4)
-        edge["age_days"] = round(age_days, 1)
-
-        if effective_conf < stale_threshold:
-            stale.append(edge)
-
-    return stale
+    return rows
 
 
 def apply_confidence_decay(
