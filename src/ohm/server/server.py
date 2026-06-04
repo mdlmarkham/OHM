@@ -748,7 +748,15 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
         return agent
 
     def _json_response(self, code: int, data):
-        """Send a JSON response."""
+        """Send a JSON response.
+
+        If _buffer_json_response is True (set by _do_GET when post_query
+        hooks are active), the response is buffered so post_query hooks
+        can decorate it before sending.
+        """
+        if getattr(self, "_buffer_json_response", False):
+            self._json_response_buffer = (code, data)
+            return
         body = json.dumps(data, indent=2, default=str).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -1657,6 +1665,11 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
                 # Public-read model: unauthenticated reads allowed
                 agent = "ohm"
 
+        # pre_query hooks — can modify qs or block with 403
+        qs = self._run_pre_query_hooks(agent, path, qs)
+        if qs is None:
+            return
+
         method_name = self._GET_EXACT.get(path)
         if method_name is None:
             for prefix, mn in self._GET_PREFIXES:
@@ -1664,9 +1677,83 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
                     method_name = mn
                     break
         if method_name:
+            has_post_query = self._has_post_query_hooks()
+            if has_post_query:
+                self._buffer_json_response = True
+                self._json_response_buffer = None
             getattr(self, method_name)(path, qs)
+            if has_post_query:
+                buf = getattr(self, "_json_response_buffer", None)
+                if buf is not None:
+                    code, data = buf
+                    decorated = self._run_post_query_hooks(agent, path, qs, data)
+                    self._buffer_json_response = False
+                    self._json_response(code, decorated)
+                else:
+                    self._buffer_json_response = False
+            else:
+                pass
         else:
             self._json_response(404, {"error": f"Unknown endpoint: {path}"})
+
+    def _run_pre_query_hooks(self, agent: str, path: str, qs: dict) -> dict | None:
+        """Run pre_query hooks. Returns modified qs, or None if blocked (403 sent)."""
+        from ohm.hooks import HookRunner
+
+        runner = HookRunner(self.current_store.conn)
+        results = runner.run_hooks("pre_query", {"agent": agent, "path": path, "query_params": qs})
+        for r in results:
+            if not r.success:
+                self._json_response(403, {
+                    "error": "hook_rejected",
+                    "hook_id": r.hook_id,
+                    "exit_code": r.exit_code,
+                    "message": r.stderr or "Query blocked by hook",
+                    "timed_out": r.timed_out,
+                })
+                return None
+            if r.success and r.stdout.strip():
+                try:
+                    override = json.loads(r.stdout.strip())
+                    if isinstance(override, dict) and "query_params" in override:
+                        qs.update(override["query_params"])
+                except json.JSONDecodeError:
+                    pass
+        return qs
+
+    def _has_post_query_hooks(self) -> bool:
+        """Check if any post_query hooks are registered."""
+        from ohm.hooks import HookRunner
+
+        try:
+            runner = HookRunner(self.current_store.conn)
+            return len(runner.get_hooks("post_query")) > 0
+        except Exception:
+            return False
+
+    def _run_post_query_hooks(self, agent: str, path: str, qs: dict, data: dict) -> dict:
+        """Run post_query hooks. Merge JSON stdout into response under hook_decorations."""
+        from ohm.hooks import HookRunner
+
+        runner = HookRunner(self.current_store.conn)
+        results = runner.run_hooks("post_query", {"agent": agent, "path": path, "query_params": qs, "response_body": data})
+        decorations = {}
+        for r in results:
+            if r.success and r.stdout.strip():
+                try:
+                    merge = json.loads(r.stdout.strip())
+                    if isinstance(merge, dict):
+                        decorations.update(merge)
+                except json.JSONDecodeError:
+                    pass
+            elif not r.success:
+                logging.getLogger(__name__).warning(
+                    "post_query hook %s failed (exit_code=%d): %s",
+                    r.hook_id, r.exit_code, r.stderr,
+                )
+        if decorations:
+            data["hook_decorations"] = decorations
+        return data
 
     # ── Authenticated GET handlers ────────────────────────────
 

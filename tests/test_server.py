@@ -1734,3 +1734,48 @@ class TestHookEndpoints:
         status, data = _request("POST", port, "/node", body={"id": "n4", "label": "decorated", "type": "concept"})
         assert status == 201
         assert data.get("hook_decorations", {}).get("decorated") is True
+
+
+class TestPreQueryPostQueryHooks:
+    """Tests for pre_query/post_query hooks wired into GET handlers (OHM-aznh.10)."""
+
+    def test_pre_query_hook_blocks_with_403(self, test_server):
+        port, _ = test_server
+        _request("POST", port, "/hooks", body={"event": "pre_query", "command": "exit 1"})
+        status, data = _request("GET", port, "/stats")
+        assert status == 403
+        assert data["error"] == "hook_rejected"
+
+    def test_pre_query_hook_allows_when_passing(self, test_server):
+        port, _ = test_server
+        _request("POST", port, "/hooks", body={"event": "pre_query", "command": "echo ok"})
+        status, data = _request("GET", port, "/stats")
+        assert status == 200
+
+    def test_pre_query_hook_modifies_query_params(self, test_server):
+        port, _ = test_server
+        _request("POST", port, "/node", body={"id": "n1", "label": "test", "type": "concept"})
+        cmd = "python -c \"import sys,json; sys.stdout.write(json.dumps({'query_params': {'limit': ['1']}}))\""
+        _request("POST", port, "/hooks", body={"event": "pre_query", "command": cmd})
+        status, data = _request("GET", port, "/nodes")
+        assert status == 200
+
+    def test_post_query_hook_decorates_response(self, test_server):
+        port, _ = test_server
+        cmd = "python -c \"import sys,json; sys.stdout.write(json.dumps({'enriched': True}))\""
+        _request("POST", port, "/hooks", body={"event": "post_query", "command": cmd})
+        status, data = _request("GET", port, "/stats")
+        assert status == 200
+        assert data.get("hook_decorations", {}).get("enriched") is True
+
+    def test_post_query_hook_failure_does_not_block(self, test_server):
+        port, _ = test_server
+        _request("POST", port, "/hooks", body={"event": "post_query", "command": "exit 1"})
+        status, data = _request("GET", port, "/stats")
+        assert status == 200
+
+    def test_no_query_hooks_normal_operation(self, test_server):
+        port, _ = test_server
+        status, data = _request("GET", port, "/stats")
+        assert status == 200
+        assert "hook_decorations" not in data
