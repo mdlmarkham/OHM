@@ -14,6 +14,49 @@ class GraphHandlerMixin:
     and batch operations.
     """
 
+    def _run_pre_ingest_hooks(self, agent: str, action: str, body: dict) -> dict | None:
+        """Run pre_ingest hooks. Return error dict if any hook rejects, else None."""
+        from ohm.hooks import HookRunner
+
+        runner = HookRunner(self.current_store.conn)
+        results = runner.run_hooks("pre_ingest", {"agent": agent, "action": action, "body": body})
+        for r in results:
+            if not r.success:
+                return {
+                    "error": "hook_rejected",
+                    "hook_id": r.hook_id,
+                    "exit_code": r.exit_code,
+                    "message": r.stderr or "Hook rejected the operation",
+                    "timed_out": r.timed_out,
+                }
+        return None
+
+    def _run_post_ingest_hooks(self, agent: str, action: str, result: dict) -> dict:
+        """Run post_ingest hooks. Return hook_decorations dict if any hook provides JSON stdout."""
+        import json
+
+        from ohm.hooks import HookRunner
+
+        runner = HookRunner(self.current_store.conn)
+        results = runner.run_hooks("post_ingest", {"agent": agent, "action": action, "result": result})
+        decorations = {}
+        for r in results:
+            if r.success and r.stdout.strip():
+                try:
+                    merge = json.loads(r.stdout.strip())
+                    if isinstance(merge, dict):
+                        decorations.update(merge)
+                except json.JSONDecodeError:
+                    pass
+            elif not r.success:
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "post_ingest hook %s failed (exit_code=%d): %s",
+                    r.hook_id, r.exit_code, r.stderr,
+                )
+        return decorations
+
     def _get_stats(self, path: str, qs: dict) -> None:
         """GET /stats — graph statistics."""
         from ohm.queries import query_stats
@@ -565,6 +608,11 @@ class GraphHandlerMixin:
             self._json_response(422, cross_link_error)
             return
 
+        hook_error = self._run_pre_ingest_hooks(agent, "node", body)
+        if hook_error is not None:
+            self._json_response(422, hook_error)
+            return
+
         result = self.current_store.write_node(
             id=body["id"],
             label=body["label"],
@@ -588,6 +636,9 @@ class GraphHandlerMixin:
             agent_name=agent,
         )
         event_type = "node.created" if result.get("created") else "node.updated"
+        decorations = self._run_post_ingest_hooks(agent, "node", result)
+        if decorations:
+            result["hook_decorations"] = decorations
         _server_module._trigger_webhooks(
             {
                 "type": event_type,
@@ -630,6 +681,11 @@ class GraphHandlerMixin:
 
     def _post_edge(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /edge — create an edge."""
+        hook_error = self._run_pre_ingest_hooks(agent, "edge", body)
+        if hook_error is not None:
+            self._json_response(422, hook_error)
+            return
+
         result = self.current_store.write_edge(
             from_node=body["from"],
             to_node=body["to"],
@@ -650,6 +706,9 @@ class GraphHandlerMixin:
             confidence_p95=body.get("confidence_p95"),
             agent_name=agent,
         )
+        decorations = self._run_post_ingest_hooks(agent, "edge", result)
+        if decorations:
+            result["hook_decorations"] = decorations
         _server_module._trigger_webhooks(
             {
                 "type": "edge.created",

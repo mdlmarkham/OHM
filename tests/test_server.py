@@ -1689,3 +1689,48 @@ class TestHookEndpoints:
         port, _ = auth_server
         status, _ = _request("POST", port, "/hooks", body={"event": "pre_ingest", "command": "echo"}, token="readonly-token")
         assert status == 403
+
+    def test_pre_ingest_hook_allows_node_creation(self, test_server):
+        port, store = test_server
+        _request("POST", port, "/hooks", body={"event": "pre_ingest", "command": "echo ok"})
+        status, data = _request("POST", port, "/node", body={"id": "n1", "label": "test", "type": "concept"})
+        assert status == 201
+
+    def test_pre_ingest_hook_rejects_node_creation(self, test_server):
+        port, store = test_server
+        _request("POST", port, "/hooks", body={"event": "pre_ingest", "command": "exit 1"})
+        status, data = _request("POST", port, "/node", body={"id": "n2", "label": "rejected", "type": "concept"})
+        assert status == 422
+        assert data["error"] == "hook_rejected"
+
+    def test_pre_ingest_hook_allows_edge_creation(self, test_server):
+        port, store = test_server
+        _request("POST", port, "/hooks", body={"event": "pre_ingest", "command": "echo ok"})
+        _request("POST", port, "/node", body={"id": "from1", "label": "from", "type": "concept"})
+        _request("POST", port, "/node", body={"id": "to1", "label": "to", "type": "concept"})
+        status, data = _request("POST", port, "/edge", body={"from": "from1", "to": "to1", "type": "SUPPORTS", "layer": "L3"})
+        assert status == 201
+
+    def test_pre_ingest_hook_rejects_edge_creation(self, test_server):
+        port, store = test_server
+        _request("POST", port, "/hooks", body={"event": "pre_ingest", "command": "exit 1"})
+        _request("POST", port, "/node", body={"id": "from2", "label": "from", "type": "concept"})
+        _request("POST", port, "/node", body={"id": "to2", "label": "to", "type": "concept"})
+        status, data = _request("POST", port, "/edge", body={"from": "from2", "to": "to2", "type": "SUPPORTS", "layer": "L3"})
+        assert status == 422
+        assert data["error"] == "hook_rejected"
+
+    def test_no_hooks_normal_operation(self, test_server):
+        port, store = test_server
+        status, data = _request("POST", port, "/node", body={"id": "n3", "label": "normal", "type": "concept"})
+        assert status == 201
+
+    def test_post_ingest_hook_decorates_response(self, test_server):
+        import sys
+
+        port, store = test_server
+        cmd = 'python -c "import sys,json; sys.stdout.write(json.dumps({chr(100)+chr(101)+chr(99)+chr(111)+chr(114)+chr(97)+chr(116)+chr(101)+chr(100): True}))"'
+        _request("POST", port, "/hooks", body={"event": "post_ingest", "command": cmd})
+        status, data = _request("POST", port, "/node", body={"id": "n4", "label": "decorated", "type": "concept"})
+        assert status == 201
+        assert data.get("hook_decorations", {}).get("decorated") is True
