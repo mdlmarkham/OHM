@@ -69,3 +69,104 @@ Strong agent identifies patterns from clusters of 3+ assessed items. Expensive b
 Queue directories: `/var/lib/ohm/ingestion/{raw,triage_pass,triage_fail,source_created,assessed}`
 
 CLI: `python3 ingestion_pipeline.py --stage {fetch|triage|source|assess|full|queue-status|drain-triage}`
+
+## Hook Architecture (OHM-aznh)
+
+The staged pipeline is extended with a deterministic hook system that runs
+before and after graph writes and reads. Hooks are registered in the
+`ohm_hooks` table and executed by `HookRunner`.
+
+### Hook Lifecycle
+
+```
+pre_ingest → [WRITE] → post_ingest
+pre_query  → [READ]  → post_query
+```
+
+For writes (POST /node, POST /edge):
+1. `pre_ingest` hooks run. Any non-zero exit aborts the write (422).
+2. The write executes.
+3. `post_ingest` hooks run. JSON stdout merged into `hook_decorations`.
+   Failures logged but do NOT abort.
+
+For reads (GET endpoints):
+1. `pre_query` hooks run. Any non-zero exit returns 403 (query blocked).
+   JSON stdout can override `query_params`.
+2. The query handler executes.
+3. `post_query` hooks run. JSON stdout merged into `hook_decorations`.
+   Failures logged but do NOT block the response.
+
+### Hook Events
+
+| Event | Trigger | Can abort? | Stdout effect |
+|-------|---------|-----------|---------------|
+| `pre_ingest` | Before POST /node, /edge | Yes (422) | Ignored |
+| `post_ingest` | After successful write | No | Merged as `hook_decorations` |
+| `pre_query` | Before GET handler | Yes (403) | `query_params` override |
+| `post_query` | After GET handler | No | Merged as `hook_decorations` |
+
+### Hook Registration
+
+- `POST /hooks` — Register a hook (event, command, timeout_ms, created_by)
+- `GET /hooks` — List hooks (filter by event)
+- `DELETE /hooks/{id}` — Remove a hook
+
+### Hook Payloads
+
+**pre_ingest / post_ingest:**
+```json
+{
+  "agent": "metis",
+  "action": "node" | "edge",
+  "body": { /* node or edge body */ },
+  "__conn": "<DuckDB connection, python: hooks only>"
+}
+```
+
+**pre_query / post_query:**
+```json
+{
+  "agent": "metis",
+  "path": "/stats",
+  "query_params": { /* parsed query string */ },
+  "response_body": { /* post_query only */ },
+  "__conn": "<DuckDB connection, python: hooks only>"
+}
+```
+
+### Exit Code Semantics
+
+- `0` — Pass (no action; stdout may carry decorations)
+- Non-zero — Reject (pre hooks abort the operation; post hooks log warning)
+- `124` — Timeout (hook exceeded `timeout_ms`)
+- `127` — Command not found (shell hooks only)
+
+### Hook Types
+
+**Shell hooks:** `command` is a shell command. Payload written to stdin as JSON.
+stdout/stderr captured. Timeout enforced via `subprocess.Popen`.
+
+**Python hooks:** `command` starts with `python:`. The module is imported and
+the named function called directly. Signature: `def hook(payload: dict) -> tuple[int, str, str]`.
+The `__conn` key is injected into the payload for DB access.
+
+### Built-in Hooks (`ohm.hooks_builtin`)
+
+| Hook | Event | Purpose |
+|------|-------|---------|
+| `cross_link_check` | pre_ingest | Rejects derived-claim nodes without `connects_to` (ADR-018) |
+| `source_url_required` | pre_ingest | Rejects source nodes without `source_url` |
+| `rate_limit` | pre_ingest | Per-agent write rate limiting |
+
+### Audit Trail
+
+All hook invocations are logged to `ohm_hook_log` with:
+- hook_id, event, payload, exit_code, stdout, stderr, duration_ms, timed_out
+
+### Security Model
+
+- Shell hooks run in the host environment (no sandbox yet — OHM-aznh.8)
+- Python hooks run in-process with full DB access
+- `__conn` injection is only available to `python:` prefix hooks
+- Hook execution is synchronous — slow hooks block the request
+- Timeout enforcement prevents runaway hooks
