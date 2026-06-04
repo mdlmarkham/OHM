@@ -221,7 +221,8 @@ class HookRunner:
         try:
             mod = importlib.import_module(module_path)
             func = getattr(mod, func_name)
-            exit_code, stdout, stderr = func(payload)
+            enriched = {**payload, "__conn": self._conn}
+            exit_code, stdout, stderr = func(enriched)
             duration_ms = (time.monotonic() - start) * 1000
             return HookResult(
                 hook_id=hook.id,

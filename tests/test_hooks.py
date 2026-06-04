@@ -393,3 +393,119 @@ class TestHookInvocationLog:
         runner.run_hook(hook, {})
         rows = test_db.execute("SELECT COUNT(*) FROM ohm_hook_log").fetchone()
         assert rows[0] == 2
+
+
+class TestPythonCallableHooks:
+    """Tests for python: prefix hooks and builtin implementations (OHM-aznh.9)."""
+
+    def test_python_hook_receives_conn(self, test_db):
+        hook = HookRecord(id="py1", event="pre_ingest", command="python:ohm.hooks_builtin.cross_link_check")
+        runner = HookRunner(test_db)
+        result = runner.run_hook(hook, {"body": {"type": "concept"}})
+        assert result.exit_code == 0
+
+    def test_cross_link_check_exempt_type(self, test_db):
+        from ohm.hooks_builtin import cross_link_check
+
+        exit_code, stdout, stderr = cross_link_check({"body": {"type": "source"}})
+        assert exit_code == 0
+
+    def test_cross_link_check_passes_with_connects_to(self, test_db):
+        from ohm.hooks_builtin import cross_link_check
+
+        test_db.execute("INSERT INTO ohm_nodes (id, label, type, created_by) VALUES (?, ?, ?, ?)", ["n1", "Anchor", "concept", "test"])
+        exit_code, stdout, stderr = cross_link_check({
+            "body": {"type": "pattern", "id": "p1", "connects_to": ["n1"]},
+            "__conn": test_db,
+        })
+        assert exit_code == 0
+
+    def test_cross_link_check_rejects_bare_pattern(self, test_db):
+        from ohm.hooks_builtin import cross_link_check
+
+        exit_code, stdout, stderr = cross_link_check({
+            "body": {"type": "pattern", "id": "p2"},
+            "__conn": test_db,
+        })
+        assert exit_code == 1
+        assert "cross_link_required" in stderr
+
+    def test_cross_link_check_rejects_unknown_target(self, test_db):
+        from ohm.hooks_builtin import cross_link_check
+
+        exit_code, stdout, stderr = cross_link_check({
+            "body": {"type": "pattern", "id": "p3", "connects_to": ["nonexistent"]},
+            "__conn": test_db,
+        })
+        assert exit_code == 1
+        assert "unknown" in stderr.lower()
+
+    def test_cross_link_check_allows_existing_node_update(self, test_db):
+        from ohm.hooks_builtin import cross_link_check
+
+        test_db.execute("INSERT INTO ohm_nodes (id, label, type, created_by) VALUES (?, ?, ?, ?)", ["p4", "Old", "pattern", "test"])
+        exit_code, stdout, stderr = cross_link_check({
+            "body": {"type": "pattern", "id": "p4"},
+            "__conn": test_db,
+        })
+        assert exit_code == 0
+
+    def test_cross_link_check_invalid_connects_to_type(self, test_db):
+        from ohm.hooks_builtin import cross_link_check
+
+        exit_code, stdout, stderr = cross_link_check({
+            "body": {"type": "pattern", "id": "p5", "connects_to": "not-a-list"},
+            "__conn": test_db,
+        })
+        assert exit_code == 1
+        assert "list" in stderr
+
+    def test_source_url_required_passes(self, test_db):
+        from ohm.hooks_builtin import source_url_required
+
+        exit_code, stdout, stderr = source_url_required({
+            "body": {"type": "source", "source_url": "https://example.com"},
+        })
+        assert exit_code == 0
+
+    def test_source_url_required_rejects_missing(self, test_db):
+        from ohm.hooks_builtin import source_url_required
+
+        exit_code, stdout, stderr = source_url_required({
+            "body": {"type": "source"},
+        })
+        assert exit_code == 1
+        assert "source_url" in stderr
+
+    def test_source_url_required_skips_non_source(self, test_db):
+        from ohm.hooks_builtin import source_url_required
+
+        exit_code, stdout, stderr = source_url_required({
+            "body": {"type": "concept"},
+        })
+        assert exit_code == 0
+
+    def test_python_hook_invalid_module(self, test_db):
+        hook = HookRecord(id="py2", event="pre_ingest", command="python:nonexistent.module.func")
+        runner = HookRunner(test_db)
+        result = runner.run_hook(hook, {})
+        assert result.exit_code == 1
+
+    def test_python_hook_invalid_format(self, test_db):
+        hook = HookRecord(id="py3", event="pre_ingest", command="python:nofunc")
+        runner = HookRunner(test_db)
+        result = runner.run_hook(hook, {})
+        assert result.exit_code == 1
+        assert "Invalid" in result.stderr
+
+    def test_builtin_cross_link_via_hook_runner(self, test_db):
+        test_db.execute("INSERT INTO ohm_nodes (id, label, type, created_by) VALUES (?, ?, ?, ?)", ["n2", "Base", "concept", "test"])
+        test_db.execute(
+            "INSERT INTO ohm_hooks (id, event, command, created_by) VALUES (?, ?, ?, ?)",
+            ["h-cl", "pre_ingest", "python:ohm.hooks_builtin.cross_link_check", "metis"],
+        )
+        runner = HookRunner(test_db)
+        hooks = runner.get_hooks("pre_ingest")
+        assert len(hooks) == 1
+        result = runner.run_hook(hooks[0], {"body": {"type": "pattern", "id": "p10", "connects_to": ["n2"]}})
+        assert result.success
