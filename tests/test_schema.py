@@ -643,3 +643,52 @@ class TestHealthcareSchema:
     def test_healthcare_module_constant(self):
         from ohm.schema import HEALTHCARE_SCHEMA
         assert HEALTHCARE_SCHEMA.name == "healthcare"
+
+
+class TestHookRegistryTable:
+    """Tests for ohm_hooks table (OHM-aznh.1)."""
+
+    def test_hooks_table_exists(self, test_db):
+        """ohm_hooks table exists after schema initialization."""
+        tables = test_db.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'").fetchall()
+        table_names = {row[0] for row in tables}
+        assert "ohm_hooks" in table_names
+
+    def test_hooks_table_columns(self, test_db):
+        """ohm_hooks has all required columns."""
+        columns = test_db.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'ohm_hooks'"
+        ).fetchall()
+        col_names = {row[0] for row in columns}
+        assert "id" in col_names
+        assert "event" in col_names
+        assert "command" in col_names
+        assert "timeout_ms" in col_names
+        assert "enabled" in col_names
+        assert "created_by" in col_names
+        assert "created_at" in col_names
+        assert "updated_at" in col_names
+
+    def test_hooks_index_exists(self, test_db):
+        """idx_hooks_event_enabled index exists."""
+        indexes = test_db.execute("SELECT index_name FROM duckdb_indexes()").fetchall()
+        index_names = {row[0] for row in indexes}
+        assert "idx_hooks_event_enabled" in index_names
+
+    def test_insert_hook(self, test_db):
+        """Can insert a hook record."""
+        test_db.execute(
+            "INSERT INTO ohm_hooks (event, command, created_by) VALUES (?, ?, ?)",
+            ["pre_ingest", "echo ok", "test"],
+        )
+        rows = test_db.execute("SELECT event, command, enabled, timeout_ms FROM ohm_hooks").fetchall()
+        assert len(rows) == 1
+        assert rows[0][0] == "pre_ingest"
+        assert rows[0][1] == "echo ok"
+        assert rows[0][2] is True
+        assert rows[0][3] == 5000
+
+    def test_migration_v0_21_0(self, test_db):
+        """Migration 0.21.0 creates ohm_hooks on existing DB."""
+        from ohm.schema import SCHEMA_VERSION
+        assert SCHEMA_VERSION == "0.21.0"

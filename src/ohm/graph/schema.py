@@ -842,11 +842,26 @@ DDL_STATEMENTS: list[str] = [
         created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """,
+    # ── Hook Registry (OHM-aznh) ───────────────────────────────────────
+    # Registered shell/Python hooks for the staged ingestion pipeline.
+    # Hooks run at pre_ingest, post_ingest, pre_query, post_query events.
+    """
+    CREATE TABLE IF NOT EXISTS ohm_hooks (
+        id          VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        event       VARCHAR NOT NULL,
+        command     VARCHAR NOT NULL,
+        timeout_ms  INTEGER DEFAULT 5000,
+        enabled     BOOLEAN DEFAULT TRUE,
+        created_by  VARCHAR NOT NULL,
+        created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """,
 ]
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.20.0"
+SCHEMA_VERSION = "0.21.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -1054,6 +1069,23 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             "CREATE INDEX IF NOT EXISTS idx_discovery_queue_status ON ohm_discovery_queue(status)",
         ],
     ),
+    (
+        "0.21.0",
+        "add hook registry table for staged ingestion pipeline (OHM-aznh)",
+        [
+            """CREATE TABLE IF NOT EXISTS ohm_hooks (
+            id          VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+            event       VARCHAR NOT NULL,
+            command     VARCHAR NOT NULL,
+            timeout_ms  INTEGER DEFAULT 5000,
+            enabled     BOOLEAN DEFAULT TRUE,
+            created_by  VARCHAR NOT NULL,
+            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+            "CREATE INDEX IF NOT EXISTS idx_hooks_event_enabled ON ohm_hooks(event, enabled)",
+        ],
+    ),
 ]
 
 # ── Indexes ─────────────────────────────────────────────────────────────────
@@ -1085,6 +1117,8 @@ INDEX_DDL: list[str] = [
     # Source reliability indexes
     "CREATE INDEX IF NOT EXISTS idx_outcomes_source ON ohm_outcomes(source_agent);",
     "CREATE INDEX IF NOT EXISTS idx_outcomes_claim ON ohm_outcomes(claim_node);",
+    # Hook registry index
+    "CREATE INDEX IF NOT EXISTS idx_hooks_event_enabled ON ohm_hooks(event, enabled);",
 ]
 
 
