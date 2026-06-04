@@ -2529,51 +2529,55 @@ def _max_edge_pert_variance_toward(
 ) -> float | None:
     """Find the maximum PERT variance among edges along any path from source to target.
 
-    Uses BFS to explore ALL paths from source to target following forward adjacency
-    (cause → effect). For each path, takes the max PERT variance across all edges.
-    Returns the maximum across all valid paths, or None if no path has any PERT data.
+    Uses BFS with memoized DP to find the maximum edge variance along any valid
+    path. A path only contributes if ALL edges on it have PERT variance data.
 
-    A path only contributes if ALL edges on it have PERT variance (otherwise
-    the uncertainty falls back to 1 - confidence).
+    For each node, we track two things via BFS:
+    - best_max_var: the maximum edge variance seen along any all-pert path reaching it
+    - all_have_pert: whether every edge on that best path has PERT data
 
-    Note: No visited set — in DAGs with multiple paths to the same target
-    (diamond/multi-path graphs), a visited set would prune alternative paths
-    and underestimate max variance. A depth limit prevents infinite loops.
+    We keep exploring when a new path yields a higher max variance than the
+    current best for that node. Complexity: O(V + E) amortized instead of
+    exponential path enumeration.
     """
     from collections import deque
 
-    max_depth = len(forward_adj) + 2  # prevent infinite loops in cyclic graphs
-    queue = deque([(source, [source], True)])  # (node, path, all_edges_have_pert)
-    best_variance: float | None = None
+    _MAX_DEPTH = 10
+
+    # best[node] = (max_edge_var, all_have_pert) — best path reaching this node
+    best: dict[str, tuple[float, bool]] = {}
+    best[source] = (0.0, True)
+
+    queue: deque[tuple[str, float, bool, int]] = deque([(source, 0.0, True, 0)])
 
     while queue:
-        node, path, all_have_pert = queue.popleft()
-        if node == target:
+        node, max_var, all_have_pert, depth = queue.popleft()
+        if depth >= _MAX_DEPTH:
             continue
 
-        if len(path) > max_depth:
+        current_best = best.get(node)
+        if current_best is not None and (current_best[0] > max_var or (current_best[0] == max_var and current_best[1] and not all_have_pert)):
             continue
 
         for neighbor in forward_adj.get(node, []):
             edge_var = edge_pert_variance.get((node, neighbor), None)
             new_all_have_pert = all_have_pert and (edge_var is not None)
 
-            if neighbor == target:
-                if new_all_have_pert and edge_var is not None:
-                    path_edges = []
-                    for i in range(len(path) - 1):
-                        e = edge_pert_variance.get((path[i], path[i + 1]), None)
-                        if e is not None:
-                            path_edges.append(e)
-                    path_edges.append(edge_var)
-                    if path_edges:
-                        path_max = max(path_edges)
-                        if best_variance is None or path_max > best_variance:
-                            best_variance = path_max
-            elif neighbor not in path:  # prevent cycles, not alternative paths
-                queue.append((neighbor, path + [neighbor], new_all_have_pert))
+            if edge_var is not None:
+                new_max_var = max(max_var, edge_var)
+            else:
+                new_max_var = max_var
 
-    return best_variance
+            prev = best.get(neighbor)
+            improved = prev is None or new_max_var > prev[0] or (new_max_var == prev[0] and new_all_have_pert and not prev[1])
+            if improved:
+                best[neighbor] = (new_max_var, new_all_have_pert)
+                queue.append((neighbor, new_max_var, new_all_have_pert, depth + 1))
+
+    target_entry = best.get(target)
+    if target_entry is not None and target_entry[1]:
+        return target_entry[0] if target_entry[0] > 0.0 else None
+    return None
 
 
 def _path_confidence(

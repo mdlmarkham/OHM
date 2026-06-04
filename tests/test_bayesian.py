@@ -1698,6 +1698,35 @@ class TestVoIPertVarianceScaling:
         b_d_var = edge_pert_variance[(b, d)]
         assert result == c_d_var, f"Should find C→D variance ({c_d_var:.4f}) as max, got {result:.4f} (B→D was {b_d_var:.4f})"
 
+    def test_no_exponential_explosion_on_wide_diamond(self):
+        """OHM-od01.7: _max_edge_pert_variance_toward must complete in <1s
+        on a wide diamond graph that would cause exponential path enumeration
+        with the old BFS (max_depth = len(adj)+2, no visited set)."""
+        import time
+
+        from ohm.bayesian import _max_edge_pert_variance_toward
+        from ohm.pert import scale_pert_variance
+
+        # Build a wide diamond: source→20 intermediates→target
+        # Old BFS: 2^20 paths. New BFS: O(V+E).
+        source = "S"
+        target = "T"
+        n_intermediates = 20
+        forward_adj = {source: [f"M{i}" for i in range(n_intermediates)]}
+        edge_pert_variance = {}
+        for i in range(n_intermediates):
+            mid = f"M{i}"
+            forward_adj[mid] = [target]
+            edge_pert_variance[(source, mid)] = scale_pert_variance(0.1)
+            edge_pert_variance[(mid, target)] = scale_pert_variance(0.5 + i * 0.025)
+
+        start = time.monotonic()
+        result = _max_edge_pert_variance_toward(source, target, forward_adj, edge_pert_variance)
+        elapsed = time.monotonic() - start
+
+        assert result is not None, "Should find a path with PERT variance"
+        assert elapsed < 1.0, f"BFS should be fast, took {elapsed:.3f}s (exponential hang?)"
+
 
 class TestTemporalDecay:
     """Temporal decay weighting in Bayesian inference (OHM-31)."""

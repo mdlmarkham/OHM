@@ -2054,23 +2054,39 @@ class Graph:
         # Filter by topics if specified
         if topics:
             topic_labels = set(t.lower() for t in topics)
+
+            node_ids = [c.get("row_id", "") for c in changes if c.get("row_id", "")]
+            node_label_map: dict[str, str] = {}
+            edge_target_map: dict[str, str] = {}
+            if node_ids:
+                placeholders = ",".join(["?"] * len(node_ids))
+                rows = self._conn.execute(
+                    f"SELECT id, label FROM ohm_nodes WHERE id IN ({placeholders})",
+                    node_ids,
+                ).fetchall()
+                node_label_map = {r[0]: r[1] for r in rows if r[1]}
+
+                edge_rows = self._conn.execute(
+                    f"SELECT e.id, n.label FROM ohm_edges e JOIN ohm_nodes n ON n.id = e.to_node WHERE e.id IN ({placeholders})",
+                    node_ids,
+                ).fetchall()
+                edge_target_map = {r[0]: r[1] for r in edge_rows if r[1]}
+
             filtered = []
+            seen = set()
             for change in changes:
                 row_id = change.get("row_id", "")
-                # Check if the changed node/edge relates to a topic
-                node_label = self._conn.execute(
-                    "SELECT label FROM ohm_nodes WHERE id = ?",
-                    [row_id],
-                ).fetchone()
-                if node_label and any(t in node_label[0].lower() for t in topic_labels):
+                if row_id in seen:
+                    continue
+                label = node_label_map.get(row_id, "")
+                if label and any(t in label.lower() for t in topic_labels):
                     filtered.append(change)
-                # Also check edges — target node might be a topic
-                edge_target = self._conn.execute(
-                    "SELECT n.label FROM ohm_edges e JOIN ohm_nodes n ON n.id = e.to_node WHERE e.id = ?",
-                    [row_id],
-                ).fetchone()
-                if edge_target and any(t in edge_target[0].lower() for t in topic_labels):
+                    seen.add(row_id)
+                    continue
+                target_label = edge_target_map.get(row_id, "")
+                if target_label and any(t in target_label.lower() for t in topic_labels):
                     filtered.append(change)
+                    seen.add(row_id)
             changes = filtered
 
         # Filter by multiple agents if specified
@@ -2153,13 +2169,15 @@ class Graph:
 
         # Query urgency for those edges
         urgent_edge_ids = set()
+        urgency_map: dict[str, str] = {}
         if edge_ids:
             placeholders = ",".join(["?"] * len(edge_ids))
             rows = self._conn.execute(
-                f"SELECT id FROM ohm_edges WHERE id IN ({placeholders}) AND urgency IN ({','.join(['?'] * len(urgency_filter))})",
+                f"SELECT id, urgency FROM ohm_edges WHERE id IN ({placeholders}) AND urgency IN ({','.join(['?'] * len(urgency_filter))})",
                 edge_ids + list(urgency_filter),
             ).fetchall()
             urgent_edge_ids = {row[0] for row in rows}
+            urgency_map = {row[0]: row[1] for row in rows if row[1]}
 
         # Filter changes to those involving urgent edges
         result = []
@@ -2167,10 +2185,7 @@ class Graph:
             row_id = change.get("row_id", "")
             table = change.get("table_name", "")
             if table == "ohm_edges" and row_id in urgent_edge_ids:
-                change["urgency"] = next(
-                    (r[1] for r in self._conn.execute("SELECT id, urgency FROM ohm_edges WHERE id = ?", [row_id]).fetchall() if r[1] in urgency_filter),
-                    "unknown",
-                )
+                change["urgency"] = urgency_map.get(row_id, "unknown")
                 result.append(change)
 
         return result[:limit]

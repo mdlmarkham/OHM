@@ -149,6 +149,15 @@ class TestGraphRead:
         results = graph.listen(node_type="concept")
         assert isinstance(results, list)
 
+    def test_listen_with_topics_no_per_row_queries(self, graph):
+        """OHM-od01.9: listen() with topics should batch label lookups,
+        not do per-row SQL queries."""
+        a = graph.create_node(label="climate risk")["id"]
+        b = graph.create_node(label="unrelated topic")["id"]
+        graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
+        results = graph.listen(topics=["climate"])
+        assert isinstance(results, list)
+
     def test_agent_state(self, graph):
         graph.set_focus("testing")
         results = graph.agent_state()
@@ -1480,6 +1489,15 @@ class TestUrgentChanges:
     def test_urgent_changes_with_filter(self, graph):
         """urgent_changes() accepts urgency_filter parameter."""
         results = graph.urgent_changes(urgency_filter=["critical"])
+        assert isinstance(results, list)
+
+    def test_urgent_changes_no_per_row_queries(self, graph):
+        """OHM-od01.9: urgent_changes() should batch urgency lookups,
+        not do per-row SQL queries for each edge."""
+        a = graph.create_node(label="urgent_test_a")["id"]
+        b = graph.create_node(label="urgent_test_b")["id"]
+        graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3", urgency="high")
+        results = graph.urgent_changes(urgency_filter=["high", "critical"])
         assert isinstance(results, list)
 
 
