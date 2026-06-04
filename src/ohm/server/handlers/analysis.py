@@ -210,14 +210,33 @@ class AnalysisHandlerMixin:
             self._json_response(400, {"error": "missing_parameter", "message": "?from=node_id&to=node_id required"})
             return
         from ohm.validation import validate_identifier
+        from ohm.exceptions import ValidationError, OHMError
 
-        from_node = validate_identifier(from_node, name="from")
-        to_node = validate_identifier(to_node, name="to")
-        max_lag = int(qs.get("max_lag", [3])[0])
-        min_obs = int(qs.get("min_observations", [5])[0])
+        try:
+            from_node = validate_identifier(from_node, name="from")
+            to_node = validate_identifier(to_node, name="to")
+        except ValidationError as e:
+            self._json_response(400, {"error": "validation_error", "message": str(e)})
+            return
+
+        try:
+            max_lag = int(qs.get("max_lag", [3])[0])
+            min_obs = int(qs.get("min_observations", [5])[0])
+        except (ValueError, TypeError) as e:
+            self._json_response(400, {"error": "invalid_parameter", "message": f"max_lag and min_observations must be integers: {e}"})
+            return
+
         from ohm.methods import granger_causality
 
-        result = granger_causality(self.current_store.conn, from_node, to_node, max_lag=max_lag, min_observations=min_obs)
+        try:
+            result = granger_causality(self.current_store.conn, from_node, to_node, max_lag=max_lag, min_observations=min_obs)
+        except OHMError as e:
+            self._json_response(e.exit_code, {"error": "ohm_error", "message": str(e), "correlation_id": getattr(e, "correlation_id", None)})
+            return
+        except Exception as e:
+            self._json_response(500, {"error": "internal_error", "message": f"Granger causality computation failed: {e}"})
+            return
+
         self._json_response(200, result)
 
     def _get_edge_stability(self, path: str, qs: dict) -> None:
@@ -225,11 +244,19 @@ class AnalysisHandlerMixin:
         edge_types_raw = qs.get("edge_types", [None])[0]
         edge_types = edge_types_raw.split(",") if edge_types_raw else None
         layer = qs.get("layer", [None])[0]
-        window_days = int(qs.get("window_days", [7])[0])
-        min_windows = int(qs.get("min_windows", [3])[0])
+        try:
+            window_days = int(qs.get("window_days", [7])[0])
+            min_windows = int(qs.get("min_windows", [3])[0])
+        except (ValueError, TypeError) as e:
+            self._json_response(400, {"error": "invalid_parameter", "message": f"window_days and min_windows must be integers: {e}"})
+            return
         from ohm.methods import compute_edge_stability
 
-        result = compute_edge_stability(self.current_store.conn, edge_types=edge_types, layer=layer, window_days=window_days, min_windows=min_windows)
+        try:
+            result = compute_edge_stability(self.current_store.conn, edge_types=edge_types, layer=layer, window_days=window_days, min_windows=min_windows)
+        except Exception as e:
+            self._json_response(500, {"error": "internal_error", "message": f"Edge stability computation failed: {e}"})
+            return
         self._json_response(200, result)
 
     def _get_suggest(self, path: str, qs: dict) -> None:
@@ -237,9 +264,17 @@ class AnalysisHandlerMixin:
         from ohm.methods import suggest_connections
 
         method = qs.get("method", ["shared_provenance"])[0]
-        min_shared = int(qs.get("min_shared", [2])[0])
-        limit = int(qs.get("limit", [20])[0])
-        result = suggest_connections(self.current_store.conn, method=method, min_shared=min_shared, limit=limit)
+        try:
+            min_shared = int(qs.get("min_shared", [2])[0])
+            limit = int(qs.get("limit", [20])[0])
+        except (ValueError, TypeError) as e:
+            self._json_response(400, {"error": "invalid_parameter", "message": f"min_shared and limit must be integers: {e}"})
+            return
+        try:
+            result = suggest_connections(self.current_store.conn, method=method, min_shared=min_shared, limit=limit)
+        except Exception as e:
+            self._json_response(500, {"error": "internal_error", "message": f"Suggest computation failed: {e}"})
+            return
         self._json_response(200, result)
 
     def _get_graph_stats(self, path: str, qs: dict) -> None:

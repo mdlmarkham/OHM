@@ -1526,7 +1526,33 @@ class TestTemporalHTTPEndpoints:
         finally:
             server.shutdown()
 
-    def test_edge_stability_endpoint(self, tmp_path):
+    def test_granger_invalid_lag_returns_400(self, tmp_path):
+        """GET /granger with non-integer max_lag returns 400, not 500."""
+        db_path = str(tmp_path / "test_granger_invalid.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test")
+        port, server, thread = _start_test_server(store, no_auth=True)
+        try:
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("GET", "/granger?from=a&to=b&max_lag=notanumber")
+            resp = conn.getresponse()
+            assert resp.status == 400
+            data = json.loads(resp.read())
+            assert data["error"] == "invalid_parameter"
+        finally:
+            server.shutdown()
+
+    def test_granger_invalid_node_id_returns_400(self, tmp_path):
+        """GET /granger with disallowed characters in node id returns 400."""
+        db_path = str(tmp_path / "test_granger_badid.duckdb")
+        store = OhmStore(db_path=db_path, agent_name="test")
+        port, server, thread = _start_test_server(store, no_auth=True)
+        try:
+            conn = HTTPConnection("127.0.0.1", port)
+            conn.request("GET", "/granger?from=node_a;DROP+TABLE&to=node_b")
+            resp = conn.getresponse()
+            assert resp.status == 400
+        finally:
+            server.shutdown()
         """GET /edge_stability returns stability analysis."""
         db_path = str(tmp_path / "test_edgestab_http.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test")
