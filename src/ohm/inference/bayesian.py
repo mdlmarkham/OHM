@@ -2445,7 +2445,20 @@ def generate_voi_tasks(
         _assigned_edges = reader.get_edges(edge_types=["ASSIGNED_TO"])
         agent_workload = sum(1 for e in _assigned_edges if e.to_node == safe_agent)
 
-    # Step 3: Build research tasks from VoI rankings
+    # Step 3: Batch-fetch all metadata needed for the ranking loop
+    ranking_node_ids = [r["node_id"] for r in voi_result["rankings"]]
+    _node_map: dict[str, Any] = {}
+    if ranking_node_ids:
+        _all_node_records = reader.get_nodes(ids=ranking_node_ids)
+        _node_map = {n.id: n for n in _all_node_records}
+
+    _concept_edge_types = ["CAUSES", "INFLUENCES", "ENABLES", "DEPENDS_ON"]
+    _all_concept_edges = reader.get_edges(edge_types=_concept_edge_types)
+    _concept_edges_by_from: dict[str, list[Any]] = {}
+    for e in _all_concept_edges:
+        _concept_edges_by_from.setdefault(e.from_node, []).append(e)
+
+    # Step 4: Build research tasks from VoI rankings
     tasks = []
     for ranking in voi_result["rankings"]:
         node_id = ranking["node_id"]
@@ -2463,9 +2476,8 @@ def generate_voi_tasks(
         # For PERT nodes, uncertainty comes from PERT variance, which is independent of confidence.
         gap_score = uncertainty * sensitivity
 
-        # Retrieve node metadata for capability matching
-        _node_records = reader.get_nodes(ids=[node_id])
-        _nr = _node_records[0] if _node_records else None
+        # Retrieve node metadata for capability matching (batch-fetched above)
+        _nr = _node_map.get(node_id)
         node_type = (_nr.type or "").lower() if _nr else ""
         node_tags: set[str] = set()
         if _nr and _nr.tags:
@@ -2476,10 +2488,9 @@ def generate_voi_tasks(
             except (ValueError, TypeError):
                 pass
 
-        # Connected concept labels for tag broadening (reuse already-fetched causal edges)
-        _concept_edge_types = ["CAUSES", "INFLUENCES", "ENABLES", "DEPENDS_ON"]
-        _concept_records = reader.get_edges(edge_types=_concept_edge_types)
-        concept_labels = {e.to_node.lower() for e in _concept_records if e.from_node == node_id}
+        # Connected concept labels for tag broadening (pre-fetched above)
+        _node_concept_edges = _concept_edges_by_from.get(node_id, [])
+        concept_labels = {e.to_node.lower() for e in _node_concept_edges}
 
         # Multi-signal capability match score (0.0–1.0)
         all_node_tokens = node_tags | concept_labels | {label.lower(), node_id.lower()}
