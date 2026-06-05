@@ -1353,6 +1353,93 @@ class GraphHandlerMixin:
         else:
             self._json_response(200, result)
 
+    def _get_vault(self, path: str, qs: dict) -> None:
+        """GET /vault — list vault contents for the authenticated agent (OHM-cuu0).
+
+        Returns nodes with ``visibility='vault'`` created by the authenticated
+        agent, plus any edges attached to those nodes.
+        """
+        agent = self._authenticate()
+        if agent is None:
+            if self.no_auth:
+                agent = "ohm"
+            else:
+                raise AuthenticationError("Authentication required")
+        nodes = self.current_store.execute(
+            "SELECT * FROM ohm_nodes WHERE visibility = 'vault' AND created_by = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 100",
+            [agent],
+        )
+        node_ids = [n["id"] for n in nodes]
+        edges: list = []
+        if node_ids:
+            placeholders = ",".join(["?"] * len(node_ids))
+            edges = self.current_store.execute(
+                f"SELECT * FROM ohm_edges WHERE (from_node IN ({placeholders}) OR to_node IN ({placeholders})) AND deleted_at IS NULL",
+                node_ids + node_ids,
+            )
+        self._json_response(200, {"agent": agent, "nodes": nodes, "edges": edges, "count": len(nodes)})
+
+    def _post_vault_promote(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /vault/promote — promote a vault node to the shared graph (OHM-cuu0).
+
+        Changes ``visibility`` from ``vault`` to ``team`` for the given node
+        and its edges (if any). Only the owning agent can promote their own
+        vault content.
+
+        Body: {"node_id": "<node_id>"}
+        """
+        node_id = body.get("node_id", "")
+        if not node_id:
+            self._json_response(400, {"error": "validation_error", "message": "node_id is required"})
+            return
+
+        node = self.current_store.conn.execute(
+            "SELECT id, visibility, created_by FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+            [node_id],
+        ).fetchone()
+        if not node:
+            self._json_response(404, {"error": "not_found", "message": f"Node not found: {node_id}"})
+            return
+        nid, vis, creator = node
+
+        if vis != "vault":
+            self._json_response(400, {"error": "validation_error", "message": f"Node {node_id} has visibility '{vis}', not 'vault'"})
+            return
+
+        # OHM-tjzh: promotion requires at least one cross-link to shared graph
+        from ohm.schema import requires_cross_link
+        if requires_cross_link(node["type"] if len(node) > 3 else "concept"):
+            edge_count = self.current_store.conn.execute(
+                "SELECT COUNT(*) FROM ohm_edges WHERE (from_node = ? OR to_node = ?) AND deleted_at IS NULL",
+                [node_id, node_id],
+            ).fetchone()[0]
+            if edge_count == 0:
+                self._json_response(422, {
+                    "error": "cross_link_required",
+                    "message": f"Vault node '{node_id}' has no edges. Per ADR-018 / OHM-tjzh, "
+                               f"nodes must have at least one edge before promotion to the shared graph.",
+                    "hint": "Add an edge to an existing shared-graph node via POST /edge, then retry promotion.",
+                })
+                return
+
+        now = self.current_store._now()
+        self.current_store.conn.execute(
+            "UPDATE ohm_nodes SET visibility = 'team', updated_at = ?, updated_by = ? WHERE id = ?",
+            [now, agent, node_id],
+        )
+        # Also promote related edges
+        self.current_store.conn.execute(
+            "UPDATE ohm_edges SET updated_at = ?, updated_by = ? WHERE (from_node = ? OR to_node = ?) AND deleted_at IS NULL",
+            [now, agent, node_id, node_id],
+        )
+
+        self._json_response(200, {
+            "promoted": node_id,
+            "previous_visibility": "vault",
+            "new_visibility": "team",
+            "promoted_by": agent,
+        })
+
     def _post_heartbeat(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /heartbeat — agent heartbeat with sync."""
         from ohm.methods import agent_heartbeat

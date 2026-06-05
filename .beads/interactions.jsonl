@@ -785,5 +785,12 @@
 {"id":"int-d0be8dd3","kind":"field_change","created_at":"2026-06-05T12:06:51.4530077Z","actor":"Matt Markham","issue_id":"OHM-vj3i","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-96323b8f","kind":"field_change","created_at":"2026-06-05T20:38:19.6826631Z","actor":"Matt Markham","issue_id":"OHM-6lvk","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
 {"id":"int-166e8532","kind":"field_change","created_at":"2026-06-05T20:41:41.122369Z","actor":"Matt Markham","issue_id":"OHM-6lvk","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
+<<<<<<< Updated upstream
 {"id":"int-557a5440","kind":"field_change","created_at":"2026-06-05T20:56:24.038174236Z","actor":"root","issue_id":"OHM-tjzh","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
 {"id":"int-274dd5ac","kind":"field_change","created_at":"2026-06-05T21:03:18.073380464Z","actor":"root","issue_id":"OHM-tjzh","extra":{"field":"status","new_value":"blocked","old_value":"in_progress"}}
+=======
+{"id":"int-e6729ef9","kind":"field_change","created_at":"2026-06-05T20:51:55.5050098Z","actor":"Matt Markham","issue_id":"OHM-od01.4","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Full implementation exists: discover_pc()/discover_ges()/discover_causal() in inference/discovery.py, GET /discover endpoint, discovery queue table with CRUD and review, 15 tests. All features from issue body are shipped."}}
+{"id":"int-457e3875","kind":"field_change","created_at":"2026-06-05T20:52:41.2897933Z","actor":"Matt Markham","issue_id":"OHM-tjzh","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Already implemented and shipped in previous session: MUST_HAVE_EDGE_NODE_TYPES, _enforce_cross_link_requirement handler, 33 tests in test_cross_link.py, AGENTS.md writing protocol"}}
+{"id":"int-cd5d28d1","kind":"field_change","created_at":"2026-06-05T21:32:30.3392623Z","actor":"Matt Markham","issue_id":"OHM-cuu0","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
+>>>>>>> Stashed changes
+{"id":"int-d5ba5023","kind":"field_change","created_at":"2026-06-05T21:39:58.852191Z","actor":"Matt Markham","issue_id":"OHM-cuu0","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}

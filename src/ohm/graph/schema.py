@@ -98,7 +98,7 @@ EXEMPT_CROSS_LINK_NODE_TYPES: frozenset[str] = frozenset(
     {"source", "concept", "entity"}
 )
 
-VALID_VISIBILITIES = frozenset({"private", "team", "public"})
+VALID_VISIBILITIES = frozenset({"private", "team", "public", "vault"})
 
 VALID_PROVENANCES = frozenset(
     {
