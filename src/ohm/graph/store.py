@@ -1388,6 +1388,102 @@ class OhmStore:
             "soft_delete": True,
         }
 
+    def merge_nodes(self, keep_id: str, merge_id: str, merged_by: str) -> dict[str, Any]:
+        """Merge *merge_id* into *keep_id* and soft-delete *merge_id*.
+
+        Re-points all edges and observations from the merge target to the
+        keep target, then soft-deletes the merge node.  Duplicate edges
+        (same **from**, **to**, **type**, **layer**) are silently skipped so
+        the operation is idempotent.
+
+        Returns a dict with counts of re-pointed edges, observations, and
+        skipped duplicates.
+
+        Raises:
+            NodeNotFoundError: If either node does not exist.
+            ValueError: If *keep_id* equals *merge_id*.
+        """
+        from ohm.exceptions import NodeNotFoundError
+
+        if keep_id == merge_id:
+            raise ValueError(f"keep_id equals merge_id ({keep_id!r}) — nothing to merge")
+
+        keep_node = self.get_node(keep_id)
+        if not keep_node:
+            raise NodeNotFoundError(f"Keep node not found: {keep_id}")
+
+        merge_node = self.get_node(merge_id)
+        if not merge_node:
+            raise NodeNotFoundError(f"Merge node not found: {merge_id}")
+
+        now = self._now()
+
+        # 1. Re-point edges FROM merge_id → keep_id (skip duplicates)
+        dup_from = self.conn.execute(
+            """UPDATE ohm_edges SET from_node = ?, updated_at = ?, updated_by = ?
+               WHERE from_node = ? AND deleted_at IS NULL
+                 AND (to_node, layer, edge_type) NOT IN (
+                   SELECT to_node, layer, edge_type FROM ohm_edges
+                   WHERE from_node = ? AND deleted_at IS NULL
+                 )""",
+            [keep_id, now, merged_by, merge_id, keep_id],
+        )
+        from_updated = dup_from.fetchone()
+        from_count = from_updated[0] if from_updated else 0
+
+        # 2. Re-point edges TO merge_id → keep_id (skip duplicates)
+        dup_to = self.conn.execute(
+            """UPDATE ohm_edges SET to_node = ?, updated_at = ?, updated_by = ?
+               WHERE to_node = ? AND deleted_at IS NULL
+                 AND (from_node, layer, edge_type) NOT IN (
+                   SELECT from_node, layer, edge_type FROM ohm_edges
+                   WHERE to_node = ? AND deleted_at IS NULL
+                 )""",
+            [keep_id, now, merged_by, merge_id, keep_id],
+        )
+        to_updated = dup_to.fetchone()
+        to_count = to_updated[0] if to_updated else 0
+
+        # 3. Re-point observations (no updated_at column on ohm_observations)
+        obs_updated = self.conn.execute(
+            "UPDATE ohm_observations SET node_id = ? WHERE node_id = ? AND deleted_at IS NULL",
+            [keep_id, merge_id],
+        )
+        obs_count = obs_updated.fetchone()
+        obs_total = obs_count[0] if obs_count else 0
+
+        # 4. Delete edges from merge that would be exact dupes (already
+        #    covered by the UPDATE NOT IN above, but also delete any edges
+        #    that point FROM → TO identically to an existing edge from keep).
+        skipped = self.conn.execute(
+            """UPDATE ohm_edges SET deleted_at = ?, updated_at = ?, updated_by = ?
+               WHERE id IN (
+                 SELECT e.id FROM ohm_edges e
+                 JOIN ohm_edges k ON e.from_node = k.from_node
+                   AND e.to_node = k.to_node
+                   AND e.layer = k.layer
+                   AND e.edge_type = k.edge_type
+                 WHERE e.from_node = ? AND e.deleted_at IS NULL
+                   AND k.from_node = ? AND k.deleted_at IS NULL
+               )""",
+            [now, now, merged_by, merge_id, keep_id],
+        )
+
+        # 5. Soft-delete the merge node
+        self.conn.execute(
+            "UPDATE ohm_nodes SET deleted_at = ?, updated_at = ?, updated_by = ? WHERE id = ?",
+            [now, now, merged_by, merge_id],
+        )
+        self._log_change("ohm_nodes", merge_id, "MERGE", None, agent_name=merged_by)
+
+        return {
+            "keep": keep_id,
+            "merged": merge_id,
+            "edges_repointed": from_count + to_count,
+            "observations_repointed": obs_total,
+            "merged_by": merged_by,
+        }
+
     def delete_edge(self, edge_id: str, deleted_by: str) -> dict[str, Any]:
         """Soft-delete an edge by ID.
 

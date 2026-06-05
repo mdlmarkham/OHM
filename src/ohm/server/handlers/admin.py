@@ -516,3 +516,28 @@ class AdminHandlerMixin:
         limit = int(qs.get("limit", [50])[0])
         result = detect_alias_duplicates(self.current_store.conn, limit=limit)
         self._json_response(200, {"duplicates": result, "count": len(result)})
+
+    def _post_admin_merge(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /admin/merge — merge duplicate nodes (OHM-g0kv.6).
+
+        Re-points all edges and observations from *merge_id* into *keep_id*,
+        then soft-deletes *merge_id*. Duplicate edges (same from→to, type,
+        layer) are silently skipped for idempotency.
+
+        Body: {"keep": "<node_id>", "merge": "<node_id>"}
+        """
+        from ohm.exceptions import NodeNotFoundError
+
+        keep_id = body.get("keep", "")
+        merge_id = body.get("merge", "")
+        if not keep_id or not merge_id:
+            self._json_response(400, {"error": "validation_error", "message": "Both 'keep' and 'merge' fields are required"})
+            return
+
+        try:
+            result = self.current_store.merge_nodes(keep_id, merge_id, merged_by=agent)
+            self._json_response(200, result)
+        except NodeNotFoundError as e:
+            self._json_response(404, {"error": "not_found", "message": str(e)})
+        except ValueError as e:
+            self._json_response(400, {"error": "validation_error", "message": str(e)})

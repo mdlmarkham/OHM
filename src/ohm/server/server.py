@@ -527,6 +527,7 @@ def _build_router() -> _RouteRegistry:
     r.add("POST", "/admin/source-node-urls")
     r.add("POST", "/admin/edge-layer-fix")
     r.add("POST", "/admin/pert-backfill")
+    r.add("POST", "/admin/merge")
 
     # /decay: write-in-GET (legacy); registered as GET to avoid spurious 405
     r.add("GET", "/decay")
@@ -1919,6 +1920,7 @@ OhmHandler._POST_EXACT = {
     "/admin/source-node-urls": "_post_admin_source_node_urls",
     "/admin/edge-layer-fix": "_post_admin_edge_layer_fix",
     "/admin/pert-backfill": "_post_admin_pert_backfill",
+    "/admin/merge": "_post_admin_merge",
     "/discover/queue/review": "_post_discovery_review",
     "/hooks": "_post_hooks",
 }
