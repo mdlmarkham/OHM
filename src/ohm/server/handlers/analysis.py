@@ -285,6 +285,17 @@ class AnalysisHandlerMixin:
             return
         self._json_response(200, result)
 
+    def _get_doctor(self, path: str, qs: dict) -> None:
+        """GET /doctor — graph health diagnostics with remediation (OHM-6lvk)."""
+        from ohm.methods import graph_doctor
+
+        try:
+            result = graph_doctor(self.current_store.conn)
+        except Exception as e:
+            self._json_response(500, {"error": "internal_error", "message": f"Doctor check failed: {e}"})
+            return
+        self._json_response(200, result)
+
     def _get_suggest(self, path: str, qs: dict) -> None:
         """GET /suggest — suggest connections."""
         from ohm.methods import suggest_connections

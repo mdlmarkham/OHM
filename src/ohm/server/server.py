@@ -1974,6 +1974,7 @@ OhmHandler._GET_EXACT = {
     "/suggest": "_get_suggest",
     "/graph/stats": "_get_graph_stats",
     "/lint": "_get_lint",
+    "/doctor": "_get_doctor",
     "/contract": "_get_contract",
     "/inference": "_get_inference",
     "/intervene": "_get_intervene",

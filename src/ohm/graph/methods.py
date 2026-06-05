@@ -3210,6 +3210,195 @@ def compute_trajectory(
     }
 
 
+def graph_doctor(conn: DuckDBPyConnection) -> dict[str, Any]:
+    """Graph health diagnostics with structured remediation (OHM-6lvk).
+
+    Runs all available health checks, assigns each a severity score
+    (0 = healthy, 1 = critical), and returns ordered remediation steps
+    grouped by dependency scope.
+
+    Returns:
+        Dict with ``overall_health`` (0–1), ``checks`` list, and
+        ``remediations`` list (ordered by priority).
+    """
+    from ohm.queries import query_graph_health
+
+    health = query_graph_health(conn)
+    total_nodes = health.get("total_nodes", 0) or 0
+    total_edges = health.get("total_edges", 0) or 0
+
+    # Individual health checks — each returns a check dict
+    checks: list[dict[str, Any]] = []
+
+    # 1. Orphan nodes (no edges at all)
+    orphans = health.get("orphan_nodes", 0) or 0
+    orphan_rate = orphans / max(total_nodes, 1)
+    checks.append({
+        "id": "orphan_nodes",
+        "label": "Orphan nodes",
+        "description": "Nodes with no edges at all — invisible to traversal",
+        "count": orphans,
+        "rate": round(orphan_rate, 4),
+        "severity": round(orphan_rate, 4),
+    })
+
+    # 2. Dead-end nodes (incoming edges only, no outgoing)
+    dead_ends = health.get("dead_end_count", 0) or 0
+    dead_end_rate = dead_ends / max(total_nodes, 1)
+    checks.append({
+        "id": "dead_end_nodes",
+        "label": "Dead-end nodes",
+        "description": "Nodes with incoming edges but no outgoing — sinks",
+        "count": dead_ends,
+        "rate": round(dead_end_rate, 4),
+        "severity": round(dead_end_rate, 4),
+    })
+
+    # 3. Low-confidence unchallenged L3/L4 edges
+    low_conf = health.get("low_confidence_unchallenged", 0) or 0
+    low_conf_rate = low_conf / max(total_edges, 1)
+    checks.append({
+        "id": "low_confidence_unchallenged",
+        "label": "Low-confidence unchallenged edges",
+        "description": "Edges with confidence < 0.3 that have never been challenged",
+        "count": low_conf,
+        "rate": round(low_conf_rate, 4),
+        "severity": round(min(1.0, low_conf_rate * 3), 4),
+    })
+
+    # 4. Dense clusters (nodes with 10+ edges)
+    dense = health.get("dense_clusters", 0) or 0
+    checks.append({
+        "id": "dense_clusters",
+        "label": "Dense clusters",
+        "description": "Nodes with 10+ edges — candidates for synthesis",
+        "count": dense,
+        "severity": round(min(1.0, dense * 0.2), 4),
+    })
+
+    # 5. Stale agents
+    stale = health.get("stale_agents", 0) or 0
+    checks.append({
+        "id": "stale_agents",
+        "label": "Stale agents",
+        "description": "Agents whose last sync is overdue",
+        "count": stale,
+        "severity": round(min(1.0, stale * 0.5), 4),
+    })
+
+    # 6. Edge-to-node ratio
+    if total_nodes > 0:
+        density = total_edges / total_nodes
+        if density < 0.5:
+            density_severity = round(min(1.0, (0.5 - density) * 2), 4)
+            density_label = "Low edge density"
+            density_desc = "Few edges per node — the graph is sparse"
+        else:
+            density_severity = 0.0
+            density_label = "Healthy edge density"
+            density_desc = f"{density:.2f} edges per node — within target range"
+        checks.append({
+            "id": "edge_density",
+            "label": density_label,
+            "description": density_desc,
+            "count": total_edges,
+            "rate": round(density, 4),
+            "severity": density_severity,
+        })
+    else:
+        checks.append({
+            "id": "edge_density",
+            "label": "Edge density",
+            "description": "Empty graph — no nodes",
+            "count": 0,
+            "severity": 1.0,
+        })
+
+    # Sort checks by severity descending
+    checks.sort(key=lambda c: c["severity"], reverse=True)
+
+    # Build remediation list (ordered by dependency + severity)
+    remediations: list[dict[str, Any]] = []
+
+    for c in checks:
+        if c["severity"] == 0.0:
+            continue
+        cid = c["id"]
+
+        if cid == "orphan_nodes":
+            remediations.append({
+                "issue": cid,
+                "severity": c["severity"],
+                "action": "connect_or_delete",
+                "description": f"{c['count']} nodes have no edges. Connect them to existing structure or delete them.",
+                "how": "POST /node/{id}/edge to link each orphan, or DELETE /node/{id} if the node is stale.",
+                "count": c["count"],
+            })
+
+        elif cid == "dead_end_nodes":
+            remediations.append({
+                "issue": cid,
+                "severity": c["severity"],
+                "action": "add_outgoing_edges",
+                "description": f"{c['count']} nodes have only incoming edges. Each is a sink — add outgoing edges or merge.",
+                "how": "Add a CAUSES, SUPPORTS, or APPLIES_TO edge from the dead-end to relevant context nodes.",
+                "count": c["count"],
+            })
+
+        elif cid == "low_confidence_unchallenged":
+            remediations.append({
+                "issue": cid,
+                "severity": c["severity"],
+                "action": "challenge_or_update_confidence",
+                "description": f"{c['count']} edges have confidence < 0.3 and have never been challenged. Challenge them or update confidence.",
+                "how": "POST /challenge/{edge_id} with a reason, or POST /edge/{id}/confidence to update the confidence.",
+                "count": c["count"],
+            })
+
+        elif cid == "dense_clusters":
+            remediations.append({
+                "issue": cid,
+                "severity": c["severity"],
+                "action": "synthesize",
+                "description": f"{c['count']} nodes have 10+ edges. Consider synthesising a new pattern node.",
+                "how": "POST /agent/synthesis with cluster_ids=[node_ids] to create a synthesis node that summarises the cluster.",
+                "count": c["count"],
+            })
+
+        elif cid == "stale_agents":
+            remediations.append({
+                "issue": cid,
+                "severity": c["severity"],
+                "action": "check_agent_heartbeat",
+                "description": f"{c['count']} agents have not synced on schedule. They may be offline.",
+                "how": "Check agent status via GET /agents. POST /heartbeat to re-sync.",
+                "count": c["count"],
+            })
+
+        elif cid == "edge_density" and c["severity"] > 0:
+            remediations.append({
+                "issue": cid,
+                "severity": c["severity"],
+                "action": "add_edges",
+                "description": c["description"],
+                "how": "Connect existing orphan nodes with CAUSES, SUPPORTS, or REFERENCES edges. Target at least 1 edge per node.",
+                "count": total_nodes,
+            })
+
+    severity_scores = [c["severity"] for c in checks]
+    overall_raw = sum(severity_scores) / len(severity_scores) if severity_scores else 0
+    overall_health = round(1.0 - min(overall_raw, 1.0), 4)
+
+    return {
+        "overall_health": overall_health,
+        "total_nodes": total_nodes,
+        "total_edges": total_edges,
+        "checks": checks,
+        "remediations": remediations,
+        "remediation_count": len(remediations),
+    }
+
+
 def _get_node(conn: DuckDBPyConnection, node_id: str) -> dict[str, Any] | None:
     rows = conn.execute(
         "SELECT id, label, type, confidence, utility_scale, utility_usd_per_day FROM ohm_nodes WHERE id = ?",
