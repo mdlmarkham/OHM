@@ -656,6 +656,79 @@ def detect_near_duplicates(
     return result
 
 
+def detect_alias_duplicates(
+    conn: DuckDBPyConnection,
+    *,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Find nodes that may be duplicates via alias collision (OHM-g0kv).
+
+    Two nodes are alias duplicates if their normalized labels are identical
+    (same ohm_aliases.alias_norm) but they have different node_ids. This
+    catches "Hormuz AND-Gate" vs "hormuz_and_gate" vs "Strait of Hormuz AND-Gate".
+
+    Also finds content hash collisions: different nodes with the same
+    content_hash in ohm_content_hashes.
+
+    Returns:
+        List of duplicate groups with alias_norm, node_ids, and labels.
+    """
+    rows = conn.execute(
+        """
+        SELECT a.alias_norm, a.node_id AS node_a, n1.label AS label_a,
+               b.node_id AS node_b, n2.label AS label_b
+        FROM ohm_aliases a
+        JOIN ohm_aliases b ON a.alias_norm = b.alias_norm AND a.node_id < b.node_id
+        LEFT JOIN ohm_nodes n1 ON n1.id = a.node_id AND n1.deleted_at IS NULL
+        LEFT JOIN ohm_nodes n2 ON n2.id = b.node_id AND n2.deleted_at IS NULL
+        WHERE n1.id IS NOT NULL AND n2.id IS NOT NULL
+        ORDER BY a.alias_norm
+        LIMIT ?
+        """,
+        [limit],
+    ).fetchall()
+
+    alias_dups = []
+    for row in rows:
+        alias_dups.append({
+            "alias_norm": row[0],
+            "node_a": row[1],
+            "label_a": row[2],
+            "node_b": row[3],
+            "label_b": row[4],
+            "kind": "alias_collision",
+        })
+
+    hash_rows = conn.execute(
+        """
+        SELECT ch1.content_hash, ch1.node_id AS node_a, n1.label AS label_a,
+               ch2.node_id AS node_b, n2.label AS label_b
+        FROM ohm_content_hashes ch1
+        JOIN ohm_content_hashes ch2 ON ch1.content_hash = ch2.content_hash
+             AND ch1.node_id < ch2.node_id
+        LEFT JOIN ohm_nodes n1 ON n1.id = ch1.node_id AND n1.deleted_at IS NULL
+        LEFT JOIN ohm_nodes n2 ON n2.id = ch2.node_id AND n2.deleted_at IS NULL
+        WHERE n1.id IS NOT NULL AND n2.id IS NOT NULL
+        ORDER BY ch1.content_hash
+        LIMIT ?
+        """,
+        [limit],
+    ).fetchall()
+
+    hash_dups = []
+    for row in hash_rows:
+        hash_dups.append({
+            "content_hash": row[0],
+            "node_a": row[1],
+            "label_a": row[2],
+            "node_b": row[3],
+            "label_b": row[4],
+            "kind": "content_hash_collision",
+        })
+
+    return alias_dups + hash_dups
+
+
 def compute_confidence_calibration(
     conn: DuckDBPyConnection,
     agent_name: str,
@@ -2813,6 +2886,171 @@ def belief_state_decision(
             {"node_id": r["node_id"], "label": r["label"], "voi_score": r["voi_score"]}
             for r in rankings[:5]
         ],
+    }
+
+
+def compute_trajectory(
+    conn: DuckDBPyConnection,
+    node_id: str,
+    *,
+    since: str | None = None,
+    min_observations: int = 3,
+) -> dict[str, Any]:
+    """Compute observation time-series trajectory for a node (OHM-vj3i).
+
+    Analyzes numeric-valued observations over time to detect:
+    - Overall trend direction (rising, falling, flat)
+    - Regression events (trend direction reversals)
+    - Acceleration (rate-of-change)
+    - Cross-source consistency
+
+    Args:
+        conn: DuckDB connection.
+        node_id: Target node ID.
+        since: ISO 8601 timestamp; only observations after this date are
+            included. ``None`` means all observations.
+        min_observations: Minimum observations needed for trend analysis.
+            If fewer than this, trend is ``"insufficient_data"``.
+
+    Returns:
+        Dict with analysis results (see function body for key layout).
+    """
+    import statistics
+
+    if since:
+        rows = conn.execute(
+            """SELECT value, source, created_by, sigma, created_at
+               FROM ohm_observations
+               WHERE node_id = ? AND value IS NOT NULL AND deleted_at IS NULL
+                 AND created_at >= ?::TIMESTAMP
+               ORDER BY created_at ASC""",
+            [node_id, since],
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT value, source, created_by, sigma, created_at
+               FROM ohm_observations
+               WHERE node_id = ? AND value IS NOT NULL AND deleted_at IS NULL
+               ORDER BY created_at ASC""",
+            [node_id],
+        ).fetchall()
+
+    data_points = []
+    values: list[float] = []
+    for row in rows:
+        val = float(row[0]) if row[0] is not None else None
+        if val is None:
+            continue
+        data_points.append({
+            "value": val,
+            "source": row[1] or "",
+            "created_by": row[2] or "",
+            "sigma": float(row[3]) if row[3] is not None else None,
+            "created_at": str(row[4]) if row[4] else "",
+        })
+        values.append(val)
+
+    n = len(data_points)
+    if n < min_observations:
+        return {
+            "node_id": node_id,
+            "observations": n,
+            "data_points": data_points[-20:],
+            "trend": "insufficient_data",
+            "trend_reason": f"Need at least {min_observations} observations, got {n}",
+            "regressions": [],
+            "acceleration": None,
+            "consistency": None,
+        }
+
+    # Simple linear regression: y = mx + b where x = index
+    xs = list(range(n))
+    slope = statistics.linear_regression(xs, values).slope
+    mean_val = statistics.mean(values)
+
+    # Trend direction
+    threshold = 0.05 * mean_val if mean_val != 0 else 0.001
+    if slope > threshold:
+        trend = "rising"
+    elif slope < -threshold:
+        trend = "falling"
+    else:
+        trend = "flat"
+
+    # Regression detection: direction changes between consecutive triples
+    regressions = []
+    for i in range(2, n):
+        v0 = values[i - 2]
+        v1 = values[i - 1]
+        v2 = values[i]
+        prev_dir = "rising" if v1 > v0 else "falling" if v1 < v0 else "flat"
+        curr_dir = "rising" if v2 > v1 else "falling" if v2 < v1 else "flat"
+        if prev_dir != "flat" and curr_dir != "flat" and prev_dir != curr_dir:
+            magnitude = abs(v2 - v0)
+            regressions.append({
+                "index": i,
+                "at": data_points[i]["created_at"],
+                "previous_trend": prev_dir,
+                "new_trend": curr_dir,
+                "from_value": v0,
+                "to_value": v2,
+                "magnitude": round(magnitude, 6),
+            })
+
+    # Acceleration: second derivative = change in slope
+    # Use window halves: slope of first half vs second half
+    mid = n // 2
+    if mid >= 2:
+        slope0 = statistics.linear_regression(range(mid), values[:mid]).slope
+        slope1 = statistics.linear_regression(range(mid), values[mid:mid + mid]).slope
+        acceleration = round(slope1 - slope0, 6)
+    else:
+        acceleration = None
+
+    # Consistency: how often sources agree on direction
+    source_dirs: dict[str, list[float]] = {}
+    for dp in data_points:
+        src = dp["source"] or dp["created_by"]
+        source_dirs.setdefault(src, []).append(dp["value"])
+
+    if len(source_dirs) < 2:
+        consistency = None
+        consistency_detail = "single_source"
+    else:
+        source_slopes = []
+        for src, vals in source_dirs.items():
+            if len(vals) >= 2:
+                s = statistics.linear_regression(range(len(vals)), vals).slope
+                source_slopes.append(s)
+        if source_slopes:
+            # CoV of source slopes — lower = more consistent
+            mean_s = statistics.mean(source_slopes)
+            if mean_s != 0:
+                cov = statistics.stdev(source_slopes) / abs(mean_s)
+            else:
+                cov = 1.0
+            consistency = round(max(0.0, 1.0 - min(cov, 2.0) / 2.0), 4)
+            consistency_detail = {
+                "sources": len(source_dirs),
+                "slope_cov": round(cov, 4),
+            }
+        else:
+            consistency = None
+            consistency_detail = "insufficient_per_source"
+
+    return {
+        "node_id": node_id,
+        "observations": n,
+        "data_points": data_points[-20:],
+        "trend": trend,
+        "trend_slope": round(slope, 6),
+        "mean_value": round(mean_val, 4),
+        "regressions": regressions,
+        "regression_count": len(regressions),
+        "acceleration": acceleration,
+        "consistency": consistency,
+        "consistency_detail": consistency_detail,
+        "window_since": since,
     }
 
 

@@ -127,3 +127,29 @@ def validate_pert_triple(
         raise ValueError(f"Invalid {name}: p05 ({p05}) must be <= p50 ({p50})")
     if p95 is not None and p50 > p95:
         raise ValueError(f"Invalid {name}: p50 ({p50}) must be <= p95 ({p95})")
+
+
+def normalize_alias(label: str) -> str:
+    """Normalize a node label for alias matching.
+
+    Lowercase, strip leading/trailing whitespace, collapse internal
+    whitespace to single underscores, remove punctuation (except
+    hyphens between words).
+
+    Examples:
+        "Hormuz AND-Gate" → "hormuz_and-gate"
+        "  Demand  Rationing  " → "demand_rationing"
+        "Strait of Hormuz" → "strait_of_hormuz"
+    """
+    s = label.strip().lower()
+    s = re.sub(r"[^\w\s-]", "", s)
+    s = re.sub(r"\s+", "_", s)
+    s = re.sub(r"_+", "_", s)
+    return s.strip("_")
+
+
+def compute_content_hash(content: str) -> str:
+    """Compute SHA-256 hex digest of content for dedup detection."""
+    import hashlib
+
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()

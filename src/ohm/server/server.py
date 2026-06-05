@@ -530,6 +530,7 @@ def _build_router() -> _RouteRegistry:
     r.add("POST", "/admin/edge-layer-fix")
     r.add("POST", "/admin/pert-backfill")
     r.add("POST", "/admin/verification-decay")
+    r.add("POST", "/admin/merge")
 
     # /decay: write-in-GET (legacy); registered as GET to avoid spurious 405
     r.add("GET", "/decay")
@@ -1923,6 +1924,7 @@ OhmHandler._POST_EXACT = {
     "/admin/edge-layer-fix": "_post_admin_edge_layer_fix",
     "/admin/pert-backfill": "_post_admin_pert_backfill",
     "/admin/verification-decay": "_post_admin_verification_decay",
+    "/admin/merge": "_post_admin_merge",
     "/discover/queue/review": "_post_discovery_review",
     "/hooks": "_post_hooks",
 }
@@ -2000,6 +2002,8 @@ OhmHandler._GET_EXACT = {
     "/source_reliability": "_get_source_reliability",
     "/webhooks/dead-letter": "_get_webhooks_dead_letter",
     "/webhooks/outbox": "_get_webhooks_outbox",
+    "/resolve": "_get_resolve",
+    "/admin/alias-duplicates": "_get_alias_duplicates",
     "/tenants": "_get_tenants",
 }
 
@@ -2015,6 +2019,7 @@ OhmHandler._GET_PREFIXES = [
     ("/confidence/", "_get_confidence"),
     ("/agent/", "_get_agent"),
     ("/aggregate/", "_get_aggregate"),
+    ("/trajectory/", "_get_trajectory"),
     ("/provenance/", "_get_provenance"),
     ("/monte-carlo/", "_get_monte_carlo"),
     ("/calibration/", "_get_calibration"),
