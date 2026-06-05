@@ -259,6 +259,32 @@ class AnalysisHandlerMixin:
             return
         self._json_response(200, result)
 
+    def _get_trajectory(self, path: str, qs: dict) -> None:
+        """GET /trajectory/{node_id} — observation time-series analysis (OHM-vj3i)."""
+        from ohm.methods import compute_trajectory
+
+        node_id = path.strip("/")
+        if "/" in node_id:
+            node_id = node_id.split("/")[-1]
+        if not node_id or node_id == "trajectory":
+            self._json_response(400, {"error": "missing_parameter", "message": "/trajectory/{node_id} required"})
+            return
+        from ohm.validation import validate_identifier
+        node_id = validate_identifier(node_id, name="node_id")
+
+        since = qs.get("since", [None])[0]
+        try:
+            min_obs = int(qs.get("min_observations", [3])[0])
+        except (ValueError, TypeError):
+            min_obs = 3
+
+        try:
+            result = compute_trajectory(self.current_store.conn, node_id, since=since, min_observations=min_obs)
+        except Exception as e:
+            self._json_response(500, {"error": "internal_error", "message": f"Trajectory computation failed: {e}"})
+            return
+        self._json_response(200, result)
+
     def _get_suggest(self, path: str, qs: dict) -> None:
         """GET /suggest — suggest connections."""
         from ohm.methods import suggest_connections

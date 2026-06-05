@@ -2014,6 +2014,7 @@ OhmHandler._GET_PREFIXES = [
     ("/confidence/", "_get_confidence"),
     ("/agent/", "_get_agent"),
     ("/aggregate/", "_get_aggregate"),
+    ("/trajectory/", "_get_trajectory"),
     ("/provenance/", "_get_provenance"),
     ("/monte-carlo/", "_get_monte_carlo"),
     ("/calibration/", "_get_calibration"),
