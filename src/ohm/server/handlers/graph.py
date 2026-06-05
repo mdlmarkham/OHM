@@ -920,7 +920,41 @@ class GraphHandlerMixin:
 
         from ohm.graph.schema import generate_node_id
         from ohm.validation import validate_identifier
+        from ohm.exceptions import NodeNotFoundError
         import json as _json
+
+        # OHM-tjzh: Validate that all cluster_ids reference existing nodes
+        # before creating the synthesis node. Synthesis without connections
+        # is a dead end — the cross-link constraint prevents this.
+        validated_cluster_ids = []
+        invalid_ids = []
+        for cid in cluster_ids:
+            try:
+                safe_cid = validate_identifier(cid, name="cluster_id")
+            except ValueError:
+                invalid_ids.append(cid)
+                continue
+            # Check that the target node exists (OHM-tjzh)
+            exists = self.current_store.conn.execute(
+                "SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                [safe_cid],
+            ).fetchone()
+            if exists:
+                validated_cluster_ids.append(safe_cid)
+            else:
+                invalid_ids.append(safe_cid)
+
+        if not validated_cluster_ids:
+            raise ValidationError(
+                f"agent/synthesis requires at least one cluster_id that references an existing node. "
+                f"None of the provided cluster_ids were found: {cluster_ids}"
+            )
+
+        if invalid_ids:
+            import logging
+            logging.getLogger("ohm.handlers").warning(
+                "Synthesis cluster_ids not found, skipping: %s", invalid_ids
+            )
 
         node_id = generate_node_id(label)
         node_result = self.current_store.write_node(
@@ -941,23 +975,22 @@ class GraphHandlerMixin:
             )
 
         edges_created = 0
-        for cid in cluster_ids:
-            try:
-                safe_cid = validate_identifier(cid, name="cluster_id")
-            except ValueError:
-                continue
+        edge_errors = []
+        for cid in validated_cluster_ids:
             try:
                 self.current_store.write_edge(
                     from_node=node_id,
-                    to_node=safe_cid,
+                    to_node=cid,
                     edge_type=edge_type,
                     layer="L3",
                     confidence=confidence,
                     agent_name=agent,
                 )
                 edges_created += 1
+            except NodeNotFoundError as e:
+                edge_errors.append(str(e))
             except Exception:
-                continue
+                edge_errors.append(f"Failed to create edge to {cid}")
 
         from ohm.queries import create_observation
 
@@ -972,14 +1005,18 @@ class GraphHandlerMixin:
             created_by=agent,
         )
 
-        self._json_response(
-            201,
-            {
-                "node": node_result if isinstance(node_result, dict) else {"id": node_id, "label": label},
-                "edges_created": edges_created,
-                "observation": obs_result,
-            },
-        )
+        result = {
+            "node": node_result if isinstance(node_result, dict) else {"id": node_id, "label": label},
+            "edges_created": edges_created,
+            "observation": obs_result,
+        }
+        if invalid_ids or edge_errors:
+            result["warnings"] = []
+            if invalid_ids:
+                result["warnings"].append(f"cluster_ids not found (skipped): {invalid_ids}")
+            if edge_errors:
+                result["warnings"].extend(edge_errors)
+        self._json_response(201, result)
 
     def _post_batch(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /batch — batch node and edge creation (all-or-nothing transaction)."""
