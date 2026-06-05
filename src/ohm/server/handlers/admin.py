@@ -479,6 +479,136 @@ class AdminHandlerMixin:
             "total_updates": len(updates),
         })
 
+    def _get_admin_verification_scan(self, path: str, qs: dict) -> None:
+        """GET /admin/verification-scan — scan for unverified edges and nodes.
+
+        Per ADR-018: Verification loops ensure claims don't persist without evidence.
+
+        Query params:
+          days_threshold: minimum age in days for unverified edges (default 14)
+          confidence_threshold: minimum confidence to flag (default 0.85)
+          causal_only: if true, only scan CAUSES/PREDICTS/EXPECTS edges (default true)
+        """
+        import json
+        from datetime import datetime, timedelta
+
+        days_threshold = int(qs.get("days_threshold", ["14"])[0])
+        confidence_threshold = float(qs.get("confidence_threshold", ["0.85"])[0])
+        causal_only = qs.get("causal_only", ["true"])[0].lower() != "false"
+
+        conn = self.current_store.conn
+
+        # 1. Unverified causal edges (CAUSES, PREDICTS, EXPECTS) with no recorded outcomes
+        # An edge is "unverified" if no outcome has been recorded that references
+        # either the edge's from_node or to_node as a claim_node.
+        causal_types = ["CAUSES", "PREDICTS", "EXPECTS"]
+        if not causal_only:
+            causal_types = None  # scan all edge types
+
+        type_filter = ""
+        if causal_types:
+            placeholders = ",".join(["?"] * len(causal_types))
+            type_filter = f"AND e.edge_type IN ({placeholders})"
+
+        cutoff_date = (datetime.utcnow() - timedelta(days=days_threshold)).strftime("%Y-%m-%d")
+
+        # Edges with no outcomes recorded against their from_node (the claim node)
+        outcome_check = """
+            SELECT e.id, e.from_node, e.to_node, e.edge_type, e.confidence,
+                   e.created_by, e.created_at,
+                   fn.label AS from_label, tn.label AS to_label
+            FROM ohm_edges e
+            LEFT JOIN ohm_nodes fn ON e.from_node = fn.id AND fn.deleted_at IS NULL
+            LEFT JOIN ohm_nodes tn ON e.to_node = tn.id AND tn.deleted_at IS NULL
+            WHERE e.deleted_at IS NULL
+              AND e.layer = 'L3'
+              {type_filter}
+              AND e.created_at < ?
+              AND NOT EXISTS (
+                  SELECT 1 FROM ohm_outcomes oc
+                  WHERE oc.claim_node = e.from_node
+              )
+              AND fn.id IS NOT NULL
+            ORDER BY e.confidence DESC, e.created_at ASC
+        """.replace("{type_filter}", type_filter)
+
+        params = causal_types + [cutoff_date] if causal_types else [cutoff_date]
+        unverified_edges = [dict(zip(["id", "from_node", "to_node", "edge_type",
+                                      "confidence", "created_by", "created_at",
+                                      "from_label", "to_label"], row))
+                            for row in conn.execute(outcome_check, params).fetchall()]
+
+        # 2. High-confidence nodes with no observations
+        high_conf_no_obs = conn.execute("""
+            SELECT n.id, n.label, n.type, n.confidence, n.created_by, n.created_at,
+                   COUNT(o.id) AS obs_count
+            FROM ohm_nodes n
+            LEFT JOIN ohm_observations o ON n.id = o.node_id AND o.deleted_at IS NULL
+            WHERE n.deleted_at IS NULL
+              AND n.confidence >= ?
+              AND n.type NOT IN ('source', 'agent')
+            GROUP BY n.id, n.label, n.type, n.confidence, n.created_by, n.created_at
+            HAVING COUNT(o.id) = 0
+            ORDER BY n.confidence DESC
+        """, [confidence_threshold]).fetchall()
+
+        high_conf_nodes = [dict(zip(["id", "label", "type", "confidence",
+                                     "created_by", "created_at", "obs_count"], row))
+                           for row in high_conf_no_obs]
+
+        # 3. Source reliability scores per agent
+        source_reliability = conn.execute("""
+            SELECT source_agent,
+                   COUNT(*) AS total_outcomes,
+                   SUM(CASE WHEN outcome = TRUE THEN 1 ELSE 0 END) AS accurate,
+                   SUM(CASE WHEN outcome = FALSE THEN 1 ELSE 0 END) AS inaccurate,
+                   CASE WHEN COUNT(*) > 0
+                        THEN ROUND(CAST(SUM(CASE WHEN outcome = TRUE THEN 1 ELSE 0 END) AS DOUBLE) / COUNT(*), 3)
+                        ELSE NULL END AS p_accurate
+            FROM ohm_outcomes
+            GROUP BY source_agent
+            ORDER BY total_outcomes DESC
+        """).fetchall()
+
+        reliability = [dict(zip(["source_agent", "total_outcomes", "accurate",
+                                 "inaccurate", "p_accurate"], row))
+                      for row in source_reliability]
+
+        # 4. Summary statistics
+        total_outcomes = conn.execute("SELECT COUNT(*) FROM ohm_outcomes").fetchone()[0]
+        total_causal = conn.execute(
+            "SELECT COUNT(*) FROM ohm_edges WHERE edge_type IN ('CAUSES','PREDICTS','EXPECTS') AND deleted_at IS NULL AND layer = 'L3'"
+        ).fetchone()[0]
+        total_challenges = conn.execute(
+            "SELECT COUNT(*) FROM ohm_edges WHERE edge_type = 'CHALLENGED_BY' AND deleted_at IS NULL"
+        ).fetchone()[0]
+        total_l3 = conn.execute(
+            "SELECT COUNT(*) FROM ohm_edges WHERE layer = 'L3' AND deleted_at IS NULL"
+        ).fetchone()[0]
+        total_l2 = conn.execute(
+            "SELECT COUNT(*) FROM ohm_edges WHERE layer = 'L2' AND deleted_at IS NULL"
+        ).fetchone()[0]
+
+        challenge_ratio = round(total_challenges / max(total_l3, 1), 4)
+        l3_l2_ratio = round(total_l3 / max(total_l2, 1), 1)
+
+        self._json_response(200, {
+            "unverified_edges": unverified_edges[:50],  # cap at 50 for response size
+            "unverified_edge_count": len(unverified_edges),
+            "high_confidence_no_obs": high_conf_nodes[:50],
+            "high_confidence_no_obs_count": len(high_conf_nodes),
+            "source_reliability": reliability,
+            "summary": {
+                "total_outcomes_recorded": total_outcomes,
+                "total_causal_edges": total_causal,
+                "challenge_ratio": challenge_ratio,
+                "l3_l2_ratio": l3_l2_ratio,
+                "days_threshold": days_threshold,
+                "confidence_threshold": confidence_threshold,
+                "verification_rate": round(total_outcomes / max(total_causal, 1), 3),
+            },
+        })
+
     def _get_admin_snapshots(self, path: str, qs: dict) -> None:
         """GET /admin/snapshots — list DuckLake snapshots."""
         snapshots = self.current_store.list_snapshots()

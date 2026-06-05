@@ -485,6 +485,7 @@ def _build_router() -> _RouteRegistry:
         "/stale",
         "/admin/embeddings",
         "/admin/snapshots",
+        "/admin/verification-scan",
         "/hooks",
         "/graph/at",
         "/graph/changes",
@@ -523,6 +524,7 @@ def _build_router() -> _RouteRegistry:
     r.add("POST", "/deduplicate")
     r.add("GET", "/admin/checkpoint")
     r.add("POST", "/admin/checkpoint")
+    r.add("GET", "/admin/verification-scan")
     r.add("POST", "/admin/observation-source-urls")
     r.add("POST", "/admin/source-node-urls")
     r.add("POST", "/admin/edge-layer-fix")
@@ -1988,6 +1990,7 @@ OhmHandler._GET_EXACT = {
     "/hooks": "_get_hooks",
     "/admin/checkpoint": "_get_admin_checkpoint",
     "/admin/embeddings": "_get_admin_embeddings",
+    "/admin/verification-scan": "_get_admin_verification_scan",
     "/admin/snapshots": "_get_admin_snapshots",
     "/graph/at": "_get_graph_at",
     "/graph/changes": "_get_graph_changes",

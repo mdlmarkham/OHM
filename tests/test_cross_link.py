@@ -219,6 +219,8 @@ def cross_link_server(tmp_path):
     """Live test server for cross-link enforcement tests."""
     db_path = str(tmp_path / "cross_link.duckdb")
     store = OhmStore(db_path=db_path, agent_name="test_agent")
+    from ohm.server.server import _register_builtin_hooks
+    _register_builtin_hooks(store)
     port, server, thread = _start_server(store)
     yield port, store
     server.shutdown()
@@ -264,9 +266,9 @@ class TestHttpCrossLinkEnforcement:
             {"id": "n_pattern", "label": "Bare pattern", "type": "pattern"},
         )
         assert status == 422
-        assert data["error"] == "cross_link_required"
-        assert "pattern" in data.get("message", "").lower() or "pattern" in str(data)
-        assert "hint" in data
+        assert data["error"] == "hook_rejected"
+        assert "cross_link_required" in data.get("message", "")
+        assert "pattern" in data.get("message", "").lower()
 
     def test_post_node_idea_without_connects_to_returns_422(self, cross_link_server):
         port, _ = cross_link_server
@@ -277,7 +279,8 @@ class TestHttpCrossLinkEnforcement:
             {"id": "n_idea", "label": "Bare idea", "type": "idea"},
         )
         assert status == 422
-        assert data["error"] == "cross_link_required"
+        assert data["error"] == "hook_rejected"
+        assert "cross_link_required" in data.get("message", "")
 
     def test_post_node_decision_without_connects_to_returns_422(self, cross_link_server):
         port, _ = cross_link_server
@@ -293,7 +296,8 @@ class TestHttpCrossLinkEnforcement:
             },
         )
         assert status == 422
-        assert data["error"] == "cross_link_required"
+        assert data["error"] == "hook_rejected"
+        assert "cross_link_required" in data.get("message", "")
 
     def test_post_node_pattern_with_valid_connects_to_succeeds(self, cross_link_server):
         port, _ = cross_link_server
@@ -335,8 +339,9 @@ class TestHttpCrossLinkEnforcement:
             },
         )
         assert status == 422
-        assert data["error"] == "cross_link_unknown_target"
-        assert "missing" in data
+        assert data["error"] == "hook_rejected"
+        assert "cross_link_unknown_target" in data.get("message", "")
+        assert "nonexistent_target" in data.get("message", "")
 
     def test_post_node_pattern_with_empty_connects_to_returns_422(self, cross_link_server):
         port, _ = cross_link_server
@@ -352,7 +357,8 @@ class TestHttpCrossLinkEnforcement:
             },
         )
         assert status == 422
-        assert data["error"] == "cross_link_required"
+        assert data["error"] == "hook_rejected"
+        assert "cross_link_required" in data.get("message", "")
 
     def test_post_node_pattern_with_nonlist_connects_to_returns_422(self, cross_link_server):
         port, _ = cross_link_server
@@ -368,7 +374,8 @@ class TestHttpCrossLinkEnforcement:
             },
         )
         assert status == 422
-        assert data["error"] == "validation_error"
+        assert data["error"] == "hook_rejected"
+        assert "connects_to must be a list" in data.get("message", "")
 
     def test_post_node_update_existing_pattern_skips_check(self, cross_link_server):
         """Updating an existing pattern node is exempt — you cannot fix a historical dead-end by refusing to update."""
