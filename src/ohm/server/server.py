@@ -1996,6 +1996,7 @@ OhmHandler._GET_EXACT = {
     "/webhooks/dead-letter": "_get_webhooks_dead_letter",
     "/webhooks/outbox": "_get_webhooks_outbox",
     "/resolve": "_get_resolve",
+    "/admin/alias-duplicates": "_get_alias_duplicates",
     "/tenants": "_get_tenants",
 }
 

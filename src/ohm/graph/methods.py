@@ -656,6 +656,79 @@ def detect_near_duplicates(
     return result
 
 
+def detect_alias_duplicates(
+    conn: DuckDBPyConnection,
+    *,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Find nodes that may be duplicates via alias collision (OHM-g0kv).
+
+    Two nodes are alias duplicates if their normalized labels are identical
+    (same ohm_aliases.alias_norm) but they have different node_ids. This
+    catches "Hormuz AND-Gate" vs "hormuz_and_gate" vs "Strait of Hormuz AND-Gate".
+
+    Also finds content hash collisions: different nodes with the same
+    content_hash in ohm_content_hashes.
+
+    Returns:
+        List of duplicate groups with alias_norm, node_ids, and labels.
+    """
+    rows = conn.execute(
+        """
+        SELECT a.alias_norm, a.node_id AS node_a, n1.label AS label_a,
+               b.node_id AS node_b, n2.label AS label_b
+        FROM ohm_aliases a
+        JOIN ohm_aliases b ON a.alias_norm = b.alias_norm AND a.node_id < b.node_id
+        LEFT JOIN ohm_nodes n1 ON n1.id = a.node_id AND n1.deleted_at IS NULL
+        LEFT JOIN ohm_nodes n2 ON n2.id = b.node_id AND n2.deleted_at IS NULL
+        WHERE n1.id IS NOT NULL AND n2.id IS NOT NULL
+        ORDER BY a.alias_norm
+        LIMIT ?
+        """,
+        [limit],
+    ).fetchall()
+
+    alias_dups = []
+    for row in rows:
+        alias_dups.append({
+            "alias_norm": row[0],
+            "node_a": row[1],
+            "label_a": row[2],
+            "node_b": row[3],
+            "label_b": row[4],
+            "kind": "alias_collision",
+        })
+
+    hash_rows = conn.execute(
+        """
+        SELECT ch1.content_hash, ch1.node_id AS node_a, n1.label AS label_a,
+               ch2.node_id AS node_b, n2.label AS label_b
+        FROM ohm_content_hashes ch1
+        JOIN ohm_content_hashes ch2 ON ch1.content_hash = ch2.content_hash
+             AND ch1.node_id < ch2.node_id
+        LEFT JOIN ohm_nodes n1 ON n1.id = ch1.node_id AND n1.deleted_at IS NULL
+        LEFT JOIN ohm_nodes n2 ON n2.id = ch2.node_id AND n2.deleted_at IS NULL
+        WHERE n1.id IS NOT NULL AND n2.id IS NOT NULL
+        ORDER BY ch1.content_hash
+        LIMIT ?
+        """,
+        [limit],
+    ).fetchall()
+
+    hash_dups = []
+    for row in hash_rows:
+        hash_dups.append({
+            "content_hash": row[0],
+            "node_a": row[1],
+            "label_a": row[2],
+            "node_b": row[3],
+            "label_b": row[4],
+            "kind": "content_hash_collision",
+        })
+
+    return alias_dups + hash_dups
+
+
 def compute_confidence_calibration(
     conn: DuckDBPyConnection,
     agent_name: str,

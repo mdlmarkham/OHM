@@ -57,15 +57,22 @@ class TestAliasRegistration:
         assert r2["created"] is False
         assert r1["id"] == r2["id"]
 
+    def test_register_same_alias_different_nodes(self, test_db):
+        r1 = register_alias(test_db, alias_norm="shared_alias", node_id="n1")
+        r2 = register_alias(test_db, alias_norm="shared_alias", node_id="n2")
+        assert r1["created"] is True
+        assert r2["created"] is True
+        assert r1["id"] != r2["id"]
+
     def test_resolve_existing(self, test_db):
         register_alias(test_db, alias_norm="demand_rationing", node_id="n2")
-        result = resolve_alias(test_db, alias_norm="demand_rationing")
-        assert result is not None
-        assert result["node_id"] == "n2"
+        results = resolve_alias(test_db, alias_norm="demand_rationing")
+        assert len(results) == 1
+        assert results[0]["node_id"] == "n2"
 
     def test_resolve_missing(self, test_db):
-        result = resolve_alias(test_db, alias_norm="nonexistent")
-        assert result is None
+        results = resolve_alias(test_db, alias_norm="nonexistent")
+        assert results == []
 
     def test_query_aliases_by_node(self, test_db):
         register_alias(test_db, alias_norm="alias_a", node_id="n1")
@@ -121,9 +128,9 @@ class TestAliasOnNodeCreation:
 
         store = OhmStore(db_path=":memory:", agent_name="test")
         store.write_node(id="n1", label="Hormuz AND-Gate", type="concept")
-        result = resolve_alias(store.conn, alias_norm="hormuz_and-gate")
-        assert result is not None
-        assert result["node_id"] == "n1"
+        results = resolve_alias(store.conn, alias_norm="hormuz_and-gate")
+        assert len(results) == 1
+        assert results[0]["node_id"] == "n1"
 
     def test_alias_not_overwritten_on_update(self, test_db):
         from ohm.graph.store import OhmStore
@@ -131,9 +138,9 @@ class TestAliasOnNodeCreation:
         store = OhmStore(db_path=":memory:", agent_name="test")
         store.write_node(id="n2", label="First Label", type="concept")
         store.write_node(id="n2", label="Second Label", type="concept")
-        result = resolve_alias(store.conn, alias_norm="first_label")
-        assert result is not None
-        assert result["node_id"] == "n2"
+        results = resolve_alias(store.conn, alias_norm="first_label")
+        assert len(results) == 1
+        assert results[0]["node_id"] == "n2"
 
     def test_resolve_node_by_alias(self, test_db):
         from ohm.graph.store import OhmStore
@@ -160,5 +167,48 @@ class TestAliasOnNodeCreation:
         store.write_node(id="n5", label="Beta Concept", type="concept")
         a = resolve_alias(store.conn, alias_norm="alpha_concept")
         b = resolve_alias(store.conn, alias_norm="beta_concept")
-        assert a["node_id"] == "n4"
-        assert b["node_id"] == "n5"
+        assert a[0]["node_id"] == "n4"
+        assert b[0]["node_id"] == "n5"
+
+
+class TestAliasDuplicateDetection:
+    """Tests for alias-based duplicate detection (OHM-g0kv.5)."""
+
+    def test_no_duplicates_empty(self, test_db):
+        from ohm.methods import detect_alias_duplicates
+
+        result = detect_alias_duplicates(test_db)
+        assert result == []
+
+    def test_detects_alias_collision(self, test_db):
+        from ohm.methods import detect_alias_duplicates
+
+        test_db.execute("INSERT INTO ohm_nodes (id, label, type, created_by) VALUES (?, ?, ?, ?)", ["n1", "Hormuz Gate", "concept", "test"])
+        test_db.execute("INSERT INTO ohm_nodes (id, label, type, created_by) VALUES (?, ?, ?, ?)", ["n2", "Hormuz Gate", "concept", "test"])
+        register_alias(test_db, alias_norm="hormuz_gate", node_id="n1")
+        register_alias(test_db, alias_norm="hormuz_gate", node_id="n2")
+        result = detect_alias_duplicates(test_db)
+        assert len(result) == 1
+        assert result[0]["kind"] == "alias_collision"
+        assert set([result[0]["node_a"], result[0]["node_b"]]) == {"n1", "n2"}
+
+    def test_detects_content_hash_collision(self, test_db):
+        from ohm.methods import detect_alias_duplicates
+
+        test_db.execute("INSERT INTO ohm_nodes (id, label, type, created_by) VALUES (?, ?, ?, ?)", ["s1", "Source A", "source", "test"])
+        test_db.execute("INSERT INTO ohm_nodes (id, label, type, created_by) VALUES (?, ?, ?, ?)", ["s2", "Source B", "source", "test"])
+        register_content_hash(test_db, node_id="s1", content_hash="abc123")
+        register_content_hash(test_db, node_id="s2", content_hash="abc123")
+        result = detect_alias_duplicates(test_db)
+        assert len(result) == 1
+        assert result[0]["kind"] == "content_hash_collision"
+
+    def test_no_collision_different_aliases(self, test_db):
+        from ohm.methods import detect_alias_duplicates
+
+        test_db.execute("INSERT INTO ohm_nodes (id, label, type, created_by) VALUES (?, ?, ?, ?)", ["n1", "Alpha", "concept", "test"])
+        test_db.execute("INSERT INTO ohm_nodes (id, label, type, created_by) VALUES (?, ?, ?, ?)", ["n2", "Beta", "concept", "test"])
+        register_alias(test_db, alias_norm="alpha", node_id="n1")
+        register_alias(test_db, alias_norm="beta", node_id="n2")
+        result = detect_alias_duplicates(test_db)
+        assert result == []

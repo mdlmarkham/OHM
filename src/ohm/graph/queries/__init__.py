@@ -3169,6 +3169,9 @@ def register_alias(
 ) -> dict[str, Any]:
     """Register a normalized alias for a node.
 
+    Allows multiple alias_norm entries for different node_ids (collision
+    detection). Skips if this exact (alias_norm, node_id) pair already exists.
+
     Args:
         alias_norm: The normalized alias string.
         node_id: The node this alias points to.
@@ -3181,11 +3184,11 @@ def register_alias(
     node_id = validate_identifier(node_id, name="node_id")
 
     existing = conn.execute(
-        "SELECT id, node_id FROM ohm_aliases WHERE alias_norm = ?",
-        [alias_norm],
+        "SELECT id FROM ohm_aliases WHERE alias_norm = ? AND node_id = ?",
+        [alias_norm, node_id],
     ).fetchone()
     if existing:
-        return {"id": existing[0], "alias_norm": alias_norm, "node_id": existing[1], "created": False}
+        return {"id": existing[0], "alias_norm": alias_norm, "node_id": node_id, "created": False}
 
     import uuid
 
@@ -3201,15 +3204,13 @@ def resolve_alias(
     conn: DuckDBPyConnection,
     *,
     alias_norm: str,
-) -> dict[str, Any] | None:
-    """Look up a normalized alias. Returns the alias record or None."""
-    row = conn.execute(
+) -> list[dict[str, Any]]:
+    """Look up a normalized alias. Returns list of matching alias records."""
+    result = conn.execute(
         "SELECT id, alias_norm, node_id, created_at FROM ohm_aliases WHERE alias_norm = ?",
         [alias_norm],
-    ).fetchone()
-    if not row:
-        return None
-    return {"id": row[0], "alias_norm": row[1], "node_id": row[2], "created_at": str(row[3])}
+    )
+    return _rows_to_dicts(result)
 
 
 def query_aliases(
@@ -3293,7 +3294,7 @@ def resolve_node_by_alias(
 ) -> dict[str, Any] | None:
     """Resolve a query string to a node via alias matching.
 
-    Normalizes the query, checks ohm_aliases, then returns the
+    Normalizes the query, checks ohm_aliases, returns the first
     matching node record (or None if no match found).
     """
     from ohm.validation import normalize_alias
@@ -3303,7 +3304,7 @@ def resolve_node_by_alias(
         return None
 
     alias_row = conn.execute(
-        "SELECT node_id FROM ohm_aliases WHERE alias_norm = ?",
+        "SELECT node_id FROM ohm_aliases WHERE alias_norm = ? LIMIT 1",
         [norm],
     ).fetchone()
     if not alias_row:

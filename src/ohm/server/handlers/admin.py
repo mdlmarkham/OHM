@@ -508,3 +508,11 @@ class AdminHandlerMixin:
             return
 
         self._json_response(200, {"resolved": node})
+
+    def _get_alias_duplicates(self, path: str, qs: dict) -> None:
+        """GET /admin/alias-duplicates — find duplicate nodes via alias/content hash (OHM-g0kv.5)."""
+        from ohm.methods import detect_alias_duplicates
+
+        limit = int(qs.get("limit", [50])[0])
+        result = detect_alias_duplicates(self.current_store.conn, limit=limit)
+        self._json_response(200, {"duplicates": result, "count": len(result)})

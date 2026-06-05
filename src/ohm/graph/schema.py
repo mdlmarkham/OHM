@@ -1146,7 +1146,7 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             node_id      VARCHAR NOT NULL,
             created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""",
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_aliases_norm ON ohm_aliases(alias_norm)",
+            "CREATE INDEX IF NOT EXISTS idx_aliases_norm ON ohm_aliases(alias_norm)",
             "CREATE INDEX IF NOT EXISTS idx_aliases_node ON ohm_aliases(node_id)",
             """CREATE TABLE IF NOT EXISTS ohm_content_hashes (
             id           VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),

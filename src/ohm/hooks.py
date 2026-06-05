@@ -74,8 +74,6 @@ class HookResult:
 # tenant-writable, so a compromised hook could read or exfiltrate data
 # if given full access. Sandboxing mitigates this.
 
-_SANDBOX_DISABLED = os.environ.get("OHM_SANDBOX_DISABLE", "") in ("1", "true", "yes")
-
 _HOOK_ENV_WHITELIST = frozenset({
     "OHM_HOOK_EVENT", "OHM_HOOK_ID", "OHM_CUSTOMER_ID",
 })
@@ -166,8 +164,12 @@ def _sandbox_preexec() -> None:
 
 
 def _is_sandboxed() -> bool:
-    """Return True if the hook sandbox is active (not disabled via env var)."""
-    return not _SANDBOX_DISABLED
+    """Return True if the hook sandbox is active (not disabled via env var).
+
+    Checks ``OHM_SANDBOX_DISABLE`` at call time so tests can toggle the
+    env var without needing ``importlib.reload``.
+    """
+    return os.environ.get("OHM_SANDBOX_DISABLE", "") not in ("1", "true", "yes")
 
 
 # ── Hook Records ─────────────────────────────────────────────────────────────
