@@ -98,7 +98,9 @@ class TestDuckLakeHealthCheck:
             pytest.skip("DuckLake attachment not available")
 
         # Run sync — should detect orphans and set sync_degraded
-        result = store.sync_heartbeat(ducklake_path=ducklake_path)
+        # Run 5 times to pass health check sampling (every 5th cycle)
+        for _ in range(5):
+            result = store.sync_heartbeat(ducklake_path=ducklake_path)
         assert hasattr(store, "sync_degraded")
         store.close()
 
