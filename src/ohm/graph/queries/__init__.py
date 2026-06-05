@@ -3284,3 +3284,37 @@ def lookup_content_hash(
         [content_hash],
     )
     return _rows_to_dicts(result)
+
+
+def resolve_node_by_alias(
+    conn: DuckDBPyConnection,
+    *,
+    query: str,
+) -> dict[str, Any] | None:
+    """Resolve a query string to a node via alias matching.
+
+    Normalizes the query, checks ohm_aliases, then returns the
+    matching node record (or None if no match found).
+    """
+    from ohm.validation import normalize_alias
+
+    norm = normalize_alias(query)
+    if not norm:
+        return None
+
+    alias_row = conn.execute(
+        "SELECT node_id FROM ohm_aliases WHERE alias_norm = ?",
+        [norm],
+    ).fetchone()
+    if not alias_row:
+        return None
+
+    node_id = alias_row[0]
+    node = conn.execute(
+        "SELECT id, label, type, confidence, visibility FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+        [node_id],
+    ).fetchone()
+    if not node:
+        return None
+
+    return {"id": node[0], "label": node[1], "type": node[2], "confidence": node[3], "visibility": node[4]}

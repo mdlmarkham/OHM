@@ -87,18 +87,29 @@ _DEFAULT_RLIMIT_NPROC = 0                     # no child processes (also prevent
 _DEFAULT_RLIMIT_STACK = 8 * 1024 * 1024       # 8 MB stack
 
 
+_SANDBOX_SAFE_ENV_VARS = frozenset({
+    "PATH", "SYSTEMROOT", "SYSTEMDRIVE", "HOME", "USERPROFILE",
+    "TMP", "TEMP", "TMPDIR", "LANG", "LC_ALL",
+})
+
+
 def _sandbox_env(hook_id: str, event: str, customer_id: str = "") -> dict[str, str]:
     """Return a sanitised environment dict for hook subprocesses.
 
-    Only ``OHM_HOOK_*`` variables are passed; the parent process
-    environment is stripped to prevent accidental data leaks through
-    env vars (tokens, DB paths, etc.).
+    Only ``OHM_HOOK_*`` vars and a minimal safe set (PATH, TEMP, HOME,
+    etc.) are passed. Sensitive vars (TOKEN, KEY, SECRET, DB_PATH) are
+    stripped to prevent accidental data leaks through env inheritance.
     """
-    return {
+    env: dict[str, str] = {
         "OHM_HOOK_EVENT": event,
         "OHM_HOOK_ID": hook_id,
         "OHM_CUSTOMER_ID": customer_id,
     }
+    for key in _SANDBOX_SAFE_ENV_VARS:
+        val = os.environ.get(key)
+        if val is not None:
+            env[key] = val
+    return env
 
 
 def _sandbox_preexec() -> None:

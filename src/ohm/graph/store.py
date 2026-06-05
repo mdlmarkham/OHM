@@ -760,6 +760,19 @@ class OhmStore:
         result = self.get_node(id) or {}
         result["created"] = True
 
+        # Auto-register alias (OHM-g0kv)
+        from ohm.validation import normalize_alias
+
+        norm = normalize_alias(label)
+        if norm and norm != id:
+            try:
+                self.conn.execute(
+                    "INSERT INTO ohm_aliases (alias_norm, node_id) VALUES (?, ?)",
+                    [norm, id],
+                )
+            except Exception:
+                pass
+
         # Auto-generate embedding in background (best-effort, non-blocking)
         threading.Thread(target=self._auto_embed_node, args=(id, label, content), daemon=True).start()
 

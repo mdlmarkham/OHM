@@ -111,3 +111,54 @@ class TestContentHash:
     def test_lookup_missing_hash(self, test_db):
         results = lookup_content_hash(test_db, content_hash="nonexistent")
         assert results == []
+
+
+class TestAliasOnNodeCreation:
+    """Tests for auto-alias registration when nodes are created (OHM-g0kv.3)."""
+
+    def test_alias_auto_registered_on_create(self, test_db):
+        from ohm.graph.store import OhmStore
+
+        store = OhmStore(db_path=":memory:", agent_name="test")
+        store.write_node(id="n1", label="Hormuz AND-Gate", type="concept")
+        result = resolve_alias(store.conn, alias_norm="hormuz_and-gate")
+        assert result is not None
+        assert result["node_id"] == "n1"
+
+    def test_alias_not_overwritten_on_update(self, test_db):
+        from ohm.graph.store import OhmStore
+
+        store = OhmStore(db_path=":memory:", agent_name="test")
+        store.write_node(id="n2", label="First Label", type="concept")
+        store.write_node(id="n2", label="Second Label", type="concept")
+        result = resolve_alias(store.conn, alias_norm="first_label")
+        assert result is not None
+        assert result["node_id"] == "n2"
+
+    def test_resolve_node_by_alias(self, test_db):
+        from ohm.graph.store import OhmStore
+        from ohm.queries import resolve_node_by_alias
+
+        store = OhmStore(db_path=":memory:", agent_name="test")
+        store.write_node(id="n3", label="Demand Rationing", type="concept")
+        node = resolve_node_by_alias(store.conn, query="demand rationing")
+        assert node is not None
+        assert node["id"] == "n3"
+        assert node["label"] == "Demand Rationing"
+
+    def test_resolve_node_by_alias_no_match(self, test_db):
+        from ohm.queries import resolve_node_by_alias
+
+        node = resolve_node_by_alias(test_db, query="nonexistent concept")
+        assert node is None
+
+    def test_multiple_aliases_for_different_nodes(self, test_db):
+        from ohm.graph.store import OhmStore
+
+        store = OhmStore(db_path=":memory:", agent_name="test")
+        store.write_node(id="n4", label="Alpha Concept", type="concept")
+        store.write_node(id="n5", label="Beta Concept", type="concept")
+        a = resolve_alias(store.conn, alias_norm="alpha_concept")
+        b = resolve_alias(store.conn, alias_norm="beta_concept")
+        assert a["node_id"] == "n4"
+        assert b["node_id"] == "n5"

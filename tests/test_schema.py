@@ -691,7 +691,7 @@ class TestHookRegistryTable:
     def test_migration_v0_21_0(self, test_db):
         """Migration 0.21.0 creates ohm_hooks on existing DB."""
         from ohm.schema import SCHEMA_VERSION
-        assert SCHEMA_VERSION == "0.22.0"
+        assert SCHEMA_VERSION == "0.23.0"
 
 
 class TestHookLogTable:
