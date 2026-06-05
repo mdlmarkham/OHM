@@ -1995,6 +1995,7 @@ OhmHandler._GET_EXACT = {
     "/source_reliability": "_get_source_reliability",
     "/webhooks/dead-letter": "_get_webhooks_dead_letter",
     "/webhooks/outbox": "_get_webhooks_outbox",
+    "/resolve": "_get_resolve",
     "/tenants": "_get_tenants",
 }
 

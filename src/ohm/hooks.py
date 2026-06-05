@@ -90,6 +90,8 @@ _DEFAULT_RLIMIT_STACK = 8 * 1024 * 1024       # 8 MB stack
 _SANDBOX_SAFE_ENV_VARS = frozenset({
     "PATH", "SYSTEMROOT", "SYSTEMDRIVE", "HOME", "USERPROFILE",
     "TMP", "TEMP", "TMPDIR", "LANG", "LC_ALL",
+    # Windows shell=True artifacts (cmd.exe adds these)
+    "COMSPEC", "PATHEXT", "PROMPT",
 })
 
 

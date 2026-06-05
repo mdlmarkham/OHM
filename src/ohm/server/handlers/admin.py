@@ -483,3 +483,28 @@ class AdminHandlerMixin:
         """GET /admin/snapshots — list DuckLake snapshots."""
         snapshots = self.current_store.list_snapshots()
         self._json_response(200, {"snapshots": snapshots, "count": len(snapshots)})
+
+    def _get_resolve(self, path: str, qs: dict) -> None:
+        """GET /resolve?query= — resolve a query to a node via alias matching (OHM-g0kv.4)."""
+        from ohm.queries import resolve_node_by_alias, query_aliases
+
+        query = qs.get("query", [""])[0]
+        if not query:
+            self._json_response(400, {"error": "validation_error", "message": "query parameter is required"})
+            return
+
+        node = resolve_node_by_alias(self.current_store.conn, query=query)
+        if node is None:
+            prefix = qs.get("prefix", ["true"])[0].lower() in ("true", "1", "yes")
+            if prefix:
+                from ohm.validation import normalize_alias
+
+                norm = normalize_alias(query)
+                aliases = query_aliases(self.current_store.conn, prefix=norm)
+                if aliases:
+                    self._json_response(200, {"resolved": None, "suggestions": aliases, "count": len(aliases)})
+                    return
+            self._json_response(404, {"error": "not_found", "message": f"No alias match for '{query}'"})
+            return
+
+        self._json_response(200, {"resolved": node})

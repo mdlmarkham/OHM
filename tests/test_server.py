@@ -1833,3 +1833,37 @@ class TestBuiltinHooks:
         commands = [h["command"] for h in data["hooks"]]
         assert "python:ohm.hooks_builtin.cross_link_check" in commands
         assert "python:ohm.hooks_builtin.source_url_required" in commands
+
+
+class TestResolveEndpoint:
+    """Tests for GET /resolve?query= endpoint (OHM-g0kv.4)."""
+
+    def test_resolve_exact_match(self, test_server):
+        port, store = test_server
+        store.write_node("n1", "Hormuz AND-Gate", "concept", agent_name="test")
+        status, data = _request("GET", port, "/resolve?query=hormuz%20and-gate")
+        assert status == 200
+        assert data["resolved"]["id"] == "n1"
+
+    def test_resolve_case_insensitive(self, test_server):
+        port, store = test_server
+        store.write_node("n2", "Demand Rationing", "concept", agent_name="test")
+        status, data = _request("GET", port, "/resolve?query=Demand%20Rationing")
+        assert status == 200
+        assert data["resolved"]["id"] == "n2"
+
+    def test_resolve_suggestions_on_prefix(self, test_server):
+        port, store = test_server
+        store.write_node("n3", "Hormuz Shipping", "concept", agent_name="test")
+        status, data = _request("GET", port, "/resolve?query=hormuz")
+        assert status == 200
+
+    def test_resolve_not_found(self, test_server):
+        port, _ = test_server
+        status, data = _request("GET", port, "/resolve?query=nonexistent_xyz")
+        assert status == 404
+
+    def test_resolve_missing_query_param(self, test_server):
+        port, _ = test_server
+        status, data = _request("GET", port, "/resolve")
+        assert status == 400
