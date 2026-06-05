@@ -609,6 +609,37 @@ class AdminHandlerMixin:
             },
         })
 
+    def _post_admin_verification_decay(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /admin/verification-decay — Run verification-aware confidence decay.
+
+        ADR-018.3: Unverified causal edges decay with 30-day half-life.
+        Verified edges decay with 365-day half-life.
+
+        Body params:
+            dry_run (bool): If true, return what would change without modifying. Default true.
+            unverified_half_life_days (float): Half-life for unverified edges. Default 30.
+            verified_half_life_days (float): Half-life for verified edges. Default 365.
+            min_confidence (float): Floor for decayed confidence. Default 0.1.
+            verification_grace_days (float): Days before decay starts. Default 14.
+        """
+        from ohm.graph.methods import apply_verification_decay
+
+        dry_run = body.get("dry_run", True)  # Default to dry run for safety
+        unverified_half_life = float(body.get("unverified_half_life_days", 30.0))
+        verified_half_life = float(body.get("verified_half_life_days", 365.0))
+        min_confidence = float(body.get("min_confidence", 0.1))
+        grace_days = float(body.get("verification_grace_days", 14.0))
+
+        result = apply_verification_decay(
+            self.current_store.conn,
+            unverified_half_life_days=unverified_half_life,
+            verified_half_life_days=verified_half_life,
+            min_confidence=min_confidence,
+            verification_grace_days=grace_days,
+            dry_run=dry_run,
+        )
+        self._json_response(200, result)
+
     def _get_admin_snapshots(self, path: str, qs: dict) -> None:
         """GET /admin/snapshots — list DuckLake snapshots."""
         snapshots = self.current_store.list_snapshots()

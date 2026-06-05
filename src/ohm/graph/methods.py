@@ -1107,6 +1107,120 @@ def decay_observations(
     return results
 
 
+def apply_verification_decay(
+    conn: DuckDBPyConnection,
+    *,
+    unverified_half_life_days: float = 30.0,
+    verified_half_life_days: float = 365.0,
+    min_confidence: float = 0.1,
+    verification_grace_days: float = 14.0,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Decay edge confidence based on verification status (ADR-018.3).
+
+    Unverified causal edges decay with a 30-day half-life. Verified edges
+    (those with recorded outcomes confirming or falsifying them) decay
+    with a 365-day half-life. Edges within the grace period (14 days)
+    are not decayed.
+
+    This implements the structural enforcement of Verification Loops
+    (Karpathy Rule 8): claims that aren't verified decay, rather than
+    persisting as sacred references.
+
+    Only affects L3 (knowledge) CAUSES/PREDICTS/EXPECTS edges.
+
+    Args:
+        conn: Database connection.
+        unverified_half_life_days: Half-life for unverified edges (default 30).
+        verified_half_life_days: Half-life for verified edges (default 365).
+        min_confidence: Floor for decayed confidence (default 0.1).
+        verification_grace_days: Days before decay starts (default 14).
+        dry_run: If True, return affected edges without modifying.
+
+    Returns:
+        Dict with decayed_count, verified_count, unverified_count, affected_edges.
+    """
+    # Find L3 causal edges eligible for decay
+    edges = conn.execute(
+        """
+        SELECT e.id, e.edge_type, e.from_node, e.to_node, e.confidence,
+               e.created_by, e.created_at,
+               EXTRACT(DAY FROM CURRENT_TIMESTAMP - e.created_at) AS age_days,
+               CASE WHEN EXISTS (
+                   SELECT 1 FROM ohm_outcomes oc
+                   WHERE oc.claim_node = e.from_node
+               ) THEN TRUE ELSE FALSE END AS is_verified
+        FROM ohm_edges e
+        WHERE e.layer = 'L3'
+          AND e.edge_type IN ('CAUSES', 'PREDICTS', 'EXPECTS')
+          AND e.deleted_at IS NULL
+          AND e.confidence > ?
+          AND e.created_at < CURRENT_TIMESTAMP - ? * INTERVAL '1 day'
+        ORDER BY e.confidence DESC
+    """,
+        [min_confidence, verification_grace_days],
+    ).fetchall()
+
+    if not edges:
+        return {"decayed_count": 0, "verified_count": 0, "unverified_count": 0,
+                "affected_edges": [], "dry_run": dry_run,
+                "summary": "No edges eligible for verification decay"}
+
+    decayed = []
+    verified_count = 0
+    unverified_count = 0
+
+    for row in edges:
+        edge_id, etype, from_node, to_node, conf, created_by, created_at, age_days, is_verified = row
+        age_days = float(age_days) if age_days else 0.0
+        is_verified = bool(is_verified)
+
+        if is_verified:
+            half_life = verified_half_life_days
+            verified_count += 1
+        else:
+            half_life = unverified_half_life_days
+            unverified_count += 1
+
+        decay_factor = 0.5 ** (age_days / half_life)
+        new_conf = round(conf * decay_factor, 4)
+        new_conf = max(new_conf, min_confidence)
+
+        if new_conf < conf:
+            decayed.append({
+                "id": edge_id,
+                "edge_type": etype,
+                "from_node": from_node,
+                "to_node": to_node,
+                "original_confidence": conf,
+                "new_confidence": new_conf,
+                "age_days": round(age_days, 1),
+                "is_verified": is_verified,
+                "half_life_used": half_life,
+                "decay_factor": round(decay_factor, 4),
+            })
+
+            if not dry_run:
+                conn.execute(
+                    "UPDATE ohm_edges SET confidence = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    [new_conf, edge_id],
+                )
+
+    return {
+        "decayed_count": len(decayed),
+        "verified_count": verified_count,
+        "unverified_count": unverified_count,
+        "affected_edges": decayed[:50],  # Limit output
+        "dry_run": dry_run,
+        "unverified_half_life_days": unverified_half_life_days,
+        "verified_half_life_days": verified_half_life_days,
+        "verification_grace_days": verification_grace_days,
+        "summary": (f"Decayed {len(decayed)} edges: "
+                    f"{unverified_count} unverified (half-life {unverified_half_life_days}d), "
+                    f"{verified_count} verified (half-life {verified_half_life_days}d)"),
+    }
+
+
 def detect_trend(
     conn: DuckDBPyConnection,
     node_id: str,
