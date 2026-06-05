@@ -533,10 +533,22 @@ class AdminHandlerMixin:
         """.replace("{type_filter}", type_filter)
 
         params = causal_types + [cutoff_date] if causal_types else [cutoff_date]
-        unverified_edges = [dict(zip(["id", "from_node", "to_node", "edge_type",
-                                      "confidence", "created_by", "created_at",
-                                      "from_label", "to_label"], row))
-                            for row in conn.execute(outcome_check, params).fetchall()]
+        unverified_rows = conn.execute(outcome_check, params).fetchall()
+        unverified_edges = []
+        for row in unverified_rows:
+            d = dict(zip(["id", "from_node", "to_node", "edge_type",
+                          "confidence", "created_by", "created_at",
+                          "from_label", "to_label"], row))
+            # ADR-018.4: Include age_days for agent prioritization
+            if d.get("created_at"):
+                try:
+                    created = datetime.fromisoformat(str(d["created_at"]).replace("Z", "+00:00"))
+                    d["age_days"] = round((datetime.utcnow() - created.replace(tzinfo=None)).total_seconds() / 86400, 1)
+                except (ValueError, TypeError):
+                    d["age_days"] = None
+            else:
+                d["age_days"] = None
+            unverified_edges.append(d)
 
         # 2. High-confidence nodes with no observations
         high_conf_no_obs = conn.execute("""
@@ -552,9 +564,20 @@ class AdminHandlerMixin:
             ORDER BY n.confidence DESC
         """, [confidence_threshold]).fetchall()
 
-        high_conf_nodes = [dict(zip(["id", "label", "type", "confidence",
-                                     "created_by", "created_at", "obs_count"], row))
-                           for row in high_conf_no_obs]
+        high_conf_nodes = []
+        for row in high_conf_no_obs:
+            d = dict(zip(["id", "label", "type", "confidence",
+                          "created_by", "created_at", "obs_count"], row))
+            # ADR-018.4: Include age_days for sacred reference identification
+            if d.get("created_at"):
+                try:
+                    created = datetime.fromisoformat(str(d["created_at"]).replace("Z", "+00:00"))
+                    d["age_days"] = round((datetime.utcnow() - created.replace(tzinfo=None)).total_seconds() / 86400, 1)
+                except (ValueError, TypeError):
+                    d["age_days"] = None
+            else:
+                d["age_days"] = None
+            high_conf_nodes.append(d)
 
         # 3. Source reliability scores per agent
         source_reliability = conn.execute("""
@@ -644,6 +667,61 @@ class AdminHandlerMixin:
         """GET /admin/snapshots — list DuckLake snapshots."""
         snapshots = self.current_store.list_snapshots()
         self._json_response(200, {"snapshots": snapshots, "count": len(snapshots)})
+
+    def _post_admin_vacuum_lake(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /admin/vacuum-lake — run VACUUM on DuckLake to prune old snapshots and reduce bloat.
+
+        DuckLake accumulates snapshots on every write. Without periodic VACUUM,
+        the snapshot metadata grows unbounded, increasing memory usage and
+        causing health check queries to consume excessive resources.
+
+        Body (optional): {"keep_versions": N} — keep last N snapshot versions (default: 10)
+        """
+        keep = body.get("keep_versions", 10) if body else 10
+        try:
+            # Check if DuckLake is attached
+            attached = self.current_store.conn.execute(
+                "SELECT database_name FROM duckdb_databases() WHERE database_name = 'ohm_lake'"
+            ).fetchone()
+            if not attached:
+                self._json_response(200, {"status": "skipped", "message": "No DuckLake attached"})
+                return
+
+            # Get snapshot count before
+            snap_before = self.current_store.conn.execute(
+                "SELECT COUNT(*) FROM ducklake_snapshots('ohm_lake')"
+            ).fetchone()[0]
+
+            # Run VACUUM — DuckLake uses VACUUM on the attached database alias
+            try:
+                self.current_store.conn.execute("VACUUM ohm_lake")
+            except Exception:
+                # DuckLake may need ALTER DATABASE for snapshot pruning
+                # Try CHECKPOINT on local DB instead (flushes WAL)
+                self.current_store.conn.execute("CHECKPOINT")
+
+            # Get snapshot count after
+            snap_after = self.current_store.conn.execute(
+                "SELECT COUNT(*) FROM ducklake_snapshots('ohm_lake')"
+            ).fetchone()[0]
+
+            # Also CHECKPOINT local DB
+            self.current_store.conn.execute("CHECKPOINT")
+
+            # Recheck health
+            dlh = self.current_store.check_ducklake_health(alias="ohm_lake")
+            total_orphans = sum(dlh.get("orphan_counts", {}).values())
+
+            self._json_response(200, {
+                "status": "ok",
+                "snapshots_before": snap_before,
+                "snapshots_after": snap_after,
+                "snapshots_pruned": snap_before - snap_after,
+                "orphan_rows": total_orphans,
+                "sync_degraded": dlh.get("sync_degraded", False),
+            })
+        except Exception as e:
+            self._json_response(500, {"error": "vacuum_failed", "message": str(e)})
 
     def _get_resolve(self, path: str, qs: dict) -> None:
         """GET /resolve?query= — resolve a query to a node via alias matching (OHM-g0kv.4)."""

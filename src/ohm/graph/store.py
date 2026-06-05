@@ -1763,7 +1763,9 @@ class OhmStore:
             pulled = self.pull_from_ducklake(ducklake_path or "", alias=alias)
 
         # Check DuckLake health after sync (OHM-qiio)
-        if ducklake_path or ducklake_attached:
+        # Only run expensive health check every 5th sync to reduce memory pressure
+        self._sync_count = getattr(self, "_sync_count", 0) + 1
+        if (ducklake_path or ducklake_attached) and self._sync_count % 5 == 0:
             try:
                 dlh = self.check_ducklake_health(alias=alias)
                 self.sync_degraded = dlh.get("sync_degraded", False)
@@ -1773,6 +1775,9 @@ class OhmStore:
                     logger.warning("DuckLake sync degraded: %s", dlh.get("errors", []))
             except Exception:
                 self.sync_degraded = True
+        elif ducklake_path or ducklake_attached:
+            # Skip health check this cycle — still report sync_degraded from last check
+            pass
 
         # Update last_sync timestamp — ensure agent row exists.
         # OHM-cwrc: upsert instead of check-then-insert (same race fix as

@@ -531,6 +531,7 @@ def _build_router() -> _RouteRegistry:
     r.add("POST", "/admin/pert-backfill")
     r.add("POST", "/admin/verification-decay")
     r.add("POST", "/admin/merge")
+    r.add("POST", "/admin/vacuum-lake")
 
     # /decay: write-in-GET (legacy); registered as GET to avoid spurious 405
     r.add("GET", "/decay")
@@ -1925,6 +1926,7 @@ OhmHandler._POST_EXACT = {
     "/admin/pert-backfill": "_post_admin_pert_backfill",
     "/admin/verification-decay": "_post_admin_verification_decay",
     "/admin/merge": "_post_admin_merge",
+    "/admin/vacuum-lake": "_post_admin_vacuum_lake",
     "/discover/queue/review": "_post_discovery_review",
     "/hooks": "_post_hooks",
 }
