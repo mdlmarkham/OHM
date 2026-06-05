@@ -281,12 +281,61 @@ def agent_heartbeat(
 
     _log_change(conn, "ohm_agent_state", agent_name, "HEARTBEAT", agent_name)
 
-    # Return updated state
+    # Return updated state + verification_overdue (ADR-018)
     result = conn.execute("SELECT * FROM ohm_agent_state WHERE agent_name = ?", [agent_name]).fetchone()
     if result:
         columns = [desc[0] for desc in conn.execute("SELECT * FROM ohm_agent_state WHERE agent_name = ?", [agent_name]).description]
-        return dict(zip(columns, result))
-    return {}
+        state = dict(zip(columns, result))
+    else:
+        state = {}
+
+    # ADR-018.3: Include unverified causal edges that this agent created
+    # so they can record outcomes and prevent confidence decay
+    verification_overdue = conn.execute(
+        """
+        SELECT e.id, e.from_node, e.to_node, e.edge_type, e.confidence,
+               e.created_at,
+               EXTRACT(DAY FROM CURRENT_TIMESTAMP - e.created_at) AS age_days,
+               fn.label AS from_label, tn.label AS to_label
+        FROM ohm_edges e
+        LEFT JOIN ohm_nodes fn ON e.from_node = fn.id AND fn.deleted_at IS NULL
+        LEFT JOIN ohm_nodes tn ON e.to_node = tn.id AND tn.deleted_at IS NULL
+        WHERE e.layer = 'L3'
+          AND e.edge_type IN ('CAUSES', 'PREDICTS', 'EXPECTS')
+          AND e.deleted_at IS NULL
+          AND e.created_by = ?
+          AND NOT EXISTS (
+              SELECT 1 FROM ohm_outcomes oc
+              WHERE oc.claim_node = e.from_node
+          )
+          AND e.created_at < CURRENT_TIMESTAMP - INTERVAL '14 day'
+        ORDER BY e.confidence DESC, e.created_at ASC
+        LIMIT 20
+    """,
+        [agent_name],
+    ).fetchall()
+
+    if verification_overdue:
+        state["verification_overdue"] = [
+            {
+                "edge_id": row[0],
+                "from_node": row[1],
+                "to_node": row[2],
+                "edge_type": row[3],
+                "confidence": row[4],
+                "created_at": str(row[5]) if row[5] else None,
+                "age_days": round(float(row[6]), 1) if row[6] else 0.0,
+                "from_label": row[7],
+                "to_label": row[8],
+            }
+            for row in verification_overdue
+        ]
+        state["verification_overdue_count"] = len(verification_overdue)
+    else:
+        state["verification_overdue"] = []
+        state["verification_overdue_count"] = 0
+
+    return state
 
 
 def query_agent_health(
