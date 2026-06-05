@@ -581,6 +581,15 @@ def query_record_outcome(
     claim_node = validate_identifier(claim_node, name="claim_node")
     recorded_by = validate_identifier(recorded_by, name="recorded_by")
 
+    # Verify the claim_node exists
+    node_exists = conn.execute(
+        "SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+        [claim_node],
+    ).fetchone()
+    if not node_exists:
+        from ohm.exceptions import NodeNotFoundError
+        raise NodeNotFoundError(f"claim_node not found: {claim_node}")
+
     outcome_id = str(uuid.uuid4())
     conn.execute(
         """INSERT INTO ohm_outcomes
