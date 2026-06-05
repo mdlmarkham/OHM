@@ -589,3 +589,70 @@ class TestHookSandbox:
         hook_keys = _json.loads(result.stdout.strip())
         for key in hook_keys:
             assert key in _SANDBOX_SAFE_ENV_VARS or key.startswith("OHM_HOOK_") or key == "OHM_CUSTOMER_ID", f"Unexpected env key: {key}"
+
+
+
+class TestHookSandbox:
+    """Tests for hook sandbox helpers (OHM-aznh.8)."""
+
+    def test_sandbox_env_contains_ohm_vars(self):
+        env = _sandbox_env("h1", "pre_ingest", "c1")
+        assert env["OHM_HOOK_EVENT"] == "pre_ingest"
+        assert env["OHM_HOOK_ID"] == "h1"
+        assert env["OHM_CUSTOMER_ID"] == "c1"
+
+    def test_sandbox_env_includes_safe_vars(self):
+        env = _sandbox_env("h1", "pre_ingest")
+        assert "PATH" in env
+        assert any(k in env for k in ("TEMP", "TMP", "TMPDIR"))
+
+    def test_sandbox_env_excludes_secrets(self):
+        import os
+        old_val = os.environ.get("MY_SECRET_TOKEN")
+        try:
+            os.environ["MY_SECRET_TOKEN"] = "hunter2"
+            env = _sandbox_env("h1", "pre_ingest")
+            assert "MY_SECRET_TOKEN" not in env
+            assert "hunter2" not in str(env)
+        finally:
+            if old_val is not None:
+                os.environ["MY_SECRET_TOKEN"] = old_val
+            else:
+                os.environ.pop("MY_SECRET_TOKEN", None)
+
+    def test_sandbox_env_keys_are_whitelisted(self):
+        env = _sandbox_env("h1", "pre_ingest", "c1")
+        for key in env:
+            assert key in _SANDBOX_SAFE_ENV_VARS or key.startswith("OHM_HOOK_") or key == "OHM_CUSTOMER_ID"
+
+    def test_is_sandboxed_default_true(self):
+        assert _is_sandboxed() is True
+
+    def test_is_sandboxed_false_when_disabled(self):
+        import os
+        old = os.environ.get("OHM_SANDBOX_DISABLE")
+        try:
+            os.environ["OHM_SANDBOX_DISABLE"] = "1"
+            assert _is_sandboxed() is False
+        finally:
+            if old is not None:
+                os.environ["OHM_SANDBOX_DISABLE"] = old
+            else:
+                os.environ.pop("OHM_SANDBOX_DISABLE", None)
+
+    def test_shell_hook_runs_with_sandboxed_env(self, test_db):
+        import json
+        test_db.execute(
+            "INSERT INTO ohm_hooks (id, event, command, created_by) VALUES (?, ?, ?, ?)",
+            ["sandbox-test", "pre_ingest",
+             "python -c \"import os,json; print(json.dumps(sorted(os.environ.keys())))\"",
+             "test"],
+        )
+        runner = HookRunner(test_db)
+        hooks = runner.get_hooks("pre_ingest")
+        assert len(hooks) == 1
+        result = runner.run_hook(hooks[0], {}, customer_id="t1")
+        assert result.success, f"Hook failed: {result.stderr}"
+        hook_keys = json.loads(result.stdout.strip())
+        for key in hook_keys:
+            assert key in _SANDBOX_SAFE_ENV_VARS or key.startswith("OHM_HOOK_") or key == "OHM_CUSTOMER_ID", f"Unexpected env key: {key}"

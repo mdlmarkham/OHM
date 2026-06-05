@@ -240,6 +240,9 @@ class HookRunner:
     def run_hook(self, hook: HookRecord, payload: dict, *, customer_id: str = "") -> HookResult:
         """Execute a single hook.
 
+        Args:
+            customer_id: Tenant customer ID (for sandbox env var whitelist).
+
         Shell command hooks: spawn subprocess, write JSON payload to stdin,
         capture stdout/stderr, enforce timeout.
 
@@ -373,6 +376,9 @@ class HookRunner:
 
     def run_hooks(self, event: str, payload: dict, *, customer_id: str = "") -> list[HookResult]:
         """Execute all hooks for the given event.
+
+        Args:
+            customer_id: Tenant customer ID (forwarded to run_hook for sandbox).
 
         Returns results in execution order. For pre_ingest, callers
         should check if any result has exit_code != 0 and abort.
