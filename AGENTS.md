@@ -386,7 +386,53 @@ bd close <id>         # Complete work
 - NEVER stop before pushing - that leaves work stranded locally
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
-<!-- END BEADS INTEGRATION -->
+
+## Verification Protocol (ADR-018)
+
+**Every agent must verify their claims. Unverified confidence decays.**
+
+### Heartbeat Verification Nudge
+
+When you call `POST /heartbeat`, the response includes `verification_overdue`: a list of your unverified CAUSES/PREDICTS/EXPECTS edges older than 14 days with no recorded outcomes.
+
+**What to do with verification_overdue:**
+1. For each edge, check if reality has validated or falsified the claim
+2. If validated: `record_outcome(source_agent="your-agent", claim_node="from_node_id", outcome=True)`
+3. If falsified: `record_outcome(source_agent="your-agent", claim_node="from_node_id", outcome=False)`
+4. If uncertain: `challenge(edge_id="edge_id", reason="why you doubt it", confidence=0.6)`
+
+### Confidence Decay
+
+- **Unverified edges** (no outcomes after 14 days): decay with 30-day half-life
+- **Verified edges** (with recorded outcomes): decay with 365-day half-life
+- Run `POST /admin/verification-decay` periodically to apply decay
+- Run `GET /admin/verification-scan` to see what needs attention
+
+### Recording Outcomes
+
+```python
+from ohm.sdk import connect_http
+g = connect_http("http://127.0.0.1:8710", actor="your-agent", token="your-token")
+
+# Claim confirmed by reality
+g.record_outcome(source_agent="your-agent", claim_node="node-id", outcome=True)
+
+# Claim falsified by reality
+g.record_outcome(source_agent="your-agent", claim_node="node-id", outcome=False)
+
+# Check your accuracy
+g.source_reliability(source_agent="your-agent")
+```
+
+### Why This Matters
+
+Without verification, confidence compounds into sacred references (Evaluation Trap):
+1. Agent writes confidence = 0.88
+2. Confidence persists without challenge
+3. Other agents cite it as evidence
+4. compound_confidence → 1.0 (unearned certainty)
+
+Verification breaks this loop. Record outcomes. Challenge dubious claims. Decay enforces the floor.
 
 ## Landing the Plane (Session Completion)
 

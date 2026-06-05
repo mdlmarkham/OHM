@@ -1,7 +1,7 @@
 # ADR-018: Verification Loops — Constraint Persistence Enforcement
 
 **Date:** 2026-05-28
-**Status:** Proposed
+**Status:** Accepted
 **Author:** metis
 **Tags:** verification, constraint-persistence, evaluation-trap, karpathy, governance
 
@@ -75,10 +75,19 @@ Results (before → after):
 ## Implementation Plan
 
 1. ✅ Nudges extended (ADR-018.1 + ADR-018.2) — `nudges.py` updated
-2. ⬜ Automated verification scheduler — new `/admin/verification-scan` endpoint
-3. ⬜ Confidence decay engine — extend `compound_confidence` with staleness
-4. ⬜ Agent heartbeat integration — include verification status in heartbeat response
-5. ⬜ Dashboard — show unverified claims, overdue verifications, reliability scores
+2. ✅ Automated verification scheduler — `GET /admin/verification-scan` endpoint deployed
+3. ✅ Confidence decay engine — `POST /admin/verification-decay` endpoint deployed (ADR-018.3)
+4. ✅ Agent heartbeat integration — `POST /heartbeat` returns `verification_overdue` list (ADR-018.1)
+5. ✅ Compound confidence fix — staleness decay, diversity correlation, verification factor, source reliability (ADR-018.4)
+6. ⬜ Dashboard — show unverified claims, overdue verifications, reliability scores
+
+### Deployment Results (2026-06-05)
+
+- **Verification scan**: Returns unverified edges (>14d), high-confidence nodes with no observations, source reliability scores
+- **Decay engine**: First run decayed 50 edges (43 unverified at 30d half-life, 7 verified at 365d half-life)
+- **Heartbeat**: Returns up to 20 verification_overdue edges per agent
+- **Migration**: All 372 observations with source field now have source_url (217 internal, 149 external)
+- **Metrics**: Verification rate 25.6% (31 outcomes on 121 causal edges), Challenge ratio 3.5%
 
 ## Connection to Trap Research
 
