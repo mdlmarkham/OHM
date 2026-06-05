@@ -1,4 +1,4 @@
-# OHM Backlog — 2026-06-05 (Session 3)
+# OHM Backlog — 2026-06-05 (Final)
 
 ## Dependency Chain
 
@@ -6,10 +6,10 @@
 OHM-aznh (DONE) ──→ OHM-tjzh (REVIEW) ──→ OHM-wdrg ──→ OHM-cuu0 ──→ OHM-tnwa
                        │                         │            │
                        │                         │            └── vault isolation + promotion gate
-                       │                         └── source citation ✅ (L3:L2 = 1.7:1)
-                       └── cross-link ✅, dead-end cleanup ✅ (158→81)
+                       │                         └── source citation ✅, migration ✅
+                       └── cross-link ✅, dead-end cleanup ✅
                        
-                    OHM-vrfy (in_progress) ────┘ (scan ✅, decay ✅, heartbeat ✅, AGENTS.md ⬜)
+                    OHM-vrfy (CLOSED) ──────────┘ 
                     
 OHM-smrt (assessment throughput)
 OHM-g0kv (dedup)
@@ -20,38 +20,42 @@ OHM-g0kv (dedup)
 | ID | Status | Title | Progress |
 |----|--------|-------|----------|
 | OHM-aznh | **CLOSED** | Hook Architecture | ✅ Shipped |
-| OHM-tjzh | **REVIEW** | Cross-Link Constraint | Hooks enforced ✅, dead-end 158→81 ✅, ready for review |
+| OHM-tjzh | **REVIEW** | Cross-Link Constraint | Hooks enforced ✅, dead-end 158→81 ✅ |
 | OHM-wdrg | open | Source Citation Architecture | L2 edges 0→712 ✅, L3:L2 33:1→1.7:1 ✅ |
-| OHM-wdrg.3 | **CLOSED** | Source String Migration | All 372 observations migrated ✅ |
-| OHM-cuu0 | open | Per-Agent Vaults | ⬜ (blocked on tjzh, wdrg) |
-| OHM-tnwa | open | Gap Analysis Synthesis | ⬜ (blocked on cuu0, tjzh) |
-| OHM-vrfy | **in_progress** | Verification Scheduling (ADR-018) | Scan ✅, Decay ✅, Heartbeat ✅, AGENTS.md ⬜ |
-
-## Key Metrics (2026-06-05 11:00)
-
-- 727 nodes, 1657 edges, 398 observations
-- Dead ends: 81 (80 valid source sinks, 1 system node)
-- L3:L2 ratio: 1.7:1 ← exceeded 3:1 target
-- Challenge ratio: 3.5%
-- Verification rate: 25.6% (31 outcomes on 121 causal edges)
-- Verification decay: 50 edges decayed first run (43 unverified, 7 verified)
-- Heartbeat: returns verification_overdue list per agent
-- source_url coverage: 375/372 (100% of sources with source field)
-- 1731 tests passing
+| OHM-wdrg.3 | **CLOSED** | Source String Migration | All 372 obs migrated ✅ |
+| OHM-cuu0 | open | Per-Agent Vaults | ⬜ (blocked on tjzh review, wdrg done) |
+| OHM-tnwa | open | Gap Analysis Synthesis | ⬜ (blocked on cuu0) |
+| OHM-vrfy | **CLOSED** | Verification Scheduling (ADR-018) | Scan ✅, Decay ✅, Heartbeat ✅, Migration ✅ |
 
 ## Shipped This Session
 
-| Component | Endpoint | Purpose |
-|-----------|----------|---------|
-| Verification scan | GET /admin/verification-scan | Unverified edges, high-conf no obs, source reliability |
-| Verification decay | POST /admin/verification-decay | ADR-018.3: unverified edges decay 30d half-life |
-| Heartbeat integration | POST /heartbeat | verification_overdue list per agent |
-| Dead-end cleanup | (API) | 158 → 81 dead ends (semantic connections + manual) |
-| Source URL migration | POST /admin/observation-source-urls | 243 observations migrated (100% coverage) |
+| Component | Endpoint | ADR | Purpose |
+|-----------|----------|-----|---------|
+| Verification scan | GET /admin/verification-scan | 018.3 | Unverified edges, high-conf no obs, source reliability |
+| Verification decay | POST /admin/verification-decay | 018.3 | Unverified 30d half-life, verified 365d |
+| Heartbeat nudge | POST /heartbeat | 018.1 | verification_overdue list per agent |
+| Dead-end cleanup | (API) | tjzh | 158 → 81 dead ends |
+| Source migration | POST /admin/observation-source-urls | 013 | 372 observations, 100% coverage |
+| AGENTS.md | — | 018.1 | Verification protocol for all agents |
+| ADR-018 | — | — | Status: Proposed → Accepted |
 
-## Remaining
+## Key Metrics
 
-1. OHM-vrfy: AGENTS.md update (verification protocol for all agents)
-2. OHM-smrt: Increase assessment throughput for Stage 4
-3. OHM-cuu0: Per-agent vaults (unblocked once tjzh reviewed)
-4. OHM-tnwa: Gap analysis synthesis (unblocked once cuu0 done)
+- 727 nodes, 1657 edges, 398 observations
+- Dead ends: 81 (80 valid source sinks)
+- L3:L2 ratio: 1.7:1 (target: 3:1 to 5:1 ✅ exceeded)
+- Verification rate: 25.6%, Challenge ratio: 3.5%
+- Verification decay: 50 edges decayed (43 unverified, 7 verified)
+- source_url coverage: 100%
+- 1731 tests passing
+
+## Remaining Work
+
+| Priority | Issue | What's Left |
+|----------|-------|-------------|
+| P1 | OHM-tjzh | Review and close — all work done |
+| P1 | OHM-cuu0 | Per-agent vaults (unblocked now) |
+| P1 | OHM-tnwa | Gap analysis (blocked on cuu0) |
+| P2 | OHM-smrt | Assessment throughput for Stage 4 |
+| P2 | OHM-g0kv | Content hashing and dedup |
+| Dashboard | ADR-018.5 | Show unverified claims, reliability scores |
