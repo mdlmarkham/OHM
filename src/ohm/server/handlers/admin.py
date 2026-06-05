@@ -516,7 +516,8 @@ class AdminHandlerMixin:
         outcome_check = """
             SELECT e.id, e.from_node, e.to_node, e.edge_type, e.confidence,
                    e.created_by, e.created_at,
-                   fn.label AS from_label, tn.label AS to_label
+                   fn.label AS from_label, tn.label AS to_label,
+                   EXTRACT(DAY FROM CURRENT_TIMESTAMP - e.created_at) AS age_days
             FROM ohm_edges e
             LEFT JOIN ohm_nodes fn ON e.from_node = fn.id AND fn.deleted_at IS NULL
             LEFT JOIN ohm_nodes tn ON e.to_node = tn.id AND tn.deleted_at IS NULL
@@ -538,7 +539,9 @@ class AdminHandlerMixin:
         for row in unverified_rows:
             d = dict(zip(["id", "from_node", "to_node", "edge_type",
                           "confidence", "created_by", "created_at",
-                          "from_label", "to_label"], row))
+                          "from_label", "to_label", "age_days"], row))
+            if d.get("age_days") is not None:
+                d["age_days"] = round(float(d["age_days"]), 1)
             # ADR-018.4: Include age_days for agent prioritization
             if d.get("created_at"):
                 try:
