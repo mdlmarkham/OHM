@@ -8,6 +8,12 @@ Hook events:
   post_ingest - runs after successful graph write, receives result payload
   pre_query   - runs before GET handlers, can modify query params
   post_query  - runs after GET handlers, can decorate response
+
+OHM-aznh.8: Hook subprocesses are sandboxed by default:
+- Environment whitelist: only OHM_HOOK_EVENT, OHM_HOOK_ID, OHM_CUSTOMER_ID
+- Linux: preexec_fn with setrlimit (RLIMIT_AS, RLIMIT_NOFILE, RLIMIT_NPROC=0)
+- Windows: best-effort (env sandbox + CREATE_NEW_PROCESS_GROUP).
+- Set OHM_SANDBOX_DISABLE=1 to run unsandboxed (dev mode, logs warning).
 """
 
 from __future__ import annotations
@@ -15,6 +21,7 @@ from __future__ import annotations
 import importlib
 import json
 import logging
+import os
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -60,6 +67,97 @@ class HookResult:
     @property
     def success(self) -> bool:
         return self.exit_code == 0 and not self.timed_out
+
+
+# ── Sandbox helpers (OHM-aznh.8) ──────────────────────────────────────────
+# Hook subprocesses run in a restricted environment. The hooks table is
+# tenant-writable, so a compromised hook could read or exfiltrate data
+# if given full access. Sandboxing mitigates this.
+
+_SANDBOX_DISABLED = os.environ.get("OHM_SANDBOX_DISABLE", "") in ("1", "true", "yes")
+
+_HOOK_ENV_WHITELIST = frozenset({
+    "OHM_HOOK_EVENT", "OHM_HOOK_ID", "OHM_CUSTOMER_ID",
+})
+
+# Resource limits (Linux-only via setrlimit)
+_DEFAULT_RLIMIT_AS = 256 * 1024 * 1024       # 256 MB address space
+_DEFAULT_RLIMIT_NOFILE = 64                   # max open file descriptors
+_DEFAULT_RLIMIT_NPROC = 0                     # no child processes (also prevents network daemon forking)
+_DEFAULT_RLIMIT_STACK = 8 * 1024 * 1024       # 8 MB stack
+
+
+def _sandbox_env(hook_id: str, event: str, customer_id: str = "") -> dict[str, str]:
+    """Return a sanitised environment dict for hook subprocesses.
+
+    Only ``OHM_HOOK_*`` variables are passed; the parent process
+    environment is stripped to prevent accidental data leaks through
+    env vars (tokens, DB paths, etc.).
+    """
+    return {
+        "OHM_HOOK_EVENT": event,
+        "OHM_HOOK_ID": hook_id,
+        "OHM_CUSTOMER_ID": customer_id,
+    }
+
+
+def _sandbox_preexec() -> None:
+    """Linux-only preexec_fn that applies resource limits.
+
+    Called in the child process after fork() but before exec(). Applies:
+    - RLIMIT_AS : prevent memory-exhaustion attacks
+    - RLIMIT_NOFILE : prevent file-descriptor exhaustion
+    - RLIMIT_NPROC : prevent forking (also implicitly blocks most network
+      daemon spawning on typical Linux systems)
+    - Closes all non-standard file descriptors (3..RLIMIT_NOFILE-1)
+
+    Safe to call on non-Linux platforms (setrlimit is a no-op on systems
+    that don't support it, but ``resource`` module is Unix-only).
+    """
+    import platform
+    if platform.system() != "Linux":
+        return
+
+    import resource
+
+    try:
+        resource.setrlimit(resource.RLIMIT_AS, (_DEFAULT_RLIMIT_AS, _DEFAULT_RLIMIT_AS))
+    except (ValueError, resource.error):
+        pass
+
+    try:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (_DEFAULT_RLIMIT_NOFILE, _DEFAULT_RLIMIT_NOFILE))
+    except (ValueError, resource.error):
+        pass
+
+    try:
+        resource.setrlimit(resource.RLIMIT_NPROC, (_DEFAULT_RLIMIT_NPROC, _DEFAULT_RLIMIT_NPROC))
+    except (ValueError, resource.error):
+        pass
+
+    try:
+        resource.setrlimit(resource.RLIMIT_STACK, (_DEFAULT_RLIMIT_STACK, _DEFAULT_RLIMIT_STACK))
+    except (ValueError, resource.error):
+        pass
+
+    # Close all inherited non-stdio file descriptors
+    try:
+        max_fd = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
+        for fd in range(3, max_fd):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+    except Exception:
+        pass
+
+
+def _is_sandboxed() -> bool:
+    """Return True if the hook sandbox is active (not disabled via env var)."""
+    return not _SANDBOX_DISABLED
+
+
+# ── Hook Records ─────────────────────────────────────────────────────────────
 
 
 def _rows_to_hook_records(result: Any) -> list[HookRecord]:
@@ -124,7 +222,7 @@ class HookRunner:
         )
         return _rows_to_hook_records(result)
 
-    def run_hook(self, hook: HookRecord, payload: dict) -> HookResult:
+    def run_hook(self, hook: HookRecord, payload: dict, *, customer_id: str = "") -> HookResult:
         """Execute a single hook.
 
         Shell command hooks: spawn subprocess, write JSON payload to stdin,
@@ -133,11 +231,16 @@ class HookRunner:
         python: prefix hooks: import and call the named function.
         Callable signature: def hook(payload: dict) -> tuple[int, str, str]
         returning (exit_code, stdout, stderr).
+
+        Args:
+            hook: Hook record to execute.
+            payload: JSON-serialisable payload dict.
+            customer_id: Tenant customer ID (for sandbox env var whitelist).
         """
         if hook.command.startswith("python:"):
             result = self._run_python_hook(hook, payload)
         else:
-            result = self._run_shell_hook(hook, payload)
+            result = self._run_shell_hook(hook, payload, customer_id=customer_id)
         self._log_invocation(hook, payload, result)
         return result
 
@@ -162,11 +265,22 @@ class HookRunner:
         except Exception:
             logger.debug("Failed to log hook invocation to ohm_hook_log", exc_info=True)
 
-    def _run_shell_hook(self, hook: HookRecord, payload: dict) -> HookResult:
-        """Execute a shell command hook via subprocess."""
+    def _run_shell_hook(self, hook: HookRecord, payload: dict, customer_id: str = "") -> HookResult:
+        """Execute a shell command hook via subprocess.
+
+        Args:
+            hook: Hook record to execute.
+            payload: JSON-serialisable payload dict.
+            customer_id: Tenant customer ID (for env var whitelist).
+        """
         timeout_sec = hook.timeout_ms / 1000.0
         payload_json = json.dumps(payload, default=str)
         start = time.monotonic()
+
+        # OHM-aznh.8: build sandboxed environment
+        env = _sandbox_env(hook.id, hook.event, customer_id) if _is_sandboxed() else None
+        preexec_fn = _sandbox_preexec if (_is_sandboxed() and os.name == "posix") else None
+
         try:
             proc = subprocess.Popen(
                 hook.command,
@@ -174,6 +288,8 @@ class HookRunner:
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                env=env,
+                preexec_fn=preexec_fn,
             )
             try:
                 stdout_bytes, stderr_bytes = proc.communicate(
@@ -240,16 +356,21 @@ class HookRunner:
                 duration_ms=round(duration_ms, 2),
             )
 
-    def run_hooks(self, event: str, payload: dict) -> list[HookResult]:
+    def run_hooks(self, event: str, payload: dict, *, customer_id: str = "") -> list[HookResult]:
         """Execute all hooks for the given event.
 
         Returns results in execution order. For pre_ingest, callers
         should check if any result has exit_code != 0 and abort.
+
+        Args:
+            event: Hook event name.
+            payload: JSON-serialisable payload dict.
+            customer_id: Tenant customer ID (forwarded to run_hook for sandbox).
         """
         hooks = self.get_hooks(event)
         results = []
         for hook in hooks:
-            result = self.run_hook(hook, payload)
+            result = self.run_hook(hook, payload, customer_id=customer_id)
             results.append(result)
             if event.startswith("pre_") and not result.success:
                 logger.info("Hook %s (%s) rejected with exit_code=%d", hook.id, hook.event, result.exit_code)

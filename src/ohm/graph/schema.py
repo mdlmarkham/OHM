@@ -871,11 +871,27 @@ DDL_STATEMENTS: list[str] = [
         triggered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """,
+    """
+    CREATE TABLE IF NOT EXISTS ohm_aliases (
+        id           VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        alias_norm   VARCHAR NOT NULL,
+        node_id      VARCHAR NOT NULL,
+        created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS ohm_content_hashes (
+        id           VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        node_id      VARCHAR NOT NULL,
+        content_hash VARCHAR NOT NULL,
+        created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """,
 ]
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.22.0"
+SCHEMA_VERSION = "0.23.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -1118,6 +1134,28 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
         )""",
             "CREATE INDEX IF NOT EXISTS idx_hook_log_hook ON ohm_hook_log(hook_id)",
             "CREATE INDEX IF NOT EXISTS idx_hook_log_time ON ohm_hook_log(triggered_at)",
+        ],
+    ),
+    (
+        "0.23.0",
+        "add alias resolution and content hashing tables (OHM-g0kv)",
+        [
+            """CREATE TABLE IF NOT EXISTS ohm_aliases (
+            id           VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+            alias_norm   VARCHAR NOT NULL,
+            node_id      VARCHAR NOT NULL,
+            created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_aliases_norm ON ohm_aliases(alias_norm)",
+            "CREATE INDEX IF NOT EXISTS idx_aliases_node ON ohm_aliases(node_id)",
+            """CREATE TABLE IF NOT EXISTS ohm_content_hashes (
+            id           VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+            node_id      VARCHAR NOT NULL,
+            content_hash VARCHAR NOT NULL,
+            created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_content_hash_node ON ohm_content_hashes(node_id)",
+            "CREATE INDEX IF NOT EXISTS idx_content_hash_hash ON ohm_content_hashes(content_hash)",
         ],
     ),
 ]

@@ -731,3 +731,52 @@ class TestHookLogTable:
         v022 = [m for m in MIGRATIONS if m[0] == "0.22.0"]
         assert len(v022) == 1
         assert "ohm_hook_log" in v022[0][2][0]
+
+
+class TestAliasAndContentHashTables:
+    """Tests for ohm_aliases and ohm_content_hashes tables (OHM-g0kv)."""
+
+    def test_aliases_table_exists(self, test_db):
+        tables = test_db.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'").fetchall()
+        table_names = {row[0] for row in tables}
+        assert "ohm_aliases" in table_names
+
+    def test_aliases_columns(self, test_db):
+        columns = test_db.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'ohm_aliases'"
+        ).fetchall()
+        col_names = {row[0] for row in columns}
+        for col in ("id", "alias_norm", "node_id", "created_at"):
+            assert col in col_names
+
+    def test_aliases_indexes(self, test_db):
+        indexes = test_db.execute("SELECT index_name FROM duckdb_indexes()").fetchall()
+        index_names = {row[0] for row in indexes}
+        assert "idx_aliases_norm" in index_names
+        assert "idx_aliases_node" in index_names
+
+    def test_content_hashes_table_exists(self, test_db):
+        tables = test_db.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'").fetchall()
+        table_names = {row[0] for row in tables}
+        assert "ohm_content_hashes" in table_names
+
+    def test_content_hashes_columns(self, test_db):
+        columns = test_db.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'ohm_content_hashes'"
+        ).fetchall()
+        col_names = {row[0] for row in columns}
+        for col in ("id", "node_id", "content_hash", "created_at"):
+            assert col in col_names
+
+    def test_content_hashes_indexes(self, test_db):
+        indexes = test_db.execute("SELECT index_name FROM duckdb_indexes()").fetchall()
+        index_names = {row[0] for row in indexes}
+        assert "idx_content_hash_node" in index_names
+        assert "idx_content_hash_hash" in index_names
+
+    def test_migration_v0_23_0(self, test_db):
+        from ohm.schema import MIGRATIONS, SCHEMA_VERSION
+        assert SCHEMA_VERSION == "0.23.0"
+        v023 = [m for m in MIGRATIONS if m[0] == "0.23.0"]
+        assert len(v023) == 1
+        assert "ohm_aliases" in v023[0][2][0]
