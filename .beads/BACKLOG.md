@@ -6,10 +6,10 @@
 OHM-aznh (DONE) ──→ OHM-tjzh ──→ OHM-wdrg ──→ OHM-cuu0 ──→ OHM-tnwa
                        │               │              │
                        │               │              └── vault isolation + promotion gate
-                       │               └── source citation enforcement
-                       └── cross-link constraint (blocks everything downstream)
+                       │               └── source citation enforcement ✅ (L3:L2 = 1.8:1)
+                       └── cross-link constraint (hooks MANDATORY, orphan cleanup pending)
                        
-                    OHM-vrfy ──────────┘ (verification scheduling, depends on tjzh only)
+                    OHM-vrfy ──────────┘ (verification scan deployed, decay engine pending)
                     
 OHM-smrt (assessment throughput, depends on wdrg)
 OHM-g0kv (dedup, soft-depends on smrt)
@@ -19,19 +19,14 @@ OHM-vj3i (trajectory, soft-depends vrfy)
 
 ## P1 — Critical Path
 
-| ID | Status | Title | Blocks | Depends On |
-|----|--------|-------|--------|------------|
-| OHM-aznh | **CLOSED** | Hook Architecture | — | — |
-| OHM-tjzh | **in_progress** | Cross-Link Constraint | cuu0, tnwa | aznh (done) |
-| OHM-wdrg | open | Source Citation Architecture | cuu0, smrt | — |
-| OHM-cuu0 | open | Per-Agent Vaults + Promotion Gate | tnwa | tjzh, wdrg |
-| OHM-tnwa | open | Gap Analysis Synthesis | — | cuu0, tjzh |
-| OHM-vrfy | open | Verification Scheduling (ADR-018) | — | tjzh |
-
-**Next session priority:**
-1. Close tjzh (hooks deployed, need enforcement-by-default + orphan cleanup)
-2. Push wdrg.3 and wdrg.7 (in-progress, mechanical)
-3. Start vrfy (verification scan endpoint + confidence decay engine)
+| ID | Status | Title | Blocks | Depends On | Progress |
+|----|--------|-------|--------|------------|----------|
+| OHM-aznh | **CLOSED** | Hook Architecture | — | — | ✅ Shipped |
+| OHM-tjzh | **in_progress** | Cross-Link Constraint | cuu0, tnwa | aznh (done) | Hooks enforced ✅, orphan cleanup ⬜ |
+| OHM-wdrg | open | Source Citation Architecture | cuu0, smrt | — | L2 edges: 0→710 ✅, L3:L2: 33:1→1.8:1 ✅ |
+| OHM-cuu0 | open | Per-Agent Vaults + Promotion Gate | tnwa | tjzh, wdrg | ⬜ |
+| OHM-tnwa | open | Gap Analysis Synthesis | — | cuu0, tjzh | ⬜ |
+| OHM-vrfy | **in_progress** | Verification Scheduling (ADR-018) | — | tjzh | Scan endpoint ✅, Decay ⬜, Heartbeat ⬜ |
 
 ## P2 — Important, Not Blocking
 
@@ -53,13 +48,17 @@ OHM-vj3i (trajectory, soft-depends vrfy)
 
 ## Milestone: multi-tenant-v2
 
-55 issues (all P5). Client comms (SMS/Slack/Teams/Email), domain templates, cross-tenant patterns. Deferred until core graph is stable. Not current priority.
+55 issues (all P5). Client comms (SMS/Slack/Teams/Email), domain templates, cross-tenant patterns. Deferred.
 
-## Key Metrics (2026-06-05)
+## Key Metrics (2026-06-05 09:30)
 
-- 711 nodes, 1215 edges, 394 observations
-- 148 dead-end nodes (21%)
-- 33:1 L3:L2 edge ratio (target: 3:1 to 5:1)
-- 4.1% challenge ratio (target: >8%)
-- 0 outcomes recorded (target: >10)
+- 724 nodes, 1483 edges, 394+ observations
+- 158 dead-end nodes (22%) ← needs cleanup
+- L3:L2 ratio: 1.8:1 ← target exceeded (was 33:1)
+- Challenge ratio: 7.27% ← improving (target: >8%)
+- Outcomes recorded: 31 ← verification rate 25.6%
+- Unverified causal edges (>14d): 42
+- High-conf nodes with no obs: 376
+- Hooks enforced: cross_link_check ✅, source_url_required ✅
+- Verification scan endpoint: ✅ deployed
 - 1731 tests passing
