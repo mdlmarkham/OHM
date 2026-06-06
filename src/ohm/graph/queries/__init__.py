@@ -3619,3 +3619,105 @@ def reflect_challenge_to_fragments(
         )
         results.append({"fragment_id": frag_id})
     return results
+
+
+def detect_fragment_clusters(
+    conn: DuckDBPyConnection,
+    *,
+    min_cluster_size: int = 5,
+    window_days: int = 7,
+) -> list[dict[str, Any]]:
+    """Detect clusters of L0 fragments sharing context nodes (OHM-a5rz.14).
+
+    When an agent accumulates ``min_cluster_size`` or more fragments that
+    share context nodes (via ``CONTEXT_OF`` edges) within ``window_days``,
+    returns the cluster with a theme summary to nudge the agent toward
+    synthesis.
+
+    Returns a list of cluster dicts, each with:
+    - ``agent``: the agent who owns the fragments
+    - ``fragment_count``: number of fragments in the cluster
+    - ``fragment_ids``: list of fragment IDs
+    - ``fragment_labels``: list of fragment labels
+    - ``shared_context_nodes``: context nodes shared across fragments
+    - ``theme``: auto-generated theme from shared context labels
+    """
+    from datetime import datetime, timedelta
+
+    cutoff = (datetime.utcnow() - timedelta(days=window_days)).strftime("%Y-%m-%d")
+
+    clusters: dict[str, dict] = {}
+
+    # Find agents with fragments in the window
+    fragment_counts = conn.execute(
+        """SELECT created_by, COUNT(*) AS cnt
+           FROM ohm_nodes
+           WHERE type = 'fragment' AND deleted_at IS NULL
+             AND created_at >= ?::TIMESTAMP
+           GROUP BY created_by
+           HAVING COUNT(*) >= ?""",
+        [cutoff, min_cluster_size],
+    ).fetchall()
+
+    for row in fragment_counts:
+        agent = row[0]
+        # Get this agent's fragments with their context nodes
+        ctx_rows = conn.execute(
+            """SELECT n.id, n.label, c.to_node AS ctx_node
+               FROM ohm_nodes n
+               LEFT JOIN ohm_edges e ON e.from_node = n.id
+                 AND e.edge_type = 'CONTEXT_OF'
+                 AND e.deleted_at IS NULL
+               LEFT JOIN ohm_nodes c ON c.id = e.to_node
+               WHERE n.type = 'fragment'
+                 AND n.deleted_at IS NULL
+                 AND n.created_by = ?
+                 AND n.created_at >= ?::TIMESTAMP
+               ORDER BY n.created_at DESC
+               LIMIT 200""",
+            [agent, cutoff],
+        ).fetchall()
+
+        # Group by fragment
+        frag_map: dict[str, dict] = {}
+        for r in ctx_rows:
+            fid, flabel, ctx_id = r[0], r[1], r[2]
+            if fid not in frag_map:
+                frag_map[fid] = {"label": flabel, "context": set()}
+            if ctx_id:
+                frag_map[fid]["context"].add(ctx_id)
+
+        fragments = list(frag_map.items())
+
+        # Check if enough fragments share at least one context node
+        shared_ctx: set[str] = set()
+        for fid, info in fragments:
+            if not shared_ctx:
+                shared_ctx = info["context"]
+            else:
+                shared_ctx &= info["context"]
+
+        if len(fragments) >= min_cluster_size and len(shared_ctx) >= 1:
+            cluster_key = agent
+            clusters[cluster_key] = {
+                "agent": agent,
+                "fragment_count": len(fragments),
+                "fragment_ids": [f[0] for f in fragments],
+                "fragment_labels": [f[1]["label"] for f in fragments],
+                "shared_context_nodes": sorted(shared_ctx),
+                "theme": f"{len(fragments)} fragments sharing {len(shared_ctx)} context nodes",
+            }
+
+            # Compute theme from shared context node labels
+            if shared_ctx:
+                placeholders = ",".join(["?"] * len(shared_ctx))
+                ctx_labels = conn.execute(
+                    f"SELECT id, label FROM ohm_nodes WHERE id IN ({placeholders}) AND deleted_at IS NULL",
+                    list(shared_ctx),
+                ).fetchall()
+                if ctx_labels:
+                    labels = [r[1] for r in ctx_labels if r[1]]
+                    if labels:
+                        clusters[cluster_key]["theme"] = f"You've been thinking about: {', '.join(labels[:5])}"
+
+    return list(clusters.values())
