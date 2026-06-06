@@ -1967,6 +1967,7 @@ OhmHandler._GET_EXACT = {
     "/stale": "_get_stale",
     "/decay": "_get_decay",
     "/duplicates": "_get_duplicates",
+    "/fragments": "_get_fragments",
     "/orphans": "_get_orphans",
     "/hubs": "_get_hubs",
     "/dead_ends": "_get_dead_ends",

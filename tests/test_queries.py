@@ -1671,3 +1671,65 @@ class TestScratch:
 
         node = scratch(test_db, content="No URL here", created_by="metis")
         assert node.get("url") is None
+
+
+class TestAutoLinkFragment:
+    """Tests for auto-linking fragments to existing nodes (OHM-a5rz.8)."""
+
+    def test_auto_link_creates_context_of_edge(self, test_db):
+        from ohm.queries import create_node, scratch
+
+        create_node(test_db, label="Hormuz AND-Gate", node_type="pattern", created_by="test")
+        node = scratch(test_db, content="Hormuz AND-Gate is the key constraint", created_by="metis")
+        assert "auto_links" in node
+        assert len(node["auto_links"]) >= 1
+        link = node["auto_links"][0]
+        assert link["edge_id"] is not None
+
+    def test_auto_link_case_insensitive(self, test_db):
+        from ohm.queries import create_node, scratch
+
+        create_node(test_db, label="Demand Rationing", node_type="concept", created_by="test")
+        node = scratch(test_db, content="demand rationing is the key insight", created_by="metis")
+        assert "auto_links" in node
+        assert len(node["auto_links"]) >= 1
+
+    def test_auto_link_max_5(self, test_db):
+        from ohm.queries import create_node, scratch
+
+        for i in range(10):
+            label = f"Pattern{i:02d}Thing"
+            create_node(test_db, label=label, node_type="concept", created_by="test")
+        node = scratch(
+            test_db,
+            content=" ".join(f"Pattern{i:02d}Thing" for i in range(10)),
+            created_by="metis",
+        )
+        assert "auto_links" in node
+        assert len(node["auto_links"]) <= 5
+
+    def test_auto_link_skips_short_labels(self, test_db):
+        from ohm.queries import create_node, scratch
+
+        create_node(test_db, label="AB", node_type="concept", created_by="test")
+        node = scratch(test_db, content="I found AB in the data", created_by="metis")
+        assert "auto_links" not in node or len(node.get("auto_links", [])) == 0
+
+    def test_auto_link_skips_fragment_nodes(self, test_db):
+        from ohm.queries import scratch
+
+        scratch(test_db, content="earlier hunch about supply chain", created_by="metis")
+        node = scratch(test_db, content="earlier hunch about supply chain update", created_by="metis")
+        assert "auto_links" not in node or len(node.get("auto_links", [])) == 0
+
+    def test_auto_link_edge_is_L0_context_of(self, test_db):
+        from ohm.queries import create_node, scratch
+
+        create_node(test_db, label="Supply Chain Disruption", node_type="pattern", created_by="test")
+        node = scratch(test_db, content="Supply Chain Disruption at Hormuz", created_by="metis")
+        if "auto_links" in node and node["auto_links"]:
+            edge_id = node["auto_links"][0]["edge_id"]
+            row = test_db.execute("SELECT layer, edge_type, confidence FROM ohm_edges WHERE id = ?", [edge_id]).fetchone()
+            assert row[0] == "L0"
+            assert row[1] == "CONTEXT_OF"
+            assert abs(row[2] - 0.3) < 0.01

@@ -57,6 +57,50 @@ class GraphHandlerMixin:
                 )
         return decorations
 
+    def _get_fragments(self, path: str, qs: dict) -> None:
+        """GET /fragments — query L0 fragment nodes (OHM-a5rz.10).
+
+        Filters: ?agent=, ?since=, ?until=, ?q= (text search), ?limit=.
+        Returns fragment nodes with their L0 context edges.
+        """
+        agent = qs.get("agent", [None])[0]
+        since = qs.get("since", [None])[0]
+        until = qs.get("until", [None])[0]
+        query = qs.get("q", [None])[0]
+        limit = int(qs.get("limit", [50])[0])
+
+        conditions = ["type = 'fragment'", "deleted_at IS NULL"]
+        params: list = []
+        if agent:
+            conditions.append("created_by = ?")
+            params.append(agent)
+        if since:
+            conditions.append("created_at >= ?::TIMESTAMP")
+            params.append(since)
+        if until:
+            conditions.append("created_at <= ?::TIMESTAMP")
+            params.append(until)
+        if query:
+            conditions.append("(label ILIKE ? OR content ILIKE ?)")
+            params.append(f"%{query}%")
+            params.append(f"%{query}%")
+        params.append(limit)
+
+        where = " AND ".join(conditions)
+        nodes = self.current_store.execute(
+            f"SELECT * FROM ohm_nodes WHERE {where} ORDER BY created_at DESC LIMIT ?",
+            params,
+        )
+        node_ids = [n["id"] for n in nodes]
+        edges: list = []
+        if node_ids:
+            placeholders = ",".join(["?"] * len(node_ids))
+            edges = self.current_store.execute(
+                f"SELECT * FROM ohm_edges WHERE layer = 'L0' AND (from_node IN ({placeholders}) OR to_node IN ({placeholders})) AND deleted_at IS NULL",
+                node_ids + node_ids,
+            )
+        self._json_response(200, {"fragments": nodes, "edges": edges, "count": len(nodes)})
+
     def _get_stats(self, path: str, qs: dict) -> None:
         """GET /stats — graph statistics."""
         from ohm.queries import query_stats

@@ -3381,4 +3381,55 @@ def scratch(
     if metadata and "metadata" not in node:
         node["metadata"] = metadata
     node["scratch"] = True
+
+    auto_links = _auto_link_fragment(conn, node["id"], content, created_by)
+    if auto_links:
+        node["auto_links"] = auto_links
+
     return node
+
+
+def _auto_link_fragment(
+    conn: DuckDBPyConnection,
+    fragment_id: str,
+    content: str,
+    created_by: str,
+    max_links: int = 5,
+) -> list[dict[str, Any]]:
+    """Auto-link fragment to existing nodes whose labels appear in content (OHM-a5rz.8).
+
+    Scans ohm_nodes for labels that are substrings of the fragment content
+    (case-insensitive). Creates L0 CONTEXT_OF edges for matches.
+    Skips fragment-type nodes and the fragment itself. Limits to max_links.
+
+    Returns list of created edge records.
+    """
+    content_lower = content.lower()
+
+    candidates = _rows_to_dicts(
+        conn.execute(
+            "SELECT id, label, type FROM ohm_nodes WHERE deleted_at IS NULL AND type != 'fragment' ORDER BY LENGTH(label) DESC",
+        )
+    )
+
+    matched = []
+    for candidate in candidates:
+        if candidate["id"] == fragment_id:
+            continue
+        if len(matched) >= max_links:
+            break
+        label_lower = candidate["label"].lower()
+        if len(label_lower) >= 4 and label_lower in content_lower:
+            edge = create_edge(
+                conn,
+                from_node=fragment_id,
+                to_node=candidate["id"],
+                layer="L0",
+                edge_type="CONTEXT_OF",
+                created_by=created_by,
+                confidence=0.3,
+                provenance="auto_link",
+            )
+            matched.append({"node_id": candidate["id"], "label": candidate["label"], "edge_id": edge["id"]})
+
+    return matched
