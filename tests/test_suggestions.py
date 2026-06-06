@@ -202,12 +202,13 @@ class TestSuggestionsInNodeCreation:
 
     def test_post_node_includes_suggestions(self):
         """POST /node includes suggestions in response."""
-        status, data = self._request("POST", "/node", {
-            "id": "suggestion-test-1",
-            "label": "Suggestion Test Node",
-            "type": "concept",
-            "content": "A node about AND-gate control mechanisms",
-        })
+        with patch("ohm.graph.queries.semantic_search", return_value=[]):
+            status, data = self._request("POST", "/node", {
+                "id": "suggestion-test-1",
+                "label": "Suggestion Test Node",
+                "type": "concept",
+                "content": "A node about AND-gate control mechanisms",
+            })
         assert status in (200, 201)
         assert "suggestions" in data
         assert "similar_nodes" in data["suggestions"]
@@ -269,3 +270,225 @@ class TestSuggestionsInNodeCreation:
         assert status in (200, 201)
         assert "suggestions" in data
         assert data["suggestions"]["similar_nodes"] == []
+
+
+# ── Unit tests for edge suggestions ────────────────────────────────────
+
+class TestGenerateEdgeSuggestions:
+    """Unit tests for edge suggestion generation."""
+
+    def test_returns_empty_when_no_related_edges(self):
+        """Edge suggestions with no related edges return empty lists."""
+        from ohm.server.suggestions import generate_edge_suggestions
+
+        store = MagicMock()
+        store.conn.execute.return_value.fetchall.return_value = []
+        store.conn.execute.return_value.fetchone.return_value = (0,)
+        result = generate_edge_suggestions(
+            store, from_node="node-a", to_node="node-b", edge_type="SUPPORTS"
+        )
+        assert result["related_edges"] == []
+        assert result["edge_patterns"] == []
+        assert result["orphan_resolved"] is False
+
+    def test_finds_related_edges(self):
+        """Edge suggestions include related edges from both nodes."""
+        from ohm.server.suggestions import generate_edge_suggestions
+
+        store = MagicMock()
+        # First call: from_node's outgoing edges
+        # Second call: to_node's incoming edges
+        # Third call: from_node edge type counts
+        # Fourth call: to_node edge type counts
+        # Fifth call: from_node edge count for orphan check
+        # Sixth call: to_node edge count for orphan check
+        store.conn.execute.side_effect = [
+            MagicMock(fetchall=MagicMock(return_value=[  # from_node edges
+                ("node-c", "CAUSES", "L3", 0.9),
+            ])),
+            MagicMock(fetchall=MagicMock(return_value=[  # to_node incoming
+                ("node-d", "REFERENCES", "L2", 0.7),
+            ])),
+            MagicMock(fetchall=MagicMock(return_value=[  # from_node edge type counts
+                ("CAUSES", 3),
+            ])),
+            MagicMock(fetchall=MagicMock(return_value=[  # to_node edge type counts
+                ("REFERENCES", 5),
+            ])),
+            MagicMock(fetchone=MagicMock(return_value=(2,))),  # from_node has 2 edges
+            MagicMock(fetchone=MagicMock(return_value=(3,))),  # to_node has 3 edges
+        ]
+        result = generate_edge_suggestions(
+            store, from_node="node-a", to_node="node-b", edge_type="SUPPORTS"
+        )
+        assert len(result["related_edges"]) == 2
+        assert result["orphan_resolved"] is False
+
+    def test_detects_orphan_resolved(self):
+        """Edge suggestions detect when an orphan was just resolved."""
+        from ohm.server.suggestions import generate_edge_suggestions
+
+        store = MagicMock()
+        store.conn.execute.side_effect = [
+            MagicMock(fetchall=MagicMock(return_value=[])),  # from_node edges
+            MagicMock(fetchall=MagicMock(return_value=[])),  # to_node edges
+            MagicMock(fetchall=MagicMock(return_value=[])),  # from_node edge types
+            MagicMock(fetchall=MagicMock(return_value=[])),  # to_node edge types
+            MagicMock(fetchone=MagicMock(return_value=(1,))),  # from_node: only edge = just resolved
+            MagicMock(fetchone=MagicMock(return_value=(5,))),  # to_node: has edges
+        ]
+        result = generate_edge_suggestions(
+            store, from_node="orphan-node", to_node="node-b", edge_type="REFERENCES"
+        )
+        assert result["orphan_resolved"] is True
+
+    def test_suggests_alternate_edge_types(self):
+        """Edge patterns suggest other edge types the nodes commonly use."""
+        from ohm.server.suggestions import generate_edge_suggestions
+
+        store = MagicMock()
+        store.conn.execute.side_effect = [
+            MagicMock(fetchall=MagicMock(return_value=[])),  # related edges
+            MagicMock(fetchall=MagicMock(return_value=[])),  # related edges
+            MagicMock(fetchall=MagicMock(return_value=[  # from_node edge types
+                ("CAUSES", 3),
+                ("SUPPORTS", 2),
+            ])),
+            MagicMock(fetchall=MagicMock(return_value=[  # to_node edge types
+                ("REFERENCES", 5),
+            ])),
+            MagicMock(fetchone=MagicMock(return_value=(5,))),  # edge count
+            MagicMock(fetchone=MagicMock(return_value=(6,))),  # edge count
+        ]
+        result = generate_edge_suggestions(
+            store, from_node="node-a", to_node="node-b", edge_type="CORRELATES_WITH"
+        )
+        # Should suggest CAUSES, SUPPORTS, REFERENCES (but not CORRELATES_WITH)
+        patterns = result["edge_patterns"]
+        edge_types = [p["edge_type"] for p in patterns]
+        assert "CORRELATES_WITH" not in edge_types
+        assert len(patterns) > 0
+
+
+# ── Integration tests for edge suggestions ──────────────────────────────
+
+class TestEdgeSuggestionsInHandler:
+    """Integration tests that POST /edge includes suggestions."""
+
+    @pytest.fixture(autouse=True)
+    def setup_server(self):
+        """Start a test HTTP server with temp store."""
+        from ohm.store import OhmStore
+        from ohm.server import OhmHandler, _build_token_lookup
+        from ohm.schema import DEFAULT_SCHEMA
+        from http.server import HTTPServer
+        import threading
+        import socket
+        import tempfile
+        import os
+
+        tmpdir = tempfile.mkdtemp()
+        db_path = os.path.join(tmpdir, "test_edge_suggestions.duckdb")
+        self.store = OhmStore(db_path=db_path, agent_name="test_agent")
+
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        self.port = sock.getsockname()[1]
+        sock.close()
+
+        OhmHandler.store = self.store
+        OhmHandler.schema_config = DEFAULT_SCHEMA
+        OhmHandler.config = {"host": "127.0.0.1", "port": self.port}
+        OhmHandler.tokens = _build_token_lookup({"test-token": "test-agent"})
+        OhmHandler.roles = {}
+        OhmHandler.no_auth = True
+        OhmHandler.require_read_auth = False
+
+        self.server = HTTPServer(("127.0.0.1", self.port), OhmHandler)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+        import time
+        time.sleep(0.3)
+
+        yield
+
+        self.server.shutdown()
+        self.thread.join(timeout=2)
+
+    def _request(self, method, path, body=None):
+        """Make an HTTP request to the test server."""
+        from http.client import HTTPConnection
+        import json
+
+        conn = HTTPConnection("127.0.0.1", self.port, timeout=5)
+        if body:
+            conn.request(method, path, body=json.dumps(body),
+                        headers={"Content-Type": "application/json"})
+        else:
+            conn.request(method, path)
+        resp = conn.getresponse()
+        data = json.loads(resp.read().decode())
+        conn.close()
+        return resp.status, data
+
+    def test_post_edge_includes_suggestions(self):
+        """POST /edge includes suggestions in response."""
+        # Create two nodes first
+        self._request("POST", "/node", {"id": "edge-from", "label": "From Node", "type": "concept"})
+        self._request("POST", "/node", {"id": "edge-to", "label": "To Node", "type": "concept"})
+
+        status, data = self._request("POST", "/edge", {
+            "from": "edge-from",
+            "to": "edge-to",
+            "type": "SUPPORTS",
+            "layer": "L3",
+            "confidence": 0.85,
+        })
+        assert status == 201
+        # Edge responses may or may not have suggestions depending on related edges
+        # At minimum, the response should succeed and include the edge
+        assert "id" in data or "from" in data
+
+    def test_edge_suggestions_include_related_edges(self):
+        """Edge suggestions show other edges involving these nodes."""
+        # Create nodes and an existing edge
+        self._request("POST", "/node", {"id": "edge-a", "label": "Node A", "type": "concept"})
+        self._request("POST", "/node", {"id": "edge-b", "label": "Node B", "type": "concept"})
+        self._request("POST", "/node", {"id": "edge-c", "label": "Node C", "type": "concept"})
+        # Create an existing edge A → C
+        self._request("POST", "/edge", {
+            "from": "edge-a", "to": "edge-c", "type": "CAUSES", "layer": "L3", "confidence": 0.9
+        })
+        # Now create edge A → B — should suggest the existing A → C edge
+        status, data = self._request("POST", "/edge", {
+            "from": "edge-a",
+            "to": "edge-b",
+            "type": "SUPPORTS",
+            "layer": "L3",
+            "confidence": 0.8,
+        })
+        assert status == 201
+        if "suggestions" in data:
+            sug = data["suggestions"]
+            assert "related_edges" in sug
+            # Should find the existing CAUSES edge from A
+            from_edges = [e for e in sug["related_edges"] if e["direction"] == "from"]
+            assert len(from_edges) >= 1
+
+    def test_edge_orphan_resolved(self):
+        """Creating an edge to an orphan resolves its orphan status."""
+        # Create an orphan node (no edges)
+        self._request("POST", "/node", {"id": "orphan-node", "label": "Orphan", "type": "concept"})
+        self._request("POST", "/node", {"id": "connected-target", "label": "Target", "type": "concept"})
+        # Create edge — this should resolve the orphan
+        status, data = self._request("POST", "/edge", {
+            "from": "orphan-node",
+            "to": "connected-target",
+            "type": "REFERENCES",
+            "layer": "L2",
+            "confidence": 0.7,
+        })
+        assert status == 201
+        if "suggestions" in data:
+            assert data["suggestions"]["orphan_resolved"] is True

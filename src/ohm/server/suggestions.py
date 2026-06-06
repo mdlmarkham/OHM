@@ -218,3 +218,99 @@ def _find_orphan_connections(
     }
 
     return warning if (similar_orphans or similar_connected) else None
+
+
+def generate_edge_suggestions(
+    store: Any,
+    from_node: str,
+    to_node: str,
+    edge_type: str,
+    layer: str = "L3",
+) -> dict[str, Any]:
+    """Generate post-write suggestions for a newly created edge.
+
+    Returns a dict with:
+        related_edges: other edges involving these nodes or similar patterns
+        edge_patterns: common edge types from these nodes (suggest richer connections)
+        orphan_resolved: True if this edge resolved an orphan warning
+
+    Suggestions never fail the write. Every path returns a valid dict.
+    """
+    suggestions: dict[str, Any] = {
+        "related_edges": [],
+        "edge_patterns": [],
+        "orphan_resolved": False,
+    }
+
+    # ── 1. Related edges — what else connects to/from these nodes? ─────────
+    try:
+        # Edges FROM this node
+        from_edges = store.conn.execute(
+            "SELECT to_node, edge_type, layer, confidence FROM ohm_edges "
+            "WHERE from_node = ? AND deleted_at IS NULL "
+            "ORDER BY created_at DESC LIMIT 5",
+            [from_node],
+        ).fetchall()
+        # Edges TO this node
+        to_edges = store.conn.execute(
+            "SELECT from_node, edge_type, layer, confidence FROM ohm_edges "
+            "WHERE to_node = ? AND deleted_at IS NULL "
+            "ORDER BY created_at DESC LIMIT 5",
+            [to_node],
+        ).fetchall()
+
+        related = []
+        for row in from_edges:
+            related.append({"node": row[0], "edge_type": row[1], "direction": "from"})
+        for row in to_edges:
+            related.append({"node": row[0], "edge_type": row[1], "direction": "to"})
+        suggestions["related_edges"] = related[:5]
+    except Exception as e:
+        logger.debug(f"Related edges query failed: {e}")
+
+    # ── 2. Edge patterns — common edge types from these node neighborhoods ──
+    try:
+        # What edge types does from_node typically use?
+        from_types = store.conn.execute(
+            "SELECT edge_type, COUNT(*) as cnt FROM ohm_edges "
+            "WHERE from_node = ? AND deleted_at IS NULL "
+            "GROUP BY edge_type ORDER BY cnt DESC LIMIT 3",
+            [from_node],
+        ).fetchall()
+        # What edge types does to_node typically receive?
+        to_types = store.conn.execute(
+            "SELECT edge_type, COUNT(*) as cnt FROM ohm_edges "
+            "WHERE to_node = ? AND deleted_at IS NULL "
+            "GROUP BY edge_type ORDER BY cnt DESC LIMIT 3",
+            [to_node],
+        ).fetchall()
+
+        patterns = []
+        for row in from_types:
+            if row[0] != edge_type:
+                patterns.append({"from": from_node, "edge_type": row[0], "count": row[1]})
+        for row in to_types:
+            if row[0] != edge_type:
+                patterns.append({"to": to_node, "edge_type": row[0], "count": row[1]})
+        suggestions["edge_patterns"] = patterns[:5]
+    except Exception as e:
+        logger.debug(f"Edge patterns query failed: {e}")
+
+    # ── 3. Orphan resolved check ────────────────────────────────────────
+    try:
+        # Check if from_node or to_node was previously an orphan (no edges)
+        # After creating this edge, they're no longer orphans
+        for nid in [from_node, to_node]:
+            edge_count = store.conn.execute(
+                "SELECT COUNT(*) FROM ohm_edges "
+                "WHERE (from_node = ? OR to_node = ?) AND deleted_at IS NULL",
+                [nid, nid],
+            ).fetchone()[0]
+            # If this was the ONLY edge for this node, it just resolved an orphan state
+            if edge_count == 1:
+                suggestions["orphan_resolved"] = True
+                break
+    except Exception as e:
+        logger.debug(f"Orphan resolved check failed: {e}")
+
+    return suggestions

@@ -1076,6 +1076,23 @@ class GraphHandlerMixin:
             tags=None,
         )
         result = enrich_response(result, nudges)
+
+        # ADR-021: Proactive discoverability — post-write edge suggestions
+        try:
+            from ohm.server.suggestions import generate_edge_suggestions
+            edge_suggestions = generate_edge_suggestions(
+                store=self.current_store,
+                from_node=body["from"],
+                to_node=body["to"],
+                edge_type=body.get("type", ""),
+                layer=body.get("layer", "L3"),
+            )
+            if edge_suggestions["related_edges"] or edge_suggestions["edge_patterns"] or edge_suggestions["orphan_resolved"]:
+                result["suggestions"] = edge_suggestions
+        except Exception as e:
+            # Suggestions never fail the write
+            logger.debug(f"Edge suggestions failed: {e}")
+
         self._json_response(201, result)
 
     def _post_challenge(self, path: str, qs: dict, body: dict, agent: str) -> None:
