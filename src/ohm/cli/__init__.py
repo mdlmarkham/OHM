@@ -103,7 +103,7 @@ def build_parser() -> argparse.ArgumentParser:
     graph_sub.add_parser("schema", help="Show current node types, edge types, layers")
 
     # graph layers
-    graph_sub.add_parser("layers", help="L1-L4 descriptions with examples")
+    graph_sub.add_parser("layers", help="L0-L4 layer descriptions")
 
     # graph status
     graph_sub.add_parser("status", help="Node count, edge count, schema version, active agents")
