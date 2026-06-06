@@ -1,6 +1,7 @@
 """Admin handler mixin — checkpoint, embeddings, snapshot, and hook endpoints."""
 
 import time
+import threading
 
 
 class AdminHandlerMixin:
@@ -112,6 +113,7 @@ class AdminHandlerMixin:
                     pass
 
             rows = self.current_store.execute("SELECT id, label FROM ohm_nodes WHERE embedding IS NULL AND deleted_at IS NULL")
+            total_missing = len(rows)
             if not rows:
                 self._json_response(
                     200,
@@ -127,6 +129,42 @@ class AdminHandlerMixin:
                 )
                 return
 
+            # Run embedding generation in background thread to avoid HTTP timeout
+            background = qs.get("background", [""])[0].lower() in ("true", "1", "yes")
+
+            if background:
+                # Track progress in server state
+                if not hasattr(self.server, "_embed_progress"):
+                    self.server._embed_progress = {"status": "idle", "updated": 0, "failed": 0, "total": 0}
+                self.server._embed_progress = {"status": "running", "updated": 0, "failed": 0, "total": total_missing}
+
+                def _background_embed(rows, store, progress):
+                    from ohm.queries import update_node_embedding as _update
+                    u, f = 0, 0
+                    for row in rows:
+                        try:
+                            if _update(store.conn, row["id"]):
+                                u += 1
+                            else:
+                                f += 1
+                        except Exception:
+                            f += 1
+                        if delay_ms > 0:
+                            time.sleep(delay_ms / 1000.0)
+                    progress["status"] = "done"
+                    progress["updated"] = u
+                    progress["failed"] = f
+
+                t = threading.Thread(target=_background_embed, args=(rows, self.current_store, self.server._embed_progress), daemon=True)
+                t.start()
+                self._json_response(202, {
+                    "status": "started",
+                    "total": total_missing,
+                    "message": f"Embedding generation started for {total_missing} nodes. GET /admin/embeddings/status to check progress.",
+                })
+                return
+
+            # Synchronous mode (original behavior)
             updated = 0
             failed = 0
             processed = 0
@@ -144,7 +182,6 @@ class AdminHandlerMixin:
                 if delay_ms > 0:
                     time.sleep(delay_ms / 1000.0)
 
-            total_missing = len(rows)
             remaining = total_missing - processed
             self._json_response(
                 200,
@@ -160,6 +197,14 @@ class AdminHandlerMixin:
             )
         except Exception as e:
             self._json_response(500, {"error": "embedding_backfill_failed", "message": str(e)})
+
+    def _get_admin_embeddings_status(self, path: str, qs: dict) -> None:
+        """GET /admin/embeddings/status — check progress of background embedding generation."""
+        if not hasattr(self.server, "_embed_progress"):
+            self._json_response(200, {"status": "never_run", "updated": 0, "failed": 0, "total": 0})
+            return
+        progress = self.server._embed_progress
+        self._json_response(200, progress)
 
     def _post_admin_edge_layer_fix(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /admin/edge-layer-fix — bulk move edges to correct layer based on schema.
