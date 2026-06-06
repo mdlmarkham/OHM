@@ -529,6 +529,7 @@ def _build_router() -> _RouteRegistry:
     r.add("POST", "/admin/source-node-urls")
     r.add("POST", "/admin/edge-layer-fix")
     r.add("POST", "/admin/pert-backfill")
+    r.add("POST", "/admin/backfill-relational-tags")
     r.add("POST", "/admin/verification-decay")
     r.add("POST", "/admin/merge")
     r.add("POST", "/admin/vacuum-lake")
@@ -1940,6 +1941,7 @@ OhmHandler._POST_EXACT = {
     "/admin/source-node-urls": "_post_admin_source_node_urls",
     "/admin/edge-layer-fix": "_post_admin_edge_layer_fix",
     "/admin/pert-backfill": "_post_admin_pert_backfill",
+    "/admin/backfill-relational-tags": "_post_admin_backfill_relational_tags",
     "/admin/verification-decay": "_post_admin_verification_decay",
     "/admin/merge": "_post_admin_merge",
     "/admin/vacuum-lake": "_post_admin_vacuum_lake",

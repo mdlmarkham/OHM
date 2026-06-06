@@ -2191,7 +2191,8 @@ def suggest_connections(
                 a.label AS from_label,
                 b.id AS to_id,
                 b.label AS to_label,
-                count(*) AS shared_tag_count
+                count(*) AS shared_tag_count,
+                STRING_AGG(DISTINCT a.tag, ',') AS shared_tags_str
             FROM tag_sets a
             JOIN tag_sets b ON a.tag = b.tag AND a.id < b.id
             WHERE NOT EXISTS (
@@ -2213,6 +2214,7 @@ def suggest_connections(
                 "to_id": row[2],
                 "to_label": row[3],
                 "shared_tag_count": row[4],
+                "shared_tags": sorted(row[5].split(",")) if row[5] else [],
                 "reason": f"Shared {row[4]} tags",
                 "score": min(row[4] / 5.0, 1.0),
             }
@@ -2238,7 +2240,8 @@ def suggest_connections(
                 b.label AS to_label,
                 a.created_by AS from_agent,
                 b.created_by AS to_agent,
-                count(*) AS shared_tag_count
+                count(*) AS shared_tag_count,
+                STRING_AGG(DISTINCT a.tag, ',') AS shared_tags_str
             FROM tag_sets a
             JOIN tag_sets b ON a.tag = b.tag AND a.id < b.id
             WHERE a.created_by != b.created_by
@@ -2263,6 +2266,7 @@ def suggest_connections(
                 "from_agent": row[4],
                 "to_agent": row[5],
                 "shared_tag_count": row[6],
+                "shared_tags": sorted(row[7].split(",")) if row[7] else [],
                 "reason": f"Cross-domain: {row[4]} and {row[5]} share {row[6]} tags",
                 "score": min(row[6] * 1.5 / 5.0, 1.0),
                 "cross_domain": True,

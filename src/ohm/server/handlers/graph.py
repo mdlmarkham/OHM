@@ -1120,6 +1120,21 @@ class GraphHandlerMixin:
         )
         result = enrich_response(result, nudges)
 
+        # ADR-021: Relational tags — add edge type as tag on both endpoints
+        try:
+            from ohm.server.relational_tags import add_relational_tags
+            tag_result = add_relational_tags(
+                conn=self.current_store.conn,
+                from_node=body["from"],
+                to_node=body["to"],
+                edge_type=body.get("type", ""),
+            )
+            if tag_result["tags_added"]:
+                result["relational_tags"] = tag_result
+        except Exception as e:
+            # Relational tags never fail the write
+            logger.debug(f"Relational tag enrichment failed: {e}")
+
         # ADR-021: Proactive discoverability — post-write edge suggestions
         try:
             from ohm.server.suggestions import generate_edge_suggestions

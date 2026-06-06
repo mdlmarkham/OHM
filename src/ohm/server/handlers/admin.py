@@ -953,3 +953,51 @@ class AdminHandlerMixin:
             ]
 
         self._json_response(200, result)
+
+
+    def _post_admin_backfill_relational_tags(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /admin/backfill-relational-tags — backfill relational tags for all existing edges.
+
+        Scans all non-deleted edges and adds edge-type-derived tags to both endpoints.
+        This is a one-time migration for ADR-021.
+
+        Body: {
+            "dry_run": false  // if true, returns what would be updated without applying
+        }
+        """
+        from ohm.server.relational_tags import backfill_relational_tags, RELATIONAL_TAG_MAP
+
+        dry_run = body.get("dry_run", False)
+
+        if dry_run:
+            # Count how many edges would generate tags
+            edges = self.current_store.conn.execute(
+                "SELECT from_node, to_node, edge_type FROM ohm_edges WHERE deleted_at IS NULL",
+            ).fetchall()
+            potential_tags = 0
+            for from_node, to_node, edge_type in edges:
+                if edge_type in RELATIONAL_TAG_MAP:
+                    for node_id in [from_node, to_node]:
+                        row = self.current_store.conn.execute(
+                            "SELECT tags FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                            [node_id],
+                        ).fetchone()
+                        if row:
+                            import json
+                            try:
+                                existing = json.loads(row[0]) if isinstance(row[0], str) else (row[0] or [])
+                            except (json.JSONDecodeError, TypeError):
+                                existing = []
+                            tag = RELATIONAL_TAG_MAP[edge_type]
+                            if tag not in existing:
+                                potential_tags += 1
+            self._json_response(200, {
+                "dry_run": True,
+                "edges_scanned": len(edges),
+                "potential_tag_additions": potential_tags,
+                "mapped_edge_types": list(RELATIONAL_TAG_MAP.keys()),
+            })
+            return
+
+        result = backfill_relational_tags(self.current_store.conn)
+        self._json_response(200, result)
