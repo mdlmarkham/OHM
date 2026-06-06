@@ -1735,6 +1735,147 @@ class TestAutoLinkFragment:
             assert abs(row[2] - 0.3) < 0.01
 
 
+class TestSemanticAutoLinkFragment:
+    """Tests for semantic auto-linking via embedding similarity (OHM-a5rz.19)."""
+
+    def test_semantic_auto_link_fallback_when_ollama_unavailable(self, test_db):
+        """Semantic auto-linking falls back to substring when Ollama unavailable."""
+        from ohm.queries import create_node, scratch
+
+        create_node(test_db, label="SemanticFallbackTest", node_type="concept", created_by="test")
+        node = scratch(test_db, content="SemanticFallbackTest is important", created_by="metis")
+        assert "auto_links" in node
+        assert len(node["auto_links"]) >= 1
+        # When Ollama is unavailable, provenance should be auto_link_substring
+        assert node["auto_links"][0].get("provenance", "") == "auto_link_substring"
+
+    def _patch_embedding(self, embedding):
+        """Monkey-patch generate_embedding in the module where _auto_link_fragment looks it up."""
+        import ohm.graph.queries as _gq
+        self._original_embedding = _gq.generate_embedding
+        _gq.generate_embedding = lambda text, model="", url="": embedding
+        return _gq
+
+    def _unpatch_embedding(self, _gq):
+        _gq.generate_embedding = self._original_embedding
+
+    def test_semantic_auto_link_with_mock_embeddings(self, test_db):
+        """Semantic auto-links created using pre-populated embeddings."""
+        from ohm.queries import create_node, scratch
+
+        # Skip if VSS (array_cosine_distance) not available
+        try:
+            test_db.execute("SELECT array_cosine_distance([1.0]::FLOAT[1], [1.0]::FLOAT[1])")
+        except Exception:
+            pytest.skip("VSS extension (array_cosine_distance) not available")
+
+        # Create nodes and set embeddings so they are semantically close
+        node_a = create_node(test_db, label="Monetary Policy Tighter", node_type="concept", created_by="test")
+        node_b = create_node(test_db, label="Interest Rate Hike", node_type="concept", created_by="test")
+        node_c = create_node(test_db, label="Baking Sourdough", node_type="concept", created_by="test")
+
+        # Embeddings: monetary policy and interest rate should be close (dim 0)
+        # Baking is far away (dim 2)
+        policy_emb = [0.0] * 768
+        policy_emb[0] = 0.95
+        rate_emb = [0.0] * 768
+        rate_emb[0] = 0.90
+        baking_emb = [0.0] * 768
+        baking_emb[2] = 0.95
+
+        test_db.execute("UPDATE ohm_nodes SET embedding = ?::FLOAT[768] WHERE id = ?", [policy_emb, node_a["id"]])
+        test_db.execute("UPDATE ohm_nodes SET embedding = ?::FLOAT[768] WHERE id = ?", [rate_emb, node_b["id"]])
+        test_db.execute("UPDATE ohm_nodes SET embedding = ?::FLOAT[768] WHERE id = ?", [baking_emb, node_c["id"]])
+
+        fragment_emb = [0.0] * 768
+        fragment_emb[0] = 1.0  # Close to monetary/rate
+
+        _gq = self._patch_embedding(fragment_emb)
+        try:
+            node = scratch(
+                test_db,
+                content="Central bank tightens monetary policy with rate adjustment",
+                created_by="metis",
+            )
+        finally:
+            self._unpatch_embedding(_gq)
+
+        assert "auto_links" in node
+        assert len(node["auto_links"]) >= 1
+        # Should be semantic provenance
+        for link in node["auto_links"]:
+            assert link["provenance"] == "auto_link_semantic"
+        # Should not link to baking (far away in embedding space)
+        linked_ids = {link["node_id"] for link in node["auto_links"]}
+        assert node_c["id"] not in linked_ids
+
+    def test_semantic_auto_link_provenance_on_edge(self, test_db):
+        """Semantic auto-link edges have correct layer, type, confidence, provenance."""
+        from ohm.queries import create_node, scratch
+
+        # Skip if VSS not available
+        try:
+            test_db.execute("SELECT array_cosine_distance([1.0]::FLOAT[1], [1.0]::FLOAT[1])")
+        except Exception:
+            pytest.skip("VSS extension not available")
+
+        node = create_node(test_db, label="Economic Indicator", node_type="concept", created_by="test")
+        emb = [0.0] * 768
+        emb[0] = 0.9
+        test_db.execute("UPDATE ohm_nodes SET embedding = ?::FLOAT[768] WHERE id = ?", [emb, node["id"]])
+
+        fragment_emb = [1.0] + [0.0] * 767
+        _gq = self._patch_embedding(fragment_emb)
+        try:
+            result = scratch(
+                test_db,
+                content="Leading economic indicators suggest slowdown",
+                created_by="metis",
+            )
+        finally:
+            self._unpatch_embedding(_gq)
+
+        assert "auto_links" in result
+        assert len(result["auto_links"]) >= 1
+        edge_id = result["auto_links"][0]["edge_id"]
+        row = test_db.execute(
+            "SELECT layer, edge_type, confidence, provenance FROM ohm_edges WHERE id = ?",
+            [edge_id],
+        ).fetchone()
+        assert row[0] == "L0"
+        assert row[1] == "CONTEXT_OF"
+        assert abs(row[2] - 0.3) < 0.01
+        assert row[3] == "auto_link_semantic"
+
+    def test_semantic_auto_link_skips_fragments(self, test_db):
+        """Semantic auto-linking skips fragment-type nodes."""
+        from ohm.queries import scratch
+
+        # Skip if VSS not available
+        try:
+            test_db.execute("SELECT array_cosine_distance([1.0]::FLOAT[1], [1.0]::FLOAT[1])")
+        except Exception:
+            pytest.skip("VSS extension not available")
+
+        # Create a fragment (no mock needed since we just need its id)
+        frag = scratch(test_db, content="Monetary policy fragment", created_by="metis")
+
+        fragment_emb = [1.0] + [0.0] * 767
+        _gq = self._patch_embedding(fragment_emb)
+        try:
+            node = scratch(
+                test_db,
+                content="Monetary policy and rate decisions",
+                created_by="metis",
+            )
+        finally:
+            self._unpatch_embedding(_gq)
+
+        if "auto_links" in node:
+            linked_ids = {link["node_id"] for link in node["auto_links"]}
+            assert frag["id"] not in linked_ids
+
+
 class TestQuestionAutoDetection:
     """Tests for question auto-detection in fragments (OHM-a5rz.12)."""
 
@@ -1838,6 +1979,45 @@ class TestFragmentResonance:
         result = detect_fragment_resonance(test_db, limit=1)
         assert len(result) <= 1
 
+    # OHM-a5rz.25: Inline resonance edge creation during scratch()
+    def test_scratch_creates_resonance_links(self, test_db):
+        """scratch() returns resonance_links when fragments from different agents share targets."""
+        from ohm.queries import create_node, scratch
+
+        create_node(test_db, label="ResonanceShared", node_type="concept", created_by="test")
+        scratch(test_db, content="ResonanceShared from agent alpha", created_by="agent_a")
+        frag2 = scratch(test_db, content="ResonanceShared from agent beta", created_by="agent_b")
+        assert "resonance_links" in frag2
+        assert len(frag2["resonance_links"]) >= 1
+        assert frag2["resonance_links"][0]["edge_type"] == "RESONANCE"
+
+    def test_resonance_edge_is_persisted(self, test_db):
+        """RESONANCE edge exists in database with correct attributes."""
+        from ohm.queries import create_node, scratch
+
+        create_node(test_db, label="ResonanceTrigger", node_type="concept", created_by="test")
+        scratch(test_db, content="ResonanceTrigger from alpha", created_by="agent_a")
+        result = scratch(test_db, content="ResonanceTrigger from beta", created_by="agent_b")
+
+        assert "resonance_links" in result
+        edge_id = result["resonance_links"][0]["edge_id"]
+        row = test_db.execute(
+            "SELECT edge_type, layer, provenance FROM ohm_edges WHERE id = ?",
+            [edge_id],
+        ).fetchone()
+        assert row[0] == "RESONANCE"
+        assert row[1] == "L0"
+        assert row[2] == "auto_resonance"
+
+    def test_no_resonance_with_same_agent(self, test_db):
+        """No RESONANCE edge created when fragments from same agent share targets."""
+        from ohm.queries import create_node, scratch
+
+        create_node(test_db, label="SameAgentResonance", node_type="concept", created_by="test")
+        scratch(test_db, content="SameAgentResonance first", created_by="agent_a")
+        result = scratch(test_db, content="SameAgentResonance second", created_by="agent_a")
+        assert "resonance_links" not in result or len(result.get("resonance_links", [])) == 0
+
 
 class TestScratchConnectsToEdges:
     """OHM-a5rz.17: connects_to creates explicit L0 CONTEXT_OF edges."""
@@ -1911,3 +2091,102 @@ class TestSearchExcludesFragments:
         assert len(result.get("explicit_links", [])) >= 1
         # Should also have auto_link (CoexistTest appears in content)
         assert len(result.get("auto_links", [])) >= 1
+
+
+class TestFragmentDensityStats:
+    """Tests for fragment density metrics in stats (OHM-a5rz.24)."""
+
+    def test_stats_without_include_l0_excludes_density(self, test_db):
+        """query_stats without include_l0 does not include fragment_density."""
+        from ohm.queries import query_stats
+
+        stats = query_stats(test_db)
+        assert "fragment_density" not in stats
+
+    def test_stats_with_include_l0_returns_density(self, test_db):
+        """query_stats with include_l0=True returns fragment density metrics."""
+        from ohm.queries import query_stats, create_node, scratch
+
+        # Create a concept and a fragment that links to it
+        concept = create_node(test_db, label="DensityMetric", node_type="concept", created_by="test")
+        scratch(test_db, content="DensityMetric test fragment", created_by="test")
+
+        stats = query_stats(test_db, include_l0=True)
+        assert "fragment_density" in stats
+        f = stats["fragment_density"]
+        assert f["fragments_total"] >= 1
+        assert f["total_fragment_edges"] >= 1
+        assert f["fragment_density"] > 0
+
+    def test_fragment_density_empty_graph(self, test_db):
+        """Fragment density is 0.0 when no fragments exist."""
+        from ohm.queries import query_stats
+
+        stats = query_stats(test_db, include_l0=True)
+        assert "fragment_density" in stats
+        assert stats["fragment_density"]["fragments_total"] == 0
+        assert stats["fragment_density"]["fragment_density"] == 0.0
+
+
+class TestFragmentPromotion:
+    """Tests for fragment promotion to L1 concept (OHM-a5rz.26)."""
+
+    def test_promote_creates_concept(self, test_db):
+        """promote_fragment creates a concept node from a fragment."""
+        from ohm.queries import scratch, promote_fragment
+
+        frag = scratch(test_db, content="Important fragment worth promoting", created_by="test")
+        result = promote_fragment(test_db, fragment_id=frag["id"], promoted_by="metis")
+
+        assert "concept" in result
+        concept = result["concept"]
+        assert concept["type"] == "concept"
+        assert concept["label"] == frag["label"]
+
+    def test_promote_creates_refines_frag_edge(self, test_db):
+        """promote_fragment creates REFINES_FRAG edge from concept to fragment."""
+        from ohm.queries import scratch, promote_fragment
+
+        frag = scratch(test_db, content="Promote me to concept", created_by="test")
+        result = promote_fragment(test_db, fragment_id=frag["id"], promoted_by="metis")
+
+        edge = test_db.execute(
+            "SELECT edge_type, layer, from_node, to_node FROM ohm_edges WHERE id = ?",
+            [result["edge"]["id"]],
+        ).fetchone()
+        assert edge[0] == "REFINES_FRAG"
+        assert edge[1] == "L0"
+        assert edge[2] == result["concept"]["id"]
+        assert edge[3] == frag["id"]
+
+    def test_promote_sets_fragment_metadata(self, test_db):
+        """promote_fragment sets promoted_to in fragment metadata."""
+        from ohm.queries import scratch, promote_fragment
+        import json
+
+        frag = scratch(test_db, content="Fragment with promotion metadata", created_by="test")
+        result = promote_fragment(test_db, fragment_id=frag["id"], promoted_by="metis")
+
+        meta_row = test_db.execute(
+            "SELECT metadata FROM ohm_nodes WHERE id = ?",
+            [frag["id"]],
+        ).fetchone()
+        meta = json.loads(meta_row[0]) if meta_row[0] else {}
+        assert "promoted_to" in meta
+        assert meta["promoted_to"] == result["concept"]["id"]
+
+    def test_promote_nonexistent_fragment(self, test_db):
+        """promote_fragment raises error for nonexistent fragment."""
+        from ohm.queries import promote_fragment
+        from ohm.exceptions import NodeNotFoundError
+
+        with pytest.raises(NodeNotFoundError):
+            promote_fragment(test_db, fragment_id="nonexistent-id", promoted_by="metis")
+
+    def test_promote_non_fragment_node(self, test_db):
+        """promote_fragment raises error for non-fragment node."""
+        from ohm.queries import create_node, promote_fragment
+
+        node = create_node(test_db, label="Not a fragment", node_type="concept", created_by="test")
+        with pytest.raises(ValueError, match="is not a fragment"):
+            promote_fragment(test_db, fragment_id=node["id"], promoted_by="metis")

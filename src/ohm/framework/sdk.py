@@ -949,33 +949,34 @@ class Graph:
         *,
         limit: int = 20,
         node_type: str | None = None,
+        include_l0: bool = False,
     ) -> list[dict[str, Any]]:
         """Search nodes by label or content text.
 
         Performs a case-insensitive ILIKE search on both label and content.
         Optionally filter by node_type.
 
+        OHM-a5rz.18: L0 fragments are excluded by default. Pass
+        include_l0=True to include fragment-type nodes.
+
         Args:
             query: Text to search for in labels and content.
             limit: Maximum results (default 20).
             node_type: Optional type filter (e.g., 'concept', 'source').
+            include_l0: Include fragment-type nodes (default False).
 
         Returns:
             List of matching node records.
         """
-        # Build WHERE clause from hardcoded column names + parameterized values.
-        # Column names (label, content, type) are not user-provided — only values use ?.
-        conditions: list[str] = ["(label ILIKE ? OR content ILIKE ?)"]
-        params: list[Any] = [f"%{query}%", f"%{query}%"]
-        if node_type:
-            conditions.append("type = ?")
-            params.append(node_type)
+        from ohm.queries import search
 
-        sql = "SELECT * FROM ohm_nodes WHERE " + " AND ".join(conditions) + " ORDER BY created_at DESC LIMIT ?"
-        params.append(limit)
-        result = self._conn.execute(sql, params)
-        columns = [desc[0] for desc in result.description]
-        return [dict(zip(columns, row)) for row in result.fetchall()]
+        return search(
+            self._conn,
+            query=query,
+            limit=limit,
+            node_type=node_type,
+            include_l0=include_l0,
+        )
 
     def search_edges(
         self,
@@ -3362,13 +3363,17 @@ def connect_http(
                 path += "?" + "&".join(params)
             return self._http_request("GET", path)
 
-        def search(self, query: str, *, node_type: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+        def search(self, query: str, *, node_type: str | None = None, limit: int = 20, include_l0: bool = False) -> list[dict[str, Any]]:
             """Search nodes via the daemon's /search endpoint (ILIKE text search).
+
+            OHM-a5rz.18: L0 fragments excluded by default. Pass include_l0=True
+            to include fragment-type nodes.
 
             Args:
                 query: Text to search for in labels and content.
                 node_type: Optional type filter.
                 limit: Maximum results (default 20).
+                include_l0: Include fragment-type nodes (default False).
 
             Returns:
                 List of matching node records.
@@ -3378,6 +3383,8 @@ def connect_http(
             params = [f"q={urllib.parse.quote(query)}", f"limit={limit}"]
             if node_type:
                 params.append(f"type={node_type}")
+            if include_l0:
+                params.append("include_l0=true")
             path = "/search?" + "&".join(params)
             return self._http_request("GET", path)
 

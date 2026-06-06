@@ -88,6 +88,9 @@ class GraphHandlerMixin:
             params.append(f"%{query}%")
         if open_questions and open_questions.lower() in ("true", "1", "yes"):
             conditions.append("json_extract(metadata, '$.is_question') = true")
+        resonance = qs.get("resonance", [None])[0]
+        resonance = resonance and resonance.lower() in ("true", "1", "yes")
+
         params.append(limit)
 
         where = " AND ".join(conditions)
@@ -103,13 +106,38 @@ class GraphHandlerMixin:
                 f"SELECT * FROM ohm_edges WHERE layer = 'L0' AND (from_node IN ({placeholders}) OR to_node IN ({placeholders})) AND deleted_at IS NULL",
                 node_ids + node_ids,
             )
-        self._json_response(200, {"fragments": nodes, "edges": edges, "count": len(nodes)})
+
+        response = {"fragments": nodes, "edges": edges, "count": len(nodes)}
+
+        # OHM-a5rz.25: resonance=true adds resonance count per fragment
+        if resonance and node_ids:
+            placeholders = ",".join(["?"] * len(node_ids))
+            resonance_counts = self.current_store.execute(
+                f"""SELECT e.from_node AS fragment_id, COUNT(DISTINCT e.to_node) AS resonance_count
+                    FROM ohm_edges e
+                    WHERE e.edge_type = 'RESONANCE' AND e.deleted_at IS NULL
+                      AND e.from_node IN ({placeholders})
+                    GROUP BY e.from_node
+                """,
+                node_ids,
+            )
+            resonance_map = {r["fragment_id"]: r["resonance_count"] for r in resonance_counts}
+            for node in nodes:
+                node["resonance_count"] = resonance_map.get(node["id"], 0)
+            # Sort by resonance_count descending
+            nodes.sort(key=lambda n: n.get("resonance_count", 0), reverse=True)
+            response["fragments"] = nodes
+
+        self._json_response(200, response)
 
     def _get_stats(self, path: str, qs: dict) -> None:
-        """GET /stats — graph statistics."""
+        """GET /stats — graph statistics (OHM-a5rz.24: ?include_l0=true adds fragment density)."""
         from ohm.queries import query_stats
 
-        stats = query_stats(self.current_store.conn)
+        include_l0 = qs.get("include_l0", [None])[0]
+        include_l0 = include_l0 and include_l0.lower() in ("true", "1", "yes")
+
+        stats = query_stats(self.current_store.conn, include_l0=include_l0)
         import time
 
         stats["uptime"] = round(time.time() - _server_module._START_TIME, 1)
@@ -769,6 +797,8 @@ class GraphHandlerMixin:
             self._post_fragment_connect(path, qs, body, agent)
         elif path.endswith("/resolve"):
             self._post_fragment_resolve(path, qs, body, agent)
+        elif path.endswith("/promote"):
+            self._post_fragment_promote(path, qs, body, agent)
         else:
             self._json_response(404, {"error": f"Unknown endpoint: {path}"})
 
@@ -862,6 +892,29 @@ class GraphHandlerMixin:
             return
 
         self._json_response(200, result)
+
+    def _post_fragment_promote(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /fragments/{id}/promote — promote fragment to L1 concept (OHM-a5rz.26)."""
+        from ohm.queries import promote_fragment
+
+        if not path.endswith("/promote"):
+            self._json_response(404, {"error": f"Unknown endpoint: {path}"})
+            return
+
+        parts = path.rstrip("/").split("/")
+        fragment_id = parts[-2]
+
+        try:
+            result = promote_fragment(
+                self.current_store.conn,
+                fragment_id=fragment_id,
+                promoted_by=agent,
+            )
+        except ValueError as e:
+            self._json_response(400, {"error": str(e)})
+            return
+
+        self._json_response(201, result)
 
     def _post_edge(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /edge — create an edge."""

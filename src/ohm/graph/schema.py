@@ -119,7 +119,7 @@ VALID_PROVENANCES = frozenset(
 # ── Edge Types by Layer ─────────────────────────────────────────────────────
 
 LAYER_EDGE_TYPES: dict[str, frozenset[str]] = {
-    "L0": frozenset({"CONTEXT_OF", "INSPIRED_BY", "CONTRADICTS_FRAG", "REFINES_FRAG"}),
+    "L0": frozenset({"CONTEXT_OF", "INSPIRED_BY", "CONTRADICTS_FRAG", "REFINES_FRAG", "RESONANCE"}),
     "L1": frozenset({"CONTAINS", "BELONGS_TO", "HAS_COMPONENT", "PART_OF", "CAPABLE_OF", "VALUES", "GOALS", "INTERESTED_IN"}),
     "L2": frozenset(
         {

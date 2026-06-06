@@ -691,8 +691,12 @@ def query_agent_state(
 # ── Stats ───────────────────────────────────────────────────────────────────
 
 
-def query_stats(conn: DuckDBPyConnection) -> dict[str, Any]:
+def query_stats(conn: DuckDBPyConnection, include_l0: bool = False) -> dict[str, Any]:
     """Aggregate graph statistics.
+
+    Args:
+        conn: Database connection.
+        include_l0: Include L0 fragment-specific metrics (OHM-a5rz.24).
 
     Returns:
         Dict with edge counts by layer, node counts by type,
@@ -809,6 +813,38 @@ def query_stats(conn: DuckDBPyConnection) -> dict[str, Any]:
     """).fetchall()
     if top_observed:
         stats["top_observed_nodes"] = [{"label": row[0], "id": row[1], "observation_count": row[2]} for row in top_observed]
+
+    # OHM-a5rz.24: Fragment density metrics
+    if include_l0:
+        fragments_total_row = conn.execute(
+            "SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL AND type = 'fragment'"
+        ).fetchone()
+        fragments_total = fragments_total_row[0] if fragments_total_row else 0
+
+        fragments_with_links_row = conn.execute("""
+            SELECT COUNT(DISTINCT n.id)
+            FROM ohm_nodes n
+            JOIN ohm_edges e ON e.from_node = n.id AND e.deleted_at IS NULL
+            WHERE n.deleted_at IS NULL AND n.type = 'fragment'
+        """).fetchone()
+        fragments_with_links = fragments_with_links_row[0] if fragments_with_links_row else 0
+
+        edge_count_row = conn.execute("""
+            SELECT COUNT(*)
+            FROM ohm_edges e
+            JOIN ohm_nodes n ON n.id = e.from_node
+            WHERE n.deleted_at IS NULL AND n.type = 'fragment' AND e.deleted_at IS NULL
+        """).fetchone()
+        total_fragment_edges = edge_count_row[0] if edge_count_row else 0
+
+        fragment_density = round(total_fragment_edges / fragments_total, 4) if fragments_total > 0 else 0.0
+
+        stats["fragment_density"] = {
+            "fragments_total": fragments_total,
+            "fragments_with_links": fragments_with_links,
+            "total_fragment_edges": total_fragment_edges,
+            "fragment_density": fragment_density,
+        }
 
     return stats
 
@@ -2879,6 +2915,65 @@ def semantic_search(
     return _rows_to_dicts(result)
 
 
+def search(
+    conn: "DuckDBPyConnection",
+    query: str,
+    limit: int = 20,
+    node_type: str | None = None,
+    created_by: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    include_l0: bool = False,
+) -> list[dict[str, Any]]:
+    """Text search over nodes using ILIKE matching (OHM-a5rz.18).
+
+    Performs case-insensitive ILIKE search on both label and content.
+    L0 fragments are excluded by default (matching stats/neighborhood
+    behavior per ADR-019). Pass include_l0=True to include them.
+
+    Args:
+        conn: Database connection.
+        query: Text to search for in labels and content.
+        limit: Maximum results (default 20).
+        node_type: Optional filter by node type (overrides include_l0).
+        created_by: Optional filter by creator.
+        since: Optional ISO 8601 lower bound on created_at.
+        until: Optional ISO 8601 upper bound on created_at.
+        include_l0: Include fragment-type nodes (default False).
+
+    Returns:
+        List of matching node records.
+    """
+    if not query or not query.strip():
+        return []
+
+    conditions: list[str] = ["deleted_at IS NULL", "(label ILIKE ? OR content ILIKE ?)"]
+    params: list[Any] = [f"%{query}%", f"%{query}%"]
+
+    if node_type:
+        conditions.append("type = ?")
+        params.append(node_type)
+    elif not include_l0:
+        conditions.append("type != 'fragment'")
+
+    if created_by:
+        conditions.append("created_by = ?")
+        params.append(created_by)
+
+    if since:
+        conditions.append("created_at >= ?::TIMESTAMP")
+        params.append(since)
+
+    if until:
+        conditions.append("created_at <= ?::TIMESTAMP")
+        params.append(until)
+
+    params.append(limit)
+    sql = "SELECT * FROM ohm_nodes WHERE " + " AND ".join(conditions) + " ORDER BY created_at DESC LIMIT ?"
+    result = conn.execute(sql, params)
+    return _rows_to_dicts(result)
+
+
 def update_node_embedding(
     conn: "DuckDBPyConnection",
     node_id: str,
@@ -3432,10 +3527,107 @@ def scratch(
     if auto_links:
         node["auto_links"] = auto_links
 
+    # OHM-a5rz.25: Cross-agent fragment resonance
+    resonance_edges = _create_resonance_edges(conn, node["id"], created_by, auto_links)
+    if resonance_edges:
+        node["resonance_links"] = resonance_edges
+
     return node
 
 
 def _auto_link_fragment(
+    conn: DuckDBPyConnection,
+    fragment_id: str,
+    content: str,
+    created_by: str,
+    max_links: int = 5,
+) -> list[dict[str, Any]]:
+    """Auto-link fragment to existing nodes (OHM-a5rz.8, OHM-a5rz.19).
+
+    Uses semantic embedding similarity when available (OHM-a5rz.19):
+    computes fragment embedding, finds top-K nearest nodes by cosine similarity
+    above 0.7 threshold, creates L0 CONTEXT_OF edges with provenance
+    'auto_link_semantic'.
+
+    Falls back to label-substring matching (OHM-a5rz.8) when:
+    - Ollama/embedding service unavailable (generate_embedding returns None)
+    - VSS extension not loaded (array_cosine_distance unavailable)
+
+    Skips fragment-type nodes and the fragment itself. Limits to max_links.
+    Returns list of created edge records.
+    """
+    # OHM-a5rz.19: Try semantic auto-linking first
+    embedding = generate_embedding(content)
+    if embedding is not None:
+        try:
+            sem_links = _semantic_auto_link_fragment(
+                conn, fragment_id, embedding, created_by,
+                max_links=min(max_links, 3),  # top 3 per spec
+            )
+            if sem_links:
+                return sem_links
+        except Exception:
+            pass  # Fall through to substring matching
+
+    # OHM-a5rz.8: Fallback — label-substring matching
+    return _substring_auto_link_fragment(conn, fragment_id, content, created_by, max_links)
+
+
+def _semantic_auto_link_fragment(
+    conn: DuckDBPyConnection,
+    fragment_id: str,
+    embedding: list[float],
+    created_by: str,
+    max_links: int = 3,
+) -> list[dict[str, Any]]:
+    """Auto-link fragment using semantic embedding similarity (OHM-a5rz.19).
+
+    Finds non-fragment nodes with embeddings closest to the fragment
+    embedding using array_cosine_distance. Creates L0 CONTEXT_OF edges
+    for matches above the similarity threshold (> 0.7).
+    """
+    DISTANCE_THRESHOLD = 0.3  # cosine similarity > 0.7 → distance < 0.3
+
+    candidates = _rows_to_dicts(
+        conn.execute(
+            """SELECT id, label, type,
+                      array_cosine_distance(embedding, ?::FLOAT[768]) AS distance
+               FROM ohm_nodes
+               WHERE deleted_at IS NULL
+                 AND type != 'fragment'
+                 AND embedding IS NOT NULL
+                 AND id != ?
+                 AND array_cosine_distance(embedding, ?::FLOAT[768]) < ?
+               ORDER BY distance ASC
+               LIMIT ?""",
+            [embedding, fragment_id, embedding, DISTANCE_THRESHOLD, max_links],
+        )
+    )
+
+    matched = []
+    for candidate in candidates:
+        edge = create_edge(
+            conn,
+            from_node=fragment_id,
+            to_node=candidate["id"],
+            layer="L0",
+            edge_type="CONTEXT_OF",
+            created_by=created_by,
+            confidence=0.3,
+            provenance="auto_link_semantic",
+        )
+        matched.append({
+            "node_id": candidate["id"],
+            "label": candidate["label"],
+            "edge_id": edge["id"],
+            "provenance": "auto_link_semantic",
+            "similarity": round(1.0 - candidate["distance"], 4),
+        })
+
+    return matched
+
+
+def _substring_auto_link_fragment(
     conn: DuckDBPyConnection,
     fragment_id: str,
     content: str,
@@ -3447,8 +3639,6 @@ def _auto_link_fragment(
     Scans ohm_nodes for labels that are substrings of the fragment content
     (case-insensitive). Creates L0 CONTEXT_OF edges for matches.
     Skips fragment-type nodes and the fragment itself. Limits to max_links.
-
-    Returns list of created edge records.
     """
     content_lower = content.lower()
 
@@ -3474,11 +3664,92 @@ def _auto_link_fragment(
                 edge_type="CONTEXT_OF",
                 created_by=created_by,
                 confidence=0.3,
-                provenance="auto_link",
+                provenance="auto_link_substring",
             )
-            matched.append({"node_id": candidate["id"], "label": candidate["label"], "edge_id": edge["id"]})
+            matched.append({
+                "node_id": candidate["id"],
+                "label": candidate["label"],
+                "edge_id": edge["id"],
+                "provenance": "auto_link_substring",
+            })
 
     return matched
+
+
+def _create_resonance_edges(
+    conn: DuckDBPyConnection,
+    fragment_id: str,
+    created_by: str,
+    auto_links: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Create RESONANCE edges when fragments from different agents share auto-link targets (OHM-a5rz.25).
+
+    After a fragment auto-links to targets, checks if other fragments from
+    different agents also link to the same targets. Creates L0 RESONANCE
+    edges between the current fragment and matching fragments.
+
+    Returns list of created resonance edge records.
+    """
+    if not auto_links:
+        return []
+
+    target_ids = [link["node_id"] for link in auto_links]
+    placeholders = ",".join(["?"] * len(target_ids))
+
+    rows = _rows_to_dicts(
+        conn.execute(
+            f"""SELECT e.from_node AS fragment_id, f.created_by AS agent,
+                       e.to_node AS shared_target
+                FROM ohm_edges e
+                JOIN ohm_nodes f ON e.from_node = f.id
+                WHERE e.edge_type = 'CONTEXT_OF' AND e.layer = 'L0' AND e.deleted_at IS NULL
+                  AND f.type = 'fragment' AND f.deleted_at IS NULL
+                  AND f.id != ?
+                  AND f.created_by != ?
+                  AND e.to_node IN ({placeholders})
+            """,
+            [fragment_id, created_by] + target_ids,
+        )
+    )
+
+    if not rows:
+        return []
+
+    from collections import defaultdict
+
+    # Group by fragment, collecting shared targets
+    fragment_targets: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        fid = row["fragment_id"]
+        if fid not in fragment_targets:
+            fragment_targets[fid] = {
+                "fragment_id": fid,
+                "agent": row["agent"],
+                "shared_targets": [],
+            }
+        fragment_targets[fid]["shared_targets"].append(row["shared_target"])
+
+    resonance_edges = []
+    for fid, info in fragment_targets.items():
+        edge = create_edge(
+            conn,
+            from_node=fragment_id,
+            to_node=fid,
+            layer="L0",
+            edge_type="RESONANCE",
+            created_by=created_by,
+            confidence=0.3,
+            provenance="auto_resonance",
+        )
+        resonance_edges.append({
+            "node_id": fid,
+            "edge_id": edge["id"],
+            "edge_type": "RESONANCE",
+            "shared_targets": info["shared_targets"],
+            "shared_count": len(info["shared_targets"]),
+        })
+
+    return resonance_edges
 
 
 def resolve_question(
@@ -3519,6 +3790,104 @@ def resolve_question(
     _log_change(conn, "ohm_nodes", fragment_id, "UPDATE", agent_name=resolved_by)
 
     return _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [fragment_id]))[0]
+
+
+def promote_fragment(
+    conn: DuckDBPyConnection,
+    *,
+    fragment_id: str,
+    promoted_by: str,
+) -> dict[str, Any]:
+    """Promote an L0 fragment to an L1 concept node (OHM-a5rz.26).
+
+    Creates a new concept node with the fragment's label and content,
+    sets metadata.promoted_from on the concept and metadata.promoted_to
+    on the fragment, and creates a REFINES_FRAG edge from concept → fragment.
+
+    Args:
+        conn: Database connection.
+        fragment_id: ID of the fragment to promote.
+        promoted_by: Agent performing the promotion.
+
+    Returns:
+        Dict with the new concept node and the created edge.
+
+    Raises:
+        NodeNotFoundError: If fragment doesn't exist.
+        ValueError: If node is not a fragment.
+    """
+    from ohm.exceptions import NodeNotFoundError
+
+    frag = conn.execute(
+        "SELECT id, label, content FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+        [fragment_id],
+    ).fetchone()
+    if not frag:
+        raise NodeNotFoundError(f"Fragment not found: {fragment_id}")
+
+    frag_type = conn.execute(
+        "SELECT type FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+        [fragment_id],
+    ).fetchone()
+    if not frag_type or frag_type[0] != "fragment":
+        raise ValueError(f"Node {fragment_id} is not a fragment (type={frag_type[0] if frag_type else 'N/A'})")
+
+    import json as _json
+
+    label = frag[1]
+    content = frag[2]
+
+    concept = create_node(
+        conn,
+        label=label,
+        node_type="concept",
+        content=content,
+        created_by=promoted_by,
+        provenance="fragment_promotion",
+        confidence=0.5,
+    )
+
+    concept_id = concept["id"]
+
+    # Set metadata.promoted_from on the concept
+    conn.execute(
+        "UPDATE ohm_nodes SET metadata = ? WHERE id = ?",
+        [_json.dumps({"promoted_from": fragment_id}), concept_id],
+    )
+
+    edge = create_edge(
+        conn,
+        from_node=concept_id,
+        to_node=fragment_id,
+        layer="L0",
+        edge_type="REFINES_FRAG",
+        created_by=promoted_by,
+        confidence=0.5,
+        provenance="fragment_promotion",
+    )
+
+    # Update fragment metadata with promoted_to
+    frag_meta_row = conn.execute(
+        "SELECT metadata FROM ohm_nodes WHERE id = ?",
+        [fragment_id],
+    ).fetchone()
+    frag_metadata = {}
+    if frag_meta_row and frag_meta_row[0]:
+        try:
+            frag_metadata = _json.loads(frag_meta_row[0])
+        except (ValueError, TypeError):
+            frag_metadata = {}
+    frag_metadata["promoted_to"] = concept_id
+    conn.execute(
+        "UPDATE ohm_nodes SET metadata = ? WHERE id = ?",
+        [_json.dumps(frag_metadata), fragment_id],
+    )
+
+    return {
+        "concept": concept,
+        "edge": edge,
+        "promoted_from": fragment_id,
+    }
 
 
 def detect_fragment_resonance(

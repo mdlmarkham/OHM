@@ -814,6 +814,31 @@ class TestSearchNodes:
         results = graph.search_nodes("SearchTest", limit=3)
         assert len(results) <= 3
 
+    def test_search_nodes_excludes_fragments_by_default(self, graph):
+        """OHM-a5rz.18: search_nodes() excludes fragment-type nodes by default."""
+        graph.create_node(label="FragExConcept", node_type="concept")
+        graph.scratch(content="FragExConcept hunch")
+        results = graph.search_nodes("FragExConcept")
+        types = [r["type"] for r in results]
+        assert "fragment" not in types
+        assert "concept" in types
+
+    def test_search_nodes_includes_fragments_with_include_l0(self, graph):
+        """OHM-a5rz.18: search_nodes(include_l0=True) includes fragment-type nodes."""
+        graph.create_node(label="FragInConcept", node_type="concept")
+        graph.scratch(content="FragInConcept hunch")
+        results = graph.search_nodes("FragInConcept", include_l0=True)
+        types = [r["type"] for r in results]
+        assert "fragment" in types
+        assert "concept" in types
+
+    def test_search_nodes_type_fragment_overrides_include_l0(self, graph):
+        """OHM-a5rz.18: node_type='fragment' works regardless of include_l0."""
+        graph.scratch(content="ExplicitTypeFrag hunch")
+        results = graph.search_nodes("ExplicitTypeFrag", node_type="fragment")
+        assert len(results) >= 1
+        assert all(r["type"] == "fragment" for r in results)
+
 
 class TestSearchEdges:
     """Tests for SDK search_edges() method."""
