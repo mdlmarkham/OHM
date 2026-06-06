@@ -325,6 +325,16 @@ class SchemaConfig:
         """All valid layer identifiers."""
         return frozenset(self.layer_edge_types.keys())
 
+    @property
+    def must_have_edge_node_types(self) -> frozenset[str]:
+        """Node types that must have at least one edge when created."""
+        return MUST_HAVE_EDGE_NODE_TYPES
+
+    @property
+    def exempt_cross_link_node_types(self) -> frozenset[str]:
+        """Node types exempt from the cross-link requirement."""
+        return EXEMPT_CROSS_LINK_NODE_TYPES
+
     def validate_node_type(self, node_type: str) -> bool:
         """Check that *node_type* is valid for this schema."""
         return node_type in self.node_types

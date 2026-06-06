@@ -181,10 +181,13 @@ class GraphHandlerMixin:
                 "challenge": "POST /challenge — Challenge an L3 interpretation. Required: edge_id. Optional: reason, confidence.",
             },
             "reading": {
-                "search": "GET /search?q=QUERY — Text search. Excludes fragments by default. Add &include_l0=true to include L0.",
+                "search": "GET /search?q=QUERY — Text search (ILIKE). Returns tip for semantic search when empty. Filters: ?type=, ?created_by=, ?since=, ?until=, ?include_l0=true.",
                 "semantic_search": "GET /semantic_search?q=QUERY — Embedding similarity search. Excludes fragments by default. Add &include_l0=true to include L0.",
-                "neighborhood": "GET /neighborhood/ID?depth=2 — Get nodes and edges around a node. Excludes L0 by default. Add &layer=L0 for fragments.",
+                "neighborhood": "GET /neighborhood/ID?depth=2 — Get nodes and edges around a node. Filters: ?layer=, ?created_by=AGENT.",
                 "stats": "GET /stats — Graph statistics. Excludes fragments by default. Add ?include_l0=true to include L0.",
+                "suggest": "GET /suggest?method=shared_tags&min_shared=2 — Find nodes that should be connected based on shared tags.",
+                "orphans": "GET /orphans — Find nodes with no edges. Good for finding isolated knowledge.",
+                "listen": "GET /listen?since=ISO8601 — Change feed. See what agents have added recently.",
             },
             "L0_thinking_layer": {
                 "purpose": "Fragments, hunches, questions, raw associations. Unreliable by design (confidence=0.0). Excluded from search/stats/neighborhood by default.",
@@ -286,16 +289,26 @@ class GraphHandlerMixin:
             raise EdgeNotFoundError(f"Edge {edge_id} not found")
 
     def _get_neighborhood(self, path: str, qs: dict) -> None:
-        """GET /neighborhood/<id> — node neighborhood."""
+        """GET /neighborhood/<id> — node neighborhood.
+
+        Supports ?created_by=AGENT to filter edges by creator.
+        Useful for "what did I add to this subgraph?" queries.
+        """
         node_id = path[14:]
         from ohm.validation import validate_identifier
 
         node_id = validate_identifier(node_id, name="node_id")
         depth = int(qs.get("depth", [3])[0])
         layer = qs.get("layer", [None])[0]
+        created_by = qs.get("created_by", [None])[0]
         from ohm.queries import query_neighborhood
 
         edges = query_neighborhood(self.current_store.conn, node_id, depth=depth, layer=layer)
+
+        # Filter edges by creator if requested
+        if created_by:
+            edges = [e for e in edges if e.get("created_by") == created_by]
+
         node_ids = {node_id}
         for e in edges:
             node_ids.add(e["from_node"])
@@ -574,7 +587,16 @@ class GraphHandlerMixin:
         params.append(limit)
         sql = "SELECT * FROM ohm_nodes WHERE " + " AND ".join(conditions) + " ORDER BY created_at DESC LIMIT ?"
         results = self.current_store.execute(sql, params)
-        self._json_response(200, results)
+
+        # Discovery tip: when text search returns 0 results, suggest semantic search
+        if not results and not node_type:
+            self._json_response(200, {
+                "results": [],
+                "count": 0,
+                "tip": f"No results for '{query_text}' via text search. Try /semantic_search?q={query_text} for embedding-based matching.",
+            })
+        else:
+            self._json_response(200, results)
 
     def _get_semantic_search(self, path: str, qs: dict) -> None:
         """GET /semantic_search — vector similarity search.
@@ -1849,9 +1871,16 @@ class GraphHandlerMixin:
         from ohm.server.boundary import enforce_l2_immutability
         enforce_l2_immutability(self.current_store.conn, agent, node_id)
 
+        # Validate type change against schema
+        if "type" in body and body["type"] not in self.schema_config.node_types:
+            raise ValidationError(
+                f"Invalid node type: '{body['type']}' — must be one of: {', '.join(sorted(self.schema_config.node_types))}"
+            )
+
         now = datetime.now(timezone.utc).isoformat()
         patchable = [
             "label",
+            "type",
             "content",
             "confidence",
             "visibility",
