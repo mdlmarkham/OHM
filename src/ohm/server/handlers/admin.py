@@ -91,8 +91,8 @@ class AdminHandlerMixin:
         try:
             from ohm.queries import update_node_embedding
 
-            batch_size = 5
-            delay_ms = 200
+            batch_size = 3
+            delay_ms = 100
             if qs.get("batch_size"):
                 try:
                     batch_size = int(qs["batch_size"][0])
@@ -136,8 +136,18 @@ class AdminHandlerMixin:
                 # Track progress in server state
                 if not hasattr(self.server, "_embed_progress"):
                     self.server._embed_progress = {"status": "idle", "updated": 0, "failed": 0, "total": 0}
-                self.server._embed_progress = {"status": "running", "updated": 0, "failed": 0, "total": total_missing}
+                self.server._embed_progress = {"status": "error", "updated": 0, "failed": 0, "total": total_missing, "message": "Background embedding temporarily disabled — use synchronous batch mode with small batch_size (e.g. ?batch_size=3) to avoid timeout. Background mode causes DuckDB concurrency issues."}
 
+                self._json_response(503, {
+                    "status": "error",
+                    "total": total_missing,
+                    "message": "Background embedding is temporarily disabled due to DuckDB concurrency issues. Use synchronous mode with small batch_size (e.g. ?batch_size=3) and re-call until remaining=0.",
+                })
+                return
+
+                # NOTE: Background mode disabled due to DuckDB malloc corruption.
+                # The background thread writes to DuckDB while the main thread also writes,
+                # causing memory corruption. Use synchronous batch mode instead.
                 def _background_embed(rows, store, progress):
                     from ohm.queries import update_node_embedding as _update
                     u, f = 0, 0
