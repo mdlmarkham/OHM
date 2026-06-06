@@ -187,6 +187,7 @@ class GraphHandlerMixin:
                 "stats": "GET /stats — Graph statistics. Excludes fragments by default. Add ?include_l0=true to include L0.",
                 "suggest": "GET /suggest?method=shared_tags&min_shared=2 — Find nodes that should be connected based on shared tags.",
                 "orphans": "GET /orphans — Find nodes with no edges. Good for finding isolated knowledge.",
+                "islands": "GET /islands â Find disconnected components (clusters of nodes isolated from the main graph). Each island is a knowledge domain needing bridges. Params: min_size (default 2), max_islands (default 20), layer, exclude_fragments (default true).",
                 "listen": "GET /listen?since=ISO8601 — Change feed. See what agents have added recently.",
             },
             "L0_thinking_layer": {

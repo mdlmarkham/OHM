@@ -145,6 +145,34 @@ class AnalysisHandlerMixin:
         result = find_orphans(self.current_store.conn, node_type=node_type, exclude_system=exclude_system, limit=limit)
         self._json_response(200, result)
 
+    def _get_islands(self, path: str, qs: dict) -> None:
+        """GET /islands — find disconnected components in the graph.
+
+        Islands are clusters of nodes connected by edges but isolated
+        from the main graph. Each island represents a knowledge domain
+        that needs bridging to the rest of the graph.
+
+        Query params:
+            exclude_fragments: Exclude L0 fragments (default: true)
+            min_size: Minimum island size to include (default: 2, 1=include orphans)
+            max_islands: Maximum number of islands to return (default: 20)
+            layer: Filter edges by layer (e.g., 'L3')
+        """
+        from ohm.methods import find_islands
+
+        exclude_fragments = qs.get("exclude_fragments", ["true"])[0].lower() == "true"
+        min_size = int(qs.get("min_size", [2])[0])
+        max_islands = int(qs.get("max_islands", [20])[0])
+        layer = qs.get("layer", [None])[0]
+        result = find_islands(
+            self.current_store.conn,
+            exclude_fragments=exclude_fragments,
+            min_size=min_size,
+            max_islands=max_islands,
+            layer=layer,
+        )
+        self._json_response(200, result)
+
     def _get_hubs(self, path: str, qs: dict) -> None:
         """GET /hubs — find most-connected nodes."""
         from ohm.methods import find_hubs
