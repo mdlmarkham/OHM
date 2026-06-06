@@ -903,6 +903,8 @@ class AnalysisHandlerMixin:
                 "edges_per_node": round(edges_per_node, 1),
                 "nudge": nudge,
             },
+            "cold_start": total_agent_nodes == 0,
+            "bootstrap_guide": "See docs/bootstrap.md for cold-start instructions" if total_agent_nodes == 0 else None,
         })
 
     def _get_contributions(self, path: str, qs: dict) -> None:
