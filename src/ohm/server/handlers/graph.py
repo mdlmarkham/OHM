@@ -90,6 +90,8 @@ class GraphHandlerMixin:
             conditions.append("json_extract(metadata, '$.is_question') = true")
         resonance = qs.get("resonance", [None])[0]
         resonance = resonance and resonance.lower() in ("true", "1", "yes")
+        clusters = qs.get("clusters", [None])[0]
+        clusters = clusters and clusters.lower() in ("true", "1", "yes")
 
         params.append(limit)
 
@@ -127,6 +129,13 @@ class GraphHandlerMixin:
             # Sort by resonance_count descending
             nodes.sort(key=lambda n: n.get("resonance_count", 0), reverse=True)
             response["fragments"] = nodes
+
+        # OHM-a5rz.28: clusters=true returns fragment clusters
+        if clusters:
+            from ohm.queries import query_fragment_clusters
+
+            cls = query_fragment_clusters(self.current_store.conn)
+            response["clusters"] = cls
 
         self._json_response(200, response)
 

@@ -2070,17 +2070,38 @@ class TestSearchExcludesFragments:
     """OHM-a5rz.18/20: search and semantic_search exclude fragments by default."""
 
     def test_search_excludes_fragments(self, test_db):
-        from ohm.queries import create_node, scratch
+        from ohm.queries import create_node, scratch, search
 
         create_node(test_db, label="SearchExConcept", node_type="concept", created_by="test")
         scratch(test_db, content="SearchExConcept hunch", created_by="test")
-        # Verify both exist in DB
-        rows = test_db.execute(
-            "SELECT id, type FROM ohm_nodes WHERE label ILIKE '%SearchExConcept%' AND deleted_at IS NULL"
-        ).fetchall()
-        types = {r[1] for r in rows}
+        results = search(test_db, query="SearchExConcept")
+        types = [r["type"] for r in results]
+        assert "concept" in types
+        assert "fragment" not in types
+
+    def test_search_includes_fragments_with_include_l0(self, test_db):
+        from ohm.queries import create_node, scratch, search
+
+        create_node(test_db, label="SearchInConcept", node_type="concept", created_by="test")
+        scratch(test_db, content="SearchInConcept hunch", created_by="test")
+        results = search(test_db, query="SearchInConcept", include_l0=True)
+        types = [r["type"] for r in results]
         assert "concept" in types
         assert "fragment" in types
+
+    def test_search_type_fragment_overrides_include_l0(self, test_db):
+        from ohm.queries import scratch, search
+
+        scratch(test_db, content="ExplicitTypeFragQuery hunch", created_by="test")
+        results = search(test_db, query="ExplicitTypeFragQuery", node_type="fragment")
+        assert len(results) >= 1
+        assert all(r["type"] == "fragment" for r in results)
+
+    def test_search_empty_query_returns_empty(self, test_db):
+        from ohm.queries import search
+
+        results = search(test_db, query="")
+        assert results == []
 
     def test_connects_to_and_auto_links_coexist(self, test_db):
         from ohm.queries import create_node, scratch
@@ -2091,6 +2112,75 @@ class TestSearchExcludesFragments:
         assert len(result.get("explicit_links", [])) >= 1
         # Should also have auto_link (CoexistTest appears in content)
         assert len(result.get("auto_links", [])) >= 1
+
+
+class TestFragmentClusters:
+    """Tests for fragment cluster detection (OHM-a5rz.28)."""
+
+    def test_cluster_empty_graph(self, test_db):
+        """query_fragment_clusters returns empty list on empty graph."""
+        from ohm.queries import query_fragment_clusters
+
+        result = query_fragment_clusters(test_db)
+        assert result == []
+
+    def test_cluster_single_fragment(self, test_db):
+        """query_fragment_clusters returns empty list with only 1 fragment."""
+        from ohm.queries import create_node, scratch, query_fragment_clusters
+
+        create_node(test_db, label="Alone", node_type="concept", created_by="test")
+        scratch(test_db, content="Alone fragment", created_by="test")
+        result = query_fragment_clusters(test_db)
+        assert result == []
+
+    def test_cluster_three_fragments_shared_two_targets(self, test_db):
+        """3 fragments sharing 2 targets form a cluster."""
+        from ohm.queries import create_node, scratch, query_fragment_clusters
+
+        t1 = create_node(test_db, label="TargetOne", node_type="concept", created_by="test")
+        t2 = create_node(test_db, label="TargetTwo", node_type="concept", created_by="test")
+
+        # Three fragments all linking to both targets
+        content = "TargetOne and TargetTwo are both discussed here"
+        scratch(test_db, content=content, created_by="agent_a")
+        scratch(test_db, content=content, created_by="agent_b")
+        scratch(test_db, content=content, created_by="agent_c")
+
+        result = query_fragment_clusters(test_db, min_fragments=3, min_shared_targets=2)
+        assert len(result) >= 1
+        cluster = result[0]
+        assert cluster["cluster_size"] >= 3
+        assert cluster["shared_target_count"] >= 2
+
+    def test_cluster_excludes_pairs(self, test_db):
+        """2 fragments sharing targets do not form a cluster (need 3+)."""
+        from ohm.queries import create_node, scratch, query_fragment_clusters
+
+        t1 = create_node(test_db, label="SharedTarget", node_type="concept", created_by="test")
+        content = "SharedTarget discussed here"
+        scratch(test_db, content=content, created_by="agent_a")
+        scratch(test_db, content=content, created_by="agent_b")
+
+        result = query_fragment_clusters(test_db, min_fragments=3)
+        assert result == []
+
+    def test_cluster_multiple_groups(self, test_db):
+        """Separate clusters are identified independently."""
+        from ohm.queries import create_node, scratch, query_fragment_clusters
+
+        c1 = create_node(test_db, label="ClusterA", node_type="concept", created_by="test")
+        c2 = create_node(test_db, label="ClusterB", node_type="concept", created_by="test")
+
+        # Cluster A: 3 fragments sharing "ClusterA"
+        for agent in ("alpha", "beta", "gamma"):
+            scratch(test_db, content=f"ClusterA discussed by {agent}", created_by=agent)
+
+        # Cluster B: 3 fragments sharing "ClusterB"
+        for agent in ("delta", "epsilon", "zeta"):
+            scratch(test_db, content=f"ClusterB discussed by {agent}", created_by=agent)
+
+        result = query_fragment_clusters(test_db, min_fragments=3, min_shared_targets=1)
+        assert len(result) >= 2
 
 
 class TestFragmentDensityStats:

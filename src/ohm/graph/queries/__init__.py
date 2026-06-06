@@ -4126,3 +4126,106 @@ def detect_fragment_clusters(
                         clusters[cluster_key]["theme"] = f"You've been thinking about: {', '.join(labels[:5])}"
 
     return list(clusters.values())
+
+
+def query_fragment_clusters(
+    conn: DuckDBPyConnection,
+    *,
+    min_fragments: int = 3,
+    min_shared_targets: int = 2,
+) -> list[dict[str, Any]]:
+    """Find clusters of fragments sharing CONTEXT_OF targets (OHM-a5rz.28).
+
+    Identifies groups of 3+ fragments that share 2+ CONTEXT_OF target
+    nodes. These clusters are promotion candidates — the fragments may
+    be worth combining into an L1 concept.
+
+    Uses a graph-based approach: finds fragment pairs sharing >= 2 targets,
+    then groups connected components into clusters.
+
+    Args:
+        min_fragments: Minimum fragments per cluster (default 3).
+        min_shared_targets: Minimum shared targets per pair (default 2).
+
+    Returns:
+        List of cluster dicts, sorted by cluster size descending.
+    """
+    # Step 1: Find all fragment→target pairs (CONTEXT_OF edges from fragments)
+    fragment_targets = _rows_to_dicts(
+        conn.execute(
+            """SELECT e.from_node AS fragment_id, e.to_node AS target_id
+               FROM ohm_edges e
+               JOIN ohm_nodes n ON e.from_node = n.id
+               WHERE e.edge_type = 'CONTEXT_OF' AND e.layer = 'L0' AND e.deleted_at IS NULL
+                 AND n.type = 'fragment' AND n.deleted_at IS NULL
+            """,
+        )
+    )
+
+    if len(fragment_targets) < min_fragments:
+        return []
+
+    # Group targets by fragment
+    from collections import defaultdict
+
+    frag_to_targets: dict[str, set[str]] = defaultdict(set)
+    for row in fragment_targets:
+        frag_to_targets[row["fragment_id"]].add(row["target_id"])
+
+    fragment_ids = list(frag_to_targets.keys())
+
+    # Step 2: Build adjacency — edge between fragments sharing >= min_shared_targets
+    adj: dict[str, set[str]] = defaultdict(set)
+    for i in range(len(fragment_ids)):
+        fi = fragment_ids[i]
+        ti = frag_to_targets[fi]
+        for j in range(i + 1, len(fragment_ids)):
+            fj = fragment_ids[j]
+            tj = frag_to_targets[fj]
+            shared = ti & tj
+            if len(shared) >= min_shared_targets:
+                adj[fi].add(fj)
+                adj[fj].add(fi)
+
+    # Step 3: BFS to find connected components (clusters)
+    visited: set[str] = set()
+    clusters: list[list[str]] = []
+
+    for fid in adj:
+        if fid in visited:
+            continue
+        component: list[str] = []
+        queue = [fid]
+        visited.add(fid)
+        while queue:
+            node = queue.pop(0)
+            component.append(node)
+            for neighbor in adj[node]:
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    queue.append(neighbor)
+        if len(component) >= min_fragments:
+            clusters.append(component)
+
+    # Sort by cluster size descending
+    clusters.sort(key=lambda c: -len(c))
+
+    # Step 4: Build response with shared target info
+    result = []
+    for cluster in clusters:
+        # Union of all shared targets across the cluster's internal edges
+        cluster_targets: set[str] = set()
+        for i in range(len(cluster)):
+            for j in range(i + 1, len(cluster)):
+                shared = frag_to_targets[cluster[i]] & frag_to_targets[cluster[j]]
+                if len(shared) >= min_shared_targets:
+                    cluster_targets |= shared
+
+        result.append({
+            "cluster_size": len(cluster),
+            "fragment_ids": sorted(cluster),
+            "shared_target_count": len(cluster_targets),
+            "shared_target_ids": sorted(cluster_targets),
+        })
+
+    return result
