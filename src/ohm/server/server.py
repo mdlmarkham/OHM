@@ -1939,6 +1939,7 @@ OhmHandler._POST_PREFIXES = [
     ("/challenge/", "_post_challenge"),
     ("/support/", "_post_support"),
     ("/observe/", "_post_observe"),
+    ("/fragments/", "_post_fragment_connect"),
 ]
 
 OhmHandler._GET_EXACT = {

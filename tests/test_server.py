@@ -1935,3 +1935,82 @@ class TestScratchEndpoint:
         status, retrieved = _request("GET", port, f"/node/{node_id}")
         assert status == 200
         assert retrieved["type"] == "fragment"
+
+
+@pytest.mark.xdist_group("server")
+class TestFragmentConnectEndpoint:
+    """Tests for POST /fragments/{id}/connect — L0 fragment linking (OHM-a5rz.11)."""
+
+    def test_fragment_connect_refines(self, test_server):
+        port, store = test_server
+        status, f1 = _request("POST", port, "/scratch", body={"content": "First hunch about supply"})
+        assert status == 201
+        status, f2 = _request("POST", port, "/scratch", body={"content": "Second refined hunch"})
+        assert status == 201
+        status, edge = _request(
+            "POST",
+            port,
+            f"/fragments/{f1['id']}/connect",
+            body={"target_id": f2["id"], "edge_type": "REFINES_FRAG"},
+        )
+        assert status == 201
+        assert edge["layer"] == "L0"
+        assert edge["edge_type"] == "REFINES_FRAG"
+
+    def test_fragment_connect_contradicts(self, test_server):
+        port, store = test_server
+        status, f1 = _request("POST", port, "/scratch", body={"content": "Hunch A"})
+        status, f2 = _request("POST", port, "/scratch", body={"content": "Hunch B"})
+        status, edge = _request(
+            "POST",
+            port,
+            f"/fragments/{f1['id']}/connect",
+            body={"target_id": f2["id"], "edge_type": "CONTRADICTS_FRAG"},
+        )
+        assert status == 201
+        assert edge["edge_type"] == "CONTRADICTS_FRAG"
+
+    def test_fragment_connect_non_fragment_400(self, test_server):
+        port, store = test_server
+        store.write_node("concept_1", "Regular Concept", "concept", agent_name="test")
+        status, frag = _request("POST", port, "/scratch", body={"content": "A hunch"})
+        status, data = _request(
+            "POST",
+            port,
+            f"/fragments/{frag['id']}/connect",
+            body={"target_id": "concept_1", "edge_type": "REFINES_FRAG"},
+        )
+        assert status == 400
+
+    def test_fragment_connect_missing_target_400(self, test_server):
+        port, _ = test_server
+        status, frag = _request("POST", port, "/scratch", body={"content": "A hunch"})
+        status, data = _request(
+            "POST",
+            port,
+            f"/fragments/{frag['id']}/connect",
+            body={"edge_type": "REFINES_FRAG"},
+        )
+        assert status == 400
+
+    def test_fragment_connect_invalid_edge_type_400(self, test_server):
+        port, store = test_server
+        status, f1 = _request("POST", port, "/scratch", body={"content": "Hunch A"})
+        status, f2 = _request("POST", port, "/scratch", body={"content": "Hunch B"})
+        status, data = _request(
+            "POST",
+            port,
+            f"/fragments/{f1['id']}/connect",
+            body={"target_id": f2["id"], "edge_type": "CAUSES"},
+        )
+        assert status == 400
+
+    def test_fragment_connect_not_found_404(self, test_server):
+        port, _ = test_server
+        status, data = _request(
+            "POST",
+            port,
+            "/fragments/nonexistent/connect",
+            body={"target_id": "also_missing", "edge_type": "REFINES_FRAG"},
+        )
+        assert status == 404

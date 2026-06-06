@@ -747,6 +747,75 @@ class GraphHandlerMixin:
             node["hook_decorations"] = decorations
         self._json_response(201, node)
 
+    def _post_fragment_connect(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /fragments/{id}/connect — link a fragment to another fragment (OHM-a5rz.11).
+
+        Creates an L0 edge (REFINES_FRAG or CONTRADICTS_FRAG) between two fragments.
+        Both nodes must be type='fragment'.
+        """
+        from ohm.queries import create_edge
+
+        if not path.endswith("/connect"):
+            self._json_response(404, {"error": f"Unknown endpoint: {path}"})
+            return
+
+        parts = path.rstrip("/").split("/")
+        fragment_id = parts[-2]
+        target_id = body.get("target_id")
+        edge_type = body.get("edge_type", "REFINES_FRAG")
+        note = body.get("note")
+
+        if not target_id:
+            self._json_response(400, {"error": "target_id is required"})
+            return
+
+        if edge_type not in ("REFINES_FRAG", "CONTRADICTS_FRAG", "INSPIRED_BY"):
+            self._json_response(400, {"error": f"edge_type must be one of: REFINES_FRAG, CONTRADICTS_FRAG, INSPIRED_BY, got {edge_type}"})
+            return
+
+        from_node = self.current_store.conn.execute(
+            "SELECT id, type FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+            [fragment_id],
+        ).fetchone()
+        if not from_node:
+            self._json_response(404, {"error": f"Fragment not found: {fragment_id}"})
+            return
+        if from_node[1] != "fragment":
+            self._json_response(400, {"error": f"Source node is not a fragment (type={from_node[1]})"})
+            return
+
+        to_node = self.current_store.conn.execute(
+            "SELECT id, type FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+            [target_id],
+        ).fetchone()
+        if not to_node:
+            self._json_response(404, {"error": f"Target fragment not found: {target_id}"})
+            return
+        if to_node[1] != "fragment":
+            self._json_response(400, {"error": f"Target node is not a fragment (type={to_node[1]})"})
+            return
+
+        try:
+            edge = create_edge(
+                self.current_store.conn,
+                from_node=fragment_id,
+                to_node=target_id,
+                layer="L0",
+                edge_type=edge_type,
+                created_by=agent,
+                confidence=0.5,
+                provenance="fragment_connect",
+                metadata={"note": note} if note else None,
+            )
+        except ValueError as e:
+            self._json_response(400, {"error": str(e)})
+            return
+
+        decorations = self._run_post_ingest_hooks(agent, "fragment_connect", edge)
+        if decorations:
+            edge["hook_decorations"] = decorations
+        self._json_response(201, edge)
+
     def _post_edge(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /edge — create an edge."""
         hook_error = self._run_pre_ingest_hooks(agent, "edge", body)

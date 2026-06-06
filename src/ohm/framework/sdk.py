@@ -443,6 +443,38 @@ class Graph:
             connects_to=connects_to,
         )
 
+    def link_fragment(
+        self,
+        fragment_id: str,
+        target_id: str,
+        edge_type: str = "REFINES_FRAG",
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        """Link two fragments with an L0 edge (OHM-a5rz.11).
+
+        Args:
+            fragment_id: Source fragment node id.
+            target_id: Target fragment node id.
+            edge_type: One of REFINES_FRAG, CONTRADICTS_FRAG, INSPIRED_BY.
+            note: Optional note about the link.
+
+        Returns:
+            The created edge record.
+        """
+        from ohm.queries import create_edge
+
+        return create_edge(
+            self._conn,
+            from_node=fragment_id,
+            to_node=target_id,
+            layer="L0",
+            edge_type=edge_type,
+            created_by=self.actor,
+            confidence=0.5,
+            provenance="fragment_connect",
+            metadata={"note": note} if note else None,
+        )
+
     def create_edge(
         self,
         *,
@@ -3280,6 +3312,13 @@ def connect_http(
             if connects_to:
                 body["connects_to"] = connects_to
             return self._http_request("POST", "/scratch", body)
+
+        def link_fragment(self, fragment_id: str, target_id: str, edge_type: str = "REFINES_FRAG", note: str | None = None, **kwargs) -> dict[str, Any]:
+            """Link two fragments via L0 edge (OHM-a5rz.11). POST to /fragments/{id}/connect."""
+            body: dict[str, Any] = {"target_id": target_id, "edge_type": edge_type}
+            if note:
+                body["note"] = note
+            return self._http_request("POST", f"/fragments/{fragment_id}/connect", body)
 
         def stats(self) -> dict[str, Any]:
             """Get graph stats from the daemon."""
