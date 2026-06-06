@@ -599,6 +599,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Default prior for root nodes (default: 0.3)",
     )
 
+    # ── fragments ──────────────────────────────────────────────────────────
+    fragments_parser = graph_sub.add_parser("fragments", help="List L0 thinking fragments")
+    fragments_parser.add_argument("--agent", help="Filter by agent name")
+    fragments_parser.add_argument("--since", help="ISO timestamp (created_at >= since)")
+    fragments_parser.add_argument("--until", help="ISO timestamp (created_at <= until)")
+    fragments_parser.add_argument("--q", help="Text search in label/content")
+    fragments_parser.add_argument("--limit", type=int, default=50, help="Max results")
+
+    # graph scratch
+    scratch_parser = graph_sub.add_parser("scratch", help="Write a thinking fragment")
+    scratch_parser.add_argument("content", nargs="+", help="Fragment text content")
+    scratch_parser.add_argument("--tags", help="Comma-separated tags")
+    scratch_parser.add_argument("--agent", default="cli", help="Agent name (default: cli)")
+    scratch_parser.add_argument("--connects-to", help="Comma-separated node IDs to link to")
+
     # ── state ────────────────────────────────────────────────────────────
     state_parser = subparsers.add_parser("state", help="Hive mind awareness")
     state_sub = state_parser.add_subparsers(dest="state_command", help="State commands")
@@ -1054,6 +1069,10 @@ def _handle_graph(args: argparse.Namespace) -> None:
         _handle_voi_tasks(args)
     elif cmd == "policy":
         _handle_policy(args)
+    elif cmd == "scratch":
+        _handle_scratch(args)
+    elif cmd == "fragments":
+        _handle_fragments(args)
     else:
         print(f"Unknown graph command: {cmd}")
 
@@ -2807,3 +2826,62 @@ def topo_main(argv: list[str] | None = None) -> NoReturn:
             break
     # Insert 'topo' before the subcommand
     main(argv[:insert_at] + ["topo"] + argv[insert_at:])
+
+
+def _handle_scratch(args: argparse.Namespace) -> None:
+    """Handle 'ohm scratch' — write a thinking fragment (OHM-a5rz.16)."""
+    conn = _get_db(args)
+    try:
+        content = " ".join(args.content)
+        tags = [t.strip() for t in args.tags.split(",") if t.strip()] if args.tags else None
+        connects_to = [c.strip() for c in args.connects_to.split(",") if c.strip()] if args.connects_to else None
+        from ohm.graph.queries import scratch
+
+        result = scratch(conn, content=content, created_by=args.agent, tags=tags, connects_to=connects_to)
+        print(f"Created fragment: {result.get('id', '?')}")
+        if args.format == "json":
+            import json
+            print(json.dumps(result, indent=2, default=str))
+    finally:
+        conn.close()
+
+
+def _handle_fragments(args: argparse.Namespace) -> None:
+    """Handle 'ohm fragments' — list L0 fragments (OHM-a5rz.16)."""
+    conn = _get_db(args)
+    try:
+        import json
+
+        conditions = ["type = 'fragment'", "deleted_at IS NULL"]
+        params: list = []
+        if args.agent:
+            conditions.append("created_by = ?")
+            params.append(args.agent)
+        if args.since:
+            conditions.append("created_at >= ?::TIMESTAMP")
+            params.append(args.since)
+        if args.until:
+            conditions.append("created_at <= ?::TIMESTAMP")
+            params.append(args.until)
+        if args.q:
+            conditions.append("(label ILIKE ? OR content ILIKE ?)")
+            params.append(f"%{args.q}%")
+            params.append(f"%{args.q}%")
+        params.append(args.limit)
+        where = " AND ".join(conditions)
+        nodes = conn.execute(
+            f"SELECT id, label, created_by, created_at FROM ohm_nodes WHERE {where} ORDER BY created_at DESC LIMIT ?",
+            params,
+        ).fetchall()
+        if args.format == "json":
+            cols = ["id", "label", "created_by", "created_at"]
+            rows = [dict(zip(cols, row)) for row in nodes]
+            print(json.dumps({"fragments": rows}, indent=2, default=str))
+        else:
+            print(f"Fragments ({len(nodes)}):")
+            for row in nodes:
+                fid, label, creator, created = row
+                created_str = str(created)[:19] if created else "?"
+                print(f"  [{created_str}] {label} ({fid}) by {creator}")
+    finally:
+        conn.close()
