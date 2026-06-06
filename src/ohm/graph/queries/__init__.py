@@ -4229,3 +4229,96 @@ def query_fragment_clusters(
         })
 
     return result
+
+
+def evict_expired_fragments(
+    conn: DuckDBPyConnection,
+    *,
+    ttl_days: int = 30,
+) -> dict[str, Any]:
+    """Soft-delete expired L0 fragments (OHM-a5rz.27).
+
+    Runs the fragment TTL eviction policy:
+    - Fragments older than ``ttl_days`` (based on ``updated_at``) are candidates.
+    - If the fragment was promoted (has ``metadata.promoted_to``), it is **never** evicted.
+    - If the fragment has any outgoing L0 edges, its TTL is **extended** (``updated_at``
+      set to ``now()``) — connected fragments are worth keeping.
+    - Otherwise, the fragment is **soft-deleted** (``deleted_at`` set to ``now()``).
+
+    This is designed to run as an hourly background job in ohmd, but can also be
+    called on-demand via ``POST /admin/evict-fragments``.
+
+    Args:
+        conn: Database connection.
+        ttl_days: Number of days after which an unconnected fragment expires.
+
+    Returns:
+        Dict with ``evicted`` (list of fragment ids soft-deleted),
+        ``extended`` (list of fragment ids whose TTL was extended),
+        ``skipped_promoted`` (list of promoted fragment ids preserved),
+        and ``candidate_count`` (total candidates evaluated).
+    """
+    import json as _json
+    from datetime import datetime, timedelta, timezone
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=ttl_days)
+
+    candidates = _rows_to_dicts(
+        conn.execute(
+            """SELECT id, metadata
+               FROM ohm_nodes
+               WHERE type = 'fragment'
+                 AND deleted_at IS NULL
+                 AND updated_at < ?
+               ORDER BY updated_at ASC
+            """,
+            [cutoff],
+        )
+    )
+
+    result: dict[str, Any] = {
+        "evicted": [],
+        "extended": [],
+        "skipped_promoted": [],
+        "candidate_count": len(candidates),
+    }
+
+    for candidate in candidates:
+        fid = candidate["id"]
+        meta_raw = candidate["metadata"]
+        meta: dict[str, Any] = {}
+        if meta_raw:
+            try:
+                meta = _json.loads(meta_raw) if isinstance(meta_raw, str) else (meta_raw or {})
+            except (ValueError, TypeError):
+                meta = {}
+
+        # Never evict promoted fragments (OHM-a5rz.26)
+        if "promoted_to" in meta:
+            result["skipped_promoted"].append(fid)
+            continue
+
+        # Check for outgoing L0 edges — extends TTL if any exist
+        edge_row = conn.execute(
+            """SELECT COUNT(*) FROM ohm_edges
+               WHERE from_node = ? AND layer = 'L0' AND deleted_at IS NULL""",
+            [fid],
+        ).fetchone()
+        has_edges = edge_row and edge_row[0] > 0
+
+        if has_edges:
+            # Extend TTL by bumping updated_at
+            conn.execute(
+                "UPDATE ohm_nodes SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                [fid],
+            )
+            result["extended"].append(fid)
+        else:
+            # Soft-delete: no edges, not promoted, expired
+            conn.execute(
+                "UPDATE ohm_nodes SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?",
+                [fid],
+            )
+            result["evicted"].append(fid)
+
+    return result

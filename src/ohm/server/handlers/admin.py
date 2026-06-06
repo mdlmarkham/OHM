@@ -792,3 +792,17 @@ class AdminHandlerMixin:
         limit = int(qs.get("limit", [10])[0])
         result = detect_fragment_resonance(self.current_store.conn, min_shared=min_shared, limit=limit)
         self._json_response(200, {"resonance": result, "count": len(result)})
+
+    def _post_admin_evict_fragments(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /admin/evict-fragments — run fragment TTL eviction on-demand (OHM-a5rz.27)."""
+        from ohm.queries import evict_expired_fragments
+
+        ttl_days = body.get("ttl_days", 30)
+        try:
+            ttl_days = int(ttl_days)
+        except (ValueError, TypeError):
+            self._json_response(400, {"error": "ttl_days must be an integer"})
+            return
+
+        result = evict_expired_fragments(self.current_store.conn, ttl_days=ttl_days)
+        self._json_response(200, result)

@@ -2183,6 +2183,106 @@ class TestFragmentClusters:
         assert len(result) >= 2
 
 
+class TestFragmentEviction:
+    """Tests for fragment TTL eviction (OHM-a5rz.27)."""
+
+    def _set_old_updated_at(self, test_db, fragment_id: str, days_ago: int = 31):
+        """Helper: set a fragment's updated_at to look old."""
+        test_db.execute(
+            f"UPDATE ohm_nodes SET updated_at = CURRENT_TIMESTAMP - INTERVAL '{days_ago}' DAY WHERE id = ?",
+            [fragment_id],
+        )
+
+    def test_evict_no_candidates(self, test_db):
+        """evict_expired_fragments returns empty when nothing is expired."""
+        from ohm.queries import evict_expired_fragments
+
+        result = evict_expired_fragments(test_db, ttl_days=0)
+        assert result["candidate_count"] == 0
+        assert result["evicted"] == []
+        assert result["extended"] == []
+        assert result["skipped_promoted"] == []
+
+    def test_evict_soft_deletes_expired_fragment(self, test_db):
+        """Expired fragment with no edges is soft-deleted."""
+        from ohm.queries import scratch, evict_expired_fragments
+
+        frag = scratch(test_db, content="This fragment will be evicted", created_by="test")
+        self._set_old_updated_at(test_db, frag["id"])
+
+        result = evict_expired_fragments(test_db, ttl_days=0)
+        assert frag["id"] in result["evicted"]
+
+        # Verify soft-deleted
+        row = test_db.execute(
+            "SELECT deleted_at FROM ohm_nodes WHERE id = ?",
+            [frag["id"]],
+        ).fetchone()
+        assert row[0] is not None
+
+    def test_evict_extends_ttl_for_fragment_with_edges(self, test_db):
+        """Fragment with L0 edges gets TTL extended instead of evicted."""
+        from ohm.queries import create_node, scratch, evict_expired_fragments
+
+        concept = create_node(test_db, label="KeepAlive", node_type="concept", created_by="test")
+        frag = scratch(test_db, content="KeepAlive keeps this fragment alive", created_by="test")
+        self._set_old_updated_at(test_db, frag["id"])
+
+        result = evict_expired_fragments(test_db, ttl_days=0)
+        assert frag["id"] in result["extended"]
+        assert frag["id"] not in result["evicted"]
+
+        # Verify not deleted
+        row = test_db.execute(
+            "SELECT deleted_at FROM ohm_nodes WHERE id = ?",
+            [frag["id"]],
+        ).fetchone()
+        assert row[0] is None
+
+        # Verify updated_at was bumped
+        row = test_db.execute(
+            "SELECT updated_at > CURRENT_TIMESTAMP - INTERVAL '1 minute' FROM ohm_nodes WHERE id = ?",
+            [frag["id"]],
+        ).fetchone()
+        assert row[0] is True
+
+    def test_evict_skips_promoted_fragment(self, test_db):
+        """Promoted fragment is never evicted, even when expired."""
+        from ohm.queries import scratch, promote_fragment, evict_expired_fragments
+        import json as _json
+
+        frag = scratch(test_db, content="This promoted fragment survives", created_by="test")
+        promote_fragment(test_db, fragment_id=frag["id"], promoted_by="test")
+        self._set_old_updated_at(test_db, frag["id"])
+
+        result = evict_expired_fragments(test_db, ttl_days=0)
+        assert frag["id"] in result["skipped_promoted"]
+        assert frag["id"] not in result["evicted"]
+
+    def test_evict_mixed_scenario(self, test_db):
+        """Multiple fragments with different states produce correct results."""
+        from ohm.queries import create_node, scratch, promote_fragment, evict_expired_fragments
+
+        anchor = create_node(test_db, label="AnchorExtend", node_type="concept", created_by="test")
+
+        # f1: no edges (unique content that doesn't match any label)
+        f1 = scratch(test_db, content="X7k9q2z4 evictable fragment", created_by="test")
+        # f2: has edges (auto-links to AnchorExtend)
+        f2 = scratch(test_db, content="AnchorExtend gives this fragment edges", created_by="test")
+        # f3: promoted
+        f3 = scratch(test_db, content="X7k9q2z4 promote candidate", created_by="test")
+        promote_fragment(test_db, fragment_id=f3["id"], promoted_by="test")
+
+        self._set_old_updated_at(test_db, f1["id"])
+        self._set_old_updated_at(test_db, f2["id"])
+        self._set_old_updated_at(test_db, f3["id"])
+
+        result = evict_expired_fragments(test_db, ttl_days=0)
+        assert f1["id"] in result["evicted"]
+        assert f2["id"] in result["extended"]
+        assert f3["id"] in result["skipped_promoted"]
+
+
 class TestFragmentDensityStats:
     """Tests for fragment density metrics in stats (OHM-a5rz.24)."""
 

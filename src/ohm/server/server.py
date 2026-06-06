@@ -532,6 +532,7 @@ def _build_router() -> _RouteRegistry:
     r.add("POST", "/admin/verification-decay")
     r.add("POST", "/admin/merge")
     r.add("POST", "/admin/vacuum-lake")
+    r.add("POST", "/admin/evict-fragments")
 
     # /decay: write-in-GET (legacy); registered as GET to avoid spurious 405
     r.add("GET", "/decay")
@@ -1930,6 +1931,7 @@ OhmHandler._POST_EXACT = {
     "/admin/verification-decay": "_post_admin_verification_decay",
     "/admin/merge": "_post_admin_merge",
     "/admin/vacuum-lake": "_post_admin_vacuum_lake",
+    "/admin/evict-fragments": "_post_admin_evict_fragments",
     "/discover/queue/review": "_post_discovery_review",
     "/hooks": "_post_hooks",
 }
@@ -2155,6 +2157,34 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     if hasattr(store, "sync_heartbeat") and ducklake_sync_interval > 0:
         _sync_thread = threading.Thread(target=_ducklake_sync_loop, daemon=True, name="ducklake-sync")
         _sync_thread.start()
+
+    # OHM-a5rz.27: Background fragment eviction thread
+    eviction_config = config.get("eviction", {})
+    eviction_interval = eviction_config.get("interval_seconds", 3600)
+    eviction_ttl_days = eviction_config.get("ttl_days", 30)
+    _eviction_stop = threading.Event()
+
+    def _eviction_loop():
+        while not _eviction_stop.wait(eviction_interval):
+            try:
+                from ohm.queries import evict_expired_fragments
+
+                result = evict_expired_fragments(store.conn, ttl_days=eviction_ttl_days)
+                if result["evicted"] or result["extended"]:
+                    logger.info(
+                        "Fragment eviction: %d evicted, %d extended, %d promoted skipped (of %d candidates)",
+                        len(result["evicted"]),
+                        len(result["extended"]),
+                        len(result["skipped_promoted"]),
+                        result["candidate_count"],
+                    )
+            except Exception:
+                logger.exception("Fragment eviction failed")
+
+    if eviction_interval > 0:
+        _eviction_thread = threading.Thread(target=_eviction_loop, daemon=True, name="fragment-eviction")
+        _eviction_thread.start()
+
     print(f"Schema: {schema_config.name}", file=sys.stderr)
     if OhmHandler.multi_tenant:
         print("Multi-tenancy: ENABLED", file=sys.stderr)
@@ -2169,6 +2199,7 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     def shutdown_handler(signum, frame):
         print("Shutting down...", file=sys.stderr)
         _sync_stop.set()
+        _eviction_stop.set()
         try:
             store.sync_heartbeat()
         except Exception:
