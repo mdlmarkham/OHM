@@ -475,6 +475,20 @@ class Graph:
             metadata={"note": note} if note else None,
         )
 
+    def resolve_question(self, fragment_id: str) -> dict[str, Any] | None:
+        """Mark a question fragment as resolved (OHM-a5rz.12).
+
+        Updates metadata: is_question → false, adds resolved_at timestamp.
+        Returns updated node dict, or None if not a question fragment.
+        """
+        from ohm.queries import resolve_question
+
+        return resolve_question(
+            self._conn,
+            fragment_id=fragment_id,
+            resolved_by=self.actor,
+        )
+
     def create_edge(
         self,
         *,
@@ -3319,6 +3333,10 @@ def connect_http(
             if note:
                 body["note"] = note
             return self._http_request("POST", f"/fragments/{fragment_id}/connect", body)
+
+        def resolve_question(self, fragment_id: str, **kwargs) -> dict[str, Any]:
+            """Mark a question fragment as resolved (OHM-a5rz.12). POST to /fragments/{id}/resolve."""
+            return self._http_request("POST", f"/fragments/{fragment_id}/resolve", {})
 
         def stats(self) -> dict[str, Any]:
             """Get graph stats from the daemon."""

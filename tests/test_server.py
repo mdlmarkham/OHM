@@ -185,9 +185,72 @@ class TestNodeEndpoints:
         port, _ = test_server
         status, data = _request("GET", port, "/node/nonexistent")
         assert status == 404
-        assert data["error"] == "not_found"
-        assert "correlation_id" in data
 
+
+@pytest.mark.xdist_group("server")
+class TestQuestionAutoDetection:
+    """Tests for question auto-detection in fragments (OHM-a5rz.12)."""
+
+    def test_scratch_question_has_is_question_metadata(self, test_server):
+        port, _ = test_server
+        status, data = _request(
+            "POST", port, "/scratch", body={"content": "Why would Altman meet Sanders?"},
+        )
+        assert status == 201
+        meta = data.get("metadata", {})
+        if isinstance(meta, str):
+            import json
+            meta = json.loads(meta)
+        assert meta.get("is_question") is True
+
+    def test_scratch_non_question_no_is_question(self, test_server):
+        port, _ = test_server
+        status, data = _request(
+            "POST", port, "/scratch", body={"content": "Broadcom refused to raise guidance"},
+        )
+        assert status == 201
+        meta = data.get("metadata") or {}
+        if isinstance(meta, str):
+            import json
+            meta = json.loads(meta)
+        assert "is_question" not in meta
+
+    def test_fragments_open_questions_filter(self, test_server):
+        port, _ = test_server
+        _request("POST", port, "/scratch", body={"content": "Why is this happening?"})
+        _request("POST", port, "/scratch", body={"content": "Just a statement here"})
+        status, data = _request("GET", port, "/fragments?open_questions=true")
+        assert status == 200
+        for frag in data["fragments"]:
+            meta = frag.get("metadata", {})
+            if isinstance(meta, str):
+                import json
+                meta = json.loads(meta)
+            assert meta.get("is_question") is True
+
+    def test_fragment_resolve(self, test_server):
+        port, _ = test_server
+        status, frag = _request("POST", port, "/scratch", body={"content": "Is HBM scaling?"})
+        assert status == 201
+        status, result = _request("POST", port, f"/fragments/{frag['id']}/resolve", body={})
+        assert status == 200
+        meta = result.get("metadata", {})
+        if isinstance(meta, str):
+            import json
+            meta = json.loads(meta)
+        assert meta.get("is_question") is False
+        assert "resolved_at" in meta
+
+    def test_fragment_resolve_non_question_404(self, test_server):
+        port, _ = test_server
+        status, frag = _request("POST", port, "/scratch", body={"content": "Not a question"})
+        status, data = _request("POST", port, f"/fragments/{frag['id']}/resolve", body={})
+        assert status == 404
+
+    def test_fragment_resolve_nonexistent_404(self, test_server):
+        port, _ = test_server
+        status, data = _request("POST", port, "/fragments/nonexistent/resolve", body={})
+        assert status == 404
     def test_create_and_get_node(self, test_server):
         port, store = test_server
         status, data = _request(

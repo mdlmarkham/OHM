@@ -1733,3 +1733,56 @@ class TestAutoLinkFragment:
             assert row[0] == "L0"
             assert row[1] == "CONTEXT_OF"
             assert abs(row[2] - 0.3) < 0.01
+
+
+class TestQuestionAutoDetection:
+    """Tests for question auto-detection in fragments (OHM-a5rz.12)."""
+
+    def test_question_fragment_has_is_question(self, test_db):
+        import json
+        from ohm.queries import scratch
+
+        node = scratch(test_db, content="Why would Altman meet Sanders?", created_by="metis")
+        meta = json.loads(node["metadata"]) if node.get("metadata") else {}
+        assert meta.get("is_question") is True
+
+    def test_non_question_fragment_no_is_question(self, test_db):
+        import json
+        from ohm.queries import scratch
+
+        node = scratch(test_db, content="Broadcom refused to raise guidance", created_by="metis")
+        meta = json.loads(node["metadata"]) if node.get("metadata") else {}
+        assert "is_question" not in meta
+
+    def test_resolve_question(self, test_db):
+        import json
+        from ohm.queries import scratch, resolve_question
+
+        node = scratch(test_db, content="Why did Kioxia delay?", created_by="metis")
+        result = resolve_question(test_db, fragment_id=node["id"], resolved_by="metis")
+        assert result is not None
+        meta = json.loads(result["metadata"]) if result.get("metadata") else {}
+        assert meta.get("is_question") is False
+        assert "resolved_at" in meta
+
+    def test_resolve_non_question_returns_none(self, test_db):
+        from ohm.queries import scratch, resolve_question
+
+        node = scratch(test_db, content="No question here", created_by="metis")
+        result = resolve_question(test_db, fragment_id=node["id"], resolved_by="metis")
+        assert result is None
+
+    def test_resolve_nonexistent_returns_none(self, test_db):
+        from ohm.queries import resolve_question
+
+        result = resolve_question(test_db, fragment_id="nonexistent", resolved_by="metis")
+        assert result is None
+
+    def test_question_with_tags_both_in_metadata(self, test_db):
+        import json
+        from ohm.queries import scratch
+
+        node = scratch(test_db, content="Is HBM scaling?", created_by="metis", tags=["semi"])
+        meta = json.loads(node["metadata"]) if node.get("metadata") else {}
+        assert meta.get("is_question") is True
+        assert meta.get("tags") == ["semi"]

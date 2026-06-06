@@ -3363,8 +3363,13 @@ def scratch(
     node_id = generate_node_id(label)
 
     metadata = None
-    if tags:
-        metadata = {"tags": tags}
+    is_question = "?" in content
+    if tags or is_question:
+        metadata = {}
+        if tags:
+            metadata["tags"] = tags
+        if is_question:
+            metadata["is_question"] = True
 
     node = create_node(
         conn,
@@ -3378,8 +3383,13 @@ def scratch(
         url=url,
         connects_to=connects_to,
     )
-    if metadata and "metadata" not in node:
-        node["metadata"] = metadata
+    if metadata:
+        import json as _json
+        conn.execute(
+            "UPDATE ohm_nodes SET metadata = ? WHERE id = ?",
+            [_json.dumps(metadata), node["id"]],
+        )
+        node["metadata"] = _json.dumps(metadata)
     node["scratch"] = True
 
     auto_links = _auto_link_fragment(conn, node["id"], content, created_by)
@@ -3433,3 +3443,43 @@ def _auto_link_fragment(
             matched.append({"node_id": candidate["id"], "label": candidate["label"], "edge_id": edge["id"]})
 
     return matched
+
+
+def resolve_question(
+    conn: DuckDBPyConnection,
+    *,
+    fragment_id: str,
+    resolved_by: str,
+) -> dict[str, Any] | None:
+    """Mark a question fragment as resolved (OHM-a5rz.12).
+
+    Updates metadata: is_question → false, adds resolved_at timestamp.
+    Only resolves fragments that currently have is_question=true in metadata.
+
+    Returns updated node dict, or None if fragment is not a question.
+    """
+    import json
+
+    node = conn.execute(
+        "SELECT id, metadata FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+        [fragment_id],
+    ).fetchone()
+    if not node:
+        return None
+
+    metadata_raw = node[1]
+    metadata = json.loads(metadata_raw) if metadata_raw else {}
+    if not metadata.get("is_question"):
+        return None
+
+    metadata["is_question"] = False
+    now_result = conn.execute("SELECT CURRENT_TIMESTAMP").fetchone()
+    metadata["resolved_at"] = str(now_result[0]) if now_result else ""
+
+    conn.execute(
+        "UPDATE ohm_nodes SET metadata = ?, updated_at = CURRENT_TIMESTAMP, updated_by = ? WHERE id = ?",
+        [json.dumps(metadata), resolved_by, fragment_id],
+    )
+    _log_change(conn, "ohm_nodes", fragment_id, "UPDATE", agent_name=resolved_by)
+
+    return _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [fragment_id]))[0]

@@ -60,13 +60,15 @@ class GraphHandlerMixin:
     def _get_fragments(self, path: str, qs: dict) -> None:
         """GET /fragments — query L0 fragment nodes (OHM-a5rz.10).
 
-        Filters: ?agent=, ?since=, ?until=, ?q= (text search), ?limit=.
+        Filters: ?agent=, ?since=, ?until=, ?q= (text search), ?limit=,
+        ?open_questions=true (fragments with is_question=true in metadata).
         Returns fragment nodes with their L0 context edges.
         """
         agent = qs.get("agent", [None])[0]
         since = qs.get("since", [None])[0]
         until = qs.get("until", [None])[0]
         query = qs.get("q", [None])[0]
+        open_questions = qs.get("open_questions", [None])[0]
         limit = int(qs.get("limit", [50])[0])
 
         conditions = ["type = 'fragment'", "deleted_at IS NULL"]
@@ -84,6 +86,8 @@ class GraphHandlerMixin:
             conditions.append("(label ILIKE ? OR content ILIKE ?)")
             params.append(f"%{query}%")
             params.append(f"%{query}%")
+        if open_questions and open_questions.lower() in ("true", "1", "yes"):
+            conditions.append("json_extract(metadata, '$.is_question') = true")
         params.append(limit)
 
         where = " AND ".join(conditions)
@@ -747,6 +751,15 @@ class GraphHandlerMixin:
             node["hook_decorations"] = decorations
         self._json_response(201, node)
 
+    def _post_fragment_action(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """Dispatch /fragments/{id}/* POST endpoints."""
+        if path.endswith("/connect"):
+            self._post_fragment_connect(path, qs, body, agent)
+        elif path.endswith("/resolve"):
+            self._post_fragment_resolve(path, qs, body, agent)
+        else:
+            self._json_response(404, {"error": f"Unknown endpoint: {path}"})
+
     def _post_fragment_connect(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /fragments/{id}/connect — link a fragment to another fragment (OHM-a5rz.11).
 
@@ -815,6 +828,28 @@ class GraphHandlerMixin:
         if decorations:
             edge["hook_decorations"] = decorations
         self._json_response(201, edge)
+
+    def _post_fragment_resolve(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /fragments/{id}/resolve — mark a question fragment as resolved (OHM-a5rz.12)."""
+        from ohm.queries import resolve_question
+
+        if not path.endswith("/resolve"):
+            self._json_response(404, {"error": f"Unknown endpoint: {path}"})
+            return
+
+        parts = path.rstrip("/").split("/")
+        fragment_id = parts[-2]
+
+        result = resolve_question(
+            self.current_store.conn,
+            fragment_id=fragment_id,
+            resolved_by=agent,
+        )
+        if result is None:
+            self._json_response(404, {"error": f"Question fragment not found or not a question: {fragment_id}"})
+            return
+
+        self._json_response(200, result)
 
     def _post_edge(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /edge — create an edge."""
