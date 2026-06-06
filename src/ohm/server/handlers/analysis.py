@@ -580,11 +580,11 @@ class AnalysisHandlerMixin:
                 [agent],
             ).fetchone()[0]
             last_act = conn.execute(
-                "SELECT MAX(created_at) FROM ("
-                "SELECT created_at FROM ohm_nodes WHERE created_by = ? UNION ALL "
-                "SELECT created_at FROM ohm_edges WHERE created_by = ? UNION ALL "
-                "SELECT created_at FROM ohm_observations WHERE created_by = ?"
-                ") ORDER BY created_at DESC LIMIT 1",
+                "SELECT MAX(la) FROM ("
+                "SELECT created_at AS la FROM ohm_nodes WHERE created_by = ? UNION ALL "
+                "SELECT created_at AS la FROM ohm_edges WHERE created_by = ? UNION ALL "
+                "SELECT created_at AS la FROM ohm_observations WHERE created_by = ?"
+                ")",
                 [agent, agent, agent],
             ).fetchone()[0]
             # Agent's orphans
