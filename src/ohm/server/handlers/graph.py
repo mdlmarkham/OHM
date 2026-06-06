@@ -912,6 +912,17 @@ class GraphHandlerMixin:
         challenge_type = body.get("challenge_type", "CHALLENGED_BY")
         result = self.current_store.challenge_edge(edge_id, reason, confidence, challenge_type, agent_name=agent)
         if result:
+            # OHM-a5rz.15: reflect the challenge back to originating L0 fragments
+            try:
+                from ohm.graph.queries import reflect_challenge_to_fragments
+
+                reflected = reflect_challenge_to_fragments(
+                    self.current_store.conn, edge_id, result.get("id", ""), agent,
+                )
+                if reflected:
+                    result["backflow_fragments"] = [r["fragment_id"] for r in reflected]
+            except Exception:
+                pass  # backflow is advisory; never block the challenge
             _server_module._trigger_webhooks(
                 {
                     "type": "edge.challenged",

@@ -476,11 +476,7 @@ class Graph:
         )
 
     def resolve_question(self, fragment_id: str) -> dict[str, Any] | None:
-        """Mark a question fragment as resolved (OHM-a5rz.12).
-
-        Updates metadata: is_question → false, adds resolved_at timestamp.
-        Returns updated node dict, or None if not a question fragment.
-        """
+        """Mark a question fragment as resolved (OHM-a5rz.12)."""
         from ohm.queries import resolve_question
 
         return resolve_question(
@@ -488,6 +484,15 @@ class Graph:
             fragment_id=fragment_id,
             resolved_by=self.actor,
         )
+
+    def fragment_resonance(self, min_shared: int = 2, limit: int = 10) -> list[dict[str, Any]]:
+        """Detect cross-agent fragment resonance (OHM-a5rz.13).
+
+        Finds fragments from different agents sharing context nodes.
+        """
+        from ohm.queries import detect_fragment_resonance
+
+        return detect_fragment_resonance(self._conn, min_shared=min_shared, limit=limit)
 
     def create_edge(
         self,
@@ -3337,6 +3342,11 @@ def connect_http(
         def resolve_question(self, fragment_id: str, **kwargs) -> dict[str, Any]:
             """Mark a question fragment as resolved (OHM-a5rz.12). POST to /fragments/{id}/resolve."""
             return self._http_request("POST", f"/fragments/{fragment_id}/resolve", {})
+
+        def fragment_resonance(self, min_shared: int = 2, limit: int = 10, **kwargs) -> list[dict[str, Any]]:
+            """Detect cross-agent fragment resonance (OHM-a5rz.13). GET /admin/fragment-resonance."""
+            result = self._http_request("GET", f"/admin/fragment-resonance?min_shared={min_shared}&limit={limit}")
+            return result.get("resonance", []) if isinstance(result, dict) else []
 
         def stats(self) -> dict[str, Any]:
             """Get graph stats from the daemon."""

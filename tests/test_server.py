@@ -251,6 +251,26 @@ class TestQuestionAutoDetection:
         port, _ = test_server
         status, data = _request("POST", port, "/fragments/nonexistent/resolve", body={})
         assert status == 404
+
+
+@pytest.mark.xdist_group("server")
+class TestFragmentResonanceEndpoint:
+    """Tests for GET /admin/fragment-resonance (OHM-a5rz.13)."""
+
+    def test_fragment_resonance_empty(self, test_server):
+        port, _ = test_server
+        status, data = _request("GET", port, "/admin/fragment-resonance")
+        assert status == 200
+        assert data["resonance"] == []
+
+    def test_fragment_resonance_with_overlap(self, test_server):
+        port, store = test_server
+        store.write_node("anchor_1", "Shared Topic One", "concept", agent_name="test")
+        store.write_node("anchor_2", "Shared Topic Two", "concept", agent_name="test")
+        _request("POST", port, "/scratch", body={"content": "Shared Topic One and Shared Topic Two both matter", "connects_to": ["anchor_1", "anchor_2"]})
+        _request("POST", port, "/scratch", body={"content": "Shared Topic One and Shared Topic Two overlap", "connects_to": ["anchor_1", "anchor_2"]})
+        status, data = _request("GET", port, "/admin/fragment-resonance?min_shared=1")
+        assert status == 200
     def test_create_and_get_node(self, test_server):
         port, store = test_server
         status, data = _request(

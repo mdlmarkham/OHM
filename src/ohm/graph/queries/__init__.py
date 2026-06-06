@@ -3483,3 +3483,139 @@ def resolve_question(
     _log_change(conn, "ohm_nodes", fragment_id, "UPDATE", agent_name=resolved_by)
 
     return _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [fragment_id]))[0]
+
+
+def detect_fragment_resonance(
+    conn: DuckDBPyConnection,
+    *,
+    min_shared: int = 2,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """Detect cross-agent fragment resonance (OHM-a5rz.13).
+
+    Finds pairs of fragments from different agents that share 2+ context
+    nodes (via L0 CONTEXT_OF edges). Returns resonance pairs with Jaccard
+    similarity on their context node sets.
+
+    Args:
+        min_shared: Minimum shared context nodes for a resonance pair.
+        limit: Max resonance pairs to return.
+
+    Returns:
+        List of resonance dicts with fragment ids, agents, shared nodes, jaccard.
+    """
+    rows = _rows_to_dicts(
+        conn.execute(
+            """SELECT f1.id AS frag_a, f1.created_by AS agent_a,
+                      f2.id AS frag_b, f2.created_by AS agent_b,
+                      e1.to_node AS context_node
+               FROM ohm_edges e1
+               JOIN ohm_edges e2 ON e1.to_node = e2.to_node
+               JOIN ohm_nodes f1 ON e1.from_node = f1.id AND f1.type = 'fragment' AND f1.deleted_at IS NULL
+               JOIN ohm_nodes f2 ON e2.from_node = f2.id AND f2.type = 'fragment' AND f2.deleted_at IS NULL
+               WHERE e1.edge_type = 'CONTEXT_OF' AND e1.layer = 'L0' AND e1.deleted_at IS NULL
+                 AND e2.edge_type = 'CONTEXT_OF' AND e2.layer = 'L0' AND e2.deleted_at IS NULL
+                 AND f1.created_by != f2.created_by
+                 AND f1.id < f2.id
+            """,
+        )
+    )
+
+    from collections import defaultdict
+
+    pair_contexts: dict[tuple[str, str], set[str]] = defaultdict(set)
+    pair_agents: dict[tuple[str, str], tuple[str, str]] = {}
+
+    for row in rows:
+        key = (row["frag_a"], row["frag_b"])
+        pair_contexts[key].add(row["context_node"])
+        pair_agents[key] = (row["agent_a"], row["agent_b"])
+
+    results = []
+    for (frag_a, frag_b), shared in sorted(pair_contexts.items(), key=lambda x: -len(x[1])):
+        if len(shared) < min_shared:
+            continue
+        if len(results) >= limit:
+            break
+
+        agent_a, agent_b = pair_agents[(frag_a, frag_b)]
+
+        ctx_a_rows = conn.execute(
+            "SELECT to_node FROM ohm_edges WHERE from_node = ? AND edge_type = 'CONTEXT_OF' AND layer = 'L0' AND deleted_at IS NULL",
+            [frag_a],
+        ).fetchall()
+        ctx_a = {r[0] for r in ctx_a_rows}
+
+        ctx_b_rows = conn.execute(
+            "SELECT to_node FROM ohm_edges WHERE from_node = ? AND edge_type = 'CONTEXT_OF' AND layer = 'L0' AND deleted_at IS NULL",
+            [frag_b],
+        ).fetchall()
+        ctx_b = {r[0] for r in ctx_b_rows}
+
+        union = ctx_a | ctx_b
+        jaccard = len(shared) / len(union) if union else 0.0
+
+        results.append({
+            "fragment_a": frag_a,
+            "fragment_b": frag_b,
+            "agent_a": agent_a,
+            "agent_b": agent_b,
+            "shared_context_nodes": sorted(shared),
+            "shared_count": len(shared),
+            "jaccard": round(jaccard, 3),
+        })
+
+    return results
+
+
+def reflect_challenge_to_fragments(
+    conn: DuckDBPyConnection,
+    challenged_edge_id: str,
+    challenge_edge_id: str,
+    challenged_by: str,
+) -> list[dict[str, Any]]:
+    """Trace a challenge back to originating L0 fragments (OHM-a5rz.15).
+
+    When an L3/L4 edge is challenged, follow ``DERIVES_FROM`` / ``REFERENCES``
+    edges backward from the claim node to find L0 ``fragment`` nodes that may
+    have originated the claim. Creates lightweight L0 annotation edges
+    (``type='CHALLENGED_BY'``, ``layer='L0'``) from the challenge back to
+    each originating fragment so the thinking layer is aware of the challenge.
+
+    Returns a list of fragment IDs that were annotated.
+    """
+    target = conn.execute(
+        "SELECT from_node, layer FROM ohm_edges WHERE id = ? AND deleted_at IS NULL",
+        [challenged_edge_id],
+    ).fetchone()
+    if not target:
+        return []
+
+    claim_node, layer = target
+    if not layer or layer == "L0":
+        return []
+
+    fragments = conn.execute(
+        """SELECT DISTINCT n.id
+           FROM ohm_edges e
+           JOIN ohm_nodes n ON n.id = e.from_node AND n.type = 'fragment' AND n.deleted_at IS NULL
+           WHERE e.to_node = ?
+             AND e.edge_type IN ('DERIVES_FROM', 'REFERENCES')
+             AND e.deleted_at IS NULL
+           LIMIT 5""",
+        [claim_node],
+    ).fetchall()
+
+    results = []
+    for row in fragments:
+        frag_id = row[0]
+        ann_id = f"backflow_{challenge_edge_id[:36]}_{frag_id[:36]}"[:80]
+        conn.execute(
+            """INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, created_by, confidence, provenance)
+               VALUES (?, ?, ?, 'L0', 'CHALLENGED_BY', ?, 0.5, ?)
+               ON CONFLICT (id) DO NOTHING""",
+            [ann_id, claim_node, frag_id, challenged_by,
+             f"auto: challenge backflow from {challenge_edge_id}"],
+        )
+        results.append({"fragment_id": frag_id})
+    return results

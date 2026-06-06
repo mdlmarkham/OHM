@@ -783,3 +783,12 @@ class AdminHandlerMixin:
             self._json_response(404, {"error": "not_found", "message": str(e)})
         except ValueError as e:
             self._json_response(400, {"error": "validation_error", "message": str(e)})
+
+    def _get_fragment_resonance(self, path: str, qs: dict) -> None:
+        """GET /admin/fragment-resonance — detect cross-agent fragment overlap (OHM-a5rz.13)."""
+        from ohm.queries import detect_fragment_resonance
+
+        min_shared = int(qs.get("min_shared", [2])[0])
+        limit = int(qs.get("limit", [10])[0])
+        result = detect_fragment_resonance(self.current_store.conn, min_shared=min_shared, limit=limit)
+        self._json_response(200, {"resonance": result, "count": len(result)})

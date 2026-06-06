@@ -1786,3 +1786,54 @@ class TestQuestionAutoDetection:
         meta = json.loads(node["metadata"]) if node.get("metadata") else {}
         assert meta.get("is_question") is True
         assert meta.get("tags") == ["semi"]
+
+
+class TestFragmentResonance:
+    """Tests for cross-agent fragment resonance (OHM-a5rz.13)."""
+
+    def test_detect_resonance_shared_context(self, test_db):
+        from ohm.queries import create_node, scratch, detect_fragment_resonance
+
+        anchor = create_node(test_db, label="Hormuz AND-Gate", node_type="pattern", created_by="test")
+        create_node(test_db, label="Supply Chain Disruption", node_type="pattern", created_by="test")
+
+        f1 = scratch(test_db, content="Hormuz AND-Gate and Supply Chain Disruption both matter", created_by="metis")
+        f2 = scratch(test_db, content="Hormuz AND-Gate and Supply Chain Disruption overlap", created_by="clio")
+
+        result = detect_fragment_resonance(test_db, min_shared=2)
+        assert len(result) >= 1
+        pair = result[0]
+        assert pair["agent_a"] != pair["agent_b"]
+        assert pair["shared_count"] >= 2
+        assert "jaccard" in pair
+
+    def test_no_resonance_single_agent(self, test_db):
+        from ohm.queries import create_node, scratch, detect_fragment_resonance
+
+        create_node(test_db, label="Shared Context Node", node_type="concept", created_by="test")
+        scratch(test_db, content="Shared Context Node is important", created_by="metis")
+        scratch(test_db, content="Shared Context Node also matters", created_by="metis")
+
+        result = detect_fragment_resonance(test_db, min_shared=1)
+        for pair in result:
+            assert pair["agent_a"] != pair["agent_b"]
+
+    def test_resonance_empty_graph(self, test_db):
+        from ohm.queries import detect_fragment_resonance
+
+        result = detect_fragment_resonance(test_db)
+        assert result == []
+
+    def test_resonance_limit(self, test_db):
+        from ohm.queries import create_node, scratch, detect_fragment_resonance
+
+        for i in range(5):
+            create_node(test_db, label=f"Context{i:02d}Node", node_type="concept", created_by="test")
+
+        content = " ".join(f"Context{i:02d}Node" for i in range(5))
+        scratch(test_db, content=content, created_by="metis")
+        scratch(test_db, content=content, created_by="clio")
+        scratch(test_db, content=content, created_by="socrates")
+
+        result = detect_fragment_resonance(test_db, limit=1)
+        assert len(result) <= 1

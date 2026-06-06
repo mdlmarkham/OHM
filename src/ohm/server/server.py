@@ -2013,6 +2013,7 @@ OhmHandler._GET_EXACT = {
     "/webhooks/outbox": "_get_webhooks_outbox",
     "/resolve": "_get_resolve",
     "/admin/alias-duplicates": "_get_alias_duplicates",
+    "/admin/fragment-resonance": "_get_fragment_resonance",
     "/tenants": "_get_tenants",
 }
 
