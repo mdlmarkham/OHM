@@ -684,15 +684,6 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
         return None
 
     @property
-    def read_conn(self):
-        """Return the read-only DuckDB connection for concurrent reads.
-
-        Falls back to the write connection if no read connection is available.
-        Read queries should use this to avoid blocking behind the write lock.
-        """
-        return self._read_conn or self.conn
-
-    @property
     def current_store(self) -> OhmStore:
         """Return the OhmStore for the current request context.
 

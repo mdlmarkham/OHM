@@ -204,14 +204,14 @@ class OhmStore:
             self._recover_from_ducklake(str(self.db_path))
             self.conn = self._connect_with_wal_recovery(str(self.db_path), readonly)
 
-        # Read-only connection for concurrent reads (OHM-tr71.6: concurrency fix)
-        # DuckDB allows concurrent reads from separate connections.
-        # This prevents read queries from blocking behind the write lock.
+        # Read-only connection for concurrent reads (OHM concurrency fix)
+        # NOTE: DuckDB requires matching configuration for concurrent connections.
+        # If read-only connection fails, reads fall back to write connection.
         try:
             self._read_conn = duckdb.connect(str(self.db_path), read_only=True)
             logger.info(f"OHM read-only connection established for {self.db_path}")
         except Exception as e:
-            logger.warning(f"Read-only connection failed (reads will use write conn): {e}")
+            logger.warning(f"Read-only connection unavailable (reads will share write conn): {e}")
             self._read_conn = None
 
         try:
@@ -539,7 +539,12 @@ class OhmStore:
             self.quack_started = False
 
     def execute(self, sql: str, params: Optional[list] = None) -> list[dict[str, Any]]:
-        """Execute a SQL query and return results as list of dicts."""
+        """Execute a SQL query and return results as list of dicts.
+
+        Uses the write lock to serialize access to the shared DuckDB connection.
+        For read-only queries, prefer read_execute() which uses the separate
+        read connection when available.
+        """
         with self._lock:
             if params:
                 result = self.conn.execute(sql, params)
@@ -576,6 +581,15 @@ class OhmStore:
             row["to"] = row["to_node"]
             row["type"] = row["edge_type"]
         return row
+
+    @property
+    def read_conn(self):
+        """Return the read-only DuckDB connection for concurrent reads.
+
+        Falls back to the write connection if no read connection is available.
+        Read queries should use this to avoid blocking behind the write lock.
+        """
+        return self._read_conn or self.conn
 
     def read_execute(self, sql: str, params: Optional[list] = None) -> list[dict[str, Any]]:
         """Execute a read-only query using the read connection.
