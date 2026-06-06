@@ -1979,6 +1979,8 @@ OhmHandler._GET_EXACT = {
     "/orphans": "_get_orphans",
     "/islands": "_get_islands",
     "/welcome": "_get_welcome",
+    "/contributions": "_get_contributions",
+    "/changes": "_get_changes",
     "/hubs": "_get_hubs",
     "/dead_ends": "_get_dead_ends",
     "/centrality": "_get_centrality",

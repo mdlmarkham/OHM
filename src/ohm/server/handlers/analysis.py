@@ -688,3 +688,179 @@ class AnalysisHandlerMixin:
             "recent_activity": recent,
             "quick_reference": quick_ref,
         })
+    def _get_contributions(self, path: str, qs: dict) -> None:
+        """GET /contributions?agent=NAME — what did this agent create?
+
+        OHM-tr71.10: Shows all nodes, edges, and observations created by
+        a specific agent. Helps agents see their own footprint.
+        """
+        from ohm.exceptions import ValidationError
+
+        agent = qs.get("agent", [None])[0]
+        if not agent:
+            raise ValidationError("?agent=<agent_name> is required")
+
+        limit = int(qs.get("limit", [50])[0])
+        node_type = qs.get("type", [None])[0]
+        since = qs.get("since", [None])[0]
+
+        conn = self.current_store.conn
+
+        # Nodes
+        conditions = ["created_by = ?", "deleted_at IS NULL", "type != 'fragment'"]
+        params = [agent]
+        if node_type:
+            conditions.append("type = ?")
+            params.append(node_type)
+        if since:
+            conditions.append("created_at > ?::TIMESTAMP")
+            params.append(since)
+        params.append(limit)
+
+        nodes = conn.execute(
+            f"SELECT id, label, type, confidence, created_at FROM ohm_nodes "
+            f"WHERE {' AND '.join(conditions)} ORDER BY created_at DESC LIMIT ?",
+            params,
+        ).fetchall()
+
+        # Edges
+        edge_params = [agent]
+        edge_since = ""
+        if since:
+            edge_since = "AND created_at > ?::TIMESTAMP"
+            edge_params.append(since)
+        edge_params.append(limit)
+
+        edges = conn.execute(
+            f"SELECT id, from_node, to_node, edge_type, layer, confidence, created_at FROM ohm_edges "
+            f"WHERE created_by = ? AND deleted_at IS NULL {edge_since} "
+            f"ORDER BY created_at DESC LIMIT ?",
+            edge_params,
+        ).fetchall()
+
+        # Observations
+        obs_params = [agent]
+        obs_since = ""
+        if since:
+            obs_since = "AND created_at > ?::TIMESTAMP"
+            obs_params.append(since)
+        obs_params.append(limit)
+
+        observations = conn.execute(
+            f"SELECT id, node_id, obs_type, value, created_at FROM ohm_observations "
+            f"WHERE created_by = ? {obs_since} "
+            f"ORDER BY created_at DESC LIMIT ?",
+            obs_params,
+        ).fetchall()
+
+        # Stats
+        node_count = conn.execute(
+            "SELECT COUNT(*) FROM ohm_nodes WHERE created_by = ? AND deleted_at IS NULL AND type != 'fragment'",
+            [agent],
+        ).fetchone()[0]
+        edge_count = conn.execute(
+            "SELECT COUNT(*) FROM ohm_edges WHERE created_by = ? AND deleted_at IS NULL",
+            [agent],
+        ).fetchone()[0]
+        obs_count = conn.execute(
+            "SELECT COUNT(*) FROM ohm_observations WHERE created_by = ?",
+            [agent],
+        ).fetchone()[0]
+
+        self._json_response(200, {
+            "agent": agent,
+            "stats": {"nodes": node_count, "edges": edge_count, "observations": obs_count},
+            "nodes": [
+                {"id": r[0], "label": r[1], "type": r[2], "confidence": r[3], "created_at": str(r[4])}
+                for r in nodes
+            ],
+            "edges": [
+                {"id": r[0], "from": r[1], "to": r[2], "type": r[3], "layer": r[4], "confidence": r[5], "created_at": str(r[6])}
+                for r in edges
+            ],
+            "observations": [
+                {"id": r[0], "node_id": r[1], "obs_type": r[2], "value": r[3], "created_at": str(r[4])}
+                for r in observations
+            ],
+        })
+
+    def _get_changes(self, path: str, qs: dict) -> None:
+        """GET /changes?since=ISO8601 — what's new since a timestamp.
+
+        OHM-tr71.11: Returns all nodes, edges, and observations created
+        after the given timestamp. Helps agents catch up on what they missed.
+        """
+        from ohm.exceptions import ValidationError
+
+        since = qs.get("since", [None])[0]
+        if not since:
+            raise ValidationError("?since=ISO8601_TIMESTAMP is required (e.g., 2026-06-06T00:00:00)")
+
+        limit = int(qs.get("limit", [100])[0])
+        agent = qs.get("agent", [None])[0]
+        node_type = qs.get("type", [None])[0]
+
+        conn = self.current_store.conn
+
+        # Nodes
+        node_conditions = ["deleted_at IS NULL", "type != 'fragment'", "created_at > ?::TIMESTAMP"]
+        params = [since]
+        if agent:
+            node_conditions.append("created_by = ?")
+            params.append(agent)
+        if node_type:
+            node_conditions.append("type = ?")
+            params.append(node_type)
+        params.append(limit)
+
+        nodes = conn.execute(
+            f"SELECT id, label, type, created_by, confidence, created_at FROM ohm_nodes "
+            f"WHERE {' AND '.join(node_conditions)} ORDER BY created_at DESC LIMIT ?",
+            params,
+        ).fetchall()
+
+        # Edges
+        edge_params = [since]
+        edge_agent = ""
+        if agent:
+            edge_agent = "AND created_by = ?"
+            edge_params.append(agent)
+        edge_params.append(limit)
+
+        edges = conn.execute(
+            f"SELECT id, from_node, to_node, edge_type, layer, confidence, created_by, created_at FROM ohm_edges "
+            f"WHERE deleted_at IS NULL AND created_at > ?::TIMESTAMP {edge_agent} "
+            f"ORDER BY created_at DESC LIMIT ?",
+            edge_params,
+        ).fetchall()
+
+        # Count totals (not limited)
+        count_params = [since]
+        count_agent = ""
+        if agent:
+            count_agent = "AND created_by = ?"
+            count_params.append(agent)
+        node_total = conn.execute(
+            f"SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL AND type != 'fragment' "
+            f"AND created_at > ?::TIMESTAMP {count_agent}",
+            count_params,
+        ).fetchone()[0]
+        edge_total = conn.execute(
+            f"SELECT COUNT(*) FROM ohm_edges WHERE deleted_at IS NULL "
+            f"AND created_at > ?::TIMESTAMP {count_agent}",
+            count_params,
+        ).fetchone()[0]
+
+        self._json_response(200, {
+            "since": since,
+            "node_total": node_total,
+            "edge_total": edge_total,
+            "nodes": [
+                {"id": r[0], "label": r[1], "type": r[2], "created_by": r[3], "confidence": r[4], "created_at": str(r[5])}
+                for r in nodes
+            ],
+            "edges": [
+                {"id": r[0], "from": r[1], "to": r[2], "type": r[3], "layer": r[4], "confidence": r[5], "created_by": r[6], "created_at": str(r[7])}
+                for r in edges
+            ],
+        })

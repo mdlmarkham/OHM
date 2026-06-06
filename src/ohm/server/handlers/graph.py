@@ -590,15 +590,46 @@ class GraphHandlerMixin:
         sql = "SELECT * FROM ohm_nodes WHERE " + " AND ".join(conditions) + " ORDER BY created_at DESC LIMIT ?"
         results = self.current_store.execute(sql, params)
 
-        # Discovery tip: when text search returns 0 results, suggest semantic search
+        # OHM-tr71.8: Automatic semantic fallback on empty text search
+        # When text search returns 0 results, try semantic search automatically
         if not results and not node_type:
+            try:
+                from ohm.graph.queries import semantic_search
+                semantic_results = semantic_search(
+                    self.current_store.conn,
+                    query=query_text,
+                    limit=limit,
+                    include_l0=include_l0,
+                )
+                if semantic_results:
+                    self._json_response(200, {
+                        "results": [
+                            {
+                                "id": r.get("node_id", ""),
+                                "label": r.get("label", ""),
+                                "type": r.get("type", ""),
+                                "distance": round(r.get("distance", 1.0), 4),
+                                "match_method": "semantic",
+                            }
+                            for r in semantic_results
+                        ],
+                        "count": len(semantic_results),
+                        "fallback": "semantic",
+                        "tip": f"No exact text matches for '{query_text}'. Showing semantic matches instead. Use /semantic_search?q={query_text} for more options.",
+                    })
+                    return
+            except (ValueError, ImportError, Exception) as e:
+                logger.debug(f"Semantic fallback failed: {e}")
+
+            # No semantic results either
             self._json_response(200, {
                 "results": [],
                 "count": 0,
-                "tip": f"No results for '{query_text}' via text search. Try /semantic_search?q={query_text} for embedding-based matching.",
+                "tip": f"No results for '{query_text}' via text or semantic search. The query may be too specific or use different terminology.",
             })
-        else:
-            self._json_response(200, results)
+            return
+
+        self._json_response(200, results)
 
     def _get_semantic_search(self, path: str, qs: dict) -> None:
         """GET /semantic_search — vector similarity search.
@@ -836,6 +867,15 @@ class GraphHandlerMixin:
                 has_edges=bool(body.get("connects_to")),
             )
             result["suggestions"] = suggestions
+
+        # OHM-tr71.6: Connectivity nudge for agents with low edges-per-node
+        try:
+            from ohm.server.suggestions import generate_connectivity_nudge
+            nudge = generate_connectivity_nudge(self.current_store, agent)
+            if nudge:
+                result["connectivity_warning"] = nudge["connectivity_warning"]
+        except Exception as e:
+            logger.debug(f"Connectivity nudge failed: {e}")
 
         if result.get("created", True):
             self._json_response(201, result)

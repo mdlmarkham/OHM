@@ -314,3 +314,68 @@ def generate_edge_suggestions(
         logger.debug(f"Orphan resolved check failed: {e}")
 
     return suggestions
+
+def generate_connectivity_nudge(
+    store: Any,
+    agent: str,
+    threshold: float = 1.5,
+) -> dict[str, Any] | None:
+    """Generate a connectivity nudge for agents with low edges-per-node.
+
+    OHM-tr71.6: When an agent's average connectivity (edges per node)
+    falls below the threshold, include a connectivity_warning in their
+    write response.
+
+    Returns None if no nudge is needed (agent is well-connected or unknown).
+    """
+    if not agent:
+        return None
+
+    try:
+        # Agent's node count (excluding fragments)
+        agent_nodes = store.conn.execute(
+            "SELECT COUNT(*) FROM ohm_nodes "
+            "WHERE created_by = ? AND deleted_at IS NULL AND type != 'fragment'",
+            [agent],
+        ).fetchone()[0]
+
+        if agent_nodes == 0:
+            return None
+
+        # Agent's edge count (edges they created)
+        agent_edges = store.conn.execute(
+            "SELECT COUNT(*) FROM ohm_edges WHERE created_by = ? AND deleted_at IS NULL",
+            [agent],
+        ).fetchone()[0]
+
+        # Graph average connectivity
+        graph_nodes = store.conn.execute(
+            "SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL AND type != 'fragment'"
+        ).fetchone()[0]
+        graph_edges = store.conn.execute(
+            "SELECT COUNT(*) FROM ohm_edges WHERE deleted_at IS NULL"
+        ).fetchone()[0]
+
+        agent_connectivity = agent_edges / max(agent_nodes, 1)
+        graph_connectivity = graph_edges / max(graph_nodes, 1)
+
+        if agent_connectivity >= threshold:
+            return None
+
+        return {
+            "connectivity_warning": {
+                "agent_connectivity": round(agent_connectivity, 2),
+                "graph_average": round(graph_connectivity, 2),
+                "threshold": threshold,
+                "message": (
+                    f"Your average connectivity is {agent_connectivity:.1f} edges/node "
+                    f"(graph average: {graph_connectivity:.1f}). "
+                    f"Consider connecting more of your nodes to the graph via /edge "
+                    f"or the 'connects_to' field when creating nodes."
+                ),
+                "suggestion": "Use /orphans?created_by=YOUR_AGENT to find your disconnected nodes.",
+            }
+        }
+    except Exception as e:
+        logger.debug(f"Connectivity nudge failed: {e}")
+        return None
