@@ -747,7 +747,7 @@ class AnalysisHandlerMixin:
         obs_params.append(limit)
 
         observations = conn.execute(
-            f"SELECT id, node_id, obs_type, value, created_at FROM ohm_observations "
+            f"SELECT id, node_id, type, value, created_at FROM ohm_observations "
             f"WHERE created_by = ? {obs_since} "
             f"ORDER BY created_at DESC LIMIT ?",
             obs_params,
@@ -779,7 +779,7 @@ class AnalysisHandlerMixin:
                 for r in edges
             ],
             "observations": [
-                {"id": r[0], "node_id": r[1], "obs_type": r[2], "value": r[3], "created_at": str(r[4])}
+                {"id": r[0], "node_id": r[1], "type": r[2], "value": r[3], "created_at": str(r[4])}
                 for r in observations
             ],
         })
