@@ -274,7 +274,7 @@ class HephaestusIntegration:
             The created observation record.
         """
         return self.graph.observe(
-            node_id=entity_id,
+            entity_id,
             obs_type=finding_type,
             value=value,
             sigma=sigma,

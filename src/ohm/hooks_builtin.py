@@ -18,6 +18,7 @@ payload keys (pre_ingest):
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 
@@ -119,11 +120,12 @@ def rate_limit(payload: dict[str, Any]) -> tuple[int, str, str]:
     max_writes = int(payload.get("max_writes", 10))
     window_s = int(payload.get("window_s", 60))
 
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=window_s)
     row = conn.execute(
         """SELECT COUNT(*) FROM ohm_nodes
            WHERE created_by = ?
-           AND created_at >= CURRENT_TIMESTAMP - INTERVAL '?' SECOND""",
-        [agent, window_s],
+           AND created_at >= ?""",
+        [agent, cutoff],
     ).fetchone()
     count = row[0] if row else 0
 

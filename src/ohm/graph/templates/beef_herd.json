@@ -13,15 +13,19 @@
     "equipment",
     "event",
     "feed",
+    "fragment",
     "goal",
     "health_event",
     "herd",
     "idea",
+    "infrastructure",
     "institution",
     "market",
     "pasture",
     "pattern",
     "person",
+    "release",
+    "service",
     "site",
     "skill",
     "source",
@@ -32,8 +36,7 @@
     "treatment",
     "value",
     "water",
-    "weather",
-    "fragment"
+    "weather"
   ],
   "layer_edge_types": {
     "L0": [
@@ -121,6 +124,7 @@
     "anomaly",
     "challenge",
     "conception",
+    "health_check",
     "intake",
     "measurement",
     "mortality",

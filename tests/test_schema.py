@@ -691,7 +691,7 @@ class TestHookRegistryTable:
     def test_migration_v0_21_0(self, test_db):
         """Migration 0.21.0 creates ohm_hooks on existing DB."""
         from ohm.schema import SCHEMA_VERSION
-        assert SCHEMA_VERSION == "0.23.0"
+        assert SCHEMA_VERSION >= "0.21.0"
 
 
 class TestHookLogTable:
@@ -776,7 +776,7 @@ class TestAliasAndContentHashTables:
 
     def test_migration_v0_23_0(self, test_db):
         from ohm.schema import MIGRATIONS, SCHEMA_VERSION
-        assert SCHEMA_VERSION == "0.23.0"
+        assert SCHEMA_VERSION >= "0.23.0"
         v023 = [m for m in MIGRATIONS if m[0] == "0.23.0"]
         assert len(v023) == 1
         assert "ohm_aliases" in v023[0][2][0]

@@ -8,11 +8,15 @@
     "decision",
     "equipment",
     "event",
+    "fragment",
     "goal",
     "idea",
+    "infrastructure",
     "institution",
     "pattern",
     "person",
+    "release",
+    "service",
     "site",
     "skill",
     "source",
@@ -20,8 +24,7 @@
     "task",
     "technology",
     "topic",
-    "value",
-    "fragment"
+    "value"
   ],
   "layer_edge_types": {
     "L0": [

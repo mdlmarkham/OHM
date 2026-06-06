@@ -12,10 +12,12 @@
     "decision",
     "equipment",
     "event",
+    "fragment",
     "generator",
     "goal",
     "heat_exchanger",
     "idea",
+    "infrastructure",
     "institution",
     "instrument",
     "line",
@@ -26,7 +28,9 @@
     "process",
     "pump",
     "reactor",
+    "release",
     "sensor",
+    "service",
     "site",
     "skill",
     "source",
@@ -38,8 +42,7 @@
     "transformer",
     "value",
     "valve",
-    "vessel",
-    "fragment"
+    "vessel"
   ],
   "layer_edge_types": {
     "L0": [
@@ -128,6 +131,7 @@
     "challenge",
     "current",
     "flow_rate",
+    "health_check",
     "level",
     "measurement",
     "pattern",
@@ -160,6 +164,7 @@
     "clio-research",
     "conversation",
     "feed-ingest",
+    "healthcheck",
     "inspection",
     "metis-research",
     "metis-review-request",

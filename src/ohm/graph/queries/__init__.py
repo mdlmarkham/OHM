@@ -1551,10 +1551,17 @@ def query_stale_edges(
     """
     defaults = {"L1": float("inf"), "L2": float("inf"), "L3": 90.0, "L4": 30.0}
     if half_life_days:
+        _valid_layers = frozenset({"L1", "L2", "L3", "L4"})
+        for k, v in half_life_days.items():
+            if k not in _valid_layers:
+                raise ValueError(f"Invalid layer in half_life_days: {k!r}")
+            if not isinstance(v, (int, float)) or v != v:  # NaN check
+                raise ValueError(f"Invalid half_life_days value for {k}: {v!r}")
         defaults.update(half_life_days)
 
+    # Values are validated numeric literals from the hardcoded defaults dict — safe to interpolate.
     when_clauses = " ".join(
-        f"WHEN '{k}' THEN {999999.0 if v == float('inf') or v <= 0 else v}"
+        f"WHEN '{k}' THEN {999999.0 if v == float('inf') or v <= 0 else float(v)}"
         for k, v in defaults.items()
     )
     hl_case = f"CASE layer {when_clauses} ELSE 90.0 END"

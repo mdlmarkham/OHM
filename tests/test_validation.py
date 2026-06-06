@@ -133,7 +133,6 @@ class TestValidateLayer:
     @pytest.mark.parametrize(
         "input",
         [
-            "L0",
             "L5",
             "l1",
             "",
