@@ -143,12 +143,15 @@ class AdminHandlerMixin:
                     u, f = 0, 0
                     for row in rows:
                         try:
-                            if _update(store.conn, row["id"]):
-                                u += 1
-                            else:
-                                f += 1
+                            with store._lock:
+                                if _update(store.conn, row["id"]):
+                                    u += 1
+                                else:
+                                    f += 1
                         except Exception:
                             f += 1
+                        progress["updated"] = u
+                        progress["failed"] = f
                         if delay_ms > 0:
                             time.sleep(delay_ms / 1000.0)
                     progress["status"] = "done"
