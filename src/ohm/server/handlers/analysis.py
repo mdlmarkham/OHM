@@ -706,6 +706,7 @@ class AnalysisHandlerMixin:
             hours: Hours of context to recover (default: 24, max: 168/1 week)
         """
         from ohm.graph.methods import find_islands
+        from datetime import datetime, timezone
 
         agent = qs.get("agent", [None])[0]
         if not agent:
@@ -753,17 +754,23 @@ class AnalysisHandlerMixin:
         ]
 
         # 2. What did I miss?
-        since = last_activity or (
-            conn.execute("SELECT MIN(created_at) FROM ohm_nodes WHERE deleted_at IS NULL").fetchone()[0]
-        )
+        since = last_activity
+        if since and since.tzinfo is None:
+            since = since.replace(tzinfo=timezone.utc)
+        if not since:
+            since = conn.execute("SELECT MIN(created_at) FROM ohm_nodes WHERE deleted_at IS NULL").fetchone()[0]
 
         # New nodes by OTHER agents since agent's last activity
+        since_param = since
+        if since_param and hasattr(since_param, 'tzinfo') and since_param.tzinfo is None:
+            since_param = since_param.replace(tzinfo=timezone.utc) if since_param else since_param
+
         new_by_others = conn.execute(
             "SELECT id, label, type, created_by, created_at FROM ohm_nodes "
             "WHERE deleted_at IS NULL AND type != 'fragment' AND created_by != ? "
             "AND created_at > ?::TIMESTAMP "
             "ORDER BY created_at DESC LIMIT 15",
-            [agent, since],
+            [agent, since_param],
         ).fetchall()
 
         # Cross-agent edges: edges connecting TO agent's nodes
@@ -849,6 +856,8 @@ class AnalysisHandlerMixin:
         time_since = None
         if last_activity:
             from datetime import datetime, timezone
+            if last_activity.tzinfo is None:
+                last_activity = last_activity.replace(tzinfo=timezone.utc)
             delta = datetime.now(timezone.utc) - last_activity
             hours_ago = delta.total_seconds() / 3600
             if hours_ago < 1:
