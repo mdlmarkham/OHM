@@ -599,6 +599,12 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
 
     daemon_threads = True
     request_queue_size = 128  # OHM-yv35: avoid connection resets under burst load (default was 5)
+    timeout = 60  # seconds before dropping a stuck request thread
+
+    def handle_error(self, request, client_address):
+        """Log request errors without crashing."""
+        import logging
+        logging.getLogger("ohm.server").warning(f"Request error from {client_address}: {request}")
 
 
 from ohm.server.handlers.admin import AdminHandlerMixin
@@ -676,6 +682,15 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
                     except ValueError:
                         return None  # Invalid customer_id — ignore header
         return None
+
+    @property
+    def read_conn(self):
+        """Return the read-only DuckDB connection for concurrent reads.
+
+        Falls back to the write connection if no read connection is available.
+        Read queries should use this to avoid blocking behind the write lock.
+        """
+        return self._read_conn or self.conn
 
     @property
     def current_store(self) -> OhmStore:

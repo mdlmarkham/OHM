@@ -10,14 +10,14 @@ class AnalysisHandlerMixin:
         """GET /health/graph — graph health check."""
         from ohm.queries import query_graph_health
 
-        result = query_graph_health(self.current_store.conn)
+        result = query_graph_health(self.current_store.read_conn)
         self._json_response(200, result)
 
     def _get_health_agents(self, path: str, qs: dict) -> None:
         """GET /health/agents — agent health check."""
         from ohm.methods import query_agent_health
 
-        result = query_agent_health(self.current_store.conn)
+        result = query_agent_health(self.current_store.read_conn)
         self._json_response(200, result)
 
     def _get_health_sync(self, path: str, qs: dict) -> None:
@@ -32,7 +32,7 @@ class AnalysisHandlerMixin:
         from ohm.methods import detect_contradictions
 
         conf_thresh = float(qs.get("confidence", [0.5])[0])
-        result = detect_contradictions(self.current_store.conn, confidence_threshold=conf_thresh)
+        result = detect_contradictions(self.current_store.read_conn, confidence_threshold=conf_thresh)
         self._json_response(200, result)
 
     def _get_anomalies(self, path: str, qs: dict) -> None:
@@ -42,7 +42,7 @@ class AnalysisHandlerMixin:
         sigma = float(qs.get("sigma", [2.0])[0])
         layer = qs.get("layer", [None])[0]
         limit = int(qs.get("limit", [50])[0])
-        result = detect_anomalies(self.current_store.conn, sigma_threshold=sigma, layer=layer, limit=limit)
+        result = detect_anomalies(self.current_store.read_conn, sigma_threshold=sigma, layer=layer, limit=limit)
         self._json_response(200, result)
 
     def _get_aggregate(self, path: str, qs: dict) -> None:
@@ -54,7 +54,7 @@ class AnalysisHandlerMixin:
         method = qs.get("method", ["weighted"])[0]
         from ohm.methods import aggregate_observations
 
-        result = aggregate_observations(self.current_store.conn, node_id, method=method)
+        result = aggregate_observations(self.current_store.read_conn, node_id, method=method)
         self._json_response(200, result)
 
     def _get_provenance(self, path: str, qs: dict) -> None:
@@ -66,7 +66,7 @@ class AnalysisHandlerMixin:
         max_depth = int(qs.get("depth", [10])[0])
         from ohm.queries import query_provenance
 
-        result = query_provenance(self.current_store.conn, node_id, max_depth=max_depth)
+        result = query_provenance(self.current_store.read_conn, node_id, max_depth=max_depth)
         self._json_response(200, result)
 
     def _get_stale(self, path: str, qs: dict) -> None:
@@ -74,7 +74,7 @@ class AnalysisHandlerMixin:
         from ohm.queries import query_stale_edges
 
         threshold = float(qs.get("threshold", [0.1])[0])
-        result = query_stale_edges(self.current_store.conn, stale_threshold=threshold)
+        result = query_stale_edges(self.current_store.read_conn, stale_threshold=threshold)
         self._json_response(200, result)
 
     def _get_decay(self, path: str, qs: dict) -> None:
@@ -86,7 +86,7 @@ class AnalysisHandlerMixin:
         layer = qs.get("layer", [None])[0]
         dry_run = qs.get("dry_run", ["false"])[0].lower() == "true"
         result = apply_confidence_decay(
-            self.current_store.conn,
+            self.current_store.read_conn,
             stale_threshold=threshold,
             layer=layer,
             dry_run=dry_run,
@@ -107,7 +107,7 @@ class AnalysisHandlerMixin:
         seed_val = qs.get("seed", [None])[0]
         seed = int(seed_val) if seed_val is not None else None
         result = monte_carlo_impact(
-            self.current_store.conn,
+            self.current_store.read_conn,
             node_id,
             simulations=sims,
             depth=depth,
@@ -121,7 +121,7 @@ class AnalysisHandlerMixin:
         from ohm.methods import detect_near_duplicates
 
         threshold = float(qs.get("similarity", [0.8])[0])
-        result = detect_near_duplicates(self.current_store.conn, similarity_threshold=threshold)
+        result = detect_near_duplicates(self.current_store.read_conn, similarity_threshold=threshold)
         self._json_response(200, result)
 
     def _get_calibration(self, path: str, qs: dict) -> None:
@@ -132,7 +132,7 @@ class AnalysisHandlerMixin:
         agent_name = validate_identifier(agent_name, name="agent_name")
         from ohm.methods import compute_confidence_calibration
 
-        result = compute_confidence_calibration(self.current_store.conn, agent_name)
+        result = compute_confidence_calibration(self.current_store.read_conn, agent_name)
         self._json_response(200, result)
 
     def _get_orphans(self, path: str, qs: dict) -> None:
@@ -142,7 +142,7 @@ class AnalysisHandlerMixin:
         node_type = qs.get("type", [None])[0]
         exclude_system = qs.get("exclude_system", ["true"])[0].lower() == "true"
         limit = int(qs.get("limit", [50])[0])
-        result = find_orphans(self.current_store.conn, node_type=node_type, exclude_system=exclude_system, limit=limit)
+        result = find_orphans(self.current_store.read_conn, node_type=node_type, exclude_system=exclude_system, limit=limit)
         self._json_response(200, result)
 
     def _get_islands(self, path: str, qs: dict) -> None:
@@ -165,7 +165,7 @@ class AnalysisHandlerMixin:
         max_islands = int(qs.get("max_islands", [20])[0])
         layer = qs.get("layer", [None])[0]
         result = find_islands(
-            self.current_store.conn,
+            self.current_store.read_conn,
             exclude_fragments=exclude_fragments,
             min_size=min_size,
             max_islands=max_islands,
@@ -180,7 +180,7 @@ class AnalysisHandlerMixin:
         node_type = qs.get("type", [None])[0]
         min_connections = int(qs.get("min_connections", [3])[0])
         limit = int(qs.get("limit", [20])[0])
-        result = find_hubs(self.current_store.conn, node_type=node_type, min_connections=min_connections, limit=limit)
+        result = find_hubs(self.current_store.read_conn, node_type=node_type, min_connections=min_connections, limit=limit)
         self._json_response(200, result)
 
     def _get_dead_ends(self, path: str, qs: dict) -> None:
@@ -189,7 +189,7 @@ class AnalysisHandlerMixin:
 
         node_type = qs.get("type", [None])[0]
         limit = int(qs.get("limit", [50])[0])
-        result = find_dead_ends(self.current_store.conn, node_type=node_type, limit=limit)
+        result = find_dead_ends(self.current_store.read_conn, node_type=node_type, limit=limit)
         self._json_response(200, result)
 
     def _get_centrality(self, path: str, qs: dict) -> None:
@@ -202,7 +202,7 @@ class AnalysisHandlerMixin:
         weight_by_confidence = qs.get("weight_by_confidence", ["true"])[0].lower() == "true"
         limit = int(qs.get("limit", [20])[0])
         result = compute_centrality(
-            self.current_store.conn,
+            self.current_store.read_conn,
             edge_types=edge_types,
             layer=layer,
             weight_by_confidence=weight_by_confidence,
@@ -217,7 +217,7 @@ class AnalysisHandlerMixin:
         edge_types_raw = qs.get("edge_types", [None])[0]
         edge_types = edge_types_raw.split(",") if edge_types_raw else None
         layer = qs.get("layer", [None])[0]
-        result = compute_communities(self.current_store.conn, edge_types=edge_types, layer=layer)
+        result = compute_communities(self.current_store.read_conn, edge_types=edge_types, layer=layer)
         self._json_response(200, result)
 
     def _get_bridges(self, path: str, qs: dict) -> None:
@@ -227,7 +227,7 @@ class AnalysisHandlerMixin:
         edge_types_raw = qs.get("edge_types", [None])[0]
         edge_types = edge_types_raw.split(",") if edge_types_raw else None
         layer = qs.get("layer", [None])[0]
-        result = find_bridges(self.current_store.conn, edge_types=edge_types, layer=layer)
+        result = find_bridges(self.current_store.read_conn, edge_types=edge_types, layer=layer)
         self._json_response(200, result)
 
     def _get_granger(self, path: str, qs: dict) -> None:
@@ -257,7 +257,7 @@ class AnalysisHandlerMixin:
         from ohm.methods import granger_causality
 
         try:
-            result = granger_causality(self.current_store.conn, from_node, to_node, max_lag=max_lag, min_observations=min_obs)
+            result = granger_causality(self.current_store.read_conn, from_node, to_node, max_lag=max_lag, min_observations=min_obs)
         except OHMError as e:
             self._json_response(e.exit_code, {"error": "ohm_error", "message": str(e), "correlation_id": getattr(e, "correlation_id", None)})
             return
@@ -281,7 +281,7 @@ class AnalysisHandlerMixin:
         from ohm.methods import compute_edge_stability
 
         try:
-            result = compute_edge_stability(self.current_store.conn, edge_types=edge_types, layer=layer, window_days=window_days, min_windows=min_windows)
+            result = compute_edge_stability(self.current_store.read_conn, edge_types=edge_types, layer=layer, window_days=window_days, min_windows=min_windows)
         except Exception as e:
             self._json_response(500, {"error": "internal_error", "message": f"Edge stability computation failed: {e}"})
             return
@@ -307,7 +307,7 @@ class AnalysisHandlerMixin:
             min_obs = 3
 
         try:
-            result = compute_trajectory(self.current_store.conn, node_id, since=since, min_observations=min_obs)
+            result = compute_trajectory(self.current_store.read_conn, node_id, since=since, min_observations=min_obs)
         except Exception as e:
             self._json_response(500, {"error": "internal_error", "message": f"Trajectory computation failed: {e}"})
             return
@@ -318,7 +318,7 @@ class AnalysisHandlerMixin:
         from ohm.methods import graph_doctor
 
         try:
-            result = graph_doctor(self.current_store.conn)
+            result = graph_doctor(self.current_store.read_conn)
         except Exception as e:
             self._json_response(500, {"error": "internal_error", "message": f"Doctor check failed: {e}"})
             return
@@ -337,7 +337,7 @@ class AnalysisHandlerMixin:
         from ohm.methods import compute_gap_analysis
 
         try:
-            result = compute_gap_analysis(self.current_store.conn, node_id)
+            result = compute_gap_analysis(self.current_store.read_conn, node_id)
         except Exception as e:
             self._json_response(500, {"error": "internal_error", "message": f"Gap analysis failed: {e}"})
             return
@@ -355,7 +355,7 @@ class AnalysisHandlerMixin:
             self._json_response(400, {"error": "invalid_parameter", "message": f"min_shared and limit must be integers: {e}"})
             return
         try:
-            result = suggest_connections(self.current_store.conn, method=method, min_shared=min_shared, limit=limit)
+            result = suggest_connections(self.current_store.read_conn, method=method, min_shared=min_shared, limit=limit)
         except Exception as e:
             self._json_response(500, {"error": "internal_error", "message": f"Suggest computation failed: {e}"})
             return
@@ -365,7 +365,7 @@ class AnalysisHandlerMixin:
         """GET /graph/stats — extended graph statistics."""
         from ohm.methods import graph_stats
 
-        result = graph_stats(self.current_store.conn)
+        result = graph_stats(self.current_store.read_conn)
         self._json_response(200, result)
 
     def _get_lint(self, path: str, qs: dict) -> None:
@@ -376,7 +376,7 @@ class AnalysisHandlerMixin:
         node_types = node_type_filter.split(",") if node_type_filter else None
         limit = int(qs.get("limit", ["1000"])[0])
         contract = ContractConfig()
-        result = lint_graph(self.current_store.conn, contract, limit=limit, node_types=node_types)
+        result = lint_graph(self.current_store.read_conn, contract, limit=limit, node_types=node_types)
         self._json_response(200, result)
 
     def _get_contract(self, path: str, qs: dict) -> None:
@@ -440,7 +440,7 @@ class AnalysisHandlerMixin:
         source_agent = validate_identifier(source_agent, name="source_agent")
         from ohm.queries import query_source_reliability
 
-        result = query_source_reliability(self.current_store.conn, source_agent)
+        result = query_source_reliability(self.current_store.read_conn, source_agent)
         self._json_response(200, result)
 
     def _get_source_reliability(self, path: str, qs: dict) -> None:
@@ -455,7 +455,7 @@ class AnalysisHandlerMixin:
         source_agent = validate_identifier(source_agent, name="source_agent")
         from ohm.queries import query_source_reliability
 
-        result = query_source_reliability(self.current_store.conn, source_agent)
+        result = query_source_reliability(self.current_store.read_conn, source_agent)
         self._json_response(200, result)
 
     def _get_compound_confidence(self, path: str, qs: dict) -> None:
@@ -528,7 +528,7 @@ class AnalysisHandlerMixin:
         import json as _json
         from ohm.graph.methods import find_islands
 
-        conn = self.current_store.conn
+        conn = self.current_store.read_conn
 
         # ── 1. Graph overview ────────────────────────────────────────
         node_count = conn.execute(
@@ -704,7 +704,7 @@ class AnalysisHandlerMixin:
         node_type = qs.get("type", [None])[0]
         since = qs.get("since", [None])[0]
 
-        conn = self.current_store.conn
+        conn = self.current_store.read_conn
 
         # Nodes
         conditions = ["created_by = ?", "deleted_at IS NULL", "type != 'fragment'"]
@@ -800,7 +800,7 @@ class AnalysisHandlerMixin:
         agent = qs.get("agent", [None])[0]
         node_type = qs.get("type", [None])[0]
 
-        conn = self.current_store.conn
+        conn = self.current_store.read_conn
 
         # Nodes
         node_conditions = ["deleted_at IS NULL", "type != 'fragment'", "created_at > ?::TIMESTAMP"]
