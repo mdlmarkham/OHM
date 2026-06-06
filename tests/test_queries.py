@@ -1616,3 +1616,58 @@ class TestDiscoveryQueue:
         )
         assert "error" in result
         assert result["error"] == "invalid_action"
+
+
+class TestScratch:
+    """Tests for L0 scratch function (OHM-a5rz.4)."""
+
+    def test_scratch_creates_fragment(self, test_db):
+        from ohm.queries import scratch
+
+        node = scratch(test_db, content="Hunch about supply chain", created_by="metis")
+        assert node["type"] == "fragment"
+        assert node["scratch"] is True
+        assert node["confidence"] == 0.0
+        assert node["label"] == "Hunch about supply chain"
+        assert node["provenance"] == "scratch"
+
+    def test_scratch_empty_content_raises(self, test_db):
+        from ohm.queries import scratch
+
+        with pytest.raises(ValueError, match="non-empty"):
+            scratch(test_db, content="", created_by="metis")
+
+    def test_scratch_url_extraction(self, test_db):
+        from ohm.queries import scratch
+
+        node = scratch(
+            test_db,
+            content="Check https://example.com/paper for details",
+            created_by="metis",
+        )
+        assert node["url"] == "https://example.com/paper"
+
+    def test_scratch_label_truncated_to_80(self, test_db):
+        from ohm.queries import scratch
+
+        long_content = "x" * 200
+        node = scratch(test_db, content=long_content, created_by="metis")
+        assert len(node["label"]) <= 80
+
+    def test_scratch_with_connects_to(self, test_db):
+        from ohm.queries import create_node, scratch
+
+        anchor = create_node(test_db, label="Anchor", node_type="concept", created_by="test")
+        node = scratch(
+            test_db,
+            content="Relates to anchor",
+            created_by="metis",
+            connects_to=[anchor["id"]],
+        )
+        assert node["type"] == "fragment"
+
+    def test_scratch_no_url_when_none_in_content(self, test_db):
+        from ohm.queries import scratch
+
+        node = scratch(test_db, content="No URL here", created_by="metis")
+        assert node.get("url") is None

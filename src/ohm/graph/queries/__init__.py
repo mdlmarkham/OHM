@@ -112,10 +112,15 @@ def query_neighborhood(
 
     params: list = [node_id, depth]
     layer_clause = ""
-    if layer:
+    if layer is not None:
         layer_clause = "AND e.layer = ?"
         params.append(layer)
         params.append(layer)  # layer_clause appears twice in the query
+    else:
+        # OHM-a5rz.6: exclude L0 from default neighborhood traversal.
+        # L0 fragments are explicitly unreliable and should not appear in
+        # default graph queries. Pass layer='L0' to include them.
+        layer_clause = "AND e.layer != 'L0'"
 
     query = f"""
         WITH RECURSIVE visited AS (
@@ -722,8 +727,8 @@ def query_stats(conn: DuckDBPyConnection) -> dict[str, Any]:
     """)
     stats["nodes_by_type"] = {row[0]: row[1] for row in result.fetchall()}
 
-    # Total counts
-    total_nodes_row = conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL").fetchone()
+    # Total counts (OHM-a5rz.6: exclude L0 fragment nodes from totals)
+    total_nodes_row = conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL AND type != 'fragment'").fetchone()
     stats["total_nodes"] = total_nodes_row[0] if total_nodes_row else 0
     total_edges_row = conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE deleted_at IS NULL").fetchone()
     stats["total_edges"] = total_edges_row[0] if total_edges_row else 0
@@ -1410,8 +1415,8 @@ def query_graph_health(
     """).fetchone()
     stale_count = stale[0] if stale else 0
 
-    # Total counts
-    total_nodes_row = conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL").fetchone()
+    # Total counts (OHM-a5rz.6: exclude L0 fragment nodes from totals)
+    total_nodes_row = conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL AND type != 'fragment'").fetchone()
     total_nodes = total_nodes_row[0] if total_nodes_row else 0
     total_edges_row = conn.execute("SELECT COUNT(*) FROM ohm_edges").fetchone()
     total_edges = total_edges_row[0] if total_edges_row else 0
@@ -3328,3 +3333,52 @@ def resolve_node_by_alias(
         return None
 
     return {"id": node[0], "label": node[1], "type": node[2], "confidence": node[3], "visibility": node[4]}
+
+
+def scratch(
+    conn: DuckDBPyConnection,
+    *,
+    content: str,
+    created_by: str,
+    tags: list[str] | None = None,
+    connects_to: list[str] | None = None,
+) -> dict[str, Any]:
+    """Write an L0 thinking fragment (OHM-a5rz.4).
+
+    Minimal write: content + agent_name. Auto-generates id, label, type='fragment'.
+    Extracts URLs from content. Fragments are exempt from cross-link requirements.
+    """
+    import re
+    from ohm.schema import generate_node_id
+
+    if not content or not content.strip():
+        raise ValueError("content must be non-empty")
+
+    label = content.strip()[:80]
+    url = None
+    url_match = re.search(r'https?://\S+', content)
+    if url_match:
+        url = url_match.group(0).rstrip('.,;:)')
+
+    node_id = generate_node_id(label)
+
+    metadata = None
+    if tags:
+        metadata = {"tags": tags}
+
+    node = create_node(
+        conn,
+        label=label,
+        node_type="fragment",
+        content=content,
+        created_by=created_by,
+        visibility="team",
+        provenance="scratch",
+        confidence=0.0,
+        url=url,
+        connects_to=connects_to,
+    )
+    if metadata and "metadata" not in node:
+        node["metadata"] = metadata
+    node["scratch"] = True
+    return node

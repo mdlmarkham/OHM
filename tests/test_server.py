@@ -1867,3 +1867,71 @@ class TestResolveEndpoint:
         port, _ = test_server
         status, data = _request("GET", port, "/resolve")
         assert status == 400
+
+
+@pytest.mark.xdist_group("server")
+class TestScratchEndpoint:
+    """Tests for POST /scratch — L0 thinking fragments (OHM-a5rz.4)."""
+
+    def test_scratch_creates_fragment(self, test_server):
+        port, store = test_server
+        status, data = _request(
+            "POST",
+            port,
+            "/scratch",
+            body={"content": "Broadcom didn't miss — they refused to raise. That's different."},
+        )
+        assert status == 201
+        assert data["type"] == "fragment"
+        assert data["scratch"] is True
+        assert data["confidence"] == 0.0
+        assert "Broadcom" in data["label"]
+        assert data["provenance"] == "scratch"
+
+    def test_scratch_empty_content_400(self, test_server):
+        port, _ = test_server
+        status, data = _request("POST", port, "/scratch", body={"content": ""})
+        assert status == 400
+        assert "error" in data
+
+    def test_scratch_missing_content_400(self, test_server):
+        port, _ = test_server
+        status, data = _request("POST", port, "/scratch", body={})
+        assert status == 400
+
+    def test_scratch_url_extraction(self, test_server):
+        port, store = test_server
+        status, data = _request(
+            "POST",
+            port,
+            "/scratch",
+            body={"content": "See https://example.com/paper for details"},
+        )
+        assert status == 201
+        assert data["url"] == "https://example.com/paper"
+
+    def test_scratch_with_connects_to(self, test_server):
+        port, store = test_server
+        store.write_node("anchor_1", "Anchor Node", "concept", agent_name="test")
+        status, data = _request(
+            "POST",
+            port,
+            "/scratch",
+            body={"content": "This relates to anchor", "connects_to": ["anchor_1"]},
+        )
+        assert status == 201
+        assert data["type"] == "fragment"
+
+    def test_scratch_fragment_node_retrievable(self, test_server):
+        port, store = test_server
+        status, data = _request(
+            "POST",
+            port,
+            "/scratch",
+            body={"content": "Hunch about supply chain"},
+        )
+        assert status == 201
+        node_id = data["id"]
+        status, retrieved = _request("GET", port, f"/node/{node_id}")
+        assert status == 200
+        assert retrieved["type"] == "fragment"

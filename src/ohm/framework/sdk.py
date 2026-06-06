@@ -71,6 +71,13 @@ class Graph:
         # Structured layer data derived from LAYER_EDGE_TYPES and CLI defaults
         layer_data = [
             {
+                "name": "L0",
+                "sharing": "Agent-owned, unreliable",
+                "ownership": "Creating agent",
+                "edge_types": sorted(LAYER_EDGE_TYPES["L0"]),
+                "example": '"I have a hunch about this pattern"',
+            },
+            {
                 "name": "L1",
                 "sharing": "Fully shared",
                 "ownership": "Communal",
@@ -402,6 +409,37 @@ class Graph:
             utility_currency=utility_currency,
             current_best_action=current_best_action,
             action_alternatives=action_alternatives,
+            connects_to=connects_to,
+        )
+
+    def scratch(
+        self,
+        content: str,
+        *,
+        tags: list[str] | None = None,
+        connects_to: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Write an L0 thinking fragment (OHM-a5rz.5).
+
+        Minimal write: just content. Auto-generates id, label (first 80 chars),
+        type='fragment', confidence=0.0, provenance='scratch'. Extracts URLs
+        from content. Fragments are exempt from cross-link requirements.
+
+        Args:
+            content: The fragment text (hunch, question, observation).
+            tags: Optional tags for categorization.
+            connects_to: Optional existing node ids to link this fragment to.
+
+        Returns:
+            The created fragment node dict.
+        """
+        from ohm.queries import scratch
+
+        return scratch(
+            self._conn,
+            content=content,
+            created_by=self.actor,
+            tags=tags,
             connects_to=connects_to,
         )
 
@@ -3233,6 +3271,15 @@ def connect_http(
                 "confidence_p95": kwargs.get("confidence_p95"),
             }
             return self._http_request("POST", "/edge", body)
+
+        def scratch(self, content: str, *, tags: list[str] | None = None, connects_to: list[str] | None = None, **kwargs) -> dict[str, Any]:
+            """Write an L0 thinking fragment (OHM-a5rz.5). Single POST to /scratch."""
+            body: dict[str, Any] = {"content": content}
+            if tags:
+                body["tags"] = tags
+            if connects_to:
+                body["connects_to"] = connects_to
+            return self._http_request("POST", "/scratch", body)
 
         def stats(self) -> dict[str, Any]:
             """Get graph stats from the daemon."""

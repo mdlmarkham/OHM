@@ -1906,6 +1906,7 @@ OhmHandler._DELETE_PREFIXES = [
 
 OhmHandler._POST_EXACT = {
     "/tenant/provision": "_post_tenant_provision",
+    "/scratch": "_post_scratch",
     "/node": "_post_node",
     "/node/find_or_create": "_post_node_find_or_create",
     "/edge": "_post_edge",

@@ -661,6 +661,36 @@ class GraphHandlerMixin:
         is_new = node.pop("created", False)
         self._json_response(201 if is_new else 200, node)
 
+    def _post_scratch(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /scratch — write an L0 thinking fragment (OHM-a5rz.4).
+
+        Minimal write: just content. Auto-generates id, label (first 80 chars),
+        type='fragment'. Extracts URLs from content. Returns 201.
+        """
+        from ohm.queries import scratch
+
+        content = body.get("content", "").strip()
+        if not content:
+            self._json_response(400, {"error": "content is required and must be non-empty"})
+            return
+
+        try:
+            node = scratch(
+                self.current_store.conn,
+                content=content,
+                created_by=agent,
+                tags=body.get("tags"),
+                connects_to=body.get("connects_to"),
+            )
+        except ValueError as e:
+            self._json_response(400, {"error": str(e)})
+            return
+
+        decorations = self._run_post_ingest_hooks(agent, "scratch", node)
+        if decorations:
+            node["hook_decorations"] = decorations
+        self._json_response(201, node)
+
     def _post_edge(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /edge — create an edge."""
         hook_error = self._run_pre_ingest_hooks(agent, "edge", body)
