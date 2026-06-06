@@ -188,6 +188,7 @@ class GraphHandlerMixin:
                 "suggest": "GET /suggest?method=shared_tags&min_shared=2 — Find nodes that should be connected based on shared tags.",
                 "orphans": "GET /orphans — Find nodes with no edges. Good for finding isolated knowledge.",
                 "islands": "GET /islands â Find disconnected components (clusters of nodes isolated from the main graph). Each island is a knowledge domain needing bridges. Params: min_size (default 2), max_islands (default 20), layer, exclude_fragments (default true).",
+                "welcome": "GET /welcome?agent=NAME â Orientation packet for new/returning agents. Shows graph overview, your footprint, suggested connections, and recent activity.",
                 "listen": "GET /listen?since=ISO8601 — Change feed. See what agents have added recently.",
             },
             "L0_thinking_layer": {

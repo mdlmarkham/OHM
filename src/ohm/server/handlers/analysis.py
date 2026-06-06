@@ -512,3 +512,179 @@ class AnalysisHandlerMixin:
         result["observations"] = len(observations)
         result["half_life_days"] = half_life_days
         self._json_response(200, result)
+
+    def _get_welcome(self, path: str, qs: dict) -> None:
+        """GET /welcome?agent=NAME — Welcome packet for new/returning agents.
+
+        Gives agents a concise orientation to the graph:
+        - Graph overview (size, density, top types)
+        - Agent's own footprint (nodes created, edges created, last activity)
+        - Suggested connections (orphaned nodes, islands, shared tags)
+        - Recent activity (what's new since last visit)
+        """
+        agent = qs.get("agent", [None])[0]
+        since = qs.get("since", [None])[0]
+
+        import json as _json
+        from ohm.graph.methods import find_islands
+
+        conn = self.current_store.conn
+
+        # ── 1. Graph overview ────────────────────────────────────────
+        node_count = conn.execute(
+            "SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL AND type != 'fragment'"
+        ).fetchone()[0]
+        edge_count = conn.execute(
+            "SELECT COUNT(*) FROM ohm_edges WHERE deleted_at IS NULL"
+        ).fetchone()[0]
+        top_types = conn.execute(
+            "SELECT type, COUNT(*) as cnt FROM ohm_nodes "
+            "WHERE deleted_at IS NULL AND type != 'fragment' "
+            "GROUP BY type ORDER BY cnt DESC LIMIT 10"
+        ).fetchall()
+        top_edge_types = conn.execute(
+            "SELECT edge_type, COUNT(*) as cnt FROM ohm_edges "
+            "WHERE deleted_at IS NULL "
+            "GROUP BY edge_type ORDER BY cnt DESC LIMIT 10"
+        ).fetchall()
+
+        overview = {
+            "total_nodes": node_count,
+            "total_edges": edge_count,
+            "density": round(edge_count / max(node_count * (node_count - 1) / 2, 1), 6),
+            "top_node_types": [{"type": t, "count": c} for t, c in top_types],
+            "top_edge_types": [{"type": t, "count": c} for t, c in top_edge_types],
+        }
+
+        # ── 2. Agent's footprint ───────────────────────────────────
+        agent_info = {
+            "nodes_created": 0,
+            "edges_created": 0,
+            "observations_made": 0,
+            "last_activity": None,
+            "orphan_count": 0,
+        }
+
+        if agent:
+            n_created = conn.execute(
+                "SELECT COUNT(*) FROM ohm_nodes "
+            "WHERE created_by = ? AND deleted_at IS NULL AND type != 'fragment'",
+                [agent],
+            ).fetchone()[0]
+            e_created = conn.execute(
+                "SELECT COUNT(*) FROM ohm_edges WHERE created_by = ? AND deleted_at IS NULL",
+                [agent],
+            ).fetchone()[0]
+            o_made = conn.execute(
+                "SELECT COUNT(*) FROM ohm_observations WHERE created_by = ?",
+                [agent],
+            ).fetchone()[0]
+            last_act = conn.execute(
+                "SELECT MAX(created_at) FROM ("
+                "SELECT created_at FROM ohm_nodes WHERE created_by = ? UNION ALL "
+                "SELECT created_at FROM ohm_edges WHERE created_by = ? UNION ALL "
+                "SELECT created_at FROM ohm_observations WHERE created_by = ?"
+                ") ORDER BY created_at DESC LIMIT 1",
+                [agent, agent, agent],
+            ).fetchone()[0]
+            # Agent's orphans
+            agent_orphans = conn.execute(
+                "SELECT COUNT(*) FROM ohm_nodes n "
+                "WHERE n.created_by = ? AND n.deleted_at IS NULL AND n.type != 'fragment' "
+                "AND n.id NOT IN (SELECT from_node FROM ohm_edges WHERE deleted_at IS NULL) "
+                "AND n.id NOT IN (SELECT to_node FROM ohm_edges WHERE deleted_at IS NULL)",
+                [agent],
+            ).fetchone()[0]
+
+            agent_info = {
+                "agent": agent,
+                "nodes_created": n_created,
+                "edges_created": e_created,
+                "observations_made": o_made,
+                "last_activity": last_act.isoformat() if last_act else None,
+                "orphan_count": agent_orphans,
+            }
+
+        # ── 3. Suggested connections ────────────────────────────────
+        # Islands (disconnected clusters)
+        islands = find_islands(conn, min_size=2, max_islands=5)
+        suggestions = {
+            "islands": [
+                {
+                    "id": i["id"],
+                    "size": i["size"],
+                    "sample_nodes": i["nodes"][:3],
+                    "internal_edges": i["internal_edges"],
+                }
+                for i in islands.get("islands", [])
+                if i["size"] < islands.get("main_graph_size", 0)  # Skip mainland
+            ],
+            "orphan_count": islands.get("orphan_count", 0),
+            "agent_orphans": agent_info["orphan_count"],
+        }
+
+        # If agent has orphans, suggest connecting them
+        if agent and agent_info["orphan_count"] > 0:
+            agent_orphan_list = conn.execute(
+                "SELECT n.id, n.label, n.type FROM ohm_nodes n "
+                "WHERE n.created_by = ? AND n.deleted_at IS NULL AND n.type != 'fragment' "
+                "AND n.id NOT IN (SELECT from_node FROM ohm_edges WHERE deleted_at IS NULL) "
+                "AND n.id NOT IN (SELECT to_node FROM ohm_edges WHERE deleted_at IS NULL) "
+                "ORDER BY n.confidence DESC NULLS LAST LIMIT 5",
+                [agent],
+            ).fetchall()
+            suggestions["your_orphans"] = [
+                {"id": r[0], "label": r[1], "type": r[2]} for r in agent_orphan_list
+            ]
+
+        # ── 4. Recent activity ──────────────────────────────────────
+        recent = {"nodes": [], "edges": []}
+        since_clause = ""
+        params = []
+        if since:
+            since_clause = "AND created_at > ?"
+            params.append(since)
+
+        recent_nodes = conn.execute(
+            f"SELECT id, label, type, created_by, created_at FROM ohm_nodes "
+            f"WHERE deleted_at IS NULL AND type != 'fragment' {since_clause} "
+            f"ORDER BY created_at DESC LIMIT 5",
+            params,
+        ).fetchall()
+        recent["nodes"] = [
+            {"id": r[0], "label": r[1], "type": r[2], "created_by": r[3], "created_at": str(r[4])}
+            for r in recent_nodes
+        ]
+
+        recent_edges = conn.execute(
+            f"SELECT id, from_node, to_node, edge_type, created_by, created_at FROM ohm_edges "
+            f"WHERE deleted_at IS NULL {since_clause} "
+            f"ORDER BY created_at DESC LIMIT 5",
+            params,
+        ).fetchall()
+        recent["edges"] = [
+            {"id": r[0], "from": r[1], "to": r[2], "type": r[3], "created_by": r[4], "created_at": str(r[5])}
+            for r in recent_edges
+        ]
+
+        # ── 5. Quick reference ─────────────────────────────────────
+        quick_ref = {
+            "create_node": "POST /node {id, label, type, content, tags, connects_to}",
+            "create_edge": "POST /edge {from, to, type, layer, confidence}",
+            "scratch": "POST /scratch {content, connects_to, tags}",
+            "search": "GET /search?q=QUERY or GET /semantic_search?q=QUERY",
+            "neighborhood": "GET /neighborhood/ID?depth=2",
+            "islands": "GET /islands?min_size=2",
+            "orphans": "GET /orphans",
+            "suggest": "GET /suggest?method=shared_tags&min_shared=2",
+            "schema": "GET /schema — Full usage guide with all endpoints",
+        }
+
+        self._json_response(200, {
+            "welcome": f"Hello {agent or 'agent'}, the knowledge graph has {node_count} nodes and {edge_count} edges.",
+            "overview": overview,
+            "your_footprint": agent_info,
+            "suggestions": suggestions,
+            "recent_activity": recent,
+            "quick_reference": quick_ref,
+        })
