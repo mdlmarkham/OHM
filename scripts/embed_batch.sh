@@ -3,7 +3,7 @@
 # Run via cron every 2 minutes until all nodes have embeddings
 
 AUTH="Authorization: Bearer ohm-metis-u0-KEjbnU_WfJnmNq7rbzQ"
-URL="http://127.0.0.1:8710/admin/embeddings?batch_size=3&delay_ms=100"
+URL="http://127.0.0.1:8710/admin/embeddings?batch_size=10&delay_ms=50"
 
 RESULT=$(curl -s -m 120 "$URL" -H "$AUTH")
 UPDATED=$(echo "$RESULT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('updated','0'))" 2>/dev/null)

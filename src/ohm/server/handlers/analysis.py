@@ -344,7 +344,16 @@ class AnalysisHandlerMixin:
         self._json_response(200, result)
 
     def _get_suggest(self, path: str, qs: dict) -> None:
-        """GET /suggest — suggest connections."""
+        """GET /suggest — suggest connections.
+
+        Methods:
+        - shared_provenance: Nodes with same provenance prefix but no edge
+        - shared_type: Concept nodes of same type, not connected
+        - shared_tags: Nodes sharing tags, not connected (min_shared=2)
+        - cross_domain: Nodes from DIFFERENT agents sharing tags, not connected
+        - semantic: Embedding similarity for unconnected pairs
+        - orphan_connect: Orphan nodes sharing type with connected nodes
+        """
         from ohm.methods import suggest_connections
 
         method = qs.get("method", ["shared_provenance"])[0]

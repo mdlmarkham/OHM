@@ -86,6 +86,27 @@ def generate_suggestions(
         except Exception as e:
             logger.debug(f"Tag overlap query failed: {e}")
 
+    # ── 2b. Cross-domain bridges ──────────────────────────────────────────
+    # Find nodes from OTHER agents that share tags or semantic similarity.
+    # This addresses Socrates's key gap: /suggest_connections only finds
+    # intra-domain (same-agent) connections, not cross-domain bridges.
+    created_by = None
+    try:
+        row = store.conn.execute(
+            "SELECT created_by FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+            [node_id],
+        ).fetchone()
+        if row:
+            created_by = row[0]
+    except Exception:
+        pass
+
+    if created_by and tags:
+        try:
+            suggestions["cross_domain"] = _find_cross_domain(store, node_id, created_by, tags)
+        except Exception as e:
+            logger.debug(f"Cross-domain suggestion failed: {e}")
+
     # ── 3. Orphan warning ────────────────────────────────────────────────
     if not has_edges:
         try:
@@ -136,6 +157,56 @@ def _find_shared_tags(
 
     # Sort by overlap count descending, return top 3
     scored.sort(key=lambda x: x["overlap_count"], reverse=True)
+    return scored[:MAX_SHARED_TAGS]
+
+
+def _find_cross_domain(
+    store: Any,
+    node_id: str,
+    created_by: str,
+    tags: list[str],
+) -> list[dict[str, Any]]:
+    """Find nodes from OTHER agents that share tags with this node.
+
+    This is the cross-domain bridge: Socrates's manipulation patterns
+    should connect to Metis's AND-gate framework, not just other
+    manipulation patterns. Cross-domain connections score HIGHER
+    because they're more surprising and valuable.
+    """
+    if not tags or not created_by:
+        return []
+
+    # Find nodes NOT created by this agent that share tags
+    rows = store.conn.execute(
+        "SELECT id, label, type, created_by, tags FROM ohm_nodes "
+        "WHERE tags IS NOT NULL AND tags != '[]' AND deleted_at IS NULL "
+        "AND id != ? AND created_by != ?",
+        [node_id, created_by],
+    ).fetchall()
+
+    tag_set = set(tags)
+    scored = []
+    for row in rows:
+        nid, nlabel, ntype, ncreated_by, ntags_json = row
+        try:
+            ntags = set(json.loads(ntags_json) if isinstance(ntags_json, str) else (ntags_json or []))
+        except (json.JSONDecodeError, TypeError):
+            continue
+        overlap = len(tag_set & ntags)
+        if overlap >= 1:  # Lower threshold for cross-domain (1 shared tag is enough)
+            # Cross-domain bonus: score = overlap * 1.5 to surface these above intra-domain
+            scored.append({
+                "id": nid,
+                "label": nlabel or "",
+                "type": ntype or "",
+                "created_by": ncreated_by or "",
+                "shared_tags": sorted(tag_set & ntags),
+                "overlap_count": overlap,
+                "cross_domain_score": round(overlap * 1.5, 1),  # Bonus for cross-domain
+            })
+
+    # Sort by cross_domain_score descending
+    scored.sort(key=lambda x: x["cross_domain_score"], reverse=True)
     return scored[:MAX_SHARED_TAGS]
 
 

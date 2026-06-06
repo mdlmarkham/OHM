@@ -2219,6 +2219,57 @@ def suggest_connections(
             for row in rows
         ]
 
+    elif method == "cross_domain":
+        # Find nodes from DIFFERENT agents that share tags but aren't connected.
+        # Cross-domain bridges are more valuable than intra-domain connections
+        # because they reveal unexpected patterns across agent specializations.
+        # Score: shared_tag_count * 1.5 (cross-domain bonus)
+        query = """
+            WITH tag_sets AS (
+                SELECT id, label, created_by, unnest(json_extract_string(tags, '$[*]')) AS tag
+                FROM ohm_nodes
+                WHERE tags IS NOT NULL AND deleted_at IS NULL
+                  AND created_by IS NOT NULL
+            )
+            SELECT
+                a.id AS from_id,
+                a.label AS from_label,
+                b.id AS to_id,
+                b.label AS to_label,
+                a.created_by AS from_agent,
+                b.created_by AS to_agent,
+                count(*) AS shared_tag_count
+            FROM tag_sets a
+            JOIN tag_sets b ON a.tag = b.tag AND a.id < b.id
+            WHERE a.created_by != b.created_by
+            AND NOT EXISTS (
+                SELECT 1 FROM ohm_edges e
+                WHERE (e.from_node = a.id AND e.to_node = b.id)
+                OR (e.from_node = b.id AND e.to_node = a.id)
+                AND e.deleted_at IS NULL
+            )
+            GROUP BY a.id, a.label, b.id, b.label, a.created_by, b.created_by
+            HAVING count(*) >= ?
+            ORDER BY shared_tag_count DESC
+            LIMIT ?
+        """
+        rows = conn.execute(query, [min_shared, limit]).fetchall()
+        return [
+            {
+                "from_id": row[0],
+                "from_label": row[1],
+                "to_id": row[2],
+                "to_label": row[3],
+                "from_agent": row[4],
+                "to_agent": row[5],
+                "shared_tag_count": row[6],
+                "reason": f"Cross-domain: {row[4]} and {row[5]} share {row[6]} tags",
+                "score": min(row[6] * 1.5 / 5.0, 1.0),
+                "cross_domain": True,
+            }
+            for row in rows
+        ]
+
     elif method == "orphan_connect":
         # Find orphan nodes (no edges) that share type with connected nodes —
         # prime candidates to link into the graph.
