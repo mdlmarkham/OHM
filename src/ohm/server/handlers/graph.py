@@ -820,6 +820,21 @@ class GraphHandlerMixin:
             provenance=body.get("provenance"),
         )
         result = enrich_response(result, nudges)
+
+        # ADR-021: Proactive discoverability — post-write suggestions
+        if result.get("created", True):
+            from ohm.server.suggestions import generate_suggestions
+            suggestions = generate_suggestions(
+                store=self.current_store,
+                node_id=result.get("id", ""),
+                content=body.get("content"),
+                label=body.get("label"),
+                tags=body.get("tags"),
+                node_type=body.get("type"),
+                has_edges=bool(body.get("connects_to")),
+            )
+            result["suggestions"] = suggestions
+
         if result.get("created", True):
             self._json_response(201, result)
         else:
@@ -873,6 +888,20 @@ class GraphHandlerMixin:
         decorations = self._run_post_ingest_hooks(agent, "scratch", node)
         if decorations:
             node["hook_decorations"] = decorations
+
+        # ADR-021: Proactive discoverability — suggestions for scratch
+        from ohm.server.suggestions import generate_suggestions
+        suggestions = generate_suggestions(
+            store=self.current_store,
+            node_id=node.get("id", ""),
+            content=content,
+            label=node.get("label"),
+            tags=body.get("tags"),
+            node_type="fragment",
+            has_edges=bool(body.get("connects_to")),
+        )
+        node["suggestions"] = suggestions
+
         self._json_response(201, node)
 
     def _post_fragment_action(self, path: str, qs: dict, body: dict, agent: str) -> None:

@@ -1466,9 +1466,16 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
             # Enforce L2 immutability — source nodes cannot be updated (OHM-k5wk)
             enforce_l2_immutability(self.current_store.conn, agent, node_id)
 
+            # Validate type change against schema
+            if "type" in body and body["type"] not in self.schema_config.node_types:
+                raise ValidationError(
+                    f"Invalid node type: '{body['type']}' — must be one of: {', '.join(sorted(self.schema_config.node_types))}"
+                )
+
             now = datetime.now(timezone.utc).isoformat()
             patchable = [
                 "label",
+                "type",
                 "content",
                 "confidence",
                 "visibility",
