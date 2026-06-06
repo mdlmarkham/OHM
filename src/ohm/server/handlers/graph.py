@@ -398,12 +398,18 @@ class GraphHandlerMixin:
         self._json_response(200, results)
 
     def _get_search(self, path: str, qs: dict) -> None:
-        """GET /search — text search over nodes."""
+        """GET /search — text search over nodes.
+
+        OHM-a5rz.7: supports ``?since=`` and ``?until=`` ISO 8601 timestamp
+        filters to constrain search by ``created_at`` range.
+        """
         from ohm.exceptions import ValidationError
 
         query_text = qs.get("q", [""])[0]
         node_type = qs.get("type", [None])[0]
         created_by = qs.get("created_by", [None])[0]
+        since = qs.get("since", [None])[0]
+        until = qs.get("until", [None])[0]
         limit = int(qs.get("limit", [20])[0])
         if not query_text:
             raise ValidationError("Search requires ?q=QUERY")
@@ -415,6 +421,12 @@ class GraphHandlerMixin:
         if created_by:
             conditions.append("created_by = ?")
             params.append(created_by)
+        if since:
+            conditions.append("created_at >= ?::TIMESTAMP")
+            params.append(since)
+        if until:
+            conditions.append("created_at <= ?::TIMESTAMP")
+            params.append(until)
         params.append(limit)
         sql = "SELECT * FROM ohm_nodes WHERE " + " AND ".join(conditions) + " ORDER BY created_at DESC LIMIT ?"
         results = self.current_store.execute(sql, params)
