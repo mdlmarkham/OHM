@@ -1943,6 +1943,7 @@ OhmHandler._POST_EXACT = {
     "/admin/verification-decay": "_post_admin_verification_decay",
     "/admin/merge": "_post_admin_merge",
     "/admin/vacuum-lake": "_post_admin_vacuum_lake",
+    "/admin/repair-dangling": "_post_admin_repair_dangling",
     "/discover/queue/review": "_post_discovery_review",
     "/hooks": "_post_hooks",
 }

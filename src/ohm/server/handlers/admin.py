@@ -792,3 +792,99 @@ class AdminHandlerMixin:
         limit = int(qs.get("limit", [10])[0])
         result = detect_fragment_resonance(self.current_store.conn, min_shared=min_shared, limit=limit)
         self._json_response(200, {"resonance": result, "count": len(result)})
+    def _post_admin_repair_dangling(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /admin/repair-dangling — fix edges pointing to non-existent nodes.
+
+        Finds all edges where from_node or to_node references a node that doesn't
+        exist (deleted or never created) and soft-deletes them.
+
+        Body params:
+            dry_run: If true, only report what would be fixed (default: true)
+            migration: Dict mapping old node IDs to new node IDs. Edges pointing
+                       to old IDs will be redirected to new IDs instead of deleted.
+
+        Returns:
+            dangling_edges: Number of dangling edges found
+            redirected: Number of edges redirected (if migration provided)
+            deleted: Number of edges deleted (if dry_run=false)
+        """
+        dry_run = body.get("dry_run", True)
+        migration = body.get("migration", {})
+
+        conn = self.current_store.conn
+        with self.current_store._lock:
+            # Find edges where to_node doesn't exist
+            dangling_to = conn.execute("""
+                SELECT e.id, e.from_node, e.to_node, e.edge_type, e.layer, e.confidence
+                FROM ohm_edges e
+                LEFT JOIN ohm_nodes n ON e.to_node = n.id
+                WHERE e.deleted_at IS NULL AND n.id IS NULL
+            """).fetchall()
+
+            # Find edges where from_node doesn't exist
+            dangling_from = conn.execute("""
+                SELECT e.id, e.from_node, e.to_node, e.edge_type, e.layer, e.confidence
+                FROM ohm_edges e
+                LEFT JOIN ohm_nodes n ON e.from_node = n.id
+                WHERE e.deleted_at IS NULL AND n.id IS NULL
+            """).fetchall()
+
+        all_dangling = list(set(dangling_to + dangling_from))
+        redirected = 0
+        deleted = 0
+        kept = []
+
+        for edge in all_dangling:
+            edge_id, from_node, to_node, edge_type, layer, confidence = edge
+
+            # Check if we can redirect
+            new_to = migration.get(to_node, to_node)
+            new_from = migration.get(from_node, from_node)
+            can_redirect = (to_node in migration or from_node in migration)
+
+            if can_redirect and not dry_run:
+                # Delete old edge and create new one with migrated IDs
+                with self.current_store._lock:
+                    conn.execute(
+                        "UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        [edge_id]
+                    )
+                # Create new edge with migrated IDs
+                try:
+                    result = self.current_store.write_edge(
+                        from_node=new_from,
+                        to_node=new_to,
+                        edge_type=edge_type,
+                        layer=layer or "L3",
+                        confidence=confidence or 0.8,
+                        created_by=agent,
+                    )
+                    redirected += 1
+                except Exception:
+                    kept.append(edge)
+            elif not can_redirect and not dry_run:
+                # Soft-delete the dangling edge
+                with self.current_store._lock:
+                    conn.execute(
+                        "UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        [edge_id]
+                    )
+                deleted += 1
+            else:
+                kept.append(edge)
+
+        result = {
+            "dangling_edges": len(all_dangling),
+            "redirected": redirected,
+            "deleted": deleted,
+            "dry_run": dry_run,
+        }
+        if dry_run:
+            result["would_redirect"] = sum(1 for e in all_dangling if e[2] in migration or e[1] in migration)
+            result["would_delete"] = len(all_dangling) - result["would_redirect"]
+            result["dangling_details"] = [
+                {"id": e[0], "from": e[1], "to": e[2], "type": e[3]}
+                for e in all_dangling[:20]
+            ]
+
+        self._json_response(200, result)
