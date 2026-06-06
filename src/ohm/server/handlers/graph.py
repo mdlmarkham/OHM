@@ -165,11 +165,58 @@ class GraphHandlerMixin:
         self._json_response(200, status)
 
     def _get_schema(self, path: str, qs: dict) -> None:
-        """GET /schema — schema description."""
+        """GET /schema — schema description with usage guidance."""
         schema = self.schema_config
         all_edge_types: set[str] = set()
         for types in schema.layer_edge_types.values():
             all_edge_types.update(types)
+
+        guide = {
+            "overview": "OHM is a knowledge graph for multi-agent cognition. Write observations, create nodes and edges, challenge claims, and think in L0 fragments.",
+            "writing": {
+                "create_node": "POST /node — Create any node type. Required: id, label, type. Optional: content, tags (list), metadata (dict), source_url, confidence, provenance, connects_to (list of existing node ids).",
+                "scratch": "POST /scratch — Write an L0 thinking fragment. Near-zero cost. Required: content. Optional: tags, connects_to, metadata. Auto-detects questions (?). Auto-links semantically. Fragments excluded from search/stats/neighborhood by default.",
+                "create_edge": "POST /edge — Link two nodes. Required: from, to, layer, edge_type. Optional: confidence, provenance, probability.",
+                "observe": "POST /observe — Record a measurement or observation on a node. Required: node_id, obs_type, value. Optional: notes, source, source_url, sigma.",
+                "challenge": "POST /challenge — Challenge an L3 interpretation. Required: edge_id. Optional: reason, confidence.",
+            },
+            "reading": {
+                "search": "GET /search?q=QUERY — Text search. Excludes fragments by default. Add &include_l0=true to include L0.",
+                "semantic_search": "GET /semantic_search?q=QUERY — Embedding similarity search. Excludes fragments by default. Add &include_l0=true to include L0.",
+                "neighborhood": "GET /neighborhood/ID?depth=2 — Get nodes and edges around a node. Excludes L0 by default. Add &layer=L0 for fragments.",
+                "stats": "GET /stats — Graph statistics. Excludes fragments by default. Add ?include_l0=true to include L0.",
+            },
+            "L0_thinking_layer": {
+                "purpose": "Fragments, hunches, questions, raw associations. Unreliable by design (confidence=0.0). Excluded from search/stats/neighborhood by default.",
+                "when_to_scratch": "A hunch, a question, a quick observation, a connection you sense but can't articulate yet.",
+                "when_not_to_scratch": "A confident concept (use create_node), a verified fact (use create_node with source_url), a known relationship (use create_edge).",
+                "l0_edge_types": {"CONTEXT_OF": "Fragment relates to existing concept", "INSPIRED_BY": "Fragment was inspired by another node", "CONTRADICTS_FRAG": "Fragment contradicts another fragment", "REFINES_FRAG": "Fragment refines another fragment", "RESONANCE": "Independent agents noticed the same thing"},
+                "lifecycle": "Write (scratch) → Auto-link (semantic) → Connect explicitly (link_fragment) → Promote to L1 concept (promote_fragment)",
+            },
+            "node_type_guide": {
+                "concept": "Abstract ideas, patterns, theories — the core of the knowledge graph",
+                "source": "External references — articles, books, papers, URLs. MUST have source_url.",
+                "event": "Things that happened — incidents, announcements, discoveries",
+                "pattern": "Recurring structures — AND-gates, traps, cycles, equilibria",
+                "decision": "Choices made — with utility, alternatives, and reasoning",
+                "fragment": "L0 thinking — hunches, questions, raw observations. Use /scratch, not /node.",
+                "infrastructure": "Physical/virtual hosts — servers, containers, networks",
+                "service": "Running software — daemons, APIs, databases, agents",
+                "release": "Software versions — deployed or available",
+                "technology": "Tools, frameworks, languages, protocols",
+                "task": "Action items with status, priority, assignment",
+            },
+            "edge_type_guide": {
+                "L0": {"CONTEXT_OF": "Fragment relates to existing concept", "INSPIRED_BY": "Fragment inspired by another node", "CONTRADICTS_FRAG": "Fragment contradicts another fragment", "REFINES_FRAG": "Fragment refines another fragment", "RESONANCE": "Independent agents noticed same thing"},
+                "L1": {"BELONGS_TO": "X belongs to Y (service to host, person to org)", "CONTAINS": "X contains Y (org contains team)", "HAS_COMPONENT": "X has component Y (system has service)", "PART_OF": "X is part of Y (reverse of CONTAINS)", "CAPABLE_OF": "X can do Y (agent capable of skill)"},
+                "L2": {"REFERENCES": "X references Y (citation, link)", "SERVES": "X serves Y (service serves agent)", "USES": "X uses Y (agent uses tool)", "FEEDS": "X feeds Y (data flow)", "RUNS_ON": "X runs on Y (service runs on host)", "HOSTS": "X hosts Y (host runs service, reverse of RUNS_ON)", "UPSTREAM_OF": "X is upstream of Y (dependency chain)", "TRANSITIONS_TO": "X transitions to Y (version upgrade)"},
+                "L3": {"CAUSES": "X causes Y (with confidence)", "SUPPORTS": "X supports Y (evidence for)", "CHALLENGED_BY": "X is challenged by Y (evidence against)", "CONTRADICTS": "X contradicts Y (incompatible claims)", "REFINES": "X refines Y (narrowing, clarifying)", "APPLIES_TO": "X applies to Y (pattern to instance)", "TRANSITIONS_TO": "X transitions to Y (state change)"},
+                "L4": {"DEPENDS_ON": "X depends on Y (infrastructure dependency)", "ENABLES": "X enables Y (prerequisite)", "THREATENS": "X threatens Y (risk)", "RISKS": "X risks Y (uncertainty)", "BLOCKS": "X blocks Y (obstacle)"},
+            },
+            "cross_link_rule": f"Nodes of type {sorted(schema.must_have_edge_node_types)} MUST have at least one edge when created. Use connects_to or create_edge in the same request.",
+            "exempt_from_cross_link": f"Nodes of type {sorted(schema.exempt_cross_link_node_types)} are exempt from the cross-link requirement.",
+        }
+
         self._json_response(
             200,
             {
@@ -178,6 +225,11 @@ class GraphHandlerMixin:
                 "edge_types": sorted(all_edge_types),
                 "edge_types_by_layer": {k: sorted(v) for k, v in schema.layer_edge_types.items()},
                 "layers": schema.layer_descriptions,
+                "observation_types": sorted(schema.observation_types),
+                "observation_sources": sorted(schema.observation_sources),
+                "visibilities": sorted(schema.visibilities),
+                "provenances": sorted(schema.provenances),
+                "guide": guide,
             },
         )
 

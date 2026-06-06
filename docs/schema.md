@@ -140,7 +140,7 @@ CREATE TABLE IF NOT EXISTS ohm_meta (
 
 ## Node Types
 
-`idea`, `source`, `person`, `concept`, `pattern`, `event`, `institution`, `technology`, `equipment`, `system`, `area`, `site`, `agent`, `skill`, `value`, `goal`, `topic`
+`idea`, `source`, `person`, `concept`, `pattern`, `event`, `institution`, `technology`, `equipment`, `system`, `infrastructure`, `service`, `release`, `area`, `site`, `agent`, `skill`, `value`, `goal`, `topic`, `task`, `decision`, `fragment`
 
 Plus TOPO types: `process`, `instrument`, `controller`, `valve`, `pump`, `motor`, `sensor`, `pipeline`, `vessel`, `reactor`, `heat_exchanger`, `tank`, `compressor`, `generator`, `transformer`, `circuit`, `bus`, `line`
 

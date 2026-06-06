@@ -1,0 +1,159 @@
+{
+  "name": "infrastructure",
+  "template_version": 1,
+  "node_types": [
+    "agent",
+    "area",
+    "concept",
+    "decision",
+    "equipment",
+    "fragment",
+    "goal",
+    "idea",
+    "infrastructure",
+    "institution",
+    "pattern",
+    "person",
+    "release",
+    "service",
+    "site",
+    "skill",
+    "source",
+    "system",
+    "technology",
+    "topic",
+    "value"
+  ],
+  "layer_edge_types": {
+    "L0": [
+      "CONTEXT_OF",
+      "CONTRADICTS_FRAG",
+      "INSPIRED_BY",
+      "REFINES_FRAG",
+      "RESONANCE"
+    ],
+    "L1": [
+      "APPLIES_TO",
+      "BELONGS_TO",
+      "CONTAINS",
+      "HAS_COMPONENT",
+      "HOSTS",
+      "INTERESTED_IN",
+      "LOCATED_IN",
+      "PART_OF",
+      "RUNS_ON",
+      "SERVES",
+      "VALUES",
+      "VERSION_OF"
+    ],
+    "L2": [
+      "AWAITING",
+      "CLOSED_BY",
+      "CONTAINED_BY",
+      "DERIVES_FROM",
+      "ERADICATED_BY",
+      "FEEDS",
+      "FLOWS_TO",
+      "INFLUENCES",
+      "INVESTIGATED_BY",
+      "NEGOTIATES_WITH",
+      "NOTIFIES",
+      "OPENED_BY",
+      "REFERENCES",
+      "RECOVERED_BY",
+      "RESOLVED_BY",
+      "STARTED_BY",
+      "TRANSFERRED_TO",
+      "TRUSTS",
+      "UPSTREAM_OF",
+      "USES"
+    ],
+    "L3": [
+      "APPLIES_TO",
+      "CAUSES",
+      "CHALLENGED_BY",
+      "COLLABORATES_WITH",
+      "CORRELATES_WITH",
+      "DEFERS_TO",
+      "DELEGATED_TO",
+      "ESCALATED_TO",
+      "EXPLAINS",
+      "EXPECTED_LIKELIHOOD",
+      "LISTENS_TO",
+      "NEGATES",
+      "PREDICTS",
+      "REFINES",
+      "RELATED_TO",
+      "SUPPORTS",
+      "THREAT_CLUSTER",
+      "TRANSITIONS_TO"
+    ],
+    "L4": [
+      "BLOCKS",
+      "DEPENDS_ON",
+      "ENABLES",
+      "EXPECTS",
+      "EXPECTS_FROM",
+      "ORDERS_TEST",
+      "PLANS",
+      "PREDICTS",
+      "RISKS",
+      "THREATENS",
+      "TRIGGERS_INCIDENT"
+    ]
+  },
+  "layer_descriptions": {
+    "L0": "Thinking — Fragments, hunches, raw associations; unreliable, auto-linked",
+    "L1": "Structure — Physical/logical hierarchy (site → infrastructure → service → release)",
+    "L2": "Flow — Data flows, service dependencies, upstream/downstream relationships",
+    "L3": "Knowledge — Incident patterns, performance insights, failure modes",
+    "L4": "Prospect — Capacity planning, risk assessment, upgrade predictions"
+  },
+  "observation_types": [
+    "anomaly",
+    "challenge",
+    "health_check",
+    "measurement",
+    "pattern",
+    "sentiment",
+    "support"
+  ],
+  "observation_sources": [
+    "analysis",
+    "conversation",
+    "feed-ingest",
+    "monitoring",
+    "observation",
+    "research",
+    "signal"
+  ],
+  "visibilities": [
+    "private",
+    "team",
+    "public",
+    "vault"
+  ],
+  "provenances": [
+    "bookmark",
+    "clio-research",
+    "conversation",
+    "feed-ingest",
+    "healthcheck",
+    "metis-research",
+    "metis-synthesis",
+    "metis-review-request",
+    "observation",
+    "research",
+    "socrates-curriculum"
+  ],
+  "required_integrations": {},
+  "optional_integrations": {},
+  "seed_agents": [
+    {
+      "agent_name": "atlas",
+      "label": "Atlas",
+      "current_focus": "Infrastructure monitoring and coordination",
+      "active_patterns": ["service-health", "version-tracking", "dependency-mapping"]
+    }
+  ]
+}

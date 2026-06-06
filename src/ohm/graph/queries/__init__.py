@@ -874,6 +874,8 @@ def create_node(
     confidence: float = 1.0,
     priority: str | None = None,
     url: str | None = None,
+    tags: list[str] | None = None,
+    metadata: dict | None = None,
     utility_scale: float | None = None,
     utility_usd_per_day: float | None = None,
     utility_currency: str | None = None,
@@ -884,6 +886,8 @@ def create_node(
     """Create a new node and return its full record.
 
     Args:
+        tags: Optional tags for categorization and discovery.
+        metadata: Optional structured key-value data (JSON dict).
         connects_to: Optional list of existing node ids this node will be linked
             to. Used by the cross-link requirement (OHM-tjzh / ADR-018) to prove
             the agent has anchored a derived claim to existing graph structure.
@@ -941,21 +945,27 @@ def create_node(
             """UPDATE ohm_nodes SET
                 label = ?, type = ?, content = ?, created_by = ?,
                 visibility = ?, provenance = ?, confidence = ?, priority = ?, url = ?,
+                tags = ?, metadata = ?,
                 utility_scale = ?, utility_usd_per_day = ?, utility_currency = ?,
                 current_best_action = ?, action_alternatives = ?,
                 deleted_at = NULL, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?""",
-            [label, node_type, content, created_by, visibility, provenance, confidence, priority, url, utility_scale, utility_usd_per_day, utility_currency, current_best_action, alternatives_json, node_id],
+            [label, node_type, content, created_by, visibility, provenance, confidence, priority, url, tags_json, metadata_json, utility_scale, utility_usd_per_day, utility_currency, current_best_action, alternatives_json, node_id],
         )
         _log_change(conn, "ohm_nodes", node_id, "UPDATE", created_by)
         return _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node_id]))[0]
 
+    # Serialize tags and metadata to JSON
+    import json as _json
+    tags_json = _json.dumps(tags) if tags else None
+    metadata_json = _json.dumps(metadata) if metadata else None
+
     conn.execute(
         """INSERT INTO ohm_nodes
            (id, label, type, content, created_by, visibility, provenance, confidence, priority, url,
-            utility_scale, utility_usd_per_day, utility_currency, current_best_action, action_alternatives)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        [node_id, label, node_type, content, created_by, visibility, provenance, confidence, priority, url, utility_scale, utility_usd_per_day, utility_currency, current_best_action, alternatives_json],
+            tags, metadata, utility_scale, utility_usd_per_day, utility_currency, current_best_action, action_alternatives)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [node_id, label, node_type, content, created_by, visibility, provenance, confidence, priority, url, tags_json, metadata_json, utility_scale, utility_usd_per_day, utility_currency, current_best_action, alternatives_json],
     )
     _log_change(conn, "ohm_nodes", node_id, "INSERT", created_by)
     # Return full node record
