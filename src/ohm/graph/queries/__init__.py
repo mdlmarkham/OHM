@@ -722,13 +722,23 @@ def query_stats(conn: DuckDBPyConnection, include_l0: bool = False) -> dict[str,
     """)
     stats["edges_by_type"] = {row[0]: row[1] for row in result.fetchall()}
 
-    # Node counts by type
-    result = conn.execute("""
-        SELECT type, COUNT(*) AS count
-        FROM ohm_nodes
-        GROUP BY type
-        ORDER BY count DESC
-    """)
+    # Node counts by type (OHM-a5rz.6: exclude L0 fragments by default)
+    if include_l0:
+        result = conn.execute("""
+            SELECT type, COUNT(*) AS count
+            FROM ohm_nodes
+            WHERE deleted_at IS NULL
+            GROUP BY type
+            ORDER BY count DESC
+        """)
+    else:
+        result = conn.execute("""
+            SELECT type, COUNT(*) AS count
+            FROM ohm_nodes
+            WHERE deleted_at IS NULL AND type != 'fragment'
+            GROUP BY type
+            ORDER BY count DESC
+        """)
     stats["nodes_by_type"] = {row[0]: row[1] for row in result.fetchall()}
 
     # Total counts (OHM-a5rz.6: exclude L0 fragment nodes from totals)
@@ -3448,6 +3458,7 @@ def scratch(
     created_by: str,
     tags: list[str] | None = None,
     connects_to: list[str] | None = None,
+    metadata: dict | None = None,
 ) -> dict[str, Any]:
     """Write an L0 thinking fragment (OHM-a5rz.4).
 
@@ -3468,14 +3479,15 @@ def scratch(
 
     node_id = generate_node_id(label)
 
-    metadata = None
+    # Merge caller-provided metadata with auto-detected metadata
+    auto_metadata = {}
     is_question = "?" in content
-    if tags or is_question:
-        metadata = {}
-        if tags:
-            metadata["tags"] = tags
-        if is_question:
-            metadata["is_question"] = True
+    if tags:
+        auto_metadata["tags"] = tags
+    if is_question:
+        auto_metadata["is_question"] = True
+    # Caller metadata takes precedence for overlapping keys
+    metadata = {**(metadata or {}), **auto_metadata} if (metadata or auto_metadata) else None
 
     node = create_node(
         conn,
