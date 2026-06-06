@@ -14,7 +14,7 @@ import re
 _IDENTIFIER_RE = re.compile(r"^[a-zA-Z0-9_\-\.]+$")
 
 # Layer values: exactly L1, L2, L3, L4
-_LAYER_RE = re.compile(r"^L[1-4]$")
+_LAYER_RE = re.compile(r"^L[0-4]$")
 
 # Customer ID: alphanumeric, underscore, hyphen — NO dots or path separators
 _CUSTOMER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{2,63}$")
@@ -65,9 +65,9 @@ def validate_customer_id(value: str) -> str:
 
 
 def validate_layer(value: str) -> str:
-    """Validate that *value* is a valid layer (L1-L4)."""
+    """Validate that *value* is a valid layer (L0-L4)."""
     if not _LAYER_RE.match(value):
-        raise ValueError(f"Invalid layer: '{value}' — must be L1, L2, L3, or L4")
+        raise ValueError(f"Invalid layer: '{value}' — must be L0, L1, L2, L3, or L4")
     return value
 
 

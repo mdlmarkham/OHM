@@ -450,6 +450,9 @@ class GraphHandlerMixin:
 
         OHM-a5rz.7: supports ``?since=`` and ``?until=`` ISO 8601 timestamp
         filters to constrain search by ``created_at`` range.
+
+        OHM-a5rz.18: L0 fragments are excluded by default.
+        Pass ``?include_l0=true`` to include fragment-type nodes.
         """
         from ohm.exceptions import ValidationError
 
@@ -458,6 +461,7 @@ class GraphHandlerMixin:
         created_by = qs.get("created_by", [None])[0]
         since = qs.get("since", [None])[0]
         until = qs.get("until", [None])[0]
+        include_l0 = qs.get("include_l0", ["false"])[0].lower() in ("true", "1", "yes")
         limit = int(qs.get("limit", [20])[0])
         if not query_text:
             raise ValidationError("Search requires ?q=QUERY")
@@ -466,6 +470,9 @@ class GraphHandlerMixin:
         if node_type:
             conditions.append("type = ?")
             params.append(node_type)
+        elif not include_l0:
+            # OHM-a5rz.18: exclude L0 fragments from default search results
+            conditions.append("type != 'fragment'")
         if created_by:
             conditions.append("created_by = ?")
             params.append(created_by)
@@ -481,7 +488,10 @@ class GraphHandlerMixin:
         self._json_response(200, results)
 
     def _get_semantic_search(self, path: str, qs: dict) -> None:
-        """GET /semantic_search — vector similarity search."""
+        """GET /semantic_search — vector similarity search.
+
+        OHM-a5rz.20: L0 fragments excluded by default. Pass ``?include_l0=true`` to include.
+        """
         from ohm.exceptions import ValidationError
 
         query_text = qs.get("q", [""])[0]
@@ -490,6 +500,7 @@ class GraphHandlerMixin:
         node_type = qs.get("type", [None])[0]
         limit = int(qs.get("limit", [10])[0])
         min_confidence = qs.get("min_confidence", [None])[0]
+        include_l0 = qs.get("include_l0", ["false"])[0].lower() in ("true", "1", "yes")
         if min_confidence is not None:
             try:
                 min_confidence = float(min_confidence)
@@ -504,6 +515,7 @@ class GraphHandlerMixin:
                 limit=limit,
                 node_type=node_type,
                 min_confidence=min_confidence,
+                include_l0=include_l0,
             )
             self._json_response(200, {"results": results, "count": len(results)})
         except ValueError as e:

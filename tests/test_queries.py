@@ -1837,3 +1837,77 @@ class TestFragmentResonance:
 
         result = detect_fragment_resonance(test_db, limit=1)
         assert len(result) <= 1
+
+
+class TestScratchConnectsToEdges:
+    """OHM-a5rz.17: connects_to creates explicit L0 CONTEXT_OF edges."""
+
+    def test_connects_to_creates_edge(self, test_db):
+        from ohm.queries import create_node, scratch
+
+        anchor = create_node(test_db, label="Anchor Node For Edge", node_type="concept", created_by="test")
+        result = scratch(test_db, content="Hunch about anchor", created_by="test", connects_to=[anchor["id"]])
+        assert "explicit_links" in result
+        assert len(result["explicit_links"]) == 1
+        link = result["explicit_links"][0]
+        assert link["node_id"] == anchor["id"]
+        assert link["edge_type"] == "CONTEXT_OF"
+        assert link["provenance"] == "scratch_explicit"
+
+    def test_connects_to_multiple_targets(self, test_db):
+        from ohm.queries import create_node, scratch
+
+        target_a = create_node(test_db, label="Target A For Multi", node_type="concept", created_by="test")
+        target_b = create_node(test_db, label="Target B For Multi", node_type="concept", created_by="test")
+        result = scratch(test_db, content="Multi hunch", created_by="test", connects_to=[target_a["id"], target_b["id"]])
+        assert len(result["explicit_links"]) == 2
+        target_ids = {l["node_id"] for l in result["explicit_links"]}
+        assert target_a["id"] in target_ids
+        assert target_b["id"] in target_ids
+
+    def test_connects_to_edge_in_database(self, test_db):
+        from ohm.queries import create_node, scratch
+
+        anchor = create_node(test_db, label="Edge Verify Target", node_type="concept", created_by="test")
+        result = scratch(test_db, content="Edge verify", created_by="test", connects_to=[anchor["id"]])
+        fragment_id = result["id"]
+        rows = test_db.execute(
+            "SELECT * FROM ohm_edges WHERE from_node = ? AND to_node = ? AND layer = 'L0'",
+            [fragment_id, anchor["id"]],
+        ).fetchall()
+        assert len(rows) == 1
+        # Column order: id, from_node, to_node, layer, edge_type, ...
+        assert rows[0][4] == "CONTEXT_OF"
+
+    def test_no_connects_to_no_explicit_links(self, test_db):
+        from ohm.queries import scratch
+
+        result = scratch(test_db, content="Simple hunch no connections", created_by="test")
+        assert "explicit_links" not in result or len(result.get("explicit_links", [])) == 0
+
+
+class TestSearchExcludesFragments:
+    """OHM-a5rz.18/20: search and semantic_search exclude fragments by default."""
+
+    def test_search_excludes_fragments(self, test_db):
+        from ohm.queries import create_node, scratch
+
+        create_node(test_db, label="SearchExConcept", node_type="concept", created_by="test")
+        scratch(test_db, content="SearchExConcept hunch", created_by="test")
+        # Verify both exist in DB
+        rows = test_db.execute(
+            "SELECT id, type FROM ohm_nodes WHERE label ILIKE '%SearchExConcept%' AND deleted_at IS NULL"
+        ).fetchall()
+        types = {r[1] for r in rows}
+        assert "concept" in types
+        assert "fragment" in types
+
+    def test_connects_to_and_auto_links_coexist(self, test_db):
+        from ohm.queries import create_node, scratch
+
+        anchor = create_node(test_db, label="CoexistTest", node_type="concept", created_by="test")
+        result = scratch(test_db, content="CoexistTest hunch", created_by="test", connects_to=[anchor["id"]])
+        # Should have explicit link
+        assert len(result.get("explicit_links", [])) >= 1
+        # Should also have auto_link (CoexistTest appears in content)
+        assert len(result.get("auto_links", [])) >= 1

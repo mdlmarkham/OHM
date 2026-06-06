@@ -2813,6 +2813,7 @@ def semantic_search(
     limit: int = 10,
     node_type: str | None = None,
     min_confidence: float | None = None,
+    include_l0: bool = False,
 ) -> list[dict[str, Any]]:
     """Search nodes by semantic similarity using embedding vectors.
 
@@ -2830,6 +2831,7 @@ def semantic_search(
         limit: Maximum number of results (default 10).
         node_type: Optional filter by node type.
         min_confidence: Optional minimum confidence threshold.
+        include_l0: Include fragment-type nodes (default False, OHM-a5rz.20).
 
     Returns:
         List of dicts with node_id, label, type, distance, and confidence.
@@ -2848,6 +2850,9 @@ def semantic_search(
     if node_type is not None:
         where_clauses.append("type = ?")
         params.append(node_type)
+    elif not include_l0:
+        # OHM-a5rz.20: exclude L0 fragments from default semantic search
+        where_clauses.append("type != 'fragment'")
 
     if min_confidence is not None:
         where_clauses.append("confidence >= ?")
@@ -3335,6 +3340,12 @@ def resolve_node_by_alias(
     return {"id": node[0], "label": node[1], "type": node[2], "confidence": node[3], "visibility": node[4]}
 
 
+def _existing_label(conn: DuckDBPyConnection, node_id: str) -> str:
+    """Look up the label of an existing node by id."""
+    row = conn.execute("SELECT label FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node_id]).fetchone()
+    return row[0] if row else node_id
+
+
 def scratch(
     conn: DuckDBPyConnection,
     *,
@@ -3391,6 +3402,31 @@ def scratch(
         )
         node["metadata"] = _json.dumps(metadata)
     node["scratch"] = True
+
+    # OHM-a5rz.17: Create explicit L0 CONTEXT_OF edges for connects_to targets.
+    # create_node() validates the targets exist but doesn't create edges.
+    explicit_links = []
+    if connects_to:
+        for target_id in connects_to:
+            edge = create_edge(
+                conn,
+                from_node=node["id"],
+                to_node=target_id,
+                layer="L0",
+                edge_type="CONTEXT_OF",
+                created_by=created_by,
+                confidence=0.5,
+                provenance="scratch_explicit",
+            )
+            explicit_links.append({
+                "node_id": target_id,
+                "label": _existing_label(conn, target_id),
+                "edge_id": edge["id"],
+                "edge_type": "CONTEXT_OF",
+                "provenance": "scratch_explicit",
+            })
+    if explicit_links:
+        node["explicit_links"] = explicit_links
 
     auto_links = _auto_link_fragment(conn, node["id"], content, created_by)
     if auto_links:

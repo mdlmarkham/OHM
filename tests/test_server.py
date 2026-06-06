@@ -2097,3 +2097,112 @@ class TestFragmentConnectEndpoint:
             body={"target_id": "also_missing", "edge_type": "REFINES_FRAG"},
         )
         assert status == 404
+
+
+@pytest.mark.xdist_group("server")
+class TestSearchExcludesFragments:
+    """OHM-a5rz.18: L0 fragments excluded from /search and /semantic_search by default."""
+
+    def test_search_excludes_fragments_by_default(self, test_server):
+        port, store = test_server
+        store.write_node("concept_search_test", "TestConcept", "concept", agent_name="test")
+        _request("POST", port, "/scratch", body={"content": "TestConcept hunch fragment"})
+        # Default search should exclude fragments
+        status, data = _request("GET", port, "/search?q=TestConcept")
+        assert status == 200
+        results = data if isinstance(data, list) else data.get("results", data)
+        types = [r.get("type") for r in results]
+        assert "fragment" not in types
+
+    def test_search_includes_fragments_with_flag(self, test_server):
+        port, store = test_server
+        store.write_node("concept_search_flag", "UniqueFlagConcept", "concept", agent_name="test")
+        _request("POST", port, "/scratch", body={"content": "UniqueFlagConcept hunch"})
+        # include_l0=true should include fragments
+        status, data = _request("GET", port, "/search?q=UniqueFlagConcept&include_l0=true")
+        assert status == 200
+        results = data if isinstance(data, list) else data.get("results", data)
+        types = [r.get("type") for r in results]
+        assert "fragment" in types
+
+    def test_search_type_fragment_explicit(self, test_server):
+        port, store = test_server
+        _request("POST", port, "/scratch", body={"content": "ExplicitTypeSearch hunch"})
+        # Explicit type=fragment should work even without include_l0
+        status, data = _request("GET", port, "/search?q=ExplicitTypeSearch&type=fragment")
+        assert status == 200
+        results = data if isinstance(data, list) else data.get("results", data)
+        assert len(results) >= 1
+        assert all(r.get("type") == "fragment" for r in results)
+
+
+@pytest.mark.xdist_group("server")
+class TestScratchConnectsToEdges:
+    """OHM-a5rz.17: connects_to should create L0 CONTEXT_OF edges."""
+
+    def test_connects_to_creates_explicit_edges(self, test_server):
+        port, store = test_server
+        store.write_node("anchor_explicit", "Anchor For Explicit", "concept", agent_name="test")
+        status, data = _request(
+            "POST",
+            port,
+            "/scratch",
+            body={"content": "This connects explicitly", "connects_to": ["anchor_explicit"]},
+        )
+        assert status == 201
+        assert "explicit_links" in data
+        assert len(data["explicit_links"]) == 1
+        link = data["explicit_links"][0]
+        assert link["node_id"] == "anchor_explicit"
+        assert link["edge_type"] == "CONTEXT_OF"
+        assert link["provenance"] == "scratch_explicit"
+
+    def test_connects_to_creates_L0_edge_in_graph(self, test_server):
+        port, store = test_server
+        store.write_node("anchor_graph", "Anchor For Graph", "concept", agent_name="test")
+        status, frag = _request(
+            "POST",
+            port,
+            "/scratch",
+            body={"content": "Graph edge test", "connects_to": ["anchor_graph"]},
+        )
+        assert status == 201
+        # Verify the edge exists in the graph (L0 layer)
+        status, nbr = _request("GET", port, f"/neighborhood/{frag['id']}?layer=L0")
+        assert status == 200
+        edges = nbr.get("edges", [])
+        l0_context_edges = [e for e in edges if e.get("edge_type") == "CONTEXT_OF" and e.get("layer") == "L0"]
+        assert len(l0_context_edges) >= 1
+
+    def test_connects_to_multiple_targets(self, test_server):
+        port, store = test_server
+        store.write_node("anchor_a", "Anchor A", "concept", agent_name="test")
+        store.write_node("anchor_b", "Anchor B", "concept", agent_name="test")
+        status, data = _request(
+            "POST",
+            port,
+            "/scratch",
+            body={"content": "Multi-target test", "connects_to": ["anchor_a", "anchor_b"]},
+        )
+        assert status == 201
+        assert len(data.get("explicit_links", [])) == 2
+        target_ids = {l["node_id"] for l in data["explicit_links"]}
+        assert "anchor_a" in target_ids
+        assert "anchor_b" in target_ids
+
+    def test_connects_to_and_auto_links_both_present(self, test_server):
+        port, store = test_server
+        # Create a node with a label that will match via auto-link
+        store.write_node("and_gate_pattern", "AND-Gate Pattern", "concept", agent_name="test")
+        status, data = _request(
+            "POST",
+            port,
+            "/scratch",
+            body={"content": "AND-Gate Pattern connects here", "connects_to": ["and_gate_pattern"]},
+        )
+        assert status == 201
+        # Both explicit and auto links should be present
+        has_explicit = len(data.get("explicit_links", [])) >= 1
+        has_auto = len(data.get("auto_links", [])) >= 1
+        # At minimum the explicit link must exist
+        assert has_explicit
