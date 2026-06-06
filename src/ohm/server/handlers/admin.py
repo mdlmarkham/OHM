@@ -93,6 +93,7 @@ class AdminHandlerMixin:
 
             batch_size = 3
             delay_ms = 100
+            ollama_url = None  # Default: use localhost Ollama
             if qs.get("batch_size"):
                 try:
                     batch_size = int(qs["batch_size"][0])
@@ -111,6 +112,12 @@ class AdminHandlerMixin:
                         delay_ms = 5000
                 except ValueError:
                     pass
+            if qs.get("ollama_url"):
+                ollama_url = qs["ollama_url"][0]
+                # Validate URL format
+                if not ollama_url.startswith(("http://", "https://")):
+                    self._json_response(400, {"error": "invalid_ollama_url", "message": "ollama_url must start with http:// or https://"})
+                    return
 
             rows = self.current_store.execute("SELECT id, label FROM ohm_nodes WHERE embedding IS NULL AND deleted_at IS NULL")
             total_missing = len(rows)
@@ -185,7 +192,7 @@ class AdminHandlerMixin:
                 if processed >= batch_size:
                     break
                 try:
-                    if update_node_embedding(self.current_store.conn, row["id"]):
+                    if update_node_embedding(self.current_store.conn, row["id"], ollama_url=ollama_url):
                         updated += 1
                     else:
                         failed += 1

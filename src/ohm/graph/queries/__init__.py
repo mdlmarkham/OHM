@@ -3005,6 +3005,7 @@ def update_node_embedding(
     conn: "DuckDBPyConnection",
     node_id: str,
     text: str | None = None,
+    ollama_url: str | None = None,
 ) -> bool:
     """Generate and store an embedding for a node.
 
@@ -3016,6 +3017,9 @@ def update_node_embedding(
         conn: Database connection.
         node_id: ID of the node to update.
         text: Optional custom text to embed. Defaults to node label.
+        ollama_url: Optional Ollama URL for parallel embedding workers.
+            Defaults to localhost. Use for distributed embedding generation
+            across multiple GPU nodes.
 
     Returns:
         True if embedding was updated, False otherwise.
@@ -3034,7 +3038,7 @@ def update_node_embedding(
     if not text:
         return False
 
-    embedding = generate_embedding(text)
+    embedding = generate_embedding(text, ollama_url=ollama_url or "http://localhost:11434")
     if embedding is None:
         return False
 
