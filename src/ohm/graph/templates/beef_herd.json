@@ -32,9 +32,16 @@
     "treatment",
     "value",
     "water",
-    "weather"
+    "weather",
+    "fragment"
   ],
   "layer_edge_types": {
+    "L0": [
+      "CONTEXT_OF",
+      "CONTRADICTS_FRAG",
+      "INSPIRED_BY",
+      "REFINES_FRAG"
+    ],
     "L1": [
       "BELONGS_TO",
       "CAPABLE_OF",
@@ -104,6 +111,7 @@
     ]
   },
   "layer_descriptions": {
+    "L0": "Thinking \u2014 Fragments, hunches, raw associations; unreliable, auto-linked",
     "L1": "Structure \u2014 Herd hierarchy (ranch \u2192 herd \u2192 cohort \u2192 animal), land, infrastructure",
     "L2": "Flow \u2014 Animal movements, feed flows, market transactions, veterinary records",
     "L3": "Knowledge \u2014 AND-gate analysis, drought response, disease patterns, market cycles",

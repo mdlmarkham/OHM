@@ -59,6 +59,7 @@ VALID_NODE_TYPES = frozenset(
         "topic",
         "task",  # Action items with status, priority, assignment
         "decision",  # Decision nodes with utility function (OHM-6mv.2)
+        "fragment",  # L0 thinking fragments (OHM-a5rz.2)
     }
 )
 
@@ -95,7 +96,7 @@ MUST_HAVE_EDGE_NODE_TYPES: frozenset[str] = frozenset(
 # lists `source`, `concept`, `entity` as exempt — they are foundational or
 # external references that legitimately stand alone until linked.
 EXEMPT_CROSS_LINK_NODE_TYPES: frozenset[str] = frozenset(
-    {"source", "concept", "entity"}
+    {"source", "concept", "entity", "fragment"}
 )
 
 VALID_VISIBILITIES = frozenset({"private", "team", "public", "vault"})
@@ -118,6 +119,7 @@ VALID_PROVENANCES = frozenset(
 # ── Edge Types by Layer ─────────────────────────────────────────────────────
 
 LAYER_EDGE_TYPES: dict[str, frozenset[str]] = {
+    "L0": frozenset({"CONTEXT_OF", "INSPIRED_BY", "CONTRADICTS_FRAG", "REFINES_FRAG"}),
     "L1": frozenset({"CONTAINS", "BELONGS_TO", "HAS_COMPONENT", "PART_OF", "CAPABLE_OF", "VALUES", "GOALS", "INTERESTED_IN"}),
     "L2": frozenset(
         {
@@ -244,6 +246,7 @@ VALID_TASK_STATUSES = frozenset(
 # ── Layer Descriptions ──────────────────────────────────────────────────────
 
 LAYER_DESCRIPTIONS: dict[str, str] = {
+    "L0": "Thinking — Fragments, hunches, raw associations; unreliable, auto-linked",
     "L1": "Structure — Fully shared, all agents read/write",
     "L2": "Flow — Shared with attribution",
     "L3": "Knowledge — Agent-owned, challengeable",

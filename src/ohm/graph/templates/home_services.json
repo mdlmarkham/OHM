@@ -23,9 +23,16 @@
     "source",
     "technician",
     "topic",
-    "warranty"
+    "warranty",
+    "fragment"
   ],
   "layer_edge_types": {
+    "L0": [
+      "CONTEXT_OF",
+      "CONTRADICTS_FRAG",
+      "INSPIRED_BY",
+      "REFINES_FRAG"
+    ],
     "L1": [
       "APPLIES_TO",
       "ASSIGNED_TO",
@@ -89,6 +96,7 @@
     ]
   },
   "layer_descriptions": {
+    "L0": "Thinking \u2014 Fragments, hunches, raw associations; unreliable, auto-linked",
     "L1": "Structure \u2014 Shop, technicians, customers, equipment, service areas",
     "L2": "Flow \u2014 Call \u2192 estimate \u2192 dispatch \u2192 en_route \u2192 on_site \u2192 complete \u2192 invoice \u2192 follow_up",
     "L3": "Knowledge \u2014 Scheduling patterns, customer LTV, technician performance, seasonal demand",

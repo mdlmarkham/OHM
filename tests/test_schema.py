@@ -35,7 +35,7 @@ class TestSchemaValidation:
         assert validate_node_type("invalid") is False
 
     def test_valid_layers(self):
-        assert VALID_LAYERS == {"L1", "L2", "L3", "L4"}
+        assert VALID_LAYERS == {"L0", "L1", "L2", "L3", "L4"}
 
     def test_edge_types_by_layer(self):
         assert "CONTAINS" in LAYER_EDGE_TYPES["L1"]
@@ -272,8 +272,8 @@ class TestSchemaConfig:
         assert "EXPECTS" in DEFAULT_SCHEMA.layer_edge_types["L4"]
 
     def test_default_schema_has_base_layers(self):
-        """Default schema should have L1-L4 layers."""
-        assert DEFAULT_SCHEMA.valid_layers == {"L1", "L2", "L3", "L4"}
+        """Default schema should have L0-L4 layers."""
+        assert DEFAULT_SCHEMA.valid_layers == {"L0", "L1", "L2", "L3", "L4"}
 
     def test_default_schema_all_edge_types(self):
         """all_edge_types property should return union of all layer edge types."""

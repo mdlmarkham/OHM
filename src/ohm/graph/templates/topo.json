@@ -38,9 +38,16 @@
     "transformer",
     "value",
     "valve",
-    "vessel"
+    "vessel",
+    "fragment"
   ],
   "layer_edge_types": {
+    "L0": [
+      "CONTEXT_OF",
+      "CONTRADICTS_FRAG",
+      "INSPIRED_BY",
+      "REFINES_FRAG"
+    ],
     "L1": [
       "BELONGS_TO",
       "CAPABLE_OF",
@@ -110,6 +117,7 @@
     ]
   },
   "layer_descriptions": {
+    "L0": "Thinking \u2014 Fragments, hunches, raw associations; unreliable, auto-linked",
     "L1": "Structure \u2014 Physical hierarchy (site \u2192 area \u2192 system \u2192 equipment)",
     "L2": "Flow \u2014 Process flows, material/energy/information paths",
     "L3": "Knowledge \u2014 Operational insights, failure modes, best practices",

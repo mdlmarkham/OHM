@@ -20,9 +20,16 @@
     "task",
     "technology",
     "topic",
-    "value"
+    "value",
+    "fragment"
   ],
   "layer_edge_types": {
+    "L0": [
+      "CONTEXT_OF",
+      "CONTRADICTS_FRAG",
+      "INSPIRED_BY",
+      "REFINES_FRAG"
+    ],
     "L1": [
       "BELONGS_TO",
       "CAPABLE_OF",
@@ -92,6 +99,7 @@
     ]
   },
   "layer_descriptions": {
+    "L0": "Thinking \u2014 Fragments, hunches, raw associations; unreliable, auto-linked",
     "L1": "Structure \u2014 Fully shared, all agents read/write",
     "L2": "Flow \u2014 Shared with attribution",
     "L3": "Knowledge \u2014 Agent-owned, challengeable",
@@ -131,19 +139,34 @@
   "required_integrations": {},
   "optional_integrations": {
     "twilio": {
-      "fields": ["account_sid", "auth_token_ref", "phone_number"],
+      "fields": [
+        "account_sid",
+        "auth_token_ref",
+        "phone_number"
+      ],
       "env_prefix": "TWILIO"
     },
     "sendgrid": {
-      "fields": ["api_key_ref", "from_email"],
+      "fields": [
+        "api_key_ref",
+        "from_email"
+      ],
       "env_prefix": "SENDGRID"
     },
     "slack": {
-      "fields": ["bot_token_ref", "signing_secret_ref", "channel_id"],
+      "fields": [
+        "bot_token_ref",
+        "signing_secret_ref",
+        "channel_id"
+      ],
       "env_prefix": "SLACK"
     },
     "teams": {
-      "fields": ["webhook_url_ref", "app_id", "tenant_id"],
+      "fields": [
+        "webhook_url_ref",
+        "app_id",
+        "tenant_id"
+      ],
       "env_prefix": "TEAMS"
     }
   },
@@ -152,31 +175,51 @@
       "agent_name": "metis",
       "label": "Metis Research Agent",
       "current_focus": "Synthesizing research findings and identifying knowledge gaps",
-      "active_patterns": ["research-synthesis", "knowledge-gap-analysis", "insight-generation"]
+      "active_patterns": [
+        "research-synthesis",
+        "knowledge-gap-analysis",
+        "insight-generation"
+      ]
     },
     {
       "agent_name": "clio",
       "label": "Clio Research Agent",
       "current_focus": "Conducting domain research and evidence gathering",
-      "active_patterns": ["research", "evidence-gathering", "source-verification"]
+      "active_patterns": [
+        "research",
+        "evidence-gathering",
+        "source-verification"
+      ]
     },
     {
       "agent_name": "socrates",
       "label": "Socrates Challenge Agent",
       "current_focus": "Challenging claims and identifying logical weaknesses",
-      "active_patterns": ["critical-analysis", "claim-challenging", "logical-reasoning"]
+      "active_patterns": [
+        "critical-analysis",
+        "claim-challenging",
+        "logical-reasoning"
+      ]
     },
     {
       "agent_name": "hephaestus",
       "label": "Hephaestus Audit Agent",
       "current_focus": "Auditing patterns and detecting anomalies",
-      "active_patterns": ["pattern-detection", "anomaly-detection", "audit-analysis"]
+      "active_patterns": [
+        "pattern-detection",
+        "anomaly-detection",
+        "audit-analysis"
+      ]
     },
     {
       "agent_name": "deepthought",
       "label": "DeepThought Journalist Agent",
       "current_focus": "Documenting observations and synthesizing narrative",
-      "active_patterns": ["observation-recording", "narrative-synthesis", "storytelling"]
+      "active_patterns": [
+        "observation-recording",
+        "narrative-synthesis",
+        "storytelling"
+      ]
     }
   ]
 }

@@ -25,9 +25,16 @@
     "specification",
     "subcontractor",
     "task",
-    "topic"
+    "topic",
+    "fragment"
   ],
   "layer_edge_types": {
+    "L0": [
+      "CONTEXT_OF",
+      "CONTRADICTS_FRAG",
+      "INSPIRED_BY",
+      "REFINES_FRAG"
+    ],
     "L1": [
       "ASSIGNED_TO",
       "BELONGS_TO",
@@ -86,6 +93,7 @@
     ]
   },
   "layer_descriptions": {
+    "L0": "Thinking \u2014 Fragments, hunches, raw associations; unreliable, auto-linked",
     "L1": "Structure \u2014 Project, phases, sites, crews, subcontractors, permits, drawings",
     "L2": "Flow \u2014 Task lifecycle, inspection sequence, material delivery, change orders",
     "L3": "Knowledge \u2014 Productivity patterns, weather impact, rework drivers, schedule risk",
