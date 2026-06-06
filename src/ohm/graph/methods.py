@@ -3399,6 +3399,171 @@ def graph_doctor(conn: DuckDBPyConnection) -> dict[str, Any]:
     }
 
 
+def compute_gap_analysis(
+    conn: DuckDBPyConnection,
+    node_id: str,
+) -> dict[str, Any]:
+    """Gap analysis for a node — surface what the graph doesn't know (OHM-tnwa).
+
+    For a given node, identifies:
+    - How many observations exist vs. an expected minimum
+    - Whether the node is disconnected (orphan/dead-end)
+    - High-confidence edges from this node that lack challenges
+    - Similar nodes (same type/layer) not connected to this node
+
+    Returns a dict with ``gaps`` list, ``strengths`` list, and a
+    ``completeness`` score (0–1).
+    """
+    gaps: list[dict[str, Any]] = []
+    strengths: list[dict[str, Any]] = []
+
+    node = _get_node(conn, node_id)
+    if not node:
+        return {
+            "node_id": node_id,
+            "error": "not_found",
+            "gaps": [],
+            "strengths": [],
+            "completeness": 0.0,
+        }
+
+    node_type = node.get("type", "")
+    node_label = node.get("label", "")
+
+    # 1. Observation gap
+    obs_count = conn.execute(
+        "SELECT COUNT(*) FROM ohm_observations WHERE node_id = ? AND deleted_at IS NULL AND value IS NOT NULL",
+        [node_id],
+    ).fetchone()[0]
+
+    expected_obs = 3
+    if obs_count < expected_obs:
+        gaps.append({
+            "type": "missing_observations",
+            "severity": "high" if obs_count == 0 else "medium",
+            "description": f"Only {obs_count} observation(s) — at least {expected_obs} recommended for reliable analysis",
+            "count": obs_count,
+            "expected": expected_obs,
+        })
+    else:
+        strengths.append({
+            "type": "sufficient_observations",
+            "description": f"{obs_count} observations — sufficient for analysis",
+            "count": obs_count,
+        })
+
+    # 2. Connectivity gap
+    out_edges = conn.execute(
+        "SELECT COUNT(*) FROM ohm_edges WHERE from_node = ? AND deleted_at IS NULL",
+        [node_id],
+    ).fetchone()[0]
+    in_edges = conn.execute(
+        "SELECT COUNT(*) FROM ohm_edges WHERE to_node = ? AND deleted_at IS NULL",
+        [node_id],
+    ).fetchone()[0]
+
+    if out_edges == 0 and in_edges == 0:
+        gaps.append({
+            "type": "orphan_node",
+            "severity": "high",
+            "description": "No edges at all — node is invisible to graph traversal",
+            "incoming": 0,
+            "outgoing": 0,
+        })
+    elif out_edges == 0 and in_edges > 0:
+        gaps.append({
+            "type": "dead_end",
+            "severity": "medium",
+            "description": "Only incoming edges — no outgoing connections",
+            "incoming": in_edges,
+            "outgoing": 0,
+        })
+    else:
+        strengths.append({
+            "type": "connected",
+            "description": f"{out_edges} outgoing, {in_edges} incoming edges",
+            "incoming": in_edges,
+            "outgoing": out_edges,
+        })
+
+    # 3. Unchallenged high-confidence edges
+    unchallenged = conn.execute(
+        """SELECT COUNT(*) FROM ohm_edges e
+           WHERE (e.from_node = ? OR e.to_node = ?)
+             AND e.deleted_at IS NULL
+             AND e.confidence >= 0.85
+             AND e.layer IN ('L3', 'L4')
+             AND NOT EXISTS (
+                 SELECT 1 FROM ohm_edges c
+                 WHERE c.from_node = e.id
+                   AND c.edge_type = 'CHALLENGED_BY'
+                   AND c.deleted_at IS NULL
+             )""",
+        [node_id, node_id],
+    ).fetchone()[0]
+
+    if unchallenged > 0:
+        gaps.append({
+            "type": "unchallenged_high_confidence",
+            "severity": "medium",
+            "description": f"{unchallenged} high-confidence edge(s) from this node have never been challenged",
+            "count": unchallenged,
+        })
+    else:
+        strengths.append({
+            "type": "edges_challenged",
+            "description": "All high-confidence edges have been challenged or don't exist",
+        })
+
+    # 4. Similar disconnected nodes (same type, not connected)
+    similar_unconnected = conn.execute(
+        """SELECT COUNT(*) FROM ohm_nodes n
+           WHERE n.type = ? AND n.id != ? AND n.deleted_at IS NULL
+             AND NOT EXISTS (
+                 SELECT 1 FROM ohm_edges e
+                 WHERE (e.from_node = n.id AND e.to_node = ?)
+                    OR (e.from_node = ? AND e.to_node = n.id)
+                 AND e.deleted_at IS NULL
+             )
+           LIMIT 5""",
+        [node_type, node_id, node_id, node_id],
+    ).fetchone()[0]
+
+    if similar_unconnected > 0:
+        gaps.append({
+            "type": "similar_not_connected",
+            "severity": "low",
+            "description": f"{similar_unconnected} other '{node_type}' nodes exist without connection to this node",
+            "count": similar_unconnected,
+        })
+
+    # 5. No outgoing edges for specific types (pattern/idea/decision should have edges)
+    if node_type in ("pattern", "idea", "decision") and out_edges == 0:
+        gaps.append({
+            "type": "derived_node_no_output",
+            "severity": "high",
+            "description": f"A '{node_type}' node with no outgoing edges — its conclusions don't flow anywhere",
+        })
+
+    # Completeness score
+    high_gaps = sum(1 for g in gaps if g.get("severity") == "high")
+    med_gaps = sum(1 for g in gaps if g.get("severity") == "medium")
+    low_gaps = sum(1 for g in gaps if g.get("severity") == "low")
+    total_penalty = high_gaps * 0.3 + med_gaps * 0.15 + low_gaps * 0.05
+    completeness = round(max(0.0, min(1.0, 1.0 - total_penalty)), 4)
+
+    return {
+        "node_id": node_id,
+        "label": node_label,
+        "type": node_type,
+        "completeness": completeness,
+        "gaps": sorted(gaps, key=lambda g: {"high": 0, "medium": 1, "low": 2}.get(g.get("severity"), 3)),
+        "strengths": strengths,
+        "gap_count": len(gaps),
+        "strength_count": len(strengths),
+    }
+
+
 def _get_node(conn: DuckDBPyConnection, node_id: str) -> dict[str, Any] | None:
     rows = conn.execute(
         "SELECT id, label, type, confidence, utility_scale, utility_usd_per_day FROM ohm_nodes WHERE id = ?",

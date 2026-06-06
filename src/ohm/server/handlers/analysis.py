@@ -296,6 +296,25 @@ class AnalysisHandlerMixin:
             return
         self._json_response(200, result)
 
+    def _get_gap(self, path: str, qs: dict) -> None:
+        """GET /gap/{node_id} — gap analysis for a node (OHM-tnwa)."""
+        node_id = path.strip("/")
+        if "/" in node_id:
+            node_id = node_id.split("/")[-1]
+        if not node_id or node_id == "gap":
+            self._json_response(400, {"error": "missing_parameter", "message": "/gap/{node_id} required"})
+            return
+        from ohm.validation import validate_identifier
+        node_id = validate_identifier(node_id, name="node_id")
+        from ohm.methods import compute_gap_analysis
+
+        try:
+            result = compute_gap_analysis(self.current_store.conn, node_id)
+        except Exception as e:
+            self._json_response(500, {"error": "internal_error", "message": f"Gap analysis failed: {e}"})
+            return
+        self._json_response(200, result)
+
     def _get_suggest(self, path: str, qs: dict) -> None:
         """GET /suggest — suggest connections."""
         from ohm.methods import suggest_connections
