@@ -688,6 +688,214 @@ class AnalysisHandlerMixin:
             "recent_activity": recent,
             "quick_reference": quick_ref,
         })
+
+    def _get_orient(self, path: str, qs: dict) -> None:
+        """GET /orient?agent=NAME&hours=N -- Context-recovery packet for agents who've lost context.
+
+        Unlike /welcome (orientation for new agents), /orient is designed for agents
+        reconnecting after context loss. It answers three questions:
+        1. "Where was I?" -- Agent's last activity, in-progress work, recent contributions
+        2. "What did I miss?" -- Changes since last activity, new nodes in agent's domains
+        3. "What should I do next?" -- Orphans, unconnected nodes, tasks, nudges
+
+        The response is deliberately terse -- agents with lost context need concise,
+        actionable information, not a full graph dump.
+
+        Query params:
+            agent: Agent name (required)
+            hours: Hours of context to recover (default: 24, max: 168/1 week)
+        """
+        from ohm.graph.methods import find_islands
+
+        agent = qs.get("agent", [None])[0]
+        if not agent:
+            self._json_response(400, {"error": "agent parameter required", "message": "GET /orient?agent=NAME&hours=N"})
+            return
+
+        try:
+            hours = min(int(qs.get("hours", ["24"])[0]), 168)
+        except (ValueError, IndexError):
+            hours = 24
+
+        conn = self.current_store.read_conn
+
+        # 1. Where was I?
+        last_activity = conn.execute(
+            "SELECT MAX(la) FROM ("
+            "SELECT created_at AS la FROM ohm_nodes WHERE created_by = ? UNION ALL "
+            "SELECT created_at AS la FROM ohm_edges WHERE created_by = ? UNION ALL "
+            "SELECT created_at AS la FROM ohm_observations WHERE created_by = ?"
+            ")",
+            [agent, agent, agent],
+        ).fetchone()[0]
+
+        # Agent's recent contributions
+        recent_nodes = conn.execute(
+            "SELECT id, label, type, created_at FROM ohm_nodes "
+            "WHERE created_by = ? AND deleted_at IS NULL AND type != 'fragment' "
+            "ORDER BY created_at DESC LIMIT 10",
+            [agent],
+        ).fetchall()
+
+        # In-progress work: nodes with 0-1 edges (likely unfinished)
+        sparse_nodes = conn.execute(
+            "SELECT n.id, n.label, n.type, n.confidence, "
+            "(SELECT COUNT(*) FROM ohm_edges e WHERE (e.from_node = n.id OR e.to_node = n.id) AND e.deleted_at IS NULL) as edge_count "
+            "FROM ohm_nodes n "
+            "WHERE n.created_by = ? AND n.deleted_at IS NULL AND n.type != 'fragment' "
+            "ORDER BY n.confidence DESC NULLS LAST LIMIT 10",
+            [agent],
+        ).fetchall()
+        sparse = [
+            {"id": r[0], "label": r[1], "type": r[2], "confidence": r[3], "edges": r[4]}
+            for r in sparse_nodes
+            if r[4] <= 1
+        ]
+
+        # 2. What did I miss?
+        since = last_activity or (
+            conn.execute("SELECT MIN(created_at) FROM ohm_nodes WHERE deleted_at IS NULL").fetchone()[0]
+        )
+
+        # New nodes by OTHER agents since agent's last activity
+        new_by_others = conn.execute(
+            "SELECT id, label, type, created_by, created_at FROM ohm_nodes "
+            "WHERE deleted_at IS NULL AND type != 'fragment' AND created_by != ? "
+            "AND created_at > ?::TIMESTAMP "
+            "ORDER BY created_at DESC LIMIT 15",
+            [agent, since],
+        ).fetchall()
+
+        # Cross-agent edges: edges connecting TO agent's nodes
+        cross_edges = conn.execute(
+            "SELECT e.id, e.from_node, e.to_node, e.edge_type, e.created_by, e.created_at "
+            "FROM ohm_edges e "
+            "WHERE e.deleted_at IS NULL AND e.created_by != ? "
+            "AND (e.from_node IN (SELECT id FROM ohm_nodes WHERE created_by = ? AND deleted_at IS NULL) "
+            "   OR e.to_node IN (SELECT id FROM ohm_nodes WHERE created_by = ? AND deleted_at IS NULL)) "
+            "ORDER BY e.created_at DESC LIMIT 15",
+            [agent, agent, agent],
+        ).fetchall()
+
+        # 3. What should I do next?
+        agent_orphan_count = conn.execute(
+            "SELECT COUNT(*) FROM ohm_nodes n "
+            "WHERE n.created_by = ? AND n.deleted_at IS NULL AND n.type != 'fragment' "
+            "AND n.id NOT IN (SELECT from_node FROM ohm_edges WHERE deleted_at IS NULL) "
+            "AND n.id NOT IN (SELECT to_node FROM ohm_edges WHERE deleted_at IS NULL)",
+            [agent],
+        ).fetchone()[0]
+
+        agent_orphan_list = conn.execute(
+            "SELECT n.id, n.label, n.type, n.confidence FROM ohm_nodes n "
+            "WHERE n.created_by = ? AND n.deleted_at IS NULL AND n.type != 'fragment' "
+            "AND n.id NOT IN (SELECT from_node FROM ohm_edges WHERE deleted_at IS NULL) "
+            "AND n.id NOT IN (SELECT to_node FROM ohm_edges WHERE deleted_at IS NULL) "
+            "ORDER BY n.confidence DESC NULLS LAST LIMIT 5",
+            [agent],
+        ).fetchall()
+
+        # Islands that need bridges (agent has nodes in them)
+        islands = find_islands(conn, min_size=2, max_islands=20)
+        agent_islands = []
+        for island in islands.get("islands", []):
+            if island["size"] < islands.get("main_graph_size", 0):
+                # Check if agent has nodes in this island
+                agent_in_island = any(
+                    n.get("created_by") == agent for n in island.get("nodes", [])
+                    if isinstance(n, dict)
+                )
+                if agent_in_island:
+                    agent_islands.append({
+                        "id": island["id"],
+                        "size": island["size"],
+                        "bridge_potential": island.get("internal_edges", 0),
+                    })
+
+        # Open tasks assigned to this agent
+        tasks = []
+        try:
+            tasks_raw = conn.execute(
+                "SELECT id, label, priority, status, due_date FROM ohm_tasks "
+                "WHERE assigned_to = ? AND status IN ('open', 'in_progress') "
+                "ORDER BY priority DESC LIMIT 5",
+                [agent],
+            ).fetchall()
+            tasks = [
+                {"id": r[0], "label": r[1], "priority": r[2], "status": r[3], "due": str(r[4]) if r[4] else None}
+                for r in tasks_raw
+            ]
+        except Exception:
+            pass  # Tasks table may not exist
+
+        # Connectivity nudge
+        total_agent_nodes = conn.execute(
+            "SELECT COUNT(*) FROM ohm_nodes WHERE created_by = ? AND deleted_at IS NULL AND type != 'fragment'",
+            [agent],
+        ).fetchone()[0]
+        total_agent_edges = conn.execute(
+            "SELECT COUNT(*) FROM ohm_edges WHERE created_by = ? AND deleted_at IS NULL",
+            [agent],
+        ).fetchone()[0]
+        edges_per_node = total_agent_edges / max(total_agent_nodes, 1)
+        connectivity = "good" if edges_per_node >= 1.5 else "sparse" if edges_per_node >= 0.5 else "disconnected"
+        nudge = None
+        if connectivity == "disconnected":
+            nudge = f"Your {total_agent_nodes} nodes have only {total_agent_edges} edges ({edges_per_node:.1f} edges/node). Consider connecting orphans to the graph."
+        elif connectivity == "sparse":
+            nudge = f"Your density is {edges_per_node:.1f} edges/node (below 1.5). Consider adding edges to your sparsely-connected nodes."
+
+        # Time-since formatting
+        time_since = None
+        if last_activity:
+            from datetime import datetime, timezone
+            delta = datetime.now(timezone.utc) - last_activity
+            hours_ago = delta.total_seconds() / 3600
+            if hours_ago < 1:
+                time_since = f"{int(delta.total_seconds() / 60)} minutes ago"
+            elif hours_ago < 24:
+                time_since = f"{int(hours_ago)} hours ago"
+            else:
+                time_since = f"{int(hours_ago / 24)} days ago"
+
+        self._json_response(200, {
+            "orient": f"Welcome back, {agent}. Here's what you missed.",
+            "where_was_i": {
+                "last_activity": last_activity.isoformat() if last_activity else None,
+                "time_since": time_since,
+                "recent_contributions": [
+                    {"id": r[0], "label": r[1], "type": r[2], "created_at": str(r[3])}
+                    for r in recent_nodes
+                ],
+                "in_progress": sparse[:5],
+            },
+            "what_did_i_miss": {
+                "since": since.isoformat() if hasattr(since, 'isoformat') else str(since),
+                "new_nodes_by_others": [
+                    {"id": r[0], "label": r[1], "type": r[2], "created_by": r[3], "created_at": str(r[4])}
+                    for r in new_by_others
+                ],
+                "cross_agent_edges": [
+                    {"id": r[0], "from": r[1], "to": r[2], "type": r[3], "created_by": r[4], "created_at": str(r[5])}
+                    for r in cross_edges
+                ],
+                "new_node_count": len(new_by_others),
+                "cross_edge_count": len(cross_edges),
+            },
+            "what_next": {
+                "orphan_count": agent_orphan_count,
+                "your_orphans": [
+                    {"id": r[0], "label": r[1], "type": r[2], "confidence": r[3]}
+                    for r in agent_orphan_list
+                ],
+                "islands_needing_bridges": agent_islands[:3],
+                "tasks": tasks,
+                "connectivity": connectivity,
+                "edges_per_node": round(edges_per_node, 1),
+                "nudge": nudge,
+            },
+        })
+
     def _get_contributions(self, path: str, qs: dict) -> None:
         """GET /contributions?agent=NAME — what did this agent create?
 
