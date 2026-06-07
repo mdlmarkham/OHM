@@ -790,6 +790,7 @@ class GraphHandlerMixin:
                 created_by=agent,
                 tags=body.get("tags"),
                 connects_to=body.get("connects_to"),
+                metadata=body.get("metadata"),
             )
         except ValueError as e:
             self._json_response(400, {"error": str(e)})
