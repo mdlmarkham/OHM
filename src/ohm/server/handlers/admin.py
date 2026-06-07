@@ -1121,3 +1121,43 @@ class AdminHandlerMixin:
             "note": "Run with enforce_layer_gates=true in config for strict enforcement",
         }
         self._json_response(200, response)
+
+    # ── OHM-8fdb: Self-Calibration Endpoints ─────────────────────────────
+
+    def _get_admin_learned_half_lives(self, path: str, qs: dict) -> None:
+        """GET /admin/learned-half-lives — learned half-lives from supersession data.
+
+        OHM-8fdb Feature 5: Returns learned half-lives per obs_type computed from
+        supersession history. When n_samples >= 5, the learned half-life replaces
+        the default. Shows comparison table with default vs learned values.
+        """
+        from ohm.graph.calibration import all_learned_half_lives
+
+        conn = self.current_store.conn
+        result = all_learned_half_lives(conn)
+
+        # Compute summary
+        using_learned = sum(1 for v in result.values() if not v["using_default"])
+        using_default = sum(1 for v in result.values() if v["using_default"])
+
+        self._json_response(200, {
+            "learned_half_lives": result,
+            "summary": {
+                "total_obs_types": len(result),
+                "using_learned": using_learned,
+                "using_default": using_default,
+                "min_samples_required": 5,
+            },
+        })
+
+    def _get_source_reliability_agent(self, path: str, qs: dict, agent_id: str) -> None:
+        """GET /source-reliability/{agent_id} — effective reliability with authority decay.
+
+        OHM-8fdb Feature 6: Returns p_accurate and effective_reliability (decayed
+        toward community prior) for a specific agent.
+        """
+        from ohm.graph.calibration import effective_reliability
+
+        conn = self.current_store.conn
+        result = effective_reliability(conn, agent_id)
+        self._json_response(200, result)

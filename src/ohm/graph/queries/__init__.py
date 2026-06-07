@@ -662,6 +662,11 @@ def query_source_reliability(
     p_accurate = round(accurate / total, 4) if total > 0 else None
     fpr = round(false_positives / total, 4) if total > 0 else None
 
+    # OHM-8fdb: Add authority decay (effective reliability)
+    from ohm.graph.calibration import effective_reliability
+
+    reliability_data = effective_reliability(conn, source_agent)
+
     return {
         "source_agent": source_agent,
         "total_outcomes": total,
@@ -670,6 +675,12 @@ def query_source_reliability(
         "p_accurate": p_accurate,
         "false_positive_rate": fpr,
         "low_confidence_warning": total < 5,
+        # OHM-8fdb: authority decay fields
+        "effective_reliability": reliability_data["effective_reliability"],
+        "days_since_verification": reliability_data["days_since_verification"],
+        "community_prior": reliability_data["community_prior"],
+        "decay_lambda": reliability_data["decay_lambda"],
+        "last_outcome_at": reliability_data["last_outcome_at"],
     }
 
 
