@@ -889,7 +889,7 @@ class GraphHandlerMixin:
         # graphs. If the budget is exceeded, the response omits suggestions (not an error).
         if result.get("created", True):
             import concurrent.futures
-            from ohm.server.suggestions import generate_suggestions, generate_connectivity_nudge
+            from ohm.server.suggestions import generate_suggestions, generate_connectivity_nudge, generate_island_nudge
 
             def _suggestions_and_nudge():
                 sugg = generate_suggestions(
@@ -902,15 +902,18 @@ class GraphHandlerMixin:
                     has_edges=bool(body.get("connects_to")),
                 )
                 nudge = generate_connectivity_nudge(self.current_store, agent)
-                return sugg, nudge
+                island = generate_island_nudge(self.current_store, agent)
+                return sugg, nudge, island
 
             try:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pool:
                     future = _pool.submit(_suggestions_and_nudge)
-                    suggestions, nudge = future.result(timeout=0.3)
+                    suggestions, nudge, island = future.result(timeout=0.3)
                 result["suggestions"] = suggestions
                 if nudge:
                     result["connectivity_warning"] = nudge["connectivity_warning"]
+                if island:
+                    result["island_warning"] = island["island_warning"]
             except concurrent.futures.TimeoutError:
                 logger.debug("Suggestion budget exceeded (>300ms), skipping for this write")
             except Exception as e:
@@ -2074,6 +2077,7 @@ class GraphHandlerMixin:
     def _post_heartbeat(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /heartbeat — agent heartbeat with sync."""
         from ohm.methods import agent_heartbeat
+        from ohm.server.suggestions import generate_island_nudge
 
         result = agent_heartbeat(
             self.current_store.conn,
@@ -2082,6 +2086,15 @@ class GraphHandlerMixin:
         )
         sync_result = self.current_store.sync_heartbeat()
         result["ducklake_sync"] = sync_result
+
+        # OHM-tr71.4: Island isolation nudge in heartbeat
+        try:
+            island = generate_island_nudge(self.current_store, agent)
+            if island:
+                result["island_warning"] = island["island_warning"]
+        except Exception as exc:
+            logger.debug("Heartbeat island nudge failed: %s", exc)
+
         self._json_response(200, result)
 
     def _post_deduplicate(self, path: str, qs: dict, body: dict, agent: str) -> None:

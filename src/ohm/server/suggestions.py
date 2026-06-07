@@ -13,9 +13,15 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Per-agent island nudge cache: {agent_name: (timestamp, result_or_None)}
+# Prevents recomputing island detection on every write (OHM-tr71.4).
+_island_nudge_cache: dict[str, tuple[float, dict[str, Any] | None]] = {}
+_ISLAND_CACHE_TTL = 300  # 5 minutes
 
 # Maximum suggestions per category
 MAX_SIMILAR = 3
@@ -450,3 +456,124 @@ def generate_connectivity_nudge(
     except Exception as e:
         logger.debug(f"Connectivity nudge failed: {e}")
         return None
+
+
+def generate_island_nudge(
+    store: Any,
+    agent: str,
+    min_island_size: int = 20,
+    min_cross_domain_edges: int = 2,
+) -> dict[str, Any] | None:
+    """Generate an island isolation warning for agents with large disconnected domains.
+
+    OHM-tr71.4: When an agent's island (disconnected component) has more than
+    min_island_size nodes and fewer than min_cross_domain_edges connections to
+    other islands, include an island_warning in their write/heartbeat response.
+
+    Results are cached per-agent with a 5-minute TTL to avoid recomputing
+    island detection (Union-Find over the full graph) on every write.
+
+    Returns None if no nudge is needed.
+    """
+    if not agent:
+        return None
+
+    from ohm.methods import find_islands
+
+    # Check cache
+    now = time.time()
+    cached = _island_nudge_cache.get(agent)
+    if cached and (now - cached[0]) < _ISLAND_CACHE_TTL:
+        return cached[1]
+
+    try:
+        island_data = find_islands(
+            store.conn,
+            exclude_fragments=True,
+            min_size=2,
+            max_islands=50,
+        )
+    except Exception as exc:
+        logger.debug("Island nudge failed for %s: %s", agent, exc)
+        _island_nudge_cache[agent] = (now, None)
+        return None
+
+    # Find which island (if any) this agent belongs to
+    agent_node_ids = set()
+    try:
+        rows = store.conn.execute(
+            "SELECT id FROM ohm_nodes WHERE created_by = ? AND deleted_at IS NULL AND type != 'fragment'",
+            [agent],
+        ).fetchall()
+        agent_node_ids = {r[0] for r in rows}
+    except Exception as exc:
+        logger.debug("Island nudge: failed to get agent nodes for %s: %s", agent, exc)
+        _island_nudge_cache[agent] = (now, None)
+        return None
+
+    if len(agent_node_ids) < min_island_size:
+        _island_nudge_cache[agent] = (now, None)
+        return None
+
+    # Check if the agent's nodes form part of an isolated island
+    agent_island = None
+    for island in island_data.get("islands", []):
+        island_node_ids = {n["id"] for n in island.get("nodes", [])}
+        overlap = island_node_ids & agent_node_ids
+        if len(overlap) >= min(min_island_size, len(agent_node_ids) // 2):
+            agent_island = island
+            break
+
+    if not agent_island:
+        _island_nudge_cache[agent] = (now, None)
+        return None
+
+    # Check cross-domain edges: how many edges connect this island to others?
+    island_id_set = {n["id"] for n in agent_island.get("nodes", [])}
+    try:
+        cross_edges = store.conn.execute(
+            """
+            SELECT COUNT(*) FROM ohm_edges
+            WHERE deleted_at IS NULL
+            AND (
+                (from_node IN (SELECT unnest(?::VARCHAR[])) AND to_node NOT IN (SELECT unnest(?::VARCHAR[])))
+                OR
+                (to_node IN (SELECT unnest(?::VARCHAR[])) AND from_node NOT IN (SELECT unnest(?::VARCHAR[])))
+            )
+            """,
+            [list(island_id_set), list(island_id_set)],
+        ).fetchone()[0]
+    except Exception as exc:
+        logger.debug("Island nudge: cross-edge count failed for %s: %s", agent, exc)
+        _island_nudge_cache[agent] = (now, None)
+        return None
+
+    if cross_edges >= min_cross_domain_edges:
+        _island_nudge_cache[agent] = (now, None)
+        return None
+
+    warning = {
+        "island_warning": {
+            "agent_domain_size": len(agent_node_ids),
+            "island_size": agent_island["size"],
+            "cross_domain_edges": cross_edges,
+            "min_cross_domain_edges": min_cross_domain_edges,
+            "message": (
+                f"Your domain has {len(agent_node_ids)} nodes but only {cross_edges} connection(s) "
+                f"to other domains (minimum recommended: {min_cross_domain_edges}). "
+                f"Consider connecting your work to the broader graph."
+            ),
+            "suggestion": "Use GET /islands to see disconnected components and GET /suggest?node_id=<id> for bridging candidates.",
+        }
+    }
+    _island_nudge_cache[agent] = (now, warning)
+    return warning
+
+
+def clear_island_nudge_cache(agent: str | None = None) -> None:
+    """Clear the island nudge cache for testing or config changes."""
+    global _island_nudge_cache
+    if agent:
+        _island_nudge_cache.pop(agent, None)
+    else:
+        _island_nudge_cache = {}
