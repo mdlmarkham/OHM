@@ -28,7 +28,8 @@ OHM-24g9 (OPEN) ── Phase 4: Weibull Generalization (continuous shape paramet
 | ID | Status | Title | Notes |
 |----|--------|-------|-------|
 | OHM-v40d | OPEN | Config bug: sync_interval_seconds nesting | 10-line fix in server.py. Workaround in place (top-level config). Ready for Hephaestus. |
-| OHM-8fdb | OPEN | Phase 3: Self-Calibration | Full spec in Beads. Dependent on Phase 1 (shipped). 10-14h. |
+| OHM-3ngi | OPEN | Layer Promotion Constraints (ADR-022) | SHACL-like write gates for L0→L1→L2→L3→L4. Full spec in ADR-022. 18-25h. |
+| OHM-8fdb | OPEN | Phase 3: Self-Calibration | Learned half-lives + authority decay. Depends on xdd4 (shipped) + 3ngi. 10-14h. |
 | OHM-aznh | OPEN | INGEST: Shell Hook Architecture | Staged pipeline for ingestion. |
 | OHM-tr71 | OPEN | Proactive Discoverability | Islands, suggestions, nudges. |
 | OHM-a5rz | OPEN | L0 Thinking Layer | Fragments, scratch(), auto-linking. |
@@ -71,7 +72,7 @@ SHIPPED:
 
 ACTIVE:
   OHM-v40d ──→ Code fix for sync_interval_seconds (standalone, 1h)
-  OHM-8fdb (Phase 3) ──→ OHM-24g9 (Phase 4)
+  OHM-xdd4 (shipped) ──→ OHM-wuki (shipped) ──→ OHM-3ngi (ADR-022: Layer Gates) ──→ OHM-8fdb (Phase 3) ──→ OHM-24g9 (Phase 4)
   OHM-aznh ──→ INGEST pipeline
   OHM-tr71 ──→ Proactive discoverability
   OHM-a5rz ──→ L0 Thinking Layer
@@ -91,7 +92,8 @@ ACTIVE:
 ## Next Actions
 
 1. **OHM-v40d** → Send to Hephaestus as focused PR (10-line fix in server.py)
-2. **OHM-8fdb** → Queue for Claude (Phase 3, full spec in Beads)
-3. **OHM-24g9** → Wait for Phase 3 validation in production
-4. **OHM-wdrg.3/.7** → Continue source node backfill
-5. **OHM-tr71.4** → Island detection in heartbeat (partially shipped in PR #627)
+2. **OHM-3ngi** → Queue for Claude/Hephaestus (ADR-022, full spec in docs/adr/)
+3. **OHM-8fdb** → Queue after OHM-3ngi (Phase 3, depends on layer gates)
+4. **OHM-24g9** → Wait for Phase 3 validation in production
+5. **OHM-wdrg.3/.7** → Continue source node backfill
+6. **OHM-tr71.4** → Island detection in heartbeat (partially shipped in PR #627)
