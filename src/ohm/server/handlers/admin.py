@@ -295,7 +295,7 @@ class AdminHandlerMixin:
             self._json_response(500, {"error": "edge_layer_fix_failed", "message": str(e)})
 
     def _post_admin_observation_source_urls(self, path: str, qs: dict, body: dict, agent: str) -> None:
-        """POST /admin/observation-source-urls — bulk update source_url on observations (ADR-013 backfill).
+        """POST /admin/observation-source-urls — bulk update source_url on observations (ADR-015 backfill).
 
         Body: {"updates": [{"observation_id": "<uuid>", "source_url": "https://..."}, ...]}
         Max 200 updates per call.
@@ -343,10 +343,10 @@ class AdminHandlerMixin:
         })
 
     def _post_admin_source_node_urls(self, path: str, qs: dict, body: dict, agent: str) -> None:
-        """POST /admin/source-node-urls — bulk update url on source nodes (ADR-013 backfill).
+        """POST /admin/source-node-urls — bulk update url on source nodes (ADR-015 backfill).
 
         Source nodes are L2-immutable via regular PATCH, so this admin endpoint
-        is needed to backfill URLs on source nodes created before ADR-013 enforcement.
+        is needed to backfill URLs on source nodes created before ADR-015 enforcement.
 
         Body: {"updates": [{"node_id": "source-reuters", "url": "https://..."}, ...]}
         Max 200 updates per call.

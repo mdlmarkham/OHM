@@ -645,6 +645,7 @@ class OhmStore:
         metadata: Optional[dict] = None,
         priority: Optional[str] = None,
         url: Optional[str] = None,
+        source_url: Optional[str] = None,
         task_status: Optional[str] = None,
         assigned_to: Optional[str] = None,
         due_date: Optional[str] = None,
@@ -680,6 +681,9 @@ class OhmStore:
         tags_json = json.dumps(tag_list) if tag_list else None
         alternatives_json = json.dumps(action_alternatives) if action_alternatives else None
         now = self._now()
+        # ADR-015: source_url is an alias for url (backward compat)
+        if source_url is not None and url is None:
+            url = source_url
 
         # Check if node exists (active)
         existing = self.get_node(id)

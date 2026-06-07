@@ -327,7 +327,7 @@ class GraphHandlerMixin:
             node_ids.add(e["from_node"])
             node_ids.add(e["to_node"])
 
-        # ADR-013: Add citation_status to L3 edges
+        # ADR-015: Add citation_status to L3 edges (Source Citation Architecture)
         # Check if any REFERENCES edges exist in the neighborhood for L3 edge anchoring
         ref_from_nodes = set()
         for e in edges:
@@ -801,7 +801,7 @@ class GraphHandlerMixin:
 
     def _post_node(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /node — create or upsert a node."""
-        # ADR-013 source_url enforcement migrated to built-in pre_ingest hook
+        # ADR-015 source_url enforcement migrated to built-in pre_ingest hook
         # (python:ohm.hooks_builtin.source_url_required). See OHM-aznh.11.
 
         create_only = qs.get("create_only", ["false"])[0].lower() in ("true", "1", "yes")
@@ -862,7 +862,7 @@ class GraphHandlerMixin:
             tags=body.get("tags"),
             metadata=body.get("metadata"),
             priority=body.get("priority"),
-            url=body.get("url"),
+            url=body.get("source_url", body.get("url")),
             task_status=body.get("task_status"),
             assigned_to=body.get("assigned_to"),
             due_date=body.get("due_date"),

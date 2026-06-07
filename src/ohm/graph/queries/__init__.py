@@ -166,7 +166,20 @@ def query_neighborhood(
     """
 
     result = conn.execute(query, params)
-    return _rows_to_dicts(result)
+    edges = _rows_to_dicts(result)
+
+    # ADR-015: Add citation_status to L3 edges (Source Citation Architecture)
+    ref_from_nodes = set()
+    for e in edges:
+        if e.get("edge_type") == "REFERENCES" or e.get("type") == "REFERENCES":
+            ref_from_nodes.add(e.get("from_node"))
+    for e in edges:
+        layer_val = e.get("layer")
+        if layer_val == "L3":
+            from_node = e.get("from_node", "")
+            e["citation_status"] = "verified" if from_node in ref_from_nodes else "unverified"
+
+    return edges
 
 
 # ── Path ────────────────────────────────────────────────────────────────────
@@ -874,6 +887,7 @@ def create_node(
     confidence: float = 1.0,
     priority: str | None = None,
     url: str | None = None,
+    source_url: str | None = None,
     tags: list[str] | None = None,
     metadata: dict | None = None,
     utility_scale: float | None = None,
@@ -886,6 +900,9 @@ def create_node(
     """Create a new node and return its full record.
 
     Args:
+        source_url: Alias for url (ADR-015). Stored in the `url` column.
+            Accepting both names for backward compatibility with agents
+            sending "source_url" for source nodes.
         tags: Optional tags for categorization and discovery.
         metadata: Optional structured key-value data (JSON dict).
         connects_to: Optional list of existing node ids this node will be linked
@@ -910,6 +927,10 @@ def create_node(
         raise ValueError(f"Invalid priority: {priority}. Must be one of: {sorted(VALID_PRIORITY)}")
     if utility_scale is not None and not (0.0 <= utility_scale <= 1.0):
         raise ValueError(f"utility_scale must be between 0 and 1, got {utility_scale}")
+
+    # ADR-015: source_url is an alias for url (backward compat)
+    if source_url is not None and url is None:
+        url = source_url
 
     # Validate connects_to references: each must be an existing node id.
     if connects_to is not None:
