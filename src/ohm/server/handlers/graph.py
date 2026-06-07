@@ -337,18 +337,29 @@ class GraphHandlerMixin:
             list(node_ids),
         )
 
-        # OHM-xdd4: attach active observations filtered by effective confidence
+        # OHM-xdd4/OHM-wuki: attach observations + chain validity when min_validity set
         response: dict = {"nodes": node_rows, "edges": edges}
         if min_validity_raw is not None:
-            from ohm.graph.decay import get_active_observations
+            from ohm.graph.decay import get_active_observations, chain_validity
             min_validity = float(min_validity_raw)
             obs_by_node: dict = {}
+            chain_validity_by_node: dict = {}
             for nid in node_ids:
                 obs_by_node[nid] = get_active_observations(
                     self.current_store.conn, nid, min_validity=min_validity
                 )
+                # OHM-wuki: for synthesis (concept) nodes, compute chain validity
+                cv = chain_validity(self.current_store.conn, nid)
+                if cv["n_cluster_nodes"] > 0:
+                    chain_validity_by_node[nid] = {
+                        "weakest_link": cv["weakest_link"],
+                        "chain_validity": cv["chain_validity"],
+                        "n_observations": cv["n_observations"],
+                    }
             response["observations_by_node"] = obs_by_node
             response["min_validity"] = min_validity
+            if chain_validity_by_node:
+                response["chain_validity_by_node"] = chain_validity_by_node
 
         self._json_response(200, response)
 
@@ -1424,6 +1435,49 @@ class GraphHandlerMixin:
 
         else:
             self._json_response(404, {"error": f"Unknown sub-resource: {sub}"})
+
+    def _get_synthesis_validity(self, path: str, qs: dict) -> None:
+        """GET /synthesis/{id}/validity — OHM-wuki chain validity for a synthesis node."""
+        from ohm.graph.decay import chain_validity
+
+        # path: /synthesis/{id}/validity
+        parts = path.strip("/").split("/")
+        if len(parts) < 3 or parts[2] != "validity":
+            self._json_response(404, {"error": "Not found — expected /synthesis/{id}/validity"})
+            return
+
+        synthesis_id = parts[1]
+        from ohm.validation import validate_identifier
+        synthesis_id = validate_identifier(synthesis_id, name="synthesis_id")
+
+        # Parse optional ?at= and ?threshold= query params
+        at_param = qs.get("at", [None])[0]
+        t = None
+        if at_param:
+            from datetime import datetime, timezone
+            try:
+                t = datetime.fromisoformat(at_param.replace("Z", "+00:00"))
+                if t.tzinfo is None:
+                    t = t.replace(tzinfo=timezone.utc)
+            except ValueError:
+                self._json_response(400, {"error": f"Invalid 'at' timestamp: {at_param}"})
+                return
+
+        threshold_raw = qs.get("threshold", [None])[0]
+        threshold = float(threshold_raw) if threshold_raw is not None else 0.1
+
+        # Verify the synthesis node exists
+        node = self.current_store.execute_one(
+            "SELECT id, label, type FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+            [synthesis_id],
+        )
+        if not node:
+            self._json_response(404, {"error": f"Node not found: {synthesis_id}"})
+            return
+
+        result = chain_validity(self.current_store.conn, synthesis_id, t=t, threshold=threshold)
+        result["node_label"] = node.get("label")
+        self._json_response(200, result)
 
     def _post_observation_supersede(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /observation/{new_id}/supersede — mark old obs as superseded by new (OHM-xdd4)."""

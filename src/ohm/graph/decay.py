@@ -304,3 +304,134 @@ def get_active_observations(
             enriched.append(row)
 
     return enriched
+
+
+# ── Chain Validity (OHM-wuki) ─────────────────────────────────────────────────
+
+
+def chain_validity(
+    conn: "DuckDBPyConnection",
+    synthesis_id: str,
+    *,
+    t: datetime | None = None,
+    threshold: float = 0.1,
+) -> dict[str, Any]:
+    """Compute STL weakest-link chain validity for a synthesis node.
+
+    A synthesis built on N supporting observations is only as valid as its
+    weakest link. This implements the STL robustness metric:
+        φ = G[0,n](v(s_i) ≥ γ)  — globally all observations meet threshold γ.
+
+    Two complementary metrics:
+    - **weakest_link**: min(confidence_at(obs)) — one bad link fails the chain.
+    - **chain_validity**: ∏(confidence_at(obs)) — multiplicative; five obs at
+      0.6 each = 0.6^5 = 0.078, far worse than any individual observation.
+
+    Supporting observations are gathered from nodes connected by outgoing L3
+    edges from synthesis_id (the cluster nodes the synthesis was built on).
+    If a cluster node has no observations, it is represented by the edge
+    confidence as a proxy (marked synthetic=True in the output).
+
+    Args:
+        synthesis_id: Node ID of the synthesis (concept) node.
+        t: Point in time to evaluate at. Defaults to now.
+        threshold: Validity threshold for STL guarantee (default 0.1).
+
+    Returns:
+        Dict with weakest_link, chain_validity, chain_product, n_observations,
+        validity_threshold_met, robustness, and per-observation breakdown.
+    """
+    if t is None:
+        t = datetime.now(timezone.utc)
+    elif t.tzinfo is None:
+        t = t.replace(tzinfo=timezone.utc)
+
+    # Find all outgoing L3 edges from the synthesis node
+    edge_result = conn.execute(
+        """
+        SELECT id, to_node, confidence, edge_type
+        FROM ohm_edges
+        WHERE from_node = ?
+          AND layer = 'L3'
+          AND deleted_at IS NULL
+        """,
+        [synthesis_id],
+    )
+    edge_cols = [d[0] for d in edge_result.description]
+    edges = [dict(zip(edge_cols, row)) for row in edge_result.fetchall()]
+
+    # Also include the synthesis node's own observations (its self-assessment)
+    own_obs = get_active_observations(conn, synthesis_id, at=t)
+
+    obs_details: list[dict[str, Any]] = []
+
+    # Supporting observations from cluster nodes
+    cluster_nodes_with_obs: set[str] = set()
+    for edge in edges:
+        cluster_id = edge["to_node"]
+        node_obs = get_active_observations(conn, cluster_id, at=t)
+        if node_obs:
+            cluster_nodes_with_obs.add(cluster_id)
+            for obs in node_obs:
+                obs_details.append({
+                    "obs_id": obs["id"],
+                    "node_id": cluster_id,
+                    "effective_confidence": obs["effective_confidence"],
+                    "decay_profile": obs["decay_profile"],
+                    "half_life_days": obs.get("half_life_days"),
+                    "synthetic": False,
+                })
+        else:
+            # No observations — use edge confidence as proxy
+            edge_conf = float(edge.get("confidence") or 0.7)
+            obs_details.append({
+                "obs_id": None,
+                "node_id": cluster_id,
+                "effective_confidence": round(edge_conf, 4),
+                "decay_profile": "edge_proxy",
+                "half_life_days": None,
+                "synthetic": True,
+            })
+
+    # Include own observations if any (the synthesis self-assessment)
+    for obs in own_obs:
+        obs_details.append({
+            "obs_id": obs["id"],
+            "node_id": synthesis_id,
+            "effective_confidence": obs["effective_confidence"],
+            "decay_profile": obs["decay_profile"],
+            "half_life_days": obs.get("half_life_days"),
+            "synthetic": False,
+            "self_assessment": True,
+        })
+
+    if not obs_details:
+        return {
+            "synthesis_id": synthesis_id,
+            "weakest_link": 0.0,
+            "chain_validity": 0.0,
+            "n_observations": 0,
+            "n_cluster_nodes": len(edges),
+            "validity_threshold_met": False,
+            "robustness": -threshold,
+            "observations": [],
+            "evaluated_at": t.isoformat(),
+        }
+
+    confidences = [o["effective_confidence"] for o in obs_details]
+    weakest = min(confidences)
+    product = 1.0
+    for c in confidences:
+        product *= c
+
+    return {
+        "synthesis_id": synthesis_id,
+        "weakest_link": round(weakest, 4),
+        "chain_validity": round(product, 6),
+        "n_observations": len(obs_details),
+        "n_cluster_nodes": len(edges),
+        "validity_threshold_met": weakest >= threshold,
+        "robustness": round(weakest - threshold, 4),
+        "observations": sorted(obs_details, key=lambda o: o["effective_confidence"]),
+        "evaluated_at": t.isoformat(),
+    }

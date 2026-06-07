@@ -510,6 +510,7 @@ def _build_router() -> _RouteRegistry:
         "/reliability/",
         "/compound_confidence/",
         "/observation/",
+        "/synthesis/",
     ):
         r.add("GET", _p)
 
@@ -2071,6 +2072,7 @@ OhmHandler._GET_PREFIXES = [
     ("/reliability/", "_get_reliability"),
     ("/compound_confidence/", "_get_compound_confidence"),
     ("/observation/", "_get_observation"),
+    ("/synthesis/", "_get_synthesis_validity"),
 ]
 
 
