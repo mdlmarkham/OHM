@@ -640,11 +640,39 @@ class GraphHandlerMixin:
             except (ValueError, ImportError, Exception) as e:
                 logger.debug(f"Semantic fallback failed: {e}")
 
-            # No semantic results either
+            # OHM-tr71.9: Fuzzy matching fallback — try DuckDB jaro_winkler_similarity
+            try:
+                from ohm.graph.queries import fuzzy_search as _fuzzy_search
+                fuzzy_results = _fuzzy_search(
+                    self.current_store.conn,
+                    query=query_text,
+                    limit=limit,
+                    include_l0=include_l0,
+                )
+                if fuzzy_results:
+                    self._json_response(200, {
+                        "results": [
+                            {
+                                "id": r.get("id", ""),
+                                "label": r.get("label", ""),
+                                "type": r.get("type", ""),
+                                "distance": r.get("distance", 0.0),
+                                "match_method": r.get("match_type", "fuzzy"),
+                            }
+                            for r in fuzzy_results
+                        ],
+                        "count": len(fuzzy_results),
+                        "fallback": "fuzzy",
+                        "tip": f"No exact matches for '{query_text}'. Showing fuzzy label matches instead.",
+                    })
+                    return
+            except Exception as e:
+                logger.debug(f"Fuzzy fallback failed: {e}")
+
             self._json_response(200, {
                 "results": [],
                 "count": 0,
-                "tip": f"No results for '{query_text}' via text or semantic search. The query may be too specific or use different terminology.",
+                "tip": f"No results for '{query_text}' via text, semantic, or fuzzy search. Try a different query.",
             })
             return
 

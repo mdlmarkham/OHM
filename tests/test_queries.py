@@ -2384,3 +2384,56 @@ class TestFragmentPromotion:
         node = create_node(test_db, label="Not a fragment", node_type="concept", created_by="test")
         with pytest.raises(ValueError, match="is not a fragment"):
             promote_fragment(test_db, fragment_id=node["id"], promoted_by="metis")
+
+
+class TestFuzzySearch:
+    """OHM-tr71.9: Fuzzy matching fallback for text search."""
+
+    def test_fuzzy_matches_typo(self, test_db):
+        from ohm.queries import create_node, fuzzy_search
+
+        create_node(test_db, label="Cognitive Bias", node_type="concept", created_by="test")
+        results = fuzzy_search(test_db, query="kognitiv", threshold=0.5)
+        assert len(results) >= 1
+        assert results[0]["match_type"] == "fuzzy"
+        assert results[0]["distance"] >= 0.5
+
+    def test_fuzzy_empty_query(self, test_db):
+        from ohm.queries import fuzzy_search
+
+        assert fuzzy_search(test_db, query="") == []
+
+    def test_fuzzy_excludes_fragments(self, test_db):
+        from ohm.queries import create_node, scratch, fuzzy_search
+
+        create_node(test_db, label="FuzzyTarget", node_type="concept", created_by="test")
+        scratch(test_db, content="FuzzyTarget hunch", created_by="test")
+        results = fuzzy_search(test_db, query="FuzzyTargit", threshold=0.5, include_l0=False)
+        types = [r["type"] for r in results]
+        assert "fragment" not in types
+
+    def test_fuzzy_includes_fragments(self, test_db):
+        from ohm.queries import create_node, scratch, fuzzy_search
+
+        create_node(test_db, label="FuzzyTarget", node_type="concept", created_by="test")
+        scratch(test_db, content="FuzzyTarget hunch", created_by="test")
+        results = fuzzy_search(test_db, query="FuzzyTargit", threshold=0.5, include_l0=True)
+        assert len(results) >= 1
+
+    def test_fuzzy_no_match_below_threshold(self, test_db):
+        from ohm.queries import create_node, fuzzy_search
+
+        create_node(test_db, label="Totally Different", node_type="concept", created_by="test")
+        results = fuzzy_search(test_db, query="zzzzzxxxxx", threshold=0.9)
+        assert len(results) == 0
+
+    def test_fuzzy_order_by_similarity(self, test_db):
+        from ohm.queries import create_node, fuzzy_search
+
+        create_node(test_db, label="Cognitive Bias", node_type="concept", created_by="test")
+        create_node(test_db, label="Cognitive Dissonance", node_type="concept", created_by="test")
+        create_node(test_db, label="Confirmation Bias", node_type="concept", created_by="test")
+        results = fuzzy_search(test_db, query="cognitive", threshold=0.5)
+        assert len(results) >= 2
+        distances = [r["distance"] for r in results]
+        assert distances == sorted(distances, reverse=True)

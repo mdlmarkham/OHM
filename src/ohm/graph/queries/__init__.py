@@ -3032,6 +3032,62 @@ def search(
     return _rows_to_dicts(result)
 
 
+def fuzzy_search(
+    conn: "DuckDBPyConnection",
+    query: str,
+    limit: int = 20,
+    threshold: float = 0.6,
+    include_l0: bool = False,
+) -> list[dict[str, Any]]:
+    """Fuzzy text search using DuckDB's jaro_winkler_similarity (OHM-tr71.9).
+
+    Fallback when ILIKE + semantic search both return 0 results.
+    Uses Jaro-Winkler similarity on labels against the query.
+    Returns matches with similarity score and match_type='fuzzy'.
+
+    Args:
+        conn: Database connection.
+        query: Query text to fuzzy-match against labels.
+        limit: Maximum results (default 20).
+        threshold: Minimum similarity (0-1) to consider a match (default 0.6).
+        include_l0: Include fragment-type nodes (default False).
+
+    Returns:
+        List of dicts with node fields plus distance and match_type.
+    """
+    if not query or not query.strip():
+        return []
+
+    type_filter = ""
+    if not include_l0:
+        type_filter = "AND type != 'fragment'"
+
+    params: list[Any] = [query, query, threshold, limit]
+    sql = f"""
+        SELECT *, jaro_winkler_similarity(LOWER(label), LOWER(?)) AS distance
+        FROM ohm_nodes
+        WHERE deleted_at IS NULL
+          AND jaro_winkler_similarity(LOWER(label), LOWER(?)) >= ?
+          {type_filter}
+        ORDER BY distance DESC
+        LIMIT ?
+    """
+    try:
+        result = conn.execute(sql, params)
+        rows = _rows_to_dicts(result)
+        for r in rows:
+            r["match_type"] = "fuzzy"
+            r["distance"] = round(float(r.get("distance", 0)), 4)
+        return rows
+    except Exception:
+        # DuckDB may not have this function on older versions — degrade gracefully
+        import logging
+        logging.getLogger(__name__).debug(
+            "fuzzy_search: jaro_winkler_similarity unavailable, returning empty"
+        )
+        return []
+
+
 def update_node_embedding(
     conn: "DuckDBPyConnection",
     node_id: str,
