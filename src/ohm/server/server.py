@@ -110,7 +110,7 @@ def _register_builtin_hooks(store: OhmStore) -> None:
 MAX_BODY_SIZE = 1 * 1024 * 1024  # 1 MB — reject bodies larger than this
 MAX_BATCH_SIZE = 500  # Maximum nodes + edges per /batch request
 RATE_LIMIT_WINDOW = 60  # seconds
-RATE_LIMIT_MAX_REQUESTS = 1000  # per window per IP
+RATE_LIMIT_MAX_REQUESTS = 5000  # per window per IP
 
 # Simple in-memory rate limiter: {ip: [(timestamp, ...)]}
 # Keyed by client IP — provides DDoS/abuse protection at the network level.

@@ -32,6 +32,40 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+# Rate-limit retry helper
+RATE_LIMIT_DELAY = 0.15  # seconds between API calls
+RATE_LIMIT_MAX_RETRIES = 3
+
+
+def _api_post(url, headers, json_data=None, *, json=None, timeout=10):
+    """POST with rate-limit retry."""
+    import requests as http_requests
+    for attempt in range(RATE_LIMIT_MAX_RETRIES):
+        time.sleep(RATE_LIMIT_DELAY)
+        r = http_requests.post(url, headers=headers, json=json_data, timeout=timeout)
+        if r.status_code == 429 or (r.status_code == 400 and 'rate_limited' in r.text):
+            wait = 5 * (attempt + 1)
+            print(f"    ~ Rate limited, retrying in {wait}s...")
+            time.sleep(wait)
+            continue
+        return r
+    return r
+
+
+def _api_get(url, headers, params=None, timeout=5):
+    """GET with rate-limit retry."""
+    import requests as http_requests
+    for attempt in range(RATE_LIMIT_MAX_RETRIES):
+        time.sleep(RATE_LIMIT_DELAY * 0.5)
+        r = http_requests.get(url, headers=headers, params=params, timeout=timeout)
+        if r.status_code == 429 or (r.status_code == 400 and 'rate_limited' in r.text):
+            wait = 3 * (attempt + 1)
+            print(f"    ~ Rate limited, retrying in {wait}s...")
+            time.sleep(wait)
+            continue
+        return r
+    return r
 from urllib.parse import urlparse
 
 # ── Configuration ────────────────────────────────────────────────────────────
@@ -114,6 +148,13 @@ def _move_queue_item(item_id: str, from_stage: str, to_stage: str):
     if src.exists():
         dst.parent.mkdir(parents=True, exist_ok=True)
         src.rename(dst)
+
+
+def _delete_queue_item(item_id: str, stage: str):
+    """Remove an item from a queue stage after it's been written elsewhere."""
+    path = _queue_path(stage, item_id)
+    if path.exists():
+        path.unlink()
 
 
 def queue_status():
@@ -463,7 +504,6 @@ def stage_source():
     creates REFERENCES edges from those concept nodes to the source.
     """
     _ensure_queues()
-    import requests as http_requests
 
     headers = {"Authorization": f"Bearer {OHM_TOKEN}"}
     triage_items = _read_queue_items("triage_pass")
@@ -488,7 +528,7 @@ def stage_source():
             from ohm.validation import normalize_alias as _norm
             normalized_title = _norm(title)
             try:
-                r = http_requests.get(
+                r = _api_get(
                     f"{OHM_URL}/resolve",
                     params={"query": normalized_title},
                     headers=headers,
@@ -522,7 +562,7 @@ def stage_source():
         trust = item.get("trust", 0.5)
 
         # Create source node in OHM
-        r = http_requests.post(
+        r = _api_post(
             f"{OHM_URL}/node",
             headers=headers,
             json={
@@ -584,7 +624,7 @@ def _create_reference_edges(item: dict, source_id: str, headers: dict):
     # Search OHM for concept nodes matching each keyword
     for keyword in list(keywords)[:5]:  # Limit to 5 keywords
         try:
-            r = http_requests.get(
+            r = _api_get(
                 f"{OHM_URL}/resolve",
                 params={"query": keyword},
                 headers=headers,
@@ -598,7 +638,7 @@ def _create_reference_edges(item: dict, source_id: str, headers: dict):
                     concept_type = resolved.get("type", "")
                     # Only create REFERENCES from non-source nodes
                     if concept_type != "source":
-                        http_requests.post(
+                        _api_post(
                             f"{OHM_URL}/edge",
                             headers=headers,
                             json={
@@ -628,7 +668,6 @@ def stage_assess():
     concept nodes.
     """
     _ensure_queues()
-    import requests as http_requests
 
     headers = {"Authorization": f"Bearer {OHM_TOKEN}"}
     source_items = _read_queue_items("source_created")
@@ -662,14 +701,14 @@ def stage_assess():
             item["assessed_at"] = datetime.now(timezone.utc).isoformat()
             item["assessment"] = {"method": "keyword", "keywords": [], "observations_created": 0}
             _write_queue_item("assessed", item)
-            _move_queue_item(item["id"], "source_created", "assessed")
+            _delete_queue_item(item["id"], "source_created")
             continue
 
         # Resolve keywords against OHM concept nodes
         resolved_concepts = []
         for keyword in matched_keywords[:5]:  # Limit to top 5 keywords
             try:
-                r = http_requests.get(
+                r = _api_get(
                     f"{OHM_URL}/resolve",
                     params={"query": keyword},
                     headers=headers,
@@ -696,7 +735,7 @@ def stage_assess():
                 "notes": observation_text,
                 "scale": "probability",
             }
-            r = http_requests.post(
+            r = _api_post(
                 f"{OHM_URL}/observe/{source_node_id}",
                 headers=headers,
                 json=obs_data,
@@ -714,7 +753,7 @@ def stage_assess():
             concept_type = concept.get("type", "")
             if concept_id and concept_type != "source":
                 try:
-                    r = http_requests.post(
+                    r = _api_post(
                         f"{OHM_URL}/edge",
                         headers=headers,
                         json={
@@ -742,7 +781,7 @@ def stage_assess():
             "confidence": confidence,
         }
         _write_queue_item("assessed", item)
-        _move_queue_item(item["id"], "source_created", "assessed")
+        _delete_queue_item(item["id"], "source_created")
         assessed += 1
 
         keywords_str = ", ".join(matched_keywords[:3])
@@ -763,7 +802,6 @@ def stage_synthesize():
     relevant concept node and logs the cluster for agent review.
     """
     _ensure_queues()
-    import requests as http_requests
     from collections import defaultdict
 
     headers = {"Authorization": f"Bearer {OHM_TOKEN}"}
@@ -822,7 +860,7 @@ def stage_synthesize():
         # Resolve keyword to a concept node
         concept_node = None
         try:
-            r = http_requests.get(
+            r = _api_get(
                 f"{OHM_URL}/resolve",
                 params={"query": keyword},
                 headers=headers,
@@ -851,7 +889,7 @@ def stage_synthesize():
         avg_confidence = sum(confidences) / len(confidences) if confidences else 0.7
 
         try:
-            r = http_requests.post(
+            r = _api_post(
                 f"{OHM_URL}/observe/{concept_node['id']}",
                 headers=headers,
                 json={
@@ -890,7 +928,7 @@ def stage_synthesize():
 
 def main():
     parser = argparse.ArgumentParser(description="OHM Staged Ingestion Pipeline")
-    parser.add_argument("--stage", choices=["fetch", "triage", "source", "assess", "full", "queue-status", "drain-triage"],
+    parser.add_argument("--stage", choices=["fetch", "triage", "source", "assess", "synthesize", "full", "queue-status", "drain-triage"],
                         default="queue-status")
     parser.add_argument("--ohm-url", default=OHM_URL)
     parser.add_argument("--ohm-token", default=OHM_TOKEN)
@@ -914,6 +952,8 @@ def main():
         stage_source()
     elif args.stage == "assess":
         stage_assess()
+    elif args.stage == "synthesize":
+        stage_synthesize()
     elif args.stage == "full":
         print("=== Stage 1: Fetch ===")
         stage_fetch()
