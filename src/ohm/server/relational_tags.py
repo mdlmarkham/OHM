@@ -55,6 +55,7 @@ RELATIONAL_TAG_MAP = {
     "INSPIRED_BY": "inspired_by",
     "CONTRADICTS_FRAG": "contradicts_frag",
     "REFINES_FRAG": "refines_frag",
+    "RESONANCE": "resonance",
 }
 
 

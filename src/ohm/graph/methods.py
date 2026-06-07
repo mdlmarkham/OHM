@@ -2156,8 +2156,8 @@ def suggest_connections(
             AND b.deleted_at IS NULL
             AND NOT EXISTS (
                 SELECT 1 FROM ohm_edges e
-                WHERE (e.from_node = a.id AND e.to_node = b.id)
-                OR (e.from_node = b.id AND e.to_node = a.id)
+                WHERE ((e.from_node = a.id AND e.to_node = b.id)
+                    OR (e.from_node = b.id AND e.to_node = a.id))
                 AND e.deleted_at IS NULL
             )
             ORDER BY similarity DESC
@@ -2247,8 +2247,8 @@ def suggest_connections(
             WHERE a.created_by != b.created_by
             AND NOT EXISTS (
                 SELECT 1 FROM ohm_edges e
-                WHERE (e.from_node = a.id AND e.to_node = b.id)
-                OR (e.from_node = b.id AND e.to_node = a.id)
+                WHERE ((e.from_node = a.id AND e.to_node = b.id)
+                    OR (e.from_node = b.id AND e.to_node = a.id))
                 AND e.deleted_at IS NULL
             )
             GROUP BY a.id, a.label, b.id, b.label, a.created_by, b.created_by
