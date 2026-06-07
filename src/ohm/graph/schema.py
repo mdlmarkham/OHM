@@ -50,6 +50,9 @@ VALID_NODE_TYPES = frozenset(
         "technology",
         "equipment",
         "system",
+        "infrastructure",  # Physical/virtual hosts, platforms (OHM-infra)
+        "service",  # Running software, daemons, APIs (OHM-infra)
+        "release",  # Software versions/deployments (OHM-infra)
         "area",
         "site",
         "agent",
@@ -96,7 +99,7 @@ MUST_HAVE_EDGE_NODE_TYPES: frozenset[str] = frozenset(
 # lists `source`, `concept`, `entity` as exempt — they are foundational or
 # external references that legitimately stand alone until linked.
 EXEMPT_CROSS_LINK_NODE_TYPES: frozenset[str] = frozenset(
-    {"source", "concept", "entity", "fragment"}
+    {"source", "concept", "entity", "fragment", "infrastructure", "service", "release"}
 )
 
 VALID_VISIBILITIES = frozenset({"private", "team", "public", "vault"})
@@ -108,6 +111,7 @@ VALID_PROVENANCES = frozenset(
         "bookmark",
         "observation",
         "feed-ingest",
+        "healthcheck",  # Automated infrastructure health checks (OHM-infra)
         "metis-research",
         "metis-synthesis",
         "metis-review-request",
@@ -120,7 +124,7 @@ VALID_PROVENANCES = frozenset(
 
 LAYER_EDGE_TYPES: dict[str, frozenset[str]] = {
     "L0": frozenset({"CONTEXT_OF", "INSPIRED_BY", "CONTRADICTS_FRAG", "REFINES_FRAG", "RESONANCE"}),
-    "L1": frozenset({"CONTAINS", "BELONGS_TO", "HAS_COMPONENT", "PART_OF", "CAPABLE_OF", "VALUES", "GOALS", "INTERESTED_IN"}),
+    "L1": frozenset({"CONTAINS", "BELONGS_TO", "HAS_COMPONENT", "PART_OF", "CAPABLE_OF", "VALUES", "GOALS", "INTERESTED_IN", "RUNS_ON", "HOSTS", "VERSION_OF", "LOCATED_IN"}),
     "L2": frozenset(
         {
             "DERIVES_FROM",
@@ -145,6 +149,7 @@ LAYER_EDGE_TYPES: dict[str, frozenset[str]] = {
             "ERADICATED_BY",
             "RECOVERED_BY",  # incident state machine
             "NEGOTIATES_WITH",  # SLAs, commitments
+            "UPSTREAM_OF",  # Infrastructure: service dependency (OHM-infra)
         }
     ),
     "L3": frozenset(
@@ -204,6 +209,7 @@ VALID_OBSERVATION_TYPES = frozenset(
         "challenge",
         "support",
         "sentiment",  # customer support: sentiment observation
+        "health_check",  # Infrastructure health/status (OHM-infra)
     }
 )
 
@@ -318,6 +324,16 @@ class SchemaConfig:
     def valid_layers(self) -> frozenset[str]:
         """All valid layer identifiers."""
         return frozenset(self.layer_edge_types.keys())
+
+    @property
+    def must_have_edge_node_types(self) -> frozenset[str]:
+        """Node types that must have at least one edge when created."""
+        return MUST_HAVE_EDGE_NODE_TYPES
+
+    @property
+    def exempt_cross_link_node_types(self) -> frozenset[str]:
+        """Node types exempt from the cross-link requirement."""
+        return EXEMPT_CROSS_LINK_NODE_TYPES
 
     def validate_node_type(self, node_type: str) -> bool:
         """Check that *node_type* is valid for this schema."""
@@ -500,7 +516,7 @@ class SchemaConfig:
             "name": self.name,
             "node_types": sorted(self.node_types),
             "layer_edge_types": {layer: sorted(types) for layer, types in self.layer_edge_types.items()},
-            "layer_descriptions": self.layer_descriptions,
+            "layer_descriptions": dict(self.layer_descriptions),
             "observation_types": sorted(self.observation_types),
             "observation_sources": sorted(self.observation_sources),
             "visibilities": sorted(self.visibilities),
@@ -609,6 +625,7 @@ HOME_SERVICES_SCHEMA = SchemaConfig.from_json_file("home_services.json")
 MANUFACTURING_SCHEMA = SchemaConfig.from_json_file("manufacturing.json")
 CONSTRUCTION_SCHEMA = SchemaConfig.from_json_file("construction.json")
 HEALTHCARE_SCHEMA = SchemaConfig.from_json_file("healthcare.json")
+INFRASTRUCTURE_SCHEMA = SchemaConfig.from_json_file("infrastructure.json")
 
 # ── DDL Statements ──────────────────────────────────────────────────────────
 
@@ -894,7 +911,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.23.0"
+SCHEMA_VERSION = "0.24.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -1159,6 +1176,13 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
         )""",
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_content_hash_node ON ohm_content_hashes(node_id)",
             "CREATE INDEX IF NOT EXISTS idx_content_hash_hash ON ohm_content_hashes(content_hash)",
+        ],
+    ),
+    (
+        "0.24.0",
+        "add infrastructure, service, release node types; RUNS_ON, HOSTS, VERSION_OF, LOCATED_IN (L1) and UPSTREAM_OF (L2) edge types; health_check observation type; healthcheck provenance; tags/metadata on create_node (OHM-infra)",
+        [
+            "",  # Node types and edge types are validated in Python, not DDL
         ],
     ),
 ]

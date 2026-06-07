@@ -166,6 +166,7 @@ class OhmStore:
                 If None, auto-detects: tries Ollama, falls back to NullBackend.
         """
         self._lock = threading.RLock()
+        self._read_lock = threading.RLock()  # Separate lock for read operations
         self.agent_name = agent_name
         self.readonly = readonly
         self.quack = quack
@@ -202,6 +203,17 @@ class OhmStore:
             logger.error(f"DB connection failed: {e}. Attempting DuckLake recovery.")
             self._recover_from_ducklake(str(self.db_path))
             self.conn = self._connect_with_wal_recovery(str(self.db_path), readonly)
+
+        # Read-only connection for concurrent reads (OHM concurrency fix)
+        # NOTE: DuckDB requires matching configuration for concurrent connections.
+        # If read-only connection fails, reads fall back to write connection.
+        try:
+            self._read_conn = duckdb.connect(str(self.db_path), read_only=True)
+            logger.info(f"OHM read-only connection established for {self.db_path}")
+        except Exception as e:
+            logger.warning(f"Read-only connection unavailable (reads will share write conn): {e}")
+            self._read_conn = None
+
         try:
             self._init_schema()
 
@@ -527,7 +539,12 @@ class OhmStore:
             self.quack_started = False
 
     def execute(self, sql: str, params: Optional[list] = None) -> list[dict[str, Any]]:
-        """Execute a SQL query and return results as list of dicts."""
+        """Execute a SQL query and return results as list of dicts.
+
+        Uses the write lock to serialize access to the shared DuckDB connection.
+        For read-only queries, prefer read_execute() which uses the separate
+        read connection when available.
+        """
         with self._lock:
             if params:
                 result = self.conn.execute(sql, params)
@@ -564,6 +581,50 @@ class OhmStore:
             row["to"] = row["to_node"]
             row["type"] = row["edge_type"]
         return row
+
+    @property
+    def read_conn(self):
+        """Return the read-only DuckDB connection for concurrent reads.
+
+        Falls back to the write connection if no read connection is available.
+        Read queries should use this to avoid blocking behind the write lock.
+        """
+        return self._read_conn or self.conn
+
+    def read_execute(self, sql: str, params: Optional[list] = None) -> list[dict[str, Any]]:
+        """Execute a read-only query using the read connection.
+
+        Uses the separate read-only DuckDB connection so reads don't
+        block behind the write lock. Falls back to the write connection
+        if the read connection is unavailable.
+        """
+        conn = self._read_conn or self.conn
+        if self._read_conn:
+            # Read-only connection — no lock needed for reads
+            if params:
+                result = conn.execute(sql, params)
+            else:
+                result = conn.execute(sql)
+            columns = [desc[0] for desc in result.description]
+            rows = result.fetchall()
+        else:
+            # Fallback: use write connection with lock
+            return self.execute(sql, params)
+
+        results = [dict(zip(columns, row)) for row in rows]
+        _json_cols = {"tags", "metadata", "action_alternatives"}
+        for row in results:
+            for col in _json_cols & row.keys():
+                if isinstance(row[col], str):
+                    try:
+                        row[col] = json.loads(row[col])
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+            if "from_node" in row:
+                row["from"] = row["from_node"]
+                row["to"] = row["to_node"]
+                row["type"] = row["edge_type"]
+        return results
 
     def _now(self) -> str:
         """Return current timestamp as ISO string."""
@@ -790,13 +851,19 @@ class OhmStore:
             text = label
             if content:
                 text = f"{label}: {content[:800]}"
+            # Ollama call is outside the lock — it's pure I/O and can run concurrently.
             embeddings = self._embedding_backend.embed([text])
             embedding = embeddings[0] if embeddings else None
             if embedding and any(e != 0.0 for e in embedding):
-                self.conn.execute(
-                    "UPDATE ohm_nodes SET embedding = ?::FLOAT[768] WHERE id = ?",
-                    [embedding, node_id],
-                )
+                # Acquire write lock before touching the connection — DuckDB connections
+                # are not thread-safe; writing from a background thread without the lock
+                # causes malloc corruption (same root cause as disabled background mode
+                # in admin.py).
+                with self._lock:
+                    self.conn.execute(
+                        "UPDATE ohm_nodes SET embedding = ?::FLOAT[768] WHERE id = ?",
+                        [embedding, node_id],
+                    )
                 logger.debug("Auto-generated embedding for node %s", node_id)
         except Exception as e:
             logger.debug("Auto-embed failed for node %s: %s", node_id, e)

@@ -529,6 +529,7 @@ def _build_router() -> _RouteRegistry:
     r.add("POST", "/admin/source-node-urls")
     r.add("POST", "/admin/edge-layer-fix")
     r.add("POST", "/admin/pert-backfill")
+    r.add("POST", "/admin/backfill-relational-tags")
     r.add("POST", "/admin/verification-decay")
     r.add("POST", "/admin/merge")
     r.add("POST", "/admin/vacuum-lake")
@@ -600,6 +601,12 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
 
     daemon_threads = True
     request_queue_size = 128  # OHM-yv35: avoid connection resets under burst load (default was 5)
+    timeout = 60  # seconds before dropping a stuck request thread
+
+    def handle_error(self, request, client_address):
+        """Log request errors without crashing."""
+        import logging
+        logging.getLogger("ohm.server").warning(f"Request error from {client_address}: {request}")
 
 
 from ohm.server.handlers.admin import AdminHandlerMixin
@@ -1467,9 +1474,16 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
             # Enforce L2 immutability — source nodes cannot be updated (OHM-k5wk)
             enforce_l2_immutability(self.current_store.conn, agent, node_id)
 
+            # Validate type change against schema
+            if "type" in body and body["type"] not in self.schema_config.node_types:
+                raise ValidationError(
+                    f"Invalid node type: '{body['type']}' — must be one of: {', '.join(sorted(self.schema_config.node_types))}"
+                )
+
             now = datetime.now(timezone.utc).isoformat()
             patchable = [
                 "label",
+                "type",
                 "content",
                 "confidence",
                 "visibility",
@@ -1928,10 +1942,12 @@ OhmHandler._POST_EXACT = {
     "/admin/source-node-urls": "_post_admin_source_node_urls",
     "/admin/edge-layer-fix": "_post_admin_edge_layer_fix",
     "/admin/pert-backfill": "_post_admin_pert_backfill",
+    "/admin/backfill-relational-tags": "_post_admin_backfill_relational_tags",
     "/admin/verification-decay": "_post_admin_verification_decay",
     "/admin/merge": "_post_admin_merge",
     "/admin/vacuum-lake": "_post_admin_vacuum_lake",
-    "/admin/evict-fragments": "_post_admin_evict_fragments",
+"/admin/evict-fragments": "_post_admin_evict_fragments",
+    "/admin/repair-dangling": "_post_admin_repair_dangling",
     "/discover/queue/review": "_post_discovery_review",
     "/hooks": "_post_hooks",
 }
@@ -1972,6 +1988,11 @@ OhmHandler._GET_EXACT = {
     "/duplicates": "_get_duplicates",
     "/fragments": "_get_fragments",
     "/orphans": "_get_orphans",
+    "/islands": "_get_islands",
+    "/welcome": "_get_welcome",
+    "/orient": "_get_orient",
+    "/contributions": "_get_contributions",
+    "/changes": "_get_changes",
     "/hubs": "_get_hubs",
     "/dead_ends": "_get_dead_ends",
     "/centrality": "_get_centrality",
@@ -1980,6 +2001,7 @@ OhmHandler._GET_EXACT = {
     "/granger": "_get_granger",
     "/edge_stability": "_get_edge_stability",
     "/suggest": "_get_suggest",
+    "/suggest_connections": "_get_suggest",
     "/graph/stats": "_get_graph_stats",
     "/lint": "_get_lint",
     "/doctor": "_get_doctor",
@@ -2005,6 +2027,7 @@ OhmHandler._GET_EXACT = {
     "/hooks": "_get_hooks",
     "/admin/checkpoint": "_get_admin_checkpoint",
     "/admin/embeddings": "_get_admin_embeddings",
+    "/admin/embeddings/status": "_get_admin_embeddings_status",
     "/admin/verification-scan": "_get_admin_verification_scan",
     "/admin/snapshots": "_get_admin_snapshots",
     "/graph/at": "_get_graph_at",

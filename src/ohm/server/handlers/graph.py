@@ -165,11 +165,64 @@ class GraphHandlerMixin:
         self._json_response(200, status)
 
     def _get_schema(self, path: str, qs: dict) -> None:
-        """GET /schema — schema description."""
+        """GET /schema — schema description with usage guidance."""
         schema = self.schema_config
         all_edge_types: set[str] = set()
         for types in schema.layer_edge_types.values():
             all_edge_types.update(types)
+
+        guide = {
+            "overview": "OHM is a knowledge graph for multi-agent cognition. Write observations, create nodes and edges, challenge claims, and think in L0 fragments.",
+            "writing": {
+                "create_node": "POST /node — Create any node type. Required: id, label, type. Optional: content, tags (list), metadata (dict), source_url, confidence, provenance, connects_to (list of existing node ids).",
+                "scratch": "POST /scratch — Write an L0 thinking fragment. Near-zero cost. Required: content. Optional: tags, connects_to, metadata. Auto-detects questions (?). Auto-links semantically. Fragments excluded from search/stats/neighborhood by default.",
+                "create_edge": "POST /edge — Link two nodes. Required: from, to, layer, edge_type. Optional: confidence, provenance, probability.",
+                "observe": "POST /observe — Record a measurement or observation on a node. Required: node_id, obs_type, value. Optional: notes, source, source_url, sigma.",
+                "challenge": "POST /challenge — Challenge an L3 interpretation. Required: edge_id. Optional: reason, confidence.",
+            },
+            "reading": {
+                "search": "GET /search?q=QUERY — Text search (ILIKE). Returns tip for semantic search when empty. Filters: ?type=, ?created_by=, ?since=, ?until=, ?include_l0=true.",
+                "semantic_search": "GET /semantic_search?q=QUERY — Embedding similarity search. Excludes fragments by default. Add &include_l0=true to include L0.",
+                "neighborhood": "GET /neighborhood/ID?depth=2 — Get nodes and edges around a node. Filters: ?layer=, ?created_by=AGENT.",
+                "stats": "GET /stats — Graph statistics. Excludes fragments by default. Add ?include_l0=true to include L0.",
+                "suggest": "GET /suggest?method=shared_tags&min_shared=2 — Find nodes that should be connected based on shared tags.",
+                "orphans": "GET /orphans — Find nodes with no edges. Good for finding isolated knowledge.",
+                "islands": "GET /islands â Find disconnected components (clusters of nodes isolated from the main graph). Each island is a knowledge domain needing bridges. Params: min_size (default 2), max_islands (default 20), layer, exclude_fragments (default true).",
+                "welcome": "GET /welcome?agent=NAME -- Orientation packet for new/returning agents. Shows graph overview, your footprint, suggested connections, and recent activity.",
+                "orient": "GET /orient?agent=NAME&hours=N -- Context-recovery packet for agents who've lost context. Answers: Where was I? What did I miss? What should I do next? Terse and actionable.",
+                "listen": "GET /listen?since=ISO8601 — Change feed. See what agents have added recently.",
+            },
+            "L0_thinking_layer": {
+                "purpose": "Fragments, hunches, questions, raw associations. Unreliable by design (confidence=0.0). Excluded from search/stats/neighborhood by default.",
+                "when_to_scratch": "A hunch, a question, a quick observation, a connection you sense but can't articulate yet.",
+                "when_not_to_scratch": "A confident concept (use create_node), a verified fact (use create_node with source_url), a known relationship (use create_edge).",
+                "l0_edge_types": {"CONTEXT_OF": "Fragment relates to existing concept", "INSPIRED_BY": "Fragment was inspired by another node", "CONTRADICTS_FRAG": "Fragment contradicts another fragment", "REFINES_FRAG": "Fragment refines another fragment", "RESONANCE": "Independent agents noticed the same thing"},
+                "lifecycle": "Write (scratch) → Auto-link (semantic) → Connect explicitly (link_fragment) → Promote to L1 concept (promote_fragment)",
+            },
+            "node_type_guide": {
+                "concept": "Abstract ideas, patterns, theories — the core of the knowledge graph",
+                "source": "External references — articles, books, papers, URLs. MUST have source_url.",
+                "event": "Things that happened — incidents, announcements, discoveries",
+                "pattern": "Recurring structures — AND-gates, traps, cycles, equilibria",
+                "decision": "Choices made — with utility, alternatives, and reasoning",
+                "fragment": "L0 thinking — hunches, questions, raw observations. Use /scratch, not /node.",
+                "infrastructure": "Physical/virtual hosts — servers, containers, networks",
+                "service": "Running software — daemons, APIs, databases, agents",
+                "release": "Software versions — deployed or available",
+                "technology": "Tools, frameworks, languages, protocols",
+                "task": "Action items with status, priority, assignment",
+            },
+            "edge_type_guide": {
+                "L0": {"CONTEXT_OF": "Fragment relates to existing concept", "INSPIRED_BY": "Fragment inspired by another node", "CONTRADICTS_FRAG": "Fragment contradicts another fragment", "REFINES_FRAG": "Fragment refines another fragment", "RESONANCE": "Independent agents noticed same thing"},
+                "L1": {"BELONGS_TO": "X belongs to Y (service to host, person to org)", "CONTAINS": "X contains Y (org contains team)", "HAS_COMPONENT": "X has component Y (system has service)", "PART_OF": "X is part of Y (reverse of CONTAINS)", "CAPABLE_OF": "X can do Y (agent capable of skill)"},
+                "L2": {"REFERENCES": "X references Y (citation, link)", "SERVES": "X serves Y (service serves agent)", "USES": "X uses Y (agent uses tool)", "FEEDS": "X feeds Y (data flow)", "RUNS_ON": "X runs on Y (service runs on host)", "HOSTS": "X hosts Y (host runs service, reverse of RUNS_ON)", "UPSTREAM_OF": "X is upstream of Y (dependency chain)", "TRANSITIONS_TO": "X transitions to Y (version upgrade)"},
+                "L3": {"CAUSES": "X causes Y (with confidence)", "SUPPORTS": "X supports Y (evidence for)", "CHALLENGED_BY": "X is challenged by Y (evidence against)", "CONTRADICTS": "X contradicts Y (incompatible claims)", "REFINES": "X refines Y (narrowing, clarifying)", "APPLIES_TO": "X applies to Y (pattern to instance)", "TRANSITIONS_TO": "X transitions to Y (state change)"},
+                "L4": {"DEPENDS_ON": "X depends on Y (infrastructure dependency)", "ENABLES": "X enables Y (prerequisite)", "THREATENS": "X threatens Y (risk)", "RISKS": "X risks Y (uncertainty)", "BLOCKS": "X blocks Y (obstacle)"},
+            },
+            "cross_link_rule": f"Nodes of type {sorted(schema.must_have_edge_node_types)} MUST have at least one edge when created. Use connects_to or create_edge in the same request.",
+            "exempt_from_cross_link": f"Nodes of type {sorted(schema.exempt_cross_link_node_types)} are exempt from the cross-link requirement.",
+        }
+
         self._json_response(
             200,
             {
@@ -178,6 +231,11 @@ class GraphHandlerMixin:
                 "edge_types": sorted(all_edge_types),
                 "edge_types_by_layer": {k: sorted(v) for k, v in schema.layer_edge_types.items()},
                 "layers": schema.layer_descriptions,
+                "observation_types": sorted(schema.observation_types),
+                "observation_sources": sorted(schema.observation_sources),
+                "visibilities": sorted(schema.visibilities),
+                "provenances": sorted(schema.provenances),
+                "guide": guide,
             },
         )
 
@@ -234,16 +292,26 @@ class GraphHandlerMixin:
             raise EdgeNotFoundError(f"Edge {edge_id} not found")
 
     def _get_neighborhood(self, path: str, qs: dict) -> None:
-        """GET /neighborhood/<id> — node neighborhood."""
+        """GET /neighborhood/<id> — node neighborhood.
+
+        Supports ?created_by=AGENT to filter edges by creator.
+        Useful for "what did I add to this subgraph?" queries.
+        """
         node_id = path[14:]
         from ohm.validation import validate_identifier
 
         node_id = validate_identifier(node_id, name="node_id")
         depth = int(qs.get("depth", [3])[0])
         layer = qs.get("layer", [None])[0]
+        created_by = qs.get("created_by", [None])[0]
         from ohm.queries import query_neighborhood
 
         edges = query_neighborhood(self.current_store.conn, node_id, depth=depth, layer=layer)
+
+        # Filter edges by creator if requested
+        if created_by:
+            edges = [e for e in edges if e.get("created_by") == created_by]
+
         node_ids = {node_id}
         for e in edges:
             node_ids.add(e["from_node"])
@@ -522,6 +590,46 @@ class GraphHandlerMixin:
         params.append(limit)
         sql = "SELECT * FROM ohm_nodes WHERE " + " AND ".join(conditions) + " ORDER BY created_at DESC LIMIT ?"
         results = self.current_store.execute(sql, params)
+
+        # OHM-tr71.8: Automatic semantic fallback on empty text search
+        # When text search returns 0 results, try semantic search automatically
+        if not results and not node_type:
+            try:
+                from ohm.graph.queries import semantic_search
+                semantic_results = semantic_search(
+                    self.current_store.conn,
+                    query=query_text,
+                    limit=limit,
+                    include_l0=include_l0,
+                )
+                if semantic_results:
+                    self._json_response(200, {
+                        "results": [
+                            {
+                                "id": r.get("node_id", ""),
+                                "label": r.get("label", ""),
+                                "type": r.get("type", ""),
+                                "distance": round(r.get("distance", 1.0), 4),
+                                "match_method": "semantic",
+                            }
+                            for r in semantic_results
+                        ],
+                        "count": len(semantic_results),
+                        "fallback": "semantic",
+                        "tip": f"No exact text matches for '{query_text}'. Showing semantic matches instead. Use /semantic_search?q={query_text} for more options.",
+                    })
+                    return
+            except (ValueError, ImportError, Exception) as e:
+                logger.debug(f"Semantic fallback failed: {e}")
+
+            # No semantic results either
+            self._json_response(200, {
+                "results": [],
+                "count": 0,
+                "tip": f"No results for '{query_text}' via text or semantic search. The query may be too specific or use different terminology.",
+            })
+            return
+
         self._json_response(200, results)
 
     def _get_semantic_search(self, path: str, qs: dict) -> None:
@@ -746,6 +854,39 @@ class GraphHandlerMixin:
             provenance=body.get("provenance"),
         )
         result = enrich_response(result, nudges)
+
+        # ADR-021: Proactive discoverability — post-write suggestions + connectivity nudge.
+        # Both run under a 300ms hard cap so they never delay the write response on slow
+        # graphs. If the budget is exceeded, the response omits suggestions (not an error).
+        if result.get("created", True):
+            import concurrent.futures
+            from ohm.server.suggestions import generate_suggestions, generate_connectivity_nudge
+
+            def _suggestions_and_nudge():
+                sugg = generate_suggestions(
+                    store=self.current_store,
+                    node_id=result.get("id", ""),
+                    content=body.get("content"),
+                    label=body.get("label"),
+                    tags=body.get("tags"),
+                    node_type=body.get("type"),
+                    has_edges=bool(body.get("connects_to")),
+                )
+                nudge = generate_connectivity_nudge(self.current_store, agent)
+                return sugg, nudge
+
+            try:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pool:
+                    future = _pool.submit(_suggestions_and_nudge)
+                    suggestions, nudge = future.result(timeout=0.3)
+                result["suggestions"] = suggestions
+                if nudge:
+                    result["connectivity_warning"] = nudge["connectivity_warning"]
+            except concurrent.futures.TimeoutError:
+                logger.debug("Suggestion budget exceeded (>300ms), skipping for this write")
+            except Exception as e:
+                logger.debug(f"Suggestions failed: {e}")
+
         if result.get("created", True):
             self._json_response(201, result)
         else:
@@ -799,6 +940,20 @@ class GraphHandlerMixin:
         decorations = self._run_post_ingest_hooks(agent, "scratch", node)
         if decorations:
             node["hook_decorations"] = decorations
+
+        # ADR-021: Proactive discoverability — suggestions for scratch
+        from ohm.server.suggestions import generate_suggestions
+        suggestions = generate_suggestions(
+            store=self.current_store,
+            node_id=node.get("id", ""),
+            content=content,
+            label=node.get("label"),
+            tags=body.get("tags"),
+            node_type="fragment",
+            has_edges=bool(body.get("connects_to")),
+        )
+        node["suggestions"] = suggestions
+
         self._json_response(201, node)
 
     def _post_fragment_action(self, path: str, qs: dict, body: dict, agent: str) -> None:
@@ -973,6 +1128,38 @@ class GraphHandlerMixin:
             tags=None,
         )
         result = enrich_response(result, nudges)
+
+        # ADR-021: Relational tags — add edge type as tag on both endpoints
+        try:
+            from ohm.server.relational_tags import add_relational_tags
+            tag_result = add_relational_tags(
+                conn=self.current_store.conn,
+                from_node=body["from"],
+                to_node=body["to"],
+                edge_type=body.get("type", ""),
+            )
+            if tag_result["tags_added"]:
+                result["relational_tags"] = tag_result
+        except Exception as e:
+            # Relational tags never fail the write
+            logger.debug(f"Relational tag enrichment failed: {e}")
+
+        # ADR-021: Proactive discoverability — post-write edge suggestions
+        try:
+            from ohm.server.suggestions import generate_edge_suggestions
+            edge_suggestions = generate_edge_suggestions(
+                store=self.current_store,
+                from_node=body["from"],
+                to_node=body["to"],
+                edge_type=body.get("type", ""),
+                layer=body.get("layer", "L3"),
+            )
+            if edge_suggestions["related_edges"] or edge_suggestions["edge_patterns"] or edge_suggestions["orphan_resolved"]:
+                result["suggestions"] = edge_suggestions
+        except Exception as e:
+            # Suggestions never fail the write
+            logger.debug(f"Edge suggestions failed: {e}")
+
         self._json_response(201, result)
 
     def _post_challenge(self, path: str, qs: dict, body: dict, agent: str) -> None:
@@ -1797,9 +1984,16 @@ class GraphHandlerMixin:
         from ohm.server.boundary import enforce_l2_immutability
         enforce_l2_immutability(self.current_store.conn, agent, node_id)
 
+        # Validate type change against schema
+        if "type" in body and body["type"] not in self.schema_config.node_types:
+            raise ValidationError(
+                f"Invalid node type: '{body['type']}' — must be one of: {', '.join(sorted(self.schema_config.node_types))}"
+            )
+
         now = datetime.now(timezone.utc).isoformat()
         patchable = [
             "label",
+            "type",
             "content",
             "confidence",
             "visibility",

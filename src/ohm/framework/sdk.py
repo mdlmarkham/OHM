@@ -47,15 +47,40 @@ class Graph:
         ADR-005: Self-documenting interface for agents.
 
         Returns:
-            Dict with 'node_types', 'edge_types_by_layer', 'schema_version'.
+            Dict with 'node_types', 'edge_types_by_layer', 'schema_version',
+            'observation_types', 'provenances', 'visibilities', and 'guide'.
         """
-        from ohm.schema import VALID_NODE_TYPES, LAYER_EDGE_TYPES, get_schema_version
+        from ohm.schema import (
+            VALID_NODE_TYPES, LAYER_EDGE_TYPES, VALID_OBSERVATION_TYPES,
+            VALID_OBSERVATION_SOURCES, VALID_VISIBILITIES, VALID_PROVENANCES,
+            get_schema_version,
+        )
 
         return {
             "node_types": sorted(VALID_NODE_TYPES),
             "edge_types_by_layer": {layer: sorted(types) for layer, types in LAYER_EDGE_TYPES.items()},
+            "observation_types": sorted(VALID_OBSERVATION_TYPES),
+            "observation_sources": sorted(VALID_OBSERVATION_SOURCES),
+            "visibilities": sorted(VALID_VISIBILITIES),
+            "provenances": sorted(VALID_PROVENANCES),
             "schema_version": get_schema_version(self._conn),
         }
+
+    def guide(self) -> dict[str, Any]:
+        """Return a usage guide for agents who want to use OHM effectively.
+
+        Includes when to use each node type, edge type, and endpoint,
+        plus L0 thinking layer guidance.
+
+        Returns:
+            Dict with 'overview', 'writing', 'reading', 'L0_thinking_layer',
+            'node_type_guide', 'edge_type_guide', 'cross_link_rule'.
+        """
+        import requests
+        r = requests.get(f"{self.url}/schema", headers=self._headers)
+        r.raise_for_status()
+        data = r.json()
+        return data.get("guide", data)
 
     def layers(self) -> list[dict[str, Any]]:
         """Return L1-L4 layer descriptions for agent introspection.
@@ -369,6 +394,8 @@ class Graph:
         confidence: float = 1.0,
         priority: str | None = None,
         url: str | None = None,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
         utility_scale: float | None = None,
         utility_usd_per_day: float | None = None,
         utility_currency: str | None = None,
@@ -390,6 +417,10 @@ class Graph:
         the forward-compat synthesis/observation/interpretation/challenge types),
         pass `connects_to=[existing_node_id, ...]` to satisfy the OHM-tjzh /
         ADR-018 cross-link requirement. Each id must already exist in the graph.
+
+        Args:
+            tags: Optional tags for categorization and discovery.
+            metadata: Optional structured key-value data (JSON dict).
         """
         from ohm.queries import create_node
 
@@ -404,6 +435,8 @@ class Graph:
             confidence=confidence,
             priority=priority,
             url=url,
+            tags=tags,
+            metadata=metadata,
             utility_scale=utility_scale,
             utility_usd_per_day=utility_usd_per_day,
             utility_currency=utility_currency,
@@ -3294,6 +3327,8 @@ def connect_http(
                 "visibility": kwargs.get("visibility", "team"),
                 "provenance": kwargs.get("provenance"),
                 "priority": kwargs.get("priority"),
+                "tags": kwargs.get("tags"),
+                "metadata": kwargs.get("metadata"),
                 "utility_scale": kwargs.get("utility_scale"),
                 "current_best_action": kwargs.get("current_best_action"),
                 "action_alternatives": kwargs.get("action_alternatives"),

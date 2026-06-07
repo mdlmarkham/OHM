@@ -2156,8 +2156,8 @@ def suggest_connections(
             AND b.deleted_at IS NULL
             AND NOT EXISTS (
                 SELECT 1 FROM ohm_edges e
-                WHERE (e.from_node = a.id AND e.to_node = b.id)
-                OR (e.from_node = b.id AND e.to_node = a.id)
+                WHERE ((e.from_node = a.id AND e.to_node = b.id)
+                    OR (e.from_node = b.id AND e.to_node = a.id))
                 AND e.deleted_at IS NULL
             )
             ORDER BY similarity DESC
@@ -2191,7 +2191,8 @@ def suggest_connections(
                 a.label AS from_label,
                 b.id AS to_id,
                 b.label AS to_label,
-                count(*) AS shared_tag_count
+                count(*) AS shared_tag_count,
+                STRING_AGG(DISTINCT a.tag, ',') AS shared_tags_str
             FROM tag_sets a
             JOIN tag_sets b ON a.tag = b.tag AND a.id < b.id
             WHERE NOT EXISTS (
@@ -2213,8 +2214,62 @@ def suggest_connections(
                 "to_id": row[2],
                 "to_label": row[3],
                 "shared_tag_count": row[4],
+                "shared_tags": sorted(row[5].split(",")) if row[5] else [],
                 "reason": f"Shared {row[4]} tags",
                 "score": min(row[4] / 5.0, 1.0),
+            }
+            for row in rows
+        ]
+
+    elif method == "cross_domain":
+        # Find nodes from DIFFERENT agents that share tags but aren't connected.
+        # Cross-domain bridges are more valuable than intra-domain connections
+        # because they reveal unexpected patterns across agent specializations.
+        # Score: shared_tag_count * 1.5 (cross-domain bonus)
+        query = """
+            WITH tag_sets AS (
+                SELECT id, label, created_by, unnest(json_extract_string(tags, '$[*]')) AS tag
+                FROM ohm_nodes
+                WHERE tags IS NOT NULL AND deleted_at IS NULL
+                  AND created_by IS NOT NULL
+            )
+            SELECT
+                a.id AS from_id,
+                a.label AS from_label,
+                b.id AS to_id,
+                b.label AS to_label,
+                a.created_by AS from_agent,
+                b.created_by AS to_agent,
+                count(*) AS shared_tag_count,
+                STRING_AGG(DISTINCT a.tag, ',') AS shared_tags_str
+            FROM tag_sets a
+            JOIN tag_sets b ON a.tag = b.tag AND a.id < b.id
+            WHERE a.created_by != b.created_by
+            AND NOT EXISTS (
+                SELECT 1 FROM ohm_edges e
+                WHERE ((e.from_node = a.id AND e.to_node = b.id)
+                    OR (e.from_node = b.id AND e.to_node = a.id))
+                AND e.deleted_at IS NULL
+            )
+            GROUP BY a.id, a.label, b.id, b.label, a.created_by, b.created_by
+            HAVING count(*) >= ?
+            ORDER BY shared_tag_count DESC
+            LIMIT ?
+        """
+        rows = conn.execute(query, [min_shared, limit]).fetchall()
+        return [
+            {
+                "from_id": row[0],
+                "from_label": row[1],
+                "to_id": row[2],
+                "to_label": row[3],
+                "from_agent": row[4],
+                "to_agent": row[5],
+                "shared_tag_count": row[6],
+                "shared_tags": sorted(row[7].split(",")) if row[7] else [],
+                "reason": f"Cross-domain: {row[4]} and {row[5]} share {row[6]} tags",
+                "score": min(row[6] * 1.5 / 5.0, 1.0),
+                "cross_domain": True,
             }
             for row in rows
         ]
@@ -3599,3 +3654,154 @@ def _node_usd_value(node: dict[str, Any] | None) -> float | None:
         return None
     usd = node.get("utility_usd_per_day")
     return float(usd) if usd is not None else None
+
+
+def find_islands(
+    conn: DuckDBPyConnection,
+    *,
+    exclude_fragments: bool = True,
+    min_size: int = 2,
+    max_islands: int = 20,
+    layer: str | None = None,
+) -> dict[str, Any]:
+    """Find disconnected islands (connected components) in the graph.
+
+    An island is a cluster of nodes connected by edges but disconnected
+    from the main graph. Islands represent knowledge that needs bridging.
+
+    This uses Union-Find (disjoint set) to efficiently compute connected
+    components from the edge table.
+
+    Args:
+        conn: DuckDB connection
+        exclude_fragments: Exclude L0 fragments from the island computation
+        min_size: Minimum island size to include (1 = include orphans)
+        max_islands: Maximum number of islands to return
+        layer: Filter edges by layer (e.g., 'L3' for knowledge edges only)
+
+    Returns:
+        Dict with:
+            islands: list of islands, each with id, nodes, edges, avg_confidence
+            total_islands: total number of islands found
+            largest_island_size: size of the largest connected component
+            main_graph_size: size of the largest component (the "mainland")
+            coverage: fraction of nodes in the mainland
+    """
+    # Build edge list
+    layer_clause = "AND e.layer = ?" if layer else ""
+    params: list[Any] = []
+    if layer:
+        params.append(layer)
+
+    edge_query = f"""
+        SELECT e.from_node, e.to_node, e.confidence
+        FROM ohm_edges e
+        JOIN ohm_nodes n1 ON e.from_node = n1.id
+        JOIN ohm_nodes n2 ON e.to_node = n2.id
+        WHERE e.deleted_at IS NULL
+        AND n1.deleted_at IS NULL
+        AND n2.deleted_at IS NULL
+        {layer_clause}
+    """
+    edges = conn.execute(edge_query, params).fetchall()
+
+    # Build node list (excluding fragments if requested)
+    frag_clause = "AND n.type != 'fragment'" if exclude_fragments else ""
+    node_query = f"""
+        SELECT n.id, n.label, n.type, n.confidence
+        FROM ohm_nodes n
+        WHERE n.deleted_at IS NULL
+        {frag_clause}
+    """
+    nodes = conn.execute(node_query).fetchall()
+
+    if not nodes:
+        return {
+            "islands": [],
+            "total_islands": 0,
+            "largest_island_size": 0,
+            "main_graph_size": 0,
+            "coverage": 0.0,
+        }
+
+    # Union-Find
+    parent: dict[str, str] = {n[0]: n[0] for n in nodes}
+
+    def find(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]  # Path compression
+            x = parent[x]
+        return x
+
+    def union(x: str, y: str) -> None:
+        px, py = find(x), find(y)
+        if px != py:
+            parent[px] = py
+
+    # Merge edges
+    for from_n, to_n, conf in edges:
+        if from_n in parent and to_n in parent:
+            union(from_n, to_n)
+
+    # Collect components
+    from collections import defaultdict
+    components: dict[str, list[tuple]] = defaultdict(list)
+    node_info = {n[0]: (n[1], n[2], n[3]) for n in nodes}
+    for nid in parent:
+        root = find(nid)
+        components[root].append(nid)
+
+    # Classify: single nodes (orphans) vs islands (2+ nodes)
+    orphans = [c for c in components.values() if len(c) == 1]
+    islands_list = [c for c in components.values() if len(c) >= min_size]
+
+    # Sort islands by size descending
+    islands_list.sort(key=len, reverse=True)
+
+    # Compute metadata for each island
+    result_islands = []
+    for i, comp in enumerate(islands_list[:max_islands]):
+        island_nodes = []
+        total_conf = 0.0
+        conf_count = 0
+        for nid in comp:
+            info = node_info.get(nid, ("", "concept", None))
+            island_nodes.append({
+                "id": nid,
+                "label": info[0],
+                "type": info[1],
+            })
+            if info[2] is not None:
+                total_conf += info[2]
+                conf_count += 1
+
+        # Count edges within this island
+        comp_set = set(comp)
+        island_edges = sum(
+            1 for from_n, to_n, _ in edges
+            if from_n in comp_set and to_n in comp_set
+        )
+
+        result_islands.append({
+            "id": f"island-{i + 1}",
+            "size": len(comp),
+            "nodes": island_nodes[:10],  # Cap at 10 for response size
+            "total_nodes": len(comp),
+            "internal_edges": island_edges,
+            "avg_confidence": round(total_conf / conf_count, 3) if conf_count > 0 else None,
+        })
+
+    # Compute stats
+    total_nodes = len(nodes)
+    mainland_size = len(islands_list[0]) if islands_list else 0
+    coverage = round(mainland_size / total_nodes, 3) if total_nodes > 0 else 0.0
+
+    return {
+        "islands": result_islands,
+        "total_islands": len(islands_list) + len(orphans),
+        "islands_of_size_2_plus": len(islands_list),
+        "orphan_count": len(orphans),
+        "largest_island_size": mainland_size,
+        "main_graph_size": mainland_size,
+        "coverage": coverage,
+    }

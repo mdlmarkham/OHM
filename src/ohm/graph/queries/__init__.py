@@ -874,6 +874,8 @@ def create_node(
     confidence: float = 1.0,
     priority: str | None = None,
     url: str | None = None,
+    tags: list[str] | None = None,
+    metadata: dict | None = None,
     utility_scale: float | None = None,
     utility_usd_per_day: float | None = None,
     utility_currency: str | None = None,
@@ -884,6 +886,8 @@ def create_node(
     """Create a new node and return its full record.
 
     Args:
+        tags: Optional tags for categorization and discovery.
+        metadata: Optional structured key-value data (JSON dict).
         connects_to: Optional list of existing node ids this node will be linked
             to. Used by the cross-link requirement (OHM-tjzh / ADR-018) to prove
             the agent has anchored a derived claim to existing graph structure.
@@ -941,21 +945,27 @@ def create_node(
             """UPDATE ohm_nodes SET
                 label = ?, type = ?, content = ?, created_by = ?,
                 visibility = ?, provenance = ?, confidence = ?, priority = ?, url = ?,
+                tags = ?, metadata = ?,
                 utility_scale = ?, utility_usd_per_day = ?, utility_currency = ?,
                 current_best_action = ?, action_alternatives = ?,
                 deleted_at = NULL, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?""",
-            [label, node_type, content, created_by, visibility, provenance, confidence, priority, url, utility_scale, utility_usd_per_day, utility_currency, current_best_action, alternatives_json, node_id],
+            [label, node_type, content, created_by, visibility, provenance, confidence, priority, url, tags_json, metadata_json, utility_scale, utility_usd_per_day, utility_currency, current_best_action, alternatives_json, node_id],
         )
         _log_change(conn, "ohm_nodes", node_id, "UPDATE", created_by)
         return _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node_id]))[0]
 
+    # Serialize tags and metadata to JSON
+    import json as _json
+    tags_json = _json.dumps(tags) if tags else None
+    metadata_json = _json.dumps(metadata) if metadata else None
+
     conn.execute(
         """INSERT INTO ohm_nodes
            (id, label, type, content, created_by, visibility, provenance, confidence, priority, url,
-            utility_scale, utility_usd_per_day, utility_currency, current_best_action, action_alternatives)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        [node_id, label, node_type, content, created_by, visibility, provenance, confidence, priority, url, utility_scale, utility_usd_per_day, utility_currency, current_best_action, alternatives_json],
+            tags, metadata, utility_scale, utility_usd_per_day, utility_currency, current_best_action, action_alternatives)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [node_id, label, node_type, content, created_by, visibility, provenance, confidence, priority, url, tags_json, metadata_json, utility_scale, utility_usd_per_day, utility_currency, current_best_action, alternatives_json],
     )
     _log_change(conn, "ohm_nodes", node_id, "INSERT", created_by)
     # Return full node record
@@ -1541,10 +1551,17 @@ def query_stale_edges(
     """
     defaults = {"L1": float("inf"), "L2": float("inf"), "L3": 90.0, "L4": 30.0}
     if half_life_days:
+        _valid_layers = frozenset({"L1", "L2", "L3", "L4"})
+        for k, v in half_life_days.items():
+            if k not in _valid_layers:
+                raise ValueError(f"Invalid layer in half_life_days: {k!r}")
+            if not isinstance(v, (int, float)) or v != v:  # NaN check
+                raise ValueError(f"Invalid half_life_days value for {k}: {v!r}")
         defaults.update(half_life_days)
 
+    # Values are validated numeric literals from the hardcoded defaults dict — safe to interpolate.
     when_clauses = " ".join(
-        f"WHEN '{k}' THEN {999999.0 if v == float('inf') or v <= 0 else v}"
+        f"WHEN '{k}' THEN {999999.0 if v == float('inf') or v <= 0 else float(v)}"
         for k, v in defaults.items()
     )
     hl_case = f"CASE layer {when_clauses} ELSE 90.0 END"
@@ -2988,6 +3005,7 @@ def update_node_embedding(
     conn: "DuckDBPyConnection",
     node_id: str,
     text: str | None = None,
+    ollama_url: str | None = None,
 ) -> bool:
     """Generate and store an embedding for a node.
 
@@ -2999,6 +3017,9 @@ def update_node_embedding(
         conn: Database connection.
         node_id: ID of the node to update.
         text: Optional custom text to embed. Defaults to node label.
+        ollama_url: Optional Ollama URL for parallel embedding workers.
+            Defaults to localhost. Use for distributed embedding generation
+            across multiple GPU nodes.
 
     Returns:
         True if embedding was updated, False otherwise.
@@ -3007,17 +3028,37 @@ def update_node_embedding(
 
     node_id = validate_identifier(node_id, name="node_id")
 
-    # Get node label if no custom text provided
+    # Enrich embedding text: label + content + tags
+    # Short labels like "Artificial Scarcity" produce shallow embeddings.
+    # Concatenating label, content, and tags gives nomic-embed-text richer
+    # semantic material to work with. (ADR-021, Socrates Round 4 feedback)
     if text is None:
-        result = conn.execute("SELECT label FROM ohm_nodes WHERE id = ?", [node_id]).fetchone()
+        result = conn.execute(
+            "SELECT label, content, tags FROM ohm_nodes WHERE id = ?",
+            [node_id],
+        ).fetchone()
         if result is None:
             return False
-        text = result[0]
+        label, content, tags_json = result
+        parts = []
+        if label:
+            parts.append(label)
+        if content:
+            parts.append(content)
+        if tags_json:
+            import json as _json
+            try:
+                tags = _json.loads(tags_json) if isinstance(tags_json, str) else tags_json
+                if isinstance(tags, list) and tags:
+                    parts.append(" ".join(str(t) for t in tags))
+            except (ValueError, TypeError):
+                pass
+        text = "\n".join(parts) if parts else label
 
     if not text:
         return False
 
-    embedding = generate_embedding(text)
+    embedding = generate_embedding(text, ollama_url=ollama_url or "http://localhost:11434")
     if embedding is None:
         return False
 

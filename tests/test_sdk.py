@@ -345,13 +345,13 @@ class TestDiscovery:
         assert "L4" in result["edge_types_by_layer"]
 
     def test_layers(self, graph):
-        """layers() returns L1-L4 layer descriptors."""
+        """layers() returns L0-L4 layer descriptors."""
         result = graph.layers()
         assert isinstance(result, list)
-        assert len(result) == 4
-        # Should have L1, L2, L3, L4
+        assert len(result) == 5
+        # Should have L0, L1, L2, L3, L4
         names = {r["name"] for r in result}
-        assert names == {"L1", "L2", "L3", "L4"}
+        assert names == {"L0", "L1", "L2", "L3", "L4"}
         # Each layer should have sharing, ownership, edge_types, example
         for r in result:
             assert "sharing" in r

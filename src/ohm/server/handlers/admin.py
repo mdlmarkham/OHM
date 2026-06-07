@@ -1,6 +1,7 @@
 """Admin handler mixin — checkpoint, embeddings, snapshot, and hook endpoints."""
 
 import time
+import threading
 
 
 class AdminHandlerMixin:
@@ -90,8 +91,9 @@ class AdminHandlerMixin:
         try:
             from ohm.queries import update_node_embedding
 
-            batch_size = 5
-            delay_ms = 200
+            batch_size = 3
+            delay_ms = 100
+            ollama_url = None  # Default: use localhost Ollama
             if qs.get("batch_size"):
                 try:
                     batch_size = int(qs["batch_size"][0])
@@ -110,8 +112,15 @@ class AdminHandlerMixin:
                         delay_ms = 5000
                 except ValueError:
                     pass
+            if qs.get("ollama_url"):
+                ollama_url = qs["ollama_url"][0]
+                # Validate URL format
+                if not ollama_url.startswith(("http://", "https://")):
+                    self._json_response(400, {"error": "invalid_ollama_url", "message": "ollama_url must start with http:// or https://"})
+                    return
 
             rows = self.current_store.execute("SELECT id, label FROM ohm_nodes WHERE embedding IS NULL AND deleted_at IS NULL")
+            total_missing = len(rows)
             if not rows:
                 self._json_response(
                     200,
@@ -127,6 +136,55 @@ class AdminHandlerMixin:
                 )
                 return
 
+            # Run embedding generation in background thread to avoid HTTP timeout
+            background = qs.get("background", [""])[0].lower() in ("true", "1", "yes")
+
+            if background:
+                # Track progress in server state
+                if not hasattr(self.server, "_embed_progress"):
+                    self.server._embed_progress = {"status": "idle", "updated": 0, "failed": 0, "total": 0}
+                self.server._embed_progress = {"status": "error", "updated": 0, "failed": 0, "total": total_missing, "message": "Background embedding temporarily disabled — use synchronous batch mode with small batch_size (e.g. ?batch_size=3) to avoid timeout. Background mode causes DuckDB concurrency issues."}
+
+                self._json_response(503, {
+                    "status": "error",
+                    "total": total_missing,
+                    "message": "Background embedding is temporarily disabled due to DuckDB concurrency issues. Use synchronous mode with small batch_size (e.g. ?batch_size=3) and re-call until remaining=0.",
+                })
+                return
+
+                # NOTE: Background mode disabled due to DuckDB malloc corruption.
+                # The background thread writes to DuckDB while the main thread also writes,
+                # causing memory corruption. Use synchronous batch mode instead.
+                def _background_embed(rows, store, progress):
+                    from ohm.queries import update_node_embedding as _update
+                    u, f = 0, 0
+                    for row in rows:
+                        try:
+                            with store._lock:
+                                if _update(store.conn, row["id"]):
+                                    u += 1
+                                else:
+                                    f += 1
+                        except Exception:
+                            f += 1
+                        progress["updated"] = u
+                        progress["failed"] = f
+                        if delay_ms > 0:
+                            time.sleep(delay_ms / 1000.0)
+                    progress["status"] = "done"
+                    progress["updated"] = u
+                    progress["failed"] = f
+
+                t = threading.Thread(target=_background_embed, args=(rows, self.current_store, self.server._embed_progress), daemon=True)
+                t.start()
+                self._json_response(202, {
+                    "status": "started",
+                    "total": total_missing,
+                    "message": f"Embedding generation started for {total_missing} nodes. GET /admin/embeddings/status to check progress.",
+                })
+                return
+
+            # Synchronous mode (original behavior)
             updated = 0
             failed = 0
             processed = 0
@@ -134,7 +192,7 @@ class AdminHandlerMixin:
                 if processed >= batch_size:
                     break
                 try:
-                    if update_node_embedding(self.current_store.conn, row["id"]):
+                    if update_node_embedding(self.current_store.conn, row["id"], ollama_url=ollama_url):
                         updated += 1
                     else:
                         failed += 1
@@ -144,7 +202,6 @@ class AdminHandlerMixin:
                 if delay_ms > 0:
                     time.sleep(delay_ms / 1000.0)
 
-            total_missing = len(rows)
             remaining = total_missing - processed
             self._json_response(
                 200,
@@ -160,6 +217,14 @@ class AdminHandlerMixin:
             )
         except Exception as e:
             self._json_response(500, {"error": "embedding_backfill_failed", "message": str(e)})
+
+    def _get_admin_embeddings_status(self, path: str, qs: dict) -> None:
+        """GET /admin/embeddings/status — check progress of background embedding generation."""
+        if not hasattr(self.server, "_embed_progress"):
+            self._json_response(200, {"status": "never_run", "updated": 0, "failed": 0, "total": 0})
+            return
+        progress = self.server._embed_progress
+        self._json_response(200, progress)
 
     def _post_admin_edge_layer_fix(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /admin/edge-layer-fix — bulk move edges to correct layer based on schema.
@@ -805,4 +870,149 @@ class AdminHandlerMixin:
             return
 
         result = evict_expired_fragments(self.current_store.conn, ttl_days=ttl_days)
+        self._json_response(200, result)
+
+    def _post_admin_repair_dangling(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /admin/repair-dangling — fix edges pointing to non-existent nodes.
+
+        Finds all edges where from_node or to_node references a node that doesn't
+        exist (deleted or never created) and soft-deletes them.
+
+        Body params:
+            dry_run: If true, only report what would be fixed (default: true)
+            migration: Dict mapping old node IDs to new node IDs. Edges pointing
+                       to old IDs will be redirected to new IDs instead of deleted.
+
+        Returns:
+            dangling_edges: Number of dangling edges found
+            redirected: Number of edges redirected (if migration provided)
+            deleted: Number of edges deleted (if dry_run=false)
+        """
+        dry_run = body.get("dry_run", True)
+        migration = body.get("migration", {})
+
+        conn = self.current_store.conn
+        with self.current_store._lock:
+            # Find edges where to_node doesn't exist
+            dangling_to = conn.execute("""
+                SELECT e.id, e.from_node, e.to_node, e.edge_type, e.layer, e.confidence
+                FROM ohm_edges e
+                LEFT JOIN ohm_nodes n ON e.to_node = n.id
+                WHERE e.deleted_at IS NULL AND n.id IS NULL
+            """).fetchall()
+
+            # Find edges where from_node doesn't exist
+            dangling_from = conn.execute("""
+                SELECT e.id, e.from_node, e.to_node, e.edge_type, e.layer, e.confidence
+                FROM ohm_edges e
+                LEFT JOIN ohm_nodes n ON e.from_node = n.id
+                WHERE e.deleted_at IS NULL AND n.id IS NULL
+            """).fetchall()
+
+        all_dangling = list(set(dangling_to + dangling_from))
+        redirected = 0
+        deleted = 0
+        kept = []
+
+        for edge in all_dangling:
+            edge_id, from_node, to_node, edge_type, layer, confidence = edge
+
+            # Check if we can redirect
+            new_to = migration.get(to_node, to_node)
+            new_from = migration.get(from_node, from_node)
+            can_redirect = (to_node in migration or from_node in migration)
+
+            if can_redirect and not dry_run:
+                # Delete old edge and create new one with migrated IDs
+                with self.current_store._lock:
+                    conn.execute(
+                        "UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        [edge_id]
+                    )
+                # Create new edge with migrated IDs
+                try:
+                    result = self.current_store.write_edge(
+                        from_node=new_from,
+                        to_node=new_to,
+                        edge_type=edge_type,
+                        layer=layer or "L3",
+                        confidence=confidence or 0.8,
+                        created_by=agent,
+                    )
+                    redirected += 1
+                except Exception:
+                    kept.append(edge)
+            elif not can_redirect and not dry_run:
+                # Soft-delete the dangling edge
+                with self.current_store._lock:
+                    conn.execute(
+                        "UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        [edge_id]
+                    )
+                deleted += 1
+            else:
+                kept.append(edge)
+
+        result = {
+            "dangling_edges": len(all_dangling),
+            "redirected": redirected,
+            "deleted": deleted,
+            "dry_run": dry_run,
+        }
+        if dry_run:
+            result["would_redirect"] = sum(1 for e in all_dangling if e[2] in migration or e[1] in migration)
+            result["would_delete"] = len(all_dangling) - result["would_redirect"]
+            result["dangling_details"] = [
+                {"id": e[0], "from": e[1], "to": e[2], "type": e[3]}
+                for e in all_dangling[:20]
+            ]
+
+        self._json_response(200, result)
+
+
+    def _post_admin_backfill_relational_tags(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /admin/backfill-relational-tags — backfill relational tags for all existing edges.
+
+        Scans all non-deleted edges and adds edge-type-derived tags to both endpoints.
+        This is a one-time migration for ADR-021.
+
+        Body: {
+            "dry_run": false  // if true, returns what would be updated without applying
+        }
+        """
+        from ohm.server.relational_tags import backfill_relational_tags, RELATIONAL_TAG_MAP
+
+        dry_run = body.get("dry_run", False)
+
+        if dry_run:
+            # Count how many edges would generate tags
+            edges = self.current_store.conn.execute(
+                "SELECT from_node, to_node, edge_type FROM ohm_edges WHERE deleted_at IS NULL",
+            ).fetchall()
+            potential_tags = 0
+            for from_node, to_node, edge_type in edges:
+                if edge_type in RELATIONAL_TAG_MAP:
+                    for node_id in [from_node, to_node]:
+                        row = self.current_store.conn.execute(
+                            "SELECT tags FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                            [node_id],
+                        ).fetchone()
+                        if row:
+                            import json
+                            try:
+                                existing = json.loads(row[0]) if isinstance(row[0], str) else (row[0] or [])
+                            except (json.JSONDecodeError, TypeError):
+                                existing = []
+                            tag = RELATIONAL_TAG_MAP[edge_type]
+                            if tag not in existing:
+                                potential_tags += 1
+            self._json_response(200, {
+                "dry_run": True,
+                "edges_scanned": len(edges),
+                "potential_tag_additions": potential_tags,
+                "mapped_edge_types": list(RELATIONAL_TAG_MAP.keys()),
+            })
+            return
+
+        result = backfill_relational_tags(self.current_store.conn)
         self._json_response(200, result)

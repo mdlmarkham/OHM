@@ -1,27 +1,17 @@
 {
-  "name": "beef_herd",
+  "name": "infrastructure",
   "template_version": 1,
   "node_types": [
     "agent",
-    "animal",
     "area",
-    "breed",
     "concept",
-    "contract",
     "decision",
-    "diagnosis",
     "equipment",
-    "event",
-    "feed",
     "fragment",
     "goal",
-    "health_event",
-    "herd",
     "idea",
     "infrastructure",
     "institution",
-    "market",
-    "pasture",
     "pattern",
     "person",
     "release",
@@ -30,34 +20,34 @@
     "skill",
     "source",
     "system",
-    "task",
     "technology",
     "topic",
-    "treatment",
-    "value",
-    "water",
-    "weather"
+    "value"
   ],
   "layer_edge_types": {
     "L0": [
       "CONTEXT_OF",
       "CONTRADICTS_FRAG",
       "INSPIRED_BY",
-      "REFINES_FRAG"
+      "REFINES_FRAG",
+      "RESONANCE"
     ],
     "L1": [
+      "APPLIES_TO",
       "BELONGS_TO",
-      "CAPABLE_OF",
       "CONTAINS",
-      "GOALS",
       "HAS_COMPONENT",
+      "HOSTS",
       "INTERESTED_IN",
+      "LOCATED_IN",
       "PART_OF",
-      "VALUES"
+      "RUNS_ON",
+      "SERVES",
+      "VALUES",
+      "VERSION_OF"
     ],
     "L2": [
       "AWAITING",
-      "BATCH_EXPIRES_BEFORE",
       "CLOSED_BY",
       "CONTAINED_BY",
       "DERIVES_FROM",
@@ -69,13 +59,13 @@
       "NEGOTIATES_WITH",
       "NOTIFIES",
       "OPENED_BY",
-      "RECOVERED_BY",
       "REFERENCES",
+      "RECOVERED_BY",
       "RESOLVED_BY",
-      "SERVES",
       "STARTED_BY",
       "TRANSFERRED_TO",
       "TRUSTS",
+      "UPSTREAM_OF",
       "USES"
     ],
     "L3": [
@@ -83,13 +73,12 @@
       "CAUSES",
       "CHALLENGED_BY",
       "COLLABORATES_WITH",
-      "CONTRADICTS",
       "CORRELATES_WITH",
       "DEFERS_TO",
       "DELEGATED_TO",
       "ESCALATED_TO",
-      "EXPECTED_LIKELIHOOD",
       "EXPLAINS",
+      "EXPECTED_LIKELIHOOD",
       "LISTENS_TO",
       "NEGATES",
       "PREDICTS",
@@ -114,61 +103,57 @@
     ]
   },
   "layer_descriptions": {
-    "L0": "Thinking \u2014 Fragments, hunches, raw associations; unreliable, auto-linked",
-    "L1": "Structure \u2014 Herd hierarchy (ranch \u2192 herd \u2192 cohort \u2192 animal), land, infrastructure",
-    "L2": "Flow \u2014 Animal movements, feed flows, market transactions, veterinary records",
-    "L3": "Knowledge \u2014 AND-gate analysis, drought response, disease patterns, market cycles",
-    "L4": "Prospect \u2014 Risk assessments, heifer retention decisions, what-if scenarios"
+    "L0": "Thinking — Fragments, hunches, raw associations; unreliable, auto-linked",
+    "L1": "Structure — Physical/logical hierarchy (site → infrastructure → service → release)",
+    "L2": "Flow — Data flows, service dependencies, upstream/downstream relationships",
+    "L3": "Knowledge — Incident patterns, performance insights, failure modes",
+    "L4": "Prospect — Capacity planning, risk assessment, upgrade predictions"
   },
   "observation_types": [
     "anomaly",
     "challenge",
-    "conception",
     "health_check",
-    "intake",
     "measurement",
-    "mortality",
-    "movement",
     "pattern",
-    "price",
-    "rainfall",
     "sentiment",
-    "support",
-    "temperature",
-    "weight"
+    "support"
   ],
   "observation_sources": [
     "analysis",
-    "auction",
     "conversation",
-    "noaa",
-    "producer",
+    "feed-ingest",
+    "monitoring",
+    "observation",
     "research",
-    "sensor",
-    "signal",
-    "usda",
-    "veterinarian"
+    "signal"
   ],
   "visibilities": [
     "private",
+    "team",
     "public",
-    "team"
+    "vault"
   ],
   "provenances": [
     "bookmark",
     "clio-research",
     "conversation",
-    "extension",
     "feed-ingest",
-    "market_report",
+    "healthcheck",
     "metis-research",
-    "metis-review-request",
     "metis-synthesis",
+    "metis-review-request",
     "observation",
-    "plf",
     "research",
-    "socrates-curriculum",
-    "veterinary",
-    "weather_service"
+    "socrates-curriculum"
+  ],
+  "required_integrations": {},
+  "optional_integrations": {},
+  "seed_agents": [
+    {
+      "agent_name": "atlas",
+      "label": "Atlas",
+      "current_focus": "Infrastructure monitoring and coordination",
+      "active_patterns": ["service-health", "version-tracking", "dependency-mapping"]
+    }
   ]
 }
