@@ -509,6 +509,7 @@ def _build_router() -> _RouteRegistry:
         "/calibration/",
         "/reliability/",
         "/compound_confidence/",
+        "/observation/",
     ):
         r.add("GET", _p)
 
@@ -518,6 +519,9 @@ def _build_router() -> _RouteRegistry:
     # Multi-method: /observations supports both GET (list) and POST (bulk upload)
     r.add("GET", "/observations")
     r.add("POST", "/observations")
+
+    # OHM-xdd4: /observation/{id}/supersede (POST) for supersession chain
+    r.add("POST", "/observation/")
 
     # /deduplicate and /admin/checkpoint: POST is canonical; GET kept for compat
     r.add("GET", "/deduplicate")
@@ -1126,6 +1130,10 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
             "notes": (str, type(None)),
             "source_name": (str, type(None)),
             "source_url": (str, type(None)),
+            "half_life_days": (int, float, type(None)),
+        },
+        "/observation": {
+            "old_obs_id": (str, type(None)),
         },
     }
 
@@ -1958,6 +1966,7 @@ OhmHandler._POST_PREFIXES = [
     ("/support/", "_post_support"),
     ("/observe/", "_post_observe"),
     ("/fragments/", "_post_fragment_action"),
+    ("/observation/", "_post_observation_supersede"),
 ]
 
 OhmHandler._GET_EXACT = {
@@ -2061,6 +2070,7 @@ OhmHandler._GET_PREFIXES = [
     ("/calibration/", "_get_calibration"),
     ("/reliability/", "_get_reliability"),
     ("/compound_confidence/", "_get_compound_confidence"),
+    ("/observation/", "_get_observation"),
 ]
 
 
