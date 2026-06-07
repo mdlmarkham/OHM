@@ -6,7 +6,7 @@
 OHM-xdd4 (CLOSED) ── Phase 1: Core Decay (schema + confidence_at + supersession)
 OHM-xdd4.1-4 (CLOSED) ── Sub-issues: schema, confidence_at, supersession, neighborhood integration
 OHM-wuki (CLOSED) ── Phase 2: Chain Validity (STL weakest-link bound)
-OHM-v40d (OPEN) ── Config bug: sync_interval_seconds nesting (code fix, workaround in place)
+OHM-v40d (SHIPPED ✅) ── Config bug: sync_interval_seconds nesting (commit 39fd6b0)
 OHM-8fdb (OPEN) ── Phase 3: Self-Calibration (learned half-lives + authority decay)
 OHM-24g9 (OPEN) ── Phase 4: Weibull Generalization (continuous shape parameter)
 ```
@@ -42,7 +42,7 @@ OHM-3ngi (CLOSED) ── ADR-022: SHACL-like write gates for L0→L1→L2→L3�
 
 | ID | GitHub | Title | Status | Notes |
 |----|--------|-------|--------|-------|
-| OHM-v40d | #646 | Config bug: sync_interval_seconds nesting | OPEN | 10-line fix in server.py. Workaround in place. Ready for Hephaestus. |
+| OHM-v40d | #646 | Config bug: sync_interval_seconds nesting | **SHIPPED** ✅ | Commit 39fd6b0. Reads from ducklake sub-config first. 30/30 tests. |
 | OHM-3ngi | #645 | Layer Promotion Constraints (ADR-022) | CLOSED | Shipped. constraint-report needs batch optimization. |
 | OHM-8fdb | #647 | Phase 3: Self-Calibration | OPEN | Learned half-lives + authority decay. Depends on 3ngi (shipped). |
 | OHM-aznh | #665 | INGEST: Shell Hook Architecture | OPEN | Staged pipeline for ingestion. |
