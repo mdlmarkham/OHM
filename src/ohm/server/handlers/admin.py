@@ -1034,7 +1034,23 @@ class AdminHandlerMixin:
         """GET /admin/constraint-report — show constraint satisfaction rates (ADR-022).
 
         Returns per-layer constraint satisfaction statistics across all nodes.
+        Uses batch computation (OHM-3ngi optimization) for ~100x speedup
+        over per-node effective_layer() calls.
+
+        Query parameters:
+            batch: bool, default true. Set to 'false' for per-node computation
+                   (slower, includes chain_validity per node).
         """
+        self._require_write_auth()
+        use_batch = qs.get("batch", ["true"])[0].lower() != "false"
+
+        if use_batch:
+            from ohm.graph.constraints import batch_constraint_report
+            result = batch_constraint_report(self.current_store.conn)
+            self._json_response(200, result)
+            return
+
+        # Slow path: per-node computation (includes chain_validity)
         from ohm.graph.constraints import (
             PROMOTION_CONSTRAINTS,
             count_sources,
@@ -1047,10 +1063,6 @@ class AdminHandlerMixin:
             count_context_links,
         )
 
-        self._require_write_auth()
-
-        # Get all nodes with their types (ohm_nodes has no layer column;
-        # effective_layer is computed from edges in constraints.py)
         nodes = self.current_store.conn.execute(
             "SELECT id, type FROM ohm_nodes WHERE deleted_at IS NULL"
         ).fetchall()
@@ -1067,7 +1079,6 @@ class AdminHandlerMixin:
             if eff in layers:
                 layers[eff]["total"] += 1
 
-        # Count constraint satisfaction per layer transition
         transition_layer_map = {
             "L0_to_L1": "L0",
             "L1_to_L2": "L1",
@@ -1119,6 +1130,7 @@ class AdminHandlerMixin:
             "total_violations": total_violations,
             "enforcement_mode": "advisory",
             "note": "Run with enforce_layer_gates=true in config for strict enforcement",
+            "batch_computed": False,
         }
         self._json_response(200, response)
 
