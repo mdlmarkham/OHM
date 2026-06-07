@@ -2170,8 +2170,15 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
 
     # Background DuckLake sync thread (OHM-1rwl): sync every sync_interval_seconds
     # so data is not lost between heartbeats on hard shutdown (SIGKILL/OOM).
-    ducklake_sync_interval = config.get("sync_interval_seconds", 60)
-    ducklake_sync_max_retries = config.get("sync_max_retries", 20)
+    # OHM-v40d: read from ducklake sub-config first, fall back to top-level for compat.
+    _top_level_sync = config.get("sync_interval_seconds")
+    ducklake_sync_interval = config.get("ducklake", {}).get("sync_interval_seconds", _top_level_sync if _top_level_sync is not None else 60)
+    if _top_level_sync is not None and config.get("ducklake", {}).get("sync_interval_seconds") is not None and _top_level_sync != config["ducklake"]["sync_interval_seconds"]:
+        logger.warning(
+            "Conflicting sync_interval_seconds: top-level=%s, ducklake=%s — using ducklake value",
+            _top_level_sync, config["ducklake"]["sync_interval_seconds"],
+        )
+    ducklake_sync_max_retries = config.get("ducklake", {}).get("sync_max_retries", config.get("sync_max_retries", 20))
     _sync_stop = threading.Event()
 
     def _ducklake_sync_loop():
