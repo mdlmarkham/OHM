@@ -46,7 +46,7 @@ OHM-3ngi (SHIPPED ✅) ── ADR-022: Layer Promotion Constraints (batch optimi
 | ~~OHM-3ngi~~ | ~~#645~~ | ~~ADR-022 Layer Gates~~ | **SHIPPED** ✅ | Batch constraint-report 106x speedup. Commit eaedaf7. |
 | ~~OHM-8fdb~~ | ~~#647~~ | ~~Phase 3: Self-Calibration~~ | **SHIPPED** ✅ | Commit 19a0e00. Learned half-lives + authority decay. |
 | ~~OHM-aznh~~ | ~~#665~~ | ~~INGEST Shell Hooks~~ | **SHIPPED** ✅ | All 13 sub-issues closed. Hooks live. |
-| OHM-wdrg | #621 | Source Citation Architecture (ADR-013) | OPEN | L2 evidence layer enforcement. |
+| ~~OHM-wdrg~~ | ~~#621~~ | ~~Source Citation Architecture~~ | **SHIPPED** ✅ | observation_source_required hook, backfill, Stage 3/4 REFERENCES. |
 | OHM-a5rz | #644 | L0 Thinking Layer | OPEN | Fragments, scratch(), auto-linking. |
 | OHM-tr71 | #636 | Proactive Discoverability | OPEN | Islands, suggestions, nudges. |
 
@@ -55,7 +55,7 @@ OHM-3ngi (SHIPPED ✅) ── ADR-022: Layer Promotion Constraints (batch optimi
 | ID | GitHub | Title | Status | Notes |
 |----|--------|-------|--------|-------|
 | OHM-24g9 | #688/#666 | Phase 4: Weibull Generalization | OPEN | Wait for Phase 3 validation. |
-| OHM-g0kv | #682/#707 | DEDUP: Content Hashing | OPEN | Idempotent ingestion. |
+| ~~OHM-g0kv~~ | ~~#682/#707~~ | ~~DEDUP: Content Hashing~~ | **SHIPPED** ✅ | 3139 aliases, 530 content hashes, /resolve live. |
 | OHM-6lvk | #684/#709 | DOCTOR: Graph Health Scoring | OPEN | Dependency-ordered remediation. |
 | OHM-vj3i | CLOSED | TRAJ: Temporal Regression Detection | SHIPPED | In PR #627. |
 | OHM-hflx | #681/#706 | Sacred references + challenge nudge | SHIPPED | In PR #627. |
