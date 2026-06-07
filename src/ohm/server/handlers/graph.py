@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import logging
 
+logger = logging.getLogger(__name__)
+
 from ohm.server import server as _server_module
 from ohm.server.nudges import generate_nudges, enrich_response
-
-logger = logging.getLogger(__name__)
 
 
 class GraphHandlerMixin:
@@ -53,7 +53,9 @@ class GraphHandlerMixin:
                 except json.JSONDecodeError:
                     pass
             elif not r.success:
-                logger.warning(
+                import logging
+
+                logging.getLogger(__name__).warning(
                     "post_ingest hook %s failed (exit_code=%d): %s",
                     r.hook_id, r.exit_code, r.stderr,
                 )
@@ -297,8 +299,7 @@ class GraphHandlerMixin:
         """GET /neighborhood/<id> — node neighborhood.
 
         Supports ?created_by=AGENT to filter edges by creator.
-        Supports ?min_validity=0.5 (OHM-xdd4) to attach active observations
-        per node filtered by effective confidence threshold.
+        Useful for "what did I add to this subgraph?" queries.
         """
         node_id = path[14:]
         from ohm.validation import validate_identifier
@@ -307,7 +308,6 @@ class GraphHandlerMixin:
         depth = int(qs.get("depth", [3])[0])
         layer = qs.get("layer", [None])[0]
         created_by = qs.get("created_by", [None])[0]
-        min_validity_raw = qs.get("min_validity", [None])[0]
         from ohm.queries import query_neighborhood
 
         edges = query_neighborhood(self.current_store.conn, node_id, depth=depth, layer=layer)
@@ -338,32 +338,7 @@ class GraphHandlerMixin:
             f"SELECT id, label, type, created_by, created_at FROM ohm_nodes WHERE id IN ({placeholders}) AND deleted_at IS NULL",
             list(node_ids),
         )
-
-        # OHM-xdd4/OHM-wuki: attach observations + chain validity when min_validity set
-        response: dict = {"nodes": node_rows, "edges": edges}
-        if min_validity_raw is not None:
-            from ohm.graph.decay import get_active_observations, chain_validity
-            min_validity = float(min_validity_raw)
-            obs_by_node: dict = {}
-            chain_validity_by_node: dict = {}
-            for nid in node_ids:
-                obs_by_node[nid] = get_active_observations(
-                    self.current_store.conn, nid, min_validity=min_validity
-                )
-                # OHM-wuki: for synthesis (concept) nodes, compute chain validity
-                cv = chain_validity(self.current_store.conn, nid)
-                if cv["n_cluster_nodes"] > 0:
-                    chain_validity_by_node[nid] = {
-                        "weakest_link": cv["weakest_link"],
-                        "chain_validity": cv["chain_validity"],
-                        "n_observations": cv["n_observations"],
-                    }
-            response["observations_by_node"] = obs_by_node
-            response["min_validity"] = min_validity
-            if chain_validity_by_node:
-                response["chain_validity_by_node"] = chain_validity_by_node
-
-        self._json_response(200, response)
+        self._json_response(200, {"nodes": node_rows, "edges": edges})
 
     def _get_path(self, path: str, qs: dict) -> None:
         """GET /path/<from>/<to> — shortest path."""
@@ -1276,10 +1251,6 @@ class GraphHandlerMixin:
                 value = body.get("value")
                 if value is not None and (value < 0.0 or value > 1.0):
                     raise ValidationError(f"Observation value {value} is outside [0, 1] for scale='probability'")
-        # OHM-xdd4: parse half_life_days override (None = use type default)
-        half_life_raw = body.get("half_life_days")
-        half_life_days = float(half_life_raw) if half_life_raw is not None else None
-
         result = self.current_store.write_observation(
             node_id=node_id,
             type=obs_type,
@@ -1292,7 +1263,6 @@ class GraphHandlerMixin:
             source_url=body.get("source_url"),
             scale=scale,
             agent_name=agent,
-            half_life_days=half_life_days,
         )
         _server_module._trigger_webhooks(
             {
@@ -1354,8 +1324,6 @@ class GraphHandlerMixin:
                         if value is not None and (value < 0.0 or value > 1.0):
                             errors.append({"index": i, "error": f"Observation value {value} is outside [0, 1] for scale='probability'"})
                             continue
-                half_life_raw = obs.get("half_life_days")
-                half_life_days = float(half_life_raw) if half_life_raw is not None else None
                 result = self.current_store.write_observation(
                     node_id=node_id,
                     type=obs_type,
@@ -1368,7 +1336,6 @@ class GraphHandlerMixin:
                     source_url=obs.get("source_url"),
                     scale=scale,
                     agent_name=agent,
-                    half_life_days=half_life_days,
                 )
                 results.append(result)
             except Exception as e:
@@ -1382,140 +1349,6 @@ class GraphHandlerMixin:
                 "observations": results,
             },
         )
-
-    def _get_observation(self, path: str, qs: dict) -> None:
-        """GET /observation/{id}/confidence and GET /observation/{id}/chain — OHM-xdd4."""
-        from ohm.graph.decay import confidence_at, get_observation_chain, decay_profile
-
-        # path is like /observation/some-uuid/confidence or /observation/some-uuid/chain
-        parts = path.strip("/").split("/")
-        # parts[0] == "observation", parts[1] == obs_id, parts[2] == sub-resource
-        if len(parts) < 3:
-            self._json_response(404, {"error": "Not found"})
-            return
-
-        obs_id = parts[1]
-        sub = parts[2]
-
-        from ohm.validation import validate_identifier
-        obs_id = validate_identifier(obs_id, name="obs_id")
-
-        if sub == "confidence":
-            row = self.current_store.execute_one(
-                "SELECT * FROM ohm_observations WHERE id = ? AND deleted_at IS NULL", [obs_id]
-            )
-            if not row:
-                self._json_response(404, {"error": f"Observation not found: {obs_id}"})
-                return
-
-            at_param = qs.get("at", [None])[0]
-            if at_param:
-                from datetime import datetime, timezone
-                try:
-                    t = datetime.fromisoformat(at_param.replace("Z", "+00:00"))
-                    if t.tzinfo is None:
-                        t = t.replace(tzinfo=timezone.utc)
-                except ValueError:
-                    self._json_response(400, {"error": f"Invalid 'at' timestamp: {at_param}"})
-                    return
-            else:
-                t = None
-
-            eff = confidence_at(row, t=t)
-            self._json_response(200, {
-                "obs_id": obs_id,
-                "effective_confidence": round(eff, 4),
-                "decay_profile": decay_profile(row.get("half_life_days")),
-                "half_life_days": row.get("half_life_days"),
-                "evaluated_at": (t or __import__("datetime").datetime.now(__import__("datetime").timezone.utc)).isoformat(),
-            })
-
-        elif sub == "chain":
-            try:
-                chain = get_observation_chain(self.current_store.conn, obs_id)
-            except Exception as e:
-                self._json_response(404, {"error": str(e)})
-                return
-            self._json_response(200, {"obs_id": obs_id, "chain": chain, "chain_length": len(chain)})
-
-        else:
-            self._json_response(404, {"error": f"Unknown sub-resource: {sub}"})
-
-    def _get_synthesis_validity(self, path: str, qs: dict) -> None:
-        """GET /synthesis/{id}/validity — OHM-wuki chain validity for a synthesis node."""
-        from ohm.graph.decay import chain_validity
-
-        # path: /synthesis/{id}/validity
-        parts = path.strip("/").split("/")
-        if len(parts) < 3 or parts[2] != "validity":
-            self._json_response(404, {"error": "Not found — expected /synthesis/{id}/validity"})
-            return
-
-        synthesis_id = parts[1]
-        from ohm.validation import validate_identifier
-        synthesis_id = validate_identifier(synthesis_id, name="synthesis_id")
-
-        # Parse optional ?at= and ?threshold= query params
-        at_param = qs.get("at", [None])[0]
-        t = None
-        if at_param:
-            from datetime import datetime, timezone
-            try:
-                t = datetime.fromisoformat(at_param.replace("Z", "+00:00"))
-                if t.tzinfo is None:
-                    t = t.replace(tzinfo=timezone.utc)
-            except ValueError:
-                self._json_response(400, {"error": f"Invalid 'at' timestamp: {at_param}"})
-                return
-
-        threshold_raw = qs.get("threshold", [None])[0]
-        threshold = float(threshold_raw) if threshold_raw is not None else 0.1
-
-        # Verify the synthesis node exists
-        node = self.current_store.execute_one(
-            "SELECT id, label, type FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
-            [synthesis_id],
-        )
-        if not node:
-            self._json_response(404, {"error": f"Node not found: {synthesis_id}"})
-            return
-
-        result = chain_validity(self.current_store.conn, synthesis_id, t=t, threshold=threshold)
-        result["node_label"] = node.get("label")
-        self._json_response(200, result)
-
-    def _post_observation_supersede(self, path: str, qs: dict, body: dict, agent: str) -> None:
-        """POST /observation/{new_id}/supersede — mark old obs as superseded by new (OHM-xdd4)."""
-        from ohm.graph.decay import supersede_observation
-
-        parts = path.strip("/").split("/")
-        # parts: ["observation", new_obs_id, "supersede"]
-        if len(parts) < 3 or parts[2] != "supersede":
-            self._json_response(404, {"error": "Not found"})
-            return
-
-        new_obs_id = parts[1]
-        old_obs_id = body.get("old_obs_id") or qs.get("old_id", [None])[0]
-        if not old_obs_id:
-            self._json_response(400, {"error": "Missing 'old_obs_id' in request body"})
-            return
-
-        from ohm.validation import validate_identifier
-        new_obs_id = validate_identifier(new_obs_id, name="new_obs_id")
-        old_obs_id = validate_identifier(old_obs_id, name="old_obs_id")
-
-        try:
-            result = supersede_observation(
-                self.current_store.conn,
-                new_obs_id=new_obs_id,
-                old_obs_id=old_obs_id,
-                agent=agent,
-            )
-        except ValueError as e:
-            self._json_response(409, {"error": str(e)})
-            return
-
-        self._json_response(200, result)
 
     def _post_outcome(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /outcome — record whether a source agent's claim was correct."""
@@ -1588,7 +1421,10 @@ class GraphHandlerMixin:
             )
 
         if invalid_ids:
-            logger.warning("Synthesis cluster_ids not found, skipping: %s", invalid_ids)
+            import logging
+            logging.getLogger("ohm.handlers").warning(
+                "Synthesis cluster_ids not found, skipping: %s", invalid_ids
+            )
 
         node_id = generate_node_id(label)
         node_result = self.current_store.write_node(
