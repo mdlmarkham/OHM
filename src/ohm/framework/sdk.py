@@ -635,6 +635,88 @@ class Graph:
             params,
         )
 
+    def batch_update_edges(
+        self,
+        updates: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Bulk update edges with PERT fields (OHM-9iyh).
+
+        Wraps PATCH /edges for auto-populating probability_p05/p50/p95
+        from observations or confidence values. Each update dict must
+        include ``id`` plus any PERT fields to update.
+
+        Args:
+            updates: List of {id, probability_p50?, probability_p05?,
+                probability_p95?, confidence?, ...} dicts.
+
+        Returns:
+            Dict with updated edges and error details.
+        """
+        if not updates:
+            return {"updated": [], "count": 0}
+
+        set_fields = [
+            "probability", "probability_p05", "probability_p50", "probability_p95",
+            "confidence", "confidence_p05", "confidence_p50", "confidence_p95",
+            "condition", "provenance", "urgency",
+        ]
+        results = []
+        errors = []
+
+        for item in updates:
+            edge_id = item.get("id")
+            if not edge_id:
+                errors.append({"error": "missing_id", "item": item})
+                continue
+
+            clauses: list[str] = []
+            params: list[Any] = []
+            for field in set_fields:
+                if field in item:
+                    clauses.append(f"{field} = ?")
+                    params.append(item[field])
+
+            if not clauses:
+                errors.append({"error": "no_fields", "edge_id": edge_id})
+                continue
+
+            try:
+                clauses.append("updated_at = CURRENT_TIMESTAMP")
+                clauses.append("updated_by = ?")
+                params.append(self.actor)
+                params.append(edge_id)
+                self._conn.execute(
+                    f"UPDATE ohm_edges SET {', '.join(clauses)} WHERE id = ? AND deleted_at IS NULL",
+                    params,
+                )
+                results.append(edge_id)
+            except Exception as e:
+                errors.append({"error": str(e), "edge_id": edge_id})
+
+        return {"updated": results, "count": len(results), "errors": errors}
+
+    def aggregate_experts(
+        self,
+        estimates: list[tuple[float, float, float]],
+        weights: list[float] | None = None,
+    ) -> dict[str, float]:
+        """Aggregate multiple expert PERT estimates (OHM-9iyh).
+
+        Each expert provides a (p05, p50, p95) triple. Uses weighted
+        mixture-of-experts aggregation accounting for both within-expert
+        uncertainty and between-expert disagreement.
+
+        Args:
+            estimates: List of (p05, p50, p95) triples from each expert.
+            weights: Optional weights per expert (uniform if None).
+
+        Returns:
+            Dict with mean, variance, total_variance, p05, p50, p95.
+        """
+        from ohm.inference.pert import aggregate_mixture_of_experts
+
+        return aggregate_mixture_of_experts(estimates, weights=weights)
+
     def observe(
         self,
         node_id_or_label: str,
