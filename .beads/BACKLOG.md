@@ -26,7 +26,7 @@ OHM-24g9 (OPEN) ── Phase 4: Weibull Generalization (continuous shape paramet
 ## ADR-022: Layer Promotion Constraints — Shipped ✅
 
 ```
-OHM-3ngi (CLOSED) ── ADR-022: SHACL-like write gates for L0→L1→L2→L3→L4
+OHM-3ngi (SHIPPED ✅) ── ADR-022: Layer Promotion Constraints (batch optimization, commit eaedaf7)
 ```
 
 **Implemented by Claude, merged to main:**
@@ -43,7 +43,7 @@ OHM-3ngi (CLOSED) ── ADR-022: SHACL-like write gates for L0→L1→L2→L3�
 | ID | GitHub | Title | Status | Notes |
 |----|--------|-------|--------|-------|
 | OHM-v40d | #646 | Config bug: sync_interval_seconds nesting | **SHIPPED** ✅ | Commit 39fd6b0. Reads from ducklake sub-config first. 30/30 tests. |
-| OHM-3ngi | #645 | Layer Promotion Constraints (ADR-022) | CLOSED | Shipped. constraint-report needs batch optimization. |
+| ~~OHM-3ngi~~ | ~~#645~~ | ~~ADR-022 Layer Gates~~ | **SHIPPED** ✅ | Batch constraint-report 106x speedup. Commit eaedaf7. |
 | ~~OHM-8fdb~~ | ~~#647~~ | ~~Phase 3: Self-Calibration~~ | **SHIPPED** ✅ | Commit 19a0e00. Learned half-lives + authority decay. |
 | OHM-aznh | #665 | INGEST: Shell Hook Architecture | OPEN | Staged pipeline for ingestion. |
 | OHM-wdrg | #621 | Source Citation Architecture (ADR-013) | OPEN | L2 evidence layer enforcement. |
