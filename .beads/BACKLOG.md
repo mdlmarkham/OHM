@@ -7,7 +7,7 @@ OHM-xdd4 (CLOSED) ── Phase 1: Core Decay (schema + confidence_at + supersess
 OHM-xdd4.1-4 (CLOSED) ── Sub-issues: schema, confidence_at, supersession, neighborhood integration
 OHM-wuki (CLOSED) ── Phase 2: Chain Validity (STL weakest-link bound)
 OHM-v40d (SHIPPED ✅) ── Config bug: sync_interval_seconds nesting (commit 39fd6b0)
-OHM-8fdb (OPEN) ── Phase 3: Self-Calibration (learned half-lives + authority decay)
+OHM-8fdb (SHIPPED ✅) ── Phase 3: Self-Calibration (commit 19a0e00)
 OHM-24g9 (OPEN) ── Phase 4: Weibull Generalization (continuous shape parameter)
 ```
 
@@ -44,7 +44,7 @@ OHM-3ngi (CLOSED) ── ADR-022: SHACL-like write gates for L0→L1→L2→L3�
 |----|--------|-------|--------|-------|
 | OHM-v40d | #646 | Config bug: sync_interval_seconds nesting | **SHIPPED** ✅ | Commit 39fd6b0. Reads from ducklake sub-config first. 30/30 tests. |
 | OHM-3ngi | #645 | Layer Promotion Constraints (ADR-022) | CLOSED | Shipped. constraint-report needs batch optimization. |
-| OHM-8fdb | #647 | Phase 3: Self-Calibration | OPEN | Learned half-lives + authority decay. Depends on 3ngi (shipped). |
+| ~~OHM-8fdb~~ | ~~#647~~ | ~~Phase 3: Self-Calibration~~ | **SHIPPED** ✅ | Commit 19a0e00. Learned half-lives + authority decay. |
 | OHM-aznh | #665 | INGEST: Shell Hook Architecture | OPEN | Staged pipeline for ingestion. |
 | OHM-wdrg | #621 | Source Citation Architecture (ADR-013) | OPEN | L2 evidence layer enforcement. |
 | OHM-a5rz | #644 | L0 Thinking Layer | OPEN | Fragments, scratch(), auto-linking. |
@@ -69,7 +69,7 @@ SHIPPED:
 
 ACTIVE:
   OHM-v40d ──→ Code fix for sync_interval_seconds (standalone, 1h)
-  OHM-xdd4 (shipped) ──→ OHM-wuki (shipped) ──→ OHM-3ngi (shipped) ──→ OHM-8fdb (Phase 3) ──→ OHM-24g9 (Phase 4)
+  OHM-xdd4 (shipped) ──→ OHM-wuki (shipped) ──→ OHM-3ngi (shipped) ──→ OHM-8fdb (Phase 3, shipped) ──→ OHM-24g9 (Phase 4)
   OHM-aznh ──→ INGEST pipeline
   OHM-tr71 ──→ Proactive discoverability
   OHM-a5rz ──→ L0 Thinking Layer
@@ -90,7 +90,7 @@ ACTIVE:
 ## Next Actions
 
 1. **OHM-v40d** → Send to Hephaestus as focused PR (10-line fix in server.py)
-2. **OHM-8fdb** → Queue for Claude (Phase 3: learned half-lives + authority decay)
+2. **OHM-8fdb** → Phase 3 SHIPPED commit 19a0e00
 3. **Constraint-report optimization** → Batch `effective_layer()` for large graphs (currently O(n) queries per node)
 4. **Source backfill** → Hormuz AND-gate has 0 source nodes, needs REFERENCES edges for L1→L2 promotion
 5. **OHM-24g9** → Wait for Phase 3 validation before Weibull generalization
