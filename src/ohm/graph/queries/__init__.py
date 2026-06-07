@@ -3028,12 +3028,32 @@ def update_node_embedding(
 
     node_id = validate_identifier(node_id, name="node_id")
 
-    # Get node label if no custom text provided
+    # Enrich embedding text: label + content + tags
+    # Short labels like "Artificial Scarcity" produce shallow embeddings.
+    # Concatenating label, content, and tags gives nomic-embed-text richer
+    # semantic material to work with. (ADR-021, Socrates Round 4 feedback)
     if text is None:
-        result = conn.execute("SELECT label FROM ohm_nodes WHERE id = ?", [node_id]).fetchone()
+        result = conn.execute(
+            "SELECT label, content, tags FROM ohm_nodes WHERE id = ?",
+            [node_id],
+        ).fetchone()
         if result is None:
             return False
-        text = result[0]
+        label, content, tags_json = result
+        parts = []
+        if label:
+            parts.append(label)
+        if content:
+            parts.append(content)
+        if tags_json:
+            import json as _json
+            try:
+                tags = _json.loads(tags_json) if isinstance(tags_json, str) else tags_json
+                if isinstance(tags, list) and tags:
+                    parts.append(" ".join(str(t) for t in tags))
+            except (ValueError, TypeError):
+                pass
+        text = "\n".join(parts) if parts else label
 
     if not text:
         return False
