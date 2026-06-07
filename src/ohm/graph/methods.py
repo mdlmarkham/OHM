@@ -335,7 +335,7 @@ def agent_heartbeat(
         state["verification_overdue"] = []
         state["verification_overdue_count"] = 0
 
-    # ADR-018.4: Sacred references — high-confidence nodes (>0.85) with zero
+    # ADR-018.4: Sacred references — high-confidence nodes (≥0.95) with zero
     # observations created by this agent. These are Evaluation Trap candidates:
     # maximum confidence, zero evidence underneath.
     sacred_refs = conn.execute(
@@ -344,7 +344,7 @@ def agent_heartbeat(
                EXTRACT(DAY FROM CURRENT_TIMESTAMP - n.created_at) AS age_days
         FROM ohm_nodes n
         WHERE n.deleted_at IS NULL
-          AND n.confidence >= 0.85
+          AND n.confidence >= 0.95
           AND n.created_by = ?
           AND NOT EXISTS (
               SELECT 1 FROM ohm_observations obs WHERE obs.node_id = n.id
@@ -372,29 +372,31 @@ def agent_heartbeat(
         state["sacred_references"] = []
         state["sacred_references_count"] = 0
 
-    # ADR-018.4: Challenge nudge — if this agent hasn't challenged anything
-    # recently, suggest L3 edges from other agents that deserve scrutiny.
-    # This drives the challenge ratio toward the >8% target.
-    last_challenge = conn.execute(
+    # ADR-018.4: Challenge nudge — if this agent's challenge_ratio < 5%,
+    # suggest L3 edges from other agents that deserve scrutiny.
+    # This drives the challenge ratio toward the >8% target (OHM-hflx).
+    agent_l3_count = conn.execute(
         """
-        SELECT MAX(e.created_at)
-        FROM ohm_edges e
-        WHERE e.edge_type = 'CHALLENGED_BY'
-          AND e.created_by = ?
-          AND e.deleted_at IS NULL
+        SELECT COUNT(*) FROM ohm_edges
+        WHERE layer = 'L3' AND deleted_at IS NULL AND created_by != ?
     """,
         [agent_name],
-    ).fetchone()
+    ).fetchone()[0]
+
+    agent_challenge_count = conn.execute(
+        """
+        SELECT COUNT(*) FROM ohm_edges
+        WHERE edge_type = 'CHALLENGED_BY' AND deleted_at IS NULL AND created_by = ?
+    """,
+        [agent_name],
+    ).fetchone()[0]
+
+    challenge_ratio = round(agent_challenge_count / max(agent_l3_count, 1), 4)
+    state["challenge_ratio"] = challenge_ratio
 
     challenge_nudge = []
-    # If agent has never challenged, or last challenge was >7 days ago
-    needs_nudge = (
-        last_challenge[0] is None
-        or conn.execute(
-            "SELECT CURRENT_TIMESTAMP - ? > INTERVAL '7 day'",
-            [last_challenge[0]],
-        ).fetchone()[0]
-    )
+    # Nudge if agent has never challenged or their ratio is below 5%
+    needs_nudge = challenge_ratio < 0.05
 
     if needs_nudge:
         # Find L3 edges from other agents with high confidence that haven't
