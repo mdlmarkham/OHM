@@ -45,7 +45,7 @@ OHM-3ngi (SHIPPED ✅) ── ADR-022: Layer Promotion Constraints (batch optimi
 | OHM-v40d | #646 | Config bug: sync_interval_seconds nesting | **SHIPPED** ✅ | Commit 39fd6b0. Reads from ducklake sub-config first. 30/30 tests. |
 | ~~OHM-3ngi~~ | ~~#645~~ | ~~ADR-022 Layer Gates~~ | **SHIPPED** ✅ | Batch constraint-report 106x speedup. Commit eaedaf7. |
 | ~~OHM-8fdb~~ | ~~#647~~ | ~~Phase 3: Self-Calibration~~ | **SHIPPED** ✅ | Commit 19a0e00. Learned half-lives + authority decay. |
-| OHM-aznh | #665 | INGEST: Shell Hook Architecture | OPEN | Staged pipeline for ingestion. |
+| ~~OHM-aznh~~ | ~~#665~~ | ~~INGEST Shell Hooks~~ | **SHIPPED** ✅ | All 13 sub-issues closed. Hooks live. |
 | OHM-wdrg | #621 | Source Citation Architecture (ADR-013) | OPEN | L2 evidence layer enforcement. |
 | OHM-a5rz | #644 | L0 Thinking Layer | OPEN | Fragments, scratch(), auto-linking. |
 | OHM-tr71 | #636 | Proactive Discoverability | OPEN | Islands, suggestions, nudges. |
