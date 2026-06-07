@@ -361,9 +361,12 @@ class TestConcurrentAccess:
             assert not errors, f"Write errors: {errors[:5]}"
             assert len(written) == 50
 
-            # Verify all 50 nodes in the tenant store
+            # Verify all 50 test nodes are in the tenant store.
+            # Filter by id prefix to exclude pre-seeded agent nodes from provisioning.
             tenant_store = tm.get_store("concurrent_tenant")
-            rows = tenant_store.execute("SELECT COUNT(*) AS n FROM ohm_nodes WHERE deleted_at IS NULL")
+            rows = tenant_store.execute(
+                "SELECT COUNT(*) AS n FROM ohm_nodes WHERE deleted_at IS NULL AND id LIKE 'cn-%'"
+            )
             assert rows[0]["n"] == 50
         finally:
             server.shutdown()

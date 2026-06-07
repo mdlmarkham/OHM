@@ -855,28 +855,37 @@ class GraphHandlerMixin:
         )
         result = enrich_response(result, nudges)
 
-        # ADR-021: Proactive discoverability — post-write suggestions
+        # ADR-021: Proactive discoverability — post-write suggestions + connectivity nudge.
+        # Both run under a 300ms hard cap so they never delay the write response on slow
+        # graphs. If the budget is exceeded, the response omits suggestions (not an error).
         if result.get("created", True):
-            from ohm.server.suggestions import generate_suggestions
-            suggestions = generate_suggestions(
-                store=self.current_store,
-                node_id=result.get("id", ""),
-                content=body.get("content"),
-                label=body.get("label"),
-                tags=body.get("tags"),
-                node_type=body.get("type"),
-                has_edges=bool(body.get("connects_to")),
-            )
-            result["suggestions"] = suggestions
+            import concurrent.futures
+            from ohm.server.suggestions import generate_suggestions, generate_connectivity_nudge
 
-        # OHM-tr71.6: Connectivity nudge for agents with low edges-per-node
-        try:
-            from ohm.server.suggestions import generate_connectivity_nudge
-            nudge = generate_connectivity_nudge(self.current_store, agent)
-            if nudge:
-                result["connectivity_warning"] = nudge["connectivity_warning"]
-        except Exception as e:
-            logger.debug(f"Connectivity nudge failed: {e}")
+            def _suggestions_and_nudge():
+                sugg = generate_suggestions(
+                    store=self.current_store,
+                    node_id=result.get("id", ""),
+                    content=body.get("content"),
+                    label=body.get("label"),
+                    tags=body.get("tags"),
+                    node_type=body.get("type"),
+                    has_edges=bool(body.get("connects_to")),
+                )
+                nudge = generate_connectivity_nudge(self.current_store, agent)
+                return sugg, nudge
+
+            try:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pool:
+                    future = _pool.submit(_suggestions_and_nudge)
+                    suggestions, nudge = future.result(timeout=0.3)
+                result["suggestions"] = suggestions
+                if nudge:
+                    result["connectivity_warning"] = nudge["connectivity_warning"]
+            except concurrent.futures.TimeoutError:
+                logger.debug("Suggestion budget exceeded (>300ms), skipping for this write")
+            except Exception as e:
+                logger.debug(f"Suggestions failed: {e}")
 
         if result.get("created", True):
             self._json_response(201, result)

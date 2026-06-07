@@ -851,13 +851,19 @@ class OhmStore:
             text = label
             if content:
                 text = f"{label}: {content[:800]}"
+            # Ollama call is outside the lock — it's pure I/O and can run concurrently.
             embeddings = self._embedding_backend.embed([text])
             embedding = embeddings[0] if embeddings else None
             if embedding and any(e != 0.0 for e in embedding):
-                self.conn.execute(
-                    "UPDATE ohm_nodes SET embedding = ?::FLOAT[768] WHERE id = ?",
-                    [embedding, node_id],
-                )
+                # Acquire write lock before touching the connection — DuckDB connections
+                # are not thread-safe; writing from a background thread without the lock
+                # causes malloc corruption (same root cause as disabled background mode
+                # in admin.py).
+                with self._lock:
+                    self.conn.execute(
+                        "UPDATE ohm_nodes SET embedding = ?::FLOAT[768] WHERE id = ?",
+                        [embedding, node_id],
+                    )
                 logger.debug("Auto-generated embedding for node %s", node_id)
         except Exception as e:
             logger.debug("Auto-embed failed for node %s: %s", node_id, e)
