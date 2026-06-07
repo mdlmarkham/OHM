@@ -117,6 +117,10 @@ def _load_extensions(conn: "duckdb.DuckDBPyConnection") -> None:
     that are already cached locally. FORCE INSTALL re-downloads every time,
     leaving orphaned .tmp- files if interrupted.
     """
+    # Check if DuckLake is configured before loading extensions, so we can
+    # warn appropriately if it's needed but unavailable.
+    ducklake_configured = bool(_get_ducklake_path())
+
     extensions = ["json", "ducklake"]
     for ext in extensions:
         try:
@@ -136,10 +140,21 @@ def _load_extensions(conn: "duckdb.DuckDBPyConnection") -> None:
     # Try to load DuckLake extension (optional, for lakehouse sync)
     # DuckLake provides ACID multi-table transactions, time travel, and
     # Parquet-based storage. Required for OHM-kdk (DuckLake shared backend).
+    # If DuckLake is configured but the extension fails to load, warn loudly
+    # so operators are aware that lakehouse features are degraded.
     try:
         conn.execute("INSTALL ducklake FROM core; LOAD ducklake;")
     except Exception as e:
-        logger.debug("DuckLake extension not available — lakehouse features disabled: %s", e, exc_info=True)
+        if ducklake_configured:
+            logger.warning(
+                "DuckLake extension not available but DuckLake is configured at %s — "
+                "lakehouse features disabled: %s",
+                _get_ducklake_path(),
+                e,
+                exc_info=True,
+            )
+        else:
+            logger.debug("DuckLake extension not available — lakehouse features disabled: %s", e, exc_info=True)
 
     # Try to load VSS extension (optional, for semantic search)
     # VSS provides HNSW index for fast vector similarity search.

@@ -813,11 +813,13 @@ class TestDuckLakeTimeTravel:
         status, data = _request("GET", port, "/graph/at?version=abc")
         assert status == 400
 
-    def test_graph_at_without_ducklake_returns_error(self, test_server):
-        """GET /graph/at?version=1 without DuckLake attached returns error."""
+    def test_graph_at_without_ducklake_returns_degraded(self, test_server):
+        """GET /graph/at?version=1 without DuckLake attached returns degraded response."""
         port, _ = test_server
         status, data = _request("GET", port, "/graph/at?version=1")
-        assert status in (400, 500)
+        assert status == 200
+        assert data["node_count"] == 0
+        assert data["edge_count"] == 0
 
     def test_graph_changes_without_params_returns_400(self, test_server):
         """GET /graph/changes without required params returns validation error."""

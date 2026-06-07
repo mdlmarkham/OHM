@@ -2158,6 +2158,7 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     # Background DuckLake sync thread (OHM-1rwl): sync every sync_interval_seconds
     # so data is not lost between heartbeats on hard shutdown (SIGKILL/OOM).
     ducklake_sync_interval = config.get("sync_interval_seconds", 60)
+    ducklake_sync_max_retries = config.get("sync_max_retries", 20)
     _sync_stop = threading.Event()
 
     def _ducklake_sync_loop():
@@ -2171,6 +2172,17 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
                 logger.exception(
                     "DuckLake sync failed (attempt %d): ", consecutive_sync_errors
                 )
+                if consecutive_sync_errors >= ducklake_sync_max_retries:
+                    # Circuit breaker: after max consecutive errors, stop retrying.
+                    # Prevents infinite retry loops when DuckLake is permanently
+                    # unavailable (corrupted catalog, disk full, etc.).
+                    logger.critical(
+                        "DuckLake sync circuit breaker opened after %d consecutive errors — "
+                        "sync thread stopped. Restart the daemon or manually trigger sync "
+                        "via POST /sync to re-enable.",
+                        consecutive_sync_errors,
+                    )
+                    break
                 if consecutive_sync_errors >= 3:
                     # Exponential backoff after 3 consecutive errors (OHM-nnu2, same pattern as OHM-s8sg)
                     backoff = min(60, 5 * (2 ** (consecutive_sync_errors - 3)))

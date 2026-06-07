@@ -1824,10 +1824,19 @@ class OhmStore:
             pass
 
         if ducklake_path or ducklake_attached:
-            # Push local changes to DuckLake
-            pushed = self.push_to_ducklake(ducklake_path or "", alias=alias)
-            # Pull remote changes from DuckLake
-            pulled = self.pull_from_ducklake(ducklake_path or "", alias=alias)
+            # Push local changes to DuckLake (failures don't block pull)
+            try:
+                pushed = self.push_to_ducklake(ducklake_path or "", alias=alias)
+            except Exception as exc:
+                logger.warning("DuckLake push failed (pull will still proceed): %s", exc)
+                pushed = 0
+
+            # Pull remote changes from DuckLake (failures don't block return)
+            try:
+                pulled = self.pull_from_ducklake(ducklake_path or "", alias=alias)
+            except Exception as exc:
+                logger.warning("DuckLake pull failed: %s", exc)
+                pulled = 0
 
         # Check DuckLake health after sync (OHM-qiio)
         # Only run expensive health check every 5th sync to reduce memory pressure
@@ -1837,8 +1846,6 @@ class OhmStore:
                 dlh = self.check_ducklake_health(alias=alias)
                 self.sync_degraded = dlh.get("sync_degraded", False)
                 if self.sync_degraded:
-                    import logging
-                    logger = logging.getLogger("ohm.store")
                     logger.warning("DuckLake sync degraded: %s", dlh.get("errors", []))
             except Exception:
                 self.sync_degraded = True
@@ -2531,10 +2538,7 @@ class OhmStore:
                     pulled += len(new_ids)
 
             except Exception as exc:
-                # Log the actual error instead of silently swallowing it
-                import logging
-
-                logging.getLogger("ohm").warning("DuckLake pull failed for %s: %s", table, exc)
+                logger.warning("DuckLake pull failed for %s: %s", table, exc)
 
         # Record pull timestamp
         from datetime import datetime, timezone
@@ -2806,10 +2810,9 @@ class OhmStore:
 
         Returns:
             Dict with 'nodes' and 'edges' lists representing the
-            graph state at that snapshot version.
-
-        Raises:
-            OHMError: If DuckLake is not attached or query fails.
+            graph state at that snapshot version. Returns empty
+            results with degraded=True if DuckLake is not attached
+            or the query fails.
         """
         # Check if DuckLake alias is attached
         try:
@@ -2821,21 +2824,45 @@ class OhmStore:
             attached = None
 
         if not attached:
-            raise OHMError("DuckLake is not attached — cannot query historical state")
+            return {
+                "version": version,
+                "nodes": [],
+                "edges": [],
+                "node_count": 0,
+                "edge_count": 0,
+                "degraded": True,
+                "error": "DuckLake is not attached — cannot query historical state",
+            }
 
         try:
             nodes = self.conn.execute(f"SELECT * FROM {alias}.ohm_nodes AT (VERSION => {int(version)})").fetchall()
             node_columns = [desc[0] for desc in self.conn.description]
             nodes_dicts = [dict(zip(node_columns, row)) for row in nodes]
         except Exception as e:
-            raise OHMError(f"Failed to query nodes at version {version}: {e}") from e
+            return {
+                "version": version,
+                "nodes": [],
+                "edges": [],
+                "node_count": 0,
+                "edge_count": 0,
+                "degraded": True,
+                "error": f"Failed to query nodes at version {version}: {e}",
+            }
 
         try:
             edges = self.conn.execute(f"SELECT * FROM {alias}.ohm_edges AT (VERSION => {int(version)})").fetchall()
             edge_columns = [desc[0] for desc in self.conn.description]
             edges_dicts = [dict(zip(edge_columns, row)) for row in edges]
         except Exception as e:
-            raise OHMError(f"Failed to query edges at version {version}: {e}") from e
+            return {
+                "version": version,
+                "nodes": nodes_dicts,
+                "edges": [],
+                "node_count": len(nodes_dicts),
+                "edge_count": 0,
+                "degraded": True,
+                "error": f"Failed to query edges at version {version}: {e}",
+            }
 
         return {
             "version": version,
@@ -2864,10 +2891,8 @@ class OhmStore:
         Returns:
             Dict with 'node_changes' and 'edge_changes' lists, each
             containing rows with snapshot_id, rowid, change_type, and
-            the data columns.
-
-        Raises:
-            OHMError: If DuckLake is not attached or query fails.
+            the data columns. Returns empty results with degraded=True
+            if DuckLake is not attached or the query fails.
         """
         # Check if DuckLake alias is attached
         try:
@@ -2879,27 +2904,32 @@ class OhmStore:
             attached = None
 
         if not attached:
-            raise OHMError("DuckLake is not attached — cannot query changes")
+            return {
+                "from_version": from_version,
+                "to_version": to_version,
+                "node_changes": [],
+                "edge_changes": [],
+                "degraded": True,
+                "error": "DuckLake is not attached — cannot query changes",
+            }
 
         try:
             node_changes = self.conn.execute(f"SELECT * FROM {alias}.table_changes('ohm_nodes', {int(from_version)}, {int(to_version)})").fetchall()
             nc_columns = [desc[0] for desc in self.conn.description]
             node_changes_dicts = [dict(zip(nc_columns, row)) for row in node_changes]
         except Exception as e:
-            raise OHMError(f"Failed to query node changes between versions {from_version} and {to_version}: {e}") from e
+            node_changes_dicts = []
 
         try:
             edge_changes = self.conn.execute(f"SELECT * FROM {alias}.table_changes('ohm_edges', {int(from_version)}, {int(to_version)})").fetchall()
             ec_columns = [desc[0] for desc in self.conn.description]
             edge_changes_dicts = [dict(zip(ec_columns, row)) for row in edge_changes]
         except Exception as e:
-            raise OHMError(f"Failed to query edge changes between versions {from_version} and {to_version}: {e}") from e
+            edge_changes_dicts = []
 
         return {
             "from_version": from_version,
             "to_version": to_version,
             "node_changes": node_changes_dicts,
             "edge_changes": edge_changes_dicts,
-            "node_change_count": len(node_changes_dicts),
-            "edge_change_count": len(edge_changes_dicts),
         }

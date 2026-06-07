@@ -364,24 +364,26 @@ class TestDuckLakeTimeTravel:
         assert result == []
         store.close()
 
-    def test_graph_at_version_without_ducklake_raises(self, tmp_path):
-        """graph_at_version raises OHMError when DuckLake is not attached."""
-        from ohm.exceptions import OHMError
-
+    def test_graph_at_version_without_ducklake_degraded(self, tmp_path):
+        """graph_at_version returns degraded results when DuckLake is not attached."""
         db_path = str(tmp_path / "local.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test_agent")
-        with pytest.raises(OHMError, match="DuckLake is not attached"):
-            store.graph_at_version(1)
+        result = store.graph_at_version(1)
+        assert result["degraded"] is True
+        assert result["node_count"] == 0
+        assert result["edge_count"] == 0
+        assert "DuckLake is not attached" in result["error"]
         store.close()
 
-    def test_graph_changes_without_ducklake_raises(self, tmp_path):
-        """graph_changes raises OHMError when DuckLake is not attached."""
-        from ohm.exceptions import OHMError
-
+    def test_graph_changes_without_ducklake_degraded(self, tmp_path):
+        """graph_changes returns degraded results when DuckLake is not attached."""
         db_path = str(tmp_path / "local.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test_agent")
-        with pytest.raises(OHMError, match="DuckLake is not attached"):
-            store.graph_changes(1, 2)
+        result = store.graph_changes(1, 2)
+        assert result["degraded"] is True
+        assert result["node_changes"] == []
+        assert result["edge_changes"] == []
+        assert "DuckLake is not attached" in result["error"]
         store.close()
 
     def test_list_snapshots_with_ducklake(self, tmp_path):
