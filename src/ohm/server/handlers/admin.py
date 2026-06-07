@@ -1049,19 +1049,23 @@ class AdminHandlerMixin:
 
         self._require_write_auth()
 
-        # Get all nodes with their types
+        # Get all nodes with their types (ohm_nodes has no layer column;
+        # effective_layer is computed from edges in constraints.py)
         nodes = self.current_store.conn.execute(
-            "SELECT id, type, layer FROM ohm_nodes WHERE deleted_at IS NULL"
+            "SELECT id, type FROM ohm_nodes WHERE deleted_at IS NULL"
         ).fetchall()
 
         layers = {"L0": {}, "L1": {}, "L2": {}, "L3": {}, "L4": {}}
         for layer_key in layers:
             layers[layer_key] = {"total": 0, "satisfied": {}, "violations": {}}
 
-        for node_id, node_type, node_layer in nodes:
-            if node_layer not in layers:
-                continue
-            layers[node_layer]["total"] += 1
+        from ohm.graph.constraints import effective_layer
+        node_effective_layers = {}
+        for node_id, node_type in nodes:
+            eff, _ = effective_layer(self.current_store.conn, node_id)
+            node_effective_layers[node_id] = eff
+            if eff in layers:
+                layers[eff]["total"] += 1
 
         # Count constraint satisfaction per layer transition
         transition_layer_map = {
@@ -1078,10 +1082,10 @@ class AdminHandlerMixin:
             for cname, _threshold in constraints.items():
                 total = 0
                 satisfied = 0
-                for node_id, node_type, node_layer in nodes:
-                    if node_layer != src_layer and node_layer != src_layer:
+                for node_id, node_type in nodes:
+                    node_layer = node_effective_layers.get(node_id)
+                    if node_layer != src_layer:
                         continue
-                    # Only check nodes at or above the source layer
                     total += 1
                     from ohm.graph.constraints import compute_constraint
                     value = compute_constraint(self.current_store.conn, node_id, cname)
