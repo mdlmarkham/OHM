@@ -1297,9 +1297,11 @@ def create_observation(
     source_name: str | None = None,
     source_url: str | None = None,
     scale: str | None = None,
+    half_life_days: float | None = None,
 ) -> dict[str, Any]:
     """Create an observation on a node or edge and return its full record."""
     from ohm.graph.schema import VALID_OBSERVATION_SCALES
+    from ohm.graph.decay import default_half_life
 
     if scale is not None and scale not in VALID_OBSERVATION_SCALES:
         raise ValueError(
@@ -1310,13 +1312,21 @@ def create_observation(
             f"Observation value {value} is outside [0, 1] for scale='probability'"
         )
     import uuid
+    from datetime import datetime, timezone
+
+    # OHM-xdd4: resolve half_life_days — explicit override > type default
+    if half_life_days is None:
+        half_life_days = default_half_life(obs_type)
 
     obs_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
     conn.execute(
         """INSERT INTO ohm_observations
-           (id, node_id, edge_id, type, value, baseline, sigma, source, created_by, notes, source_name, source_url, scale)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        [obs_id, node_id, edge_id, obs_type, value, baseline, sigma, source, created_by, notes, source_name, source_url, scale],
+           (id, node_id, edge_id, type, value, baseline, sigma, source, created_by, notes,
+            source_name, source_url, scale, half_life_days, valid_from)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [obs_id, node_id, edge_id, obs_type, value, baseline, sigma, source, created_by, notes,
+         source_name, source_url, scale, half_life_days, now],
     )
     _log_change(conn, "ohm_observations", obs_id, "INSERT", created_by)
     # Return full observation record

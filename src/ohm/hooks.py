@@ -286,11 +286,18 @@ class HookRunner:
     def _run_shell_hook(self, hook: HookRecord, payload: dict, customer_id: str = "") -> HookResult:
         """Execute a shell command hook via subprocess.
 
+        OHM-sh11: uses shlex.split() + shell=False to prevent command injection.
+        Hook commands are split into argument lists before execution — shell
+        metacharacters (;, &&, |, $(), backticks) are treated as literals, not
+        interpreted by the shell.
+
         Args:
             hook: Hook record to execute.
             payload: JSON-serialisable payload dict.
             customer_id: Tenant customer ID (for env var whitelist).
         """
+        import shlex
+
         timeout_sec = hook.timeout_ms / 1000.0
         payload_json = json.dumps(payload, default=str)
         start = time.monotonic()
@@ -299,10 +306,20 @@ class HookRunner:
         env = _sandbox_env(hook.id, hook.event, customer_id) if _is_sandboxed() else None
         preexec_fn = _sandbox_preexec if (_is_sandboxed() and os.name == "posix") else None
 
+        # OHM-sh11: split command into argv list — prevents shell injection
+        try:
+            cmd_args = shlex.split(hook.command)
+        except ValueError as exc:
+            return HookResult(
+                hook_id=hook.id,
+                exit_code=1,
+                stderr=f"Invalid hook command (shlex parse error): {exc}",
+            )
+
         try:
             proc = subprocess.Popen(
-                hook.command,
-                shell=True,
+                cmd_args,
+                shell=False,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -343,7 +360,14 @@ class HookRunner:
             )
 
     def _run_python_hook(self, hook: HookRecord, payload: dict) -> HookResult:
-        """Execute a python: prefix hook by importing and calling the function."""
+        """Execute a python: prefix hook by importing and calling the function.
+
+        OHM-phto: enforces hook.timeout_ms via a ThreadPoolExecutor future.
+        A buggy or malicious hook that hangs will be interrupted after the
+        configured timeout (default 5000ms), preventing server DoS.
+        """
+        import concurrent.futures
+
         module_path, _, func_name = hook.command[len("python:"):].rpartition(".")
         if not module_path or not func_name:
             return HookResult(
@@ -352,11 +376,28 @@ class HookRunner:
                 stderr=f"Invalid python: hook format: {hook.command!r} — expected python:module.function",
             )
         start = time.monotonic()
+        timeout_sec = hook.timeout_ms / 1000.0
+
         try:
             mod = importlib.import_module(module_path)
             func = getattr(mod, func_name)
             enriched = {**payload, "__conn": self._conn}
-            exit_code, stdout, stderr = func(enriched)
+
+            # OHM-phto: run callable in a worker thread with timeout cap
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(func, enriched)
+                try:
+                    exit_code, stdout, stderr = future.result(timeout=timeout_sec)
+                except concurrent.futures.TimeoutError:
+                    duration_ms = (time.monotonic() - start) * 1000
+                    return HookResult(
+                        hook_id=hook.id,
+                        exit_code=_TIMEOUT_EXIT,
+                        stderr=f"Python hook timed out after {hook.timeout_ms}ms",
+                        duration_ms=round(duration_ms, 2),
+                        timed_out=True,
+                    )
+
             duration_ms = (time.monotonic() - start) * 1000
             return HookResult(
                 hook_id=hook.id,

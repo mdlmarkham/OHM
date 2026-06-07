@@ -1323,6 +1323,7 @@ class OhmStore:
         source_url: Optional[str] = None,
         scale: Optional[str] = None,
         agent_name: Optional[str] = None,
+        half_life_days: Optional[float] = None,
     ) -> Optional[dict[str, Any]]:
         """Create an observation. Attributed to the given agent.
 
@@ -1332,8 +1333,10 @@ class OhmStore:
             source_name: Name of the source (e.g., 'Reuters').
             source_url: URL of the source (e.g., 'https://reuters.com/...').
             scale: Measurement scale — 'probability' (0-1), 'count', 'currency', 'percent', or 'unknown'.
+            half_life_days: OHM-xdd4 temporal decay override. None = use type default.
         """
         from ohm.graph.schema import VALID_OBSERVATION_SCALES
+        from ohm.graph.decay import default_half_life
 
         if scale is not None and scale not in VALID_OBSERVATION_SCALES:
             raise ValueError(
@@ -1343,16 +1346,22 @@ class OhmStore:
             raise ValueError(
                 f"Observation value {value} is outside [0, 1] for scale='probability'"
             )
+        # OHM-xdd4: resolve half_life_days — explicit override > type default
+        if half_life_days is None:
+            half_life_days = default_half_life(type)
+
         actor = agent_name or self.agent_name
         now = self._now()
         self.conn.execute(
             """
             INSERT INTO ohm_observations
                 (node_id, edge_id, type, value, baseline, sigma, source,
-                 created_by, created_at, notes, source_name, source_url, scale)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 created_by, created_at, notes, source_name, source_url, scale,
+                 half_life_days, valid_from)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            [node_id, edge_id, type, value, baseline, sigma, source, actor, now, notes, source_name, source_url, scale],
+            [node_id, edge_id, type, value, baseline, sigma, source, actor, now, notes, source_name, source_url, scale,
+             half_life_days, now],
         )
 
         obs = self.execute_one(

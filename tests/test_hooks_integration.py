@@ -131,7 +131,7 @@ class TestHookIntegration:
 
     def test_scenario2_pre_ingest_fail_node_returns_422(self, hook_server):
         port, _ = hook_server
-        _register_hook(port, "pre_ingest", "exit 1")
+        _register_hook(port, "pre_ingest", "/bin/false")
         status, data = _request("POST", port, "/node", body={"id": "s2", "label": "rejected", "type": "concept"})
         assert status == 422
         assert data["error"] == "hook_rejected"

@@ -911,7 +911,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.24.0"
+SCHEMA_VERSION = "0.25.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -1183,6 +1183,22 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
         "add infrastructure, service, release node types; RUNS_ON, HOSTS, VERSION_OF, LOCATED_IN (L1) and UPSTREAM_OF (L2) edge types; health_check observation type; healthcheck provenance; tags/metadata on create_node (OHM-infra)",
         [
             "",  # Node types and edge types are validated in Python, not DDL
+        ],
+    ),
+    (
+        "0.25.0",
+        "OHM-xdd4: temporal decay — add half_life_days, valid_from, valid_to, supersedes_obs_id to observations",
+        [
+            "ALTER TABLE ohm_observations ADD COLUMN IF NOT EXISTS half_life_days FLOAT",
+            "ALTER TABLE ohm_observations ADD COLUMN IF NOT EXISTS valid_from TIMESTAMP",
+            "ALTER TABLE ohm_observations ADD COLUMN IF NOT EXISTS valid_to TIMESTAMP",
+            "ALTER TABLE ohm_observations ADD COLUMN IF NOT EXISTS supersedes_obs_id VARCHAR",
+            # Backfill: existing observations are currently active with valid_from = created_at
+            "UPDATE ohm_observations SET valid_from = created_at WHERE valid_from IS NULL",
+            # Index for supersession chain traversal
+            "CREATE INDEX IF NOT EXISTS idx_obs_supersedes ON ohm_observations(supersedes_obs_id)",
+            # Index for active observations (valid_to IS NULL)
+            "CREATE INDEX IF NOT EXISTS idx_obs_valid_to ON ohm_observations(valid_to)",
         ],
     ),
 ]
