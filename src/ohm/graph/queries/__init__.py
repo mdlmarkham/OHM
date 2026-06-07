@@ -3867,6 +3867,8 @@ def promote_fragment(
     sets metadata.promoted_from on the concept and metadata.promoted_to
     on the fragment, and creates a REFINES_FRAG edge from concept → fragment.
 
+    Enforces ADR-022 L0→L1 promotion constraints (min_context_links ≥ 1).
+
     Args:
         conn: Database connection.
         fragment_id: ID of the fragment to promote.
@@ -3877,9 +3879,9 @@ def promote_fragment(
 
     Raises:
         NodeNotFoundError: If fragment doesn't exist.
-        ValueError: If node is not a fragment.
+        ValueError: If node is not a fragment or constraints not satisfied.
     """
-    from ohm.exceptions import NodeNotFoundError
+    from ohm.exceptions import NodeNotFoundError, ConstraintViolationError
 
     frag = conn.execute(
         "SELECT id, label, content FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
@@ -3894,6 +3896,17 @@ def promote_fragment(
     ).fetchone()
     if not frag_type or frag_type[0] != "fragment":
         raise ValueError(f"Node {fragment_id} is not a fragment (type={frag_type[0] if frag_type else 'N/A'})")
+
+    # ADR-022: Validate L0→L1 promotion constraints (enforced for structural constraints)
+    from ohm.graph.constraints import validate_layer_promotion
+
+    valid, warnings, errors = validate_layer_promotion(
+        fragment_id, "L0", "L1", conn, enforce=True,
+    )
+    if errors:
+        raise ConstraintViolationError(
+            f"Cannot promote fragment {fragment_id}: {'; '.join(errors)}"
+        )
 
     import json as _json
 

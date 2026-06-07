@@ -2039,6 +2039,7 @@ OhmHandler._GET_EXACT = {
     "/admin/embeddings": "_get_admin_embeddings",
     "/admin/embeddings/status": "_get_admin_embeddings_status",
     "/admin/verification-scan": "_get_admin_verification_scan",
+    "/admin/constraint-report": "_get_admin_constraint_report",
     "/admin/snapshots": "_get_admin_snapshots",
     "/graph/at": "_get_graph_at",
     "/graph/changes": "_get_graph_changes",

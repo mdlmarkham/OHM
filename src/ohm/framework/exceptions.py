@@ -77,6 +77,12 @@ class ConflictError(OHMError):
     exit_code = 6
 
 
+class ConstraintViolationError(OHMError):
+    """Layer promotion or edge constraint violation (ADR-022)."""
+
+    exit_code = 6
+
+
 EXIT_CODES = {
     0: "Success",
     1: "General error",

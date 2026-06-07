@@ -1029,3 +1029,91 @@ class AdminHandlerMixin:
 
         result = backfill_relational_tags(self.current_store.conn)
         self._json_response(200, result)
+
+    def _get_admin_constraint_report(self, path: str, qs: dict) -> None:
+        """GET /admin/constraint-report — show constraint satisfaction rates (ADR-022).
+
+        Returns per-layer constraint satisfaction statistics across all nodes.
+        """
+        from ohm.graph.constraints import (
+            PROMOTION_CONSTRAINTS,
+            count_sources,
+            count_observations,
+            count_outcomes,
+            count_verified_outcomes,
+            count_open_challenges,
+            count_L3_supporting_nodes,
+            chain_validity,
+            count_context_links,
+        )
+
+        self._require_write_auth()
+
+        # Get all nodes with their types
+        nodes = self.current_store.conn.execute(
+            "SELECT id, type, layer FROM ohm_nodes WHERE deleted_at IS NULL"
+        ).fetchall()
+
+        layers = {"L0": {}, "L1": {}, "L2": {}, "L3": {}, "L4": {}}
+        for layer_key in layers:
+            layers[layer_key] = {"total": 0, "satisfied": {}, "violations": {}}
+
+        for node_id, node_type, node_layer in nodes:
+            if node_layer not in layers:
+                continue
+            layers[node_layer]["total"] += 1
+
+        # Count constraint satisfaction per layer transition
+        transition_layer_map = {
+            "L0_to_L1": "L0",
+            "L1_to_L2": "L1",
+            "L2_to_L3": "L2",
+            "L3_to_L4": "L3",
+        }
+
+        for trans_key, src_layer in transition_layer_map.items():
+            constraints = PROMOTION_CONSTRAINTS.get(trans_key, {})
+            if not constraints:
+                continue
+            for cname, _threshold in constraints.items():
+                total = 0
+                satisfied = 0
+                for node_id, node_type, node_layer in nodes:
+                    if node_layer != src_layer and node_layer != src_layer:
+                        continue
+                    # Only check nodes at or above the source layer
+                    total += 1
+                    from ohm.graph.constraints import compute_constraint
+                    value = compute_constraint(self.current_store.conn, node_id, cname)
+                    if isinstance(_threshold, bool):
+                        if bool(value) == _threshold:
+                            satisfied += 1
+                    elif isinstance(_threshold, (int, float)):
+                        if value is not None and value >= _threshold:
+                            satisfied += 1
+                    else:
+                        if value == _threshold:
+                            satisfied += 1
+
+                if total > 0:
+                    rate = round(satisfied / total * 100, 1)
+                    layers[src_layer]["satisfied"][cname] = {
+                        "satisfied": satisfied,
+                        "total": total,
+                        "rate_pct": rate,
+                    }
+                    layers[src_layer]["violations"][cname] = total - satisfied
+
+        response = {
+            "constraint_report": layers,
+            "summary": {},
+        }
+        total_nodes = sum(l["total"] for l in layers.values())
+        total_violations = sum(sum(l["violations"].values()) for l in layers.values())
+        response["summary"] = {
+            "total_nodes": total_nodes,
+            "total_violations": total_violations,
+            "enforcement_mode": "advisory",
+            "note": "Run with enforce_layer_gates=true in config for strict enforcement",
+        }
+        self._json_response(200, response)

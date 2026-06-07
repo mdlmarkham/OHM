@@ -1020,6 +1020,22 @@ class OhmStore:
 
                     raise NodeNotFoundError(f"Edge {role} does not exist: {node_id}")
 
+        # ADR-022: Validate edge-level constraints (advisory mode — warnings only)
+        from ohm.graph.constraints import validate_edge_constraints
+
+        _valid, _warnings, _errors = validate_edge_constraints(
+            edge_type=edge_type,
+            layer=layer,
+            conn=self.conn,
+            from_node=from_node,
+            confidence=confidence,
+            enforce=False,
+        )
+        for warn in _warnings:
+            logger.warning("Edge constraint warning: %s", warn)
+        for err in _errors:
+            logger.error("Edge constraint violation: %s", err)
+
         # Compute PERT mean when PERT triple is provided but probability is not
         if probability is None and probability_p50 is not None:
             from ohm.inference.pert import compute_pert_mean

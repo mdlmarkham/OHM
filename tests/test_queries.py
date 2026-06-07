@@ -2248,10 +2248,11 @@ class TestFragmentEviction:
 
     def test_evict_skips_promoted_fragment(self, test_db):
         """Promoted fragment is never evicted, even when expired."""
-        from ohm.queries import scratch, promote_fragment, evict_expired_fragments
+        from ohm.queries import scratch, promote_fragment, evict_expired_fragments, create_node
         import json as _json
 
-        frag = scratch(test_db, content="This promoted fragment survives", created_by="test")
+        ctx = create_node(test_db, label="Context", node_type="concept", created_by="test")
+        frag = scratch(test_db, content="This promoted fragment survives", created_by="test", connects_to=[ctx["id"]])
         promote_fragment(test_db, fragment_id=frag["id"], promoted_by="test")
         self._set_old_updated_at(test_db, frag["id"])
 
@@ -2269,8 +2270,8 @@ class TestFragmentEviction:
         f1 = scratch(test_db, content="X7k9q2z4 evictable fragment", created_by="test")
         # f2: has edges (auto-links to AnchorExtend)
         f2 = scratch(test_db, content="AnchorExtend gives this fragment edges", created_by="test")
-        # f3: promoted
-        f3 = scratch(test_db, content="X7k9q2z4 promote candidate", created_by="test")
+        # f3: promoted (needs context link per ADR-022)
+        f3 = scratch(test_db, content="X7k9q2z4 promote candidate", created_by="test", connects_to=[anchor["id"]])
         promote_fragment(test_db, fragment_id=f3["id"], promoted_by="test")
 
         self._set_old_updated_at(test_db, f1["id"])
@@ -2323,9 +2324,10 @@ class TestFragmentPromotion:
 
     def test_promote_creates_concept(self, test_db):
         """promote_fragment creates a concept node from a fragment."""
-        from ohm.queries import scratch, promote_fragment
+        from ohm.queries import scratch, promote_fragment, create_node
 
-        frag = scratch(test_db, content="Important fragment worth promoting", created_by="test")
+        ctx = create_node(test_db, label="Context", node_type="concept", created_by="test")
+        frag = scratch(test_db, content="Important fragment worth promoting", created_by="test", connects_to=[ctx["id"]])
         result = promote_fragment(test_db, fragment_id=frag["id"], promoted_by="metis")
 
         assert "concept" in result
@@ -2335,9 +2337,10 @@ class TestFragmentPromotion:
 
     def test_promote_creates_refines_frag_edge(self, test_db):
         """promote_fragment creates REFINES_FRAG edge from concept to fragment."""
-        from ohm.queries import scratch, promote_fragment
+        from ohm.queries import scratch, promote_fragment, create_node
 
-        frag = scratch(test_db, content="Promote me to concept", created_by="test")
+        ctx = create_node(test_db, label="Context", node_type="concept", created_by="test")
+        frag = scratch(test_db, content="Promote me to concept", created_by="test", connects_to=[ctx["id"]])
         result = promote_fragment(test_db, fragment_id=frag["id"], promoted_by="metis")
 
         edge = test_db.execute(
@@ -2351,10 +2354,11 @@ class TestFragmentPromotion:
 
     def test_promote_sets_fragment_metadata(self, test_db):
         """promote_fragment sets promoted_to in fragment metadata."""
-        from ohm.queries import scratch, promote_fragment
+        from ohm.queries import scratch, promote_fragment, create_node
         import json
 
-        frag = scratch(test_db, content="Fragment with promotion metadata", created_by="test")
+        ctx = create_node(test_db, label="Context", node_type="concept", created_by="test")
+        frag = scratch(test_db, content="Fragment with promotion metadata", created_by="test", connects_to=[ctx["id"]])
         result = promote_fragment(test_db, fragment_id=frag["id"], promoted_by="metis")
 
         meta_row = test_db.execute(

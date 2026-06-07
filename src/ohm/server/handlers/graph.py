@@ -248,13 +248,19 @@ class GraphHandlerMixin:
         self._json_response(200, self.schema_config.layer_descriptions)
 
     def _get_node(self, path: str, qs: dict) -> None:
-        """GET /node/<id> — fetch a node."""
+        """GET /node/<id> — fetch a node with effective_layer and constraint_status."""
         node_id = path[6:]
         from ohm.validation import validate_identifier
 
         node_id = validate_identifier(node_id, name="node_id")
         node = self.current_store.get_node(node_id)
         if node:
+            # ADR-022: Add effective layer and constraint status
+            from ohm.graph.constraints import effective_layer
+
+            eff_layer, constraint_status = effective_layer(self.current_store.conn, node_id)
+            node["effective_layer"] = eff_layer
+            node["constraint_status"] = constraint_status
             self._json_response(200, node)
         else:
             from ohm.exceptions import NodeNotFoundError
@@ -338,6 +344,14 @@ class GraphHandlerMixin:
             f"SELECT id, label, type, created_by, created_at FROM ohm_nodes WHERE id IN ({placeholders}) AND deleted_at IS NULL",
             list(node_ids),
         )
+
+        # ADR-022: Add effective_layer for each node in the neighborhood
+        from ohm.graph.constraints import effective_layer
+
+        for n in node_rows:
+            eff_layer, _cs = effective_layer(self.current_store.conn, n["id"])
+            n["effective_layer"] = eff_layer
+
         self._json_response(200, {"nodes": node_rows, "edges": edges})
 
     def _get_path(self, path: str, qs: dict) -> None:
@@ -811,6 +825,27 @@ class GraphHandlerMixin:
         # The hook is registered automatically on server startup (OHM-aznh.11).
         # Inline _enforce_cross_link_requirement is no longer called here.
 
+        # ADR-022: Validate layer promotion constraints on write
+        if body.get("layer") and body.get("type") == "fragment":
+            node_layer = body.get("layer", "L0")
+            target_layer = body.get("promote_to_layer")
+            if target_layer and node_layer != target_layer:
+                from ohm.graph.constraints import validate_layer_promotion
+
+                promote_valid, promote_warnings, promote_errors = validate_layer_promotion(
+                    body["id"], node_layer, target_layer,
+                    self.current_store.conn,
+                    enforce=self.config.get("enforce_layer_gates", False),
+                )
+                if promote_errors:
+                    self._json_response(422, {
+                        "error": "layer_promotion_denied",
+                        "message": "Layer promotion constraints not satisfied",
+                        "constraint_errors": promote_errors,
+                        "constraint_warnings": promote_warnings,
+                    })
+                    return
+
         hook_error = self._run_pre_ingest_hooks(agent, "node", body)
         if hook_error is not None:
             self._json_response(422, hook_error)
@@ -1066,8 +1101,12 @@ class GraphHandlerMixin:
         self._json_response(200, result)
 
     def _post_fragment_promote(self, path: str, qs: dict, body: dict, agent: str) -> None:
-        """POST /fragments/{id}/promote — promote fragment to L1 concept (OHM-a5rz.26)."""
+        """POST /fragments/{id}/promote — promote fragment to L1 concept (OHM-a5rz.26).
+
+        Validates ADR-022 L0→L1 promotion constraints (min_context_links ≥ 1).
+        """
         from ohm.queries import promote_fragment
+        from ohm.exceptions import ConstraintViolationError
 
         if not path.endswith("/promote"):
             self._json_response(404, {"error": f"Unknown endpoint: {path}"})
@@ -1075,6 +1114,23 @@ class GraphHandlerMixin:
 
         parts = path.rstrip("/").split("/")
         fragment_id = parts[-2]
+
+        # ADR-022: Validate L0→L1 promotion constraints before promoting
+        from ohm.graph.constraints import validate_layer_promotion
+
+        promote_valid, promote_warnings, promote_errors = validate_layer_promotion(
+            fragment_id, "L0", "L1",
+            self.current_store.conn,
+            enforce=self.config.get("enforce_layer_gates", False),
+        )
+        if promote_errors:
+            self._json_response(422, {
+                "error": "layer_promotion_denied",
+                "message": "Fragment does not satisfy L0→L1 promotion constraints",
+                "constraint_errors": promote_errors,
+                "constraint_warnings": promote_warnings,
+            })
+            return
 
         try:
             result = promote_fragment(
@@ -1085,11 +1141,41 @@ class GraphHandlerMixin:
         except ValueError as e:
             self._json_response(400, {"error": str(e)})
             return
+        except ConstraintViolationError as e:
+            self._json_response(422, {"error": "layer_promotion_denied", "message": str(e)})
+            return
+
+        # Include constraint info in response
+        if promote_warnings:
+            result["constraint_warnings"] = promote_warnings
 
         self._json_response(201, result)
 
     def _post_edge(self, path: str, qs: dict, body: dict, agent: str) -> None:
-        """POST /edge — create an edge."""
+        """POST /edge — create an edge.
+
+        Validates ADR-022 edge-level constraints (min_layer, require_references, etc.).
+        """
+        # ADR-022: Validate edge-level constraints
+        from ohm.graph.constraints import validate_edge_constraints
+
+        edge_valid, edge_warnings, edge_errors = validate_edge_constraints(
+            edge_type=body.get("type", ""),
+            layer=body.get("layer", "L3"),
+            conn=self.current_store.conn,
+            from_node=body.get("from"),
+            confidence=body.get("confidence"),
+            enforce=self.config.get("enforce_layer_gates", False),
+        )
+        if edge_errors:
+            self._json_response(422, {
+                "error": "edge_constraint_denied",
+                "message": "Edge constraints not satisfied",
+                "constraint_errors": edge_errors,
+                "constraint_warnings": edge_warnings,
+            })
+            return
+
         hook_error = self._run_pre_ingest_hooks(agent, "edge", body)
         if hook_error is not None:
             self._json_response(422, hook_error)
@@ -1166,6 +1252,10 @@ class GraphHandlerMixin:
         except Exception as e:
             # Suggestions never fail the write
             logger.debug(f"Edge suggestions failed: {e}")
+
+        # ADR-022: Include constraint warnings in response (advisory mode)
+        if edge_warnings:
+            result["constraint_warnings"] = edge_warnings
 
         self._json_response(201, result)
 

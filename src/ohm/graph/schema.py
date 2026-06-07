@@ -232,6 +232,12 @@ VALID_OBSERVATION_SCALES = frozenset(
     }
 )
 
+# ── ADR-022: Layer Promotion Constraints ────────────────────────────────────
+
+# Export the constraint dictionaries for use by other modules.
+# Canonical definitions live in ohm.graph.constraints.
+from ohm.graph.constraints import PROMOTION_CONSTRAINTS, EDGE_CONSTRAINTS
+
 # ── Urgency / Priority ──────────────────────────────────────────────────────
 
 VALID_URGENCY = frozenset({"low", "normal", "high", "critical"})
