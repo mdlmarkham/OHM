@@ -2409,7 +2409,11 @@ class OhmStore:
             return 0
 
         # Connect to DuckLake and insert changes
-        ducklake = duckdb.connect(ducklake_path, read_only=False)
+        try:
+            ducklake = duckdb.connect(ducklake_path, read_only=False)
+        except Exception as exc:
+            logger.warning("Legacy DuckLake push failed to open connection to %s: %s", ducklake_path, exc)
+            return 0
 
         try:
             inserted = 0
@@ -2569,7 +2573,11 @@ class OhmStore:
         last_pull_str = last_pull if last_pull else "1970-01-01T00:00:00Z"
 
         # Connect to DuckLake and read changes
-        ducklake = duckdb.connect(ducklake_path, read_only=True)
+        try:
+            ducklake = duckdb.connect(ducklake_path, read_only=True)
+        except Exception as exc:
+            logger.warning("Legacy DuckLake pull failed to open connection to %s: %s", ducklake_path, exc)
+            return 0
 
         try:
             # Read remote changes since last pull (excluding our own)
