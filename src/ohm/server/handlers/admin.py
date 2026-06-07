@@ -114,9 +114,22 @@ class AdminHandlerMixin:
                     pass
             if qs.get("ollama_url"):
                 ollama_url = qs["ollama_url"][0]
-                # Validate URL format
+                # OHM-ssrf: validate scheme and restrict host to allowlist
                 if not ollama_url.startswith(("http://", "https://")):
                     self._json_response(400, {"error": "invalid_ollama_url", "message": "ollama_url must start with http:// or https://"})
+                    return
+                from urllib.parse import urlparse
+                _parsed = urlparse(ollama_url)
+                _allowed_hosts = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+                # Config can extend the allowlist via embeddings.allowed_hosts
+                _cfg_hosts = (self.config or {}).get("embeddings", {}).get("allowed_hosts", [])
+                _allowed_hosts.update(_cfg_hosts)
+                if _parsed.hostname not in _allowed_hosts:
+                    self._json_response(400, {
+                        "error": "ssrf_blocked",
+                        "message": f"ollama_url host '{_parsed.hostname}' is not in the allowed hosts list. "
+                                   "Add it to embeddings.allowed_hosts in config to permit.",
+                    })
                     return
 
             rows = self.current_store.execute("SELECT id, label FROM ohm_nodes WHERE embedding IS NULL AND deleted_at IS NULL")

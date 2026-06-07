@@ -162,7 +162,7 @@ class TestHookRunnerRunHook:
         assert result.exit_code == 0
 
     def test_shell_hook_nonzero_exit(self, test_db):
-        hook = HookRecord(id="h2", event="pre_ingest", command="exit 1")
+        hook = HookRecord(id="h2", event="pre_ingest", command="/bin/false")
         runner = HookRunner(test_db)
         result = runner.run_hook(hook, {})
         assert not result.success
@@ -379,7 +379,7 @@ class TestHookInvocationLog:
         assert row["timed_out"] is False
 
     def test_failed_hook_creates_log_row(self, test_db):
-        hook = HookRecord(id="h2", event="pre_ingest", command="exit 1")
+        hook = HookRecord(id="h2", event="pre_ingest", command="/bin/false")
         runner = HookRunner(test_db)
         runner.run_hook(hook, {})
         rows = test_db.execute("SELECT exit_code, timed_out FROM ohm_hook_log").fetchall()
