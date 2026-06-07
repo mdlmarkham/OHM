@@ -862,6 +862,166 @@ class AdminHandlerMixin:
         except ValueError as e:
             self._json_response(400, {"error": "validation_error", "message": str(e)})
 
+    def _post_admin_backfill_aliases(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /admin/backfill-aliases — populate ohm_aliases for all existing nodes.
+
+        Iterates all non-deleted nodes, registers normalize_alias(label) and
+        normalize_alias(node_id) as aliases. Returns count of aliases created.
+
+        OHM-g0kv Feature A.
+        """
+        from ohm.queries import register_alias
+        from ohm.validation import normalize_alias
+
+        conn = self.current_store.conn
+        rows = conn.execute(
+            "SELECT id, label FROM ohm_nodes WHERE deleted_at IS NULL"
+        ).fetchall()
+
+        created = 0
+        skipped = 0
+        errors = []
+        for node_id, label in rows:
+            try:
+                # Register normalized label as alias
+                norm_label = normalize_alias(label)
+                if norm_label:
+                    result = register_alias(conn, alias_norm=norm_label, node_id=node_id)
+                    if result.get("created"):
+                        created += 1
+                    else:
+                        skipped += 1
+
+                # Register normalized node_id as alias
+                norm_id = normalize_alias(node_id)
+                if norm_id and norm_id != norm_label:
+                    result = register_alias(conn, alias_norm=norm_id, node_id=node_id)
+                    if result.get("created"):
+                        created += 1
+                    else:
+                        skipped += 1
+            except Exception as e:
+                errors.append({"node_id": node_id, "error": str(e)})
+
+        self.current_store._increment_graph_generation()
+
+        self._json_response(200, {
+            "status": "ok",
+            "total_nodes": len(rows),
+            "aliases_created": created,
+            "aliases_skipped": skipped,
+            "errors": errors[:10],
+        })
+
+    def _post_admin_backfill_content_hashes(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /admin/backfill-content-hashes — populate ohm_content_hashes for source nodes.
+
+        Iterates all source-type nodes, computes SHA-256 of url (or label+url if
+        url is empty), and registers the content hash. Returns count of hashes created.
+
+        OHM-g0kv Feature B.
+        """
+        from ohm.queries import register_content_hash
+        from ohm.validation import compute_content_hash
+
+        conn = self.current_store.conn
+        rows = conn.execute(
+            "SELECT id, label, url FROM ohm_nodes WHERE type = 'source' AND deleted_at IS NULL"
+        ).fetchall()
+
+        created = 0
+        skipped = 0
+        errors = []
+        for node_id, label, url in rows:
+            try:
+                # Compute hash from url, or label+url if url is empty
+                if url:
+                    content = url
+                else:
+                    content = f"{label or ''}{url or ''}"
+                if not content.strip():
+                    skipped += 1
+                    continue
+
+                content_hash = compute_content_hash(content)
+                result = register_content_hash(conn, node_id=node_id, content_hash=content_hash)
+                if result.get("created"):
+                    created += 1
+                else:
+                    skipped += 1
+            except Exception as e:
+                errors.append({"node_id": node_id, "error": str(e)})
+
+        self.current_store._increment_graph_generation()
+
+        self._json_response(200, {
+            "status": "ok",
+            "total_source_nodes": len(rows),
+            "hashes_created": created,
+            "hashes_skipped": skipped,
+            "errors": errors[:10],
+        })
+
+    def _post_admin_backfill_source_urls(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /admin/backfill-source-urls — copy source node URLs to observations.
+
+        Finds observations without source_url, checks if the source node
+        (referenced via REFERENCES edge from the parent node) has a url field,
+        and if so copies the source node url to the observation's source_url.
+
+        OHM-wdrg Feature B.
+        """
+        conn = self.current_store.conn
+
+        # Find observations without source_url
+        obs_rows = conn.execute(
+            "SELECT id, node_id FROM ohm_observations WHERE deleted_at IS NULL AND (source_url IS NULL OR source_url = '')"
+        ).fetchall()
+
+        updated = 0
+        not_found = 0
+        errors = []
+
+        for obs_id, node_id in obs_rows:
+            try:
+                # Look for REFERENCES edges from the parent node to source nodes
+                ref_edges = conn.execute(
+                    "SELECT to_node FROM ohm_edges WHERE from_node = ? AND edge_type = 'REFERENCES' AND deleted_at IS NULL",
+                    [node_id],
+                ).fetchall()
+
+                source_url_found = None
+                for (source_node_id,) in ref_edges:
+                    row = conn.execute(
+                        "SELECT url FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL AND url IS NOT NULL AND url != ''",
+                        [source_node_id],
+                    ).fetchone()
+                    if row and row[0]:
+                        source_url_found = row[0]
+                        break
+
+                if source_url_found:
+                    conn.execute(
+                        "UPDATE ohm_observations SET source_url = ? WHERE id = ? AND deleted_at IS NULL",
+                        [source_url_found, obs_id],
+                    )
+                    self.current_store._log_change("ohm_observations", obs_id, "UPDATE", "L2", agent_name=agent)
+                    updated += 1
+                else:
+                    not_found += 1
+            except Exception as e:
+                errors.append({"observation_id": obs_id, "error": str(e)})
+
+        self.current_store._increment_graph_generation()
+
+        self._json_response(200, {
+            "status": "ok",
+            "total_observations": len(obs_rows),
+            "updated": updated,
+            "no_source_url_found": not_found,
+            "errors": errors[:10],
+        })
+
     def _get_fragment_resonance(self, path: str, qs: dict) -> None:
         """GET /admin/fragment-resonance — detect cross-agent fragment overlap (OHM-a5rz.13)."""
         from ohm.queries import detect_fragment_resonance

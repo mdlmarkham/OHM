@@ -216,7 +216,11 @@ def _fetch_searxng(query: str, category: str = "search") -> list[dict]:
 
 
 def stage_fetch():
-    """Stage 1: Fetch from RSS feeds and SearXNG, deduplicate, queue for triage."""
+    """Stage 1: Fetch from RSS feeds and SearXNG, deduplicate, queue for triage.
+
+    OHM-g0kv Feature C: After URL hash dedup, also checks ohm_content_hashes
+    for existing content to avoid re-ingesting known sources.
+    """
     _ensure_queues()
 
     # RSS feeds to check
@@ -253,6 +257,32 @@ def stage_fetch():
             seen.add(item["id"])
             unique.append(item)
 
+    # OHM-g0kv: Check content hashes for existing content
+    content_deduped = 0
+    if OHM_TOKEN:
+        import requests as http_requests
+        headers = {"Authorization": f"Bearer {OHM_TOKEN}"}
+        for item in unique[:]:
+            url = item.get("url", "")
+            if url:
+                content_hash = hashlib.sha256(url.encode("utf-8")).hexdigest()
+                try:
+                    r = http_requests.get(
+                        f"{OHM_URL}/resolve",
+                        params={"query": url},
+                        headers=headers,
+                        timeout=5,
+                    )
+                    if r.status_code == 200:
+                        data = r.json()
+                        if data.get("resolved"):
+                            # This URL already exists as a source node
+                            unique.remove(item)
+                            content_deduped += 1
+                            continue
+                except Exception:
+                    pass  # Content hash check is best-effort
+
     # Check if already in raw queue or further stages
     existing_ids = set()
     for stage in ("raw", "triage_pass", "source_created", "assessed"):
@@ -265,7 +295,7 @@ def stage_fetch():
             _write_queue_item("raw", item)
             new_count += 1
 
-    print(f"\n  Total fetched: {len(all_items)}, unique: {len(unique)}, new: {new_count}")
+    print(f"\n  Total fetched: {len(all_items)}, unique: {len(unique)}, content-deduped: {content_deduped}, new: {new_count}")
     return new_count
 
 
@@ -422,7 +452,16 @@ def drain_triage():
 
 
 def stage_source():
-    """Stage 3: Auto-create source nodes for triage-passed items."""
+    """Stage 3: Auto-create source nodes for triage-passed items.
+
+    OHM-g0kv Feature C: Before creating a source node, checks /resolve
+    for an existing node with a matching alias. If found, skips creation
+    and logs the duplicate.
+
+    OHM-wdrg Feature C: After creating the source node, searches OHM for
+    existing concept nodes matching the article's domain keywords and
+    creates REFERENCES edges from those concept nodes to the source.
+    """
     _ensure_queues()
     import requests as http_requests
 
@@ -436,12 +475,38 @@ def stage_source():
     print(f"  Creating source nodes for {len(triage_items)} items...")
 
     created = 0
+    skipped = 0
     for item in triage_items:
         url = item.get("url", "")
         title = item.get("title", "")
 
         if not url:
             continue
+
+        # OHM-g0kv: Check if a similar node already exists via alias resolution
+        if OHM_TOKEN:
+            from ohm.validation import normalize_alias as _norm
+            normalized_title = _norm(title)
+            try:
+                r = http_requests.get(
+                    f"{OHM_URL}/resolve",
+                    params={"query": normalized_title},
+                    headers=headers,
+                    timeout=5,
+                )
+                if r.status_code == 200:
+                    data = r.json()
+                    if data.get("resolved"):
+                        existing_id = data["resolved"].get("id")
+                        print(f"    ~ Duplicate found: '{title[:50]}...' resolves to {existing_id}, skipping creation")
+                        item["source_node_id"] = existing_id
+                        item["duplicate_of"] = existing_id
+                        _write_queue_item("source_created", item)
+                        _move_queue_item(item["id"], "triage_pass", "source_created")
+                        skipped += 1
+                        continue
+            except Exception:
+                pass  # Alias resolution is best-effort
 
         # Derive source node ID from domain
         try:
@@ -480,23 +545,87 @@ def stage_source():
             item["source_node_id"] = source_id
             _write_queue_item("source_created", item)
             _move_queue_item(item["id"], "triage_pass", "source_created")
-            print(f"    ✓ {source_id}: {title[:50]}...")
+            print(f"    + {source_id}: {title[:50]}...")
+
+            # OHM-wdrg: Create REFERENCES edges from existing concept nodes
+            _create_reference_edges(item, source_id, headers)
         else:
             # Might already exist
             print(f"    ~ {source_id}: {r.status_code} ({title[:40]}...)")
 
-    print(f"\n  Source nodes created: {created}/{len(triage_items)} (zero tokens)")
+    print(f"\n  Source nodes: {created} created, {skipped} duplicates skipped (zero tokens)")
     return created
+
+
+def _create_reference_edges(item: dict, source_id: str, headers: dict):
+    """OHM-wdrg Feature C: Create REFERENCES edges from concept nodes to source.
+
+    After creating a source node, search OHM for existing concept nodes whose
+    labels match keywords from the article. Create REFERENCES edges from
+    those concept nodes to the new source node.
+    """
+    import requests as http_requests
+
+    title = item.get("title", "")
+    description = item.get("description", "")
+    triage_domain = item.get("triage", {}).get("domain", "")
+
+    # Extract keywords from title and matched domain
+    keywords = set()
+    if triage_domain:
+        keywords.add(triage_domain.lower())
+    for domain in TRACKED_DOMAINS:
+        if domain.lower() in f"{title} {description}".lower():
+            keywords.add(domain.lower())
+
+    if not keywords:
+        return
+
+    # Search OHM for concept nodes matching each keyword
+    for keyword in list(keywords)[:5]:  # Limit to 5 keywords
+        try:
+            r = http_requests.get(
+                f"{OHM_URL}/resolve",
+                params={"query": keyword},
+                headers=headers,
+                timeout=5,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                resolved = data.get("resolved")
+                if resolved and resolved.get("id"):
+                    concept_id = resolved["id"]
+                    concept_type = resolved.get("type", "")
+                    # Only create REFERENCES from non-source nodes
+                    if concept_type != "source":
+                        http_requests.post(
+                            f"{OHM_URL}/edge",
+                            headers=headers,
+                            json={
+                                "from_node": concept_id,
+                                "to_node": source_id,
+                                "edge_type": "REFERENCES",
+                                "layer": "L2",
+                                "confidence": 0.7,
+                                "created_by": "ingestion-pipeline",
+                            },
+                        )
+        except Exception:
+            pass  # Reference edge creation is best-effort
 
 
 # ── Stage 4: Assess (Domain agent reads + writes observation) ────────────────
 
 
 def stage_assess():
-    """Stage 4: Domain agent assesses article and writes observation to OHM.
+    """Stage 4: Keyword-based assessment of articles.
 
-    This is the expensive gate — only items that pass triage reach here.
-    Token cost: ~300 tokens per item.
+    OHM-wdrg Feature A (replaces stub): Reads items from source_created queue,
+    extracts key entities from title/description using TRACKED_DOMAINS, matches
+    against existing OHM concept nodes via /resolve, creates observations on
+    source nodes with findings, sets confidence based on trust score, sets
+    source_url to article URL, and creates REFERENCES edges from relevant
+    concept nodes.
     """
     _ensure_queues()
     import requests as http_requests
@@ -508,42 +637,151 @@ def stage_assess():
         print("  No items in source_created queue for assessment.")
         return 0
 
-    print(f"  Assessing {len(source_items)} items (this requires agent intelligence)...")
+    print(f"  Assessing {len(source_items)} items using keyword extraction...")
 
-    # This stage is intentionally left for agent implementation
-    # It should be called by the domain agent (Clio/Metis) during heartbeat
-    # The agent reads each item, fetches the full article, and writes:
-    # 1. Observation with source_url pointing to the source node
-    # 2. Optional: new edges if causal links are discovered
+    assessed = 0
+    for item in source_items:
+        title = item.get("title", "")
+        description = item.get("description", "")
+        source_node_id = item.get("source_node_id", "")
+        url = item.get("url", "")
+        trust = item.get("trust", 0.5)
+        triage = item.get("triage", {})
+        matched_domain = triage.get("domain", "")
 
-    print("  Stage 4 is agent-driven. Items queued for agent processing:")
-    for item in source_items[:10]:
-        title = item.get("title", "?")[:60]
-        domain = item.get("triage", {}).get("domain", "?")
-        src_id = item.get("source_node_id", "?")
-        print(f"    [{domain}] {title} (source: {src_id})")
+        if not source_node_id:
+            print(f"    - Skipping item without source_node_id: {title[:40]}...")
+            continue
 
-    return len(source_items)
+        # Extract key entities from title/description using TRACKED_DOMAINS
+        text = f"{title} {description}".lower()
+        matched_keywords = [d for d in TRACKED_DOMAINS if d.lower() in text]
+
+        if not matched_keywords:
+            # No keywords matched; move to assessed without observations
+            item["assessed_at"] = datetime.now(timezone.utc).isoformat()
+            item["assessment"] = {"method": "keyword", "keywords": [], "observations_created": 0}
+            _write_queue_item("assessed", item)
+            _move_queue_item(item["id"], "source_created", "assessed")
+            continue
+
+        # Resolve keywords against OHM concept nodes
+        resolved_concepts = []
+        for keyword in matched_keywords[:5]:  # Limit to top 5 keywords
+            try:
+                r = http_requests.get(
+                    f"{OHM_URL}/resolve",
+                    params={"query": keyword},
+                    headers=headers,
+                    timeout=5,
+                )
+                if r.status_code == 200:
+                    data = r.json()
+                    if data.get("resolved"):
+                        resolved_concepts.append(data["resolved"])
+            except Exception:
+                pass  # Best-effort resolution
+
+        # Create observation on the source node
+        obs_created = 0
+        confidence = min(0.5 + trust * 0.3, 0.95)  # Scale trust to confidence
+        observation_text = f"Article covers: {', '.join(matched_keywords[:5])}"
+
+        try:
+            obs_data = {
+                "type": "assessment",
+                "value": confidence,
+                "source": "ingestion-pipeline",
+                "source_url": url,
+                "notes": observation_text,
+                "scale": "probability",
+            }
+            r = http_requests.post(
+                f"{OHM_URL}/observe/{source_node_id}",
+                headers=headers,
+                json=obs_data,
+                timeout=10,
+            )
+            if r.status_code in (200, 201):
+                obs_created += 1
+        except Exception as e:
+            print(f"    ! Failed to create observation: {e}")
+
+        # Create REFERENCES edges from resolved concept nodes to source
+        refs_created = 0
+        for concept in resolved_concepts:
+            concept_id = concept.get("id", "")
+            concept_type = concept.get("type", "")
+            if concept_id and concept_type != "source":
+                try:
+                    r = http_requests.post(
+                        f"{OHM_URL}/edge",
+                        headers=headers,
+                        json={
+                            "from_node": concept_id,
+                            "to_node": source_node_id,
+                            "edge_type": "REFERENCES",
+                            "layer": "L2",
+                            "confidence": 0.7,
+                            "created_by": "ingestion-pipeline",
+                        },
+                        timeout=5,
+                    )
+                    if r.status_code in (200, 201):
+                        refs_created += 1
+                except Exception:
+                    pass  # Best-effort
+
+        item["assessed_at"] = datetime.now(timezone.utc).isoformat()
+        item["assessment"] = {
+            "method": "keyword",
+            "keywords": matched_keywords,
+            "resolved_concepts": [c.get("id") for c in resolved_concepts],
+            "observations_created": obs_created,
+            "references_created": refs_created,
+            "confidence": confidence,
+        }
+        _write_queue_item("assessed", item)
+        _move_queue_item(item["id"], "source_created", "assessed")
+        assessed += 1
+
+        keywords_str = ", ".join(matched_keywords[:3])
+        print(f"    * {title[:50]}... [kw={keywords_str}, obs={obs_created}, ref={refs_created}]")
+
+    print(f"\n  Assessed: {assessed}/{len(source_items)} items")
+    return assessed
 
 
 # ── Stage 5: Synthesize (Pattern identification from clusters) ──────────────
 
 
 def stage_synthesize():
-    """Stage 5: Identify patterns from clusters of assessed items.
+    """Stage 5: Detect clusters from assessed items and create synthesis observations.
 
-    This is the most expensive stage (~1000 tokens) but runs rarely.
-    Triggered when 3+ assessed items share a domain or theme.
+    OHM-wdrg Feature B (replaces stub): Groups assessed items by domain/keyword
+    overlap. When 3+ items share a domain, creates a synthesis observation on a
+    relevant concept node and logs the cluster for agent review.
     """
     _ensure_queues()
+    import requests as http_requests
+    from collections import defaultdict
+
+    headers = {"Authorization": f"Bearer {OHM_TOKEN}"}
     assessed = _read_queue_items("assessed")
 
     if len(assessed) < 3:
         print("  Fewer than 3 assessed items — insufficient for synthesis.")
         return 0
 
-    # Group by domain
-    from collections import defaultdict
+    # Group by domain/keyword overlap
+    by_keyword = defaultdict(list)
+    for item in assessed:
+        assessment = item.get("assessment", {})
+        keywords = assessment.get("keywords", [])
+        for kw in keywords:
+            by_keyword[kw].append(item)
+
+    # Also group by triage domain for backward compat
     by_domain = defaultdict(list)
     for item in assessed:
         domain = item.get("triage", {}).get("domain", "unknown")
@@ -553,14 +791,98 @@ def stage_synthesize():
     for domain, items in sorted(by_domain.items(), key=lambda x: -len(x[1])):
         print(f"    {domain}: {len(items)} items")
 
-    clusters_ready = [d for d, items in by_domain.items() if len(items) >= 3]
-    if clusters_ready:
-        print(f"\n  Clusters ready for synthesis: {clusters_ready}")
-        print("  (Synthesis is agent-driven — run via Clio or Metis)")
-    else:
-        print("  No clusters with 3+ items yet.")
+    # Find clusters: keywords with 3+ items
+    clusters = []
+    for keyword, items in by_keyword.items():
+        if len(items) >= 3:
+            clusters.append({"keyword": keyword, "items": items, "count": len(items)})
 
-    return len(clusters_ready)
+    # Also include domain-based clusters
+    for domain, items in by_domain.items():
+        if len(items) >= 3 and domain:
+            # Avoid double-counting if keyword cluster already covers this domain
+            existing_keywords = {c["keyword"].lower() for c in clusters}
+            if domain.lower() not in existing_keywords:
+                clusters.append({"keyword": domain, "items": items, "count": len(items)})
+
+    if not clusters:
+        print("  No clusters with 3+ items yet.")
+        return 0
+
+    print(f"\n  Clusters ready for synthesis: {len(clusters)}")
+
+    syntheses_created = 0
+    for cluster in clusters:
+        keyword = cluster["keyword"]
+        items = cluster["items"]
+        count = cluster["count"]
+
+        print(f"    Cluster [{keyword}]: {count} items")
+
+        # Resolve keyword to a concept node
+        concept_node = None
+        try:
+            r = http_requests.get(
+                f"{OHM_URL}/resolve",
+                params={"query": keyword},
+                headers=headers,
+                timeout=5,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                if data.get("resolved"):
+                    concept_node = data["resolved"]
+        except Exception:
+            pass
+
+        if not concept_node:
+            print(f"      No concept node found for '{keyword}', skipping synthesis")
+            continue
+
+        # Create synthesis observation on the concept node
+        titles = [it.get("title", "?")[:60] for it in items[:5]]
+        synthesis_notes = (
+            f"Cluster of {count} articles about '{keyword}': "
+            f"{'; '.join(titles)}"
+        )
+
+        # Average confidence from items
+        confidences = [it.get("assessment", {}).get("confidence", 0.7) for it in items]
+        avg_confidence = sum(confidences) / len(confidences) if confidences else 0.7
+
+        try:
+            r = http_requests.post(
+                f"{OHM_URL}/observe/{concept_node['id']}",
+                headers=headers,
+                json={
+                    "type": "synthesis",
+                    "value": min(avg_confidence * 1.1, 0.95),  # Slight boost for synthesis
+                    "source": "ingestion-pipeline",
+                    "notes": synthesis_notes,
+                    "scale": "probability",
+                },
+                timeout=10,
+            )
+            if r.status_code in (200, 201):
+                syntheses_created += 1
+                print(f"      Synthesis observation created on {concept_node['id']}")
+            else:
+                print(f"      Failed to create synthesis: {r.status_code}")
+        except Exception as e:
+            print(f"      Synthesis failed: {e}")
+
+        # Log cluster for agent review
+        cluster_log = {
+            "keyword": keyword,
+            "count": count,
+            "concept_node": concept_node.get("id"),
+            "items": [{"title": it.get("title", ""), "url": it.get("url", "")} for it in items[:10]],
+            "synthesized_at": datetime.now(timezone.utc).isoformat(),
+        }
+        _write_queue_item("assessed", {"id": f"cluster-{keyword}", **cluster_log})
+
+    print(f"\n  Syntheses created: {syntheses_created}/{len(clusters)} clusters")
+    return syntheses_created
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────

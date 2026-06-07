@@ -957,6 +957,38 @@ class GraphHandlerMixin:
             except Exception as e:
                 logger.debug(f"Suggestions failed: {e}")
 
+        # OHM-g0kv Feature D: Auto-register alias and content hash on node creation
+        if result.get("created", True):
+            from ohm.queries import register_alias, register_content_hash
+            from ohm.validation import normalize_alias, compute_content_hash
+            node_id = result.get("id", body.get("id", ""))
+            label = body.get("label", "")
+            if node_id and label:
+                try:
+                    norm_label = normalize_alias(label)
+                    if norm_label:
+                        register_alias(self.current_store.conn, alias_norm=norm_label, node_id=node_id)
+                    norm_id = normalize_alias(node_id)
+                    if norm_id and norm_id != norm_label:
+                        register_alias(self.current_store.conn, alias_norm=norm_id, node_id=node_id)
+                except Exception:
+                    logger.debug(f"Alias registration failed for {node_id}", exc_info=True)
+
+            # Register content hash for source nodes with url or source_url
+            url_val = body.get("source_url", body.get("url"))
+            if url_val:
+                try:
+                    content_hash = compute_content_hash(url_val)
+                    register_content_hash(self.current_store.conn, node_id=node_id, content_hash=content_hash)
+                except Exception:
+                    logger.debug(f"Content hash registration failed for {node_id}", exc_info=True)
+            elif label:
+                try:
+                    content_hash = compute_content_hash(label)
+                    register_content_hash(self.current_store.conn, node_id=node_id, content_hash=content_hash)
+                except Exception:
+                    logger.debug(f"Content hash registration failed for {node_id}", exc_info=True)
+
         if result.get("created", True):
             self._json_response(201, result)
         else:

@@ -91,6 +91,7 @@ def _register_builtin_hooks(store: OhmStore) -> None:
     builtins = [
         ("pre_ingest", "python:ohm.hooks_builtin.cross_link_check", "system"),
         ("pre_ingest", "python:ohm.hooks_builtin.source_url_required", "system"),
+        ("pre_ingest", "python:ohm.hooks_builtin.observation_source_required", "system"),
     ]
     for event, command, created_by in builtins:
         existing = store.conn.execute(
@@ -1955,6 +1956,9 @@ OhmHandler._POST_EXACT = {
     "/admin/backfill-relational-tags": "_post_admin_backfill_relational_tags",
     "/admin/verification-decay": "_post_admin_verification_decay",
     "/admin/merge": "_post_admin_merge",
+    "/admin/backfill-aliases": "_post_admin_backfill_aliases",
+    "/admin/backfill-content-hashes": "_post_admin_backfill_content_hashes",
+    "/admin/backfill-source-urls": "_post_admin_backfill_source_urls",
     "/admin/vacuum-lake": "_post_admin_vacuum_lake",
 "/admin/evict-fragments": "_post_admin_evict_fragments",
     "/admin/repair-dangling": "_post_admin_repair_dangling",

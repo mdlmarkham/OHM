@@ -137,3 +137,68 @@ def rate_limit(payload: dict[str, Any]) -> tuple[int, str, str]:
         )
 
     return 0, "", ""
+
+
+def observation_source_required(payload: dict[str, Any]) -> tuple[int, str, str]:
+    """Validate that high-confidence observations include a source_url.
+
+    OHM-wdrg Feature A: For observations with confidence >= 0.8,
+    requires source_url to be populated. Returns a warning in advisory
+    mode (not a rejection) and logs the warning with the observation ID.
+
+    This hook is designed to be registered as a pre_ingest hook for
+    observation writes. In strict mode, it rejects the write.
+
+    payload keys:
+        agent: str — originating agent
+        action: str — 'observation'
+        body: dict — the observation body being written
+        __strict: bool — if True, reject; if False (default), warn only
+    """
+    body = payload.get("body", {})
+    action = payload.get("action", "")
+
+    # Only applies to observations
+    if action != "observation":
+        return 0, "", ""
+
+    # Check if this is a high-confidence observation
+    value = body.get("value")
+    source_url = body.get("source_url", "")
+
+    if value is None:
+        return 0, "", ""
+
+    try:
+        conf = float(value)
+    except (TypeError, ValueError):
+        return 0, "", ""
+
+    if conf < 0.8:
+        return 0, "", ""
+
+    if source_url and isinstance(source_url, str) and source_url.strip():
+        return 0, "", ""
+
+    # High-confidence observation without source_url
+    strict = payload.get("__strict", False)
+    node_id = body.get("node_id", "unknown")
+
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.warning(
+        "observation_source_required: high-confidence observation (value=%.2f) "
+        "on node '%s' missing source_url",
+        conf, node_id,
+    )
+
+    if strict:
+        return (
+            1,
+            "",
+            f"observation_source_required: Observations with confidence >= 0.8 "
+            f"must include source_url (node: {node_id}, value: {conf})",
+        )
+
+    # Advisory mode: log warning but allow
+    return 0, "", ""
