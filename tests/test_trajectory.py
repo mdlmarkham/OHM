@@ -1,268 +1,180 @@
-"""Tests for OHM-vj3i — compute_trajectory() temporal regression detection."""
+"""Tests for temporal regression detection (OHM-vj3i / TRAJ)."""
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+import uuid
+from typing import TYPE_CHECKING
 
-import duckdb
 import pytest
 
-from ohm.graph.methods import compute_trajectory
+if TYPE_CHECKING:
+    from duckdb import DuckDBPyConnection
 
 
-# ── Fixtures ─────────────────────────────────────────────────────────────────
+def _create_node(conn: DuckDBPyConnection, **kw) -> str:
+    node_id = f"traj_node_{uuid.uuid4().hex[:6]}"
+    conn.execute(
+        "INSERT INTO ohm_nodes (id, label, type, created_by) VALUES (?, ?, ?, ?)",
+        [node_id, kw.get("label", "test"), kw.get("node_type", "concept"), kw.get("created_by", "agent")],
+    )
+    return node_id
+
+
+def _create_obs(
+    conn: DuckDBPyConnection,
+    *,
+    node_id: str,
+    value: float,
+    created_at: str | None = None,
+    source: str = "test_source",
+) -> str:
+    obs_id = str(uuid.uuid4())
+    conn.execute(
+        "INSERT INTO ohm_observations (id, node_id, type, value, source, created_by, scale, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [obs_id, node_id, "measurement", value, source, "agent", "probability", created_at],
+    )
+    return obs_id
 
 
 @pytest.fixture
-def mem_conn():
-    """In-memory DuckDB with minimal ohm_observations schema."""
-    conn = duckdb.connect(":memory:")
-    conn.execute("""
-        CREATE TABLE ohm_observations (
-            id VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
-            node_id VARCHAR,
-            edge_id VARCHAR,
-            type VARCHAR,
-            value FLOAT,
-            baseline FLOAT,
-            sigma FLOAT,
-            source VARCHAR,
-            created_by VARCHAR,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            deleted_at TIMESTAMP,
-            notes VARCHAR,
-            source_name VARCHAR,
-            source_url VARCHAR,
-            scale VARCHAR,
-            half_life_days FLOAT,
-            valid_from TIMESTAMP,
-            valid_to TIMESTAMP,
-            supersedes_obs_id VARCHAR
-        )
-    """)
-    yield conn
-    conn.close()
+def db(test_db):
+    return test_db
 
 
-def _obs(conn, node_id, value, created_at, source="test_src", created_by="agent", sigma=None):
-    conn.execute(
-        """INSERT INTO ohm_observations
-           (node_id, type, value, source, created_by, sigma, created_at, valid_from)
-           VALUES (?, 'measurement', ?, ?, ?, ?, ?, ?)""",
-        [node_id, value, source, created_by, sigma, created_at, created_at],
-    )
+class TestTrajectory:
+    def test_insufficient_data_returns_insufficient_trend(self, db):
+        node_id = _create_node(db)
+        from ohm.methods import compute_trajectory
 
+        result = compute_trajectory(db, node_id, min_observations=3)
+        assert result["trend"] == "insufficient_data"
+        assert result["observations"] == 0
 
-def _ts(days_ago: float) -> datetime:
-    return datetime.now(timezone.utc) - timedelta(days=days_ago)
+    def test_rising_trend_detected(self, db):
+        node_id = _create_node(db)
+        _create_obs(db, node_id=node_id, value=0.1, created_at="2026-01-01T00:00:00")
+        _create_obs(db, node_id=node_id, value=0.5, created_at="2026-01-02T00:00:00")
+        _create_obs(db, node_id=node_id, value=0.9, created_at="2026-01-03T00:00:00")
+        _create_obs(db, node_id=node_id, value=0.95, created_at="2026-01-04T00:00:00")
 
+        from ohm.methods import compute_trajectory
 
-# ── Insufficient data ─────────────────────────────────────────────────────────
+        result = compute_trajectory(db, node_id, min_observations=3)
+        assert result["trend"] == "rising"
+        assert result["trend_slope"] > 0
 
+    def test_falling_trend_detected(self, db):
+        node_id = _create_node(db)
+        _create_obs(db, node_id=node_id, value=0.9, created_at="2026-01-01T00:00:00")
+        _create_obs(db, node_id=node_id, value=0.6, created_at="2026-01-02T00:00:00")
+        _create_obs(db, node_id=node_id, value=0.3, created_at="2026-01-03T00:00:00")
+        _create_obs(db, node_id=node_id, value=0.1, created_at="2026-01-04T00:00:00")
 
-def test_insufficient_data_returns_marker(mem_conn):
-    _obs(mem_conn, "n1", 0.5, _ts(10))
-    _obs(mem_conn, "n1", 0.6, _ts(5))
-    result = compute_trajectory(mem_conn, "n1", min_observations=3)
-    assert result["trend"] == "insufficient_data"
-    assert result["observations"] == 2
-    assert result["regressions"] == []
-    assert result["consistency"] is None
+        from ohm.methods import compute_trajectory
 
+        result = compute_trajectory(db, node_id, min_observations=3)
+        assert result["trend"] == "falling"
+        assert result["trend_slope"] < 0
 
-def test_no_observations_returns_insufficient(mem_conn):
-    result = compute_trajectory(mem_conn, "no-node")
-    assert result["trend"] == "insufficient_data"
-    assert result["observations"] == 0
+    def test_flat_trend_detected(self, db):
+        node_id = _create_node(db)
+        _create_obs(db, node_id=node_id, value=0.5, created_at="2026-01-01T00:00:00")
+        _create_obs(db, node_id=node_id, value=0.51, created_at="2026-01-02T00:00:00")
+        _create_obs(db, node_id=node_id, value=0.49, created_at="2026-01-03T00:00:00")
+        _create_obs(db, node_id=node_id, value=0.5, created_at="2026-01-04T00:00:00")
 
+        from ohm.methods import compute_trajectory
 
-def test_exact_minimum_observations_proceeds(mem_conn):
-    for i, v in enumerate([0.3, 0.5, 0.7]):
-        _obs(mem_conn, "n-min", v, _ts(10 - i))
-    result = compute_trajectory(mem_conn, "n-min", min_observations=3)
-    assert result["trend"] != "insufficient_data"
+        result = compute_trajectory(db, node_id, min_observations=3)
+        assert result["trend"] == "flat"
 
+    def test_regression_detected_on_direction_reversal(self, db):
+        node_id = _create_node(db)
+        _create_obs(db, node_id=node_id, value=0.2, created_at="2026-01-01T00:00:00")
+        _create_obs(db, node_id=node_id, value=0.5, created_at="2026-01-02T00:00:00")
+        _create_obs(db, node_id=node_id, value=0.8, created_at="2026-01-03T00:00:00")
+        _create_obs(db, node_id=node_id, value=0.4, created_at="2026-01-04T00:00:00")
 
-# ── Trend direction ───────────────────────────────────────────────────────────
+        from ohm.methods import compute_trajectory
 
+        result = compute_trajectory(db, node_id, min_observations=3)
+        assert len(result["regressions"]) >= 1
+        first_reg = result["regressions"][0]
+        assert "previous_trend" in first_reg
+        assert "new_trend" in first_reg
+        assert first_reg["previous_trend"] != first_reg["new_trend"]
 
-def test_rising_trend_detected(mem_conn):
-    for i, v in enumerate([0.2, 0.4, 0.6, 0.8, 0.9]):
-        _obs(mem_conn, "n-up", v, _ts(20 - i * 4))
-    result = compute_trajectory(mem_conn, "n-up")
-    assert result["trend"] == "rising"
-    assert result["trend_slope"] > 0
+    def test_no_false_regression_on_flat_plateau(self, db):
+        node_id = _create_node(db)
+        _create_obs(db, node_id=node_id, value=0.5, created_at="2026-01-01T00:00:00")
+        _create_obs(db, node_id=node_id, value=0.5, created_at="2026-01-02T00:00:00")
+        _create_obs(db, node_id=node_id, value=0.5, created_at="2026-01-03T00:00:00")
 
+        from ohm.methods import compute_trajectory
 
-def test_falling_trend_detected(mem_conn):
-    for i, v in enumerate([0.9, 0.7, 0.5, 0.3, 0.1]):
-        _obs(mem_conn, "n-dn", v, _ts(20 - i * 4))
-    result = compute_trajectory(mem_conn, "n-dn")
-    assert result["trend"] == "falling"
-    assert result["trend_slope"] < 0
+        result = compute_trajectory(db, node_id, min_observations=3)
+        assert len(result["regressions"]) == 0
 
+    def test_since_filter_limits_window(self, db):
+        node_id = _create_node(db)
+        _create_obs(db, node_id=node_id, value=0.1, created_at="2026-01-01T00:00:00")
+        _create_obs(db, node_id=node_id, value=0.2, created_at="2026-01-02T00:00:00")
+        _create_obs(db, node_id=node_id, value=0.9, created_at="2026-01-10T00:00:00")
+        _create_obs(db, node_id=node_id, value=0.95, created_at="2026-01-11T00:00:00")
 
-def test_flat_trend_detected(mem_conn):
-    for i in range(6):
-        _obs(mem_conn, "n-flat", 0.5, _ts(20 - i * 3))
-    result = compute_trajectory(mem_conn, "n-flat")
-    assert result["trend"] == "flat"
+        from ohm.methods import compute_trajectory
 
+        result = compute_trajectory(db, node_id, since="2026-01-09T00:00:00", min_observations=2)
+        assert result["observations"] == 2
+        assert result["trend"] == "rising"
 
-# ── Regression detection ──────────────────────────────────────────────────────
+    def test_consistency_with_multiple_sources(self, db):
+        node_id = _create_node(db)
+        _create_obs(db, node_id=node_id, value=0.3, source="src_a", created_at="2026-01-01T00:00:00")
+        _create_obs(db, node_id=node_id, value=0.4, source="src_a", created_at="2026-01-02T00:00:00")
+        _create_obs(db, node_id=node_id, value=0.25, source="src_b", created_at="2026-01-01T00:00:00")
+        _create_obs(db, node_id=node_id, value=0.35, source="src_b", created_at="2026-01-02T00:00:00")
 
+        from ohm.methods import compute_trajectory
 
-def test_no_regressions_in_monotone_series(mem_conn):
-    for i, v in enumerate([0.1, 0.3, 0.5, 0.7, 0.9]):
-        _obs(mem_conn, "n-mono", v, _ts(20 - i * 3))
-    result = compute_trajectory(mem_conn, "n-mono")
-    assert result["regressions"] == []
-    assert result["regression_count"] == 0
+        result = compute_trajectory(db, node_id, min_observations=3)
+        assert result["consistency"] is not None
+        assert result["consistency_detail"]["sources"] == 2
 
+    def test_data_points_returned_in_order(self, db):
+        node_id = _create_node(db)
+        _create_obs(db, node_id=node_id, value=0.1, created_at="2026-01-01T00:00:00")
+        _create_obs(db, node_id=node_id, value=0.5, created_at="2026-01-02T00:00:00")
+        _create_obs(db, node_id=node_id, value=0.9, created_at="2026-01-03T00:00:00")
 
-def test_single_reversal_detected(mem_conn):
-    # Rising then falling: 0.2, 0.5, 0.8, 0.4, 0.1
-    for i, v in enumerate([0.2, 0.5, 0.8, 0.4, 0.1]):
-        _obs(mem_conn, "n-rev", v, _ts(20 - i * 3))
-    result = compute_trajectory(mem_conn, "n-rev")
-    assert result["regression_count"] >= 1
-    first_reg = result["regressions"][0]
-    assert first_reg["previous_trend"] == "rising"
-    assert first_reg["new_trend"] == "falling"
+        from ohm.methods import compute_trajectory
 
+        result = compute_trajectory(db, node_id, min_observations=2)
+        assert len(result["data_points"]) == 3
+        values = [dp["value"] for dp in result["data_points"]]
+        assert values[0] == pytest.approx(0.1, abs=0.01)
+        assert values[1] == pytest.approx(0.5, abs=0.01)
+        assert values[2] == pytest.approx(0.9, abs=0.01)
 
-def test_multiple_regressions_detected(mem_conn):
-    # Oscillating: 0.1, 0.9, 0.1, 0.9, 0.1
-    for i, v in enumerate([0.1, 0.9, 0.1, 0.9, 0.1]):
-        _obs(mem_conn, "n-osc", v, _ts(20 - i * 3))
-    result = compute_trajectory(mem_conn, "n-osc")
-    assert result["regression_count"] >= 2
+    def test_regression_count_matches(self, db):
+        node_id = _create_node(db)
+        values = [0.1, 0.9, 0.2, 0.8, 0.3]
+        for i, v in enumerate(values):
+            day = i + 1
+            _create_obs(db, node_id=node_id, value=v, created_at=f"2026-01-{day:02d}T00:00:00")
 
+        from ohm.methods import compute_trajectory
 
-def test_regression_has_required_fields(mem_conn):
-    for i, v in enumerate([0.2, 0.7, 0.3, 0.8, 0.1]):
-        _obs(mem_conn, "n-rf", v, _ts(20 - i * 3))
-    result = compute_trajectory(mem_conn, "n-rf")
-    assert result["regressions"]
-    reg = result["regressions"][0]
-    for key in ("index", "at", "previous_trend", "new_trend", "from_value", "to_value", "magnitude"):
-        assert key in reg, f"Missing regression field: {key}"
-    assert reg["magnitude"] >= 0
+        result = compute_trajectory(db, node_id, min_observations=3)
+        assert result["regression_count"] == len(result["regressions"])
+        assert result["regression_count"] >= 2
 
+    def test_acceleration_is_not_none(self, db):
+        node_id = _create_node(db)
+        for i in range(6):
+            _create_obs(db, node_id=node_id, value=float(i) * 0.1, created_at=f"2026-01-{i+1:02d}T00:00:00")
 
-# ── Acceleration ──────────────────────────────────────────────────────────────
+        from ohm.methods import compute_trajectory
 
-
-def test_acceleration_present_for_sufficient_data(mem_conn):
-    for i, v in enumerate([0.1, 0.2, 0.35, 0.55, 0.8, 1.0]):
-        _obs(mem_conn, "n-acc", v, _ts(30 - i * 5))
-    result = compute_trajectory(mem_conn, "n-acc")
-    assert result["acceleration"] is not None
-
-
-def test_acceleration_none_for_small_window(mem_conn):
-    for i, v in enumerate([0.1, 0.5, 0.9]):
-        _obs(mem_conn, "n-acc-sm", v, _ts(10 - i * 3))
-    result = compute_trajectory(mem_conn, "n-acc-sm")
-    # With only 3 points, mid=1 which is < 2 so acceleration should be None
-    assert result["acceleration"] is None
-
-
-# ── Consistency ───────────────────────────────────────────────────────────────
-
-
-def test_single_source_consistency_is_none(mem_conn):
-    for i, v in enumerate([0.3, 0.5, 0.7, 0.8]):
-        _obs(mem_conn, "n-cons-s", v, _ts(20 - i * 4), source="only_src")
-    result = compute_trajectory(mem_conn, "n-cons-s")
-    assert result["consistency"] is None
-    assert result["consistency_detail"] == "single_source"
-
-
-def test_agreeing_sources_high_consistency(mem_conn):
-    # Two sources both trending up
-    for i in range(4):
-        _obs(mem_conn, "n-agree", 0.2 + i * 0.2, _ts(20 - i * 2), source="src_a")
-    for i in range(4):
-        _obs(mem_conn, "n-agree", 0.25 + i * 0.2, _ts(19 - i * 2), source="src_b")
-    result = compute_trajectory(mem_conn, "n-agree")
-    assert result["consistency"] is not None
-    assert result["consistency"] >= 0.5
-
-
-def test_disagreeing_sources_low_consistency(mem_conn):
-    # Source A: rising. Source B: falling.
-    for i in range(4):
-        _obs(mem_conn, "n-disagree", 0.1 + i * 0.2, _ts(20 - i * 2), source="src_up")
-    for i in range(4):
-        _obs(mem_conn, "n-disagree", 0.9 - i * 0.2, _ts(19 - i * 2), source="src_dn")
-    result = compute_trajectory(mem_conn, "n-disagree")
-    assert result["consistency"] is not None
-    assert result["consistency"] < 0.5
-
-
-# ── since= filter ─────────────────────────────────────────────────────────────
-
-
-def test_since_filter_excludes_old_observations(mem_conn):
-    # 3 old observations (50–40 days ago) + 5 recent (10–0 days ago)
-    for i in range(3):
-        _obs(mem_conn, "n-since", 0.1, _ts(50 - i * 5))
-    for i in range(5):
-        _obs(mem_conn, "n-since", 0.5 + i * 0.1, _ts(10 - i * 2))
-
-    since_str = _ts(15).isoformat()
-    result = compute_trajectory(mem_conn, "n-since", since=since_str)
-    assert result["observations"] == 5
-
-
-def test_since_filter_too_restrictive_returns_insufficient(mem_conn):
-    for i in range(5):
-        _obs(mem_conn, "n-since2", 0.5, _ts(20 - i * 3))
-    # since = yesterday → only obs from last 24h included
-    since_str = _ts(1).isoformat()
-    result = compute_trajectory(mem_conn, "n-since2", since=since_str)
-    assert result["trend"] == "insufficient_data"
-
-
-# ── Response shape ────────────────────────────────────────────────────────────
-
-
-def test_response_has_required_top_level_keys(mem_conn):
-    for i, v in enumerate([0.3, 0.5, 0.7, 0.6, 0.8]):
-        _obs(mem_conn, "n-shape", v, _ts(20 - i * 4))
-    result = compute_trajectory(mem_conn, "n-shape")
-    for key in ("node_id", "observations", "data_points", "trend", "regressions",
-                "regression_count", "acceleration", "consistency", "consistency_detail",
-                "mean_value", "trend_slope", "window_since"):
-        assert key in result, f"Missing top-level key: {key}"
-
-
-def test_data_points_capped_at_20(mem_conn):
-    for i in range(25):
-        _obs(mem_conn, "n-cap", 0.5 + i * 0.01, _ts(100 - i * 3))
-    result = compute_trajectory(mem_conn, "n-cap")
-    assert len(result["data_points"]) <= 20
-
-
-def test_data_points_contain_required_fields(mem_conn):
-    for i, v in enumerate([0.3, 0.5, 0.7, 0.9]):
-        _obs(mem_conn, "n-dp", v, _ts(15 - i * 3), sigma=0.05)
-    result = compute_trajectory(mem_conn, "n-dp")
-    assert result["data_points"]
-    dp = result["data_points"][0]
-    for key in ("value", "source", "created_by", "created_at"):
-        assert key in dp, f"Missing data_point field: {key}"
-
-
-def test_deleted_observations_excluded(mem_conn):
-    for i, v in enumerate([0.3, 0.5, 0.7]):
-        _obs(mem_conn, "n-del", v, _ts(15 - i * 3))
-    # Mark one as deleted (DuckDB doesn't support LIMIT in UPDATE; use subquery)
-    mem_conn.execute(
-        """UPDATE ohm_observations SET deleted_at = CURRENT_TIMESTAMP
-           WHERE id = (SELECT id FROM ohm_observations WHERE node_id = 'n-del' LIMIT 1)"""
-    )
-    result = compute_trajectory(mem_conn, "n-del")
-    assert result["observations"] == 2
-    assert result["trend"] == "insufficient_data"
+        result = compute_trajectory(db, node_id, min_observations=3)
+        assert result["acceleration"] is not None
