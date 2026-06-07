@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import logging
+
 from ohm.server import server as _server_module
 from ohm.server.nudges import generate_nudges, enrich_response
+
+logger = logging.getLogger(__name__)
 
 
 class GraphHandlerMixin:
@@ -49,9 +53,7 @@ class GraphHandlerMixin:
                 except json.JSONDecodeError:
                     pass
             elif not r.success:
-                import logging
-
-                logging.getLogger(__name__).warning(
+                logger.warning(
                     "post_ingest hook %s failed (exit_code=%d): %s",
                     r.hook_id, r.exit_code, r.stderr,
                 )
@@ -1583,10 +1585,7 @@ class GraphHandlerMixin:
             )
 
         if invalid_ids:
-            import logging
-            logging.getLogger("ohm.handlers").warning(
-                "Synthesis cluster_ids not found, skipping: %s", invalid_ids
-            )
+            logger.warning("Synthesis cluster_ids not found, skipping: %s", invalid_ids)
 
         node_id = generate_node_id(label)
         node_result = self.current_store.write_node(
