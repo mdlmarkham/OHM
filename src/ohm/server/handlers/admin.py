@@ -812,7 +812,13 @@ class AdminHandlerMixin:
             self._json_response(500, {"error": "vacuum_failed", "message": str(e)})
 
     def _get_resolve(self, path: str, qs: dict) -> None:
-        """GET /resolve?query= — resolve a query to a node via alias matching (OHM-g0kv.4)."""
+        """GET /resolve?query= — resolve a query to a node via alias matching, then fuzzy fallback (OHM-g0kv.4, OHM-tr71.9).
+
+        Resolution chain:
+        1. Exact alias match via resolve_node_by_alias()
+        2. Prefix alias match via query_aliases()
+        3. Fuzzy search via fuzzy_search() (Jaro-Winkler similarity)
+        """
         from ohm.queries import resolve_node_by_alias, query_aliases
 
         query = qs.get("query", [""])[0]
@@ -820,21 +826,50 @@ class AdminHandlerMixin:
             self._json_response(400, {"error": "validation_error", "message": "query parameter is required"})
             return
 
+        # 1. Exact alias match
         node = resolve_node_by_alias(self.current_store.conn, query=query)
-        if node is None:
-            prefix = qs.get("prefix", ["true"])[0].lower() in ("true", "1", "yes")
-            if prefix:
-                from ohm.validation import normalize_alias
-
-                norm = normalize_alias(query)
-                aliases = query_aliases(self.current_store.conn, prefix=norm)
-                if aliases:
-                    self._json_response(200, {"resolved": None, "suggestions": aliases, "count": len(aliases)})
-                    return
-            self._json_response(404, {"error": "not_found", "message": f"No alias match for '{query}'"})
+        if node is not None:
+            self._json_response(200, {"resolved": node})
             return
 
-        self._json_response(200, {"resolved": node})
+        # 2. Prefix alias match
+        prefix = qs.get("prefix", ["true"])[0].lower() in ("true", "1", "yes")
+        if prefix:
+            from ohm.validation import normalize_alias
+
+            norm = normalize_alias(query)
+            aliases = query_aliases(self.current_store.conn, prefix=norm)
+            if aliases:
+                self._json_response(200, {"resolved": None, "suggestions": aliases, "count": len(aliases)})
+                return
+
+        # 3. Fuzzy search fallback (OHM-tr71.9)
+        fuzzy_limit = min(int(qs.get("fuzzy_limit", [5])[0]), 20)
+        fuzzy_threshold = max(0.3, min(1.0, float(qs.get("fuzzy_threshold", [0.6])[0])))
+        from ohm.queries import fuzzy_search
+
+        fuzzy_results = fuzzy_search(
+            self.current_store.conn,
+            query=query,
+            limit=fuzzy_limit,
+            threshold=fuzzy_threshold,
+            include_l0=False,
+        )
+        if fuzzy_results:
+            suggestions = [
+                {"id": r.get("id", ""), "label": r.get("label", ""), "type": r.get("type"), "similarity": r.get("distance", 0)}
+                for r in fuzzy_results
+                if r.get("label")
+            ]
+            self._json_response(200, {
+                "resolved": None,
+                "suggestions": suggestions,
+                "count": len(suggestions),
+                "fallback": "fuzzy",
+            })
+            return
+
+        self._json_response(404, {"error": "not_found", "message": f"No match for '{query}' via alias, prefix, or fuzzy search"})
 
     def _get_alias_duplicates(self, path: str, qs: dict) -> None:
         """GET /admin/alias-duplicates — find duplicate nodes via alias/content hash (OHM-g0kv.5)."""
