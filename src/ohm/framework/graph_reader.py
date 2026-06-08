@@ -69,6 +69,8 @@ class NodeRecord:
     tags: list[str] | None = None
     metadata: dict[str, Any] | None = None
     priority: str | None = None
+    current_best_action: str | None = None
+    action_alternatives: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -282,7 +284,7 @@ class DuckDBGraphReader:
             params.append(node_type)
 
         where = " AND ".join(conditions)
-        sql = f"SELECT id, label, type, confidence, utility_scale, utility_usd_per_day, utility_currency, content, tags, metadata, priority FROM ohm_nodes WHERE {where}"
+        sql = f"SELECT id, label, type, confidence, utility_scale, utility_usd_per_day, utility_currency, content, tags, metadata, priority, current_best_action, action_alternatives FROM ohm_nodes WHERE {where}"
         rows = self._conn.execute(sql, params).fetchall()
 
         records = []
@@ -314,6 +316,8 @@ class DuckDBGraphReader:
                     tags=tags,
                     metadata=metadata,
                     priority=r[10],
+                    current_best_action=r[11],
+                    action_alternatives=_json.loads(r[12]) if r[12] and isinstance(r[12], str) else r[12],
                 )
             )
         return records
