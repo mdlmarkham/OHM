@@ -41,22 +41,53 @@ DEFAULT_HALF_LIFE: dict[str, float | None] = {
     "_default":     30.0,
 }
 
+# Default Weibull shape parameters per obs_type (OHM-24g9).
+# κ < 1 → decelerating decay (durable), κ = 1 → exponential (perishable),
+# κ > 1 → accelerating decay (fast-perishable), κ = 0 → binary (step function),
+# κ < 0 → appreciating (confidence grows with age).
+DEFAULT_WEIBULL_SHAPE: dict[str, float] = {
+    "measurement":  1.0,   # exponential
+    "sentiment":    1.5,   # accelerating decay
+    "verification": 0.7,   # decelerating decay (durable)
+    "outcome":      0.0,    # binary (step function)
+    "source":       1.0,    # exponential
+    "pattern":      -1.0,   # appreciating
+    "_default":     1.0,    # exponential
+}
+
 
 def default_half_life(obs_type: str) -> float | None:
     """Return the default half_life_days for a given observation type."""
     return DEFAULT_HALF_LIFE.get(obs_type, DEFAULT_HALF_LIFE["_default"])
 
 
+def default_weibull_shape(obs_type: str) -> float:
+    """Return the default Weibull shape κ for a given observation type (OHM-24g9)."""
+    return DEFAULT_WEIBULL_SHAPE.get(obs_type, DEFAULT_WEIBULL_SHAPE["_default"])
+
+
 def confidence_at(
     obs: dict[str, Any],
     t: datetime | None = None,
+    use_weibull: bool = True,
 ) -> float:
     """Compute effective confidence of an observation at time t.
 
+    When use_weibull=True (default), uses Weibull decay with shape parameter κ:
+    - κ < 0: appreciating (confidence grows with age)
+    - κ = 0: binary (valid until superseded)
+    - 0 < κ < 1: decelerating decay (durable)
+    - κ = 1: exponential decay (perishable)
+    - κ > 1: accelerating decay (fast-perishable)
+
+    Falls back to Phase 1 discrete logic when use_weibull=False or weibull_shape
+    is not provided.
+
     Args:
         obs: Observation record dict (must have 'value', 'created_at',
-             and optionally 'half_life_days', 'valid_to', 'valid_from').
+             and optionally 'half_life_days', 'weibull_shape', 'valid_to', 'valid_from').
         t: Point in time to evaluate at. Defaults to now (UTC).
+        use_weibull: Use Weibull formula when shape is available (default True).
 
     Returns:
         Effective confidence in [0.0, 1.0].
@@ -99,6 +130,16 @@ def confidence_at(
 
     age_days = max(0.0, (t - anchor).total_seconds() / 86400.0)
 
+    # Determine Weibull shape: use stored value, then obs_type default, then 1.0
+    weibull_shape = obs.get("weibull_shape")
+    if weibull_shape is None:
+        weibull_shape = default_weibull_shape(obs.get("type", "_default"))
+
+    # Weibull decay (OHM-24g9)
+    if use_weibull and weibull_shape is not None:
+        return _confidence_weibull(base_value, age_days, half_life, weibull_shape)
+
+    # Phase 1 fallback: discrete decay profiles
     # Binary (half_life_days == 0): valid until superseded
     if half_life == 0.0:
         return base_value  # valid_to check above already handles supersession
@@ -112,8 +153,60 @@ def confidence_at(
     return base_value * math.exp(-math.log(2) * age_days / half_life)
 
 
-def decay_profile(half_life_days: float | None) -> str:
-    """Return a human-readable decay profile name for a half_life_days value."""
+def _confidence_weibull(base_value: float, age_days: float, half_life: float, shape: float) -> float:
+    """Compute confidence using Weibull decay (OHM-24g9).
+
+    Args:
+        base_value: Base confidence value.
+        age_days: Age of observation in days.
+        half_life: Half-life in days (Weibull scale = half_life / ln(2)).
+        shape: Weibull shape κ.
+            < 0: appreciating
+            = 0: binary (step function)
+            0 < κ < 1: decelerating (durable)
+            = 1: exponential (standard)
+            > 1: accelerating (fast-perishable)
+
+    Returns:
+        Effective confidence in [0.0, 1.0].
+    """
+    # Binary (step function): valid until superseded
+    # NOTE: This case is handled before Weibull since scale = half_life/ln(2) = 0
+    # would cause division by zero.
+    if shape == 0.0 or half_life == 0.0:
+        return base_value
+
+    # Appreciating: confidence grows with age, capped at 1.0
+    # For negative half_life, use the Phase 1 appreciation formula
+    # (Weibull with negative shape is also appreciation but formula differs)
+    if shape < 0.0 or half_life < 0.0:
+        appreciation_rate = math.log(2) / abs(half_life)
+        return min(1.0, base_value * (1.0 + appreciation_rate * age_days))
+
+    # Standard Weibull: confidence = value * exp(-(age/scale)^shape)
+    # scale = half_life / ln(2) converts half-life to Weibull scale parameter
+    scale = half_life / math.log(2)
+    decay_factor = math.exp(-((age_days / scale) ** shape))
+
+    return base_value * decay_factor
+
+
+def decay_profile(half_life_days: float | None, weibull_shape: float | None = None) -> str:
+    """Return a human-readable decay profile name for a half_life_days value.
+    
+    When weibull_shape is provided, returns the Weibull profile name (OHM-24g9).
+    """
+    if weibull_shape is not None:
+        if weibull_shape < 0:
+            return "appreciating"
+        if weibull_shape == 0:
+            return "binary"
+        if weibull_shape < 1:
+            return "durable"
+        if weibull_shape == 1:
+            return "perishable"
+        return "fast-perishable"
+    # Phase 1 fallback
     if half_life_days is None:
         return "permanent"
     if half_life_days == 0.0:

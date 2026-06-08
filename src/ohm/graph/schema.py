@@ -917,7 +917,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.25.0"
+SCHEMA_VERSION = "0.26.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -1205,6 +1205,22 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             "CREATE INDEX IF NOT EXISTS idx_obs_supersedes ON ohm_observations(supersedes_obs_id)",
             # Index for active observations (valid_to IS NULL)
             "CREATE INDEX IF NOT EXISTS idx_obs_valid_to ON ohm_observations(valid_to)",
+        ],
+    ),
+    (
+        "0.26.0",
+        "OHM-24g9: Weibull shape parameter — add weibull_shape column to observations",
+        [
+            "ALTER TABLE ohm_observations ADD COLUMN IF NOT EXISTS weibull_shape FLOAT",
+            # Backfill: set default Weibull shape per obs_type
+            "UPDATE ohm_observations SET weibull_shape = 1.0 WHERE weibull_shape IS NULL AND type = 'measurement'",
+            "UPDATE ohm_observations SET weibull_shape = 1.5 WHERE weibull_shape IS NULL AND type = 'sentiment'",
+            "UPDATE ohm_observations SET weibull_shape = 0.7 WHERE weibull_shape IS NULL AND type = 'verification'",
+            "UPDATE ohm_observations SET weibull_shape = 0.0 WHERE weibull_shape IS NULL AND type = 'outcome'",
+            "UPDATE ohm_observations SET weibull_shape = 1.0 WHERE weibull_shape IS NULL AND type = 'source'",
+            "UPDATE ohm_observations SET weibull_shape = -1.0 WHERE weibull_shape IS NULL AND type = 'pattern'",
+            # Remaining types get exponential (κ=1.0)
+            "UPDATE ohm_observations SET weibull_shape = 1.0 WHERE weibull_shape IS NULL",
         ],
     ),
 ]
