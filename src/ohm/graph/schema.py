@@ -860,6 +860,8 @@ DDL_STATEMENTS: list[str] = [
         confidence   FLOAT,
         provenance   VARCHAR NOT NULL DEFAULT 'structure_learning',
         method       VARCHAR NOT NULL,
+        p_value      FLOAT,
+        metadata     VARCHAR,
         status       VARCHAR NOT NULL DEFAULT 'pending',
         reviewed_by  VARCHAR,
         reviewed_at  TIMESTAMP,
@@ -917,7 +919,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.26.0"
+SCHEMA_VERSION = "0.27.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -1115,6 +1117,8 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             confidence   FLOAT,
             provenance   VARCHAR NOT NULL DEFAULT 'structure_learning',
             method       VARCHAR NOT NULL,
+            p_value      FLOAT,
+            metadata     VARCHAR,
             status       VARCHAR NOT NULL DEFAULT 'pending',
             reviewed_by  VARCHAR,
             reviewed_at  TIMESTAMP,
@@ -1123,6 +1127,14 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""",
             "CREATE INDEX IF NOT EXISTS idx_discovery_queue_status ON ohm_discovery_queue(status)",
+        ],
+    ),
+    (
+        "0.27.0",
+        "OHM-od01.4: Causal discovery — add p_value and metadata columns to discovery queue",
+        [
+            "ALTER TABLE ohm_discovery_queue ADD COLUMN IF NOT EXISTS p_value FLOAT",
+            "ALTER TABLE ohm_discovery_queue ADD COLUMN IF NOT EXISTS metadata VARCHAR",
         ],
     ),
     (

@@ -5,7 +5,7 @@ Multi-agent knowledge graph with local DuckDB caches,
 DuckLake shared backend, and change-feed-driven coordination.
 """
 
-__version__ = "0.26.0"
+__version__ = "0.27.0"
 
 from .framework.graph_reader import (
     DuckDBGraphReader,
