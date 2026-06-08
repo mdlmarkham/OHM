@@ -48,7 +48,7 @@ OHM-3ngi (SHIPPED ✅) ── ADR-022: Layer Promotion Constraints (batch optimi
 | ~~OHM-aznh~~ | ~~#665~~ | ~~INGEST Shell Hooks~~ | **SHIPPED** ✅ | All 13 sub-issues closed. Hooks live. |
 | ~~OHM-wdrg~~ | ~~#621~~ | ~~Source Citation Architecture~~ | **SHIPPED** ✅ | observation_source_required hook, backfill, Stage 3/4 REFERENCES. |
 | OHM-a5rz | #644 | L0 Thinking Layer | OPEN | Fragments, scratch(), auto-linking. |
-| OHM-tr71 | #636 | Proactive Discoverability | OPEN | Islands, suggestions, nudges. |
+| ~~OHM-tr71~~ | ~~#636~~ | ~~Proactive Discoverability~~ | **SHIPPED** ✅ | Islands, bridges, nudges, connectivity. 15/15 tests. |
 
 ## Active — P2
 
