@@ -512,6 +512,7 @@ class AnalysisHandlerMixin:
             agent_islands: Islands the agent has contributed to
             unverified_causal_edges: Causal edges with confidence < 0.5
             unchallenged_high_confidence: High-confidence edges with no challenges
+            challenge_ratio_nudge: When agent has >10 L3 edges and challenge ratio < 0.05
             recent_nodes_no_observations: Recent nodes with no observations
         """
         import json
@@ -594,7 +595,51 @@ class AnalysisHandlerMixin:
             for r in unchallenged
         ]
 
-        # 5. Recent nodes with no observations
+        # 5. Challenge ratio nudge (OHM-tr71.7)
+        # When agent has >10 L3 edges and challenge ratio < 0.05, suggest challenging
+        challenge_target = 0.05
+        l3_count = conn.execute(
+            "SELECT COUNT(*) FROM ohm_edges e "
+            "WHERE e.created_by = ? AND e.deleted_at IS NULL AND e.layer = 'L3'",
+            [agent],
+        ).fetchone()[0]
+        challenge_ratio_nudge = None
+        if l3_count > 10:
+            challenged_count = conn.execute(
+                "SELECT COUNT(DISTINCT e.id) FROM ohm_edges e "
+                "WHERE e.created_by = ? AND e.deleted_at IS NULL "
+                "AND e.edge_type = 'CHALLENGED_BY'",
+                [agent],
+            ).fetchone()[0]
+            ratio = challenged_count / l3_count if l3_count > 0 else 0
+            if ratio < challenge_target:
+                # Suggest up to 3 unchallenged high-confidence L3 edges from OTHER agents
+                suggest_edges = conn.execute(
+                    "SELECT e.id, e.from_node, e.to_node, e.edge_type, e.confidence, e.created_by "
+                    "FROM ohm_edges e "
+                    "WHERE e.created_by != ? AND e.deleted_at IS NULL AND e.layer = 'L3' "
+                    "AND e.confidence >= 0.8 "
+                    "AND NOT EXISTS ("
+                    "  SELECT 1 FROM ohm_edges c "
+                    "  WHERE c.edge_type = 'CHALLENGED_BY' AND c.from_node = e.id "
+                    "  AND c.deleted_at IS NULL"
+                    ") "
+                    "ORDER BY e.confidence DESC LIMIT 3",
+                    [agent],
+                ).fetchall()
+                challenge_ratio_nudge = {
+                    "message": f"You've made {l3_count} L3 claims but only challenged {challenged_count}. Consider challenging claims you disagree with.",
+                    "l3_edge_count": l3_count,
+                    "challenges_made": challenged_count,
+                    "challenge_ratio": round(ratio, 4),
+                    "target_ratio": challenge_target,
+                    "suggested_edges": [
+                        {"id": r[0], "from": r[1], "to": r[2], "type": r[3], "confidence": r[4], "created_by": r[5]}
+                        for r in suggest_edges
+                    ],
+                }
+
+        # 6. Recent nodes with no observations
         recent_no_obs = conn.execute(
             "SELECT n.id, n.label, n.type, n.confidence, n.created_at "
             "FROM ohm_nodes n "
@@ -611,7 +656,7 @@ class AnalysisHandlerMixin:
             for r in recent_no_obs
         ]
 
-        self._json_response(200, {
+        response = {
             "agent": agent,
             "orphan_nodes": orphan_nodes,
             "orphan_count": len(orphan_nodes),
@@ -623,7 +668,11 @@ class AnalysisHandlerMixin:
             "unchallenged_high_confidence_count": len(unchallenged_high_confidence),
             "recent_nodes_no_observations": recent_nodes_no_observations,
             "recent_no_obs_count": len(recent_nodes_no_observations),
-        })
+        }
+        if challenge_ratio_nudge:
+            response["challenge_ratio_nudge"] = challenge_ratio_nudge
+
+        self._json_response(200, response)
 
     def _get_suggest_connectivity(self, qs: dict, limit: int) -> None:
         """GET /suggest?method=connectivity — for a disconnected node, find top-k most similar connected nodes.
