@@ -285,6 +285,7 @@ GET  /compound_confidence?node_ids=X,Y         # Combined confidence
 
 # Admin
 GET  /admin/stats                              # Detailed statistics
+GET  /admin/health                              # Composite health score (0-100) + remediation priorities
 GET  /admin/constraint-report                  # Layer promotion constraints
 GET  /admin/islands                            # Disconnected components
 POST /admin/backfill-aliases                   # Deduplicate aliases
@@ -394,6 +395,8 @@ See [ADR-006](docs/adr/0007-schema-evolution-and-type-governance.md) (graduated 
 | DuckDB resilience | — | Health check in `read_conn()`, graceful recovery from SEGV |
 | Constraint-report optimization | OHM-3ngi | Batch computation: 39s → 0.37s (106x speedup) |
 | Fuzzy resolve | OHM-tr71.9 | Jaro-Winkler fallback in /resolve for typo tolerance |
+| Challenge ratio nudge | OHM-tr71.7 | Nudge agents with low challenge ratio to challenge more |
+| Graph health scoring | OHM-6lvk | Composite score (0-100) with remediation priorities |
 
 ### Open Work
 
