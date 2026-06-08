@@ -181,7 +181,7 @@ class GraphHandlerMixin:
                 "create_node": "POST /node — Create any node type. Required: id, label, type. Optional: content, tags (list), metadata (dict), source_url, confidence, provenance, connects_to (list of existing node ids).",
                 "scratch": "POST /scratch — Write an L0 thinking fragment. Near-zero cost. Required: content. Optional: tags, connects_to, metadata. Auto-detects questions (?). Auto-links semantically. Fragments excluded from search/stats/neighborhood by default.",
                 "create_edge": "POST /edge — Link two nodes. Required: from, to, layer, edge_type. Optional: confidence, provenance, probability.",
-                "observe": "POST /observe — Record a measurement or observation on a node. Required: node_id, obs_type, value. Optional: notes, source, source_url, sigma.",
+                "observe": "POST /observe/{id} — Record a measurement or observation on a node. Required: node_id, obs_type, value. Optional: notes, source, source_url, sigma. Also: POST /observations for bulk upload, GET /observations for listing.",
                 "challenge": "POST /challenge — Challenge an L3 interpretation. Required: edge_id. Optional: reason, confidence.",
             },
             "reading": {
