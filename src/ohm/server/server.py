@@ -542,6 +542,7 @@ def _build_router() -> _RouteRegistry:
     r.add("POST", "/admin/merge")
     r.add("POST", "/admin/vacuum-lake")
     r.add("POST", "/admin/evict-fragments")
+    r.add("GET", "/admin/health")
 
     # /decay: write-in-GET (legacy); registered as GET to avoid spurious 405
     r.add("GET", "/decay")
@@ -2047,6 +2048,7 @@ OhmHandler._GET_EXACT = {
     "/admin/islands": "_get_admin_islands",
     "/admin/verification-scan": "_get_admin_verification_scan",
     "/admin/constraint-report": "_get_admin_constraint_report",
+    "/admin/health": "_get_admin_health",
     "/admin/learned-half-lives": "_get_admin_learned_half_lives",
     "/admin/snapshots": "_get_admin_snapshots",
     "/graph/at": "_get_graph_at",
