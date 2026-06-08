@@ -353,6 +353,9 @@ class AnalysisHandlerMixin:
         - cross_domain: Nodes from DIFFERENT agents sharing tags, not connected
         - semantic: Embedding similarity for unconnected pairs
         - orphan_connect: Orphan nodes sharing type with connected nodes
+        - bridges: Suggest bridge edges between an island and the main component
+        - nudge: Proactive nudges for the calling agent
+        - connectivity: Top-k most similar connected nodes for a disconnected node
         """
         from ohm.methods import suggest_connections
 
@@ -363,12 +366,350 @@ class AnalysisHandlerMixin:
         except (ValueError, TypeError) as e:
             self._json_response(400, {"error": "invalid_parameter", "message": f"min_shared and limit must be integers: {e}"})
             return
+
+        # ── OHM-tr71: Bridge suggestions ──────────────────────────────────
+        if method == "bridges":
+            self._get_suggest_bridges(qs, limit)
+            return
+
+        # ── OHM-tr71: Nudge notifications ─────────────────────────────────
+        if method == "nudge":
+            self._get_suggest_nudge(qs, limit)
+            return
+
+        # ── OHM-tr71: Connectivity nudge ──────────────────────────────────
+        if method == "connectivity":
+            self._get_suggest_connectivity(qs, limit)
+            return
+
         try:
             result = suggest_connections(self.current_store.read_conn, method=method, min_shared=min_shared, limit=limit)
         except Exception as e:
             self._json_response(500, {"error": "internal_error", "message": f"Suggest computation failed: {e}"})
             return
         self._json_response(200, result)
+
+    def _get_suggest_bridges(self, qs: dict, limit: int) -> None:
+        """GET /suggest?method=bridges — suggest bridge edges from an island to the main component.
+
+        Query params:
+            island_id: Island ID (e.g., "island-1") from /admin/islands
+            min_score: Minimum bridge score (default 0.0)
+        """
+        import json
+        from ohm.methods import find_islands
+
+        island_id = qs.get("island_id", [None])[0]
+        if not island_id:
+            self._json_response(400, {"error": "validation_error", "message": "island_id parameter is required"})
+            return
+
+        min_score = float(qs.get("min_score", ["0.0"])[0])
+        conn = self.current_store.conn
+
+        # Find all islands
+        result = find_islands(conn, exclude_fragments=True, min_size=2, max_islands=50)
+        islands = result.get("islands", [])
+
+        # Find the requested island (skip the mainland)
+        target_island = None
+        for idx, island in enumerate(islands):
+            island_id_from_idx = f"island-{idx + 1}"
+            if island_id_from_idx == island_id:
+                target_island = island
+                break
+            # Also try matching current id field
+            if island.get("id") == island_id:
+                target_island = island
+                break
+
+        if not target_island:
+            self._json_response(404, {"error": "not_found", "message": f"Island {island_id} not found"})
+            return
+
+        island_node_ids = {n["id"] for n in target_island.get("nodes", [])}
+        if not island_node_ids:
+            self._json_response(200, {"bridges": [], "island_id": island_id, "island_size": target_island.get("size", 0)})
+            return
+
+        # Main component = all nodes not in this island
+        all_nodes = conn.execute(
+            "SELECT id FROM ohm_nodes WHERE deleted_at IS NULL AND type != 'fragment'"
+        ).fetchall()
+        main_component_ids = {r[0] for r in all_nodes} - island_node_ids
+
+        if not main_component_ids:
+            self._json_response(200, {"bridges": [], "island_id": island_id, "island_size": target_island.get("size", 0)})
+            return
+
+        # Score island→main pairs by tag overlap and label similarity
+        bridges = []
+        for island_nid in island_node_ids:
+            island_row = conn.execute(
+                "SELECT tags, label FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                [island_nid],
+            ).fetchone()
+            if not island_row:
+                continue
+            island_tags_json, island_label = island_row
+            island_tags = set()
+            if island_tags_json:
+                try:
+                    parsed = json.loads(island_tags_json) if isinstance(island_tags_json, str) else (island_tags_json or [])
+                    if isinstance(parsed, list):
+                        island_tags = set(parsed)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            island_words = set(island_label.lower().split()) if island_label else set()
+
+            for main_id in list(main_component_ids)[:100]:
+                main_row = conn.execute(
+                    "SELECT tags, label, type FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                    [main_id],
+                ).fetchone()
+                if not main_row:
+                    continue
+                main_tags_json, main_label, main_type = main_row
+                main_tags = set()
+                if main_tags_json:
+                    try:
+                        parsed = json.loads(main_tags_json) if isinstance(main_tags_json, str) else (main_tags_json or [])
+                        if isinstance(parsed, list):
+                            main_tags = set(parsed)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+                tag_overlap = len(island_tags & main_tags)
+                main_words = set(main_label.lower().split()) if main_label else set()
+                word_overlap = len(island_words & main_words)
+
+                score = tag_overlap * 2.0 + word_overlap * 1.0
+
+                if score >= min_score:
+                    bridges.append({
+                        "from": island_nid,
+                        "to": main_id,
+                        "score": round(score, 2),
+                        "shared_tags": sorted(island_tags & main_tags),
+                        "from_label": island_label or "",
+                        "to_label": main_label or "",
+                        "to_type": main_type or "",
+                    })
+
+        bridges.sort(key=lambda x: x["score"], reverse=True)
+        self._json_response(200, {
+            "bridges": bridges[:limit],
+            "island_id": island_id,
+            "island_size": target_island.get("size", 0),
+            "candidates_evaluated": len(bridges),
+        })
+
+    def _get_suggest_nudge(self, qs: dict, limit: int) -> None:
+        """GET /suggest?method=nudge — proactive nudges for the calling agent.
+
+        Returns:
+            orphan_nodes: Nodes created by agent with no edges
+            agent_islands: Islands the agent has contributed to
+            unverified_causal_edges: Causal edges with confidence < 0.5
+            unchallenged_high_confidence: High-confidence edges with no challenges
+            recent_nodes_no_observations: Recent nodes with no observations
+        """
+        import json
+        from ohm.methods import find_islands
+
+        agent = qs.get("agent", [None])[0]
+        if not agent:
+            self._json_response(400, {"error": "validation_error", "message": "agent parameter is required for nudge method"})
+            return
+
+        conn = self.current_store.conn
+
+        # 1. Orphan nodes created by the agent
+        orphans = conn.execute(
+            "SELECT n.id, n.label, n.type, n.confidence, n.created_at "
+            "FROM ohm_nodes n "
+            "WHERE n.created_by = ? AND n.deleted_at IS NULL AND n.type != 'fragment' "
+            "AND n.id NOT IN (SELECT from_node FROM ohm_edges WHERE deleted_at IS NULL) "
+            "AND n.id NOT IN (SELECT to_node FROM ohm_edges WHERE deleted_at IS NULL) "
+            "ORDER BY n.confidence DESC NULLS LAST LIMIT ?",
+            [agent, limit],
+        ).fetchall()
+        orphan_nodes = [
+            {"id": r[0], "label": r[1], "type": r[2], "confidence": r[3], "created_at": str(r[4])}
+            for r in orphans
+        ]
+
+        # 2. Islands the agent has contributed to
+        islands_data = find_islands(conn, exclude_fragments=True, min_size=2, max_islands=50)
+        agent_node_ids = {
+            r[0] for r in conn.execute(
+                "SELECT id FROM ohm_nodes WHERE created_by = ? AND deleted_at IS NULL AND type != 'fragment'",
+                [agent],
+            ).fetchall()
+        }
+        agent_islands = []
+        for idx, island in enumerate(islands_data.get("islands", [])):
+            island_nodes = {n["id"] for n in island.get("nodes", [])}
+            overlap = island_nodes & agent_node_ids
+            if overlap:
+                agent_islands.append({
+                    "id": f"island-{idx + 1}",
+                    "size": island.get("size", 0),
+                    "your_nodes": sorted(overlap)[:5],
+                    "your_node_count": len(overlap),
+                })
+
+        # 3. Unverified causal edges (confidence < 0.5)
+        unverified = conn.execute(
+            "SELECT e.id, e.from_node, e.to_node, e.edge_type, e.confidence, e.created_at "
+            "FROM ohm_edges e "
+            "WHERE e.created_by = ? AND e.deleted_at IS NULL "
+            "AND e.edge_type IN ('CAUSES', 'PREDICTS', 'EXPECTS') "
+            "AND (e.confidence IS NULL OR e.confidence < 0.5) "
+            "ORDER BY e.confidence ASC NULLS FIRST LIMIT ?",
+            [agent, limit],
+        ).fetchall()
+        unverified_causal_edges = [
+            {"id": r[0], "from": r[1], "to": r[2], "type": r[3], "confidence": r[4], "created_at": str(r[5])}
+            for r in unverified
+        ]
+
+        # 4. Unchallenged high-confidence edges (>0.85, no CHALLENGED_BY)
+        unchallenged = conn.execute(
+            "SELECT e.id, e.from_node, e.to_node, e.edge_type, e.confidence, e.created_at "
+            "FROM ohm_edges e "
+            "WHERE e.created_by = ? AND e.deleted_at IS NULL "
+            "AND e.confidence >= 0.85 "
+            "AND NOT EXISTS ("
+            "  SELECT 1 FROM ohm_edges c "
+            "  WHERE c.edge_type = 'CHALLENGED_BY' "
+            "  AND (c.from_node = e.from_node OR c.to_node = e.to_node)"
+            "  AND c.deleted_at IS NULL"
+            ") "
+            "ORDER BY e.confidence DESC LIMIT ?",
+            [agent, limit],
+        ).fetchall()
+        unchallenged_high_confidence = [
+            {"id": r[0], "from": r[1], "to": r[2], "type": r[3], "confidence": r[4], "created_at": str(r[5])}
+            for r in unchallenged
+        ]
+
+        # 5. Recent nodes with no observations
+        recent_no_obs = conn.execute(
+            "SELECT n.id, n.label, n.type, n.confidence, n.created_at "
+            "FROM ohm_nodes n "
+            "WHERE n.created_by = ? AND n.deleted_at IS NULL AND n.type != 'fragment' "
+            "AND NOT EXISTS ("
+            "  SELECT 1 FROM ohm_observations o "
+            "  WHERE o.node_id = n.id AND o.deleted_at IS NULL"
+            ") "
+            "ORDER BY n.created_at DESC LIMIT ?",
+            [agent, limit],
+        ).fetchall()
+        recent_nodes_no_observations = [
+            {"id": r[0], "label": r[1], "type": r[2], "confidence": r[3], "created_at": str(r[4])}
+            for r in recent_no_obs
+        ]
+
+        self._json_response(200, {
+            "agent": agent,
+            "orphan_nodes": orphan_nodes,
+            "orphan_count": len(orphan_nodes),
+            "agent_islands": agent_islands,
+            "agent_island_count": len(agent_islands),
+            "unverified_causal_edges": unverified_causal_edges,
+            "unverified_causal_count": len(unverified_causal_edges),
+            "unchallenged_high_confidence": unchallenged_high_confidence,
+            "unchallenged_high_confidence_count": len(unchallenged_high_confidence),
+            "recent_nodes_no_observations": recent_nodes_no_observations,
+            "recent_no_obs_count": len(recent_nodes_no_observations),
+        })
+
+    def _get_suggest_connectivity(self, qs: dict, limit: int) -> None:
+        """GET /suggest?method=connectivity — for a disconnected node, find top-k most similar connected nodes.
+
+        Query params:
+            node_id: The disconnected node to find connections for
+        """
+        import json
+
+        node_id = qs.get("node_id", [None])[0]
+        if not node_id:
+            self._json_response(400, {"error": "validation_error", "message": "node_id parameter is required for connectivity method"})
+            return
+
+        conn = self.current_store.conn
+
+        # Get the target node's tags and label
+        target_row = conn.execute(
+            "SELECT tags, label, type FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+            [node_id],
+        ).fetchone()
+        if not target_row:
+            self._json_response(404, {"error": "not_found", "message": f"Node {node_id} not found"})
+            return
+
+        target_tags_json, target_label, target_type = target_row
+        target_tags = set()
+        if target_tags_json:
+            try:
+                parsed = json.loads(target_tags_json) if isinstance(target_tags_json, str) else (target_tags_json or [])
+                if isinstance(parsed, list):
+                    target_tags = set(parsed)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        target_words = set(target_label.lower().split()) if target_label else set()
+
+        # Find connected nodes (nodes with at least 1 edge)
+        connected_nodes = conn.execute(
+            "SELECT DISTINCT n.id, n.label, n.type, n.tags, n.confidence "
+            "FROM ohm_nodes n "
+            "WHERE n.deleted_at IS NULL AND n.type != 'fragment' AND n.id != ? "
+            "AND (n.id IN (SELECT from_node FROM ohm_edges WHERE deleted_at IS NULL) "
+            "  OR n.id IN (SELECT to_node FROM ohm_edges WHERE deleted_at IS NULL)) "
+            "ORDER BY n.confidence DESC NULLS LAST LIMIT 500",
+            [node_id],
+        ).fetchall()
+
+        scored = []
+        for row in connected_nodes:
+            cid, clabel, ctype, ctags_json, cconf = row
+            ctags = set()
+            if ctags_json:
+                try:
+                    parsed = json.loads(ctags_json) if isinstance(ctags_json, str) else (ctags_json or [])
+                    if isinstance(parsed, list):
+                        ctags = set(parsed)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            cwords = set(clabel.lower().split()) if clabel else set()
+
+            tag_overlap = len(target_tags & ctags)
+            word_overlap = len(target_words & cwords)
+            same_type = 1.0 if ctype == target_type else 0.0
+
+            score = tag_overlap * 2.0 + word_overlap * 1.0 + same_type * 0.5
+
+            if score > 0 or tag_overlap > 0:
+                scored.append({
+                    "id": cid,
+                    "label": clabel or "",
+                    "type": ctype or "",
+                    "confidence": cconf,
+                    "score": round(score, 2),
+                    "shared_tags": sorted(target_tags & ctags),
+                    "shared_words": sorted(target_words & cwords),
+                })
+
+        scored.sort(key=lambda x: x["score"], reverse=True)
+
+        self._json_response(200, {
+            "node_id": node_id,
+            "node_label": target_label or "",
+            "node_type": target_type or "",
+            "candidates": scored[:limit],
+            "total_candidates": len(scored),
+        })
 
     def _get_graph_stats(self, path: str, qs: dict) -> None:
         """GET /graph/stats — extended graph statistics."""

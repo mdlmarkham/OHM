@@ -1333,3 +1333,158 @@ class AdminHandlerMixin:
         conn = self.current_store.conn
         result = effective_reliability(conn, agent_id)
         self._json_response(200, result)
+
+    # ── OHM-tr71: Proactive Discoverability ──────────────────────────────────
+
+    def _get_admin_islands(self, path: str, qs: dict) -> None:
+        """GET /admin/islands — find disconnected components with bridge suggestions.
+
+        Enriches the standard /islands response with:
+          - center: the most-connected node in each island
+          - tags: aggregate tags across island nodes
+          - bridges_suggested: candidate bridge edges to the main component
+
+        Query params:
+            min_size: Minimum island size (default 2)
+            max_islands: Maximum islands to return (default 10)
+            layer: Filter edges by layer
+        """
+        import json
+        from ohm.methods import find_islands
+
+        min_size = int(qs.get("min_size", [2])[0])
+        max_islands = int(qs.get("max_islands", [10])[0])
+        layer = qs.get("layer", [None])[0]
+
+        conn = self.current_store.conn
+        result = find_islands(
+            conn,
+            exclude_fragments=True,
+            min_size=min_size,
+            max_islands=max_islands,
+            layer=layer,
+        )
+
+        islands = result.get("islands", [])
+        mainland_size = result.get("main_graph_size", 0)
+
+        # Get all node IDs of the main component for bridge suggestion
+        main_component_ids = set()
+        if islands:
+            mainland_ids = conn.execute(
+                "SELECT n.id FROM ohm_nodes n WHERE n.deleted_at IS NULL AND n.type != 'fragment'"
+            ).fetchall()
+            all_node_ids = {r[0] for r in mainland_ids}
+            island_node_ids = set()
+            for island in islands:
+                for n in island.get("nodes", []):
+                    island_node_ids.add(n["id"])
+            main_component_ids = all_node_ids - island_node_ids
+
+        enriched_islands = []
+        for island in islands:
+            island_node_ids = {n["id"] for n in island.get("nodes", [])}
+            if not island_node_ids:
+                continue
+
+            # Find center: node with most edges within the island
+            center_id = None
+            max_internal_degree = -1
+            for nid in island_node_ids:
+                internal_deg = conn.execute(
+                    "SELECT COUNT(*) FROM ohm_edges e "
+                    "WHERE e.deleted_at IS NULL AND "
+                    "((e.from_node = ? AND e.to_node IN (SELECT unnest(?::VARCHAR[]))) "
+                    "OR (e.to_node = ? AND e.from_node IN (SELECT unnest(?::VARCHAR[]))))",
+                    [nid, list(island_node_ids), nid, list(island_node_ids)],
+                ).fetchone()[0]
+                if internal_deg > max_internal_degree:
+                    max_internal_degree = internal_deg
+                    center_id = nid
+
+            # Collect tags from all island nodes
+            tag_rows = conn.execute(
+                "SELECT tags FROM ohm_nodes WHERE id IN (SELECT unnest(?::VARCHAR[])) AND deleted_at IS NULL",
+                [list(island_node_ids)],
+            ).fetchall()
+            all_tags = set()
+            for (tags_json,) in tag_rows:
+                if tags_json:
+                    try:
+                        parsed = json.loads(tags_json) if isinstance(tags_json, str) else (tags_json or [])
+                        if isinstance(parsed, list):
+                            all_tags.update(parsed)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+            # Suggest bridges to the main component
+            bridge_suggestions = []
+            if main_component_ids:
+                for island_nid in list(island_node_ids)[:5]:  # Limit candidates
+                    tag_row = conn.execute(
+                        "SELECT tags, label FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                        [island_nid],
+                    ).fetchone()
+                    if not tag_row:
+                        continue
+                    island_tags_json, island_label = tag_row
+                    island_tags = set()
+                    if island_tags_json:
+                        try:
+                            parsed = json.loads(island_tags_json) if isinstance(island_tags_json, str) else (island_tags_json or [])
+                            if isinstance(parsed, list):
+                                island_tags = set(parsed)
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+
+                    # Score main component nodes by tag overlap
+                    scored_bridges = []
+                    for main_id in list(main_component_ids)[:50]:  # Limit for perf
+                        main_row = conn.execute(
+                            "SELECT tags, label FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                            [main_id],
+                        ).fetchone()
+                        if not main_row:
+                            continue
+                        main_tags_json, main_label = main_row
+                        main_tags = set()
+                        if main_tags_json:
+                            try:
+                                parsed = json.loads(main_tags_json) if isinstance(main_tags_json, str) else (main_tags_json or [])
+                                if isinstance(parsed, list):
+                                    main_tags = set(parsed)
+                            except (json.JSONDecodeError, TypeError):
+                                pass
+
+                        tag_overlap = len(island_tags & main_tags)
+                        # Label similarity: case-insensitive word overlap
+                        island_words = set(island_label.lower().split()) if island_label else set()
+                        main_words = set(main_label.lower().split()) if main_label else set()
+                        word_overlap = len(island_words & main_words)
+                        score = tag_overlap * 2.0 + word_overlap * 1.0
+
+                        if score > 0:
+                            scored_bridges.append({
+                                "from": island_nid,
+                                "to": main_id,
+                                "score": round(score, 2),
+                                "shared_tags": sorted(island_tags & main_tags),
+                            })
+
+                    scored_bridges.sort(key=lambda x: x["score"], reverse=True)
+                    for sb in scored_bridges[:2]:
+                        bridge_suggestions.append(
+                            f"{sb['from']} → {sb['to']}"
+                        )
+
+            enriched = dict(island)
+            enriched["center"] = center_id or (island["nodes"][0]["id"] if island.get("nodes") else None)
+            enriched["tags"] = sorted(all_tags)[:10]
+            enriched["bridges_suggested"] = bridge_suggestions[:5]
+            enriched_islands.append(enriched)
+
+        self._json_response(200, {
+            "islands": enriched_islands,
+            "total_islands": result.get("total_islands", 0),
+            "total_orphan_nodes": result.get("orphan_count", 0),
+        })
