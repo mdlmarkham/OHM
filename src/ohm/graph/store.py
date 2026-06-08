@@ -588,8 +588,23 @@ class OhmStore:
 
         Falls back to the write connection if no read connection is available.
         Read queries should use this to avoid blocking behind the write lock.
+        ADR-023: If the read connection is stale/crashed, recreate it.
         """
-        return self._read_conn or self.conn
+        if self._read_conn:
+            try:
+                # Health check — will raise if the connection is dead
+                self._read_conn.execute("SELECT 1")
+                return self._read_conn
+            except Exception:
+                # Read connection is dead, fall back to write connection
+                logger.warning("Read-only connection is stale, falling back to write connection")
+                try:
+                    self._read_conn = duckdb.connect(str(self.db_path), read_only=True)
+                    return self._read_conn
+                except Exception:
+                    self._read_conn = None
+                    return self.conn
+        return self.conn
 
     def read_execute(self, sql: str, params: Optional[list] = None) -> list[dict[str, Any]]:
         """Execute a read-only query using the read connection.
@@ -597,16 +612,26 @@ class OhmStore:
         Uses the separate read-only DuckDB connection so reads don't
         block behind the write lock. Falls back to the write connection
         if the read connection is unavailable.
+        ADR-023: Catches DuckDB connection errors and falls back gracefully.
         """
         conn = self._read_conn or self.conn
         if self._read_conn:
             # Read-only connection — no lock needed for reads
-            if params:
-                result = conn.execute(sql, params)
-            else:
-                result = conn.execute(sql)
-            columns = [desc[0] for desc in result.description]
-            rows = result.fetchall()
+            try:
+                if params:
+                    result = conn.execute(sql, params)
+                else:
+                    result = conn.execute(sql)
+                columns = [desc[0] for desc in result.description]
+                rows = result.fetchall()
+            except (duckdb.FatalException, duckdb.IOException, duckdb.InternalException) as e:
+                # Read connection crashed — fall back to write connection
+                logger.warning(f"Read connection error: {e}, falling back to write connection")
+                try:
+                    self._read_conn = duckdb.connect(str(self.db_path), read_only=True)
+                except Exception:
+                    self._read_conn = None
+                return self.execute(sql, params)
         else:
             # Fallback: use write connection with lock
             return self.execute(sql, params)
