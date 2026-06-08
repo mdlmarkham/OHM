@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ohm"
-version = "0.25.0"
+version = "0.26.0"
 description = "Shared awareness, individual judgment. Multi-agent knowledge graph."
 authors = [
     {name = "Matt Markham"},
