@@ -47,3 +47,4 @@ venv/
 .beads-credential-key
 .beads/proxieddb/
 .claude/worktrees/
+.opencode/
