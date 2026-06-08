@@ -1369,6 +1369,7 @@ class OhmStore:
         scale: Optional[str] = None,
         agent_name: Optional[str] = None,
         half_life_days: Optional[float] = None,
+        weibull_shape: Optional[float] = None,
     ) -> Optional[dict[str, Any]]:
         """Create an observation. Attributed to the given agent.
 
@@ -1379,9 +1380,10 @@ class OhmStore:
             source_url: URL of the source (e.g., 'https://reuters.com/...').
             scale: Measurement scale — 'probability' (0-1), 'count', 'currency', 'percent', or 'unknown'.
             half_life_days: OHM-xdd4 temporal decay override. None = use type default.
+            weibull_shape: OHM-24g9 Weibull shape parameter override. None = use type default.
         """
         from ohm.graph.schema import VALID_OBSERVATION_SCALES
-        from ohm.graph.decay import default_half_life
+        from ohm.graph.decay import default_half_life, default_weibull_shape
 
         if scale is not None and scale not in VALID_OBSERVATION_SCALES:
             raise ValueError(
@@ -1394,6 +1396,9 @@ class OhmStore:
         # OHM-xdd4: resolve half_life_days — explicit override > type default
         if half_life_days is None:
             half_life_days = default_half_life(type)
+        # OHM-24g9: resolve weibull_shape — explicit override > type default
+        if weibull_shape is None:
+            weibull_shape = default_weibull_shape(type)
 
         actor = agent_name or self.agent_name
         now = self._now()
@@ -1402,11 +1407,11 @@ class OhmStore:
             INSERT INTO ohm_observations
                 (node_id, edge_id, type, value, baseline, sigma, source,
                  created_by, created_at, notes, source_name, source_url, scale,
-                 half_life_days, valid_from)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 half_life_days, weibull_shape, valid_from)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [node_id, edge_id, type, value, baseline, sigma, source, actor, now, notes, source_name, source_url, scale,
-             half_life_days, now],
+             half_life_days, weibull_shape, now],
         )
 
         obs = self.execute_one(

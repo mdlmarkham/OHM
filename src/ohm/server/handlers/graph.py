@@ -1422,6 +1422,8 @@ class GraphHandlerMixin:
             source_url=body.get("source_url"),
             scale=scale,
             agent_name=agent,
+            half_life_days=body.get("half_life_days"),
+            weibull_shape=body.get("weibull_shape"),
         )
         _server_module._trigger_webhooks(
             {
@@ -1495,6 +1497,8 @@ class GraphHandlerMixin:
                     source_url=obs.get("source_url"),
                     scale=scale,
                     agent_name=agent,
+                    half_life_days=obs.get("half_life_days"),
+                    weibull_shape=obs.get("weibull_shape"),
                 )
                 results.append(result)
             except Exception as e:
