@@ -22,6 +22,7 @@ import json
 import re
 import sys
 from collections import defaultdict
+import requests
 
 # Configuration
 OHM_URL = "http://127.0.0.1:8710"
@@ -347,15 +348,16 @@ def main():
                     backfilled += 1
                     continue
 
-                # Update observation via PATCH
+                # Update observation source_url via admin bulk endpoint
+                updates_payload = {"updates": [{"observation_id": obs_id, "source_url": source_url}]}
                 try:
-                    update_resp = requests.patch(
-                        f"{OHM_URL}/observations/{obs_id}",
-                        json={"source_url": source_url},
+                    update_resp = requests.post(
+                        f"{OHM_URL}/admin/observation-source-urls",
+                        json=updates_payload,
                         headers=HEADERS,
                         timeout=10,
                     )
-                    if update_resp.status_code in (200, 204):
+                    if update_resp.status_code in (200, 201):
                         backfilled += 1
                     else:
                         print(f"  ✗ Failed to update obs {obs_id}: {update_resp.status_code}")
