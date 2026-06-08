@@ -55,7 +55,7 @@ class AdminHandlerMixin:
         from ohm.queries import delete_hook
         from ohm.exceptions import ValidationError
 
-        hook_id = path[len("/hooks/"):]
+        hook_id = path[len("/hooks/") :]
         if not hook_id:
             raise ValidationError("Hook ID is required")
 
@@ -119,17 +119,20 @@ class AdminHandlerMixin:
                     self._json_response(400, {"error": "invalid_ollama_url", "message": "ollama_url must start with http:// or https://"})
                     return
                 from urllib.parse import urlparse
+
                 _parsed = urlparse(ollama_url)
                 _allowed_hosts = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
                 # Config can extend the allowlist via embeddings.allowed_hosts
                 _cfg_hosts = (self.config or {}).get("embeddings", {}).get("allowed_hosts", [])
                 _allowed_hosts.update(_cfg_hosts)
                 if _parsed.hostname not in _allowed_hosts:
-                    self._json_response(400, {
-                        "error": "ssrf_blocked",
-                        "message": f"ollama_url host '{_parsed.hostname}' is not in the allowed hosts list. "
-                                   "Add it to embeddings.allowed_hosts in config to permit.",
-                    })
+                    self._json_response(
+                        400,
+                        {
+                            "error": "ssrf_blocked",
+                            "message": f"ollama_url host '{_parsed.hostname}' is not in the allowed hosts list. Add it to embeddings.allowed_hosts in config to permit.",
+                        },
+                    )
                     return
 
             rows = self.current_store.execute("SELECT id, label FROM ohm_nodes WHERE embedding IS NULL AND deleted_at IS NULL")
@@ -156,13 +159,22 @@ class AdminHandlerMixin:
                 # Track progress in server state
                 if not hasattr(self.server, "_embed_progress"):
                     self.server._embed_progress = {"status": "idle", "updated": 0, "failed": 0, "total": 0}
-                self.server._embed_progress = {"status": "error", "updated": 0, "failed": 0, "total": total_missing, "message": "Background embedding temporarily disabled — use synchronous batch mode with small batch_size (e.g. ?batch_size=3) to avoid timeout. Background mode causes DuckDB concurrency issues."}
-
-                self._json_response(503, {
+                self.server._embed_progress = {
                     "status": "error",
+                    "updated": 0,
+                    "failed": 0,
                     "total": total_missing,
-                    "message": "Background embedding is temporarily disabled due to DuckDB concurrency issues. Use synchronous mode with small batch_size (e.g. ?batch_size=3) and re-call until remaining=0.",
-                })
+                    "message": "Background embedding temporarily disabled — use synchronous batch mode with small batch_size (e.g. ?batch_size=3) to avoid timeout. Background mode causes DuckDB concurrency issues.",
+                }
+
+                self._json_response(
+                    503,
+                    {
+                        "status": "error",
+                        "total": total_missing,
+                        "message": "Background embedding is temporarily disabled due to DuckDB concurrency issues. Use synchronous mode with small batch_size (e.g. ?batch_size=3) and re-call until remaining=0.",
+                    },
+                )
                 return
 
                 # NOTE: Background mode disabled due to DuckDB malloc corruption.
@@ -170,6 +182,7 @@ class AdminHandlerMixin:
                 # causing memory corruption. Use synchronous batch mode instead.
                 def _background_embed(rows, store, progress):
                     from ohm.queries import update_node_embedding as _update
+
                     u, f = 0, 0
                     for row in rows:
                         try:
@@ -190,11 +203,14 @@ class AdminHandlerMixin:
 
                 t = threading.Thread(target=_background_embed, args=(rows, self.current_store, self.server._embed_progress), daemon=True)
                 t.start()
-                self._json_response(202, {
-                    "status": "started",
-                    "total": total_missing,
-                    "message": f"Embedding generation started for {total_missing} nodes. GET /admin/embeddings/status to check progress.",
-                })
+                self._json_response(
+                    202,
+                    {
+                        "status": "started",
+                        "total": total_missing,
+                        "message": f"Embedding generation started for {total_missing} nodes. GET /admin/embeddings/status to check progress.",
+                    },
+                )
                 return
 
             # Synchronous mode (original behavior)
@@ -262,10 +278,13 @@ class AdminHandlerMixin:
                 break
 
         if expected_layer and expected_layer != to_layer:
-            self._json_response(400, {
-                "error": f"Schema assigns {edge_type} to {expected_layer}, not {to_layer}",
-                "expected": expected_layer,
-            })
+            self._json_response(
+                400,
+                {
+                    "error": f"Schema assigns {edge_type} to {expected_layer}, not {to_layer}",
+                    "expected": expected_layer,
+                },
+            )
             return
 
         try:
@@ -276,21 +295,23 @@ class AdminHandlerMixin:
             count = result[0]
 
             self.current_store.conn.execute(
-                "UPDATE ohm_edges SET layer = ?, updated_at = CURRENT_TIMESTAMP, updated_by = ? "
-                "WHERE edge_type = ? AND layer = ? AND deleted_at IS NULL",
+                "UPDATE ohm_edges SET layer = ?, updated_at = CURRENT_TIMESTAMP, updated_by = ? WHERE edge_type = ? AND layer = ? AND deleted_at IS NULL",
                 [to_layer, agent, edge_type, from_layer],
             )
 
             self.current_store._log_change("ohm_edges", "bulk", "UPDATE", to_layer, agent_name=agent)
             self.current_store._increment_graph_generation()
 
-            self._json_response(200, {
-                "status": "ok",
-                "edge_type": edge_type,
-                "from_layer": from_layer,
-                "to_layer": to_layer,
-                "moved": count,
-            })
+            self._json_response(
+                200,
+                {
+                    "status": "ok",
+                    "edge_type": edge_type,
+                    "from_layer": from_layer,
+                    "to_layer": to_layer,
+                    "moved": count,
+                },
+            )
         except Exception as e:
             self._json_response(500, {"error": "edge_layer_fix_failed", "message": str(e)})
 
@@ -335,12 +356,15 @@ class AdminHandlerMixin:
             except Exception as e:
                 errors.append({"observation_id": obs_id, "error": str(e)})
 
-        self._json_response(200, {
-            "updated": updated,
-            "not_found": not_found,
-            "errors": errors[:10],
-            "total_requested": len(updates),
-        })
+        self._json_response(
+            200,
+            {
+                "updated": updated,
+                "not_found": not_found,
+                "errors": errors[:10],
+                "total_requested": len(updates),
+            },
+        )
 
     def _post_admin_source_node_urls(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /admin/source-node-urls — bulk update url on source nodes (ADR-015 backfill).
@@ -369,15 +393,8 @@ class AdminHandlerMixin:
         # statement; check the type in Python from a pre-fetched set of
         # source-node ids. For typical 200-item batches this turns
         # 400 round-trips into ~3.
-        node_ids = [
-            item.get("node_id")
-            for item in updates
-            if item.get("node_id") and item.get("url")
-        ]
-        bad_items = [
-            item for item in updates
-            if not (item.get("node_id") and item.get("url"))
-        ]
+        node_ids = [item.get("node_id") for item in updates if item.get("node_id") and item.get("url")]
+        bad_items = [item for item in updates if not (item.get("node_id") and item.get("url"))]
         for item in bad_items:
             errors.append({"node_id": item.get("node_id"), "error": "missing node_id or url"})
 
@@ -394,33 +411,29 @@ class AdminHandlerMixin:
             for row in type_rows:
                 if row[1] != "source":
                     not_source += 1
-                    errors.append(
-                        {"node_id": row[0], "error": f"node type is '{row[1]}', not 'source'"}
-                    )
+                    errors.append({"node_id": row[0], "error": f"node type is '{row[1]}', not 'source'"})
 
         # Single executemany UPDATE … RETURNING for the source nodes only.
-        source_updates = [
-            (item["url"], item["node_id"])
-            for item in updates
-            if item.get("node_id") in source_ids and item.get("url")
-        ]
+        source_updates = [(item["url"], item["node_id"]) for item in updates if item.get("node_id") in source_ids and item.get("url")]
         if source_updates:
             updated_rows = self.current_store.conn.executemany(
-                "UPDATE ohm_nodes SET url = ? WHERE id = ? AND deleted_at IS NULL "
-                "AND type = 'source' RETURNING id",
+                "UPDATE ohm_nodes SET url = ? WHERE id = ? AND deleted_at IS NULL AND type = 'source' RETURNING id",
                 source_updates,
             )
             updated = len(updated_rows)
-            for row_id, in updated_rows:
+            for (row_id,) in updated_rows:
                 self.current_store._log_change("ohm_nodes", row_id, "UPDATE", "L2", agent_name=agent)
 
-        self._json_response(200, {
-            "updated": updated,
-            "not_found": not_found,
-            "not_source": not_source,
-            "errors": errors[:10],
-            "total_requested": len(updates),
-        })
+        self._json_response(
+            200,
+            {
+                "updated": updated,
+                "not_found": not_found,
+                "not_source": not_source,
+                "errors": errors[:10],
+                "total_requested": len(updates),
+            },
+        )
 
     def _post_admin_pert_backfill(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /admin/pert-backfill — auto-populate PERT estimates on edges.
@@ -441,9 +454,7 @@ class AdminHandlerMixin:
         dry_run = body.get("dry_run", False)
 
         # Collect observations indexed by node_id
-        obs_rows = self.current_store.conn.execute(
-            "SELECT node_id, value FROM ohm_observations WHERE deleted_at IS NULL AND value IS NOT NULL"
-        ).fetchall()
+        obs_rows = self.current_store.conn.execute("SELECT node_id, value FROM ohm_observations WHERE deleted_at IS NULL AND value IS NOT NULL").fetchall()
         obs_by_node = {}
         for row in obs_rows:
             nid, val = row[0], row[1]
@@ -452,10 +463,7 @@ class AdminHandlerMixin:
             obs_by_node[nid].append(float(val))
 
         # Find edges that need PERT (have confidence but no p50)
-        edge_rows = self.current_store.conn.execute(
-            "SELECT id, edge_type, from_node, to_node, confidence, probability_p50 "
-            "FROM ohm_edges WHERE deleted_at IS NULL AND probability_p50 IS NULL"
-        ).fetchall()
+        edge_rows = self.current_store.conn.execute("SELECT id, edge_type, from_node, to_node, confidence, probability_p50 FROM ohm_edges WHERE deleted_at IS NULL AND probability_p50 IS NULL").fetchall()
 
         candidates = []
         for row in edge_rows:
@@ -481,13 +489,15 @@ class AdminHandlerMixin:
             if len(obs_values) >= 3 and method in ("auto", "observations"):
                 result = auto_pert_from_observations(obs_values)
                 if result["method"] != "insufficient_data":
-                    updates.append({
-                        "id": eid,
-                        "probability_p05": result["p05"],
-                        "probability_p50": result["p50"],
-                        "probability_p95": result["p95"],
-                        "provenance": "auto_pert_from_observations",
-                    })
+                    updates.append(
+                        {
+                            "id": eid,
+                            "probability_p05": result["p05"],
+                            "probability_p50": result["p50"],
+                            "probability_p95": result["p95"],
+                            "provenance": "auto_pert_from_observations",
+                        }
+                    )
                     from_obs += 1
                     continue
 
@@ -501,30 +511,36 @@ class AdminHandlerMixin:
                     p05 = round(max(0.01, p50 - 0.05), 4)
                 if p50 >= p95:
                     p95 = round(min(0.99, p50 + 0.05), 4)
-                updates.append({
-                    "id": eid,
-                    "probability_p05": p05,
-                    "probability_p50": p50,
-                    "probability_p95": p95,
-                    "provenance": "auto_pert_from_confidence",
-                })
+                updates.append(
+                    {
+                        "id": eid,
+                        "probability_p05": p05,
+                        "probability_p50": p50,
+                        "probability_p95": p95,
+                        "provenance": "auto_pert_from_confidence",
+                    }
+                )
                 from_conf += 1
 
         if dry_run:
-            self._json_response(200, {
-                "status": "dry_run",
-                "candidates": len(candidates),
-                "from_observations": from_obs,
-                "from_confidence": from_conf,
-                "total_updates": len(updates),
-                "sample": updates[:10],
-            })
+            self._json_response(
+                200,
+                {
+                    "status": "dry_run",
+                    "candidates": len(candidates),
+                    "from_observations": from_obs,
+                    "from_confidence": from_conf,
+                    "total_updates": len(updates),
+                    "sample": updates[:10],
+                },
+            )
             return
 
         # Apply updates directly (admin bypass)
         updated = 0
         errors = []
         from ohm.validation import validate_identifier
+
         for item in updates:
             try:
                 eid = item["id"]
@@ -535,9 +551,7 @@ class AdminHandlerMixin:
                 pert_mean = compute_pert_mean(p05, p50, p95)
 
                 self.current_store.conn.execute(
-                    "UPDATE ohm_edges SET probability_p05 = ?, probability_p50 = ?, probability_p95 = ?, "
-                    "probability = ?, provenance = ?, updated_at = CURRENT_TIMESTAMP, updated_by = ? "
-                    "WHERE id = ? AND deleted_at IS NULL",
+                    "UPDATE ohm_edges SET probability_p05 = ?, probability_p50 = ?, probability_p95 = ?, probability = ?, provenance = ?, updated_at = CURRENT_TIMESTAMP, updated_by = ? WHERE id = ? AND deleted_at IS NULL",
                     [p05, p50, p95, pert_mean, prov, agent, eid],
                 )
                 self.current_store._log_change("ohm_edges", eid, "UPDATE", "L3", agent_name=agent)
@@ -547,15 +561,18 @@ class AdminHandlerMixin:
 
         self.current_store._increment_graph_generation()
 
-        self._json_response(200, {
-            "status": "ok",
-            "candidates": len(candidates),
-            "from_observations": from_obs,
-            "from_confidence": from_conf,
-            "updated": updated,
-            "errors": errors[:10],
-            "total_updates": len(updates),
-        })
+        self._json_response(
+            200,
+            {
+                "status": "ok",
+                "candidates": len(candidates),
+                "from_observations": from_obs,
+                "from_confidence": from_conf,
+                "updated": updated,
+                "errors": errors[:10],
+                "total_updates": len(updates),
+            },
+        )
 
     def _get_admin_verification_scan(self, path: str, qs: dict) -> None:
         """GET /admin/verification-scan — scan for unverified edges and nodes.
@@ -615,9 +632,7 @@ class AdminHandlerMixin:
         unverified_rows = conn.execute(outcome_check, params).fetchall()
         unverified_edges = []
         for row in unverified_rows:
-            d = dict(zip(["id", "from_node", "to_node", "edge_type",
-                          "confidence", "created_by", "created_at",
-                          "from_label", "to_label", "age_days"], row))
+            d = dict(zip(["id", "from_node", "to_node", "edge_type", "confidence", "created_by", "created_at", "from_label", "to_label", "age_days"], row))
             if d.get("age_days") is not None:
                 d["age_days"] = round(float(d["age_days"]), 1)
             # ADR-018.4: Include age_days for agent prioritization
@@ -632,7 +647,8 @@ class AdminHandlerMixin:
             unverified_edges.append(d)
 
         # 2. High-confidence nodes with no observations
-        high_conf_no_obs = conn.execute("""
+        high_conf_no_obs = conn.execute(
+            """
             SELECT n.id, n.label, n.type, n.confidence, n.created_by, n.created_at,
                    COUNT(o.id) AS obs_count
             FROM ohm_nodes n
@@ -643,12 +659,13 @@ class AdminHandlerMixin:
             GROUP BY n.id, n.label, n.type, n.confidence, n.created_by, n.created_at
             HAVING COUNT(o.id) = 0
             ORDER BY n.confidence DESC
-        """, [confidence_threshold]).fetchall()
+        """,
+            [confidence_threshold],
+        ).fetchall()
 
         high_conf_nodes = []
         for row in high_conf_no_obs:
-            d = dict(zip(["id", "label", "type", "confidence",
-                          "created_by", "created_at", "obs_count"], row))
+            d = dict(zip(["id", "label", "type", "confidence", "created_by", "created_at", "obs_count"], row))
             # ADR-018.4: Include age_days for sacred reference identification
             if d.get("created_at"):
                 try:
@@ -674,44 +691,37 @@ class AdminHandlerMixin:
             ORDER BY total_outcomes DESC
         """).fetchall()
 
-        reliability = [dict(zip(["source_agent", "total_outcomes", "accurate",
-                                 "inaccurate", "p_accurate"], row))
-                      for row in source_reliability]
+        reliability = [dict(zip(["source_agent", "total_outcomes", "accurate", "inaccurate", "p_accurate"], row)) for row in source_reliability]
 
         # 4. Summary statistics
         total_outcomes = conn.execute("SELECT COUNT(*) FROM ohm_outcomes").fetchone()[0]
-        total_causal = conn.execute(
-            "SELECT COUNT(*) FROM ohm_edges WHERE edge_type IN ('CAUSES','PREDICTS','EXPECTS') AND deleted_at IS NULL AND layer = 'L3'"
-        ).fetchone()[0]
-        total_challenges = conn.execute(
-            "SELECT COUNT(*) FROM ohm_edges WHERE edge_type = 'CHALLENGED_BY' AND deleted_at IS NULL"
-        ).fetchone()[0]
-        total_l3 = conn.execute(
-            "SELECT COUNT(*) FROM ohm_edges WHERE layer = 'L3' AND deleted_at IS NULL"
-        ).fetchone()[0]
-        total_l2 = conn.execute(
-            "SELECT COUNT(*) FROM ohm_edges WHERE layer = 'L2' AND deleted_at IS NULL"
-        ).fetchone()[0]
+        total_causal = conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE edge_type IN ('CAUSES','PREDICTS','EXPECTS') AND deleted_at IS NULL AND layer = 'L3'").fetchone()[0]
+        total_challenges = conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE edge_type = 'CHALLENGED_BY' AND deleted_at IS NULL").fetchone()[0]
+        total_l3 = conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE layer = 'L3' AND deleted_at IS NULL").fetchone()[0]
+        total_l2 = conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE layer = 'L2' AND deleted_at IS NULL").fetchone()[0]
 
         challenge_ratio = round(total_challenges / max(total_l3, 1), 4)
         l3_l2_ratio = round(total_l3 / max(total_l2, 1), 1)
 
-        self._json_response(200, {
-            "unverified_edges": unverified_edges[:50],  # cap at 50 for response size
-            "unverified_edge_count": len(unverified_edges),
-            "high_confidence_no_obs": high_conf_nodes[:50],
-            "high_confidence_no_obs_count": len(high_conf_nodes),
-            "source_reliability": reliability,
-            "summary": {
-                "total_outcomes_recorded": total_outcomes,
-                "total_causal_edges": total_causal,
-                "challenge_ratio": challenge_ratio,
-                "l3_l2_ratio": l3_l2_ratio,
-                "days_threshold": days_threshold,
-                "confidence_threshold": confidence_threshold,
-                "verification_rate": round(total_outcomes / max(total_causal, 1), 3),
+        self._json_response(
+            200,
+            {
+                "unverified_edges": unverified_edges[:50],  # cap at 50 for response size
+                "unverified_edge_count": len(unverified_edges),
+                "high_confidence_no_obs": high_conf_nodes[:50],
+                "high_confidence_no_obs_count": len(high_conf_nodes),
+                "source_reliability": reliability,
+                "summary": {
+                    "total_outcomes_recorded": total_outcomes,
+                    "total_causal_edges": total_causal,
+                    "challenge_ratio": challenge_ratio,
+                    "l3_l2_ratio": l3_l2_ratio,
+                    "days_threshold": days_threshold,
+                    "confidence_threshold": confidence_threshold,
+                    "verification_rate": round(total_outcomes / max(total_causal, 1), 3),
+                },
             },
-        })
+        )
 
     def _post_admin_verification_decay(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /admin/verification-decay — Run verification-aware confidence decay.
@@ -761,17 +771,13 @@ class AdminHandlerMixin:
         keep = body.get("keep_versions", 10) if body else 10
         try:
             # Check if DuckLake is attached
-            attached = self.current_store.conn.execute(
-                "SELECT database_name FROM duckdb_databases() WHERE database_name = 'ohm_lake'"
-            ).fetchone()
+            attached = self.current_store.conn.execute("SELECT database_name FROM duckdb_databases() WHERE database_name = 'ohm_lake'").fetchone()
             if not attached:
                 self._json_response(200, {"status": "skipped", "message": "No DuckLake attached"})
                 return
 
             # Get snapshot count before
-            snap_before = self.current_store.conn.execute(
-                "SELECT COUNT(*) FROM ducklake_snapshots('ohm_lake')"
-            ).fetchone()[0]
+            snap_before = self.current_store.conn.execute("SELECT COUNT(*) FROM ducklake_snapshots('ohm_lake')").fetchone()[0]
 
             # Run VACUUM — DuckLake uses VACUUM on the attached database alias
             try:
@@ -782,9 +788,7 @@ class AdminHandlerMixin:
                 self.current_store.conn.execute("CHECKPOINT")
 
             # Get snapshot count after
-            snap_after = self.current_store.conn.execute(
-                "SELECT COUNT(*) FROM ducklake_snapshots('ohm_lake')"
-            ).fetchone()[0]
+            snap_after = self.current_store.conn.execute("SELECT COUNT(*) FROM ducklake_snapshots('ohm_lake')").fetchone()[0]
 
             # Also CHECKPOINT local DB
             self.current_store.conn.execute("CHECKPOINT")
@@ -793,14 +797,17 @@ class AdminHandlerMixin:
             dlh = self.current_store.check_ducklake_health(alias="ohm_lake")
             total_orphans = sum(dlh.get("orphan_counts", {}).values())
 
-            self._json_response(200, {
-                "status": "ok",
-                "snapshots_before": snap_before,
-                "snapshots_after": snap_after,
-                "snapshots_pruned": snap_before - snap_after,
-                "orphan_rows": total_orphans,
-                "sync_degraded": dlh.get("sync_degraded", False),
-            })
+            self._json_response(
+                200,
+                {
+                    "status": "ok",
+                    "snapshots_before": snap_before,
+                    "snapshots_after": snap_after,
+                    "snapshots_pruned": snap_before - snap_after,
+                    "orphan_rows": total_orphans,
+                    "sync_degraded": dlh.get("sync_degraded", False),
+                },
+            )
         except Exception as e:
             self._json_response(500, {"error": "vacuum_failed", "message": str(e)})
 
@@ -874,9 +881,7 @@ class AdminHandlerMixin:
         from ohm.validation import normalize_alias
 
         conn = self.current_store.conn
-        rows = conn.execute(
-            "SELECT id, label FROM ohm_nodes WHERE deleted_at IS NULL"
-        ).fetchall()
+        rows = conn.execute("SELECT id, label FROM ohm_nodes WHERE deleted_at IS NULL").fetchall()
 
         created = 0
         skipped = 0
@@ -905,13 +910,16 @@ class AdminHandlerMixin:
 
         self.current_store._increment_graph_generation()
 
-        self._json_response(200, {
-            "status": "ok",
-            "total_nodes": len(rows),
-            "aliases_created": created,
-            "aliases_skipped": skipped,
-            "errors": errors[:10],
-        })
+        self._json_response(
+            200,
+            {
+                "status": "ok",
+                "total_nodes": len(rows),
+                "aliases_created": created,
+                "aliases_skipped": skipped,
+                "errors": errors[:10],
+            },
+        )
 
     def _post_admin_backfill_content_hashes(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /admin/backfill-content-hashes — populate ohm_content_hashes for source nodes.
@@ -925,9 +933,7 @@ class AdminHandlerMixin:
         from ohm.validation import compute_content_hash
 
         conn = self.current_store.conn
-        rows = conn.execute(
-            "SELECT id, label, url FROM ohm_nodes WHERE type = 'source' AND deleted_at IS NULL"
-        ).fetchall()
+        rows = conn.execute("SELECT id, label, url FROM ohm_nodes WHERE type = 'source' AND deleted_at IS NULL").fetchall()
 
         created = 0
         skipped = 0
@@ -954,13 +960,16 @@ class AdminHandlerMixin:
 
         self.current_store._increment_graph_generation()
 
-        self._json_response(200, {
-            "status": "ok",
-            "total_source_nodes": len(rows),
-            "hashes_created": created,
-            "hashes_skipped": skipped,
-            "errors": errors[:10],
-        })
+        self._json_response(
+            200,
+            {
+                "status": "ok",
+                "total_source_nodes": len(rows),
+                "hashes_created": created,
+                "hashes_skipped": skipped,
+                "errors": errors[:10],
+            },
+        )
 
     def _post_admin_backfill_source_urls(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /admin/backfill-source-urls — copy source node URLs to observations.
@@ -974,9 +983,7 @@ class AdminHandlerMixin:
         conn = self.current_store.conn
 
         # Find observations without source_url
-        obs_rows = conn.execute(
-            "SELECT id, node_id FROM ohm_observations WHERE deleted_at IS NULL AND (source_url IS NULL OR source_url = '')"
-        ).fetchall()
+        obs_rows = conn.execute("SELECT id, node_id FROM ohm_observations WHERE deleted_at IS NULL AND (source_url IS NULL OR source_url = '')").fetchall()
 
         updated = 0
         not_found = 0
@@ -1014,13 +1021,16 @@ class AdminHandlerMixin:
 
         self.current_store._increment_graph_generation()
 
-        self._json_response(200, {
-            "status": "ok",
-            "total_observations": len(obs_rows),
-            "updated": updated,
-            "no_source_url_found": not_found,
-            "errors": errors[:10],
-        })
+        self._json_response(
+            200,
+            {
+                "status": "ok",
+                "total_observations": len(obs_rows),
+                "updated": updated,
+                "no_source_url_found": not_found,
+                "errors": errors[:10],
+            },
+        )
 
     def _get_fragment_resonance(self, path: str, qs: dict) -> None:
         """GET /admin/fragment-resonance — detect cross-agent fragment overlap (OHM-a5rz.13)."""
@@ -1093,15 +1103,12 @@ class AdminHandlerMixin:
             # Check if we can redirect
             new_to = migration.get(to_node, to_node)
             new_from = migration.get(from_node, from_node)
-            can_redirect = (to_node in migration or from_node in migration)
+            can_redirect = to_node in migration or from_node in migration
 
             if can_redirect and not dry_run:
                 # Delete old edge and create new one with migrated IDs
                 with self.current_store._lock:
-                    conn.execute(
-                        "UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?",
-                        [edge_id]
-                    )
+                    conn.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?", [edge_id])
                 # Create new edge with migrated IDs
                 try:
                     result = self.current_store.write_edge(
@@ -1118,10 +1125,7 @@ class AdminHandlerMixin:
             elif not can_redirect and not dry_run:
                 # Soft-delete the dangling edge
                 with self.current_store._lock:
-                    conn.execute(
-                        "UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?",
-                        [edge_id]
-                    )
+                    conn.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?", [edge_id])
                 deleted += 1
             else:
                 kept.append(edge)
@@ -1135,13 +1139,9 @@ class AdminHandlerMixin:
         if dry_run:
             result["would_redirect"] = sum(1 for e in all_dangling if e[2] in migration or e[1] in migration)
             result["would_delete"] = len(all_dangling) - result["would_redirect"]
-            result["dangling_details"] = [
-                {"id": e[0], "from": e[1], "to": e[2], "type": e[3]}
-                for e in all_dangling[:20]
-            ]
+            result["dangling_details"] = [{"id": e[0], "from": e[1], "to": e[2], "type": e[3]} for e in all_dangling[:20]]
 
         self._json_response(200, result)
-
 
     def _post_admin_backfill_relational_tags(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /admin/backfill-relational-tags — backfill relational tags for all existing edges.
@@ -1172,6 +1172,7 @@ class AdminHandlerMixin:
                         ).fetchone()
                         if row:
                             import json
+
                             try:
                                 existing = json.loads(row[0]) if isinstance(row[0], str) else (row[0] or [])
                             except (json.JSONDecodeError, TypeError):
@@ -1179,12 +1180,15 @@ class AdminHandlerMixin:
                             tag = RELATIONAL_TAG_MAP[edge_type]
                             if tag not in existing:
                                 potential_tags += 1
-            self._json_response(200, {
-                "dry_run": True,
-                "edges_scanned": len(edges),
-                "potential_tag_additions": potential_tags,
-                "mapped_edge_types": list(RELATIONAL_TAG_MAP.keys()),
-            })
+            self._json_response(
+                200,
+                {
+                    "dry_run": True,
+                    "edges_scanned": len(edges),
+                    "potential_tag_additions": potential_tags,
+                    "mapped_edge_types": list(RELATIONAL_TAG_MAP.keys()),
+                },
+            )
             return
 
         result = backfill_relational_tags(self.current_store.conn)
@@ -1206,6 +1210,7 @@ class AdminHandlerMixin:
 
         if use_batch:
             from ohm.graph.constraints import batch_constraint_report
+
             result = batch_constraint_report(self.current_store.conn)
             self._json_response(200, result)
             return
@@ -1223,15 +1228,14 @@ class AdminHandlerMixin:
             count_context_links,
         )
 
-        nodes = self.current_store.conn.execute(
-            "SELECT id, type FROM ohm_nodes WHERE deleted_at IS NULL"
-        ).fetchall()
+        nodes = self.current_store.conn.execute("SELECT id, type FROM ohm_nodes WHERE deleted_at IS NULL").fetchall()
 
         layers = {"L0": {}, "L1": {}, "L2": {}, "L3": {}, "L4": {}}
         for layer_key in layers:
             layers[layer_key] = {"total": 0, "satisfied": {}, "violations": {}}
 
         from ohm.graph.constraints import effective_layer
+
         node_effective_layers = {}
         for node_id, node_type in nodes:
             eff, _ = effective_layer(self.current_store.conn, node_id)
@@ -1259,6 +1263,7 @@ class AdminHandlerMixin:
                         continue
                     total += 1
                     from ohm.graph.constraints import compute_constraint
+
                     value = compute_constraint(self.current_store.conn, node_id, cname)
                     if isinstance(_threshold, bool):
                         if bool(value) == _threshold:
@@ -1312,15 +1317,18 @@ class AdminHandlerMixin:
         using_learned = sum(1 for v in result.values() if not v["using_default"])
         using_default = sum(1 for v in result.values() if v["using_default"])
 
-        self._json_response(200, {
-            "learned_half_lives": result,
-            "summary": {
-                "total_obs_types": len(result),
-                "using_learned": using_learned,
-                "using_default": using_default,
-                "min_samples_required": 5,
+        self._json_response(
+            200,
+            {
+                "learned_half_lives": result,
+                "summary": {
+                    "total_obs_types": len(result),
+                    "using_learned": using_learned,
+                    "using_default": using_default,
+                    "min_samples_required": 5,
+                },
             },
-        })
+        )
 
     def _get_source_reliability_agent(self, path: str, qs: dict, agent_id: str) -> None:
         """GET /source-reliability/{agent_id} — effective reliability with authority decay.
@@ -1333,6 +1341,237 @@ class AdminHandlerMixin:
         conn = self.current_store.conn
         result = effective_reliability(conn, agent_id)
         self._json_response(200, result)
+
+    # ── OHM-6lvk: Graph Health Scoring ─────────────────────────────────────
+
+    def _get_admin_health(self, path: str, qs: dict) -> None:
+        """GET /admin/health — compute a composite health score for the graph.
+
+        Returns:
+            health_score: weighted composite score (0–100)
+            metrics: individual metric scores and raw values
+            remediation_priorities: top-5 actions sorted by score impact
+        """
+        conn = self.current_store.conn
+
+        total_nodes = conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL").fetchone()[0]
+        total_edges = conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE deleted_at IS NULL").fetchone()[0]
+
+        if total_nodes == 0:
+            self._json_response(
+                200,
+                {
+                    "health_score": 0,
+                    "metrics": {},
+                    "remediation_priorities": [],
+                    "note": "Empty graph — no nodes to score",
+                },
+            )
+            return
+
+        # 1. Connectivity: ratio of nodes with >=2 edges to total (weight 0.25)
+        connected = conn.execute("""
+            SELECT COUNT(*) FROM (
+                SELECT n.id
+                FROM ohm_nodes n
+                WHERE n.deleted_at IS NULL
+                GROUP BY n.id
+                HAVING (
+                    (SELECT COUNT(*) FROM ohm_edges e WHERE e.from_node = n.id AND e.deleted_at IS NULL)
+                    + (SELECT COUNT(*) FROM ohm_edges e WHERE e.to_node = n.id AND e.deleted_at IS NULL)
+                ) >= 2
+            )
+        """).fetchone()[0]
+        connectivity_ratio = connected / total_nodes
+
+        # 2. Orphan ratio: orphans / total, inverted (weight 0.15)
+        orphans = conn.execute("""
+            SELECT COUNT(*) FROM ohm_nodes n
+            WHERE n.deleted_at IS NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM ohm_edges e
+                  WHERE e.deleted_at IS NULL AND (e.from_node = n.id OR e.to_node = n.id)
+              )
+        """).fetchone()[0]
+        orphan_ratio = orphans / total_nodes
+        non_orphan_ratio = 1.0 - orphan_ratio
+
+        # 3. Verification rate: verified causal edges / total causal edges (weight 0.25)
+        causal_types = ("CAUSES", "PREDICTS", "EXPECTS")
+        placeholders = ",".join(["?"] * len(causal_types))
+        total_causal = conn.execute(
+            f"SELECT COUNT(*) FROM ohm_edges WHERE edge_type IN ({placeholders}) AND deleted_at IS NULL AND layer = 'L3'",
+            list(causal_types),
+        ).fetchone()[0]
+
+        if total_causal > 0:
+            verified_causal = conn.execute(
+                f"""
+                SELECT COUNT(DISTINCT e.id) FROM ohm_edges e
+                INNER JOIN ohm_outcomes o ON o.claim_node = e.from_node
+                WHERE e.edge_type IN ({placeholders}) AND e.deleted_at IS NULL AND e.layer = 'L3'
+            """,
+                list(causal_types),
+            ).fetchone()[0]
+            verification_rate = verified_causal / total_causal
+        else:
+            verification_rate = 1.0
+
+        # 4. Challenge health: closeness to target 5% challenge ratio (weight 0.15)
+        total_l3 = conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE layer = 'L3' AND deleted_at IS NULL").fetchone()[0]
+        total_challenges = conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE edge_type = 'CHALLENGED_BY' AND deleted_at IS NULL").fetchone()[0]
+
+        challenge_target = 0.05
+        if total_l3 > 0:
+            challenge_ratio = total_challenges / total_l3
+            challenge_score = max(0.0, 1.0 - abs(challenge_ratio - challenge_target) / challenge_target)
+        else:
+            challenge_score = 0.0
+
+        # 5. Source coverage: nodes with url / total (weight 0.10)
+        with_url = conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL AND url IS NOT NULL AND url != ''").fetchone()[0]
+        source_coverage = with_url / total_nodes
+
+        # 6. Layer balance: edge distribution across L1/L2/L3 (weight 0.10)
+        l1_edges = conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE layer = 'L1' AND deleted_at IS NULL").fetchone()[0]
+        l2_edges = conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE layer = 'L2' AND deleted_at IS NULL").fetchone()[0]
+        l3_edges = conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE layer = 'L3' AND deleted_at IS NULL").fetchone()[0]
+
+        if total_edges > 0:
+            layer_counts = [l1_edges, l2_edges, l3_edges]
+            active_layers = sum(1 for c in layer_counts if c > 0)
+            if active_layers == 0:
+                layer_balance_score = 0.0
+            else:
+                ideal_share = 1.0 / 3
+                actual_shares = [c / total_edges for c in layer_counts]
+                mae = sum(abs(s - ideal_share) for s in actual_shares) / 3
+                layer_balance_score = max(0.0, 1.0 - mae / ideal_share)
+        else:
+            layer_balance_score = 0.0
+
+        # Weights
+        weights = {
+            "connectivity": 0.25,
+            "orphan_ratio": 0.15,
+            "verification_rate": 0.25,
+            "challenge_health": 0.15,
+            "source_coverage": 0.10,
+            "layer_balance": 0.10,
+        }
+        scores = {
+            "connectivity": connectivity_ratio,
+            "orphan_ratio": non_orphan_ratio,
+            "verification_rate": verification_rate,
+            "challenge_health": challenge_score,
+            "source_coverage": source_coverage,
+            "layer_balance": layer_balance_score,
+        }
+
+        raw_values = {
+            "total_nodes": total_nodes,
+            "total_edges": total_edges,
+            "connected_nodes": connected,
+            "orphan_nodes": orphans,
+            "total_causal_edges": total_causal,
+            "verified_causal_edges": verified_causal if total_causal > 0 else 0,
+            "total_l3_edges": total_l3,
+            "total_challenges": total_challenges,
+            "challenge_ratio": round(challenge_ratio, 4) if total_l3 > 0 else 0,
+            "nodes_with_url": with_url,
+            "l1_edges": l1_edges,
+            "l2_edges": l2_edges,
+            "l3_edges": l3_edges,
+        }
+
+        health_score = sum(weights[k] * scores[k] for k in weights)
+        health_score_100 = round(health_score * 100, 1)
+
+        metrics = {}
+        for k in weights:
+            metrics[k] = {
+                "score": round(scores[k], 4),
+                "weight": weights[k],
+                "weighted_contribution": round(weights[k] * scores[k] * 100, 2),
+            }
+
+        # Remediation priorities: dependency-ordered, sorted by potential score improvement
+        remediation_candidates = []
+
+        remediation_candidates.append(
+            {
+                "metric": "connectivity",
+                "priority": 1,
+                "action": "Add edges to loosely connected nodes",
+                "potential_gain": round((1.0 - scores["connectivity"]) * weights["connectivity"] * 100, 2),
+                "dependency": None,
+                "detail": f"{total_nodes - connected} nodes have fewer than 2 edges",
+            }
+        )
+        remediation_candidates.append(
+            {
+                "metric": "verification_rate",
+                "priority": 2,
+                "action": "Record outcomes for causal edges",
+                "potential_gain": round((1.0 - scores["verification_rate"]) * weights["verification_rate"] * 100, 2),
+                "dependency": "causal_edges_exist",
+                "detail": f"{total_causal - (verified_causal if total_causal > 0 else 0)} unverified causal edges" if total_causal > 0 else "No causal edges to verify",
+            }
+        )
+        remediation_candidates.append(
+            {
+                "metric": "orphan_ratio",
+                "priority": 3,
+                "action": "Connect orphan nodes to existing nodes",
+                "potential_gain": round((1.0 - scores["orphan_ratio"]) * weights["orphan_ratio"] * 100, 2),
+                "dependency": None,
+                "detail": f"{orphans} orphan nodes with no edges",
+            }
+        )
+        remediation_candidates.append(
+            {
+                "metric": "challenge_health",
+                "priority": 4,
+                "action": "Add CHALLENGED_BY edges to reach 5% challenge ratio" if challenge_ratio < challenge_target else "Reduce challenge ratio — exceeds 5% target",
+                "potential_gain": round((1.0 - scores["challenge_health"]) * weights["challenge_health"] * 100, 2),
+                "dependency": "L3_edges_exist",
+                "detail": f"Challenge ratio: {round(challenge_ratio, 4) if total_l3 > 0 else 0} (target: {challenge_target})",
+            }
+        )
+        remediation_candidates.append(
+            {
+                "metric": "source_coverage",
+                "priority": 5,
+                "action": "Add source URLs to nodes",
+                "potential_gain": round((1.0 - scores["source_coverage"]) * weights["source_coverage"] * 100, 2),
+                "dependency": None,
+                "detail": f"{total_nodes - with_url} nodes without source URLs",
+            }
+        )
+        remediation_candidates.append(
+            {
+                "metric": "layer_balance",
+                "priority": 6,
+                "action": "Distribute edges across L1, L2, and L3",
+                "potential_gain": round((1.0 - scores["layer_balance"]) * weights["layer_balance"] * 100, 2),
+                "dependency": "edges_exist",
+                "detail": f"Layer distribution: L1={l1_edges}, L2={l2_edges}, L3={l3_edges}",
+            }
+        )
+
+        remediation_candidates.sort(key=lambda x: x["potential_gain"], reverse=True)
+        for i, c in enumerate(remediation_candidates):
+            c["rank"] = i + 1
+
+        self._json_response(
+            200,
+            {
+                "health_score": health_score_100,
+                "metrics": metrics,
+                "raw_values": raw_values,
+                "remediation_priorities": remediation_candidates[:5],
+            },
+        )
 
     # ── OHM-tr71: Proactive Discoverability ──────────────────────────────────
 
@@ -1371,9 +1610,7 @@ class AdminHandlerMixin:
         # Get all node IDs of the main component for bridge suggestion
         main_component_ids = set()
         if islands:
-            mainland_ids = conn.execute(
-                "SELECT n.id FROM ohm_nodes n WHERE n.deleted_at IS NULL AND n.type != 'fragment'"
-            ).fetchall()
+            mainland_ids = conn.execute("SELECT n.id FROM ohm_nodes n WHERE n.deleted_at IS NULL AND n.type != 'fragment'").fetchall()
             all_node_ids = {r[0] for r in mainland_ids}
             island_node_ids = set()
             for island in islands:
@@ -1392,10 +1629,7 @@ class AdminHandlerMixin:
             max_internal_degree = -1
             for nid in island_node_ids:
                 internal_deg = conn.execute(
-                    "SELECT COUNT(*) FROM ohm_edges e "
-                    "WHERE e.deleted_at IS NULL AND "
-                    "((e.from_node = ? AND e.to_node IN (SELECT unnest(?::VARCHAR[]))) "
-                    "OR (e.to_node = ? AND e.from_node IN (SELECT unnest(?::VARCHAR[]))))",
+                    "SELECT COUNT(*) FROM ohm_edges e WHERE e.deleted_at IS NULL AND ((e.from_node = ? AND e.to_node IN (SELECT unnest(?::VARCHAR[]))) OR (e.to_node = ? AND e.from_node IN (SELECT unnest(?::VARCHAR[]))))",
                     [nid, list(island_node_ids), nid, list(island_node_ids)],
                 ).fetchone()[0]
                 if internal_deg > max_internal_degree:
@@ -1464,18 +1698,18 @@ class AdminHandlerMixin:
                         score = tag_overlap * 2.0 + word_overlap * 1.0
 
                         if score > 0:
-                            scored_bridges.append({
-                                "from": island_nid,
-                                "to": main_id,
-                                "score": round(score, 2),
-                                "shared_tags": sorted(island_tags & main_tags),
-                            })
+                            scored_bridges.append(
+                                {
+                                    "from": island_nid,
+                                    "to": main_id,
+                                    "score": round(score, 2),
+                                    "shared_tags": sorted(island_tags & main_tags),
+                                }
+                            )
 
                     scored_bridges.sort(key=lambda x: x["score"], reverse=True)
                     for sb in scored_bridges[:2]:
-                        bridge_suggestions.append(
-                            f"{sb['from']} → {sb['to']}"
-                        )
+                        bridge_suggestions.append(f"{sb['from']} → {sb['to']}")
 
             enriched = dict(island)
             enriched["center"] = center_id or (island["nodes"][0]["id"] if island.get("nodes") else None)
@@ -1483,8 +1717,11 @@ class AdminHandlerMixin:
             enriched["bridges_suggested"] = bridge_suggestions[:5]
             enriched_islands.append(enriched)
 
-        self._json_response(200, {
-            "islands": enriched_islands,
-            "total_islands": result.get("total_islands", 0),
-            "total_orphan_nodes": result.get("orphan_count", 0),
-        })
+        self._json_response(
+            200,
+            {
+                "islands": enriched_islands,
+                "total_islands": result.get("total_islands", 0),
+                "total_orphan_nodes": result.get("orphan_count", 0),
+            },
+        )

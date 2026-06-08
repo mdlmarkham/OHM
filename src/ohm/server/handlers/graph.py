@@ -311,7 +311,7 @@ class GraphHandlerMixin:
         from ohm.validation import validate_identifier
 
         node_id = validate_identifier(node_id, name="node_id")
-        depth = int(qs.get("depth", [3])[0])
+        depth = min(int(qs.get("depth", [3])[0]), 2)  # ADR-023: Cap depth at 2 to prevent OOM on large neighborhoods
         layer = qs.get("layer", [None])[0]
         created_by = qs.get("created_by", [None])[0]
         from ohm.queries import query_neighborhood
@@ -346,13 +346,22 @@ class GraphHandlerMixin:
         )
 
         # ADR-022: Add effective_layer for each node in the neighborhood
+        # ADR-023: Skip effective_layer computation for large neighborhoods (>500 nodes)
+        # to prevent OOM crashes. Include warning when skipped.
         from ohm.graph.constraints import effective_layer
 
-        for n in node_rows:
-            eff_layer, _cs = effective_layer(self.current_store.conn, n["id"])
-            n["effective_layer"] = eff_layer
+        LARGE_NEIGHBORHOOD_THRESHOLD = 500
+        response = {"nodes": node_rows, "edges": edges}
 
-        self._json_response(200, {"nodes": node_rows, "edges": edges})
+        if len(node_rows) <= LARGE_NEIGHBORHOOD_THRESHOLD:
+            for n in node_rows:
+                eff_layer, _cs = effective_layer(self.current_store.conn, n["id"])
+                n["effective_layer"] = eff_layer
+        else:
+            response["warning"] = f"Neighborhood has {len(node_rows)} nodes; effective_layer computation skipped for performance. Use /constraint-report?batch=true for bulk analysis."
+            response["truncated"] = True
+
+        self._json_response(200, response)
 
     def _get_path(self, path: str, qs: dict) -> None:
         """GET /path/<from>/<to> — shortest path."""
