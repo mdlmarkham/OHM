@@ -46,7 +46,10 @@ def _build_observation_matrix(
         metadata["observation_counts"][node_id] = len(obs)
         if len(obs) >= min_observations:
             # Binary: value > 0.5 → 1 (good), else → 0 (bad)
-            values = [1 if (o.value if hasattr(o, 'value') else o.get('value', 0)) > 0.5 else 0 for o in obs]
+            values = []
+            for o in obs:
+                v = o.value if hasattr(o, 'value') else o.get('value')
+                values.append(1 if v is not None and v > 0.5 else 0)
             node_obs[node_id] = values
         else:
             metadata["skipped"][node_id] = f"insufficient observations ({len(obs)} < {min_observations})"
