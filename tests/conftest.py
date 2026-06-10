@@ -301,3 +301,105 @@ def create_sample_graph(conn: "duckdb.DuckDBPyConnection", size: str = "small") 
         edges["cross_4"] = create_sample_edge(conn, from_node=nodes["G"], to_node=nodes["J"], edge_type="PREDICTS", layer="L3")
 
     return {"nodes": nodes, "edges": edges}
+
+
+# ── Shared HTTP server fixtures ───────────────────────────────────────────
+
+import json
+import threading
+from http.client import HTTPConnection
+
+
+def _start_test_server(store, tokens=None, roles=None, no_auth=False, schema_config=None, require_read_auth=False, multi_tenant=False):
+    """Start a test HTTP server on a random port and return (port, server, thread)."""
+    import socketserver
+
+    from ohm.server import OhmHandler, _hash_token
+    from ohm.schema import DEFAULT_SCHEMA
+    from ohm.server.server import _register_builtin_hooks
+
+    OhmHandler.store = store
+    OhmHandler.config = {"host": "127.0.0.1", "port": 0}
+    OhmHandler.schema_config = schema_config or DEFAULT_SCHEMA
+    if tokens:
+        token_hashes = {}
+        for token, agent_name in tokens.items():
+            token_hashes[_hash_token(token)] = agent_name
+        OhmHandler.tokens = token_hashes
+    else:
+        OhmHandler.tokens = {}
+    OhmHandler.roles = roles or {}
+    OhmHandler.no_auth = no_auth
+    OhmHandler.multi_tenant = multi_tenant
+    if multi_tenant and not require_read_auth:
+        OhmHandler.require_read_auth = True
+    else:
+        OhmHandler.require_read_auth = require_read_auth
+
+    _register_builtin_hooks(store)
+
+    server = socketserver.TCPServer(
+        ("127.0.0.1", 0),
+        OhmHandler,
+        bind_and_activate=False,
+    )
+    server.allow_reuse_address = True
+    server.server_bind()
+    server.server_activate()
+    port = server.server_address[1]
+
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    wait_for_port("127.0.0.1", port)
+    return port, server, thread
+
+
+def _request(method, port, path, body=None, headers=None, token=None):
+    """Make an HTTP request to the test server."""
+    conn = HTTPConnection(f"127.0.0.1:{port}", timeout=15)
+    hdrs = headers or {}
+    if token:
+        hdrs["Authorization"] = f"Bearer {token}"
+    if body is not None:
+        hdrs["Content-Type"] = "application/json"
+        body_bytes = json.dumps(body).encode()
+    else:
+        body_bytes = None
+    conn.request(method, path, body=body_bytes, headers=hdrs)
+    resp = conn.getresponse()
+    data = resp.read().decode()
+    conn.close()
+    try:
+        return resp.status, json.loads(data)
+    except json.JSONDecodeError:
+        return resp.status, data
+
+
+@pytest.fixture
+def test_server(tmp_path):
+    """Start a test server with a temp database (no-auth dev mode)."""
+    from ohm.store import OhmStore
+
+    db_path = str(tmp_path / "test_server.duckdb")
+    store = OhmStore(db_path=db_path, agent_name="test_agent")
+    port, server, thread = _start_test_server(store, no_auth=True)
+    yield port, store
+    server.shutdown()
+    thread.join(timeout=2)
+    store.close()
+
+
+@pytest.fixture
+def auth_server(tmp_path):
+    """Start a test server with token auth enabled."""
+    from ohm.store import OhmStore
+
+    db_path = str(tmp_path / "test_auth.duckdb")
+    store = OhmStore(db_path=db_path, agent_name="test_agent")
+    tokens = {"test-token-abc": "metis", "readonly-token": "observer"}
+    roles = {"metis": "read-write", "observer": "read-only"}
+    port, server, thread = _start_test_server(store, tokens=tokens, roles=roles)
+    yield port, store
+    server.shutdown()
+    thread.join(timeout=2)
+    store.close()

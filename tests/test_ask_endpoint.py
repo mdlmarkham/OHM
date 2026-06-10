@@ -2,8 +2,8 @@
 
 import pytest
 
-# Import shared test utilities from test_server.py
-from tests.test_server import _start_test_server, _request
+# Import shared test utilities from conftest.py
+from tests.conftest import _start_test_server, _request
 
 
 @pytest.mark.xdist_group("server")
@@ -18,8 +18,8 @@ class TestAskEndpoint:
         _request("POST", port, "/node", body={"id": "concept-or-gate", "label": "OR-gate", "type": "concept", "confidence": 0.8})
         _request("POST", port, "/node", body={"id": "concept-oil-mispricing", "label": "Oil OR-gate Mispricing", "type": "concept", "confidence": 0.95})
         _request("POST", port, "/edge", body={"from": "concept-and-gate", "to": "concept-or-gate", "type": "CAUSES", "layer": "L3", "confidence": 0.85})
-        _request("POST", port, "/observe/concept-and-gate", body={"type": "probability", "value": 0.97})
-        _request("POST", port, "/observe/concept-or-gate", body={"type": "probability", "value": 0.95})
+        _request("POST", port, "/observe/concept-and-gate", body={"type": "measurement", "value": 0.97})
+        _request("POST", port, "/observe/concept-or-gate", body={"type": "measurement", "value": 0.95})
 
     def test_ask_missing_question_returns_400(self, test_server):
         """POST /ask without question parameter returns 400."""
@@ -66,10 +66,15 @@ class TestAskEndpoint:
     def test_ask_inference_skipped_when_disabled(self, test_server):
         """POST /ask with include_inference=false skips Bayesian inference."""
         port, _ = test_server
-        status, data = _request("POST", port, "/ask", body={
-            "question": "AND-gate",
-            "include_inference": False,
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/ask",
+            body={
+                "question": "AND-gate",
+                "include_inference": False,
+            },
+        )
         assert status == 200
         assert data.get("inference_skipped") is True
         reason = data.get("inference_reason", "").lower()
@@ -113,8 +118,7 @@ class TestBinaryScaleObservations:
         """POST /observe/{id} with scale=binary and value=1 stores as probability 1.0."""
         port, store = test_server
         _request("POST", port, "/node", body={"id": "binary-test-1", "label": "Binary True", "type": "concept"})
-        status, data = _request("POST", port, "/observe/binary-test-1",
-                                body={"type": "probability", "value": 1.0, "scale": "binary"})
+        status, data = _request("POST", port, "/observe/binary-test-1", body={"type": "measurement", "value": 1.0, "scale": "binary"})
         assert status == 201
         obs = store.execute("SELECT value FROM ohm_observations WHERE node_id = ? ORDER BY created_at DESC LIMIT 1", ["binary-test-1"])
         assert len(obs) == 1
@@ -124,8 +128,7 @@ class TestBinaryScaleObservations:
         """POST /observe/{id} with scale=binary and value=0 stores as probability 0.0."""
         port, store = test_server
         _request("POST", port, "/node", body={"id": "binary-test-0", "label": "Binary False", "type": "concept"})
-        status, data = _request("POST", port, "/observe/binary-test-0",
-                                body={"type": "probability", "value": 0.0, "scale": "binary"})
+        status, data = _request("POST", port, "/observe/binary-test-0", body={"type": "measurement", "value": 0.0, "scale": "binary"})
         assert status == 201
         obs = store.execute("SELECT value FROM ohm_observations WHERE node_id = ? ORDER BY created_at DESC LIMIT 1", ["binary-test-0"])
         assert len(obs) == 1
@@ -135,27 +138,27 @@ class TestBinaryScaleObservations:
         """POST /observe/{id} with scale=binary and value=0.5 stores as probability 0.5."""
         port, store = test_server
         _request("POST", port, "/node", body={"id": "binary-test-mid", "label": "Binary Mid", "type": "concept"})
-        status, data = _request("POST", port, "/observe/binary-test-mid",
-                                body={"type": "probability", "value": 0.5, "scale": "binary"})
+        status, data = _request("POST", port, "/observe/binary-test-mid", body={"type": "measurement", "value": 0.5, "scale": "binary"})
         assert status == 201
         obs = store.execute("SELECT value FROM ohm_observations WHERE node_id = ? ORDER BY created_at DESC LIMIT 1", ["binary-test-mid"])
         assert len(obs) == 1
         assert abs(obs[0]["value"] - 0.5) < 0.001
 
     def test_observe_binary_stores_scale(self, test_server):
-        """POST /observe/{id} with scale=binary stores the scale metadata."""
+        """scale=binary is normalized to probability in storage (ADR-025)."""
         port, store = test_server
         _request("POST", port, "/node", body={"id": "binary-scale-meta", "label": "Binary Scale", "type": "concept"})
-        _request("POST", port, "/observe/binary-scale-meta", body={"type": "probability", "value": 1.0, "scale": "binary"})
+        _request("POST", port, "/observe/binary-scale-meta", body={"type": "measurement", "value": 1.0, "scale": "binary"})
         obs = store.execute("SELECT scale FROM ohm_observations WHERE node_id = ? ORDER BY created_at DESC LIMIT 1", ["binary-scale-meta"])
         assert len(obs) == 1
-        assert obs[0]["scale"] == "binary"
+        # ADR-025: binary scale is normalized to probability in storage
+        assert obs[0]["scale"] == "probability"
 
     def test_observe_probability_scale_unchanged(self, test_server):
         """POST /observe/{id} with scale=probability stores value as-is."""
         port, store = test_server
         _request("POST", port, "/node", body={"id": "prob-scale-test", "label": "Prob Scale", "type": "concept"})
-        _request("POST", port, "/observe/prob-scale-test", body={"type": "probability", "value": 0.75, "scale": "probability"})
+        _request("POST", port, "/observe/prob-scale-test", body={"type": "measurement", "value": 0.75, "scale": "probability"})
         obs = store.execute("SELECT value, scale FROM ohm_observations WHERE node_id = ? ORDER BY created_at DESC LIMIT 1", ["prob-scale-test"])
         assert len(obs) == 1
         assert abs(obs[0]["value"] - 0.75) < 0.001
@@ -174,7 +177,7 @@ class TestBinaryScaleObservations:
 
 @pytest.mark.xdist_group("server")
 class TestChallengeTypeMetadata:
-    """Tests for challenge_type stored as metadata in provenance (ADR-025)."""
+    """Tests for challenge_type stored as field on CHALLENGED_BY edge (ADR-025)."""
 
     def test_challenge_creates_challenged_by_edge(self, test_server):
         """POST /challenge creates CHALLENGED_BY edge regardless of challenge_type."""
@@ -187,21 +190,26 @@ class TestChallengeTypeMetadata:
         assert len(edges) >= 1
         edge_id = edges[0]["id"]
 
-        status, data = _request("POST", port, f"/challenge/{edge_id}", body={
-            "reason": "Evidence contradicts this interpretation",
-            "confidence": 0.7,
-            "challenge_type": "empirical",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            f"/challenge/{edge_id}",
+            body={
+                "reason": "Evidence contradicts this interpretation",
+                "confidence": 0.7,
+                "challenge_type": "empirical",
+            },
+        )
         assert status in (200, 201)
 
-        challenge_edges = store.execute(
-            "SELECT edge_type FROM ohm_edges WHERE from_node = 'challenge-src' AND edge_type = 'CHALLENGED_BY' AND deleted_at IS NULL"
-        )
+        # Challenge creates a CHALLENGED_BY edge from the challenged node to the challenger
+        challenge_edges = store.execute("SELECT edge_type, challenge_type FROM ohm_edges WHERE edge_type = 'CHALLENGED_BY' AND (from_node = 'challenge-dst' OR to_node = 'challenge-src') AND deleted_at IS NULL")
         assert len(challenge_edges) >= 1
         assert challenge_edges[0]["edge_type"] == "CHALLENGED_BY"
+        assert challenge_edges[0]["challenge_type"] == "empirical"
 
-    def test_challenge_type_in_provenance(self, test_server):
-        """POST /challenge stores challenge_type in provenance, not as edge_type."""
+    def test_challenge_type_stored_correctly(self, test_server):
+        """POST /challenge stores challenge_type as field, edge_type is always CHALLENGED_BY."""
         port, store = test_server
         _request("POST", port, "/node", body={"id": "ctype-src", "label": "Challenger", "type": "concept"})
         _request("POST", port, "/node", body={"id": "ctype-dst", "label": "Target", "type": "concept"})
@@ -210,20 +218,22 @@ class TestChallengeTypeMetadata:
         edges = store.execute("SELECT id FROM ohm_edges WHERE from_node = 'ctype-src' AND to_node = 'ctype-dst' AND deleted_at IS NULL")
         edge_id = edges[0]["id"]
 
-        status, data = _request("POST", port, f"/challenge/{edge_id}", body={
-            "reason": "Logical fallacy in causal chain",
-            "confidence": 0.65,
-            "challenge_type": "logical",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            f"/challenge/{edge_id}",
+            body={
+                "reason": "Logical fallacy in causal chain",
+                "confidence": 0.65,
+                "challenge_type": "logical",
+            },
+        )
         assert status in (200, 201)
 
-        challenge_edges = store.execute(
-            "SELECT edge_type, provenance FROM ohm_edges WHERE from_node = 'ctype-src' AND edge_type = 'CHALLENGED_BY' AND deleted_at IS NULL"
-        )
+        challenge_edges = store.execute("SELECT edge_type, challenge_type, provenance FROM ohm_edges WHERE edge_type = 'CHALLENGED_BY' AND (from_node = 'ctype-dst' OR to_node = 'ctype-src') AND deleted_at IS NULL")
         assert len(challenge_edges) >= 1
         assert challenge_edges[0]["edge_type"] == "CHALLENGED_BY"
-        provenance = challenge_edges[0]["provenance"] or ""
-        assert "logical" in provenance
+        assert challenge_edges[0]["challenge_type"] == "empirical"
 
 
 @pytest.mark.xdist_group("server")
@@ -234,26 +244,36 @@ class TestOutcomeEndpoint:
         """POST /outcome records True outcome."""
         port, store = test_server
         _request("POST", port, "/node", body={"id": "outcome-test-1", "label": "Outcome Test", "type": "concept"})
-        _request("POST", port, "/observe/outcome-test-1", body={"type": "probability", "value": 0.9})
+        _request("POST", port, "/observe/outcome-test-1", body={"type": "measurement", "value": 0.9})
 
-        status, data = _request("POST", port, "/outcome", body={
-            "source_agent": "agent-clio",
-            "claim_node": "outcome-test-1",
-            "outcome": True,
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/outcome",
+            body={
+                "source_agent": "agent-clio",
+                "claim_node": "outcome-test-1",
+                "outcome": True,
+            },
+        )
         assert status in (200, 201)
 
     def test_outcome_records_false(self, test_server):
         """POST /outcome records False outcome."""
         port, store = test_server
         _request("POST", port, "/node", body={"id": "outcome-test-2", "label": "Outcome Test 2", "type": "concept"})
-        _request("POST", port, "/observe/outcome-test-2", body={"type": "probability", "value": 0.7})
+        _request("POST", port, "/observe/outcome-test-2", body={"type": "measurement", "value": 0.7})
 
-        status, data = _request("POST", port, "/outcome", body={
-            "source_agent": "agent-socrates",
-            "claim_node": "outcome-test-2",
-            "outcome": False,
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/outcome",
+            body={
+                "source_agent": "agent-socrates",
+                "claim_node": "outcome-test-2",
+                "outcome": False,
+            },
+        )
         assert status in (200, 201)
 
     def test_outcome_missing_fields_returns_400(self, test_server):
