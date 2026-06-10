@@ -1770,8 +1770,8 @@ class TestHookEndpoints:
         _request("POST", port, "/hooks", body={"event": "post_ingest", "command": "echo b"})
         status, data = _request("GET", port, "/hooks")
         assert status == 200
-        assert data["count"] == 4  # 2 user + 2 built-in (OHM-aznh.11)
-        assert len(data["hooks"]) == 4
+        assert data["count"] == 5  # 2 user + 3 built-in (OHM-aznh.11)
+        assert len(data["hooks"]) == 5
 
     def test_get_hooks_filter_by_event(self, test_server):
         port, _ = test_server
@@ -1779,7 +1779,7 @@ class TestHookEndpoints:
         _request("POST", port, "/hooks", body={"event": "post_ingest", "command": "echo b"})
         status, data = _request("GET", port, "/hooks?event=pre_ingest")
         assert status == 200
-        assert data["count"] == 3  # 1 user + 2 built-in (OHM-aznh.11)
+        assert data["count"] == 4  # 1 user + 3 built-in (OHM-aznh.11)
         assert data["hooks"][0]["event"] == "pre_ingest"
 
     def test_get_hooks_invalid_event_returns_400(self, test_server):
@@ -1795,7 +1795,7 @@ class TestHookEndpoints:
         assert status == 200
         assert data["deleted"] == hook_id
         status, data = _request("GET", port, "/hooks")
-        assert data["count"] == 2  # 2 built-in hooks remain (OHM-aznh.11)
+        assert data["count"] == 3  # 3 built-in hooks remain (OHM-aznh.11)
 
     def test_delete_hooks_not_found_returns_400(self, test_server):
         port, _ = test_server
