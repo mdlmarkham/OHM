@@ -554,6 +554,7 @@ def _build_router() -> _RouteRegistry:
         "/edge",
         "/outcome",
         "/agent/synthesis",
+        "/ask",
         "/batch",
         "/webhook",
         "/state",
@@ -1072,6 +1073,7 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
         "/observe": [],
         "/observations": [],
         "/outcome": [],
+        "/ask": ["question"],
         "/reliability": [],
         "/webhook": [],
     }
@@ -1139,6 +1141,13 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
         },
         "/observation": {
             "old_obs_id": (str, type(None)),
+        },
+        "/ask": {
+            "question": str,
+            "agent": (str, type(None)),
+            "depth": (int, type(None)),
+            "include_inference": (bool, type(None)),
+            "limit": (int, type(None)),
         },
     }
 
@@ -1948,6 +1957,7 @@ OhmHandler._POST_EXACT = {
     "/observations": "_post_observations",
     "/outcome": "_post_outcome",
     "/agent/synthesis": "_post_synthesis",
+    "/ask": "_post_ask",
     "/batch": "_post_batch",
     "/webhook": "_post_webhook",
     "/state": "_post_state",
