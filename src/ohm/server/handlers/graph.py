@@ -2544,6 +2544,39 @@ class GraphHandlerMixin:
         matched_nodes = []
         search_errors = []
 
+        # Direct node ID lookup — if the question contains a known node ID, use it
+        question_lower = question.lower().replace(" ", "_").replace("-", "_")
+        try:
+            # Check if question matches an existing node ID directly
+            direct_node = self.current_store.get_node(question_lower)
+            if direct_node:
+                matched_nodes.append({
+                    "id": direct_node["id"],
+                    "label": direct_node.get("label", ""),
+                    "type": direct_node.get("type", ""),
+                    "confidence": direct_node.get("confidence"),
+                    "match_method": "direct_id",
+                })
+        except Exception:
+            pass
+
+        # Also try common variations (hormuz and gate → hormuz_and_gate)
+        if not matched_nodes:
+            for variant in [question_lower, question_lower.replace(" and ", "_and_").replace(" ", "_")]:
+                try:
+                    node = self.current_store.get_node(variant)
+                    if node and node["id"] not in {n["id"] for n in matched_nodes}:
+                        matched_nodes.append({
+                            "id": node["id"],
+                            "label": node.get("label", ""),
+                            "type": node.get("type", ""),
+                            "confidence": node.get("confidence"),
+                            "match_method": "direct_id",
+                        })
+                        break
+                except Exception:
+                    pass
+
         # Text search
         try:
             text_results = search(
@@ -2688,7 +2721,15 @@ class GraphHandlerMixin:
                                 customer_id=self._customer_id,
                             )
                             if "error" not in result:
-                                inference_results[target_safe] = result
+                                # ADR-025: Extract only posteriors, not full network info
+                                posterior = result.get("posterior", result)
+                                network_info = result.get("network_info", {})
+                                inference_results[target_safe] = {
+                                    "posterior": posterior,
+                                    "n_nodes": network_info.get("n_nodes", 0),
+                                    "n_edges": network_info.get("n_edges", 0),
+                                    "method": result.get("method", "bayesian_variable_elimination"),
+                                }
                         except Exception as e:
                             inference_errors.append(f"inference({target_id}): {e}")
 
