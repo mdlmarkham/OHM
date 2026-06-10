@@ -1837,10 +1837,14 @@ class OhmStore:
         """Return a safely quoted table reference for DuckLake sync."""
         return f'"{alias}"."{table}"'
 
+    # Minimum seconds between DuckLake syncs (avoid syncing on every write)
+    _MIN_SYNC_INTERVAL_SECONDS: float = 30.0
+
     def sync_heartbeat(
         self,
         ducklake_path: Optional[str] = None,
         alias: str = "ohm_lake",
+        force: bool = False,
     ) -> dict[str, Any]:
         """Push local changes to DuckLake and pull remote changes.
 
@@ -1848,6 +1852,9 @@ class OhmStore:
         It:
         1. Pushes local changes to DuckLake (if path configured)
         2. Pulls changes from DuckLake (if path configured)
+
+        Throttled to run at most once every _MIN_SYNC_INTERVAL_SECONDS
+        unless force=True.
         3. Updates last_sync timestamp
 
         When DuckLake is attached as an alias on the current connection,
@@ -1866,9 +1873,26 @@ class OhmStore:
         if ducklake_path is None:
             ducklake_path = os.environ.get("OHM_DUCKLAKE_PATH")
 
+        # Throttle: skip sync if last sync was less than _MIN_SYNC_INTERVAL_SECONDS ago
+        import time
+        now_ts = time.time()
+        last_sync_ts = getattr(self, "_last_sync_ts", 0.0)
+        if not force and (now_ts - last_sync_ts) < self._MIN_SYNC_INTERVAL_SECONDS:
+            return {
+                "pushed": 0,
+                "pulled": 0,
+                "last_sync": None,
+                "ducklake_attached": False,
+                "throttled": True,
+                "reason": f"sync throttled (last sync {now_ts - last_sync_ts:.1f}s ago, min interval {self._MIN_SYNC_INTERVAL_SECONDS}s)",
+            }
+
         pushed = 0
         pulled = 0
         last_sync = None
+
+        # Mark sync start time
+        self._last_sync_ts = now_ts
 
         # Check if DuckLake is attached on this connection (OHM-0ku fix)
         # Even without ducklake_path, if the catalog is attached, we can sync.
