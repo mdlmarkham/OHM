@@ -18,6 +18,32 @@ class GraphHandlerMixin:
     and batch operations.
     """
 
+    _challenge_ratio_cache: float = 0.0
+    _challenge_ratio_cache_time: float = 0.0
+
+    def _get_challenge_ratio(self) -> float:
+        """Get the current graph challenge ratio, cached for 5 minutes."""
+        import time
+        now = time.time()
+        if now - self._challenge_ratio_cache_time > 300:  # 5-minute cache
+            try:
+                row = self.current_store.conn.execute(
+                    "SELECT COUNT(*) FROM edges WHERE edge_type = 'CHALLENGED_BY' AND deleted_at IS NULL"
+                ).fetchone()
+                challenged = row[0] if row else 0
+                row2 = self.current_store.conn.execute(
+                    "SELECT COUNT(*) FROM edges WHERE layer = 'L3' AND deleted_at IS NULL"
+                ).fetchone()
+                total_l3 = row2[0] if row2 else 1
+                ratio = challenged / max(total_l3, 1)
+                GraphHandlerMixin._challenge_ratio_cache = ratio
+                GraphHandlerMixin._challenge_ratio_cache_time = now
+            except Exception:
+                ratio = GraphHandlerMixin._challenge_ratio_cache
+        else:
+            ratio = GraphHandlerMixin._challenge_ratio_cache
+        return ratio
+
     def _run_pre_ingest_hooks(self, agent: str, action: str, body: dict) -> dict | None:
         """Run pre_ingest hooks. Return error dict if any hook rejects, else None."""
         from ohm.hooks import HookRunner
@@ -838,6 +864,7 @@ class GraphHandlerMixin:
 
     def _post_node(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /node — create or upsert a node."""
+
         # ADR-015 source_url enforcement migrated to built-in pre_ingest hook
         # (python:ohm.hooks_builtin.source_url_required). See OHM-aznh.11.
 
@@ -922,12 +949,14 @@ class GraphHandlerMixin:
             },
             customer_id=self._customer_id,
         )
-        # ADR-017: Cognitive nudge enrichment
+        # ADR-017 + ADR-023: Cognitive nudge enrichment with decision detection
         nudges = generate_nudges(
             action="node",
             node_id=result.get("id"),
             tags=body.get("tags"),
             provenance=body.get("provenance"),
+            store=self.current_store,
+            node=body,
         )
         result = enrich_response(result, nudges)
 
@@ -1281,13 +1310,19 @@ class GraphHandlerMixin:
             },
             customer_id=self._customer_id,
         )
-        # ADR-017: Cognitive nudge enrichment
+        # ADR-017 + ADR-023: Cognitive nudge enrichment with causal guidance
+        _challenge_ratio = self._get_challenge_ratio()
         nudges = generate_nudges(
             action="edge",
+            node_id=body.get("to") or body.get("from"),
             edge_type=body.get("type"),
             confidence=body.get("confidence"),
             provenance=body.get("provenance"),
             tags=None,
+            store=self.current_store,
+            from_node_id=body.get("from"),
+            to_node_id=body.get("to"),
+            challenge_ratio=_challenge_ratio,
         )
         result = enrich_response(result, nudges)
 
@@ -1433,13 +1468,14 @@ class GraphHandlerMixin:
             },
             customer_id=self._customer_id,
         )
-        # ADR-017: Cognitive nudge enrichment
+        # ADR-017 + ADR-023: Cognitive nudge enrichment with inference delta
         nudges = generate_nudges(
             action="observation",
             node_id=node_id,
             confidence=body.get("value"),
             provenance=body.get("source"),
             source_url=body.get("source_url"),
+            store=self.current_store,
         )
         result = enrich_response(result, nudges)
         self._json_response(201, result)
@@ -2074,7 +2110,11 @@ class GraphHandlerMixin:
         })
 
     def _post_heartbeat(self, path: str, qs: dict, body: dict, agent: str) -> None:
-        """POST /heartbeat — agent heartbeat with sync."""
+        """POST /heartbeat — agent heartbeat with sync and orient enrichment.
+
+        ADR-023: Heartbeat now includes orient data, contradictions, stale observations,
+        and anomalies so agents see what needs attention without extra API calls.
+        """
         from ohm.methods import agent_heartbeat
         from ohm.server.suggestions import generate_island_nudge
 
@@ -2094,7 +2134,82 @@ class GraphHandlerMixin:
         except Exception as exc:
             logger.debug("Heartbeat island nudge failed: %s", exc)
 
+        # ADR-023: Proactive orient enrichment
+        try:
+            orient = self._get_orient_data(agent)
+            if orient:
+                result["orient"] = orient
+        except Exception as exc:
+            logger.debug("Heartbeat orient enrichment failed: %s", exc)
+
+        # ADR-023: Proactive contradictions (limit 3)
+        try:
+            contradictions = self._get_contradictions_data(limit=3)
+            if contradictions:
+                result["contradictions"] = contradictions
+        except Exception as exc:
+            logger.debug("Heartbeat contradictions enrichment failed: %s", exc)
+
+        # ADR-023: Stale observations nudge
+        try:
+            stale = self._get_stale_data(days=7, limit=3)
+            if stale:
+                result["stale_observations"] = stale
+        except Exception as exc:
+            logger.debug("Heartbeat stale enrichment failed: %s", exc)
+
         self._json_response(200, result)
+
+    def _get_orient_data(self, agent: str) -> dict | None:
+        """Lightweight orient data for heartbeat enrichment."""
+        try:
+            conn = self.current_store.read_conn
+            from datetime import datetime, timezone
+            hours = 24
+            # Last activity
+            last_activity = conn.execute(
+                "SELECT MAX(la) FROM ("
+                "SELECT created_at AS la FROM ohm_nodes WHERE created_by = ? UNION ALL "
+                "SELECT created_at AS la FROM ohm_edges WHERE created_by = ? UNION ALL "
+                "SELECT created_at AS la FROM ohm_observations WHERE created_by = ?"
+                ")",
+                [agent, agent, agent],
+            ).fetchone()[0]
+            # Open tasks
+            tasks = conn.execute(
+                "SELECT id, label, priority, due_date FROM ohm_nodes "
+                "WHERE assigned_to = ? AND task_status = 'open' AND deleted_at IS NULL ORDER BY priority DESC LIMIT 5",
+                [agent],
+            ).fetchall()
+            return {
+                "last_activity": str(last_activity) if last_activity else None,
+                "open_tasks": len(tasks),
+                "task_summaries": [{"id": t[0], "label": t[1], "priority": t[2]} for t in tasks[:3]],
+            }
+        except Exception:
+            return None
+
+    def _get_contradictions_data(self, limit: int = 3) -> list | None:
+        """Lightweight contradictions for heartbeat enrichment."""
+        try:
+            from ohm.methods import detect_contradictions
+            result = detect_contradictions(self.current_store.read_conn, confidence_threshold=0.5)
+            if isinstance(result, list):
+                return result[:limit]
+            return None
+        except Exception:
+            return None
+
+    def _get_stale_data(self, days: int = 7, limit: int = 3) -> list | None:
+        """Lightweight stale observations for heartbeat enrichment."""
+        try:
+            from ohm.queries import query_stale_edges
+            result = query_stale_edges(self.current_store.read_conn, stale_threshold=0.1)
+            if isinstance(result, list):
+                return result[:limit]
+            return None
+        except Exception:
+            return None
 
     def _post_deduplicate(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /deduplicate — remove duplicate edges (same from→to, type, layer), keeping most recent."""
@@ -2256,6 +2371,13 @@ class GraphHandlerMixin:
                 update_fields.append(f"{field} = ?")
                 update_params.append(body[field])
 
+        # Allow edge_type updates for causal restructuring (ADR-023)
+        if "edge_type" in body:
+            from ohm.validation import validate_identifier
+            new_type = validate_identifier(body["edge_type"], name="edge_type")
+            update_fields.append("edge_type = ?")
+            update_params.append(new_type)
+
         if "probability_p50" in body and "probability" not in body:
             from ohm.pert import compute_pert_mean
             p05 = body.get("probability_p05", edge.get("probability_p05") or body["probability_p50"])
@@ -2335,6 +2457,12 @@ class GraphHandlerMixin:
                 if field in item:
                     update_fields.append(f"{field} = ?")
                     update_params.append(item[field])
+
+            # Allow edge_type updates for causal restructuring (ADR-023)
+            if "edge_type" in item:
+                new_type = validate_identifier(item["edge_type"], name="edge_type")
+                update_fields.append("edge_type = ?")
+                update_params.append(new_type)
 
             if "probability_p50" in item and "probability" not in item:
                 from ohm.pert import compute_pert_mean

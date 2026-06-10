@@ -2,6 +2,10 @@
 
 import time
 import threading
+from datetime import datetime, timedelta, timezone
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class AdminHandlerMixin:
@@ -1175,6 +1179,147 @@ class AdminHandlerMixin:
             result["would_redirect"] = sum(1 for e in all_dangling if e[2] in migration or e[1] in migration)
             result["would_delete"] = len(all_dangling) - result["would_redirect"]
             result["dangling_details"] = [{"id": e[0], "from": e[1], "to": e[2], "type": e[3]} for e in all_dangling[:20]]
+
+        self._json_response(200, result)
+
+    def _post_admin_purge_orphans(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /admin/purge-orphans — hard-delete orphaned nodes whose creators no longer have auth.
+
+        Finds nodes where created_by agent has no token in the current config, the node
+        has no edges (orphan), and optionally matches a provenance filter.
+        Requires agent to have admin-level write access.
+
+        Body params:
+            dry_run: If true, only report what would be purged (default: true)
+            provenance_filter: Only purge nodes matching this provenance prefix (e.g. "ranch_")
+            min_age_hours: Only purge nodes created at least N hours ago (default: 24)
+            max_observations: Only purge nodes with <= N observations (default: 500)
+
+        Returns:
+            candidates: Number of orphan nodes matching criteria
+            purged: Number of nodes hard-deleted (0 if dry_run)
+            observations_removed: Total observations deleted
+            edges_removed: Total edges removed
+        """
+        dry_run = body.get("dry_run", True)
+        provenance_filter = body.get("provenance_filter")
+        min_age_hours = body.get("min_age_hours", 24)
+        max_observations = body.get("max_observations", 500)
+
+        conn = self.current_store.conn
+
+        # Get the set of currently authenticated agent names
+        # self.tokens maps {token_hash: agent_name} — invert to get agent names
+        configured_agents = set(self.tokens.values()) if hasattr(self, 'tokens') else set()
+
+        with self.current_store._lock:
+            # Find nodes by agents not in current token config
+            # If include_connected is true, find ALL such nodes (not just orphans)
+            include_connected = body.get("include_connected", False)
+            if include_connected:
+                # Build a list of ghost agent names (in DB but not in current token config)
+                ghost_agents = conn.execute(
+                    "SELECT DISTINCT created_by FROM ohm_nodes WHERE deleted_at IS NULL AND created_by IS NOT NULL"
+                ).fetchall()
+                ghost_names = [r[0] for r in ghost_agents if r[0] not in configured_agents]
+                if not ghost_names:
+                    self._json_response(200, {"candidates": 0, "purged": 0, "observations_removed": 0, "edges_removed": 0, "dry_run": dry_run, "configured_agents": sorted(configured_agents), "ghost_agents": []})
+                    return
+                placeholders = ",".join(["?"] * len(ghost_names))
+                query = f"""
+                    SELECT n.id, n.created_by, n.provenance, n.created_at
+                    FROM ohm_nodes n
+                    WHERE n.deleted_at IS NULL AND n.created_by IN ({placeholders})
+                """
+                rows = conn.execute(query, ghost_names).fetchall()
+            else:
+                query = """
+                    SELECT n.id, n.created_by, n.provenance, n.created_at,
+                           COUNT(DISTINCT e.id) as edge_count,
+                           (SELECT COUNT(*) FROM ohm_observations o WHERE o.node_id = n.id AND o.deleted_at IS NULL) as obs_count
+                    FROM ohm_nodes n
+                    LEFT JOIN ohm_edges e ON (
+                        (e.from_node = n.id OR e.to_node = n.id) AND e.deleted_at IS NULL
+                    )
+                    WHERE n.deleted_at IS NULL
+                    GROUP BY n.id, n.created_by, n.provenance, n.created_at
+                    HAVING edge_count = 0
+                """
+                rows = conn.execute(query).fetchall()
+
+        candidates = []
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=min_age_hours)
+
+        for row in rows:
+            if include_connected:
+                node_id, created_by, provenance, created_at = row
+                obs_count = 0  # not queried for performance
+            else:
+                node_id, created_by, provenance, created_at, edge_count, obs_count = row
+            # Skip if creator still has auth
+            if created_by in configured_agents:
+                continue
+            # Skip if too recent
+            try:
+                created_dt = datetime.fromisoformat(str(created_at).replace('Z', '+00:00'))
+                if created_dt > cutoff:
+                    continue
+            except Exception:
+                continue
+            # Skip if too many observations (safety)
+            if obs_count > max_observations:
+                continue
+            # Apply provenance filter if specified
+            if provenance_filter and (provenance or '') != provenance_filter and not (provenance or '').startswith(provenance_filter):
+                continue
+            candidates.append({
+                "id": node_id,
+                "created_by": created_by,
+                "provenance": provenance,
+                "observations": obs_count,
+            })
+
+        purged = 0
+        obs_removed = 0
+        edges_removed = 0
+
+        if not dry_run:
+            for c in candidates:
+                try:
+                    with self.current_store._lock:
+                        # Soft-delete observations
+                        r1 = conn.execute(
+                            "UPDATE ohm_observations SET deleted_at = CURRENT_TIMESTAMP WHERE node_id = ? AND deleted_at IS NULL",
+                            [c["id"]]
+                        )
+                        obs_removed += r1.rowcount if hasattr(r1, 'rowcount') else 0
+                        # Soft-delete connected edges if include_connected
+                        if include_connected:
+                            r1b = conn.execute(
+                                "UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE (from_node = ? OR to_node = ?) AND deleted_at IS NULL",
+                                [c["id"], c["id"]]
+                            )
+                            edges_removed += r1b.rowcount if hasattr(r1b, 'rowcount') else 0
+                        # Soft-delete the node
+                        r2 = conn.execute(
+                            "UPDATE ohm_nodes SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL",
+                            [c["id"]]
+                        )
+                        if r2.rowcount if hasattr(r2, 'rowcount') else 0:
+                            purged += 1
+                except Exception as e:
+                    logger.warning(f"Failed to purge {c['id']}: {e}")
+
+        result = {
+            "candidates": len(candidates),
+            "purged": purged,
+            "observations_removed": obs_removed,
+            "edges_removed": edges_removed,
+            "dry_run": dry_run,
+            "configured_agents": sorted(configured_agents),
+        }
+        if dry_run and candidates:
+            result["sample"] = candidates[:10]
 
         self._json_response(200, result)
 

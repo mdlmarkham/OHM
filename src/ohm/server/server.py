@@ -1571,6 +1571,13 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
                     update_fields.append(f"{field} = ?")
                     update_params.append(body[field])
 
+            # Allow edge_type updates for causal restructuring (ADR-023)
+            if "edge_type" in body:
+                from ohm.validation import validate_identifier as _validate_id
+                new_type = _validate_id(body["edge_type"], name="edge_type")
+                update_fields.append("edge_type = ?")
+                update_params.append(new_type)
+
             # Recompute PERT mean if p50 provided and probability not explicitly set
             if "probability_p50" in body and "probability" not in body:
                 from ohm.pert import compute_pert_mean
@@ -1962,7 +1969,8 @@ OhmHandler._POST_EXACT = {
     "/admin/backfill-content-hashes": "_post_admin_backfill_content_hashes",
     "/admin/backfill-source-urls": "_post_admin_backfill_source_urls",
     "/admin/vacuum-lake": "_post_admin_vacuum_lake",
-"/admin/evict-fragments": "_post_admin_evict_fragments",
+    "/admin/evict-fragments": "_post_admin_evict_fragments",
+    "/admin/purge-orphans": "_post_admin_purge_orphans",
     "/admin/repair-dangling": "_post_admin_repair_dangling",
     "/discover/queue/review": "_post_discovery_review",
     "/hooks": "_post_hooks",

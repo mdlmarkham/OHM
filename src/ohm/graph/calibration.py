@@ -276,7 +276,7 @@ def effective_reliability(
         SELECT
             COUNT(*) AS total_outcomes,
             SUM(CASE WHEN outcome = TRUE THEN 1 ELSE 0 END) AS accurate,
-            MAX(created_at) AS last_outcome_at
+            MAX(recorded_at) AS last_outcome_at
         FROM ohm_outcomes
         WHERE source_agent = ?
         """,

@@ -3280,6 +3280,13 @@ def review_discovery_candidate(
             ohm_edge_type = "CAUSES"
         elif edge_type == "undirected":
             ohm_edge_type = "CORRELATES_WITH"
+        elif edge_type == "SUGGESTED_CAUSES":
+            ohm_edge_type = "CAUSES"
+        elif edge_type == "SUGGESTED_CORRELATES_WITH":
+            ohm_edge_type = "CORRELATES_WITH"
+        elif edge_type.startswith("SUGGESTED_"):
+            # Strip SUGGESTED_ prefix for any other types
+            ohm_edge_type = edge_type[len("SUGGESTED_"):]
 
         edge_id = create_edge(
             conn, from_node=from_node, to_node=to_node,

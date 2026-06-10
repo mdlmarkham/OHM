@@ -430,14 +430,14 @@ class InferenceHandlerMixin:
         )
         self._json_response(200, {"queue": result, "count": len(result)})
 
-    def _post_discovery_review(self, path: str, body: dict) -> None:
+    def _post_discovery_review(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /discover/queue/review — accept or reject a discovery candidate."""
         from ohm.graph.queries import review_discovery_candidate
         from ohm.exceptions import EdgeNotFoundError, ValidationError
 
         queue_id = body.get("queue_id", "")
         action = body.get("action", "")
-        reviewed_by = body.get("reviewed_by", "unknown")
+        reviewed_by = body.get("reviewed_by", agent or "unknown")
         review_notes = body.get("review_notes")
         edge_layer = body.get("edge_layer", "L3")
 

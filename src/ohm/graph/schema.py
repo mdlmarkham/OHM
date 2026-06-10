@@ -1130,14 +1130,6 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
         ],
     ),
     (
-        "0.27.0",
-        "OHM-od01.4: Causal discovery — add p_value and metadata columns to discovery queue",
-        [
-            "ALTER TABLE ohm_discovery_queue ADD COLUMN IF NOT EXISTS p_value FLOAT",
-            "ALTER TABLE ohm_discovery_queue ADD COLUMN IF NOT EXISTS metadata VARCHAR",
-        ],
-    ),
-    (
         "0.21.0",
         "add hook registry table for staged ingestion pipeline (OHM-aznh)",
         [
@@ -1233,6 +1225,14 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             "UPDATE ohm_observations SET weibull_shape = -1.0 WHERE weibull_shape IS NULL AND type = 'pattern'",
             # Remaining types get exponential (κ=1.0)
             "UPDATE ohm_observations SET weibull_shape = 1.0 WHERE weibull_shape IS NULL",
+        ],
+    ),
+    (
+        "0.27.0",
+        "OHM-od01.4: Causal discovery — add p_value and metadata columns to discovery queue",
+        [
+            "ALTER TABLE ohm_discovery_queue ADD COLUMN IF NOT EXISTS p_value FLOAT",
+            "ALTER TABLE ohm_discovery_queue ADD COLUMN IF NOT EXISTS metadata VARCHAR",
         ],
     ),
 ]

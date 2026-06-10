@@ -317,19 +317,28 @@ def discover_causal(
         )
 
     if method in ("ges", "both"):
-        results["ges"] = discover_ges(
-            conn, node_ids, min_observations=min_observations,
-            score_class=score_class,
-        )
+        try:
+            results["ges"] = discover_ges(
+                conn, node_ids, min_observations=min_observations,
+                score_class=score_class,
+            )
+        except (TypeError, ValueError) as e:
+            # GES can fail with numpy compatibility errors (causal-learn + numpy 2.x)
+            results["ges"] = {"candidate_edges": [], "ges_error": str(e)}
+            logger.warning(f"GES discovery failed: {e}")
 
     if method == "pc":
         pc_result = results["pc"]
         if pc_result.get("error") or not pc_result.get("candidate_edges"):
             logger.info("PC produced no edges, falling back to GES")
-            results["ges"] = discover_ges(
-                conn, node_ids, min_observations=min_observations,
-                score_class=score_class,
-            )
+            try:
+                results["ges"] = discover_ges(
+                    conn, node_ids, min_observations=min_observations,
+                    score_class=score_class,
+                )
+            except (TypeError, ValueError) as e:
+                results["ges"] = {"candidate_edges": [], "ges_error": str(e)}
+                logger.warning(f"GES fallback failed: {e}")
             ges_result = results["ges"]
             if ges_result.get("candidate_edges"):
                 ges_result["fallback_from"] = "pc"
