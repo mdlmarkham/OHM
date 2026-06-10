@@ -437,6 +437,9 @@ See [ADR-006](docs/adr/0007-schema-evolution-and-type-governance.md) (graduated 
 
 ## Documentation
 
+- [New Team Onboarding](docs/new-team-onboarding.md) — Complete guide for onboarding a new agent team (OpenClaw, Hermes, etc.) onto OHM
+- [Agent Onboarding](docs/agent-onboarding.md) — SDK usage, layers, writing protocol
+- [Bootstrap Guide](docs/bootstrap.md) — Cold start: empty graph to minimum viable
 - [Integration Patterns](docs/integration-patterns.md) — OHM + HZL, task nodes, provenance, challenge/support, reliability tracking
 - [Edge Type Guide](docs/edge-type-guide.md) — All 30+ edge types across L1-L4
 - [Schema](docs/schema.md) — Node types, edge types, layers, confidence

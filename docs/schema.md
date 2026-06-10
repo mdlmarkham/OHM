@@ -178,3 +178,22 @@ Distinct from confidence. Confidence = agent belief; probability = objective lik
 - **OPENED_BY, STARTED_BY, AWAITING, RESOLVED_BY, CLOSED_BY** (L2): Support state machine
 - **INVESTIGATED_BY, CONTAINED_BY, ERADICATED_BY, RECOVERED_BY** (L2): Incident state machine
 - **NEGOTIATES_WITH** (L2): SLAs, commitments
+
+### Identity Override (X-Ohm-Agent)
+
+The `created_by` field on nodes and edges is normally derived from the bearer token's mapped agent name. For multi-agent setups where agents share a token or use a generic admin token, the SDK sends an `X-Ohm-Agent` header with the `actor` parameter value.
+
+The server honors `X-Ohm-Agent` when:
+1. The bearer token is valid (agent is authenticated)
+2. The authenticated agent has write access (not read-only)
+3. The header value is a non-empty string
+
+Example:
+```python
+g = connect_http("http://127.0.0.1:8710", actor="thalia",
+                  token="ohm-metis-u0-...")
+# → X-Ohm-Agent: thalia header sent automatically
+# → created_by: "thalia" (not "metis" from the token)
+```
+
+This ensures correct attribution regardless of token configuration, which is especially useful during initial team onboarding before each agent has its own token.
