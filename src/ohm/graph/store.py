@@ -1313,7 +1313,7 @@ class OhmStore:
         return self.write_edge(
             from_node=original["to_node"],
             to_node=original["from_node"],
-            edge_type=challenge_type,
+            edge_type="CHALLENGED_BY",  # ADR-025: challenge_type is metadata, not edge_type
             layer=original["layer"],
             confidence=confidence,
             provenance=reason,

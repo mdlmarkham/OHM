@@ -1441,6 +1441,9 @@ class GraphHandlerMixin:
 
             if scale not in VALID_OBSERVATION_SCALES:
                 raise ValidationError(f"Invalid scale '{scale}' — must be one of: {', '.join(sorted(VALID_OBSERVATION_SCALES))}")
+            # ADR-025: Normalize binary to probability
+            if scale == "binary":
+                scale = "probability"
             if scale == "probability":
                 value = body.get("value")
                 if value is not None and (value < 0.0 or value > 1.0):
@@ -1516,6 +1519,9 @@ class GraphHandlerMixin:
                     if scale not in VALID_OBSERVATION_SCALES:
                         errors.append({"index": i, "error": f"Invalid scale '{scale}' — must be one of: {', '.join(sorted(VALID_OBSERVATION_SCALES))}"})
                         continue
+                    # ADR-025: Normalize binary to probability
+                    if scale == "binary":
+                        scale = "probability"
                     if scale == "probability":
                         value = obs.get("value")
                         if value is not None and (value < 0.0 or value > 1.0):

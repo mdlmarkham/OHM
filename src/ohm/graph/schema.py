@@ -229,6 +229,7 @@ VALID_OBSERVATION_SCALES = frozenset(
         "currency",
         "percent",
         "unknown",
+        "binary",  # ADR-025: alias for probability with value 0/1
     }
 )
 
