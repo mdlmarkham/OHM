@@ -1860,6 +1860,7 @@ class OhmStore:
 
         # Throttle: skip sync if last sync was less than _MIN_SYNC_INTERVAL_SECONDS ago
         import time
+
         now_ts = time.time()
         last_sync_ts = getattr(self, "_last_sync_ts", 0.0)
         if not force and (now_ts - last_sync_ts) < self._MIN_SYNC_INTERVAL_SECONDS:
