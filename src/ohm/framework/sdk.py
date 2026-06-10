@@ -3432,6 +3432,10 @@ def connect_http(
                 headers["Authorization"] = token_header
             if self._tenant_id:
                 headers["X-Tenant-ID"] = self._tenant_id
+            # Pass actor identity as X-Ohm-Agent header so the server
+            # can use it for created_by when the token maps to a generic agent.
+            if self.actor and self.actor != "unknown":
+                headers["X-Ohm-Agent"] = self.actor
 
             req = urllib.request.Request(url, data=data, headers=headers, method=method)
             try:

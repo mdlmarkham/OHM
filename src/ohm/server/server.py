@@ -743,6 +743,10 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
         boundary enforcement can distinguish customer writes from agent writes.
         All existing call sites (which do ``agent = self._authenticate()``) keep
         working without modification — the agent name is just a string.
+
+        If X-Ohm-Agent header is provided and the authenticated agent has write
+        access, the header value overrides the token-derived agent name. This allows
+        SDK clients to specify their identity (e.g., connect_remote(actor="thalia")).
         """
         from urllib.parse import unquote
 
@@ -756,6 +760,10 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
             for token_hash, agent_name in self.tokens.items():
                 if _verify_token(token, token_hash):
                     self._authenticated_agent = agent_name
+                    # Honor X-Ohm-Agent header if the authenticated agent has write access
+                    ohm_agent = self.headers.get("X-Ohm-Agent")
+                    if ohm_agent and self.roles.get(agent_name, "read-write") != "read-only":
+                        return ohm_agent
                     return agent_name
             for token_hash, customer_id in self.customer_tokens.items():
                 if _verify_token(token, token_hash):
@@ -770,6 +778,10 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
             for token_hash, agent_name in self.tokens.items():
                 if _verify_token(token, token_hash):
                     self._authenticated_agent = agent_name
+                    # Honor X-Ohm-Agent header if the authenticated agent has write access
+                    ohm_agent = self.headers.get("X-Ohm-Agent")
+                    if ohm_agent and self.roles.get(agent_name, "read-write") != "read-only":
+                        return ohm_agent
                     return agent_name
             for token_hash, customer_id in self.customer_tokens.items():
                 if _verify_token(token, token_hash):
