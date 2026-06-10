@@ -3,9 +3,15 @@
 import pytest
 
 from ohm.hooks import (
-    HookRecord, HookResult, HookRunner, VALID_HOOK_EVENTS,
-    _SHELL_NOT_FOUND_EXIT, _TIMEOUT_EXIT,
-    _sandbox_env, _is_sandboxed, _SANDBOX_SAFE_ENV_VARS,
+    HookRecord,
+    HookResult,
+    HookRunner,
+    VALID_HOOK_EVENTS,
+    _SHELL_NOT_FOUND_EXIT,
+    _TIMEOUT_EXIT,
+    _sandbox_env,
+    _is_sandboxed,
+    _SANDBOX_SAFE_ENV_VARS,
 )
 
 
@@ -16,12 +22,14 @@ def _can_fork():
     or if /bin/sh cannot fork for other reasons.
     """
     import os
+
     # If sandbox is active, forking is intentionally disabled
     if os.environ.get("OHM_SANDBOX_DISABLE", "") not in ("1", "true", "yes"):
         # Sandbox is active — NPROC limit prevents forking by design
         return False
     try:
         import subprocess
+
         result = subprocess.run(["sh", "-c", "sleep 0.1"], timeout=2, capture_output=True)
         return result.returncode == 0
     except Exception:
@@ -440,29 +448,35 @@ class TestPythonCallableHooks:
         from ohm.hooks_builtin import cross_link_check
 
         test_db.execute("INSERT INTO ohm_nodes (id, label, type, created_by) VALUES (?, ?, ?, ?)", ["n1", "Anchor", "concept", "test"])
-        exit_code, stdout, stderr = cross_link_check({
-            "body": {"type": "pattern", "id": "p1", "connects_to": ["n1"]},
-            "__conn": test_db,
-        })
+        exit_code, stdout, stderr = cross_link_check(
+            {
+                "body": {"type": "pattern", "id": "p1", "connects_to": ["n1"]},
+                "__conn": test_db,
+            }
+        )
         assert exit_code == 0
 
     def test_cross_link_check_rejects_bare_pattern(self, test_db):
         from ohm.hooks_builtin import cross_link_check
 
-        exit_code, stdout, stderr = cross_link_check({
-            "body": {"type": "pattern", "id": "p2"},
-            "__conn": test_db,
-        })
+        exit_code, stdout, stderr = cross_link_check(
+            {
+                "body": {"type": "pattern", "id": "p2"},
+                "__conn": test_db,
+            }
+        )
         assert exit_code == 1
         assert "cross_link_required" in stderr
 
     def test_cross_link_check_rejects_unknown_target(self, test_db):
         from ohm.hooks_builtin import cross_link_check
 
-        exit_code, stdout, stderr = cross_link_check({
-            "body": {"type": "pattern", "id": "p3", "connects_to": ["nonexistent"]},
-            "__conn": test_db,
-        })
+        exit_code, stdout, stderr = cross_link_check(
+            {
+                "body": {"type": "pattern", "id": "p3", "connects_to": ["nonexistent"]},
+                "__conn": test_db,
+            }
+        )
         assert exit_code == 1
         assert "unknown" in stderr.lower()
 
@@ -470,45 +484,55 @@ class TestPythonCallableHooks:
         from ohm.hooks_builtin import cross_link_check
 
         test_db.execute("INSERT INTO ohm_nodes (id, label, type, created_by) VALUES (?, ?, ?, ?)", ["p4", "Old", "pattern", "test"])
-        exit_code, stdout, stderr = cross_link_check({
-            "body": {"type": "pattern", "id": "p4"},
-            "__conn": test_db,
-        })
+        exit_code, stdout, stderr = cross_link_check(
+            {
+                "body": {"type": "pattern", "id": "p4"},
+                "__conn": test_db,
+            }
+        )
         assert exit_code == 0
 
     def test_cross_link_check_invalid_connects_to_type(self, test_db):
         from ohm.hooks_builtin import cross_link_check
 
-        exit_code, stdout, stderr = cross_link_check({
-            "body": {"type": "pattern", "id": "p5", "connects_to": "not-a-list"},
-            "__conn": test_db,
-        })
+        exit_code, stdout, stderr = cross_link_check(
+            {
+                "body": {"type": "pattern", "id": "p5", "connects_to": "not-a-list"},
+                "__conn": test_db,
+            }
+        )
         assert exit_code == 1
         assert "list" in stderr
 
     def test_source_url_required_passes(self, test_db):
         from ohm.hooks_builtin import source_url_required
 
-        exit_code, stdout, stderr = source_url_required({
-            "body": {"type": "source", "source_url": "https://example.com"},
-        })
+        exit_code, stdout, stderr = source_url_required(
+            {
+                "body": {"type": "source", "source_url": "https://example.com"},
+            }
+        )
         assert exit_code == 0
 
     def test_source_url_required_rejects_missing(self, test_db):
         from ohm.hooks_builtin import source_url_required
 
-        exit_code, stdout, stderr = source_url_required({
-            "body": {"type": "source"},
-        })
+        exit_code, stdout, stderr = source_url_required(
+            {
+                "body": {"type": "source"},
+            }
+        )
         assert exit_code == 1
         assert "source_url" in stderr
 
     def test_source_url_required_skips_non_source(self, test_db):
         from ohm.hooks_builtin import source_url_required
 
-        exit_code, stdout, stderr = source_url_required({
-            "body": {"type": "concept"},
-        })
+        exit_code, stdout, stderr = source_url_required(
+            {
+                "body": {"type": "concept"},
+            }
+        )
         assert exit_code == 0
 
     def test_python_hook_invalid_module(self, test_db):
@@ -560,6 +584,7 @@ class TestHookSandbox:
     def test_sandbox_env_excludes_secrets(self):
         """_sandbox_env() strips sensitive env vars."""
         import os
+
         # Temporarily set a fake secret
         old_val = os.environ.get("MY_SECRET_TOKEN")
         try:
@@ -582,12 +607,14 @@ class TestHookSandbox:
     def test_is_sandboxed_default_true(self):
         """_is_sandboxed() returns True when OHM_SANDBOX_DISABLE is not set."""
         from ohm.hooks import _is_sandboxed
+
         assert _is_sandboxed() is True
 
     def test_is_sandboxed_false_when_disabled(self):
         """_is_sandboxed() returns False when OHM_SANDBOX_DISABLE=1."""
         import os
         from ohm.hooks import _is_sandboxed
+
         old = os.environ.get("OHM_SANDBOX_DISABLE")
         try:
             os.environ["OHM_SANDBOX_DISABLE"] = "1"
@@ -603,7 +630,7 @@ class TestHookSandbox:
         """Shell hook subprocess receives only the sandboxed env."""
         test_db.execute(
             "INSERT INTO ohm_hooks (id, event, command, created_by) VALUES (?, ?, ?, ?)",
-            ["sandbox-test", "pre_ingest", "python3 -c \"import os,json; print(json.dumps(sorted(os.environ.keys())))\"", "test"],
+            ["sandbox-test", "pre_ingest", 'python3 -c "import os,json; print(json.dumps(sorted(os.environ.keys())))"', "test"],
         )
         runner = HookRunner(test_db)
         hooks = runner.get_hooks("pre_ingest")
@@ -612,7 +639,7 @@ class TestHookSandbox:
         assert result.success, f"Hook failed: {result.stderr}"
         # The subprocess should see only OHM_HOOK_* vars and safe vars
         import json as _json
+
         hook_keys = _json.loads(result.stdout.strip())
         for key in hook_keys:
             assert key in _SANDBOX_SAFE_ENV_VARS or key.startswith("OHM_HOOK_") or key == "OHM_CUSTOMER_ID", f"Unexpected env key: {key}"
-

@@ -606,6 +606,7 @@ def query_record_outcome(
     ).fetchone()
     if not node_exists:
         from ohm.exceptions import NodeNotFoundError
+
         raise NodeNotFoundError(f"claim_node not found: {claim_node}")
 
     outcome_id = str(uuid.uuid4())
@@ -850,9 +851,7 @@ def query_stats(conn: DuckDBPyConnection, include_l0: bool = False) -> dict[str,
 
     # OHM-a5rz.24: Fragment density metrics
     if include_l0:
-        fragments_total_row = conn.execute(
-            "SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL AND type = 'fragment'"
-        ).fetchone()
+        fragments_total_row = conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL AND type = 'fragment'").fetchone()
         fragments_total = fragments_total_row[0] if fragments_total_row else 0
 
         fragments_with_links_row = conn.execute("""
@@ -959,10 +958,7 @@ def create_node(
         existing_ids = {row[0] for row in existing}
         missing = [cid for cid in connects_to if cid not in existing_ids]
         if missing:
-            raise ValueError(
-                f"connects_to references unknown node id(s): {missing}. "
-                f"Cross-link targets must already exist in the graph."
-            )
+            raise ValueError(f"connects_to references unknown node id(s): {missing}. Cross-link targets must already exist in the graph.")
 
     # Serialize action_alternatives to JSON if provided
     alternatives_json = json.dumps(action_alternatives) if action_alternatives is not None else None
@@ -989,6 +985,7 @@ def create_node(
 
     # Serialize tags and metadata to JSON
     import json as _json
+
     tags_json = _json.dumps(tags) if tags else None
     metadata_json = _json.dumps(metadata) if metadata else None
 
@@ -1336,13 +1333,9 @@ def create_observation(
     from ohm.graph.decay import default_half_life
 
     if scale is not None and scale not in VALID_OBSERVATION_SCALES:
-        raise ValueError(
-            f"Invalid scale '{scale}' — must be one of: {', '.join(sorted(VALID_OBSERVATION_SCALES))}"
-        )
+        raise ValueError(f"Invalid scale '{scale}' — must be one of: {', '.join(sorted(VALID_OBSERVATION_SCALES))}")
     if scale == "probability" and value is not None and (value < 0.0 or value > 1.0):
-        raise ValueError(
-            f"Observation value {value} is outside [0, 1] for scale='probability'"
-        )
+        raise ValueError(f"Observation value {value} is outside [0, 1] for scale='probability'")
     import uuid
     from datetime import datetime, timezone
 
@@ -1357,8 +1350,7 @@ def create_observation(
            (id, node_id, edge_id, type, value, baseline, sigma, source, created_by, notes,
             source_name, source_url, scale, half_life_days, valid_from)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        [obs_id, node_id, edge_id, obs_type, value, baseline, sigma, source, created_by, notes,
-         source_name, source_url, scale, half_life_days, now],
+        [obs_id, node_id, edge_id, obs_type, value, baseline, sigma, source, created_by, notes, source_name, source_url, scale, half_life_days, now],
     )
     _log_change(conn, "ohm_observations", obs_id, "INSERT", created_by)
     # Return full observation record
@@ -1602,13 +1594,11 @@ def query_stale_edges(
         defaults.update(half_life_days)
 
     # Values are validated numeric literals from the hardcoded defaults dict — safe to interpolate.
-    when_clauses = " ".join(
-        f"WHEN '{k}' THEN {999999.0 if v == float('inf') or v <= 0 else float(v)}"
-        for k, v in defaults.items()
-    )
+    when_clauses = " ".join(f"WHEN '{k}' THEN {999999.0 if v == float('inf') or v <= 0 else float(v)}" for k, v in defaults.items())
     hl_case = f"CASE layer {when_clauses} ELSE 90.0 END"
 
-    result = conn.execute(f"""
+    result = conn.execute(
+        f"""
         WITH decayed AS (
             SELECT
                 id, from_node, to_node, layer, edge_type,
@@ -1632,7 +1622,9 @@ def query_stale_edges(
         SELECT * FROM decayed
         WHERE effective_confidence < ?
         ORDER BY effective_confidence ASC
-    """, [stale_threshold])
+    """,
+        [stale_threshold],
+    )
 
     rows = _rows_to_dicts(result)
 
@@ -3093,9 +3085,8 @@ def fuzzy_search(
     except Exception:
         # DuckDB may not have this function on older versions — degrade gracefully
         import logging
-        logging.getLogger(__name__).debug(
-            "fuzzy_search: jaro_winkler_similarity unavailable, returning empty"
-        )
+
+        logging.getLogger(__name__).debug("fuzzy_search: jaro_winkler_similarity unavailable, returning empty")
         return []
 
 
@@ -3145,6 +3136,7 @@ def update_node_embedding(
             parts.append(content)
         if tags_json:
             import json as _json
+
             try:
                 tags = _json.loads(tags_json) if isinstance(tags_json, str) else tags_json
                 if isinstance(tags, list) and tags:
@@ -3260,6 +3252,7 @@ def review_discovery_candidate(
     ).fetchone()
     if row is None:
         from ohm.exceptions import EdgeNotFoundError
+
         raise EdgeNotFoundError(f"Discovery queue entry {queue_id} not found")
 
     if row[8] != "pending":
@@ -3286,11 +3279,14 @@ def review_discovery_candidate(
             ohm_edge_type = "CORRELATES_WITH"
         elif edge_type.startswith("SUGGESTED_"):
             # Strip SUGGESTED_ prefix for any other types
-            ohm_edge_type = edge_type[len("SUGGESTED_"):]
+            ohm_edge_type = edge_type[len("SUGGESTED_") :]
 
         edge_id = create_edge(
-            conn, from_node=from_node, to_node=to_node,
-            edge_type=ohm_edge_type, layer=edge_layer,
+            conn,
+            from_node=from_node,
+            to_node=to_node,
+            edge_type=ohm_edge_type,
+            layer=edge_layer,
             confidence=confidence if confidence is not None else 0.5,
             provenance=provenance,
             created_by=reviewed_by,
@@ -3619,9 +3615,9 @@ def scratch(
 
     label = content.strip()[:80]
     url = None
-    url_match = re.search(r'https?://\S+', content)
+    url_match = re.search(r"https?://\S+", content)
     if url_match:
-        url = url_match.group(0).rstrip('.,;:)')
+        url = url_match.group(0).rstrip(".,;:)")
 
     node_id = generate_node_id(label)
 
@@ -3649,6 +3645,7 @@ def scratch(
     )
     if metadata:
         import json as _json
+
         conn.execute(
             "UPDATE ohm_nodes SET metadata = ? WHERE id = ?",
             [_json.dumps(metadata), node["id"]],
@@ -3671,13 +3668,15 @@ def scratch(
                 confidence=0.5,
                 provenance="scratch_explicit",
             )
-            explicit_links.append({
-                "node_id": target_id,
-                "label": _existing_label(conn, target_id),
-                "edge_id": edge["id"],
-                "edge_type": "CONTEXT_OF",
-                "provenance": "scratch_explicit",
-            })
+            explicit_links.append(
+                {
+                    "node_id": target_id,
+                    "label": _existing_label(conn, target_id),
+                    "edge_id": edge["id"],
+                    "edge_type": "CONTEXT_OF",
+                    "provenance": "scratch_explicit",
+                }
+            )
     if explicit_links:
         node["explicit_links"] = explicit_links
 
@@ -3719,7 +3718,10 @@ def _auto_link_fragment(
     if embedding is not None:
         try:
             sem_links = _semantic_auto_link_fragment(
-                conn, fragment_id, embedding, created_by,
+                conn,
+                fragment_id,
+                embedding,
+                created_by,
                 max_links=min(max_links, 3),  # top 3 per spec
             )
             if sem_links:
@@ -3774,13 +3776,15 @@ def _semantic_auto_link_fragment(
             confidence=0.3,
             provenance="auto_link_semantic",
         )
-        matched.append({
-            "node_id": candidate["id"],
-            "label": candidate["label"],
-            "edge_id": edge["id"],
-            "provenance": "auto_link_semantic",
-            "similarity": round(1.0 - candidate["distance"], 4),
-        })
+        matched.append(
+            {
+                "node_id": candidate["id"],
+                "label": candidate["label"],
+                "edge_id": edge["id"],
+                "provenance": "auto_link_semantic",
+                "similarity": round(1.0 - candidate["distance"], 4),
+            }
+        )
 
     return matched
 
@@ -3824,12 +3828,14 @@ def _substring_auto_link_fragment(
                 confidence=0.3,
                 provenance="auto_link_substring",
             )
-            matched.append({
-                "node_id": candidate["id"],
-                "label": candidate["label"],
-                "edge_id": edge["id"],
-                "provenance": "auto_link_substring",
-            })
+            matched.append(
+                {
+                    "node_id": candidate["id"],
+                    "label": candidate["label"],
+                    "edge_id": edge["id"],
+                    "provenance": "auto_link_substring",
+                }
+            )
 
     return matched
 
@@ -3899,13 +3905,15 @@ def _create_resonance_edges(
             confidence=0.3,
             provenance="auto_resonance",
         )
-        resonance_edges.append({
-            "node_id": fid,
-            "edge_id": edge["id"],
-            "edge_type": "RESONANCE",
-            "shared_targets": info["shared_targets"],
-            "shared_count": len(info["shared_targets"]),
-        })
+        resonance_edges.append(
+            {
+                "node_id": fid,
+                "edge_id": edge["id"],
+                "edge_type": "RESONANCE",
+                "shared_targets": info["shared_targets"],
+                "shared_count": len(info["shared_targets"]),
+            }
+        )
 
     return resonance_edges
 
@@ -3996,12 +4004,14 @@ def promote_fragment(
     from ohm.graph.constraints import validate_layer_promotion
 
     valid, warnings, errors = validate_layer_promotion(
-        fragment_id, "L0", "L1", conn, enforce=True,
+        fragment_id,
+        "L0",
+        "L1",
+        conn,
+        enforce=True,
     )
     if errors:
-        raise ConstraintViolationError(
-            f"Cannot promote fragment {fragment_id}: {'; '.join(errors)}"
-        )
+        raise ConstraintViolationError(f"Cannot promote fragment {fragment_id}: {'; '.join(errors)}")
 
     import json as _json
 
@@ -4131,15 +4141,17 @@ def detect_fragment_resonance(
         union = ctx_a | ctx_b
         jaccard = len(shared) / len(union) if union else 0.0
 
-        results.append({
-            "fragment_a": frag_a,
-            "fragment_b": frag_b,
-            "agent_a": agent_a,
-            "agent_b": agent_b,
-            "shared_context_nodes": sorted(shared),
-            "shared_count": len(shared),
-            "jaccard": round(jaccard, 3),
-        })
+        results.append(
+            {
+                "fragment_a": frag_a,
+                "fragment_b": frag_b,
+                "agent_a": agent_a,
+                "agent_b": agent_b,
+                "shared_context_nodes": sorted(shared),
+                "shared_count": len(shared),
+                "jaccard": round(jaccard, 3),
+            }
+        )
 
     return results
 
@@ -4190,8 +4202,7 @@ def reflect_challenge_to_fragments(
             """INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, created_by, confidence, provenance)
                VALUES (?, ?, ?, 'L0', 'CHALLENGED_BY', ?, 0.5, ?)
                ON CONFLICT (id) DO NOTHING""",
-            [ann_id, claim_node, frag_id, challenged_by,
-             f"auto: challenge backflow from {challenge_edge_id}"],
+            [ann_id, claim_node, frag_id, challenged_by, f"auto: challenge backflow from {challenge_edge_id}"],
         )
         results.append({"fragment_id": frag_id})
     return results
@@ -4392,12 +4403,14 @@ def query_fragment_clusters(
                 if len(shared) >= min_shared_targets:
                     cluster_targets |= shared
 
-        result.append({
-            "cluster_size": len(cluster),
-            "fragment_ids": sorted(cluster),
-            "shared_target_count": len(cluster_targets),
-            "shared_target_ids": sorted(cluster_targets),
-        })
+        result.append(
+            {
+                "cluster_size": len(cluster),
+                "fragment_ids": sorted(cluster),
+                "shared_target_count": len(cluster_targets),
+                "shared_target_ids": sorted(cluster_targets),
+            }
+        )
 
     return result
 

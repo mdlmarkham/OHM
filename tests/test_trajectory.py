@@ -172,7 +172,7 @@ class TestTrajectory:
     def test_acceleration_is_not_none(self, db):
         node_id = _create_node(db)
         for i in range(6):
-            _create_obs(db, node_id=node_id, value=float(i) * 0.1, created_at=f"2026-01-{i+1:02d}T00:00:00")
+            _create_obs(db, node_id=node_id, value=float(i) * 0.1, created_at=f"2026-01-{i + 1:02d}T00:00:00")
 
         from ohm.methods import compute_trajectory
 

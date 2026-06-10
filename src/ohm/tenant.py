@@ -66,6 +66,7 @@ TIER_QUOTAS: dict[str, dict] = {
 
 class QuotaExceededError(Exception):
     """Raised when a tenant exceeds their quota (OHM-982m)."""
+
     pass
 
 
@@ -209,6 +210,7 @@ class TenantManager:
 
         if self._shared_patterns_dir is not None:
             from ohm.patterns import load_patterns, seed_patterns
+
             patterns = load_patterns(self._shared_patterns_dir, domain)
             if patterns:
                 store = OhmStore(db_path=str(db_path), agent_name="ohmd", schema=schema)
@@ -400,22 +402,15 @@ class TenantManager:
                 entry = self._cache.get(customer_id)
             if entry is not None:
                 try:
-                    current = entry.store.conn.execute(
-                        f"SELECT COUNT(*) FROM {table_name} WHERE deleted_at IS NULL"
-                    ).fetchone()
+                    current = entry.store.conn.execute(f"SELECT COUNT(*) FROM {table_name} WHERE deleted_at IS NULL").fetchone()
                     current_count = current[0] if current else 0
                 except Exception:
                     current_count = 0
             else:
-                raise QuotaExceededError(
-                    f"Tenant '{customer_id}' cannot verify {resource} quota — store not in cache"
-                )
+                raise QuotaExceededError(f"Tenant '{customer_id}' cannot verify {resource} quota — store not in cache")
 
             if current_count + amount > limit:
-                raise QuotaExceededError(
-                    f"Tenant '{customer_id}' would exceed {resource} quota: "
-                    f"{current_count + amount} > {limit}"
-                )
+                raise QuotaExceededError(f"Tenant '{customer_id}' would exceed {resource} quota: {current_count + amount} > {limit}")
 
         elif resource == "db_size_bytes":
             db_path = self._tenant_dir(customer_id) / _DB_FILENAME
@@ -424,10 +419,7 @@ class TenantManager:
             except Exception:
                 current_size = 0
             if current_size + amount > limit:
-                raise QuotaExceededError(
-                    f"Tenant '{customer_id}' would exceed DB size quota: "
-                    f"{current_size + amount} > {limit}"
-                )
+                raise QuotaExceededError(f"Tenant '{customer_id}' would exceed DB size quota: {current_size + amount} > {limit}")
 
         elif resource == "requests_per_day":
             today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -441,10 +433,7 @@ class TenantManager:
                 request_counts[date] += count
             current_count = request_counts.get(today, 0)
             if current_count + amount > limit:
-                raise QuotaExceededError(
-                    f"Tenant '{customer_id}' would exceed daily request quota: "
-                    f"{current_count + amount} > {limit}"
-                )
+                raise QuotaExceededError(f"Tenant '{customer_id}' would exceed daily request quota: {current_count + amount} > {limit}")
 
     def record_request(self, customer_id: str) -> int:
         """Record a request for rate limiting (OHM-982m). Returns today's count.
@@ -586,7 +575,7 @@ class TenantManager:
 
     def shutdown(self) -> None:
         """Signal background threads to stop and checkpoint all tenants (OHM-xfqp)."""
-        if not hasattr(self, '_stop_event') or not hasattr(self, '_eviction_thread'):
+        if not hasattr(self, "_stop_event") or not hasattr(self, "_eviction_thread"):
             return  # Not fully initialized — nothing to shut down
         self._stop_event.set()  # Signal threads to stop
         self._eviction_thread.join(timeout=5)  # Wait for eviction to finish
@@ -647,12 +636,14 @@ class TenantManager:
             # Check for migration lock file (indicates crash mid-migration)
             lock_path = self._tenant_dir(cid) / ".migration_lock"
             if lock_path.exists():
-                results.append({
-                    "customer_id": cid,
-                    "meta_version": tenant_version_str,
-                    "db_version": "unknown",
-                    "status": "half_migrated",
-                })
+                results.append(
+                    {
+                        "customer_id": cid,
+                        "meta_version": tenant_version_str,
+                        "db_version": "unknown",
+                        "status": "half_migrated",
+                    }
+                )
                 meta["needs_attention"] = True
                 meta["migration_error"] = "Migration lock file found — previous migration may have crashed"
                 self._write_meta(cid, meta)
@@ -662,12 +653,14 @@ class TenantManager:
             try:
                 db_path = self._tenant_dir(cid) / _DB_FILENAME
                 if not db_path.exists():
-                    results.append({
-                        "customer_id": cid,
-                        "meta_version": tenant_version_str,
-                        "db_version": "missing",
-                        "status": "meta_behind",
-                    })
+                    results.append(
+                        {
+                            "customer_id": cid,
+                            "meta_version": tenant_version_str,
+                            "db_version": "missing",
+                            "status": "meta_behind",
+                        }
+                    )
                     continue
 
                 store = self.get_store(cid)
@@ -688,19 +681,23 @@ class TenantManager:
                 else:
                     status = "ok"
 
-                results.append({
-                    "customer_id": cid,
-                    "meta_version": tenant_version_str,
-                    "db_version": db_version,
-                    "status": status,
-                })
+                results.append(
+                    {
+                        "customer_id": cid,
+                        "meta_version": tenant_version_str,
+                        "db_version": db_version,
+                        "status": status,
+                    }
+                )
             except Exception as e:
-                results.append({
-                    "customer_id": cid,
-                    "meta_version": tenant_version_str,
-                    "db_version": "error",
-                    "status": "meta_behind",
-                })
+                results.append(
+                    {
+                        "customer_id": cid,
+                        "meta_version": tenant_version_str,
+                        "db_version": "error",
+                        "status": "meta_behind",
+                    }
+                )
                 meta["needs_attention"] = True
                 meta["migration_error"] = f"Reconciliation error: {e}"
                 self._write_meta(cid, meta)
@@ -736,6 +733,7 @@ class TenantManager:
 
     def _load_schema(self, domain: str) -> SchemaConfig:
         import re as _re
+
         if not _re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,62}", domain):
             raise ValueError(f"Invalid domain '{domain}' — must be lowercase alphanumeric/underscore/hyphen, 1-63 chars")
         # Try custom templates dir first
@@ -823,17 +821,24 @@ class TenantManager:
 
             logger.info(
                 "Migrating tenant %s from %s to %s",
-                customer_id, db_version, SCHEMA_VERSION,
+                customer_id,
+                db_version,
+                SCHEMA_VERSION,
             )
             # Write migration lock file for crash detection
-            lock_path.write_text(json.dumps({
-                "customer_id": customer_id,
-                "from_version": db_version,
-                "to_version": SCHEMA_VERSION,
-                "started_at": datetime.now(timezone.utc).isoformat(),
-            }))
+            lock_path.write_text(
+                json.dumps(
+                    {
+                        "customer_id": customer_id,
+                        "from_version": db_version,
+                        "to_version": SCHEMA_VERSION,
+                        "started_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+            )
             try:
                 from ohm.schema import _apply_migrations
+
                 _apply_migrations(store.conn)
                 meta["schema_version"] = SCHEMA_VERSION
                 meta.pop("needs_attention", None)
@@ -883,7 +888,10 @@ class TenantManager:
             self._write_meta(customer_id, meta)
             logger.info(
                 "Propagated template v%d \u2192 v%d for tenant %s (domain=%s)",
-                tenant_tv, current_tv, customer_id, domain,
+                tenant_tv,
+                current_tv,
+                customer_id,
+                domain,
             )
 
     @staticmethod
@@ -989,7 +997,7 @@ class TenantManager:
     def _eviction_loop(self) -> None:
         """Background thread: evict idle tenants every 60 seconds (OHM-s8sg: resilient, OHM-xfqp: graceful shutdown)."""
         consecutive_errors = 0
-        stop_event = getattr(self, '_stop_event', None)
+        stop_event = getattr(self, "_stop_event", None)
         while not (stop_event and stop_event.is_set()):
             try:
                 stop_event.wait(timeout=60) if stop_event else True  # OHM-xfqp: interruptible sleep
@@ -1009,7 +1017,7 @@ class TenantManager:
     def _checkpoint_loop(self) -> None:
         """Background thread: periodic checkpoint of active tenants (OHM-p7fv, OHM-s8sg: resilient, OHM-xfqp: graceful shutdown)."""
         consecutive_errors = 0
-        stop_event = getattr(self, '_stop_event', None)
+        stop_event = getattr(self, "_stop_event", None)
         while not (stop_event and stop_event.is_set()):
             try:
                 stop_event.wait(timeout=self._checkpoint_interval) if stop_event else True  # OHM-xfqp: interruptible sleep
@@ -1203,7 +1211,7 @@ class TenantManager:
                     return True
                 except (IOError, OSError):
                     if attempt < max_attempts - 1:
-                        _time.sleep(0.05 * (2 ** attempt))
+                        _time.sleep(0.05 * (2**attempt))
             return False
 
         def _atomic_copy(src: Path, dst_dir: Path, name: str) -> tuple[int, str]:
@@ -1285,12 +1293,14 @@ class TenantManager:
                 if meta_path.exists():
                     try:
                         meta = json.loads(meta_path.read_text())
-                        backups.append({
-                            "backup_id": entry.name,
-                            "created_at": meta.get("created_at", ""),
-                            "reason": meta.get("reason", "unknown"),
-                            "db_size_bytes": meta.get("db_size_bytes", 0),
-                        })
+                        backups.append(
+                            {
+                                "backup_id": entry.name,
+                                "created_at": meta.get("created_at", ""),
+                                "reason": meta.get("reason", "unknown"),
+                                "db_size_bytes": meta.get("db_size_bytes", 0),
+                            }
+                        )
                     except Exception:
                         backups.append({"backup_id": entry.name, "created_at": "", "reason": "unknown", "db_size_bytes": 0})
 

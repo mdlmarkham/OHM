@@ -268,8 +268,7 @@ class TestChallengeNudge:
         result = agent_heartbeat(conn, "agent_a")
         if result["challenge_nudge"]:
             nudge = result["challenge_nudge"][0]
-            for key in ("edge_id", "from_node", "to_node", "edge_type",
-                        "confidence", "edge_author", "from_label", "to_label"):
+            for key in ("edge_id", "from_node", "to_node", "edge_type", "confidence", "edge_author", "from_label", "to_label"):
                 assert key in nudge, f"Missing nudge field: {key}"
 
     def test_empty_graph_no_nudge(self, conn):
@@ -284,8 +283,7 @@ class TestChallengeNudge:
 class TestHeartbeatResponseShape:
     def test_all_new_fields_always_present(self, conn):
         result = agent_heartbeat(conn, "agent_a")
-        for key in ("sacred_references", "sacred_references_count",
-                    "challenge_ratio", "challenge_nudge"):
+        for key in ("sacred_references", "sacred_references_count", "challenge_ratio", "challenge_nudge"):
             assert key in result, f"Missing heartbeat field: {key}"
 
     def test_heartbeat_creates_agent_state_on_first_call(self, conn):

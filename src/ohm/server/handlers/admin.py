@@ -860,17 +860,16 @@ class AdminHandlerMixin:
             include_l0=False,
         )
         if fuzzy_results:
-            suggestions = [
-                {"id": r.get("id", ""), "label": r.get("label", ""), "type": r.get("type"), "similarity": r.get("distance", 0)}
-                for r in fuzzy_results
-                if r.get("label")
-            ]
-            self._json_response(200, {
-                "resolved": None,
-                "suggestions": suggestions,
-                "count": len(suggestions),
-                "fallback": "fuzzy",
-            })
+            suggestions = [{"id": r.get("id", ""), "label": r.get("label", ""), "type": r.get("type"), "similarity": r.get("distance", 0)} for r in fuzzy_results if r.get("label")]
+            self._json_response(
+                200,
+                {
+                    "resolved": None,
+                    "suggestions": suggestions,
+                    "count": len(suggestions),
+                    "fallback": "fuzzy",
+                },
+            )
             return
 
         self._json_response(404, {"error": "not_found", "message": f"No match for '{query}' via alias, prefix, or fuzzy search"})
@@ -1210,7 +1209,7 @@ class AdminHandlerMixin:
 
         # Get the set of currently authenticated agent names
         # self.tokens maps {token_hash: agent_name} — invert to get agent names
-        configured_agents = set(self.tokens.values()) if hasattr(self, 'tokens') else set()
+        configured_agents = set(self.tokens.values()) if hasattr(self, "tokens") else set()
 
         with self.current_store._lock:
             # Find nodes by agents not in current token config
@@ -1218,9 +1217,7 @@ class AdminHandlerMixin:
             include_connected = body.get("include_connected", False)
             if include_connected:
                 # Build a list of ghost agent names (in DB but not in current token config)
-                ghost_agents = conn.execute(
-                    "SELECT DISTINCT created_by FROM ohm_nodes WHERE deleted_at IS NULL AND created_by IS NOT NULL"
-                ).fetchall()
+                ghost_agents = conn.execute("SELECT DISTINCT created_by FROM ohm_nodes WHERE deleted_at IS NULL AND created_by IS NOT NULL").fetchall()
                 ghost_names = [r[0] for r in ghost_agents if r[0] not in configured_agents]
                 if not ghost_names:
                     self._json_response(200, {"candidates": 0, "purged": 0, "observations_removed": 0, "edges_removed": 0, "dry_run": dry_run, "configured_agents": sorted(configured_agents), "ghost_agents": []})
@@ -1261,7 +1258,7 @@ class AdminHandlerMixin:
                 continue
             # Skip if too recent
             try:
-                created_dt = datetime.fromisoformat(str(created_at).replace('Z', '+00:00'))
+                created_dt = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
                 if created_dt > cutoff:
                     continue
             except Exception:
@@ -1270,14 +1267,16 @@ class AdminHandlerMixin:
             if obs_count > max_observations:
                 continue
             # Apply provenance filter if specified
-            if provenance_filter and (provenance or '') != provenance_filter and not (provenance or '').startswith(provenance_filter):
+            if provenance_filter and (provenance or "") != provenance_filter and not (provenance or "").startswith(provenance_filter):
                 continue
-            candidates.append({
-                "id": node_id,
-                "created_by": created_by,
-                "provenance": provenance,
-                "observations": obs_count,
-            })
+            candidates.append(
+                {
+                    "id": node_id,
+                    "created_by": created_by,
+                    "provenance": provenance,
+                    "observations": obs_count,
+                }
+            )
 
         purged = 0
         obs_removed = 0
@@ -1288,24 +1287,15 @@ class AdminHandlerMixin:
                 try:
                     with self.current_store._lock:
                         # Soft-delete observations
-                        r1 = conn.execute(
-                            "UPDATE ohm_observations SET deleted_at = CURRENT_TIMESTAMP WHERE node_id = ? AND deleted_at IS NULL",
-                            [c["id"]]
-                        )
-                        obs_removed += r1.rowcount if hasattr(r1, 'rowcount') else 0
+                        r1 = conn.execute("UPDATE ohm_observations SET deleted_at = CURRENT_TIMESTAMP WHERE node_id = ? AND deleted_at IS NULL", [c["id"]])
+                        obs_removed += r1.rowcount if hasattr(r1, "rowcount") else 0
                         # Soft-delete connected edges if include_connected
                         if include_connected:
-                            r1b = conn.execute(
-                                "UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE (from_node = ? OR to_node = ?) AND deleted_at IS NULL",
-                                [c["id"], c["id"]]
-                            )
-                            edges_removed += r1b.rowcount if hasattr(r1b, 'rowcount') else 0
+                            r1b = conn.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE (from_node = ? OR to_node = ?) AND deleted_at IS NULL", [c["id"], c["id"]])
+                            edges_removed += r1b.rowcount if hasattr(r1b, "rowcount") else 0
                         # Soft-delete the node
-                        r2 = conn.execute(
-                            "UPDATE ohm_nodes SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL",
-                            [c["id"]]
-                        )
-                        if r2.rowcount if hasattr(r2, 'rowcount') else 0:
+                        r2 = conn.execute("UPDATE ohm_nodes SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL", [c["id"]])
+                        if r2.rowcount if hasattr(r2, "rowcount") else 0:
                             purged += 1
                 except Exception as e:
                     logger.warning(f"Failed to purge {c['id']}: {e}")

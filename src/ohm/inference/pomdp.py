@@ -205,12 +205,14 @@ def compute_policy(
                     good_p = good_posteriors.get(node_id, {}).get("bad", 0)
                     diff = round(bad_p - good_p, 4)
                     if abs(diff) >= 0.05:  # Only report meaningful differences
-                        downstream_diff.append({
-                            "node_id": node_id,
-                            "p_bad_if_bad": bad_p,
-                            "p_bad_if_good": good_p,
-                            "impact": diff,
-                        })
+                        downstream_diff.append(
+                            {
+                                "node_id": node_id,
+                                "p_bad_if_bad": bad_p,
+                                "p_bad_if_good": good_p,
+                                "impact": diff,
+                            }
+                        )
 
             downstream_diff.sort(key=lambda x: abs(x["impact"]), reverse=True)
 
@@ -231,19 +233,11 @@ def compute_policy(
     if recommend_observe:
         recommendation = "observe"
         confidence = min(1.0, evsi / (cost_of_observation * 2)) if cost_of_observation > 0 else 0.5
-        reasoning = (
-            f"EVSI ({evsi:.4f}) exceeds observation cost ({cost_of_observation:.4f}). "
-            f"Expected improvement from a single observation (quality {sample_quality:.0%}) "
-            f"exceeds the cost of gathering it."
-        )
+        reasoning = f"EVSI ({evsi:.4f}) exceeds observation cost ({cost_of_observation:.4f}). Expected improvement from a single observation (quality {sample_quality:.0%}) exceeds the cost of gathering it."
     else:
         recommendation = "act"
         confidence = min(1.0, cost_of_observation / (evsi + 0.01)) if evsi > 0 else 0.5
-        reasoning = (
-            f"EVSI ({evsi:.4f}) does not exceed observation cost ({cost_of_observation:.4f}). "
-            f"Take action now — a single observation would not improve decision quality enough "
-            f"to justify its cost."
-        )
+        reasoning = f"EVSI ({evsi:.4f}) does not exceed observation cost ({cost_of_observation:.4f}). Take action now — a single observation would not improve decision quality enough to justify its cost."
 
     if not rankings:
         reasoning = "No causal ancestors found. Insufficient graph structure to compute VoI. Recommend act based on current belief."
@@ -255,10 +249,7 @@ def compute_policy(
         impacts = (intervention_comparison or {}).get("downstream_impacts", [])
         if impacts:
             top_impact = impacts[0]
-            reasoning += (
-                f" The largest downstream impact: {top_impact['node_id']} "
-                f"shifts {top_impact['impact']:+.2%} in P(bad) depending on action."
-            )
+            reasoning += f" The largest downstream impact: {top_impact['node_id']} shifts {top_impact['impact']:+.2%} in P(bad) depending on action."
 
     # Observation recommendation: which node to observe?
     observe_target = None

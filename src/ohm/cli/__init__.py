@@ -777,6 +777,7 @@ def _handle_sync(args: argparse.Namespace) -> None:
             result = store.check_ducklake_health(alias=args.alias)
             if args.format == "json":
                 import json
+
                 print(json.dumps(result, indent=2, default=str))
             else:
                 status = "✓ HEALTHY" if result.get("healthy") else "✗ DEGRADED"
@@ -794,6 +795,7 @@ def _handle_sync(args: argparse.Namespace) -> None:
             result = store.repair_from_ducklake(alias=args.alias)
             if args.format == "json":
                 import json
+
                 print(json.dumps(result, indent=2, default=str))
             else:
                 print("DuckLake Repair Results:")
@@ -809,6 +811,7 @@ def _handle_sync(args: argparse.Namespace) -> None:
             result = store.sync_heartbeat()
             if args.format == "json":
                 import json
+
                 print(json.dumps(result, indent=2, default=str))
             else:
                 print(f"Synced: pushed={result.get('pushed', 0)} pulled={result.get('pulled', 0)}")
@@ -2841,6 +2844,7 @@ def _handle_scratch(args: argparse.Namespace) -> None:
         print(f"Created fragment: {result.get('id', '?')}")
         if args.format == "json":
             import json
+
             print(json.dumps(result, indent=2, default=str))
     finally:
         conn.close()

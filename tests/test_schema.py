@@ -471,6 +471,7 @@ class TestSchemaConfigSerialization:
 
     def test_from_dict_missing_keys(self):
         import pytest
+
         with pytest.raises(ValueError, match="missing required keys"):
             SchemaConfig.from_dict({"name": "broken"})
 
@@ -499,11 +500,13 @@ class TestSchemaConfigSerialization:
 
     def test_from_json_file_not_found(self):
         import pytest
+
         with pytest.raises(FileNotFoundError, match="nonexistent.json"):
             SchemaConfig.from_json_file("nonexistent.json")
 
     def test_from_json_file_custom_search_path(self, tmp_path):
         import json
+
         template = {"name": "custom_test", "node_types": ["idea", "source"], "layer_descriptions": {"L1": "test"}, "observation_types": ["anomaly"], "observation_sources": ["owner"], "provenances": ["research"]}
         template_path = tmp_path / "custom_test.json"
         template_path.write_text(json.dumps(template))
@@ -533,8 +536,7 @@ class TestHomeServicesSchema:
 
     def test_home_services_node_types(self):
         config = SchemaConfig.from_json_file("home_services.json")
-        for expected in ["customer", "technician", "job", "appointment", "equipment",
-                         "service_contract", "warranty", "estimate", "invoice"]:
+        for expected in ["customer", "technician", "job", "appointment", "equipment", "service_contract", "warranty", "estimate", "invoice"]:
             assert expected in config.node_types, f"Missing node type: {expected}"
 
     def test_home_services_observation_types(self):
@@ -559,6 +561,7 @@ class TestHomeServicesSchema:
 
     def test_home_services_module_constant(self):
         from ohm.schema import HOME_SERVICES_SCHEMA
+
         assert HOME_SERVICES_SCHEMA.name == "home_services"
 
 
@@ -571,8 +574,7 @@ class TestManufacturingSchema:
 
     def test_manufacturing_node_types(self):
         config = SchemaConfig.from_json_file("manufacturing.json")
-        for expected in ["work_order", "bill_of_materials", "quality_check",
-                         "machine", "tool", "fixture", "workstation", "product"]:
+        for expected in ["work_order", "bill_of_materials", "quality_check", "machine", "tool", "fixture", "workstation", "product"]:
             assert expected in config.node_types, f"Missing node type: {expected}"
 
     def test_manufacturing_observation_types(self):
@@ -587,6 +589,7 @@ class TestManufacturingSchema:
 
     def test_manufacturing_module_constant(self):
         from ohm.schema import MANUFACTURING_SCHEMA
+
         assert MANUFACTURING_SCHEMA.name == "manufacturing"
 
 
@@ -599,8 +602,7 @@ class TestConstructionSchema:
 
     def test_construction_node_types(self):
         config = SchemaConfig.from_json_file("construction.json")
-        for expected in ["project", "phase", "crew", "subcontractor", "material",
-                         "permit", "inspection", "change_order", "site", "drawing", "specification"]:
+        for expected in ["project", "phase", "crew", "subcontractor", "material", "permit", "inspection", "change_order", "site", "drawing", "specification"]:
             assert expected in config.node_types, f"Missing node type: {expected}"
 
     def test_construction_observation_types(self):
@@ -615,6 +617,7 @@ class TestConstructionSchema:
 
     def test_construction_module_constant(self):
         from ohm.schema import CONSTRUCTION_SCHEMA
+
         assert CONSTRUCTION_SCHEMA.name == "construction"
 
 
@@ -627,8 +630,7 @@ class TestHealthcareSchema:
 
     def test_healthcare_node_types(self):
         config = SchemaConfig.from_json_file("healthcare.json")
-        for expected in ["patient", "provider", "payer", "procedure", "diagnosis",
-                         "prior_auth", "claim", "referral", "medication", "lab_result", "appointment"]:
+        for expected in ["patient", "provider", "payer", "procedure", "diagnosis", "prior_auth", "claim", "referral", "medication", "lab_result", "appointment"]:
             assert expected in config.node_types, f"Missing node type: {expected}"
 
     def test_healthcare_observation_types(self):
@@ -642,6 +644,7 @@ class TestHealthcareSchema:
 
     def test_healthcare_module_constant(self):
         from ohm.schema import HEALTHCARE_SCHEMA
+
         assert HEALTHCARE_SCHEMA.name == "healthcare"
 
 
@@ -656,9 +659,7 @@ class TestHookRegistryTable:
 
     def test_hooks_table_columns(self, test_db):
         """ohm_hooks has all required columns."""
-        columns = test_db.execute(
-            "SELECT column_name FROM information_schema.columns WHERE table_name = 'ohm_hooks'"
-        ).fetchall()
+        columns = test_db.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'ohm_hooks'").fetchall()
         col_names = {row[0] for row in columns}
         assert "id" in col_names
         assert "event" in col_names
@@ -691,6 +692,7 @@ class TestHookRegistryTable:
     def test_migration_v0_21_0(self, test_db):
         """Migration 0.21.0 creates ohm_hooks on existing DB."""
         from ohm.schema import SCHEMA_VERSION
+
         assert SCHEMA_VERSION >= "0.21.0"
 
 
@@ -703,9 +705,7 @@ class TestHookLogTable:
         assert "ohm_hook_log" in table_names
 
     def test_hook_log_columns(self, test_db):
-        columns = test_db.execute(
-            "SELECT column_name FROM information_schema.columns WHERE table_name = 'ohm_hook_log'"
-        ).fetchall()
+        columns = test_db.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'ohm_hook_log'").fetchall()
         col_names = {row[0] for row in columns}
         for col in ("id", "hook_id", "event", "payload", "exit_code", "stdout", "stderr", "duration_ms", "timed_out", "triggered_at"):
             assert col in col_names
@@ -728,6 +728,7 @@ class TestHookLogTable:
 
     def test_migration_v0_22_0(self, test_db):
         from ohm.schema import MIGRATIONS
+
         v022 = [m for m in MIGRATIONS if m[0] == "0.22.0"]
         assert len(v022) == 1
         assert "ohm_hook_log" in v022[0][2][0]
@@ -742,9 +743,7 @@ class TestAliasAndContentHashTables:
         assert "ohm_aliases" in table_names
 
     def test_aliases_columns(self, test_db):
-        columns = test_db.execute(
-            "SELECT column_name FROM information_schema.columns WHERE table_name = 'ohm_aliases'"
-        ).fetchall()
+        columns = test_db.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'ohm_aliases'").fetchall()
         col_names = {row[0] for row in columns}
         for col in ("id", "alias_norm", "node_id", "created_at"):
             assert col in col_names
@@ -761,9 +760,7 @@ class TestAliasAndContentHashTables:
         assert "ohm_content_hashes" in table_names
 
     def test_content_hashes_columns(self, test_db):
-        columns = test_db.execute(
-            "SELECT column_name FROM information_schema.columns WHERE table_name = 'ohm_content_hashes'"
-        ).fetchall()
+        columns = test_db.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'ohm_content_hashes'").fetchall()
         col_names = {row[0] for row in columns}
         for col in ("id", "node_id", "content_hash", "created_at"):
             assert col in col_names
@@ -776,6 +773,7 @@ class TestAliasAndContentHashTables:
 
     def test_migration_v0_23_0(self, test_db):
         from ohm.schema import MIGRATIONS, SCHEMA_VERSION
+
         assert SCHEMA_VERSION >= "0.23.0"
         v023 = [m for m in MIGRATIONS if m[0] == "0.23.0"]
         assert len(v023) == 1

@@ -14,9 +14,7 @@ try:
 except ImportError:
     NETWORKX_AVAILABLE = False
 
-pytestmark = pytest.mark.skipif(
-    not NETWORKX_AVAILABLE, reason="networkx not installed"
-)
+pytestmark = pytest.mark.skipif(not NETWORKX_AVAILABLE, reason="networkx not installed")
 
 
 def test_centrality_empty_graph(test_db):

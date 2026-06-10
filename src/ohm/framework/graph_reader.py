@@ -425,6 +425,7 @@ class MockGraphReader:
 
     def get_observation_counts(self, node_ids: list[str]) -> dict[str, int]:
         from collections import Counter
+
         counts = Counter(o.node_id for o in self.observations if o.node_id in set(node_ids))
         return {nid: counts.get(nid, 0) for nid in node_ids}
 

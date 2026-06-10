@@ -51,8 +51,12 @@ class Graph:
             'observation_types', 'provenances', 'visibilities', and 'guide'.
         """
         from ohm.schema import (
-            VALID_NODE_TYPES, LAYER_EDGE_TYPES, VALID_OBSERVATION_TYPES,
-            VALID_OBSERVATION_SOURCES, VALID_VISIBILITIES, VALID_PROVENANCES,
+            VALID_NODE_TYPES,
+            LAYER_EDGE_TYPES,
+            VALID_OBSERVATION_TYPES,
+            VALID_OBSERVATION_SOURCES,
+            VALID_VISIBILITIES,
+            VALID_PROVENANCES,
             get_schema_version,
         )
 
@@ -77,6 +81,7 @@ class Graph:
             'node_type_guide', 'edge_type_guide', 'cross_link_rule'.
         """
         import requests
+
         r = requests.get(f"{self.url}/schema", headers=self._headers)
         r.raise_for_status()
         data = r.json()
@@ -223,9 +228,7 @@ class Graph:
             "schema_version": get_schema_version(self._conn),
         }
 
-    def _resolve_label_or_id(
-        self, node_id_or_label: str, *, create_if_missing: bool = False
-    ) -> str:
+    def _resolve_label_or_id(self, node_id_or_label: str, *, create_if_missing: bool = False) -> str:
         """Resolve a node_id or label to a node_id.
 
         Heuristic: if the string matches UUID pattern (36 chars with 4 hyphens),
@@ -246,15 +249,11 @@ class Graph:
         if len(node_id_or_label) == 36 and node_id_or_label.count("-") == 4:
             return node_id_or_label
 
-        row = self._conn.execute(
-            "SELECT id FROM ohm_nodes WHERE label = ?", [node_id_or_label]
-        ).fetchone()
+        row = self._conn.execute("SELECT id FROM ohm_nodes WHERE label = ?", [node_id_or_label]).fetchone()
         if row:
             return row[0]
 
-        row = self._conn.execute(
-            "SELECT id FROM ohm_nodes WHERE id = ?", [node_id_or_label]
-        ).fetchone()
+        row = self._conn.execute("SELECT id FROM ohm_nodes WHERE id = ?", [node_id_or_label]).fetchone()
         if row:
             return row[0]
 
@@ -656,9 +655,17 @@ class Graph:
             return {"updated": [], "count": 0}
 
         set_fields = [
-            "probability", "probability_p05", "probability_p50", "probability_p95",
-            "confidence", "confidence_p05", "confidence_p50", "confidence_p95",
-            "condition", "provenance", "urgency",
+            "probability",
+            "probability_p05",
+            "probability_p50",
+            "probability_p95",
+            "confidence",
+            "confidence_p05",
+            "confidence_p50",
+            "confidence_p95",
+            "condition",
+            "provenance",
+            "urgency",
         ]
         results = []
         errors = []
@@ -2745,27 +2752,80 @@ class Graph:
 
         # Column allowlists — only known schema columns are permitted as column
         # names in the generated INSERT statements (OHM-ftwx).
-        _NODE_COLS = frozenset({
-            "label", "type", "content", "url", "created_by", "created_at",
-            "updated_at", "updated_by", "confidence", "visibility", "provenance",
-            "tags", "metadata", "priority", "task_status", "assigned_to",
-            "due_date", "utility_scale", "current_best_action",
-            "action_alternatives", "deleted_at", "embedding",
-            "utility_usd_per_day", "utility_currency",
-        })
-        _EDGE_COLS = frozenset({
-            "from_node", "to_node", "layer", "edge_type", "confidence",
-            "probability", "probability_p05", "probability_p50",
-            "probability_p95", "confidence_p05", "confidence_p50",
-            "confidence_p95", "urgency", "condition", "provenance",
-            "created_by", "created_at", "updated_at", "updated_by",
-            "challenge_of", "challenge_type", "metadata", "deleted_at",
-        })
-        _OBS_COLS = frozenset({
-            "node_id", "edge_id", "type", "value", "baseline", "sigma",
-            "source", "created_by", "created_at", "metadata", "notes",
-            "source_name", "source_url", "deleted_at", "sentiment",
-        })
+        _NODE_COLS = frozenset(
+            {
+                "label",
+                "type",
+                "content",
+                "url",
+                "created_by",
+                "created_at",
+                "updated_at",
+                "updated_by",
+                "confidence",
+                "visibility",
+                "provenance",
+                "tags",
+                "metadata",
+                "priority",
+                "task_status",
+                "assigned_to",
+                "due_date",
+                "utility_scale",
+                "current_best_action",
+                "action_alternatives",
+                "deleted_at",
+                "embedding",
+                "utility_usd_per_day",
+                "utility_currency",
+            }
+        )
+        _EDGE_COLS = frozenset(
+            {
+                "from_node",
+                "to_node",
+                "layer",
+                "edge_type",
+                "confidence",
+                "probability",
+                "probability_p05",
+                "probability_p50",
+                "probability_p95",
+                "confidence_p05",
+                "confidence_p50",
+                "confidence_p95",
+                "urgency",
+                "condition",
+                "provenance",
+                "created_by",
+                "created_at",
+                "updated_at",
+                "updated_by",
+                "challenge_of",
+                "challenge_type",
+                "metadata",
+                "deleted_at",
+            }
+        )
+        _OBS_COLS = frozenset(
+            {
+                "node_id",
+                "edge_id",
+                "type",
+                "value",
+                "baseline",
+                "sigma",
+                "source",
+                "created_by",
+                "created_at",
+                "metadata",
+                "notes",
+                "source_name",
+                "source_url",
+                "deleted_at",
+                "sentiment",
+            }
+        )
 
         if not merge:
             # Destructive: clear all tables
@@ -3202,6 +3262,7 @@ def connect(
     # Resolve tenant-scoped path (OHM-xbbi)
     if tenant_id is not None and db_path != ":memory:":
         from pathlib import Path as _Path
+
         tenant_db = str(_Path(db_path) / actor / tenant_id / "ohm.duckdb")
         _Path(tenant_db).parent.mkdir(parents=True, exist_ok=True)
         conn = db_connect(tenant_db)

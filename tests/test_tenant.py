@@ -257,6 +257,7 @@ class TestLazySchemaMigration:
 
         store = tm.get_store("acme_hvac")
         from ohm.schema import get_schema_version
+
         db_version = get_schema_version(store.conn)
         assert db_version == SCHEMA_VERSION
 
@@ -283,6 +284,7 @@ class TestLazySchemaMigration:
         # Mock get_schema_version to return old version (bypass the DB check)
         # and _apply_migrations to fail
         import ohm.schema as schema_mod
+
         monkeypatch.setattr(schema_mod, "get_schema_version", lambda conn: "0.1.0")
         monkeypatch.setattr(schema_mod, "_apply_migrations", lambda conn: (_ for _ in ()).throw(RuntimeError("simulated migration failure")))
 
@@ -362,12 +364,16 @@ class TestCrashConsistentMigration:
 
         # Simulate crash mid-migration: leave .migration_lock file
         lock_path = tmp_path / "tenants" / "acme_hvac" / ".migration_lock"
-        lock_path.write_text(json.dumps({
-            "customer_id": "acme_hvac",
-            "from_version": "0.1.0",
-            "to_version": "0.18.0",
-            "started_at": "2026-05-24T00:00:00+00:00",
-        }))
+        lock_path.write_text(
+            json.dumps(
+                {
+                    "customer_id": "acme_hvac",
+                    "from_version": "0.1.0",
+                    "to_version": "0.18.0",
+                    "started_at": "2026-05-24T00:00:00+00:00",
+                }
+            )
+        )
 
         results = tm.reconcile_tenants()
         assert len(results) == 1
@@ -397,6 +403,7 @@ class TestCrashConsistentMigration:
         meta_path.write_text(json.dumps(meta, indent=2))
 
         import ohm.schema as schema_mod
+
         monkeypatch.setattr(schema_mod, "get_schema_version", lambda conn: "0.1.0")
 
         lock_path = tmp_path / "tenants" / "acme_hvac" / ".migration_lock"
@@ -611,9 +618,7 @@ class TestPerTenantIntegrations:
 
     def test_update_integrations(self, tm):
         tm.provision("acme_hvac")
-        meta = tm.update_integrations("acme_hvac", {
-            "sendgrid": {"api_key_ref": "SENDGRID_KEY_ACME", "from_email": "ops@acme.com"}
-        })
+        meta = tm.update_integrations("acme_hvac", {"sendgrid": {"api_key_ref": "SENDGRID_KEY_ACME", "from_email": "ops@acme.com"}})
         assert "sendgrid" in meta["integrations"]
 
         loaded = tm.load_integrations("acme_hvac")
@@ -900,6 +905,7 @@ class TestBackupRestore:
 
         tm.backup_tenant("acme_hvac")
         import time
+
         time.sleep(1.1)
         tm.backup_tenant("acme_hvac")
 
@@ -911,9 +917,7 @@ class TestTemplatePropagation:
     """Tests for OHM-dcf3: Domain-template change propagation to existing tenants."""
 
     def test_provision_stores_template_version(self, tm):
-        tm.provision("acme_hvac", domain="home_services", integrations={
-            "twilio": {"account_sid": "x", "auth_token_ref": "x", "phone_number": "+1"}
-        })
+        tm.provision("acme_hvac", domain="home_services", integrations={"twilio": {"account_sid": "x", "auth_token_ref": "x", "phone_number": "+1"}})
         meta = tm._read_meta("acme_hvac")
         assert "template_version" in meta
         assert meta["template_version"] >= 1
@@ -924,9 +928,7 @@ class TestTemplatePropagation:
         assert meta["template_version"] >= 0
 
     def test_no_propagation_when_template_current(self, tm):
-        tm.provision("acme_hvac", domain="home_services", integrations={
-            "twilio": {"account_sid": "x", "auth_token_ref": "x", "phone_number": "+1"}
-        })
+        tm.provision("acme_hvac", domain="home_services", integrations={"twilio": {"account_sid": "x", "auth_token_ref": "x", "phone_number": "+1"}})
         store = tm.get_store("acme_hvac")
         original_tv = store.schema.template_version
         tm._propagate_template("acme_hvac", store)
@@ -934,6 +936,7 @@ class TestTemplatePropagation:
 
     def test_additive_merge_adds_node_types(self, tm):
         from ohm.graph.schema import SchemaConfig
+
         old = SchemaConfig(name="test", node_types=frozenset({"a", "b"}), template_version=1)
         current = SchemaConfig(name="test", node_types=frozenset({"a", "b", "c"}), template_version=2)
         merged = tm._additive_merge(old, current)
@@ -942,6 +945,7 @@ class TestTemplatePropagation:
 
     def test_additive_merge_preserves_old_types(self, tm):
         from ohm.graph.schema import SchemaConfig
+
         old = SchemaConfig(name="test", node_types=frozenset({"a", "b", "custom"}), template_version=1)
         current = SchemaConfig(name="test", node_types=frozenset({"a", "b", "c"}), template_version=2)
         merged = tm._additive_merge(old, current)
@@ -949,6 +953,7 @@ class TestTemplatePropagation:
 
     def test_additive_merge_merges_edge_types(self, tm):
         from ohm.graph.schema import SchemaConfig
+
         old = SchemaConfig(
             name="test",
             edge_types_by_layer={"L1": frozenset({"A", "B"})},
@@ -965,15 +970,14 @@ class TestTemplatePropagation:
 
     def test_additive_merge_merges_observation_types(self, tm):
         from ohm.graph.schema import SchemaConfig
+
         old = SchemaConfig(name="test", observation_types=frozenset({"temp"}), template_version=1)
         current = SchemaConfig(name="test", observation_types=frozenset({"temp", "humidity"}), template_version=2)
         merged = tm._additive_merge(old, current)
         assert "humidity" in merged.observation_types
 
     def test_propagation_updates_meta_template_version(self, tm):
-        tm.provision("acme_hvac", domain="home_services", integrations={
-            "twilio": {"account_sid": "x", "auth_token_ref": "x", "phone_number": "+1"}
-        })
+        tm.provision("acme_hvac", domain="home_services", integrations={"twilio": {"account_sid": "x", "auth_token_ref": "x", "phone_number": "+1"}})
         meta = tm._read_meta("acme_hvac")
         meta["template_version"] = 0
         tm._write_meta("acme_hvac", meta)

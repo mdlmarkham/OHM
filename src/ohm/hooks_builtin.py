@@ -56,8 +56,7 @@ def cross_link_check(payload: dict[str, Any]) -> tuple[int, str, str]:
         return (
             1,
             "",
-            f"cross_link_required: Nodes of type '{node_type}' must reference "
-            f"at least one existing node via 'connects_to'. See ADR-018.",
+            f"cross_link_required: Nodes of type '{node_type}' must reference at least one existing node via 'connects_to'. See ADR-018.",
         )
 
     if not isinstance(connects_to, list) or not all(isinstance(c, str) for c in connects_to):
@@ -185,19 +184,19 @@ def observation_source_required(payload: dict[str, Any]) -> tuple[int, str, str]
     node_id = body.get("node_id", "unknown")
 
     import logging
+
     logger = logging.getLogger(__name__)
     logger.warning(
-        "observation_source_required: high-confidence observation (value=%.2f) "
-        "on node '%s' missing source_url",
-        conf, node_id,
+        "observation_source_required: high-confidence observation (value=%.2f) on node '%s' missing source_url",
+        conf,
+        node_id,
     )
 
     if strict:
         return (
             1,
             "",
-            f"observation_source_required: Observations with confidence >= 0.8 "
-            f"must include source_url (node: {node_id}, value: {conf})",
+            f"observation_source_required: Observations with confidence >= 0.8 must include source_url (node: {node_id}, value: {conf})",
         )
 
     # Advisory mode: log warning but allow

@@ -57,10 +57,7 @@ def validate_customer_id(value: str) -> str:
     if "/" in value or "\\" in value:
         raise ValueError(f"Invalid customer_id: path separator in '{value}'")
     if not _CUSTOMER_ID_RE.match(value):
-        raise ValueError(
-            f"Invalid customer_id: '{value}' — must be 3-64 chars, "
-            "lowercase alphanumeric, underscore, or hyphen, starting with alphanumeric"
-        )
+        raise ValueError(f"Invalid customer_id: '{value}' — must be 3-64 chars, lowercase alphanumeric, underscore, or hyphen, starting with alphanumeric")
     return value
 
 

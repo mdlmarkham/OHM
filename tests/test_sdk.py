@@ -613,9 +613,7 @@ class TestTaskComplete:
         assert result["observation_id"] is not None
         assert result["derived_edges_created"] == 0
 
-        obs = graph._conn.execute(
-            "SELECT type, value FROM ohm_observations WHERE id = ?", [result["observation_id"]]
-        ).fetchone()
+        obs = graph._conn.execute("SELECT type, value FROM ohm_observations WHERE id = ?", [result["observation_id"]]).fetchone()
         assert obs[0] == "task_completion"
         assert obs[1] == pytest.approx(0.9, abs=0.001)
 

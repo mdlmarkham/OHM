@@ -33,6 +33,7 @@ class TestBackfillAliases:
     @pytest.fixture
     def store(self, tmp_path):
         from ohm.store import OhmStore
+
         db_path = str(tmp_path / "test.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test")
         return store
@@ -47,8 +48,7 @@ class TestBackfillAliases:
 
         # Create some test nodes
         store.write_node("test-concept-1", "Hormuz AND-Gate", "concept")
-        store.write_node("test-source-1", "Reuters Investigation", "source",
-                        url="https://reuters.com/article")
+        store.write_node("test-source-1", "Reuters Investigation", "source", url="https://reuters.com/article")
 
         conn = store.conn
 
@@ -58,9 +58,7 @@ class TestBackfillAliases:
         assert before >= 2  # At least label aliases exist
 
         # Backfill aliases (add node_id aliases)
-        rows = conn.execute(
-            "SELECT id, label FROM ohm_nodes WHERE deleted_at IS NULL"
-        ).fetchall()
+        rows = conn.execute("SELECT id, label FROM ohm_nodes WHERE deleted_at IS NULL").fetchall()
 
         created = 0
         for node_id, label in rows:
@@ -85,9 +83,7 @@ class TestBackfillAliases:
         assert after >= 4  # 2 label aliases + 2 node_id aliases
 
         # Verify specific alias
-        hormuz_alias = conn.execute(
-            "SELECT node_id FROM ohm_aliases WHERE alias_norm = ?", ["hormuz_and-gate"]
-        ).fetchone()
+        hormuz_alias = conn.execute("SELECT node_id FROM ohm_aliases WHERE alias_norm = ?", ["hormuz_and-gate"]).fetchone()
         assert hormuz_alias is not None
         assert hormuz_alias[0] == "test-concept-1"
 
@@ -126,6 +122,7 @@ class TestBackfillContentHashes:
     @pytest.fixture
     def store(self, tmp_path):
         from ohm.store import OhmStore
+
         db_path = str(tmp_path / "test.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test")
         return store
@@ -135,8 +132,7 @@ class TestBackfillContentHashes:
         from ohm.queries import register_content_hash
 
         # Create source node with URL
-        store.write_node("test-src", "Reuters Article", "source",
-                        url="https://reuters.com/article/123")
+        store.write_node("test-src", "Reuters Article", "source", url="https://reuters.com/article/123")
         # Create a concept node (should not get content hash in backfill)
         store.write_node("test-concept", "Some Concept", "concept")
 
@@ -160,8 +156,7 @@ class TestBackfillContentHashes:
         from ohm.queries import register_content_hash
 
         url = "https://example.com/article"
-        store.write_node("test-src2", "Article Title", "source",
-                        url=url)
+        store.write_node("test-src2", "Article Title", "source", url=url)
 
         content = url  # URL is preferred
         expected_hash = compute_content_hash(content)
@@ -270,6 +265,7 @@ class TestAutoAliasOnNodeCreation:
     @pytest.fixture
     def store(self, tmp_path):
         from ohm.store import OhmStore
+
         db_path = str(tmp_path / "test.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test")
         return store
@@ -414,6 +410,7 @@ class TestBackfillSourceUrls:
     @pytest.fixture
     def store(self, tmp_path):
         from ohm.store import OhmStore
+
         db_path = str(tmp_path / "test.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test")
         return store
@@ -423,19 +420,16 @@ class TestBackfillSourceUrls:
         conn = store.conn
 
         # Create source node with URL
-        store.write_node("source-reuters", "Reuters", "source",
-                        url="https://reuters.com/article/123")
+        store.write_node("source-reuters", "Reuters", "source", url="https://reuters.com/article/123")
 
         # Create concept node
         store.write_node("concept-hormuz", "Hormuz AND-Gate", "concept")
 
         # Create REFERENCES edge from concept to source
-        store.write_edge(from_node="concept-hormuz", to_node="source-reuters",
-                        edge_type="REFERENCES", layer="L2", confidence=0.9)
+        store.write_edge(from_node="concept-hormuz", to_node="source-reuters", edge_type="REFERENCES", layer="L2", confidence=0.9)
 
         # Create observation on concept node without source_url
-        store.write_observation(node_id="concept-hormuz", type="measurement",
-                               value=0.85, source="agent-metis")
+        store.write_observation(node_id="concept-hormuz", type="measurement", value=0.85, source="agent-metis")
 
         # Find the observation
         obs = conn.execute(
@@ -493,6 +487,7 @@ class TestReferencesEdgeAutoCreation:
     @pytest.fixture
     def store(self, tmp_path):
         from ohm.store import OhmStore
+
         db_path = str(tmp_path / "test.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test")
         return store
@@ -500,8 +495,7 @@ class TestReferencesEdgeAutoCreation:
     def test_reference_edge_creation(self, store):
         """Creating a REFERENCES edge should work for concept→source."""
         store.write_node("concept-iran", "Iran Geopolitics", "concept")
-        store.write_node("src-article-1", "Reuters: Iran Sanctions", "source",
-                        url="https://reuters.com/iran-sanctions")
+        store.write_node("src-article-1", "Reuters: Iran Sanctions", "source", url="https://reuters.com/iran-sanctions")
 
         edge = store.write_edge(
             from_node="concept-iran",
@@ -516,8 +510,7 @@ class TestReferencesEdgeAutoCreation:
 
     def test_reference_edge_not_from_source(self, store):
         """REFERENCES edges should only go FROM concept nodes, not from source nodes."""
-        store.write_node("src-article-2", "Article", "source",
-                        url="https://example.com")
+        store.write_node("src-article-2", "Article", "source", url="https://example.com")
         store.write_node("concept-oil", "Oil Prices", "concept")
 
         # This should work (concept → source is valid)
@@ -614,6 +607,7 @@ class TestAdminBackfillEndpoints:
     @pytest.fixture
     def store(self, tmp_path):
         from ohm.store import OhmStore
+
         db_path = str(tmp_path / "test.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test")
         return store
@@ -624,13 +618,10 @@ class TestAdminBackfillEndpoints:
 
         # Create test nodes
         store.write_node("test-1", "Test Node Alpha", "concept")
-        store.write_node("test-2", "Another Node", "source",
-                        url="https://example.com")
+        store.write_node("test-2", "Another Node", "source", url="https://example.com")
 
         conn = store.conn
-        rows = conn.execute(
-            "SELECT id, label FROM ohm_nodes WHERE deleted_at IS NULL"
-        ).fetchall()
+        rows = conn.execute("SELECT id, label FROM ohm_nodes WHERE deleted_at IS NULL").fetchall()
 
         created = 0
         for node_id, label in rows:
@@ -650,6 +641,7 @@ class TestAdminBackfillEndpoints:
 
         # Verify we can resolve via alias
         from ohm.queries import resolve_node_by_alias
+
         result = resolve_node_by_alias(conn, query="Test Node Alpha")
         assert result is not None
         assert result["id"] == "test-1"
@@ -659,15 +651,11 @@ class TestAdminBackfillEndpoints:
         from ohm.queries import register_content_hash
 
         # Create source nodes
-        store.write_node("src-1", "Reuters Article", "source",
-                        url="https://reuters.com/article")
-        store.write_node("src-2", "BBC News", "source",
-                        url="https://bbc.com/news")
+        store.write_node("src-1", "Reuters Article", "source", url="https://reuters.com/article")
+        store.write_node("src-2", "BBC News", "source", url="https://bbc.com/news")
 
         conn = store.conn
-        rows = conn.execute(
-            "SELECT id, label, url FROM ohm_nodes WHERE type = 'source' AND deleted_at IS NULL"
-        ).fetchall()
+        rows = conn.execute("SELECT id, label, url FROM ohm_nodes WHERE type = 'source' AND deleted_at IS NULL").fetchall()
 
         created = 0
         for node_id, label, url in rows:
@@ -685,24 +673,19 @@ class TestAdminBackfillEndpoints:
         conn = store.conn
 
         # Create source node with URL
-        store.write_node("source-reuters", "Reuters", "source",
-                        url="https://reuters.com/article/456")
+        store.write_node("source-reuters", "Reuters", "source", url="https://reuters.com/article/456")
 
         # Create concept node
         store.write_node("concept-test", "Test Concept", "concept")
 
         # Create REFERENCES edge
-        store.write_edge(from_node="concept-test", to_node="source-reuters",
-                        edge_type="REFERENCES", layer="L2", confidence=0.8)
+        store.write_edge(from_node="concept-test", to_node="source-reuters", edge_type="REFERENCES", layer="L2", confidence=0.8)
 
         # Create observation without source_url
-        store.write_observation(node_id="concept-test", type="measurement",
-                               value=0.9, source="agent-clio")
+        store.write_observation(node_id="concept-test", type="measurement", value=0.9, source="agent-clio")
 
         # Find observations without source_url
-        obs_rows = conn.execute(
-            "SELECT id, node_id FROM ohm_observations WHERE deleted_at IS NULL AND (source_url IS NULL OR source_url = '')"
-        ).fetchall()
+        obs_rows = conn.execute("SELECT id, node_id FROM ohm_observations WHERE deleted_at IS NULL AND (source_url IS NULL OR source_url = '')").fetchall()
 
         updated = 0
         for obs_id, node_id in obs_rows:

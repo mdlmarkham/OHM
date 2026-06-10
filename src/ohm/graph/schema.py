@@ -98,9 +98,7 @@ MUST_HAVE_EDGE_NODE_TYPES: frozenset[str] = frozenset(
 # Node types that are allowed to exist as bare stubs. The spec (OHM-tjzh)
 # lists `source`, `concept`, `entity` as exempt — they are foundational or
 # external references that legitimately stand alone until linked.
-EXEMPT_CROSS_LINK_NODE_TYPES: frozenset[str] = frozenset(
-    {"source", "concept", "entity", "fragment", "infrastructure", "service", "release"}
-)
+EXEMPT_CROSS_LINK_NODE_TYPES: frozenset[str] = frozenset({"source", "concept", "entity", "fragment", "infrastructure", "service", "release"})
 
 VALID_VISIBILITIES = frozenset({"private", "team", "public", "vault"})
 
@@ -237,7 +235,6 @@ VALID_OBSERVATION_SCALES = frozenset(
 
 # Export the constraint dictionaries for use by other modules.
 # Canonical definitions live in ohm.graph.constraints.
-from ohm.graph.constraints import PROMOTION_CONSTRAINTS, EDGE_CONSTRAINTS
 
 # ── Urgency / Priority ──────────────────────────────────────────────────────
 
@@ -323,7 +320,7 @@ class SchemaConfig:
     @property
     def all_edge_types(self) -> frozenset[str]:
         """All edge types across all layers (cached, OHM-x3ar)."""
-        if not hasattr(self, '_all_edge_types_cache'):
+        if not hasattr(self, "_all_edge_types_cache"):
             self._all_edge_types_cache = frozenset().union(*self.layer_edge_types.values())
         return self._all_edge_types_cache
 
@@ -559,9 +556,7 @@ class SchemaConfig:
 
         layer_edge_types = None
         if "layer_edge_types" in data:
-            layer_edge_types = {
-                layer: frozenset(types) for layer, types in data["layer_edge_types"].items()
-            }
+            layer_edge_types = {layer: frozenset(types) for layer, types in data["layer_edge_types"].items()}
 
         return cls(
             name=data["name"],
@@ -613,9 +608,7 @@ class SchemaConfig:
                     data = json.load(f)
                 return cls.from_dict(data)
 
-        raise FileNotFoundError(
-            f"Schema template '{filename}' not found in: {candidates}"
-        )
+        raise FileNotFoundError(f"Schema template '{filename}' not found in: {candidates}")
 
 
 # Default OHM schema config instance
@@ -1357,6 +1350,7 @@ def _apply_migrations(conn: "DuckDBPyConnection") -> None:
                             pass  # DuckDB version doesn't support this index type (e.g., partial indexes) — safe to skip
                         else:
                             from ohm.framework.exceptions import MigrationError
+
                             raise MigrationError(f"Migration {version} failed: {e}") from e
                 conn.execute("COMMIT")
             except Exception:
@@ -1451,10 +1445,7 @@ def _seed_domain_agents(conn: "DuckDBPyConnection", schema: "SchemaConfig | None
 
         node_id = f"agent::{agent_name}"
 
-        existing = conn.execute(
-            "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
-            [node_id]
-        ).fetchone()
+        existing = conn.execute("SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node_id]).fetchone()
 
         if not existing:
             conn.execute(
@@ -1473,10 +1464,7 @@ def _seed_domain_agents(conn: "DuckDBPyConnection", schema: "SchemaConfig | None
                 ],
             )
 
-        existing_state = conn.execute(
-            "SELECT agent_name FROM ohm_agent_state WHERE agent_name = ?",
-            [agent_name]
-        ).fetchone()
+        existing_state = conn.execute("SELECT agent_name FROM ohm_agent_state WHERE agent_name = ?", [agent_name]).fetchone()
 
         if not existing_state:
             conn.execute(

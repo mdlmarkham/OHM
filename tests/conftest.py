@@ -129,8 +129,7 @@ def create_sample_node(
                                utility_scale, utility_usd_per_day, utility_currency)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        [node_id, label, node_type, created_by, visibility, provenance, confidence,
-         utility_scale, utility_usd_per_day, utility_currency],
+        [node_id, label, node_type, created_by, visibility, provenance, confidence, utility_scale, utility_usd_per_day, utility_currency],
     )
     return node_id
 

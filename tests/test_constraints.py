@@ -243,8 +243,7 @@ class TestL3toL4:
     def test_node_with_open_challenge_blocked(self, db):
         node_id = _create_node(db, label="challenged_claim", node_type="pattern", layer="L3")
         challenger = _create_node(db, label="challenger", node_type="agent")
-        _create_edge(db, from_node=challenger, to_node=node_id, layer="L3", edge_type="CHALLENGED_BY",
-                     confidence=0.3)
+        _create_edge(db, from_node=challenger, to_node=node_id, layer="L3", edge_type="CHALLENGED_BY", confidence=0.3)
 
         from ohm.graph.constraints import validate_layer_promotion
 
@@ -266,7 +265,11 @@ class TestEdgeConstraints:
         from ohm.graph.constraints import validate_edge_constraints
 
         valid, warnings, errors = validate_edge_constraints(
-            "CAUSES", "L1", db, from_node=from_node, enforce=True,
+            "CAUSES",
+            "L1",
+            db,
+            from_node=from_node,
+            enforce=True,
         )
         assert not valid
         assert any("L2" in e for e in errors)
@@ -280,7 +283,11 @@ class TestEdgeConstraints:
         from ohm.graph.constraints import validate_edge_constraints
 
         valid, warnings, errors = validate_edge_constraints(
-            "CAUSES", "L2", db, from_node=from_node, enforce=True,
+            "CAUSES",
+            "L2",
+            db,
+            from_node=from_node,
+            enforce=True,
         )
         assert valid
 
@@ -291,7 +298,11 @@ class TestEdgeConstraints:
         from ohm.graph.constraints import validate_edge_constraints
 
         valid, warnings, errors = validate_edge_constraints(
-            "CAUSES", "L2", db, from_node=from_node, enforce=False,
+            "CAUSES",
+            "L2",
+            db,
+            from_node=from_node,
+            enforce=False,
         )
         assert valid
         assert any("REFERENCES" in w for w in warnings)
@@ -300,7 +311,11 @@ class TestEdgeConstraints:
         from ohm.graph.constraints import validate_edge_constraints
 
         valid, warnings, errors = validate_edge_constraints(
-            "CHALLENGED_BY", "L3", db, confidence=None, enforce=True,
+            "CHALLENGED_BY",
+            "L3",
+            db,
+            confidence=None,
+            enforce=True,
         )
         assert not valid
         assert any("confidence" in e for e in errors)
@@ -315,7 +330,11 @@ class TestEdgeConstraints:
         from ohm.graph.constraints import validate_edge_constraints
 
         valid, warnings, errors = validate_edge_constraints(
-            "PREDICTS", "L2", db, from_node="test_node", enforce=True,
+            "PREDICTS",
+            "L2",
+            db,
+            from_node="test_node",
+            enforce=True,
         )
         assert not valid
         assert any("L3" in e for e in errors)
@@ -413,9 +432,14 @@ class TestConstraintReport:
         _create_observation(db, node_id=node_id, value=0.8)
 
         from ohm.graph.constraints import (
-            count_sources, count_observations, count_outcomes,
-            count_verified_outcomes, count_open_challenges,
-            count_L3_supporting_nodes, chain_validity, count_context_links,
+            count_sources,
+            count_observations,
+            count_outcomes,
+            count_verified_outcomes,
+            count_open_challenges,
+            count_L3_supporting_nodes,
+            chain_validity,
+            count_context_links,
         )
 
         assert count_observations(db, node_id) >= 1

@@ -147,8 +147,7 @@ def _load_extensions(conn: "duckdb.DuckDBPyConnection") -> None:
     except Exception as e:
         if ducklake_configured:
             logger.warning(
-                "DuckLake extension not available but DuckLake is configured at %s — "
-                "lakehouse features disabled: %s",
+                "DuckLake extension not available but DuckLake is configured at %s — lakehouse features disabled: %s",
                 _get_ducklake_path(),
                 e,
                 exc_info=True,
@@ -447,7 +446,7 @@ def _auto_restore_if_empty(conn: "duckdb.DuckDBPyConnection", db_path_str: str) 
                     "AUTO_RESTORE",
                     "ohmd",
                     json.dumps(
-                                                {
+                        {
                             "trigger": "empty_graph_on_startup",
                             "snapshot_id": snapshot_id,
                             "nodes_restored": node_count_restored,

@@ -75,6 +75,7 @@ def _prewarm_pgmpy() -> None:
         from pgmpy.inference import VariableElimination
         from pgmpy.models import BayesianNetwork
         from pgmpy.factors.discrete import TabularCPD
+
         logger.debug("pgmpy pre-warmed (imports loaded)")
     except ImportError:
         logger.info("pgmpy not available — Bayesian inference will be disabled")
@@ -104,6 +105,7 @@ def _register_builtin_hooks(store: OhmStore) -> None:
                 [event, command, created_by],
             )
             logger.debug("Registered built-in hook: %s (%s)", command, event)
+
 
 # ── Security Constants ─────────────────────────────────────
 
@@ -616,6 +618,7 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     def handle_error(self, request, client_address):
         """Log request errors without crashing."""
         import logging
+
         logging.getLogger("ohm.server").warning(f"Request error from {client_address}: {request}")
 
 
@@ -689,6 +692,7 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
                     x_tenant = x_tenant.get("X-Tenant-ID")
                 if x_tenant:
                     from ohm.framework.validation import validate_customer_id
+
                     try:
                         return validate_customer_id(x_tenant)
                     except ValueError:
@@ -717,9 +721,7 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
         try:
             return self.tenant_manager.get_store(customer_id)
         except TenantNotFoundError:
-            raise NodeNotFoundError(
-                f"Tenant not found — provision this tenant before use"
-            )
+            raise NodeNotFoundError(f"Tenant not found — provision this tenant before use")
 
     def log_message(self, format, *args):
         """Structured request logging with correlation ID."""
@@ -1498,9 +1500,7 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
 
             # Validate type change against schema
             if "type" in body and body["type"] not in self.schema_config.node_types:
-                raise ValidationError(
-                    f"Invalid node type: '{body['type']}' — must be one of: {', '.join(sorted(self.schema_config.node_types))}"
-                )
+                raise ValidationError(f"Invalid node type: '{body['type']}' — must be one of: {', '.join(sorted(self.schema_config.node_types))}")
 
             now = datetime.now(timezone.utc).isoformat()
             patchable = [
@@ -1583,6 +1583,7 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
             # Allow edge_type updates for causal restructuring (ADR-023)
             if "edge_type" in body:
                 from ohm.validation import validate_identifier as _validate_id
+
                 new_type = _validate_id(body["edge_type"], name="edge_type")
                 update_fields.append("edge_type = ?")
                 update_params.append(new_type)
@@ -1779,13 +1780,16 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
         results = runner.run_hooks("pre_query", {"agent": agent, "path": path, "query_params": qs})
         for r in results:
             if not r.success:
-                self._json_response(403, {
-                    "error": "hook_rejected",
-                    "hook_id": r.hook_id,
-                    "exit_code": r.exit_code,
-                    "message": r.stderr or "Query blocked by hook",
-                    "timed_out": r.timed_out,
-                })
+                self._json_response(
+                    403,
+                    {
+                        "error": "hook_rejected",
+                        "hook_id": r.hook_id,
+                        "exit_code": r.exit_code,
+                        "message": r.stderr or "Query blocked by hook",
+                        "timed_out": r.timed_out,
+                    },
+                )
                 return None
             if r.success and r.stdout.strip():
                 try:
@@ -1824,7 +1828,9 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
             elif not r.success:
                 logging.getLogger(__name__).warning(
                     "post_query hook %s failed (exit_code=%d): %s",
-                    r.hook_id, r.exit_code, r.stderr,
+                    r.hook_id,
+                    r.exit_code,
+                    r.stderr,
                 )
         if decorations:
             data["hook_decorations"] = decorations
@@ -1880,9 +1886,7 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
                     try:
                         write_lock = self.tenant_manager.get_write_lock(customer_id)
                     except TenantNotFoundError:
-                        raise NodeNotFoundError(
-                            f"Tenant not found — provision this tenant before use"
-                        )
+                        raise NodeNotFoundError(f"Tenant not found — provision this tenant before use")
                     with write_lock:
                         getattr(self, method_name)(path, qs, body, agent)
                 else:
@@ -1928,15 +1932,14 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
                     try:
                         write_lock = self.tenant_manager.get_write_lock(customer_id)
                     except TenantNotFoundError:
-                        raise NodeNotFoundError(
-                            f"Tenant not found — provision this tenant before use"
-                        )
+                        raise NodeNotFoundError(f"Tenant not found — provision this tenant before use")
                     with write_lock:
                         getattr(self, method_name)(path, agent)
                 else:
                     getattr(self, method_name)(path, agent)
         else:
             self._json_response(404, {"error": f"Unknown endpoint: {path}"})
+
 
 # ── Dispatch table population ─────────────────────────────────────────────────
 # Populated after class body so method names are valid references.
@@ -2138,9 +2141,7 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     trusted = config.get("trusted_proxies")
     if trusted is None:
         trusted = os.environ.get("OHM_TRUSTED_PROXIES", "")
-    OhmHandler.TRUSTED_PROXIES = frozenset(
-        p.strip() for p in trusted.split(",") if p.strip()
-    )
+    OhmHandler.TRUSTED_PROXIES = frozenset(p.strip() for p in trusted.split(",") if p.strip())
 
     # OHM-whbk: hydrate the in-memory webhook registry from DuckDB so
     # registrations survive restarts. Single-tenant mode keys on "".
@@ -2204,7 +2205,8 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     if _top_level_sync is not None and config.get("ducklake", {}).get("sync_interval_seconds") is not None and _top_level_sync != config["ducklake"]["sync_interval_seconds"]:
         logger.warning(
             "Conflicting sync_interval_seconds: top-level=%s, ducklake=%s — using ducklake value",
-            _top_level_sync, config["ducklake"]["sync_interval_seconds"],
+            _top_level_sync,
+            config["ducklake"]["sync_interval_seconds"],
         )
     ducklake_sync_max_retries = config.get("ducklake", {}).get("sync_max_retries", config.get("sync_max_retries", 20))
     _sync_stop = threading.Event()
@@ -2217,17 +2219,13 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
                 consecutive_sync_errors = 0  # Reset on success (OHM-nnu2)
             except Exception:
                 consecutive_sync_errors += 1
-                logger.exception(
-                    "DuckLake sync failed (attempt %d): ", consecutive_sync_errors
-                )
+                logger.exception("DuckLake sync failed (attempt %d): ", consecutive_sync_errors)
                 if consecutive_sync_errors >= ducklake_sync_max_retries:
                     # Circuit breaker: after max consecutive errors, stop retrying.
                     # Prevents infinite retry loops when DuckLake is permanently
                     # unavailable (corrupted catalog, disk full, etc.).
                     logger.critical(
-                        "DuckLake sync circuit breaker opened after %d consecutive errors — "
-                        "sync thread stopped. Restart the daemon or manually trigger sync "
-                        "via POST /sync to re-enable.",
+                        "DuckLake sync circuit breaker opened after %d consecutive errors — sync thread stopped. Restart the daemon or manually trigger sync via POST /sync to re-enable.",
                         consecutive_sync_errors,
                     )
                     break
@@ -2318,6 +2316,7 @@ def _prewarm_pgmpy() -> None:
         from pgmpy.inference import VariableElimination
         from pgmpy.models import BayesianNetwork
         from pgmpy.factors.discrete import TabularCPD
+
         logger.debug("pgmpy pre-warmed (imports loaded)")
     except ImportError:
         logger.info("pgmpy not available — Bayesian inference will be disabled")
@@ -2531,17 +2530,11 @@ def topod_main():
     from ohm.schema import TOPO_SCHEMA
 
     warnings.warn(
-        "topod is deprecated. Use 'ohmd --schema topo' or provision a "
-        "multi-tenant instance with domain='topo'. See "
-        "docs/upgrade_multi_tenancy.md#topo-migration for migration steps. "
-        "topod will be removed in a future release.",
+        "topod is deprecated. Use 'ohmd --schema topo' or provision a multi-tenant instance with domain='topo'. See docs/upgrade_multi_tenancy.md#topo-migration for migration steps. topod will be removed in a future release.",
         DeprecationWarning,
         stacklevel=2,
     )
-    logger.warning(
-        "topod is deprecated. Use 'ohmd --schema topo' or multi-tenant "
-        "provisioning with domain='topo'."
-    )
+    logger.warning("topod is deprecated. Use 'ohmd --schema topo' or multi-tenant provisioning with domain='topo'.")
     main(schema_config=TOPO_SCHEMA)
 
 

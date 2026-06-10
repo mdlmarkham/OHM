@@ -35,6 +35,7 @@ def _build_observation_matrix(
         metadata includes skipped nodes and observation counts.
     """
     from ohm.graph_reader import coerce_reader
+
     reader = coerce_reader(conn)
 
     # Collect observations for each node
@@ -48,7 +49,7 @@ def _build_observation_matrix(
             # Binary: value > 0.5 → 1 (good), else → 0 (bad)
             values = []
             for o in obs:
-                v = o.value if hasattr(o, 'value') else o.get('value')
+                v = o.value if hasattr(o, "value") else o.get("value")
                 values.append(1 if v is not None and v > 0.5 else 0)
             node_obs[node_id] = values
         else:
@@ -94,9 +95,7 @@ def discover_pc(
     Returns:
         Dict with candidate_edges, skeleton, metadata.
     """
-    data, valid_nodes, metadata = _build_observation_matrix(
-        conn, node_ids, min_observations=min_observations
-    )
+    data, valid_nodes, metadata = _build_observation_matrix(conn, node_ids, min_observations=min_observations)
 
     if len(valid_nodes) < 2:
         return {
@@ -120,34 +119,38 @@ def discover_pc(
 
         # Extract edges from the discovered graph
         edges = []
-        
+
         # Use find_fully_directed for directed edges
         directed = cg.find_fully_directed()
         for pair in directed:
             i, j = pair
             if i < len(valid_nodes) and j < len(valid_nodes):
-                edges.append({
-                    "from": valid_nodes[i],
-                    "to": valid_nodes[j],
-                    "edge_type": "directed",
-                    "confidence": round(1 - alpha, 2),
-                    "provenance": "structure_learning",
-                    "method": "pc",
-                })
+                edges.append(
+                    {
+                        "from": valid_nodes[i],
+                        "to": valid_nodes[j],
+                        "edge_type": "directed",
+                        "confidence": round(1 - alpha, 2),
+                        "provenance": "structure_learning",
+                        "method": "pc",
+                    }
+                )
 
         # Use find_undirected for undirected edges (skeleton)
         undirected = cg.find_undirected()
         for pair in undirected:
             i, j = pair
             if i < len(valid_nodes) and j < len(valid_nodes):
-                edges.append({
-                    "from": valid_nodes[i],
-                    "to": valid_nodes[j],
-                    "edge_type": "undirected",
-                    "confidence": round(1 - alpha, 2),
-                    "provenance": "structure_learning",
-                    "method": "pc",
-                })
+                edges.append(
+                    {
+                        "from": valid_nodes[i],
+                        "to": valid_nodes[j],
+                        "edge_type": "undirected",
+                        "confidence": round(1 - alpha, 2),
+                        "provenance": "structure_learning",
+                        "method": "pc",
+                    }
+                )
 
         metadata["alpha"] = alpha
         metadata["indep_test"] = test_name
@@ -194,9 +197,7 @@ def discover_ges(
     Returns:
         Dict with candidate_edges, metadata.
     """
-    data, valid_nodes, metadata = _build_observation_matrix(
-        conn, node_ids, min_observations=min_observations
-    )
+    data, valid_nodes, metadata = _build_observation_matrix(conn, node_ids, min_observations=min_observations)
 
     if len(valid_nodes) < 2:
         return {
@@ -219,27 +220,31 @@ def discover_ges(
         for pair in directed:
             i, j = pair
             if i < len(valid_nodes) and j < len(valid_nodes):
-                edges.append({
-                    "from": valid_nodes[i],
-                    "to": valid_nodes[j],
-                    "edge_type": "directed",
-                    "confidence": 0.7,
-                    "provenance": "structure_learning",
-                    "method": "ges",
-                })
+                edges.append(
+                    {
+                        "from": valid_nodes[i],
+                        "to": valid_nodes[j],
+                        "edge_type": "directed",
+                        "confidence": 0.7,
+                        "provenance": "structure_learning",
+                        "method": "ges",
+                    }
+                )
 
         undirected = cg.find_undirected()
         for pair in undirected:
             i, j = pair
             if i < len(valid_nodes) and j < len(valid_nodes):
-                edges.append({
-                    "from": valid_nodes[i],
-                    "to": valid_nodes[j],
-                    "edge_type": "undirected",
-                    "confidence": 0.6,
-                    "provenance": "structure_learning",
-                    "method": "ges",
-                })
+                edges.append(
+                    {
+                        "from": valid_nodes[i],
+                        "to": valid_nodes[j],
+                        "edge_type": "undirected",
+                        "confidence": 0.6,
+                        "provenance": "structure_learning",
+                        "method": "ges",
+                    }
+                )
 
         metadata["score_class"] = score_class
 
@@ -292,11 +297,12 @@ def discover_causal(
         Dict with candidate_edges, method, metadata.
     """
     from ohm.graph_reader import coerce_reader
+
     reader = coerce_reader(conn)
 
     if node_ids is None:
         all_nodes = reader.get_all_nodes()
-        all_ids = [n.id if hasattr(n, 'id') else n.get("id", n.get("node_id", "")) for n in all_nodes]
+        all_ids = [n.id if hasattr(n, "id") else n.get("id", n.get("node_id", "")) for n in all_nodes]
         obs_counts = reader.get_observation_counts(all_ids)
         node_ids = [nid for nid, cnt in obs_counts.items() if cnt >= min_observations]
         if len(node_ids) < 2:
@@ -312,14 +318,19 @@ def discover_causal(
 
     if method in ("pc", "both"):
         results["pc"] = discover_pc(
-            conn, node_ids, alpha=alpha,
-            min_observations=min_observations, indep_test=indep_test,
+            conn,
+            node_ids,
+            alpha=alpha,
+            min_observations=min_observations,
+            indep_test=indep_test,
         )
 
     if method in ("ges", "both"):
         try:
             results["ges"] = discover_ges(
-                conn, node_ids, min_observations=min_observations,
+                conn,
+                node_ids,
+                min_observations=min_observations,
                 score_class=score_class,
             )
         except (TypeError, ValueError) as e:
@@ -333,7 +344,9 @@ def discover_causal(
             logger.info("PC produced no edges, falling back to GES")
             try:
                 results["ges"] = discover_ges(
-                    conn, node_ids, min_observations=min_observations,
+                    conn,
+                    node_ids,
+                    min_observations=min_observations,
                     score_class=score_class,
                 )
             except (TypeError, ValueError) as e:

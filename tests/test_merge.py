@@ -23,9 +23,7 @@ class TestMergeNodes:
         assert result["edges_repointed"] == 1
         assert result["observations_repointed"] == 0
 
-        edge = store.conn.execute(
-            "SELECT from_node FROM ohm_edges WHERE to_node = 'target' AND deleted_at IS NULL"
-        ).fetchone()
+        edge = store.conn.execute("SELECT from_node FROM ohm_edges WHERE to_node = 'target' AND deleted_at IS NULL").fetchone()
         assert edge[0] == "keep"
 
         store.close()
@@ -62,9 +60,7 @@ class TestMergeNodes:
         result = store.merge_nodes("keep", "merge", merged_by="test")
         assert result["observations_repointed"] == 1
 
-        obs = store.conn.execute(
-            "SELECT node_id FROM ohm_observations WHERE node_id = 'keep' AND deleted_at IS NULL"
-        ).fetchone()
+        obs = store.conn.execute("SELECT node_id FROM ohm_observations WHERE node_id = 'keep' AND deleted_at IS NULL").fetchone()
         assert obs is not None
 
         store.close()
@@ -136,9 +132,7 @@ class TestMergeNodes:
         result = store.merge_nodes("keep", "merge", merged_by="test")
         assert result["edges_repointed"] == 0
 
-        edges = store.conn.execute(
-            "SELECT COUNT(*) FROM ohm_edges WHERE from_node = 'keep' AND to_node = 'target' AND deleted_at IS NULL"
-        ).fetchone()[0]
+        edges = store.conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE from_node = 'keep' AND to_node = 'target' AND deleted_at IS NULL").fetchone()[0]
         assert edges == 1
 
         store.close()
@@ -159,6 +153,3 @@ class TestMergeNodes:
         assert result["merged_by"] == "test_agent"
 
         store.close()
-
-
-

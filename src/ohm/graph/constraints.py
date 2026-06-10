@@ -216,9 +216,7 @@ CONSTRAINT_DISPATCH: dict[str, Any] = {
 }
 
 
-def compute_constraint(
-    conn: DuckDBPyConnection, node_id: str, constraint_name: str
-) -> Any:
+def compute_constraint(conn: DuckDBPyConnection, node_id: str, constraint_name: str) -> Any:
     handler = CONSTRAINT_DISPATCH.get(constraint_name)
     if handler is None:
         return None
@@ -323,9 +321,7 @@ def validate_edge_constraints(
 # ── Effective Layer ───────────────────────────────────────────────────────
 
 
-def effective_layer(
-    conn: DuckDBPyConnection, node_id: str, t: str | None = None
-) -> tuple[str, dict[str, Any]]:
+def effective_layer(conn: DuckDBPyConnection, node_id: str, t: str | None = None) -> tuple[str, dict[str, Any]]:
     """Compute the effective layer of a node based on its edges and type.
 
     Nodes don't have a stored layer column — the layer is inferred from
@@ -408,9 +404,7 @@ def effective_layer(
     return original_layer, {}
 
 
-def _build_constraint_status(
-    conn: DuckDBPyConnection, node_id: str, layer: str, t: str | None = None
-) -> dict[str, Any]:
+def _build_constraint_status(conn: DuckDBPyConnection, node_id: str, layer: str, t: str | None = None) -> dict[str, Any]:
     status: dict[str, Any] = {}
     layer_display = layer.replace("L", "L")
 
@@ -489,9 +483,7 @@ def batch_constraint_report(
     #   - count of REFERENCES edges at L2
 
     # Base node types
-    nodes = conn.execute(
-        "SELECT id, type FROM ohm_nodes WHERE deleted_at IS NULL"
-    ).fetchall()
+    nodes = conn.execute("SELECT id, type FROM ohm_nodes WHERE deleted_at IS NULL").fetchall()
     node_types = {n[0]: n[1] for n in nodes}
 
     # Max layer from incident edges
@@ -671,11 +663,13 @@ def batch_constraint_report(
             node_effective_layers[node_id] = original_layer
 
     # 3. Build the constraint report
-    layers = {"L0": {"total": 0, "satisfied": {}, "violations": {}},
-              "L1": {"total": 0, "satisfied": {}, "violations": {}},
-              "L2": {"total": 0, "satisfied": {}, "violations": {}},
-              "L3": {"total": 0, "satisfied": {}, "violations": {}},
-              "L4": {"total": 0, "satisfied": {}, "violations": {}}}
+    layers = {
+        "L0": {"total": 0, "satisfied": {}, "violations": {}},
+        "L1": {"total": 0, "satisfied": {}, "violations": {}},
+        "L2": {"total": 0, "satisfied": {}, "violations": {}},
+        "L3": {"total": 0, "satisfied": {}, "violations": {}},
+        "L4": {"total": 0, "satisfied": {}, "violations": {}},
+    }
 
     for node_id, eff in node_effective_layers.items():
         layers[eff]["total"] += 1

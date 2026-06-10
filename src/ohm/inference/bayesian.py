@@ -248,7 +248,8 @@ def _build_soft_evidence_factors(
             lik_bad = 1.0 - confidence
 
         factor = TabularCPD(
-            safe_target, 2,
+            safe_target,
+            2,
             [[lik_bad], [lik_good]],
         )
         factors.append(factor)
@@ -596,17 +597,11 @@ def build_bayesian_network(
         if safe not in parent_edges:
             root_safe_names.add(safe)
             # Get prior from probability-scaled observations with temporal decay
-            _obs = [
-                o for o in reader.get_observations(node_id)
-                if o.value is not None and o.scale in ("probability", "unknown")
-            ]
+            _obs = [o for o in reader.get_observations(node_id) if o.value is not None and o.scale in ("probability", "unknown")]
             # Filter to observation_window_days if specified
             if observation_window_days is not None and observation_window_days > 0:
                 cutoff = now - timedelta(days=observation_window_days)
-                _obs = [
-                    o for o in _obs
-                    if o.created_at and datetime.fromisoformat(str(o.created_at)) >= cutoff
-                ]
+                _obs = [o for o in _obs if o.created_at and datetime.fromisoformat(str(o.created_at)) >= cutoff]
             if _obs:
                 total_weight = 0.0
                 weighted_sum = 0.0
@@ -796,7 +791,9 @@ def build_bayesian_network(
     if include_soft_evidence:
         soft_types = soft_edge_types or ["SUPPORTS", "APPLIES_TO"]
         soft_factors = _build_soft_evidence_factors(
-            reader, model, safe_names,
+            reader,
+            model,
+            safe_names,
             soft_edge_types=soft_types,
             layers=layers,
         )
@@ -865,7 +862,18 @@ def bayesian_inference(
 
     # Build the Bayesian network scoped around target and evidence nodes
     scope_nodes = [target] + list(evidence.keys())
-    network = build_bayesian_network(reader, edge_types=edge_types, layers=layers, root_nodes=scope_nodes, root_prior=root_prior, half_life_days=half_life_days, observation_window_days=observation_window_days, include_soft_evidence=include_soft_evidence, soft_edge_types=soft_edge_types, customer_id=customer_id)
+    network = build_bayesian_network(
+        reader,
+        edge_types=edge_types,
+        layers=layers,
+        root_nodes=scope_nodes,
+        root_prior=root_prior,
+        half_life_days=half_life_days,
+        observation_window_days=observation_window_days,
+        include_soft_evidence=include_soft_evidence,
+        soft_edge_types=soft_edge_types,
+        customer_id=customer_id,
+    )
 
     if network is None:
         return {

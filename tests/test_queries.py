@@ -1559,7 +1559,11 @@ class TestDiscoveryQueue:
         ids = queue_discovery_candidates(test_db, edges, created_by="test")
 
         result = review_discovery_candidate(
-            test_db, ids[0], action="accept", reviewed_by="metis", edge_layer="L3",
+            test_db,
+            ids[0],
+            action="accept",
+            reviewed_by="metis",
+            edge_layer="L3",
         )
         assert result["action"] == "accepted"
         assert "edge_id" in result
@@ -1576,7 +1580,11 @@ class TestDiscoveryQueue:
         ids = queue_discovery_candidates(test_db, edges)
 
         result = review_discovery_candidate(
-            test_db, ids[0], action="reject", reviewed_by="clio", review_notes="insufficient evidence",
+            test_db,
+            ids[0],
+            action="reject",
+            reviewed_by="clio",
+            review_notes="insufficient evidence",
         )
         assert result["action"] == "rejected"
 
@@ -1612,7 +1620,10 @@ class TestDiscoveryQueue:
         ids = queue_discovery_candidates(test_db, edges)
 
         result = review_discovery_candidate(
-            test_db, ids[0], action="maybe", reviewed_by="metis",
+            test_db,
+            ids[0],
+            action="maybe",
+            reviewed_by="metis",
         )
         assert "error" in result
         assert result["error"] == "invalid_action"
@@ -1752,6 +1763,7 @@ class TestSemanticAutoLinkFragment:
     def _patch_embedding(self, embedding):
         """Monkey-patch generate_embedding in the module where _auto_link_fragment looks it up."""
         import ohm.graph.queries as _gq
+
         self._original_embedding = _gq.generate_embedding
         _gq.generate_embedding = lambda text, model="", url="": embedding
         return _gq

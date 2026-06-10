@@ -46,6 +46,7 @@ class TenantHandlerMixin:
         if not customer_id:
             raise ValidationError("customer_id is required")
         from ohm.framework.validation import validate_customer_id as _validate_cid
+
         try:
             customer_id = _validate_cid(customer_id)
         except ValueError as exc:
@@ -53,6 +54,7 @@ class TenantHandlerMixin:
         domain = body.get("domain", "ohm")
         tier = body.get("tier", "starter")
         import re as _re
+
         if not _re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,62}", domain):
             raise ValidationError(f"Invalid domain '{domain}' — must be lowercase alphanumeric/underscore/hyphen, 1-63 chars")
 
@@ -89,11 +91,12 @@ class TenantHandlerMixin:
         self._require_admin()
         self._require_multi_tenant_active()
 
-        tail = path[len("/tenant/"):]
+        tail = path[len("/tenant/") :]
         parts = tail.split("/", 1)
         raw_id = parts[0]
         sub = parts[1] if len(parts) > 1 else ""
         from ohm.framework.validation import validate_customer_id as _validate_cid
+
         try:
             customer_id = _validate_cid(raw_id)
         except ValueError as exc:
@@ -142,9 +145,10 @@ class TenantHandlerMixin:
         if not confirm:
             raise ValidationError("Pass ?confirm=true to deprovision a tenant — this is irreversible")
 
-        customer_id = path[len("/tenant/"):]
+        customer_id = path[len("/tenant/") :]
         try:
             from ohm.tenant import TenantNotFoundError, validate_customer_id
+
             customer_id = validate_customer_id(customer_id)
         except ValueError as exc:
             raise ValidationError(f"Invalid customer_id: {exc}")
@@ -167,11 +171,12 @@ class TenantHandlerMixin:
 
         from ohm.tenant import TenantNotFoundError
 
-        tail = path[len("/tenant/"):]
+        tail = path[len("/tenant/") :]
         parts = tail.split("/", 1)
         raw_id = parts[0]
         sub = parts[1] if len(parts) > 1 else ""
         from ohm.framework.validation import validate_customer_id as _validate_cid
+
         try:
             customer_id = _validate_cid(raw_id)
         except ValueError as exc:

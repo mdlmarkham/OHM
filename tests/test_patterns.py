@@ -45,10 +45,7 @@ class TestExtractPatterns:
         tm = TenantManager(tmp_path / "tenants")
         tm.provision("test_tenant")
         store = tm.get_store("test_tenant")
-        store.conn.execute(
-            "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) "
-            "VALUES ('n1', 'AND-OR conversion', 'pattern', 'agent', CURRENT_TIMESTAMP)"
-        )
+        store.conn.execute("INSERT INTO ohm_nodes (id, label, type, created_by, created_at) VALUES ('n1', 'AND-OR conversion', 'pattern', 'agent', CURRENT_TIMESTAMP)")
         patterns = extract_patterns(store, domain="ohm")
         assert len(patterns) == 1
         assert patterns[0]["label"] == "AND-OR conversion"
@@ -60,10 +57,7 @@ class TestExtractPatterns:
         tm = TenantManager(tmp_path / "tenants")
         tm.provision("test_tenant")
         store = tm.get_store("test_tenant")
-        store.conn.execute(
-            "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) "
-            "VALUES ('n1', 'Batch before peak', 'idea', 'agent', CURRENT_TIMESTAMP)"
-        )
+        store.conn.execute("INSERT INTO ohm_nodes (id, label, type, created_by, created_at) VALUES ('n1', 'Batch before peak', 'idea', 'agent', CURRENT_TIMESTAMP)")
         patterns = extract_patterns(store, domain="ohm")
         assert len(patterns) == 1
         tm.close()
@@ -72,10 +66,7 @@ class TestExtractPatterns:
         tm = TenantManager(tmp_path / "tenants")
         tm.provision("test_tenant")
         store = tm.get_store("test_tenant")
-        store.conn.execute(
-            "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) "
-            "VALUES ('n1', 'Equipment A', 'equipment', 'agent', CURRENT_TIMESTAMP)"
-        )
+        store.conn.execute("INSERT INTO ohm_nodes (id, label, type, created_by, created_at) VALUES ('n1', 'Equipment A', 'equipment', 'agent', CURRENT_TIMESTAMP)")
         patterns = extract_patterns(store, domain="ohm")
         assert len(patterns) == 0
         tm.close()
@@ -84,10 +75,7 @@ class TestExtractPatterns:
         tm = TenantManager(tmp_path / "tenants")
         tm.provision("test_tenant")
         store = tm.get_store("test_tenant")
-        store.conn.execute(
-            "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) "
-            "VALUES ('n1', 'Pattern from John Smith about 555-123-4567', 'pattern', 'agent', CURRENT_TIMESTAMP)"
-        )
+        store.conn.execute("INSERT INTO ohm_nodes (id, label, type, created_by, created_at) VALUES ('n1', 'Pattern from John Smith about 555-123-4567', 'pattern', 'agent', CURRENT_TIMESTAMP)")
         patterns = extract_patterns(store, domain="ohm")
         assert "[NAME]" in patterns[0]["label"]
         assert "[PHONE]" in patterns[0]["label"]
@@ -167,10 +155,7 @@ class TestRunExtraction:
         tm = TenantManager(tmp_path / "tenants", shared_patterns_dir=tmp_path / "shared")
         tm.provision("private_tenant")
         store = tm.get_store("private_tenant")
-        store.conn.execute(
-            "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) "
-            "VALUES ('n1', 'Secret pattern', 'pattern', 'agent', CURRENT_TIMESTAMP)"
-        )
+        store.conn.execute("INSERT INTO ohm_nodes (id, label, type, created_by, created_at) VALUES ('n1', 'Secret pattern', 'pattern', 'agent', CURRENT_TIMESTAMP)")
         shared_dir = tmp_path / "shared"
         results = run_extraction(tm, shared_dir)
         assert "private_tenant" not in results
@@ -184,10 +169,7 @@ class TestRunExtraction:
         tm._write_meta("sharing_tenant", meta)
 
         store = tm.get_store("sharing_tenant")
-        store.conn.execute(
-            "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) "
-            "VALUES ('n1', 'Useful pattern', 'pattern', 'agent', CURRENT_TIMESTAMP)"
-        )
+        store.conn.execute("INSERT INTO ohm_nodes (id, label, type, created_by, created_at) VALUES ('n1', 'Useful pattern', 'pattern', 'agent', CURRENT_TIMESTAMP)")
         shared_dir = tmp_path / "shared"
         results = run_extraction(tm, shared_dir)
         assert "sharing_tenant" in results

@@ -303,6 +303,7 @@ class AnalysisHandlerMixin:
             self._json_response(400, {"error": "missing_parameter", "message": "/trajectory/{node_id} required"})
             return
         from ohm.validation import validate_identifier
+
         node_id = validate_identifier(node_id, name="node_id")
 
         since = qs.get("since", [None])[0]
@@ -338,6 +339,7 @@ class AnalysisHandlerMixin:
             self._json_response(400, {"error": "missing_parameter", "message": "/gap/{node_id} required"})
             return
         from ohm.validation import validate_identifier
+
         node_id = validate_identifier(node_id, name="node_id")
         from ohm.methods import compute_gap_analysis
 
@@ -438,9 +440,7 @@ class AnalysisHandlerMixin:
             return
 
         # Main component = all nodes not in this island
-        all_nodes = conn.execute(
-            "SELECT id FROM ohm_nodes WHERE deleted_at IS NULL AND type != 'fragment'"
-        ).fetchall()
+        all_nodes = conn.execute("SELECT id FROM ohm_nodes WHERE deleted_at IS NULL AND type != 'fragment'").fetchall()
         main_component_ids = {r[0] for r in all_nodes} - island_node_ids
 
         if not main_component_ids:
@@ -491,23 +491,28 @@ class AnalysisHandlerMixin:
                 score = tag_overlap * 2.0 + word_overlap * 1.0
 
                 if score >= min_score:
-                    bridges.append({
-                        "from": island_nid,
-                        "to": main_id,
-                        "score": round(score, 2),
-                        "shared_tags": sorted(island_tags & main_tags),
-                        "from_label": island_label or "",
-                        "to_label": main_label or "",
-                        "to_type": main_type or "",
-                    })
+                    bridges.append(
+                        {
+                            "from": island_nid,
+                            "to": main_id,
+                            "score": round(score, 2),
+                            "shared_tags": sorted(island_tags & main_tags),
+                            "from_label": island_label or "",
+                            "to_label": main_label or "",
+                            "to_type": main_type or "",
+                        }
+                    )
 
         bridges.sort(key=lambda x: x["score"], reverse=True)
-        self._json_response(200, {
-            "bridges": bridges[:limit],
-            "island_id": island_id,
-            "island_size": target_island.get("size", 0),
-            "candidates_evaluated": len(bridges),
-        })
+        self._json_response(
+            200,
+            {
+                "bridges": bridges[:limit],
+                "island_id": island_id,
+                "island_size": target_island.get("size", 0),
+                "candidates_evaluated": len(bridges),
+            },
+        )
 
     def _get_suggest_nudge(self, qs: dict, limit: int) -> None:
         """GET /suggest?method=nudge — proactive nudges for the calling agent.
@@ -540,15 +545,13 @@ class AnalysisHandlerMixin:
             "ORDER BY n.confidence DESC NULLS LAST LIMIT ?",
             [agent, limit],
         ).fetchall()
-        orphan_nodes = [
-            {"id": r[0], "label": r[1], "type": r[2], "confidence": r[3], "created_at": str(r[4])}
-            for r in orphans
-        ]
+        orphan_nodes = [{"id": r[0], "label": r[1], "type": r[2], "confidence": r[3], "created_at": str(r[4])} for r in orphans]
 
         # 2. Islands the agent has contributed to
         islands_data = find_islands(conn, exclude_fragments=True, min_size=2, max_islands=50)
         agent_node_ids = {
-            r[0] for r in conn.execute(
+            r[0]
+            for r in conn.execute(
                 "SELECT id FROM ohm_nodes WHERE created_by = ? AND deleted_at IS NULL AND type != 'fragment'",
                 [agent],
             ).fetchall()
@@ -558,12 +561,14 @@ class AnalysisHandlerMixin:
             island_nodes = {n["id"] for n in island.get("nodes", [])}
             overlap = island_nodes & agent_node_ids
             if overlap:
-                agent_islands.append({
-                    "id": f"island-{idx + 1}",
-                    "size": island.get("size", 0),
-                    "your_nodes": sorted(overlap)[:5],
-                    "your_node_count": len(overlap),
-                })
+                agent_islands.append(
+                    {
+                        "id": f"island-{idx + 1}",
+                        "size": island.get("size", 0),
+                        "your_nodes": sorted(overlap)[:5],
+                        "your_node_count": len(overlap),
+                    }
+                )
 
         # 3. Unverified causal edges (confidence < 0.5)
         unverified = conn.execute(
@@ -575,10 +580,7 @@ class AnalysisHandlerMixin:
             "ORDER BY e.confidence ASC NULLS FIRST LIMIT ?",
             [agent, limit],
         ).fetchall()
-        unverified_causal_edges = [
-            {"id": r[0], "from": r[1], "to": r[2], "type": r[3], "confidence": r[4], "created_at": str(r[5])}
-            for r in unverified
-        ]
+        unverified_causal_edges = [{"id": r[0], "from": r[1], "to": r[2], "type": r[3], "confidence": r[4], "created_at": str(r[5])} for r in unverified]
 
         # 4. Unchallenged high-confidence edges (>0.85, no CHALLENGED_BY)
         unchallenged = conn.execute(
@@ -595,25 +597,19 @@ class AnalysisHandlerMixin:
             "ORDER BY e.confidence DESC LIMIT ?",
             [agent, limit],
         ).fetchall()
-        unchallenged_high_confidence = [
-            {"id": r[0], "from": r[1], "to": r[2], "type": r[3], "confidence": r[4], "created_at": str(r[5])}
-            for r in unchallenged
-        ]
+        unchallenged_high_confidence = [{"id": r[0], "from": r[1], "to": r[2], "type": r[3], "confidence": r[4], "created_at": str(r[5])} for r in unchallenged]
 
         # 5. Challenge ratio nudge (OHM-tr71.7)
         # When agent has >10 L3 edges and challenge ratio < 0.05, suggest challenging
         challenge_target = 0.05
         l3_count = conn.execute(
-            "SELECT COUNT(*) FROM ohm_edges e "
-            "WHERE e.created_by = ? AND e.deleted_at IS NULL AND e.layer = 'L3'",
+            "SELECT COUNT(*) FROM ohm_edges e WHERE e.created_by = ? AND e.deleted_at IS NULL AND e.layer = 'L3'",
             [agent],
         ).fetchone()[0]
         challenge_ratio_nudge = None
         if l3_count > 10:
             challenged_count = conn.execute(
-                "SELECT COUNT(DISTINCT e.id) FROM ohm_edges e "
-                "WHERE e.created_by = ? AND e.deleted_at IS NULL "
-                "AND e.edge_type = 'CHALLENGED_BY'",
+                "SELECT COUNT(DISTINCT e.id) FROM ohm_edges e WHERE e.created_by = ? AND e.deleted_at IS NULL AND e.edge_type = 'CHALLENGED_BY'",
                 [agent],
             ).fetchone()[0]
             ratio = challenged_count / l3_count if l3_count > 0 else 0
@@ -638,10 +634,7 @@ class AnalysisHandlerMixin:
                     "challenges_made": challenged_count,
                     "challenge_ratio": round(ratio, 4),
                     "target_ratio": challenge_target,
-                    "suggested_edges": [
-                        {"id": r[0], "from": r[1], "to": r[2], "type": r[3], "confidence": r[4], "created_by": r[5]}
-                        for r in suggest_edges
-                    ],
+                    "suggested_edges": [{"id": r[0], "from": r[1], "to": r[2], "type": r[3], "confidence": r[4], "created_by": r[5]} for r in suggest_edges],
                 }
 
         # 6. Recent nodes with no observations
@@ -656,10 +649,7 @@ class AnalysisHandlerMixin:
             "ORDER BY n.created_at DESC LIMIT ?",
             [agent, limit],
         ).fetchall()
-        recent_nodes_no_observations = [
-            {"id": r[0], "label": r[1], "type": r[2], "confidence": r[3], "created_at": str(r[4])}
-            for r in recent_no_obs
-        ]
+        recent_nodes_no_observations = [{"id": r[0], "label": r[1], "type": r[2], "confidence": r[3], "created_at": str(r[4])} for r in recent_no_obs]
 
         response = {
             "agent": agent,
@@ -745,25 +735,30 @@ class AnalysisHandlerMixin:
             score = tag_overlap * 2.0 + word_overlap * 1.0 + same_type * 0.5
 
             if score > 0 or tag_overlap > 0:
-                scored.append({
-                    "id": cid,
-                    "label": clabel or "",
-                    "type": ctype or "",
-                    "confidence": cconf,
-                    "score": round(score, 2),
-                    "shared_tags": sorted(target_tags & ctags),
-                    "shared_words": sorted(target_words & cwords),
-                })
+                scored.append(
+                    {
+                        "id": cid,
+                        "label": clabel or "",
+                        "type": ctype or "",
+                        "confidence": cconf,
+                        "score": round(score, 2),
+                        "shared_tags": sorted(target_tags & ctags),
+                        "shared_words": sorted(target_words & cwords),
+                    }
+                )
 
         scored.sort(key=lambda x: x["score"], reverse=True)
 
-        self._json_response(200, {
-            "node_id": node_id,
-            "node_label": target_label or "",
-            "node_type": target_type or "",
-            "candidates": scored[:limit],
-            "total_candidates": len(scored),
-        })
+        self._json_response(
+            200,
+            {
+                "node_id": node_id,
+                "node_label": target_label or "",
+                "node_type": target_type or "",
+                "candidates": scored[:limit],
+                "total_candidates": len(scored),
+            },
+        )
 
     def _get_graph_stats(self, path: str, qs: dict) -> None:
         """GET /graph/stats — extended graph statistics."""
@@ -935,22 +930,10 @@ class AnalysisHandlerMixin:
         conn = self.current_store.read_conn
 
         # ── 1. Graph overview ────────────────────────────────────────
-        node_count = conn.execute(
-            "SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL AND type != 'fragment'"
-        ).fetchone()[0]
-        edge_count = conn.execute(
-            "SELECT COUNT(*) FROM ohm_edges WHERE deleted_at IS NULL"
-        ).fetchone()[0]
-        top_types = conn.execute(
-            "SELECT type, COUNT(*) as cnt FROM ohm_nodes "
-            "WHERE deleted_at IS NULL AND type != 'fragment' "
-            "GROUP BY type ORDER BY cnt DESC LIMIT 10"
-        ).fetchall()
-        top_edge_types = conn.execute(
-            "SELECT edge_type, COUNT(*) as cnt FROM ohm_edges "
-            "WHERE deleted_at IS NULL "
-            "GROUP BY edge_type ORDER BY cnt DESC LIMIT 10"
-        ).fetchall()
+        node_count = conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL AND type != 'fragment'").fetchone()[0]
+        edge_count = conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE deleted_at IS NULL").fetchone()[0]
+        top_types = conn.execute("SELECT type, COUNT(*) as cnt FROM ohm_nodes WHERE deleted_at IS NULL AND type != 'fragment' GROUP BY type ORDER BY cnt DESC LIMIT 10").fetchall()
+        top_edge_types = conn.execute("SELECT edge_type, COUNT(*) as cnt FROM ohm_edges WHERE deleted_at IS NULL GROUP BY edge_type ORDER BY cnt DESC LIMIT 10").fetchall()
 
         overview = {
             "total_nodes": node_count,
@@ -971,8 +954,7 @@ class AnalysisHandlerMixin:
 
         if agent:
             n_created = conn.execute(
-                "SELECT COUNT(*) FROM ohm_nodes "
-            "WHERE created_by = ? AND deleted_at IS NULL AND type != 'fragment'",
+                "SELECT COUNT(*) FROM ohm_nodes WHERE created_by = ? AND deleted_at IS NULL AND type != 'fragment'",
                 [agent],
             ).fetchone()[0]
             e_created = conn.execute(
@@ -984,11 +966,7 @@ class AnalysisHandlerMixin:
                 [agent],
             ).fetchone()[0]
             last_act = conn.execute(
-                "SELECT MAX(la) FROM ("
-                "SELECT created_at AS la FROM ohm_nodes WHERE created_by = ? UNION ALL "
-                "SELECT created_at AS la FROM ohm_edges WHERE created_by = ? UNION ALL "
-                "SELECT created_at AS la FROM ohm_observations WHERE created_by = ?"
-                ")",
+                "SELECT MAX(la) FROM (SELECT created_at AS la FROM ohm_nodes WHERE created_by = ? UNION ALL SELECT created_at AS la FROM ohm_edges WHERE created_by = ? UNION ALL SELECT created_at AS la FROM ohm_observations WHERE created_by = ?)",
                 [agent, agent, agent],
             ).fetchone()[0]
             # Agent's orphans
@@ -1037,9 +1015,7 @@ class AnalysisHandlerMixin:
                 "ORDER BY n.confidence DESC NULLS LAST LIMIT 5",
                 [agent],
             ).fetchall()
-            suggestions["your_orphans"] = [
-                {"id": r[0], "label": r[1], "type": r[2]} for r in agent_orphan_list
-            ]
+            suggestions["your_orphans"] = [{"id": r[0], "label": r[1], "type": r[2]} for r in agent_orphan_list]
 
         # ── 4. Recent activity ──────────────────────────────────────
         recent = {"nodes": [], "edges": []}
@@ -1050,26 +1026,16 @@ class AnalysisHandlerMixin:
             params.append(since)
 
         recent_nodes = conn.execute(
-            f"SELECT id, label, type, created_by, created_at FROM ohm_nodes "
-            f"WHERE deleted_at IS NULL AND type != 'fragment' {since_clause} "
-            f"ORDER BY created_at DESC LIMIT 5",
+            f"SELECT id, label, type, created_by, created_at FROM ohm_nodes WHERE deleted_at IS NULL AND type != 'fragment' {since_clause} ORDER BY created_at DESC LIMIT 5",
             params,
         ).fetchall()
-        recent["nodes"] = [
-            {"id": r[0], "label": r[1], "type": r[2], "created_by": r[3], "created_at": str(r[4])}
-            for r in recent_nodes
-        ]
+        recent["nodes"] = [{"id": r[0], "label": r[1], "type": r[2], "created_by": r[3], "created_at": str(r[4])} for r in recent_nodes]
 
         recent_edges = conn.execute(
-            f"SELECT id, from_node, to_node, edge_type, created_by, created_at FROM ohm_edges "
-            f"WHERE deleted_at IS NULL {since_clause} "
-            f"ORDER BY created_at DESC LIMIT 5",
+            f"SELECT id, from_node, to_node, edge_type, created_by, created_at FROM ohm_edges WHERE deleted_at IS NULL {since_clause} ORDER BY created_at DESC LIMIT 5",
             params,
         ).fetchall()
-        recent["edges"] = [
-            {"id": r[0], "from": r[1], "to": r[2], "type": r[3], "created_by": r[4], "created_at": str(r[5])}
-            for r in recent_edges
-        ]
+        recent["edges"] = [{"id": r[0], "from": r[1], "to": r[2], "type": r[3], "created_by": r[4], "created_at": str(r[5])} for r in recent_edges]
 
         # ── 5. Quick reference ─────────────────────────────────────
         quick_ref = {
@@ -1084,14 +1050,17 @@ class AnalysisHandlerMixin:
             "schema": "GET /schema — Full usage guide with all endpoints",
         }
 
-        self._json_response(200, {
-            "welcome": f"Hello {agent or 'agent'}, the knowledge graph has {node_count} nodes and {edge_count} edges.",
-            "overview": overview,
-            "your_footprint": agent_info,
-            "suggestions": suggestions,
-            "recent_activity": recent,
-            "quick_reference": quick_ref,
-        })
+        self._json_response(
+            200,
+            {
+                "welcome": f"Hello {agent or 'agent'}, the knowledge graph has {node_count} nodes and {edge_count} edges.",
+                "overview": overview,
+                "your_footprint": agent_info,
+                "suggestions": suggestions,
+                "recent_activity": recent,
+                "quick_reference": quick_ref,
+            },
+        )
 
     def _get_orient(self, path: str, qs: dict) -> None:
         """GET /orient?agent=NAME&hours=N -- Context-recovery packet for agents who've lost context.
@@ -1126,19 +1095,13 @@ class AnalysisHandlerMixin:
 
         # 1. Where was I?
         last_activity = conn.execute(
-            "SELECT MAX(la) FROM ("
-            "SELECT created_at AS la FROM ohm_nodes WHERE created_by = ? UNION ALL "
-            "SELECT created_at AS la FROM ohm_edges WHERE created_by = ? UNION ALL "
-            "SELECT created_at AS la FROM ohm_observations WHERE created_by = ?"
-            ")",
+            "SELECT MAX(la) FROM (SELECT created_at AS la FROM ohm_nodes WHERE created_by = ? UNION ALL SELECT created_at AS la FROM ohm_edges WHERE created_by = ? UNION ALL SELECT created_at AS la FROM ohm_observations WHERE created_by = ?)",
             [agent, agent, agent],
         ).fetchone()[0]
 
         # Agent's recent contributions
         recent_nodes = conn.execute(
-            "SELECT id, label, type, created_at FROM ohm_nodes "
-            "WHERE created_by = ? AND deleted_at IS NULL AND type != 'fragment' "
-            "ORDER BY created_at DESC LIMIT 10",
+            "SELECT id, label, type, created_at FROM ohm_nodes WHERE created_by = ? AND deleted_at IS NULL AND type != 'fragment' ORDER BY created_at DESC LIMIT 10",
             [agent],
         ).fetchall()
 
@@ -1151,11 +1114,7 @@ class AnalysisHandlerMixin:
             "ORDER BY n.confidence DESC NULLS LAST LIMIT 10",
             [agent],
         ).fetchall()
-        sparse = [
-            {"id": r[0], "label": r[1], "type": r[2], "confidence": r[3], "edges": r[4]}
-            for r in sparse_nodes
-            if r[4] <= 1
-        ]
+        sparse = [{"id": r[0], "label": r[1], "type": r[2], "confidence": r[3], "edges": r[4]} for r in sparse_nodes if r[4] <= 1]
 
         # 2. What did I miss?
         since = last_activity
@@ -1166,14 +1125,11 @@ class AnalysisHandlerMixin:
 
         # New nodes by OTHER agents since agent's last activity
         since_param = since
-        if since_param and hasattr(since_param, 'tzinfo') and since_param.tzinfo is None:
+        if since_param and hasattr(since_param, "tzinfo") and since_param.tzinfo is None:
             since_param = since_param.replace(tzinfo=timezone.utc) if since_param else since_param
 
         new_by_others = conn.execute(
-            "SELECT id, label, type, created_by, created_at FROM ohm_nodes "
-            "WHERE deleted_at IS NULL AND type != 'fragment' AND created_by != ? "
-            "AND created_at > ?::TIMESTAMP "
-            "ORDER BY created_at DESC LIMIT 15",
+            "SELECT id, label, type, created_by, created_at FROM ohm_nodes WHERE deleted_at IS NULL AND type != 'fragment' AND created_by != ? AND created_at > ?::TIMESTAMP ORDER BY created_at DESC LIMIT 15",
             [agent, since_param],
         ).fetchall()
 
@@ -1212,30 +1168,24 @@ class AnalysisHandlerMixin:
         for island in islands.get("islands", []):
             if island["size"] < islands.get("main_graph_size", 0):
                 # Check if agent has nodes in this island
-                agent_in_island = any(
-                    n.get("created_by") == agent for n in island.get("nodes", [])
-                    if isinstance(n, dict)
-                )
+                agent_in_island = any(n.get("created_by") == agent for n in island.get("nodes", []) if isinstance(n, dict))
                 if agent_in_island:
-                    agent_islands.append({
-                        "id": island["id"],
-                        "size": island["size"],
-                        "bridge_potential": island.get("internal_edges", 0),
-                    })
+                    agent_islands.append(
+                        {
+                            "id": island["id"],
+                            "size": island["size"],
+                            "bridge_potential": island.get("internal_edges", 0),
+                        }
+                    )
 
         # Open tasks assigned to this agent
         tasks = []
         try:
             tasks_raw = conn.execute(
-                "SELECT id, label, priority, status, due_date FROM ohm_tasks "
-                "WHERE assigned_to = ? AND status IN ('open', 'in_progress') "
-                "ORDER BY priority DESC LIMIT 5",
+                "SELECT id, label, priority, status, due_date FROM ohm_tasks WHERE assigned_to = ? AND status IN ('open', 'in_progress') ORDER BY priority DESC LIMIT 5",
                 [agent],
             ).fetchall()
-            tasks = [
-                {"id": r[0], "label": r[1], "priority": r[2], "status": r[3], "due": str(r[4]) if r[4] else None}
-                for r in tasks_raw
-            ]
+            tasks = [{"id": r[0], "label": r[1], "priority": r[2], "status": r[3], "due": str(r[4]) if r[4] else None} for r in tasks_raw]
         except Exception:
             pass  # Tasks table may not exist
 
@@ -1260,6 +1210,7 @@ class AnalysisHandlerMixin:
         time_since = None
         if last_activity:
             from datetime import datetime, timezone
+
             if last_activity.tzinfo is None:
                 last_activity = last_activity.replace(tzinfo=timezone.utc)
             delta = datetime.now(timezone.utc) - last_activity
@@ -1271,45 +1222,36 @@ class AnalysisHandlerMixin:
             else:
                 time_since = f"{int(hours_ago / 24)} days ago"
 
-        self._json_response(200, {
-            "orient": f"Welcome back, {agent}. Here's what you missed.",
-            "where_was_i": {
-                "last_activity": last_activity.isoformat() if last_activity else None,
-                "time_since": time_since,
-                "recent_contributions": [
-                    {"id": r[0], "label": r[1], "type": r[2], "created_at": str(r[3])}
-                    for r in recent_nodes
-                ],
-                "in_progress": sparse[:5],
+        self._json_response(
+            200,
+            {
+                "orient": f"Welcome back, {agent}. Here's what you missed.",
+                "where_was_i": {
+                    "last_activity": last_activity.isoformat() if last_activity else None,
+                    "time_since": time_since,
+                    "recent_contributions": [{"id": r[0], "label": r[1], "type": r[2], "created_at": str(r[3])} for r in recent_nodes],
+                    "in_progress": sparse[:5],
+                },
+                "what_did_i_miss": {
+                    "since": since.isoformat() if hasattr(since, "isoformat") else str(since),
+                    "new_nodes_by_others": [{"id": r[0], "label": r[1], "type": r[2], "created_by": r[3], "created_at": str(r[4])} for r in new_by_others],
+                    "cross_agent_edges": [{"id": r[0], "from": r[1], "to": r[2], "type": r[3], "created_by": r[4], "created_at": str(r[5])} for r in cross_edges],
+                    "new_node_count": len(new_by_others),
+                    "cross_edge_count": len(cross_edges),
+                },
+                "what_next": {
+                    "orphan_count": agent_orphan_count,
+                    "your_orphans": [{"id": r[0], "label": r[1], "type": r[2], "confidence": r[3]} for r in agent_orphan_list],
+                    "islands_needing_bridges": agent_islands[:3],
+                    "tasks": tasks,
+                    "connectivity": connectivity,
+                    "edges_per_node": round(edges_per_node, 1),
+                    "nudge": nudge,
+                },
+                "cold_start": total_agent_nodes == 0,
+                "bootstrap_guide": "See docs/bootstrap.md for cold-start instructions" if total_agent_nodes == 0 else None,
             },
-            "what_did_i_miss": {
-                "since": since.isoformat() if hasattr(since, 'isoformat') else str(since),
-                "new_nodes_by_others": [
-                    {"id": r[0], "label": r[1], "type": r[2], "created_by": r[3], "created_at": str(r[4])}
-                    for r in new_by_others
-                ],
-                "cross_agent_edges": [
-                    {"id": r[0], "from": r[1], "to": r[2], "type": r[3], "created_by": r[4], "created_at": str(r[5])}
-                    for r in cross_edges
-                ],
-                "new_node_count": len(new_by_others),
-                "cross_edge_count": len(cross_edges),
-            },
-            "what_next": {
-                "orphan_count": agent_orphan_count,
-                "your_orphans": [
-                    {"id": r[0], "label": r[1], "type": r[2], "confidence": r[3]}
-                    for r in agent_orphan_list
-                ],
-                "islands_needing_bridges": agent_islands[:3],
-                "tasks": tasks,
-                "connectivity": connectivity,
-                "edges_per_node": round(edges_per_node, 1),
-                "nudge": nudge,
-            },
-            "cold_start": total_agent_nodes == 0,
-            "bootstrap_guide": "See docs/bootstrap.md for cold-start instructions" if total_agent_nodes == 0 else None,
-        })
+        )
 
     def _get_contributions(self, path: str, qs: dict) -> None:
         """GET /contributions?agent=NAME — what did this agent create?
@@ -1341,8 +1283,7 @@ class AnalysisHandlerMixin:
         params.append(limit)
 
         nodes = conn.execute(
-            f"SELECT id, label, type, confidence, created_at FROM ohm_nodes "
-            f"WHERE {' AND '.join(conditions)} ORDER BY created_at DESC LIMIT ?",
+            f"SELECT id, label, type, confidence, created_at FROM ohm_nodes WHERE {' AND '.join(conditions)} ORDER BY created_at DESC LIMIT ?",
             params,
         ).fetchall()
 
@@ -1355,9 +1296,7 @@ class AnalysisHandlerMixin:
         edge_params.append(limit)
 
         edges = conn.execute(
-            f"SELECT id, from_node, to_node, edge_type, layer, confidence, created_at FROM ohm_edges "
-            f"WHERE created_by = ? AND deleted_at IS NULL {edge_since} "
-            f"ORDER BY created_at DESC LIMIT ?",
+            f"SELECT id, from_node, to_node, edge_type, layer, confidence, created_at FROM ohm_edges WHERE created_by = ? AND deleted_at IS NULL {edge_since} ORDER BY created_at DESC LIMIT ?",
             edge_params,
         ).fetchall()
 
@@ -1370,9 +1309,7 @@ class AnalysisHandlerMixin:
         obs_params.append(limit)
 
         observations = conn.execute(
-            f"SELECT id, node_id, type, value, created_at FROM ohm_observations "
-            f"WHERE created_by = ? {obs_since} "
-            f"ORDER BY created_at DESC LIMIT ?",
+            f"SELECT id, node_id, type, value, created_at FROM ohm_observations WHERE created_by = ? {obs_since} ORDER BY created_at DESC LIMIT ?",
             obs_params,
         ).fetchall()
 
@@ -1390,22 +1327,16 @@ class AnalysisHandlerMixin:
             [agent],
         ).fetchone()[0]
 
-        self._json_response(200, {
-            "agent": agent,
-            "stats": {"nodes": node_count, "edges": edge_count, "observations": obs_count},
-            "nodes": [
-                {"id": r[0], "label": r[1], "type": r[2], "confidence": r[3], "created_at": str(r[4])}
-                for r in nodes
-            ],
-            "edges": [
-                {"id": r[0], "from": r[1], "to": r[2], "type": r[3], "layer": r[4], "confidence": r[5], "created_at": str(r[6])}
-                for r in edges
-            ],
-            "observations": [
-                {"id": r[0], "node_id": r[1], "type": r[2], "value": r[3], "created_at": str(r[4])}
-                for r in observations
-            ],
-        })
+        self._json_response(
+            200,
+            {
+                "agent": agent,
+                "stats": {"nodes": node_count, "edges": edge_count, "observations": obs_count},
+                "nodes": [{"id": r[0], "label": r[1], "type": r[2], "confidence": r[3], "created_at": str(r[4])} for r in nodes],
+                "edges": [{"id": r[0], "from": r[1], "to": r[2], "type": r[3], "layer": r[4], "confidence": r[5], "created_at": str(r[6])} for r in edges],
+                "observations": [{"id": r[0], "node_id": r[1], "type": r[2], "value": r[3], "created_at": str(r[4])} for r in observations],
+            },
+        )
 
     def _get_changes(self, path: str, qs: dict) -> None:
         """GET /changes?since=ISO8601 — what's new since a timestamp.
@@ -1437,8 +1368,7 @@ class AnalysisHandlerMixin:
         params.append(limit)
 
         nodes = conn.execute(
-            f"SELECT id, label, type, created_by, confidence, created_at FROM ohm_nodes "
-            f"WHERE {' AND '.join(node_conditions)} ORDER BY created_at DESC LIMIT ?",
+            f"SELECT id, label, type, created_by, confidence, created_at FROM ohm_nodes WHERE {' AND '.join(node_conditions)} ORDER BY created_at DESC LIMIT ?",
             params,
         ).fetchall()
 
@@ -1451,9 +1381,7 @@ class AnalysisHandlerMixin:
         edge_params.append(limit)
 
         edges = conn.execute(
-            f"SELECT id, from_node, to_node, edge_type, layer, confidence, created_by, created_at FROM ohm_edges "
-            f"WHERE deleted_at IS NULL AND created_at > ?::TIMESTAMP {edge_agent} "
-            f"ORDER BY created_at DESC LIMIT ?",
+            f"SELECT id, from_node, to_node, edge_type, layer, confidence, created_by, created_at FROM ohm_edges WHERE deleted_at IS NULL AND created_at > ?::TIMESTAMP {edge_agent} ORDER BY created_at DESC LIMIT ?",
             edge_params,
         ).fetchall()
 
@@ -1464,26 +1392,21 @@ class AnalysisHandlerMixin:
             count_agent = "AND created_by = ?"
             count_params.append(agent)
         node_total = conn.execute(
-            f"SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL AND type != 'fragment' "
-            f"AND created_at > ?::TIMESTAMP {count_agent}",
+            f"SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL AND type != 'fragment' AND created_at > ?::TIMESTAMP {count_agent}",
             count_params,
         ).fetchone()[0]
         edge_total = conn.execute(
-            f"SELECT COUNT(*) FROM ohm_edges WHERE deleted_at IS NULL "
-            f"AND created_at > ?::TIMESTAMP {count_agent}",
+            f"SELECT COUNT(*) FROM ohm_edges WHERE deleted_at IS NULL AND created_at > ?::TIMESTAMP {count_agent}",
             count_params,
         ).fetchone()[0]
 
-        self._json_response(200, {
-            "since": since,
-            "node_total": node_total,
-            "edge_total": edge_total,
-            "nodes": [
-                {"id": r[0], "label": r[1], "type": r[2], "created_by": r[3], "confidence": r[4], "created_at": str(r[5])}
-                for r in nodes
-            ],
-            "edges": [
-                {"id": r[0], "from": r[1], "to": r[2], "type": r[3], "layer": r[4], "confidence": r[5], "created_by": r[6], "created_at": str(r[7])}
-                for r in edges
-            ],
-        })
+        self._json_response(
+            200,
+            {
+                "since": since,
+                "node_total": node_total,
+                "edge_total": edge_total,
+                "nodes": [{"id": r[0], "label": r[1], "type": r[2], "created_by": r[3], "confidence": r[4], "created_at": str(r[5])} for r in nodes],
+                "edges": [{"id": r[0], "from": r[1], "to": r[2], "type": r[3], "layer": r[4], "confidence": r[5], "created_by": r[6], "created_at": str(r[7])} for r in edges],
+            },
+        )

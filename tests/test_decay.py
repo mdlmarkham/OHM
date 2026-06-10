@@ -198,8 +198,7 @@ def mem_conn():
     conn.close()
 
 
-def _insert_obs(conn, obs_id, node_id="n1", type_="measurement", value=0.9,
-                half_life_days=7.0, supersedes_obs_id=None):
+def _insert_obs(conn, obs_id, node_id="n1", type_="measurement", value=0.9, half_life_days=7.0, supersedes_obs_id=None):
     now = datetime.now(timezone.utc)
     conn.execute(
         """INSERT INTO ohm_observations

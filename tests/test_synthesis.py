@@ -29,7 +29,9 @@ def _start_test_server(store, tokens=None, no_auth=True):
     OhmHandler.require_read_auth = False
 
     server = socketserver.TCPServer(
-        ("127.0.0.1", 0), OhmHandler, bind_and_activate=False,
+        ("127.0.0.1", 0),
+        OhmHandler,
+        bind_and_activate=False,
     )
     server.allow_reuse_address = True
     server.server_bind()
@@ -39,6 +41,7 @@ def _start_test_server(store, tokens=None, no_auth=True):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     import time
+
     time.sleep(0.3)
     return port, server, thread
 
@@ -80,14 +83,13 @@ class TestSynthesisHTTPEndpoint:
         _, n2 = _request("POST", port, "/node", {"id": "concept-b", "label": "Concept B", "type": "concept"}, token="test-token")
 
         # Create synthesis
-        status, data = _request("POST", port, "/agent/synthesis", {
-            "label": "A and B are connected",
-            "content": "The pattern shows that A causes B through mechanism C",
-            "cluster_ids": ["concept-a", "concept-b"],
-            "edge_type": "SUPPORTS",
-            "confidence": 0.85,
-            "tags": ["pattern", "synthesis"]
-        }, token="test-token")
+        status, data = _request(
+            "POST",
+            port,
+            "/agent/synthesis",
+            {"label": "A and B are connected", "content": "The pattern shows that A causes B through mechanism C", "cluster_ids": ["concept-a", "concept-b"], "edge_type": "SUPPORTS", "confidence": 0.85, "tags": ["pattern", "synthesis"]},
+            token="test-token",
+        )
 
         assert status == 201
         assert "node" in data
@@ -99,22 +101,16 @@ class TestSynthesisHTTPEndpoint:
         port, _ = synthesis_server
 
         # Missing content
-        status, data = _request("POST", port, "/agent/synthesis", {
-            "label": "Test",
-            "cluster_ids": ["some-id"]
-        }, token="test-token")
+        status, data = _request("POST", port, "/agent/synthesis", {"label": "Test", "cluster_ids": ["some-id"]}, token="test-token")
         assert status == 400
 
         # Missing cluster_ids
-        status, data = _request("POST", port, "/agent/synthesis", {
-            "label": "Test",
-            "content": "Test content"
-        }, token="test-token")
+        status, data = _request("POST", port, "/agent/synthesis", {"label": "Test", "content": "Test content"}, token="test-token")
         assert status == 400
 
     def test_synthesis_skips_invalid_cluster_ids(self, synthesis_server):
         """Synthesis gracefully handles nonexistent cluster nodes.
-        
+
         Note: DuckDB has no foreign key constraints, so edges to nonexistent
         nodes ARE created. This test verifies the endpoint doesn't crash."""
         port, _ = synthesis_server
@@ -122,12 +118,7 @@ class TestSynthesisHTTPEndpoint:
         # Create one valid node
         _ = _request("POST", port, "/node", {"id": "valid-node", "label": "Valid Node", "type": "concept"}, token="test-token")
 
-        status, data = _request("POST", port, "/agent/synthesis", {
-            "label": "Partial synthesis",
-            "content": "Only one valid connection",
-            "cluster_ids": ["valid-node", "nonexistent-node-12345"],
-            "confidence": 0.7
-        }, token="test-token")
+        status, data = _request("POST", port, "/agent/synthesis", {"label": "Partial synthesis", "content": "Only one valid connection", "cluster_ids": ["valid-node", "nonexistent-node-12345"], "confidence": 0.7}, token="test-token")
 
         assert status == 201
         # Only valid-node edge is created; nonexistent-node edge is rejected by referential integrity (OHM-7298)
@@ -139,11 +130,17 @@ class TestSynthesisHTTPEndpoint:
 
         _ = _request("POST", port, "/node", {"id": "test-node", "label": "Test Node", "type": "concept"}, token="test-token")
 
-        status, data = _request("POST", port, "/agent/synthesis", {
-            "label": "Default synthesis",
-            "content": "Testing defaults",
-            "cluster_ids": ["test-node"],
-        }, token="test-token")
+        status, data = _request(
+            "POST",
+            port,
+            "/agent/synthesis",
+            {
+                "label": "Default synthesis",
+                "content": "Testing defaults",
+                "cluster_ids": ["test-node"],
+            },
+            token="test-token",
+        )
 
         # Print error details if not 201
         if status != 201:
@@ -159,9 +156,11 @@ class TestSynthesisSDK:
         """Test write_synthesis via SDK with direct DuckDB connection."""
         db_path = str(tmp_path / "test_synthesis_sdk.duckdb")
         import duckdb
+
         conn = duckdb.connect(db_path)
 
         from ohm.schema import initialize_schema
+
         initialize_schema(conn)
 
         g = Graph(conn, actor="metis")
@@ -179,7 +178,7 @@ class TestSynthesisSDK:
             confidence=0.85,
             sigma=0.08,
             provenance="pattern_analysis",
-            tags=["AND-OR", "governance", "hormuz"]
+            tags=["AND-OR", "governance", "hormuz"],
         )
 
         assert "node" in result

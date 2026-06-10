@@ -74,23 +74,39 @@ class HookResult:
 # tenant-writable, so a compromised hook could read or exfiltrate data
 # if given full access. Sandboxing mitigates this.
 
-_HOOK_ENV_WHITELIST = frozenset({
-    "OHM_HOOK_EVENT", "OHM_HOOK_ID", "OHM_CUSTOMER_ID",
-})
+_HOOK_ENV_WHITELIST = frozenset(
+    {
+        "OHM_HOOK_EVENT",
+        "OHM_HOOK_ID",
+        "OHM_CUSTOMER_ID",
+    }
+)
 
 # Resource limits (Linux-only via setrlimit)
-_DEFAULT_RLIMIT_AS = 256 * 1024 * 1024       # 256 MB address space
-_DEFAULT_RLIMIT_NOFILE = 64                   # max open file descriptors
-_DEFAULT_RLIMIT_NPROC = 0                     # no child processes (also prevents network daemon forking)
-_DEFAULT_RLIMIT_STACK = 8 * 1024 * 1024       # 8 MB stack
+_DEFAULT_RLIMIT_AS = 256 * 1024 * 1024  # 256 MB address space
+_DEFAULT_RLIMIT_NOFILE = 64  # max open file descriptors
+_DEFAULT_RLIMIT_NPROC = 0  # no child processes (also prevents network daemon forking)
+_DEFAULT_RLIMIT_STACK = 8 * 1024 * 1024  # 8 MB stack
 
 
-_SANDBOX_SAFE_ENV_VARS = frozenset({
-    "PATH", "SYSTEMROOT", "SYSTEMDRIVE", "HOME", "USERPROFILE",
-    "TMP", "TEMP", "TMPDIR", "LANG", "LC_ALL",
-    # Windows shell=True artifacts (cmd.exe adds these)
-    "COMSPEC", "PATHEXT", "PROMPT",
-})
+_SANDBOX_SAFE_ENV_VARS = frozenset(
+    {
+        "PATH",
+        "SYSTEMROOT",
+        "SYSTEMDRIVE",
+        "HOME",
+        "USERPROFILE",
+        "TMP",
+        "TEMP",
+        "TMPDIR",
+        "LANG",
+        "LC_ALL",
+        # Windows shell=True artifacts (cmd.exe adds these)
+        "COMSPEC",
+        "PATHEXT",
+        "PROMPT",
+    }
+)
 
 
 def _sandbox_env(hook_id: str, event: str, customer_id: str = "") -> dict[str, str]:
@@ -126,6 +142,7 @@ def _sandbox_preexec() -> None:
     that don't support it, but ``resource`` module is Unix-only).
     """
     import platform
+
     if platform.system() != "Linux":
         return
 
@@ -275,9 +292,15 @@ class HookRunner:
                     duration_ms, timed_out)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 [
-                    log_id, hook.id, hook.event, payload_json,
-                    result.exit_code, result.stdout, result.stderr,
-                    result.duration_ms, result.timed_out,
+                    log_id,
+                    hook.id,
+                    hook.event,
+                    payload_json,
+                    result.exit_code,
+                    result.stdout,
+                    result.stderr,
+                    result.duration_ms,
+                    result.timed_out,
                 ],
             )
         except Exception:
@@ -368,7 +391,7 @@ class HookRunner:
         """
         import concurrent.futures
 
-        module_path, _, func_name = hook.command[len("python:"):].rpartition(".")
+        module_path, _, func_name = hook.command[len("python:") :].rpartition(".")
         if not module_path or not func_name:
             return HookResult(
                 hook_id=hook.id,

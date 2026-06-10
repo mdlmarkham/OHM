@@ -178,6 +178,7 @@ class TestAllLearnedHalfLives:
         # First call: superseded types, second call: all types,
         # then for each empirical_half_life call: the superseded obs query
         call_count = [0]
+
         def mock_execute(query, params=None):
             call_count[0] += 1
             if call_count[0] == 1:
@@ -295,7 +296,9 @@ class TestEffectiveReliability:
 
         # Mock: agent-metis has 15/17 outcomes accurate, last outcome = now
         conn.execute.return_value.fetchone.return_value = (
-            17, 15, now  # total, accurate, last_outcome_at
+            17,
+            15,
+            now,  # total, accurate, last_outcome_at
         )
         conn.execute.return_value.fetchall.return_value = [
             ("agent-metis", 0.882),
@@ -340,9 +343,7 @@ class TestEffectiveReliability:
         now = datetime.now(timezone.utc)
         last_verified = now - timedelta(days=365)
 
-        conn.execute.return_value.fetchone.return_value = (
-            17, 15, last_verified
-        )
+        conn.execute.return_value.fetchone.return_value = (17, 15, last_verified)
         conn.execute.return_value.fetchall.return_value = [
             ("agent-metis", 0.882),
         ]
@@ -351,9 +352,7 @@ class TestEffectiveReliability:
         # exp(-0.01 * 365) ≈ exp(-3.65) ≈ 0.026
         # effective ≈ prior + (0.882 - prior) * 0.026 ≈ prior
         # Should be very close to community_prior
-        assert result["effective_reliability"] == pytest.approx(
-            result["community_prior"], abs=0.05
-        )
+        assert result["effective_reliability"] == pytest.approx(result["community_prior"], abs=0.05)
 
     def test_unknown_agent_uses_prior(self):
         """Unknown agent with no outcomes should use community prior."""
@@ -407,6 +406,7 @@ class TestAllEffectiveReliabilities:
         # 1. Agent stats query (fetchone)
         # 2. Community prior query (fetchall)
         call_count = [0]
+
         def mock_execute(query, params=None):
             call_count[0] += 1
             if call_count[0] == 1:

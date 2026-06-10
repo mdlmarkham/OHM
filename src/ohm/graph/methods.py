@@ -848,14 +848,16 @@ def detect_alias_duplicates(
 
     alias_dups = []
     for row in rows:
-        alias_dups.append({
-            "alias_norm": row[0],
-            "node_a": row[1],
-            "label_a": row[2],
-            "node_b": row[3],
-            "label_b": row[4],
-            "kind": "alias_collision",
-        })
+        alias_dups.append(
+            {
+                "alias_norm": row[0],
+                "node_a": row[1],
+                "label_a": row[2],
+                "node_b": row[3],
+                "label_b": row[4],
+                "kind": "alias_collision",
+            }
+        )
 
     hash_rows = conn.execute(
         """
@@ -875,14 +877,16 @@ def detect_alias_duplicates(
 
     hash_dups = []
     for row in hash_rows:
-        hash_dups.append({
-            "content_hash": row[0],
-            "node_a": row[1],
-            "label_a": row[2],
-            "node_b": row[3],
-            "label_b": row[4],
-            "kind": "content_hash_collision",
-        })
+        hash_dups.append(
+            {
+                "content_hash": row[0],
+                "node_a": row[1],
+                "label_a": row[2],
+                "node_b": row[3],
+                "label_b": row[4],
+                "kind": "content_hash_collision",
+            }
+        )
 
     return alias_dups + hash_dups
 
@@ -1393,9 +1397,7 @@ def apply_verification_decay(
     ).fetchall()
 
     if not edges:
-        return {"decayed_count": 0, "verified_count": 0, "unverified_count": 0,
-                "affected_edges": [], "dry_run": dry_run,
-                "summary": "No edges eligible for verification decay"}
+        return {"decayed_count": 0, "verified_count": 0, "unverified_count": 0, "affected_edges": [], "dry_run": dry_run, "summary": "No edges eligible for verification decay"}
 
     decayed = []
     verified_count = 0
@@ -1418,18 +1420,20 @@ def apply_verification_decay(
         new_conf = max(new_conf, min_confidence)
 
         if new_conf < conf:
-            decayed.append({
-                "id": edge_id,
-                "edge_type": etype,
-                "from_node": from_node,
-                "to_node": to_node,
-                "original_confidence": conf,
-                "new_confidence": new_conf,
-                "age_days": round(age_days, 1),
-                "is_verified": is_verified,
-                "half_life_used": half_life,
-                "decay_factor": round(decay_factor, 4),
-            })
+            decayed.append(
+                {
+                    "id": edge_id,
+                    "edge_type": etype,
+                    "from_node": from_node,
+                    "to_node": to_node,
+                    "original_confidence": conf,
+                    "new_confidence": new_conf,
+                    "age_days": round(age_days, 1),
+                    "is_verified": is_verified,
+                    "half_life_used": half_life,
+                    "decay_factor": round(decay_factor, 4),
+                }
+            )
 
             if not dry_run:
                 conn.execute(
@@ -1446,9 +1450,7 @@ def apply_verification_decay(
         "unverified_half_life_days": unverified_half_life_days,
         "verified_half_life_days": verified_half_life_days,
         "verification_grace_days": verification_grace_days,
-        "summary": (f"Decayed {len(decayed)} edges: "
-                    f"{unverified_count} unverified (half-life {unverified_half_life_days}d), "
-                    f"{verified_count} verified (half-life {verified_half_life_days}d)"),
+        "summary": (f"Decayed {len(decayed)} edges: {unverified_count} unverified (half-life {unverified_half_life_days}d), {verified_count} verified (half-life {verified_half_life_days}d)"),
     }
 
 
@@ -1605,9 +1607,7 @@ def _compute_diversity_correlation(observations: list[dict[str, Any]]) -> float 
     same_agent_frac = same_agent_diff_day_weighted / total_weight
     diff_agent_frac = diff_agent_weighted / total_weight
 
-    effective_corr = (
-        same_day_frac * 0.9 + same_agent_frac * 0.6 + diff_agent_frac * 0.2
-    )
+    effective_corr = same_day_frac * 0.9 + same_agent_frac * 0.6 + diff_agent_frac * 0.2
     return round(effective_corr, 3)
 
 
@@ -2496,7 +2496,7 @@ def compute_centrality(
     query = f"""
         SELECT from_node, to_node, confidence
         FROM ohm_edges
-        WHERE edge_type IN ({','.join('?' * len(edge_types))})
+        WHERE edge_type IN ({",".join("?" * len(edge_types))})
         AND deleted_at IS NULL
         {layer_clause}
     """
@@ -2533,14 +2533,16 @@ def compute_centrality(
 
     nodes_result = []
     for node_id in sorted_nodes:
-        nodes_result.append({
-            "id": node_id,
-            "label": node_labels.get(node_id, node_id),
-            "centrality": round(pagerank[node_id], 6),
-            "in_degree": in_degree.get(node_id, 0),
-            "out_degree": out_degree.get(node_id, 0),
-            "reachable_nodes": len(nx.descendants(G, node_id)),
-        })
+        nodes_result.append(
+            {
+                "id": node_id,
+                "label": node_labels.get(node_id, node_id),
+                "centrality": round(pagerank[node_id], 6),
+                "in_degree": in_degree.get(node_id, 0),
+                "out_degree": out_degree.get(node_id, 0),
+                "reachable_nodes": len(nx.descendants(G, node_id)),
+            }
+        )
 
     return {
         "method": "compute_centrality",
@@ -2587,7 +2589,7 @@ def compute_communities(
     query = f"""
         SELECT DISTINCT from_node, to_node, confidence
         FROM ohm_edges
-        WHERE edge_type IN ({','.join('?' * len(edge_types))})
+        WHERE edge_type IN ({",".join("?" * len(edge_types))})
         AND deleted_at IS NULL
         {layer_clause}
     """
@@ -2622,11 +2624,13 @@ def compute_communities(
     communities_result = []
     for i, community in enumerate(sorted(communities, key=len, reverse=True)):
         community_list = sorted(community)
-        communities_result.append({
-            "id": i,
-            "size": len(community),
-            "nodes": [{"id": n, "label": node_labels.get(n, n)} for n in community_list],
-        })
+        communities_result.append(
+            {
+                "id": i,
+                "size": len(community),
+                "nodes": [{"id": n, "label": node_labels.get(n, n)} for n in community_list],
+            }
+        )
 
     return {
         "method": "compute_communities",
@@ -2671,7 +2675,7 @@ def find_bridges(
     query = f"""
         SELECT DISTINCT from_node, to_node
         FROM ohm_edges
-        WHERE edge_type IN ({','.join('?' * len(edge_types))})
+        WHERE edge_type IN ({",".join("?" * len(edge_types))})
         AND deleted_at IS NULL
         {layer_clause}
     """
@@ -2700,13 +2704,8 @@ def find_bridges(
         for row in label_rows:
             node_labels[row[0]] = row[1]
 
-    bridges_result = [
-        {"from": f, "to": t, "from_label": node_labels.get(f, f), "to_label": node_labels.get(t, t)}
-        for f, t in bridges
-    ]
-    articulation_result = [
-        {"id": n, "label": node_labels.get(n, n)} for n in articulation_points
-    ]
+    bridges_result = [{"from": f, "to": t, "from_label": node_labels.get(f, f), "to_label": node_labels.get(t, t)} for f, t in bridges]
+    articulation_result = [{"id": n, "label": node_labels.get(n, n)} for n in articulation_points]
 
     return {
         "method": "find_bridges",
@@ -2807,8 +2806,8 @@ def granger_causality(
     n = len(series_b)
     Y = series_b[effective_lag:]
 
-    X_restricted = np.column_stack([series_b[effective_lag - k: n - k] for k in range(1, effective_lag + 1)])
-    X_unrestricted = np.column_stack([X_restricted] + [series_a[effective_lag - k: n - k] for k in range(1, effective_lag + 1)])
+    X_restricted = np.column_stack([series_b[effective_lag - k : n - k] for k in range(1, effective_lag + 1)])
+    X_unrestricted = np.column_stack([X_restricted] + [series_a[effective_lag - k : n - k] for k in range(1, effective_lag + 1)])
 
     ones = np.ones((Y.shape[0], 1))
     X_r = np.column_stack([ones, X_restricted])
@@ -2819,8 +2818,8 @@ def granger_causality(
         beta_u = np.linalg.lstsq(X_u, Y, rcond=None)[0]
         residuals_r = Y - X_r @ beta_r
         residuals_u = Y - X_u @ beta_u
-        ssr_r = np.sum(residuals_r ** 2)
-        ssr_u = np.sum(residuals_u ** 2)
+        ssr_r = np.sum(residuals_r**2)
+        ssr_u = np.sum(residuals_u**2)
 
         df_num = effective_lag
         df_den = n - 2 * effective_lag - 1
@@ -2892,7 +2891,7 @@ def compute_edge_stability(
         SELECT from_node, to_node, edge_type, confidence,
                probability, probability_p50
         FROM ohm_edges
-        WHERE edge_type IN ({','.join(['?' for _ in edge_types])})
+        WHERE edge_type IN ({",".join(["?" for _ in edge_types])})
         AND deleted_at IS NULL
         {layer_clause}
         ORDER BY from_node, to_node
@@ -2951,17 +2950,19 @@ def compute_edge_stability(
                 stability = "unstable"
                 n_unstable += 1
 
-        edges_result.append({
-            "from_node": from_node,
-            "from_label": node_labels.get(from_node, from_node),
-            "to_node": to_node,
-            "to_label": node_labels.get(to_node, to_node),
-            "edge_type": edge_type,
-            "confidence": round(conf, 4),
-            "probability": round(prob, 4) if prob is not None else None,
-            "variance": variance,
-            "stability": stability,
-        })
+        edges_result.append(
+            {
+                "from_node": from_node,
+                "from_label": node_labels.get(from_node, from_node),
+                "to_node": to_node,
+                "to_label": node_labels.get(to_node, to_node),
+                "edge_type": edge_type,
+                "confidence": round(conf, 4),
+                "probability": round(prob, 4) if prob is not None else None,
+                "variance": variance,
+                "stability": stability,
+            }
+        )
 
     edges_result.sort(key=lambda e: e.get("variance") or 1.0, reverse=True)
 
@@ -3094,11 +3095,10 @@ def belief_state_decision(
             "voi_score": top_target["voi_score"],
             "uncertainty": top_target["uncertainty"],
             "sensitivity": top_target["sensitivity"],
-        } if top_target else None,
-        "top_rankings": [
-            {"node_id": r["node_id"], "label": r["label"], "voi_score": r["voi_score"]}
-            for r in rankings[:5]
-        ],
+        }
+        if top_target
+        else None,
+        "top_rankings": [{"node_id": r["node_id"], "label": r["label"], "voi_score": r["voi_score"]} for r in rankings[:5]],
     }
 
 
@@ -3154,13 +3154,15 @@ def compute_trajectory(
         val = float(row[0]) if row[0] is not None else None
         if val is None:
             continue
-        data_points.append({
-            "value": val,
-            "source": row[1] or "",
-            "created_by": row[2] or "",
-            "sigma": float(row[3]) if row[3] is not None else None,
-            "created_at": str(row[4]) if row[4] else "",
-        })
+        data_points.append(
+            {
+                "value": val,
+                "source": row[1] or "",
+                "created_by": row[2] or "",
+                "sigma": float(row[3]) if row[3] is not None else None,
+                "created_at": str(row[4]) if row[4] else "",
+            }
+        )
         values.append(val)
 
     n = len(data_points)
@@ -3200,22 +3202,24 @@ def compute_trajectory(
         curr_dir = "rising" if v2 > v1 else "falling" if v2 < v1 else "flat"
         if prev_dir != "flat" and curr_dir != "flat" and prev_dir != curr_dir:
             magnitude = abs(v2 - v0)
-            regressions.append({
-                "index": i,
-                "at": data_points[i]["created_at"],
-                "previous_trend": prev_dir,
-                "new_trend": curr_dir,
-                "from_value": v0,
-                "to_value": v2,
-                "magnitude": round(magnitude, 6),
-            })
+            regressions.append(
+                {
+                    "index": i,
+                    "at": data_points[i]["created_at"],
+                    "previous_trend": prev_dir,
+                    "new_trend": curr_dir,
+                    "from_value": v0,
+                    "to_value": v2,
+                    "magnitude": round(magnitude, 6),
+                }
+            )
 
     # Acceleration: second derivative = change in slope
     # Use window halves: slope of first half vs second half
     mid = n // 2
     if mid >= 2:
         slope0 = statistics.linear_regression(range(mid), values[:mid]).slope
-        slope1 = statistics.linear_regression(range(mid), values[mid:mid + mid]).slope
+        slope1 = statistics.linear_regression(range(mid), values[mid : mid + mid]).slope
         acceleration = round(slope1 - slope0, 6)
     else:
         acceleration = None
@@ -3290,58 +3294,68 @@ def graph_doctor(conn: DuckDBPyConnection) -> dict[str, Any]:
     # 1. Orphan nodes (no edges at all)
     orphans = health.get("orphan_nodes", 0) or 0
     orphan_rate = orphans / max(total_nodes, 1)
-    checks.append({
-        "id": "orphan_nodes",
-        "label": "Orphan nodes",
-        "description": "Nodes with no edges at all — invisible to traversal",
-        "count": orphans,
-        "rate": round(orphan_rate, 4),
-        "severity": round(orphan_rate, 4),
-    })
+    checks.append(
+        {
+            "id": "orphan_nodes",
+            "label": "Orphan nodes",
+            "description": "Nodes with no edges at all — invisible to traversal",
+            "count": orphans,
+            "rate": round(orphan_rate, 4),
+            "severity": round(orphan_rate, 4),
+        }
+    )
 
     # 2. Dead-end nodes (incoming edges only, no outgoing)
     dead_ends = health.get("dead_end_count", 0) or 0
     dead_end_rate = dead_ends / max(total_nodes, 1)
-    checks.append({
-        "id": "dead_end_nodes",
-        "label": "Dead-end nodes",
-        "description": "Nodes with incoming edges but no outgoing — sinks",
-        "count": dead_ends,
-        "rate": round(dead_end_rate, 4),
-        "severity": round(dead_end_rate, 4),
-    })
+    checks.append(
+        {
+            "id": "dead_end_nodes",
+            "label": "Dead-end nodes",
+            "description": "Nodes with incoming edges but no outgoing — sinks",
+            "count": dead_ends,
+            "rate": round(dead_end_rate, 4),
+            "severity": round(dead_end_rate, 4),
+        }
+    )
 
     # 3. Low-confidence unchallenged L3/L4 edges
     low_conf = health.get("low_confidence_unchallenged", 0) or 0
     low_conf_rate = low_conf / max(total_edges, 1)
-    checks.append({
-        "id": "low_confidence_unchallenged",
-        "label": "Low-confidence unchallenged edges",
-        "description": "Edges with confidence < 0.3 that have never been challenged",
-        "count": low_conf,
-        "rate": round(low_conf_rate, 4),
-        "severity": round(min(1.0, low_conf_rate * 3), 4),
-    })
+    checks.append(
+        {
+            "id": "low_confidence_unchallenged",
+            "label": "Low-confidence unchallenged edges",
+            "description": "Edges with confidence < 0.3 that have never been challenged",
+            "count": low_conf,
+            "rate": round(low_conf_rate, 4),
+            "severity": round(min(1.0, low_conf_rate * 3), 4),
+        }
+    )
 
     # 4. Dense clusters (nodes with 10+ edges)
     dense = health.get("dense_clusters", 0) or 0
-    checks.append({
-        "id": "dense_clusters",
-        "label": "Dense clusters",
-        "description": "Nodes with 10+ edges — candidates for synthesis",
-        "count": dense,
-        "severity": round(min(1.0, dense * 0.2), 4),
-    })
+    checks.append(
+        {
+            "id": "dense_clusters",
+            "label": "Dense clusters",
+            "description": "Nodes with 10+ edges — candidates for synthesis",
+            "count": dense,
+            "severity": round(min(1.0, dense * 0.2), 4),
+        }
+    )
 
     # 5. Stale agents
     stale = health.get("stale_agents", 0) or 0
-    checks.append({
-        "id": "stale_agents",
-        "label": "Stale agents",
-        "description": "Agents whose last sync is overdue",
-        "count": stale,
-        "severity": round(min(1.0, stale * 0.5), 4),
-    })
+    checks.append(
+        {
+            "id": "stale_agents",
+            "label": "Stale agents",
+            "description": "Agents whose last sync is overdue",
+            "count": stale,
+            "severity": round(min(1.0, stale * 0.5), 4),
+        }
+    )
 
     # 6. Edge-to-node ratio
     if total_nodes > 0:
@@ -3354,22 +3368,26 @@ def graph_doctor(conn: DuckDBPyConnection) -> dict[str, Any]:
             density_severity = 0.0
             density_label = "Healthy edge density"
             density_desc = f"{density:.2f} edges per node — within target range"
-        checks.append({
-            "id": "edge_density",
-            "label": density_label,
-            "description": density_desc,
-            "count": total_edges,
-            "rate": round(density, 4),
-            "severity": density_severity,
-        })
+        checks.append(
+            {
+                "id": "edge_density",
+                "label": density_label,
+                "description": density_desc,
+                "count": total_edges,
+                "rate": round(density, 4),
+                "severity": density_severity,
+            }
+        )
     else:
-        checks.append({
-            "id": "edge_density",
-            "label": "Edge density",
-            "description": "Empty graph — no nodes",
-            "count": 0,
-            "severity": 1.0,
-        })
+        checks.append(
+            {
+                "id": "edge_density",
+                "label": "Edge density",
+                "description": "Empty graph — no nodes",
+                "count": 0,
+                "severity": 1.0,
+            }
+        )
 
     # Sort checks by severity descending
     checks.sort(key=lambda c: c["severity"], reverse=True)
@@ -3383,64 +3401,76 @@ def graph_doctor(conn: DuckDBPyConnection) -> dict[str, Any]:
         cid = c["id"]
 
         if cid == "orphan_nodes":
-            remediations.append({
-                "issue": cid,
-                "severity": c["severity"],
-                "action": "connect_or_delete",
-                "description": f"{c['count']} nodes have no edges. Connect them to existing structure or delete them.",
-                "how": "POST /node/{id}/edge to link each orphan, or DELETE /node/{id} if the node is stale.",
-                "count": c["count"],
-            })
+            remediations.append(
+                {
+                    "issue": cid,
+                    "severity": c["severity"],
+                    "action": "connect_or_delete",
+                    "description": f"{c['count']} nodes have no edges. Connect them to existing structure or delete them.",
+                    "how": "POST /node/{id}/edge to link each orphan, or DELETE /node/{id} if the node is stale.",
+                    "count": c["count"],
+                }
+            )
 
         elif cid == "dead_end_nodes":
-            remediations.append({
-                "issue": cid,
-                "severity": c["severity"],
-                "action": "add_outgoing_edges",
-                "description": f"{c['count']} nodes have only incoming edges. Each is a sink — add outgoing edges or merge.",
-                "how": "Add a CAUSES, SUPPORTS, or APPLIES_TO edge from the dead-end to relevant context nodes.",
-                "count": c["count"],
-            })
+            remediations.append(
+                {
+                    "issue": cid,
+                    "severity": c["severity"],
+                    "action": "add_outgoing_edges",
+                    "description": f"{c['count']} nodes have only incoming edges. Each is a sink — add outgoing edges or merge.",
+                    "how": "Add a CAUSES, SUPPORTS, or APPLIES_TO edge from the dead-end to relevant context nodes.",
+                    "count": c["count"],
+                }
+            )
 
         elif cid == "low_confidence_unchallenged":
-            remediations.append({
-                "issue": cid,
-                "severity": c["severity"],
-                "action": "challenge_or_update_confidence",
-                "description": f"{c['count']} edges have confidence < 0.3 and have never been challenged. Challenge them or update confidence.",
-                "how": "POST /challenge/{edge_id} with a reason, or POST /edge/{id}/confidence to update the confidence.",
-                "count": c["count"],
-            })
+            remediations.append(
+                {
+                    "issue": cid,
+                    "severity": c["severity"],
+                    "action": "challenge_or_update_confidence",
+                    "description": f"{c['count']} edges have confidence < 0.3 and have never been challenged. Challenge them or update confidence.",
+                    "how": "POST /challenge/{edge_id} with a reason, or POST /edge/{id}/confidence to update the confidence.",
+                    "count": c["count"],
+                }
+            )
 
         elif cid == "dense_clusters":
-            remediations.append({
-                "issue": cid,
-                "severity": c["severity"],
-                "action": "synthesize",
-                "description": f"{c['count']} nodes have 10+ edges. Consider synthesising a new pattern node.",
-                "how": "POST /agent/synthesis with cluster_ids=[node_ids] to create a synthesis node that summarises the cluster.",
-                "count": c["count"],
-            })
+            remediations.append(
+                {
+                    "issue": cid,
+                    "severity": c["severity"],
+                    "action": "synthesize",
+                    "description": f"{c['count']} nodes have 10+ edges. Consider synthesising a new pattern node.",
+                    "how": "POST /agent/synthesis with cluster_ids=[node_ids] to create a synthesis node that summarises the cluster.",
+                    "count": c["count"],
+                }
+            )
 
         elif cid == "stale_agents":
-            remediations.append({
-                "issue": cid,
-                "severity": c["severity"],
-                "action": "check_agent_heartbeat",
-                "description": f"{c['count']} agents have not synced on schedule. They may be offline.",
-                "how": "Check agent status via GET /agents. POST /heartbeat to re-sync.",
-                "count": c["count"],
-            })
+            remediations.append(
+                {
+                    "issue": cid,
+                    "severity": c["severity"],
+                    "action": "check_agent_heartbeat",
+                    "description": f"{c['count']} agents have not synced on schedule. They may be offline.",
+                    "how": "Check agent status via GET /agents. POST /heartbeat to re-sync.",
+                    "count": c["count"],
+                }
+            )
 
         elif cid == "edge_density" and c["severity"] > 0:
-            remediations.append({
-                "issue": cid,
-                "severity": c["severity"],
-                "action": "add_edges",
-                "description": c["description"],
-                "how": "Connect existing orphan nodes with CAUSES, SUPPORTS, or REFERENCES edges. Target at least 1 edge per node.",
-                "count": total_nodes,
-            })
+            remediations.append(
+                {
+                    "issue": cid,
+                    "severity": c["severity"],
+                    "action": "add_edges",
+                    "description": c["description"],
+                    "how": "Connect existing orphan nodes with CAUSES, SUPPORTS, or REFERENCES edges. Target at least 1 edge per node.",
+                    "count": total_nodes,
+                }
+            )
 
     severity_scores = [c["severity"] for c in checks]
     overall_raw = sum(severity_scores) / len(severity_scores) if severity_scores else 0
@@ -3495,19 +3525,23 @@ def compute_gap_analysis(
 
     expected_obs = 3
     if obs_count < expected_obs:
-        gaps.append({
-            "type": "missing_observations",
-            "severity": "high" if obs_count == 0 else "medium",
-            "description": f"Only {obs_count} observation(s) — at least {expected_obs} recommended for reliable analysis",
-            "count": obs_count,
-            "expected": expected_obs,
-        })
+        gaps.append(
+            {
+                "type": "missing_observations",
+                "severity": "high" if obs_count == 0 else "medium",
+                "description": f"Only {obs_count} observation(s) — at least {expected_obs} recommended for reliable analysis",
+                "count": obs_count,
+                "expected": expected_obs,
+            }
+        )
     else:
-        strengths.append({
-            "type": "sufficient_observations",
-            "description": f"{obs_count} observations — sufficient for analysis",
-            "count": obs_count,
-        })
+        strengths.append(
+            {
+                "type": "sufficient_observations",
+                "description": f"{obs_count} observations — sufficient for analysis",
+                "count": obs_count,
+            }
+        )
 
     # 2. Connectivity gap
     out_edges = conn.execute(
@@ -3520,28 +3554,34 @@ def compute_gap_analysis(
     ).fetchone()[0]
 
     if out_edges == 0 and in_edges == 0:
-        gaps.append({
-            "type": "orphan_node",
-            "severity": "high",
-            "description": "No edges at all — node is invisible to graph traversal",
-            "incoming": 0,
-            "outgoing": 0,
-        })
+        gaps.append(
+            {
+                "type": "orphan_node",
+                "severity": "high",
+                "description": "No edges at all — node is invisible to graph traversal",
+                "incoming": 0,
+                "outgoing": 0,
+            }
+        )
     elif out_edges == 0 and in_edges > 0:
-        gaps.append({
-            "type": "dead_end",
-            "severity": "medium",
-            "description": "Only incoming edges — no outgoing connections",
-            "incoming": in_edges,
-            "outgoing": 0,
-        })
+        gaps.append(
+            {
+                "type": "dead_end",
+                "severity": "medium",
+                "description": "Only incoming edges — no outgoing connections",
+                "incoming": in_edges,
+                "outgoing": 0,
+            }
+        )
     else:
-        strengths.append({
-            "type": "connected",
-            "description": f"{out_edges} outgoing, {in_edges} incoming edges",
-            "incoming": in_edges,
-            "outgoing": out_edges,
-        })
+        strengths.append(
+            {
+                "type": "connected",
+                "description": f"{out_edges} outgoing, {in_edges} incoming edges",
+                "incoming": in_edges,
+                "outgoing": out_edges,
+            }
+        )
 
     # 3. Unchallenged high-confidence edges
     unchallenged = conn.execute(
@@ -3560,17 +3600,21 @@ def compute_gap_analysis(
     ).fetchone()[0]
 
     if unchallenged > 0:
-        gaps.append({
-            "type": "unchallenged_high_confidence",
-            "severity": "medium",
-            "description": f"{unchallenged} high-confidence edge(s) from this node have never been challenged",
-            "count": unchallenged,
-        })
+        gaps.append(
+            {
+                "type": "unchallenged_high_confidence",
+                "severity": "medium",
+                "description": f"{unchallenged} high-confidence edge(s) from this node have never been challenged",
+                "count": unchallenged,
+            }
+        )
     else:
-        strengths.append({
-            "type": "edges_challenged",
-            "description": "All high-confidence edges have been challenged or don't exist",
-        })
+        strengths.append(
+            {
+                "type": "edges_challenged",
+                "description": "All high-confidence edges have been challenged or don't exist",
+            }
+        )
 
     # 4. Similar disconnected nodes (same type, not connected)
     similar_unconnected = conn.execute(
@@ -3587,20 +3631,24 @@ def compute_gap_analysis(
     ).fetchone()[0]
 
     if similar_unconnected > 0:
-        gaps.append({
-            "type": "similar_not_connected",
-            "severity": "low",
-            "description": f"{similar_unconnected} other '{node_type}' nodes exist without connection to this node",
-            "count": similar_unconnected,
-        })
+        gaps.append(
+            {
+                "type": "similar_not_connected",
+                "severity": "low",
+                "description": f"{similar_unconnected} other '{node_type}' nodes exist without connection to this node",
+                "count": similar_unconnected,
+            }
+        )
 
     # 5. No outgoing edges for specific types (pattern/idea/decision should have edges)
     if node_type in ("pattern", "idea", "decision") and out_edges == 0:
-        gaps.append({
-            "type": "derived_node_no_output",
-            "severity": "high",
-            "description": f"A '{node_type}' node with no outgoing edges — its conclusions don't flow anywhere",
-        })
+        gaps.append(
+            {
+                "type": "derived_node_no_output",
+                "severity": "high",
+                "description": f"A '{node_type}' node with no outgoing edges — its conclusions don't flow anywhere",
+            }
+        )
 
     # Completeness score
     high_gaps = sum(1 for g in gaps if g.get("severity") == "high")
@@ -3747,6 +3795,7 @@ def find_islands(
 
     # Collect components
     from collections import defaultdict
+
     components: dict[str, list[tuple]] = defaultdict(list)
     node_info = {n[0]: (n[1], n[2], n[3]) for n in nodes}
     for nid in parent:
@@ -3768,30 +3817,31 @@ def find_islands(
         conf_count = 0
         for nid in comp:
             info = node_info.get(nid, ("", "concept", None))
-            island_nodes.append({
-                "id": nid,
-                "label": info[0],
-                "type": info[1],
-            })
+            island_nodes.append(
+                {
+                    "id": nid,
+                    "label": info[0],
+                    "type": info[1],
+                }
+            )
             if info[2] is not None:
                 total_conf += info[2]
                 conf_count += 1
 
         # Count edges within this island
         comp_set = set(comp)
-        island_edges = sum(
-            1 for from_n, to_n, _ in edges
-            if from_n in comp_set and to_n in comp_set
-        )
+        island_edges = sum(1 for from_n, to_n, _ in edges if from_n in comp_set and to_n in comp_set)
 
-        result_islands.append({
-            "id": f"island-{i + 1}",
-            "size": len(comp),
-            "nodes": island_nodes[:10],  # Cap at 10 for response size
-            "total_nodes": len(comp),
-            "internal_edges": island_edges,
-            "avg_confidence": round(total_conf / conf_count, 3) if conf_count > 0 else None,
-        })
+        result_islands.append(
+            {
+                "id": f"island-{i + 1}",
+                "size": len(comp),
+                "nodes": island_nodes[:10],  # Cap at 10 for response size
+                "total_nodes": len(comp),
+                "internal_edges": island_edges,
+                "avg_confidence": round(total_conf / conf_count, 3) if conf_count > 0 else None,
+            }
+        )
 
     # Compute stats
     total_nodes = len(nodes)

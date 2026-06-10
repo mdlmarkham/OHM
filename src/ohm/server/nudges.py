@@ -21,11 +21,31 @@ CAUSAL_EDGE_TYPES = {"CAUSES", "DEPENDS_ON", "BLOCKS", "ENABLES", "INFLUENCES", 
 
 # Edge types that do NOT flow through the Bayesian network
 NON_CAUSAL_EDGE_TYPES = {
-    "SUPPORTS", "REFERENCES", "RELATED_TO", "APPLIES_TO", "CORRELATES_WITH",
-    "CHALLENGED_BY", "SYNTHESIZES", "CONTEXT_OF", "PART_OF", "HAS_COMPONENT",
-    "CONTAINS", "BELONGS_TO", "VALUES", "GOALS", "CAPABLE_OF", "DERIVES_FROM",
-    "CONVERGES_WITH", "PARALLELS", "INTERESTED_IN", "USES", "SERVES",
-    "REFINES", "EXPLAINS", "FEEDS", "COMPOUNDS",
+    "SUPPORTS",
+    "REFERENCES",
+    "RELATED_TO",
+    "APPLIES_TO",
+    "CORRELATES_WITH",
+    "CHALLENGED_BY",
+    "SYNTHESIZES",
+    "CONTEXT_OF",
+    "PART_OF",
+    "HAS_COMPONENT",
+    "CONTAINS",
+    "BELONGS_TO",
+    "VALUES",
+    "GOALS",
+    "CAPABLE_OF",
+    "DERIVES_FROM",
+    "CONVERGES_WITH",
+    "PARALLELS",
+    "INTERESTED_IN",
+    "USES",
+    "SERVES",
+    "REFINES",
+    "EXPLAINS",
+    "FEEDS",
+    "COMPOUNDS",
 }
 
 # Node types that represent decision points for game theory
@@ -33,11 +53,42 @@ DECISION_CANDIDATE_TYPES = {"event", "concept"}
 
 # Keywords that suggest a node is a decision/action point
 DECISION_KEYWORDS = [
-    "strike", "attack", "respond", "retaliate", "invade", "defend", "withdraw",
-    "negotiate", "concede", "escalate", "deescalate", "sanction", "authorize",
-    "deploy", "launch", "halt", "resume", "impose", "lift", "ban", "approve",
-    "reject", "veto", "sign", "cancel", "commit", "invest", "sell", "buy",
-    "hold", "cut", "hike", "pause", "pivot", "exercise", "option",
+    "strike",
+    "attack",
+    "respond",
+    "retaliate",
+    "invade",
+    "defend",
+    "withdraw",
+    "negotiate",
+    "concede",
+    "escalate",
+    "deescalate",
+    "sanction",
+    "authorize",
+    "deploy",
+    "launch",
+    "halt",
+    "resume",
+    "impose",
+    "lift",
+    "ban",
+    "approve",
+    "reject",
+    "veto",
+    "sign",
+    "cancel",
+    "commit",
+    "invest",
+    "sell",
+    "buy",
+    "hold",
+    "cut",
+    "hike",
+    "pause",
+    "pivot",
+    "exercise",
+    "option",
 ]
 
 
@@ -122,162 +173,157 @@ def generate_nudges(
     if action == "edge" and edge_type and edge_type in NON_CAUSAL_EDGE_TYPES:
         # Check if either endpoint has causal edges already — if so, this
         # non-causal edge won't feed the Bayesian network
-        causal_hint = (
-            f"{edge_type} edges don't flow through the Bayesian inference network. "
-            f"For causal reasoning (inference, intervention, game theory), use "
-            f"CAUSES, DEPENDS_ON, BLOCKS, ENABLES, or INFLUENCES. "
-            f"Is this a causal relationship?"
+        causal_hint = f"{edge_type} edges don't flow through the Bayesian inference network. For causal reasoning (inference, intervention, game theory), use CAUSES, DEPENDS_ON, BLOCKS, ENABLES, or INFLUENCES. Is this a causal relationship?"
+        nudges.append(
+            {
+                "type": "causal_edge_suggestion",
+                "message": causal_hint,
+                "severity": "info",
+                "data": {
+                    "edge_type_used": edge_type,
+                    "suggested_types": sorted(CAUSAL_EDGE_TYPES),
+                    "current_edge_non_causal": True,
+                },
+            }
         )
-        nudges.append({
-            "type": "causal_edge_suggestion",
-            "message": causal_hint,
-            "severity": "info",
-            "data": {
-                "edge_type_used": edge_type,
-                "suggested_types": sorted(CAUSAL_EDGE_TYPES),
-                "current_edge_non_causal": True,
-            },
-        })
 
     if action == "edge" and edge_type and edge_type in CAUSAL_EDGE_TYPES:
-        nudges.append({
-            "type": "causal_edge_confirmed",
-            "message": f"{edge_type} edge feeds the Bayesian network. This edge will "
-                        f"be used by /inference, /intervene, /sensitivity, /voi, and /game.",
-            "severity": "info",
-        })
+        nudges.append(
+            {
+                "type": "causal_edge_confirmed",
+                "message": f"{edge_type} edge feeds the Bayesian network. This edge will be used by /inference, /intervene, /sensitivity, /voi, and /game.",
+                "severity": "info",
+            }
+        )
 
     # ── ADR-023: Decision node nudge ──────────────────────────────────────
     if action == "node" and node and _looks_like_decision(node):
-        nudges.append({
-            "type": "decision_node_suggestion",
-            "message": "This node looks like a decision or action point. Consider adding "
-                        "utility_scale and action_alternatives to enable game theory analysis "
-                        "(/game, /nash, /policy). Decision nodes with utility_scale are the "
-                        "entry point for strategic reasoning about the graph.",
-            "severity": "suggestion",
-            "data": {
-                "suggested_type": "decision",
-                "required_fields": ["utility_scale", "current_best_action", "action_alternatives"],
-                "enabled_endpoints": ["/game", "/nash", "/policy", "/voi"],
-            },
-        })
+        nudges.append(
+            {
+                "type": "decision_node_suggestion",
+                "message": "This node looks like a decision or action point. Consider adding "
+                "utility_scale and action_alternatives to enable game theory analysis "
+                "(/game, /nash, /policy). Decision nodes with utility_scale are the "
+                "entry point for strategic reasoning about the graph.",
+                "severity": "suggestion",
+                "data": {
+                    "suggested_type": "decision",
+                    "required_fields": ["utility_scale", "current_best_action", "action_alternatives"],
+                    "enabled_endpoints": ["/game", "/nash", "/policy", "/voi"],
+                },
+            }
+        )
 
     # ── Source citation nudge ────────────────────────────────────────────
     if action == "observation" and not source_url and provenance != "pattern_analysis":
-        nudges.append({
-            "type": "source_citation",
-            "message": "No source_url on this observation. If this is based on external information, "
-                        "add source_url to enable L2 citation tracking and source reliability scoring.",
-            "severity": "hint",
-        })
+        nudges.append(
+            {
+                "type": "source_citation",
+                "message": "No source_url on this observation. If this is based on external information, add source_url to enable L2 citation tracking and source reliability scoring.",
+                "severity": "hint",
+            }
+        )
 
     # ── PERT estimation nudge ─────────────────────────────────────────────
     if action == "edge" and confidence is not None:
-        nudges.append({
-            "type": "pert_estimation",
-            "message": f"Confidence {confidence:.2f} recorded. Consider providing PERT estimates "
-                        f"(p05/p50/p95) for calibrated inference. What range of probabilities "
-                        f"would surprise you?",
-            "severity": "hint",
-        })
+        nudges.append(
+            {
+                "type": "pert_estimation",
+                "message": f"Confidence {confidence:.2f} recorded. Consider providing PERT estimates (p05/p50/p95) for calibrated inference. What range of probabilities would surprise you?",
+                "severity": "hint",
+            }
+        )
 
     # ── Challenge nudge (dynamic) ────────────────────────────────────────
     if action == "edge" and edge_type in ("CAUSES", "SUPPORTS", "INFLUENCES"):
         ratio_str = f"{challenge_ratio:.1%}" if challenge_ratio is not None else "low"
-        nudges.append({
-            "type": "challenge_reminder",
-            "message": f"{edge_type} edge created. Challenge ratio is {ratio_str} — most L3 "
-                        f"interpretations are unchallenged. Consider: does this causal claim "
-                        f"have evidence against it? Is the direction correct? Could this be "
-                        f"an AND→OR conversion?",
-            "severity": "hint",
-        })
+        nudges.append(
+            {
+                "type": "challenge_reminder",
+                "message": f"{edge_type} edge created. Challenge ratio is {ratio_str} — most L3 interpretations are unchallenged. Consider: does this causal claim have evidence against it? Is the direction correct? Could this be an AND→OR conversion?",
+                "severity": "hint",
+            }
+        )
 
     # ── AND→OR pattern nudge ─────────────────────────────────────────────
-    if tags and any(t in ("and-or", "AND-OR", "governance", "security", "ontology")
-                    for t in (tags or [])):
-        nudges.append({
-            "type": "pattern_detection",
-            "message": "AND→OR pattern tag detected. Ask: Is this an AND-gate or OR-gate? "
-                        "Which direction does it operate? AND-gates trap when enabling contradictory "
-                        "truths; AND-gates escape when constraining anti-democratic processing.",
-            "severity": "info",
-        })
+    if tags and any(t in ("and-or", "AND-OR", "governance", "security", "ontology") for t in (tags or [])):
+        nudges.append(
+            {
+                "type": "pattern_detection",
+                "message": "AND→OR pattern tag detected. Ask: Is this an AND-gate or OR-gate? Which direction does it operate? AND-gates trap when enabling contradictory truths; AND-gates escape when constraining anti-democratic processing.",
+                "severity": "info",
+            }
+        )
 
     # ── Cluster synthesis nudge ───────────────────────────────────────────
     if neighborhood and action == "node":
         nodes_in_hood = neighborhood.get("nodes", {})
         edges_in_hood = neighborhood.get("edges", [])
-        unchallenged = [e for e in edges_in_hood
-                        if e.get("edge_type") in ("CAUSES", "SUPPORTS", "INFLUENCES")
-                        and e.get("challenge_of") is None]
+        unchallenged = [e for e in edges_in_hood if e.get("edge_type") in ("CAUSES", "SUPPORTS", "INFLUENCES") and e.get("challenge_of") is None]
         if len(nodes_in_hood) >= 3 and len(unchallenged) >= 2:
-            nudges.append({
-                "type": "cluster_synthesis",
-                "message": f"This node has {len(nodes_in_hood)} neighbors with {len(unchallenged)} "
-                            f"unchallenged causal edges. Consider writing a synthesis connecting these "
-                            f"into a pattern. When 3+ nodes share a theme, the pattern is often more "
-                            f"important than any single node.",
-                "severity": "suggestion",
-                "data": {"neighbor_count": len(nodes_in_hood),
-                         "unchallenged_causal_edges": len(unchallenged)},
-            })
+            nudges.append(
+                {
+                    "type": "cluster_synthesis",
+                    "message": f"This node has {len(nodes_in_hood)} neighbors with {len(unchallenged)} "
+                    f"unchallenged causal edges. Consider writing a synthesis connecting these "
+                    f"into a pattern. When 3+ nodes share a theme, the pattern is often more "
+                    f"important than any single node.",
+                    "severity": "suggestion",
+                    "data": {"neighbor_count": len(nodes_in_hood), "unchallenged_causal_edges": len(unchallenged)},
+                }
+            )
 
     # ── Confidence outlier nudge ─────────────────────────────────────────
     if confidence is not None and neighborhood:
         edges_in_hood = neighborhood.get("edges", [])
-        similar_edges = [e for e in edges_in_hood
-                         if e.get("edge_type") == edge_type
-                         and e.get("confidence") is not None]
+        similar_edges = [e for e in edges_in_hood if e.get("edge_type") == edge_type and e.get("confidence") is not None]
         if len(similar_edges) >= 2:
             avg_conf = sum(e["confidence"] for e in similar_edges) / len(similar_edges)
             if abs(confidence - avg_conf) > 0.15:
                 direction = "higher" if confidence > avg_conf else "lower"
-                nudges.append({
-                    "type": "confidence_outlier",
-                    "message": f"Your confidence ({confidence:.2f}) is {direction} than the "
-                                f"neighborhood average ({avg_conf:.2f}) for {edge_type} edges. "
-                                f"What evidence supports this {direction} confidence?",
-                    "severity": "info",
-                    "data": {"your_confidence": confidence,
-                             "neighborhood_avg": round(avg_conf, 3),
-                             "direction": direction},
-                })
+                nudges.append(
+                    {
+                        "type": "confidence_outlier",
+                        "message": f"Your confidence ({confidence:.2f}) is {direction} than the neighborhood average ({avg_conf:.2f}) for {edge_type} edges. What evidence supports this {direction} confidence?",
+                        "severity": "info",
+                        "data": {"your_confidence": confidence, "neighborhood_avg": round(avg_conf, 3), "direction": direction},
+                    }
+                )
 
     # ── Babel insight nudge (rare, for L3 interpretations) ──────────────
     if provenance == "pattern_analysis" and action == "edge":
-        nudges.append({
-            "type": "babel_insight",
-            "message": "You're writing an L3 interpretation. Remember: the graph values navigable "
-                        "plurality, not convergence. If another agent might see this differently, "
-                        "that divergence is data, not error.",
-            "severity": "info",
-        })
+        nudges.append(
+            {
+                "type": "babel_insight",
+                "message": "You're writing an L3 interpretation. Remember: the graph values navigable plurality, not convergence. If another agent might see this differently, that divergence is data, not error.",
+                "severity": "info",
+            }
+        )
 
     # ── ADR-023: Inference delta nudge ───────────────────────────────────
     # After writing to a node, show how the Bayesian network shifted
     if action in ("observation", "edge") and node_id and store:
         delta = _get_inference_delta(store, node_id, action)
         if delta and delta.get("probabilities"):
-            nudges.append({
-                "type": "inference_delta",
-                "message": f"Bayesian network update for {node_id}: "
-                            f"{delta['probabilities']}. "
-                            f"Use /inference?target={node_id} for full analysis.",
-                "severity": "info",
-                "data": delta,
-            })
+            nudges.append(
+                {
+                    "type": "inference_delta",
+                    "message": f"Bayesian network update for {node_id}: {delta['probabilities']}. Use /inference?target={node_id} for full analysis.",
+                    "severity": "info",
+                    "data": delta,
+                }
+            )
 
     # ── ADR-023: Batch write nudge ────────────────────────────────────────
     if action in ("node", "edge") and store is not None:
         # If this is a single write, suggest batch for multi-write sessions
-        nudges.append({
-            "type": "batch_suggestion",
-            "message": "For multi-write sessions, use POST /batch to create nodes and edges "
-                        "in a single transaction. Faster and atomic — no partial writes.",
-            "severity": "hint",
-        })
+        nudges.append(
+            {
+                "type": "batch_suggestion",
+                "message": "For multi-write sessions, use POST /batch to create nodes and edges in a single transaction. Faster and atomic — no partial writes.",
+                "severity": "hint",
+            }
+        )
 
     # ── ADR-023: Contradiction awareness nudge ────────────────────────────
     # After writing an observation, check if it contradicts existing ones
@@ -290,15 +336,14 @@ def generate_nudges(
             ).fetchone()
             challenge_count = rows[0] if rows else 0
             if challenge_count > 0:
-                nudges.append({
-                    "type": "contradiction_alert",
-                    "message": f"This node has {challenge_count} challenge(s) from other agents. "
-                                f"Your observation may contradict existing interpretations. "
-                                f"Consider: does your evidence resolve or deepen the disagreement? "
-                                f"Use /contradictions to review.",
-                    "severity": "info",
-                    "data": {"challenge_count": challenge_count, "node_id": node_id},
-                })
+                nudges.append(
+                    {
+                        "type": "contradiction_alert",
+                        "message": f"This node has {challenge_count} challenge(s) from other agents. Your observation may contradict existing interpretations. Consider: does your evidence resolve or deepen the disagreement? Use /contradictions to review.",
+                        "severity": "info",
+                        "data": {"challenge_count": challenge_count, "node_id": node_id},
+                    }
+                )
         except Exception:
             pass  # Never fail the write for a nudge
 

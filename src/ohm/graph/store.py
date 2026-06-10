@@ -289,9 +289,7 @@ class OhmStore:
 
                     for table in ["ohm_nodes", "ohm_edges", "ohm_observations"]:
                         try:
-                            dl_cols = conn.execute(
-                                f"PRAGMA table_info('{dl_schema_prefix}.{table}')"
-                            ).fetchall()
+                            dl_cols = conn.execute(f"PRAGMA table_info('{dl_schema_prefix}.{table}')").fetchall()
                             dl_col_names = {r[1] for r in dl_cols}
                             if not dl_col_names:
                                 logger.warning("No columns found in DuckLake for %s, skipping", table)
@@ -318,9 +316,7 @@ class OhmStore:
                             select_str = ", ".join(select_parts)
                             insert_cols = ", ".join(common)
 
-                            conn.execute(
-                                f"INSERT INTO {table} ({insert_cols}, deleted_at) SELECT {select_str}, NULL::TIMESTAMP FROM {dl_schema_prefix}.{table}"
-                            )
+                            conn.execute(f"INSERT INTO {table} ({insert_cols}, deleted_at) SELECT {select_str}, NULL::TIMESTAMP FROM {dl_schema_prefix}.{table}")
                             count = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]  # type: ignore[index]
                             logger.info("Recovered %d %s from DuckLake (%d columns)", count, table, len(common))
                         except Exception as e:
@@ -393,21 +389,15 @@ class OhmStore:
                 try:
                     # Try metadata schema first (DuckLake 0.3+)
                     try:
-                        dl_cols = self.conn.execute(
-                            f"PRAGMA table_info('{dl_schema_prefix}.{table}')"
-                        ).fetchall()
+                        dl_cols = self.conn.execute(f"PRAGMA table_info('{dl_schema_prefix}.{table}')").fetchall()
                     except Exception:
                         # Fall back to catalog-qualified table name
-                        dl_cols = self.conn.execute(
-                            f"PRAGMA table_info('{dl_catalog}.{table}')"
-                        ).fetchall()
+                        dl_cols = self.conn.execute(f"PRAGMA table_info('{dl_catalog}.{table}')").fetchall()
 
                     # If still no columns, try direct table name
                     if not dl_cols:
                         try:
-                            dl_cols = self.conn.execute(
-                                f"PRAGMA table_info('{table}')"
-                            ).fetchall()
+                            dl_cols = self.conn.execute(f"PRAGMA table_info('{table}')").fetchall()
                         except Exception:
                             pass
                     dl_col_names = {r[1] for r in dl_cols}
@@ -452,9 +442,7 @@ class OhmStore:
                     select_str = ", ".join(select_parts)
                     insert_cols = ", ".join(common)
 
-                    self.conn.execute(
-                        f"INSERT INTO {table} ({insert_cols}, deleted_at) SELECT {select_str}, NULL::TIMESTAMP FROM {source_table}"
-                    )
+                    self.conn.execute(f"INSERT INTO {table} ({insert_cols}, deleted_at) SELECT {select_str}, NULL::TIMESTAMP FROM {source_table}")
                     count = self.conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]  # type: ignore[index]
                     logger.info("Auto-restored %d %s from DuckLake (%d columns)", count, table, len(common))
                 except Exception as e:
@@ -714,6 +702,7 @@ class OhmStore:
         existing = self.get_node(id)
         if existing:
             from ohm.server.boundary import check_can_update_l2_node
+
             check_can_update_l2_node(actor, id, self.conn)
             self.conn.execute(
                 """
@@ -1342,6 +1331,7 @@ class OhmStore:
             return None
 
         from ohm.server.boundary import check_can_update_edge
+
         check_can_update_edge(actor, edge["created_by"], edge_id)
 
         now = self._now()
@@ -1386,13 +1376,9 @@ class OhmStore:
         from ohm.graph.decay import default_half_life, default_weibull_shape
 
         if scale is not None and scale not in VALID_OBSERVATION_SCALES:
-            raise ValueError(
-                f"Invalid scale '{scale}' — must be one of: {', '.join(sorted(VALID_OBSERVATION_SCALES))}"
-            )
+            raise ValueError(f"Invalid scale '{scale}' — must be one of: {', '.join(sorted(VALID_OBSERVATION_SCALES))}")
         if scale == "probability" and value is not None and (value < 0.0 or value > 1.0):
-            raise ValueError(
-                f"Observation value {value} is outside [0, 1] for scale='probability'"
-            )
+            raise ValueError(f"Observation value {value} is outside [0, 1] for scale='probability'")
         # OHM-xdd4: resolve half_life_days — explicit override > type default
         if half_life_days is None:
             half_life_days = default_half_life(type)
@@ -1410,8 +1396,7 @@ class OhmStore:
                  half_life_days, weibull_shape, valid_from)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            [node_id, edge_id, type, value, baseline, sigma, source, actor, now, notes, source_name, source_url, scale,
-             half_life_days, weibull_shape, now],
+            [node_id, edge_id, type, value, baseline, sigma, source, actor, now, notes, source_name, source_url, scale, half_life_days, weibull_shape, now],
         )
 
         obs = self.execute_one(
@@ -1488,6 +1473,7 @@ class OhmStore:
             raise NodeNotFoundError(f"Node not found: {node_id}")
 
         from ohm.server.boundary import check_can_delete_node
+
         check_can_delete_node(deleted_by, node["created_by"], node_id)
 
         now = self._now()
@@ -1581,7 +1567,7 @@ class OhmStore:
         # 4. Delete edges from merge that would be exact dupes (already
         #    covered by the UPDATE NOT IN above, but also delete any edges
         #    that point FROM → TO identically to an existing edge from keep).
-        skipped = self.conn.execute(
+        _skipped = self.conn.execute(
             """UPDATE ohm_edges SET deleted_at = ?, updated_at = ?, updated_by = ?
                WHERE id IN (
                  SELECT e.id FROM ohm_edges e
@@ -1625,6 +1611,7 @@ class OhmStore:
             raise EdgeNotFoundError(f"Edge not found: {edge_id}")
 
         from ohm.server.boundary import check_can_delete_edge
+
         check_can_delete_edge(deleted_by, edge["created_by"], edge_id)
 
         now = self._now()
@@ -1691,9 +1678,7 @@ class OhmStore:
 
         result: dict[str, dict[str, dict]] = {}
         try:
-            rows = self.conn.execute(
-                "SELECT customer_id, agent, url, events FROM ohm_webhook_subscriptions"
-            ).fetchall()
+            rows = self.conn.execute("SELECT customer_id, agent, url, events FROM ohm_webhook_subscriptions").fetchall()
         except Exception:
             return result
         for row in rows:
@@ -1975,7 +1960,6 @@ class OhmStore:
             Dict with: healthy, sync_degraded, local_counts, ducklake_counts,
             orphan_counts, last_push, last_pull, staleness_seconds, errors.
         """
-        import time as _time
 
         health = {
             "healthy": True,
@@ -2012,13 +1996,9 @@ class OhmStore:
         tables = ["ohm_nodes", "ohm_edges", "ohm_observations"]
         for table in tables:
             try:
-                local_count = self.conn.execute(
-                    f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL"
-                ).fetchone()[0]
+                local_count = self.conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]
                 # DuckLake tables don't have deleted_at column — use unfiltered count
-                ducklake_count = self.conn.execute(
-                    f"SELECT COUNT(*) FROM {self._ducklake_table(table, alias)}"
-                ).fetchone()[0]
+                ducklake_count = self.conn.execute(f"SELECT COUNT(*) FROM {self._ducklake_table(table, alias)}").fetchone()[0]
                 health["local_counts"][table] = local_count
                 health["ducklake_counts"][table] = ducklake_count
 
@@ -2044,6 +2024,7 @@ class OhmStore:
             ).fetchone()
             if row and row[0]:
                 from datetime import datetime, timezone
+
                 last_sync = row[0]
                 if isinstance(last_sync, str):
                     last_sync = datetime.fromisoformat(last_sync)
@@ -2080,9 +2061,7 @@ class OhmStore:
         counts = {}
         for table in ["ohm_nodes", "ohm_edges", "ohm_observations"]:
             try:
-                counts[table] = self.conn.execute(
-                    f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL"
-                ).fetchone()[0]
+                counts[table] = self.conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]
             except Exception:
                 counts[table] = -1
         return counts
@@ -2189,6 +2168,7 @@ class OhmStore:
 
                 if soft_deleted_count > 0:
                     from datetime import datetime, timezone
+
                     now = datetime.now(timezone.utc).isoformat()
                     self.conn.execute(f"""
                         UPDATE {table} SET deleted_at = '{now}'
@@ -2207,17 +2187,11 @@ class OhmStore:
         # 4. Verify — check that counts match after repair
         for table in table_config:
             try:
-                local_count = self.conn.execute(
-                    f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL"
-                ).fetchone()[0]
-                dl_count = self.conn.execute(
-                    f"SELECT COUNT(*) FROM {self._ducklake_table(table, alias)}"
-                ).fetchone()[0]
+                local_count = self.conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]
+                dl_count = self.conn.execute(f"SELECT COUNT(*) FROM {self._ducklake_table(table, alias)}").fetchone()[0]
                 if local_count != dl_count:
                     result["verified"] = False
-                    result["errors"].append(
-                        f"{table} count mismatch after repair: local={local_count}, ducklake={dl_count}"
-                    )
+                    result["errors"].append(f"{table} count mismatch after repair: local={local_count}, ducklake={dl_count}")
             except Exception as e:
                 result["errors"].append(f"{table} verification error: {e}")
                 result["verified"] = False
@@ -3008,14 +2982,14 @@ class OhmStore:
             node_changes = self.conn.execute(f"SELECT * FROM {alias}.table_changes('ohm_nodes', {int(from_version)}, {int(to_version)})").fetchall()
             nc_columns = [desc[0] for desc in self.conn.description]
             node_changes_dicts = [dict(zip(nc_columns, row)) for row in node_changes]
-        except Exception as e:
+        except Exception:
             node_changes_dicts = []
 
         try:
             edge_changes = self.conn.execute(f"SELECT * FROM {alias}.table_changes('ohm_edges', {int(from_version)}, {int(to_version)})").fetchall()
             ec_columns = [desc[0] for desc in self.conn.description]
             edge_changes_dicts = [dict(zip(ec_columns, row)) for row in edge_changes]
-        except Exception as e:
+        except Exception:
             edge_changes_dicts = []
 
         return {

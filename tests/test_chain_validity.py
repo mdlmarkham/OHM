@@ -128,7 +128,7 @@ def test_chain_validity_five_clusters_multiplicative(mem_conn):
     assert result["n_cluster_nodes"] == 5
     assert result["weakest_link"] == pytest.approx(0.6, abs=0.05)
     # 0.6^5 ≈ 0.0778
-    assert result["chain_validity"] == pytest.approx(0.6 ** 5, abs=0.01)
+    assert result["chain_validity"] == pytest.approx(0.6**5, abs=0.01)
 
 
 def test_chain_validity_weakest_link_is_minimum(mem_conn):

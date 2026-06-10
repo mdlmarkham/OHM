@@ -137,8 +137,7 @@ def _find_shared_tags(
 
     # Query nodes with non-empty tags
     rows = store.conn.execute(
-        "SELECT id, label, type, tags FROM ohm_nodes "
-        "WHERE tags IS NOT NULL AND tags != '[]' AND deleted_at IS NULL AND id != ?",
+        "SELECT id, label, type, tags FROM ohm_nodes WHERE tags IS NOT NULL AND tags != '[]' AND deleted_at IS NULL AND id != ?",
         [node_id],
     ).fetchall()
 
@@ -153,13 +152,15 @@ def _find_shared_tags(
             continue
         overlap = len(tag_set & ntags)
         if overlap > 0:
-            scored.append({
-                "id": nid,
-                "label": nlabel or "",
-                "type": ntype or "",
-                "shared_tags": sorted(tag_set & ntags),
-                "overlap_count": overlap,
-            })
+            scored.append(
+                {
+                    "id": nid,
+                    "label": nlabel or "",
+                    "type": ntype or "",
+                    "shared_tags": sorted(tag_set & ntags),
+                    "overlap_count": overlap,
+                }
+            )
 
     # Sort by overlap count descending, return top 3
     scored.sort(key=lambda x: x["overlap_count"], reverse=True)
@@ -184,9 +185,7 @@ def _find_cross_domain(
 
     # Find nodes NOT created by this agent that share tags
     rows = store.conn.execute(
-        "SELECT id, label, type, created_by, tags FROM ohm_nodes "
-        "WHERE tags IS NOT NULL AND tags != '[]' AND deleted_at IS NULL "
-        "AND id != ? AND created_by != ?",
+        "SELECT id, label, type, created_by, tags FROM ohm_nodes WHERE tags IS NOT NULL AND tags != '[]' AND deleted_at IS NULL AND id != ? AND created_by != ?",
         [node_id, created_by],
     ).fetchall()
 
@@ -201,15 +200,17 @@ def _find_cross_domain(
         overlap = len(tag_set & ntags)
         if overlap >= 1:  # Lower threshold for cross-domain (1 shared tag is enough)
             # Cross-domain bonus: score = overlap * 1.5 to surface these above intra-domain
-            scored.append({
-                "id": nid,
-                "label": nlabel or "",
-                "type": ntype or "",
-                "created_by": ncreated_by or "",
-                "shared_tags": sorted(tag_set & ntags),
-                "overlap_count": overlap,
-                "cross_domain_score": round(overlap * 1.5, 1),  # Bonus for cross-domain
-            })
+            scored.append(
+                {
+                    "id": nid,
+                    "label": nlabel or "",
+                    "type": ntype or "",
+                    "created_by": ncreated_by or "",
+                    "shared_tags": sorted(tag_set & ntags),
+                    "overlap_count": overlap,
+                    "cross_domain_score": round(overlap * 1.5, 1),  # Bonus for cross-domain
+                }
+            )
 
     # Sort by cross_domain_score descending
     scored.sort(key=lambda x: x["cross_domain_score"], reverse=True)
@@ -256,12 +257,14 @@ def _find_orphan_connections(
             for r in results:
                 rid = r.get("node_id", "")
                 if rid in orphan_ids and rid != node_id:
-                    similar_orphans.append({
-                        "id": rid,
-                        "label": r.get("label", ""),
-                        "type": r.get("type", ""),
-                        "distance": round(r.get("distance", 1.0), 4),
-                    })
+                    similar_orphans.append(
+                        {
+                            "id": rid,
+                            "label": r.get("label", ""),
+                            "type": r.get("type", ""),
+                            "distance": round(r.get("distance", 1.0), 4),
+                        }
+                    )
         except (ValueError, ImportError, Exception):
             pass
 
@@ -280,11 +283,13 @@ def _find_orphan_connections(
             for r in results:
                 rid = r.get("node_id", "")
                 if rid != node_id and rid not in {o[0] for o in orphans}:
-                    similar_connected.append({
-                        "id": rid,
-                        "label": r.get("label", ""),
-                        "type": r.get("type", ""),
-                    })
+                    similar_connected.append(
+                        {
+                            "id": rid,
+                            "label": r.get("label", ""),
+                            "type": r.get("type", ""),
+                        }
+                    )
         except (ValueError, ImportError, Exception):
             pass
 
@@ -323,16 +328,12 @@ def generate_edge_suggestions(
     try:
         # Edges FROM this node
         from_edges = store.conn.execute(
-            "SELECT to_node, edge_type, layer, confidence FROM ohm_edges "
-            "WHERE from_node = ? AND deleted_at IS NULL "
-            "ORDER BY created_at DESC LIMIT 5",
+            "SELECT to_node, edge_type, layer, confidence FROM ohm_edges WHERE from_node = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 5",
             [from_node],
         ).fetchall()
         # Edges TO this node
         to_edges = store.conn.execute(
-            "SELECT from_node, edge_type, layer, confidence FROM ohm_edges "
-            "WHERE to_node = ? AND deleted_at IS NULL "
-            "ORDER BY created_at DESC LIMIT 5",
+            "SELECT from_node, edge_type, layer, confidence FROM ohm_edges WHERE to_node = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 5",
             [to_node],
         ).fetchall()
 
@@ -349,16 +350,12 @@ def generate_edge_suggestions(
     try:
         # What edge types does from_node typically use?
         from_types = store.conn.execute(
-            "SELECT edge_type, COUNT(*) as cnt FROM ohm_edges "
-            "WHERE from_node = ? AND deleted_at IS NULL "
-            "GROUP BY edge_type ORDER BY cnt DESC LIMIT 3",
+            "SELECT edge_type, COUNT(*) as cnt FROM ohm_edges WHERE from_node = ? AND deleted_at IS NULL GROUP BY edge_type ORDER BY cnt DESC LIMIT 3",
             [from_node],
         ).fetchall()
         # What edge types does to_node typically receive?
         to_types = store.conn.execute(
-            "SELECT edge_type, COUNT(*) as cnt FROM ohm_edges "
-            "WHERE to_node = ? AND deleted_at IS NULL "
-            "GROUP BY edge_type ORDER BY cnt DESC LIMIT 3",
+            "SELECT edge_type, COUNT(*) as cnt FROM ohm_edges WHERE to_node = ? AND deleted_at IS NULL GROUP BY edge_type ORDER BY cnt DESC LIMIT 3",
             [to_node],
         ).fetchall()
 
@@ -379,8 +376,7 @@ def generate_edge_suggestions(
         # After creating this edge, they're no longer orphans
         for nid in [from_node, to_node]:
             edge_count = store.conn.execute(
-                "SELECT COUNT(*) FROM ohm_edges "
-                "WHERE (from_node = ? OR to_node = ?) AND deleted_at IS NULL",
+                "SELECT COUNT(*) FROM ohm_edges WHERE (from_node = ? OR to_node = ?) AND deleted_at IS NULL",
                 [nid, nid],
             ).fetchone()[0]
             # If this was the ONLY edge for this node, it just resolved an orphan state
@@ -391,6 +387,7 @@ def generate_edge_suggestions(
         logger.debug(f"Orphan resolved check failed: {e}")
 
     return suggestions
+
 
 def generate_connectivity_nudge(
     store: Any,
@@ -411,8 +408,7 @@ def generate_connectivity_nudge(
     try:
         # Agent's node count (excluding fragments)
         agent_nodes = store.conn.execute(
-            "SELECT COUNT(*) FROM ohm_nodes "
-            "WHERE created_by = ? AND deleted_at IS NULL AND type != 'fragment'",
+            "SELECT COUNT(*) FROM ohm_nodes WHERE created_by = ? AND deleted_at IS NULL AND type != 'fragment'",
             [agent],
         ).fetchone()[0]
 
@@ -426,12 +422,8 @@ def generate_connectivity_nudge(
         ).fetchone()[0]
 
         # Graph average connectivity
-        graph_nodes = store.conn.execute(
-            "SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL AND type != 'fragment'"
-        ).fetchone()[0]
-        graph_edges = store.conn.execute(
-            "SELECT COUNT(*) FROM ohm_edges WHERE deleted_at IS NULL"
-        ).fetchone()[0]
+        graph_nodes = store.conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL AND type != 'fragment'").fetchone()[0]
+        graph_edges = store.conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE deleted_at IS NULL").fetchone()[0]
 
         agent_connectivity = agent_edges / max(agent_nodes, 1)
         graph_connectivity = graph_edges / max(graph_nodes, 1)
@@ -444,12 +436,7 @@ def generate_connectivity_nudge(
                 "agent_connectivity": round(agent_connectivity, 2),
                 "graph_average": round(graph_connectivity, 2),
                 "threshold": threshold,
-                "message": (
-                    f"Your average connectivity is {agent_connectivity:.1f} edges/node "
-                    f"(graph average: {graph_connectivity:.1f}). "
-                    f"Consider connecting more of your nodes to the graph via /edge "
-                    f"or the 'connects_to' field when creating nodes."
-                ),
+                "message": (f"Your average connectivity is {agent_connectivity:.1f} edges/node (graph average: {graph_connectivity:.1f}). Consider connecting more of your nodes to the graph via /edge or the 'connects_to' field when creating nodes."),
                 "suggestion": "Use /orphans?created_by=YOUR_AGENT to find your disconnected nodes.",
             }
         }
@@ -558,11 +545,7 @@ def generate_island_nudge(
             "island_size": agent_island["size"],
             "cross_domain_edges": cross_edges,
             "min_cross_domain_edges": min_cross_domain_edges,
-            "message": (
-                f"Your domain has {len(agent_node_ids)} nodes but only {cross_edges} connection(s) "
-                f"to other domains (minimum recommended: {min_cross_domain_edges}). "
-                f"Consider connecting your work to the broader graph."
-            ),
+            "message": (f"Your domain has {len(agent_node_ids)} nodes but only {cross_edges} connection(s) to other domains (minimum recommended: {min_cross_domain_edges}). Consider connecting your work to the broader graph."),
             "suggestion": "Use GET /islands to see disconnected components and GET /suggest?node_id=<id> for bridging candidates.",
         }
     }

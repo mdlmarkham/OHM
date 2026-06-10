@@ -29,7 +29,7 @@ def is_customer_identity(agent_name: str) -> bool:
 def customer_id_from_identity(agent_name: str) -> str | None:
     """Extract customer_id from a 'customer:{id}' identity string."""
     if agent_name.startswith("customer:"):
-        return agent_name[len("customer:"):]
+        return agent_name[len("customer:") :]
     return None
 
 

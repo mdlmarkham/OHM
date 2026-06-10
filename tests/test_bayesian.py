@@ -1739,24 +1739,38 @@ class TestTemporalDecay:
 
         # Insert observations with explicit created_at
         create_sample_observation(
-            db, node_id=g["a"], value=0.5, scale="probability", created_by="test",
+            db,
+            node_id=g["a"],
+            value=0.5,
+            scale="probability",
+            created_by="test",
             created_at=now,
         )
         create_sample_observation(
-            db, node_id=g["a"], value=0.9, scale="probability", created_by="test",
+            db,
+            node_id=g["a"],
+            value=0.9,
+            scale="probability",
+            created_by="test",
             created_at=old,
         )
 
         # Without decay: prior = mean(0.5, 0.9) = 0.7
         result_no_decay = bayesian_inference(
-            db, g["c"], {}, half_life_days=0.0,
+            db,
+            g["c"],
+            {},
+            half_life_days=0.0,
         )
 
         # With decay (half_life=30): recent 0.5 gets weight ~1.0, old 0.9 gets weight ~0.5
         # Weighted prior = (0.5 * 1.0 + 0.9 * 0.49) / (1.0 + 0.49) = (0.5 + 0.441) / 1.49 = 0.632
         # So posterior for C should be lower than the no-decay case
         result_decay = bayesian_inference(
-            db, g["c"], {}, half_life_days=30.0,
+            db,
+            g["c"],
+            {},
+            half_life_days=30.0,
         )
 
         # Posterior for C should differ between decay and no-decay
@@ -1766,10 +1780,18 @@ class TestTemporalDecay:
         """half_life=0.0 means no decay, same as original behavior."""
         g = causal_graph
         create_sample_observation(
-            db, node_id=g["a"], value=0.5, scale="probability", created_by="test",
+            db,
+            node_id=g["a"],
+            value=0.5,
+            scale="probability",
+            created_by="test",
         )
         create_sample_observation(
-            db, node_id=g["a"], value=0.7, scale="probability", created_by="test",
+            db,
+            node_id=g["a"],
+            value=0.7,
+            scale="probability",
+            created_by="test",
         )
 
         result = bayesian_inference(db, g["c"], {}, half_life_days=0.0)
@@ -1779,7 +1801,11 @@ class TestTemporalDecay:
         """Single observation yields same prior regardless of half_life."""
         g = causal_graph
         create_sample_observation(
-            db, node_id=g["a"], value=0.5, scale="probability", created_by="test",
+            db,
+            node_id=g["a"],
+            value=0.5,
+            scale="probability",
+            created_by="test",
             created_at="2026-01-01T12:00:00",
         )
 
@@ -1791,7 +1817,11 @@ class TestTemporalDecay:
         """half_life parameter is accepted by the HTTP handler."""
         g = causal_graph
         create_sample_observation(
-            db, node_id=g["a"], value=0.8, scale="probability", created_by="test",
+            db,
+            node_id=g["a"],
+            value=0.8,
+            scale="probability",
+            created_by="test",
         )
 
         result = bayesian_inference(db, g["c"], {}, half_life_days=30.0)
@@ -1854,9 +1884,7 @@ class TestSoftEvidence:
         p_bad_without = result_without["posterior"][c]["bad"]
         p_bad_with = result_with["posterior"][c]["bad"]
 
-        assert abs(p_bad_with - p_bad_without) > 0.001, (
-            f"Soft evidence should shift posterior: without={p_bad_without}, with={p_bad_with}"
-        )
+        assert abs(p_bad_with - p_bad_without) > 0.001, f"Soft evidence should shift posterior: without={p_bad_without}, with={p_bad_with}"
 
     def test_soft_evidence_applies_to_edge_type(self, db):
         a = create_sample_node(db, label="cause_a")

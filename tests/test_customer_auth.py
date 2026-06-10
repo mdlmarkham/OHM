@@ -39,7 +39,7 @@ class TestGenerateCustomerToken:
     def test_format(self):
         token, _ = _generate_customer_token("acme_hvac")
         assert token.startswith("twai_live_")
-        suffix = token[len("twai_live_"):]
+        suffix = token[len("twai_live_") :]
         # secrets.token_urlsafe(18) → 24 chars of urlsafe base64
         assert len(suffix) == 24
         assert re.fullmatch(r"[A-Za-z0-9_\-]+", suffix)
@@ -74,9 +74,7 @@ class TestBuildCustomerTokenLookup:
     def test_multiple_customers(self):
         t1, h1 = _generate_customer_token("tenant_a")
         t2, h2 = _generate_customer_token("tenant_b")
-        lookup = _build_customer_token_lookup(
-            {"tenant_a": {"hash": h1}, "tenant_b": {"hash": h2}}
-        )
+        lookup = _build_customer_token_lookup({"tenant_a": {"hash": h1}, "tenant_b": {"hash": h2}})
         assert lookup[h1] == "tenant_a"
         assert lookup[h2] == "tenant_b"
 

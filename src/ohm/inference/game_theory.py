@@ -95,10 +95,7 @@ def extract_game(
     # Find decision nodes (players)
     if players is None:
         all_nodes = reader.get_nodes()
-        players = [
-            n.id for n in all_nodes
-            if n.type == "decision" and (n.utility_scale or 0) > 0
-        ]
+        players = [n.id for n in all_nodes if n.type == "decision" and (n.utility_scale or 0) > 0]
 
     if not players:
         return {
@@ -168,10 +165,7 @@ def extract_game(
                 continue
             blocks_edge = edge_map.get((players[i], players[j]))
             reversed_blocks = edge_map.get((players[j], players[i]))
-            is_adversarial[(i, j)] = bool(
-                (blocks_edge and blocks_edge["edge_type"] == "BLOCKS")
-                or (reversed_blocks and reversed_blocks["edge_type"] == "BLOCKS")
-            )
+            is_adversarial[(i, j)] = bool((blocks_edge and blocks_edge["edge_type"] == "BLOCKS") or (reversed_blocks and reversed_blocks["edge_type"] == "BLOCKS"))
 
     # Build N-dimensional payoff arrays
     # payoff_arrays[player_i][a_0][a_1]...[a_{n-1}] = payoff to player_i
@@ -182,7 +176,7 @@ def extract_game(
         base_payoff_i = _payoff_from_utility(util_i, target_utility)
         infl_i = causal_influence(players[i])
         # For each action combination, compute player i's payoff
-        n_combos = 2 ** n_players
+        n_combos = 2**n_players
         payoff_flat: list[float] = []
         for combo in range(n_combos):
             action_profile = [(combo >> k) & 1 for k in range(n_players)]
@@ -212,11 +206,11 @@ def extract_game(
         # Reshape flat array into nested lists
         def _reshape(flat: list[float], dims: list[int]) -> list:
             if len(dims) == 1:
-                return flat[:dims[0]]
+                return flat[: dims[0]]
             stride = 1
             for d in dims[1:]:
                 stride *= d
-            return [_reshape(flat[k * stride:(k + 1) * stride], dims[1:]) for k in range(dims[0])]
+            return [_reshape(flat[k * stride : (k + 1) * stride], dims[1:]) for k in range(dims[0])]
 
         player_payoff = _reshape(payoff_flat, [2] * n_players)
         payoff_arrays.append(player_payoff)
@@ -296,9 +290,7 @@ def compute_nash(payoff_matrices: list[Any], players: list[str]) -> dict[str, An
     }
 
 
-def _find_mixed_equilibrium_2p(
-    A: np.ndarray, B: np.ndarray, players: list[str]
-) -> dict[str, Any] | None:
+def _find_mixed_equilibrium_2p(A: np.ndarray, B: np.ndarray, players: list[str]) -> dict[str, Any] | None:
     """Find mixed-strategy Nash equilibrium for 2-player game via gradient ascent."""
     n0, n1 = A.shape
 
@@ -372,9 +364,7 @@ def _best_response_1(A: np.ndarray, p: np.ndarray) -> np.ndarray:
     return best
 
 
-def _find_pure_equilibria_2p(
-    A: np.ndarray, B: np.ndarray, players: list[str]
-) -> list[dict[str, Any]]:
+def _find_pure_equilibria_2p(A: np.ndarray, B: np.ndarray, players: list[str]) -> list[dict[str, Any]]:
     """Find pure-strategy Nash equilibria for 2-player game."""
     equilibria = []
     n0, n1 = A.shape
@@ -386,23 +376,23 @@ def _find_pure_equilibria_2p(
             # Player 1's action j is best response to i
             is_br_1 = np.all(B[i, j] >= B[i, :])
             if is_br_0 and is_br_1:
-                equilibria.append({
-                    "strategy_profile": {
-                        players[0]: [1.0 if k == i else 0.0 for k in range(n0)],
-                        players[1]: [1.0 if k == j else 0.0 for k in range(n1)],
-                    },
-                    "expected_payoffs": {
-                        players[0]: round(float(A[i, j]), 4),
-                        players[1]: round(float(B[i, j]), 4),
-                    },
-                    "equilibrium_type": "pure_strategy",
-                })
+                equilibria.append(
+                    {
+                        "strategy_profile": {
+                            players[0]: [1.0 if k == i else 0.0 for k in range(n0)],
+                            players[1]: [1.0 if k == j else 0.0 for k in range(n1)],
+                        },
+                        "expected_payoffs": {
+                            players[0]: round(float(A[i, j]), 4),
+                            players[1]: round(float(B[i, j]), 4),
+                        },
+                        "equilibrium_type": "pure_strategy",
+                    }
+                )
     return equilibria
 
 
-def _compute_nash_general(
-    payoff_matrices: list[list[list[float]]], players: list[str]
-) -> dict[str, Any]:
+def _compute_nash_general(payoff_matrices: list[list[list[float]]], players: list[str]) -> dict[str, Any]:
     """Compute Nash equilibrium for N-player games via iterated dominance."""
     n_players = len(players)
     actions = [len(payoff_matrices[i]) for i in range(n_players)]
@@ -443,17 +433,13 @@ def _compute_nash_general(
             # Unique pure equilibrium
             profile = [s[0] for s in surviving_actions]
             return {
-                "equilibria": [{
-                    "strategy_profile": {
-                        players[i]: [1.0 if k == profile[i] else 0.0 for k in range(actions[i])]
-                        for i in range(n_players)
-                    },
-                    "expected_payoffs": {
-                        players[i]: round(_get_payoff(payoff_matrices, i, profile, profile[i]), 4)
-                        for i in range(n_players)
-                    },
-                    "equilibrium_type": "pure_strategy_iterated_dominance",
-                }],
+                "equilibria": [
+                    {
+                        "strategy_profile": {players[i]: [1.0 if k == profile[i] else 0.0 for k in range(actions[i])] for i in range(n_players)},
+                        "expected_payoffs": {players[i]: round(_get_payoff(payoff_matrices, i, profile, profile[i]), 4) for i in range(n_players)},
+                        "equilibrium_type": "pure_strategy_iterated_dominance",
+                    }
+                ],
                 "n_players": n_players,
                 "solution_method": "iterated_dominance",
                 "game_type": "general_sum",
@@ -474,9 +460,7 @@ def _compute_nash_general(
         "equilibria": [],
         "n_players": n_players,
         "solution_method": "indeterminate",
-        "surviving_actions": {
-            players[i]: surviving_actions[i] for i in range(n_players)
-        },
+        "surviving_actions": {players[i]: surviving_actions[i] for i in range(n_players)},
         "message": f"No pure-strategy equilibrium found after iterated dominance. {n_players}-player mixed equilibrium computation not yet implemented.",
     }
 

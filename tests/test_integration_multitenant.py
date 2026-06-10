@@ -55,9 +55,7 @@ def _start_mt_server(tmp_path, admin_token="admin-secret", no_auth=False):
     tm = TenantManager(tenants_dir, max_cached=10)
     OhmHandler.tenant_manager = tm
 
-    server = socketserver.ThreadingTCPServer(
-        ("127.0.0.1", 0), OhmHandler, bind_and_activate=False
-    )
+    server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), OhmHandler, bind_and_activate=False)
     server.allow_reuse_address = True
     server.daemon_threads = True
     server.request_queue_size = 128  # OHM-yv35: avoid connection resets under burst load
@@ -112,7 +110,9 @@ class TestTenantIsolation:
 
             # Write a node to tenant_a
             status, data = _req(
-                "POST", port, "/node",
+                "POST",
+                port,
+                "/node",
                 body={"id": "secret-node-A", "label": "Tenant A secret", "type": "concept"},
                 token=token_a,
             )
@@ -139,12 +139,8 @@ class TestTenantIsolation:
             token_b = _register_customer(port, tm, "tenant_b")
 
             for i in range(5):
-                _req("POST", port, "/node",
-                     body={"id": f"a-node-{i}", "label": f"A {i}", "type": "concept"},
-                     token=token_a)
-                _req("POST", port, "/node",
-                     body={"id": f"b-node-{i}", "label": f"B {i}", "type": "concept"},
-                     token=token_b)
+                _req("POST", port, "/node", body={"id": f"a-node-{i}", "label": f"A {i}", "type": "concept"}, token=token_a)
+                _req("POST", port, "/node", body={"id": f"b-node-{i}", "label": f"B {i}", "type": "concept"}, token=token_b)
 
             # tenant_a can see its own nodes
             status, data = _req("GET", port, "/nodes", token=token_a)
@@ -173,10 +169,8 @@ class TestTenantIsolation:
             token_a = _register_customer(port, tm, "tenant_a")
             token_b = _register_customer(port, tm, "tenant_b")
 
-            _req("POST", port, "/node",
-                 body={"id": "shared-id", "label": "Version A", "type": "concept"}, token=token_a)
-            _req("POST", port, "/node",
-                 body={"id": "shared-id", "label": "Version B", "type": "concept"}, token=token_b)
+            _req("POST", port, "/node", body={"id": "shared-id", "label": "Version A", "type": "concept"}, token=token_a)
+            _req("POST", port, "/node", body={"id": "shared-id", "label": "Version B", "type": "concept"}, token=token_b)
 
             _, data_a = _req("GET", port, "/node/shared-id", token=token_a)
             _, data_b = _req("GET", port, "/node/shared-id", token=token_b)
@@ -195,8 +189,7 @@ class TestTenantIsolation:
             token_b = _register_customer(port, tm, "tenant_b")
 
             # Write exclusive node to tenant_b
-            _req("POST", port, "/node",
-                 body={"id": "b-exclusive", "label": "Only in B", "type": "concept"}, token=token_b)
+            _req("POST", port, "/node", body={"id": "b-exclusive", "label": "Only in B", "type": "concept"}, token=token_b)
 
             # tenant_a token cannot see it — 404 not 403 (it's isolated, not forbidden)
             status, _ = _req("GET", port, "/node/b-exclusive", token=token_a)
@@ -223,9 +216,7 @@ class TestTokenRouting:
             token_a = _register_customer(port, tm, "tenant_a")
 
             # Write a node via customer token → goes into tenant_a's store
-            _req("POST", port, "/node",
-                 body={"id": "tenant-only-node", "label": "Tenant data", "type": "concept"},
-                 token=token_a)
+            _req("POST", port, "/node", body={"id": "tenant-only-node", "label": "Tenant data", "type": "concept"}, token=token_a)
 
             # Agent token (admin) cannot see it — it's in a different DuckDB
             status, _ = _req("GET", port, "/node/tenant-only-node", token="admin-secret")
@@ -242,9 +233,7 @@ class TestTokenRouting:
             token_a = _register_customer(port, tm, "tenant_a")
 
             # Agent writes a node to the core store
-            _req("POST", port, "/node",
-                 body={"id": "core-node", "label": "Core data", "type": "concept"},
-                 token="admin-secret")
+            _req("POST", port, "/node", body={"id": "core-node", "label": "Core data", "type": "concept"}, token="admin-secret")
 
             # Customer token for tenant_a cannot see it
             status, _ = _req("GET", port, "/node/core-node", token=token_a)
@@ -284,19 +273,14 @@ class TestDeprovision:
         port, server, core, tm = _start_mt_server(tmp_path)
         try:
             token = _register_customer(port, tm, "doomed")
-            _req("POST", port, "/node",
-                 body={"id": "doomed-node", "label": "Will be gone", "type": "concept"},
-                 token=token)
+            _req("POST", port, "/node", body={"id": "doomed-node", "label": "Will be gone", "type": "concept"}, token=token)
 
             # Deprovision via admin
-            status, _ = _req("DELETE", port, "/tenant/doomed?confirm=true",
-                              token="admin-secret")
+            status, _ = _req("DELETE", port, "/tenant/doomed?confirm=true", token="admin-secret")
             assert status == 200
 
             # Subsequent write with old (revoked) token → 401 (token no longer recognized)
-            status, _ = _req("POST", port, "/node",
-                              body={"id": "post-deprovision", "label": "x", "type": "concept"},
-                              token=token)
+            status, _ = _req("POST", port, "/node", body={"id": "post-deprovision", "label": "x", "type": "concept"}, token=token)
             assert status == 401, f"Revoked token should get 401 on write, got {status}"
 
             # Tenant directory is gone
@@ -312,8 +296,7 @@ class TestDeprovision:
         try:
             # Provision, write, deprovision
             token1 = _register_customer(port, tm, "recycled")
-            _req("POST", port, "/node",
-                 body={"id": "old-node", "label": "Old", "type": "concept"}, token=token1)
+            _req("POST", port, "/node", body={"id": "old-node", "label": "Old", "type": "concept"}, token=token1)
             _req("DELETE", port, "/tenant/recycled?confirm=true", token="admin-secret")
 
             # Reprovision — should be a clean slate
@@ -341,7 +324,9 @@ class TestConcurrentAccess:
             def writer(i):
                 try:
                     s, d = _req(
-                        "POST", port, "/node",
+                        "POST",
+                        port,
+                        "/node",
                         body={"id": f"cn-{i}", "label": f"Node {i}", "type": "concept"},
                         token=token,
                     )
@@ -364,9 +349,7 @@ class TestConcurrentAccess:
             # Verify all 50 test nodes are in the tenant store.
             # Filter by id prefix to exclude pre-seeded agent nodes from provisioning.
             tenant_store = tm.get_store("concurrent_tenant")
-            rows = tenant_store.execute(
-                "SELECT COUNT(*) AS n FROM ohm_nodes WHERE deleted_at IS NULL AND id LIKE 'cn-%'"
-            )
+            rows = tenant_store.execute("SELECT COUNT(*) AS n FROM ohm_nodes WHERE deleted_at IS NULL AND id LIKE 'cn-%'")
             assert rows[0]["n"] == 50
         finally:
             server.shutdown()
@@ -382,9 +365,7 @@ class TestConcurrentAccess:
                 cid = f"reader_{i}"
                 tok = _register_customer(port, tm, cid)
                 tokens[cid] = tok
-                _req("POST", port, "/node",
-                     body={"id": f"unique-{cid}", "label": f"Node in {cid}", "type": "concept"},
-                     token=tok)
+                _req("POST", port, "/node", body={"id": f"unique-{cid}", "label": f"Node in {cid}", "type": "concept"}, token=tok)
 
             errors = []
 
@@ -394,10 +375,7 @@ class TestConcurrentAccess:
                     if s != 200:
                         errors.append((cid, s))
 
-            threads = [
-                threading.Thread(target=reader, args=(cid, tok))
-                for cid, tok in tokens.items()
-            ]
+            threads = [threading.Thread(target=reader, args=(cid, tok)) for cid, tok in tokens.items()]
             for t in threads:
                 t.start()
             for t in threads:
@@ -427,9 +405,7 @@ class TestLRUEviction:
             tok_c = _register_customer(port, tm2, "evict_c")
 
             # Write a distinctive node to evict_a before it gets evicted
-            _req("POST", port, "/node",
-                 body={"id": "pre-evict", "label": "Before eviction", "type": "concept"},
-                 token=tok_a)
+            _req("POST", port, "/node", body={"id": "pre-evict", "label": "Before eviction", "type": "concept"}, token=tok_a)
 
             # Access b and c to fill the cache (evicts a)
             _req("GET", port, "/stats", token=tok_b)
@@ -458,9 +434,7 @@ class TestLRUEviction:
 
             # Write 3 nodes to lru_a
             for i in range(3):
-                _req("POST", port, "/node",
-                     body={"id": f"lru-a-{i}", "label": f"A{i}", "type": "concept"},
-                     token=tokens["lru_a"])
+                _req("POST", port, "/node", body={"id": f"lru-a-{i}", "label": f"A{i}", "type": "concept"}, token=tokens["lru_a"])
 
             # Fill cache with b, c, d (pushes lru_a out)
             for cid in ("lru_b", "lru_c", "lru_d"):

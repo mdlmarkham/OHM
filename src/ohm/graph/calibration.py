@@ -334,9 +334,7 @@ def all_effective_reliabilities(
         t = datetime.now(timezone.utc)
 
     # Get all distinct agents
-    agents = conn.execute(
-        "SELECT DISTINCT source_agent FROM ohm_outcomes ORDER BY source_agent"
-    ).fetchall()
+    agents = conn.execute("SELECT DISTINCT source_agent FROM ohm_outcomes ORDER BY source_agent").fetchall()
 
     results = []
     for (agent_id,) in agents:

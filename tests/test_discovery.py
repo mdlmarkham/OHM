@@ -104,11 +104,13 @@ class TestGetObsCountsBatch:
         """MockGraphReader.get_observation_counts returns correct counts."""
         from ohm.graph_reader import MockGraphReader, ObservationRecord
 
-        reader = MockGraphReader(observations=[
-            ObservationRecord(edge_id=None, id="o1", node_id="a", type="binary", value=1.0, source="test", created_by="test", scale="binary", created_at="2026-01-01"),
-            ObservationRecord(edge_id=None, id="o2", node_id="a", type="binary", value=0.0, source="test", created_by="test", scale="binary", created_at="2026-01-01"),
-            ObservationRecord(edge_id=None, id="o3", node_id="b", type="binary", value=1.0, source="test", created_by="test", scale="binary", created_at="2026-01-01"),
-        ])
+        reader = MockGraphReader(
+            observations=[
+                ObservationRecord(edge_id=None, id="o1", node_id="a", type="binary", value=1.0, source="test", created_by="test", scale="binary", created_at="2026-01-01"),
+                ObservationRecord(edge_id=None, id="o2", node_id="a", type="binary", value=0.0, source="test", created_by="test", scale="binary", created_at="2026-01-01"),
+                ObservationRecord(edge_id=None, id="o3", node_id="b", type="binary", value=1.0, source="test", created_by="test", scale="binary", created_at="2026-01-01"),
+            ]
+        )
         counts = reader.get_observation_counts(["a", "b", "c"])
         assert counts["a"] == 2
         assert counts["b"] == 1

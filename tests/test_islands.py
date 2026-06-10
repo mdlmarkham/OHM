@@ -7,8 +7,7 @@ from ohm.graph.methods import find_islands
 def _insert_node(conn, nid, label, ntype="concept", confidence=0.8, created_by="test"):
     """Helper to insert a node with all required fields."""
     conn.execute(
-        "INSERT INTO ohm_nodes (id, label, type, provenance, confidence, created_by, created_at) "
-        "VALUES (?, ?, ?, 'test', ?, ?, CURRENT_TIMESTAMP)",
+        "INSERT INTO ohm_nodes (id, label, type, provenance, confidence, created_by, created_at) VALUES (?, ?, ?, 'test', ?, ?, CURRENT_TIMESTAMP)",
         [nid, label, ntype, confidence, created_by],
     )
 
@@ -16,8 +15,7 @@ def _insert_node(conn, nid, label, ntype="concept", confidence=0.8, created_by="
 def _insert_edge(conn, from_n, to_n, etype="SUPPORTS", layer="L3", confidence=0.9, created_by="test"):
     """Helper to insert an edge with all required fields."""
     conn.execute(
-        "INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, confidence, created_by, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+        "INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, confidence, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
         [f"edge-{from_n}-{to_n}", from_n, to_n, etype, layer, confidence, created_by],
     )
 

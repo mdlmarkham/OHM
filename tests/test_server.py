@@ -52,6 +52,7 @@ def _start_test_server(store, tokens=None, roles=None, no_auth=False, schema_con
 
     # Register built-in hooks (OHM-aznh.11)
     from ohm.server.server import _register_builtin_hooks
+
     _register_builtin_hooks(store)
 
     # Use TCPServer to get a random port
@@ -194,24 +195,32 @@ class TestQuestionAutoDetection:
     def test_scratch_question_has_is_question_metadata(self, test_server):
         port, _ = test_server
         status, data = _request(
-            "POST", port, "/scratch", body={"content": "Why would Altman meet Sanders?"},
+            "POST",
+            port,
+            "/scratch",
+            body={"content": "Why would Altman meet Sanders?"},
         )
         assert status == 201
         meta = data.get("metadata", {})
         if isinstance(meta, str):
             import json
+
             meta = json.loads(meta)
         assert meta.get("is_question") is True
 
     def test_scratch_non_question_no_is_question(self, test_server):
         port, _ = test_server
         status, data = _request(
-            "POST", port, "/scratch", body={"content": "Broadcom refused to raise guidance"},
+            "POST",
+            port,
+            "/scratch",
+            body={"content": "Broadcom refused to raise guidance"},
         )
         assert status == 201
         meta = data.get("metadata") or {}
         if isinstance(meta, str):
             import json
+
             meta = json.loads(meta)
         assert "is_question" not in meta
 
@@ -225,6 +234,7 @@ class TestQuestionAutoDetection:
             meta = frag.get("metadata", {})
             if isinstance(meta, str):
                 import json
+
                 meta = json.loads(meta)
             assert meta.get("is_question") is True
 
@@ -237,6 +247,7 @@ class TestQuestionAutoDetection:
         meta = result.get("metadata", {})
         if isinstance(meta, str):
             import json
+
             meta = json.loads(meta)
         assert meta.get("is_question") is False
         assert "resolved_at" in meta
@@ -271,6 +282,7 @@ class TestFragmentResonanceEndpoint:
         _request("POST", port, "/scratch", body={"content": "Shared Topic One and Shared Topic Two overlap", "connects_to": ["anchor_1", "anchor_2"]})
         status, data = _request("GET", port, "/admin/fragment-resonance?min_shared=1")
         assert status == 200
+
     def test_create_and_get_node(self, test_server):
         port, store = test_server
         status, data = _request(
@@ -333,7 +345,7 @@ class TestEdgeEndpoints:
                 "type": "CAUSES",
                 "layer": "L3",
             },
-)
+        )
         assert status == 201
 
     def test_observe_invalid_obs_type_rejected(self, test_server):
@@ -1461,6 +1473,7 @@ class TestMultiTenantFeatureFlag:
     def test_env_var_enables_multi_tenant(self, monkeypatch):
         """OHM_MULTI_TENANT=1 enables multi-tenancy via environment variable."""
         import os
+
         monkeypatch.setenv("OHM_MULTI_TENANT", "1")
         assert os.environ.get("OHM_MULTI_TENANT", "").lower() in ("1", "true", "yes")
 
@@ -1711,10 +1724,15 @@ class TestHookEndpoints:
 
     def test_post_hooks_creates_hook(self, test_server):
         port, _ = test_server
-        status, data = _request("POST", port, "/hooks", body={
-            "event": "pre_ingest",
-            "command": "echo validate",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/hooks",
+            body={
+                "event": "pre_ingest",
+                "command": "echo validate",
+            },
+        )
         assert status == 201
         assert data["event"] == "pre_ingest"
         assert data["command"] == "echo validate"
@@ -1723,17 +1741,27 @@ class TestHookEndpoints:
 
     def test_post_hooks_invalid_event_returns_400(self, test_server):
         port, _ = test_server
-        status, data = _request("POST", port, "/hooks", body={
-            "event": "bad_event",
-            "command": "echo",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/hooks",
+            body={
+                "event": "bad_event",
+                "command": "echo",
+            },
+        )
         assert status == 400
 
     def test_post_hooks_missing_command_returns_400(self, test_server):
         port, _ = test_server
-        status, data = _request("POST", port, "/hooks", body={
-            "event": "pre_ingest",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/hooks",
+            body={
+                "event": "pre_ingest",
+            },
+        )
         assert status == 400
 
     def test_get_hooks_returns_list(self, test_server):
@@ -1880,35 +1908,63 @@ class TestBuiltinHooks:
 
     def test_cross_link_enforced_via_hook(self, test_server):
         port, _ = test_server
-        status, data = _request("POST", port, "/node", body={
-            "id": "bare-pattern", "label": "Bare", "type": "pattern",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "bare-pattern",
+                "label": "Bare",
+                "type": "pattern",
+            },
+        )
         assert status == 422
         assert data["error"] == "hook_rejected"
 
     def test_cross_link_passes_with_connects_to(self, test_server):
         port, store = test_server
         store.write_node("anchor1", "Anchor", "concept", agent_name="test")
-        status, data = _request("POST", port, "/node", body={
-            "id": "linked-pattern", "label": "Linked", "type": "pattern",
-            "connects_to": ["anchor1"],
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "linked-pattern",
+                "label": "Linked",
+                "type": "pattern",
+                "connects_to": ["anchor1"],
+            },
+        )
         assert status == 201
 
     def test_source_url_enforced_via_hook(self, test_server):
         port, _ = test_server
-        status, data = _request("POST", port, "/node", body={
-            "id": "bare-source", "label": "No URL", "type": "source",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "bare-source",
+                "label": "No URL",
+                "type": "source",
+            },
+        )
         assert status == 422
         assert data["error"] == "hook_rejected"
 
     def test_source_url_passes_with_url(self, test_server):
         port, _ = test_server
-        status, data = _request("POST", port, "/node", body={
-            "id": "url-source", "label": "With URL", "type": "source",
-            "source_url": "https://example.com",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "url-source",
+                "label": "With URL",
+                "type": "source",
+                "source_url": "https://example.com",
+            },
+        )
         assert status == 201
 
     def test_builtin_hooks_listed(self, test_server):

@@ -149,9 +149,7 @@ class TestSCCCollapse:
 
         from ohm.inference.markov import _build_transition_matrix
 
-        nodes, matrix, transient, absorbing, sccs, meta_members = _build_transition_matrix(
-            test_db, edge_types=["TRANSITIONS_TO"], collapse_sccs=True
-        )
+        nodes, matrix, transient, absorbing, sccs, meta_members = _build_transition_matrix(test_db, edge_types=["TRANSITIONS_TO"], collapse_sccs=True)
 
         assert len(nodes) < 3
         assert len(sccs) == 2

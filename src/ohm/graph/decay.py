@@ -31,14 +31,14 @@ if TYPE_CHECKING:
 
 # Default half-lives per obs_type (days). None = permanent, negative = appreciating.
 DEFAULT_HALF_LIFE: dict[str, float | None] = {
-    "measurement":  7.0,
-    "sentiment":    3.0,
+    "measurement": 7.0,
+    "sentiment": 3.0,
     "verification": 180.0,
-    "outcome":      None,   # permanent
-    "source":       30.0,
-    "pattern":      -30.0,  # appreciating
+    "outcome": None,  # permanent
+    "source": 30.0,
+    "pattern": -30.0,  # appreciating
     # Generic fallback for custom types
-    "_default":     30.0,
+    "_default": 30.0,
 }
 
 # Default Weibull shape parameters per obs_type (OHM-24g9).
@@ -46,13 +46,13 @@ DEFAULT_HALF_LIFE: dict[str, float | None] = {
 # κ > 1 → accelerating decay (fast-perishable), κ = 0 → binary (step function),
 # κ < 0 → appreciating (confidence grows with age).
 DEFAULT_WEIBULL_SHAPE: dict[str, float] = {
-    "measurement":  1.0,   # exponential
-    "sentiment":    1.5,   # accelerating decay
-    "verification": 0.7,   # decelerating decay (durable)
-    "outcome":      0.0,    # binary (step function)
-    "source":       1.0,    # exponential
-    "pattern":      -1.0,   # appreciating
-    "_default":     1.0,    # exponential
+    "measurement": 1.0,  # exponential
+    "sentiment": 1.5,  # accelerating decay
+    "verification": 0.7,  # decelerating decay (durable)
+    "outcome": 0.0,  # binary (step function)
+    "source": 1.0,  # exponential
+    "pattern": -1.0,  # appreciating
+    "_default": 1.0,  # exponential
 }
 
 
@@ -193,7 +193,7 @@ def _confidence_weibull(base_value: float, age_days: float, half_life: float, sh
 
 def decay_profile(half_life_days: float | None, weibull_shape: float | None = None) -> str:
     """Return a human-readable decay profile name for a half_life_days value.
-    
+
     When weibull_shape is provided, returns the Weibull profile name (OHM-24g9).
     """
     if weibull_shape is not None:
@@ -255,10 +255,7 @@ def supersede_observation(
     old_dict = dict(zip(old_cols, old))
 
     if old_dict.get("valid_to") is not None:
-        raise ValueError(
-            f"Observation {old_obs_id} is already superseded (valid_to={old_dict['valid_to']}). "
-            "Chain to the most recent observation instead."
-        )
+        raise ValueError(f"Observation {old_obs_id} is already superseded (valid_to={old_dict['valid_to']}). Chain to the most recent observation instead.")
 
     new = conn.execute(
         "SELECT * FROM ohm_observations WHERE id = ? AND deleted_at IS NULL",
@@ -282,13 +279,9 @@ def supersede_observation(
     )
 
     # Refetch both
-    old_updated = conn.execute(
-        "SELECT * FROM ohm_observations WHERE id = ?", [old_obs_id]
-    ).fetchone()
+    old_updated = conn.execute("SELECT * FROM ohm_observations WHERE id = ?", [old_obs_id]).fetchone()
     old_cols2 = [d[0] for d in conn.description]
-    new_updated = conn.execute(
-        "SELECT * FROM ohm_observations WHERE id = ?", [new_obs_id]
-    ).fetchone()
+    new_updated = conn.execute("SELECT * FROM ohm_observations WHERE id = ?", [new_obs_id]).fetchone()
     new_cols2 = [d[0] for d in conn.description]
 
     return {
@@ -466,37 +459,43 @@ def chain_validity(
         if node_obs:
             cluster_nodes_with_obs.add(cluster_id)
             for obs in node_obs:
-                obs_details.append({
-                    "obs_id": obs["id"],
-                    "node_id": cluster_id,
-                    "effective_confidence": obs["effective_confidence"],
-                    "decay_profile": obs["decay_profile"],
-                    "half_life_days": obs.get("half_life_days"),
-                    "synthetic": False,
-                })
+                obs_details.append(
+                    {
+                        "obs_id": obs["id"],
+                        "node_id": cluster_id,
+                        "effective_confidence": obs["effective_confidence"],
+                        "decay_profile": obs["decay_profile"],
+                        "half_life_days": obs.get("half_life_days"),
+                        "synthetic": False,
+                    }
+                )
         else:
             # No observations — use edge confidence as proxy
             edge_conf = float(edge.get("confidence") or 0.7)
-            obs_details.append({
-                "obs_id": None,
-                "node_id": cluster_id,
-                "effective_confidence": round(edge_conf, 4),
-                "decay_profile": "edge_proxy",
-                "half_life_days": None,
-                "synthetic": True,
-            })
+            obs_details.append(
+                {
+                    "obs_id": None,
+                    "node_id": cluster_id,
+                    "effective_confidence": round(edge_conf, 4),
+                    "decay_profile": "edge_proxy",
+                    "half_life_days": None,
+                    "synthetic": True,
+                }
+            )
 
     # Include own observations if any (the synthesis self-assessment)
     for obs in own_obs:
-        obs_details.append({
-            "obs_id": obs["id"],
-            "node_id": synthesis_id,
-            "effective_confidence": obs["effective_confidence"],
-            "decay_profile": obs["decay_profile"],
-            "half_life_days": obs.get("half_life_days"),
-            "synthetic": False,
-            "self_assessment": True,
-        })
+        obs_details.append(
+            {
+                "obs_id": obs["id"],
+                "node_id": synthesis_id,
+                "effective_confidence": obs["effective_confidence"],
+                "decay_profile": obs["decay_profile"],
+                "half_life_days": obs.get("half_life_days"),
+                "synthetic": False,
+                "self_assessment": True,
+            }
+        )
 
     if not obs_details:
         return {

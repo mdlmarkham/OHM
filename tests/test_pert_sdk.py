@@ -30,6 +30,7 @@ def _create_edge(
 @pytest.fixture
 def graph(test_db):
     from ohm.sdk import Graph
+
     return Graph(test_db, actor="test_agent")
 
 
@@ -40,9 +41,11 @@ class TestBatchUpdateEdges:
 
     def test_batch_update_single_edge(self, graph, test_db):
         a = _create_edge(test_db, "node_a", "node_b", confidence=0.5)
-        result = graph.batch_update_edges([
-            {"id": a, "probability_p50": 0.7, "probability_p05": 0.3, "probability_p95": 0.9},
-        ])
+        result = graph.batch_update_edges(
+            [
+                {"id": a, "probability_p50": 0.7, "probability_p05": 0.3, "probability_p95": 0.9},
+            ]
+        )
         assert result["count"] == 1
         assert a in result["updated"]
 
@@ -54,10 +57,12 @@ class TestBatchUpdateEdges:
     def test_batch_update_multiple_edges(self, graph, test_db):
         e1 = _create_edge(test_db, "n1", "n2", confidence=0.5)
         e2 = _create_edge(test_db, "n3", "n4", confidence=0.6)
-        result = graph.batch_update_edges([
-            {"id": e1, "probability_p50": 0.8, "probability_p05": 0.5},
-            {"id": e2, "probability_p50": 0.9, "probability_p05": 0.7},
-        ])
+        result = graph.batch_update_edges(
+            [
+                {"id": e1, "probability_p50": 0.8, "probability_p05": 0.5},
+                {"id": e2, "probability_p50": 0.9, "probability_p05": 0.7},
+            ]
+        )
         assert result["count"] == 2
 
     def test_batch_update_missing_id(self, graph):
@@ -101,10 +106,12 @@ class TestAggregateExperts:
         assert result["variance"] == 0.0
 
     def test_aggregate_three_experts(self, graph):
-        result = graph.aggregate_experts([
-            (0.1, 0.3, 0.5),
-            (0.3, 0.5, 0.7),
-            (0.2, 0.4, 0.6),
-        ])
+        result = graph.aggregate_experts(
+            [
+                (0.1, 0.3, 0.5),
+                (0.3, 0.5, 0.7),
+                (0.2, 0.4, 0.6),
+            ]
+        )
         assert result["p50"] == pytest.approx(0.4, abs=0.02)
         assert result["between_variance"] > 0  # experts disagree

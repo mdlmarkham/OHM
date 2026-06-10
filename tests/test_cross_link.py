@@ -220,6 +220,7 @@ def cross_link_server(tmp_path):
     db_path = str(tmp_path / "cross_link.duckdb")
     store = OhmStore(db_path=db_path, agent_name="test_agent")
     from ohm.server.server import _register_builtin_hooks
+
     _register_builtin_hooks(store)
     port, server, thread = _start_server(store)
     yield port, store
@@ -474,6 +475,7 @@ class TestHealthDeadEndMetric:
         a = create_node(test_db, label="A", node_type="concept", created_by="test")
         b = create_node(test_db, label="B", node_type="concept", created_by="test")
         from ohm.queries import create_edge
+
         create_edge(test_db, from_node=a["id"], to_node=b["id"], layer="L3", edge_type="CAUSES", created_by="test")
 
         h = query_graph_health(test_db)

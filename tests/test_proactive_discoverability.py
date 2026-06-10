@@ -15,8 +15,7 @@ def _insert_node(conn, nid, label, ntype="concept", tags=None, confidence=0.8, c
     """Helper to insert a node."""
     tags_json = json.dumps(tags) if tags else "[]"
     conn.execute(
-        "INSERT OR REPLACE INTO ohm_nodes (id, label, type, tags, confidence, created_by, provenance, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+        "INSERT OR REPLACE INTO ohm_nodes (id, label, type, tags, confidence, created_by, provenance, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
         [nid, label, ntype, tags_json, confidence, created_by, provenance],
     )
 
@@ -24,8 +23,7 @@ def _insert_node(conn, nid, label, ntype="concept", tags=None, confidence=0.8, c
 def _insert_edge(conn, from_n, to_n, etype="SUPPORTS", layer="L3", confidence=0.9, created_by="test"):
     """Helper to insert an edge."""
     conn.execute(
-        "INSERT OR REPLACE INTO ohm_edges (id, from_node, to_node, edge_type, layer, confidence, created_by, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+        "INSERT OR REPLACE INTO ohm_edges (id, from_node, to_node, edge_type, layer, confidence, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
         [f"edge-{from_n}-{to_n}", from_n, to_n, etype, layer, confidence, created_by],
     )
 
@@ -91,6 +89,7 @@ class TestAdminIslands:
     def store(self, tmp_path):
         """Create a store with islands of varying sizes."""
         import os
+
         db_path = os.path.join(str(tmp_path), "test_admin_islands.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test")
 
@@ -128,6 +127,7 @@ class TestAdminIslands:
     def test_handler_registered(self, store):
         """The _get_admin_islands method should exist on the handler."""
         from ohm.server.handlers.admin import AdminHandlerMixin
+
         assert hasattr(AdminHandlerMixin, "_get_admin_islands")
 
     def test_via_http(self, store):
@@ -158,6 +158,7 @@ class TestAdminIslands:
     def test_handles_empty_graph(self, tmp_path):
         """Empty graph returns empty islands list."""
         import os
+
         db_path = os.path.join(str(tmp_path), "empty_admin_islands.duckdb")
         empty_store = OhmStore(db_path=db_path, agent_name="test")
 
@@ -203,6 +204,7 @@ class TestSuggestBridges:
     def store(self, tmp_path):
         """Create a store with an island that needs bridges."""
         import os
+
         db_path = os.path.join(str(tmp_path), "test_bridges.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test")
 
@@ -280,6 +282,7 @@ class TestSuggestNudge:
     def store(self, tmp_path):
         """Create a store with data relevant for nudge testing."""
         import os
+
         db_path = os.path.join(str(tmp_path), "test_nudge.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test")
 
@@ -362,6 +365,7 @@ class TestSuggestConnectivity:
     def store(self, tmp_path):
         """Create a store with an orphan node and connected nodes."""
         import os
+
         db_path = os.path.join(str(tmp_path), "test_connectivity.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test")
 
@@ -427,6 +431,7 @@ class TestSuggestConnectivity:
     def test_connectivity_empty_result(self, tmp_path):
         """Orphan with no tag overlap with connected nodes returns empty candidates."""
         import os
+
         db_path = os.path.join(str(tmp_path), "test_connectivity_empty.duckdb")
         store = OhmStore(db_path=db_path, agent_name="test")
 

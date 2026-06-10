@@ -66,10 +66,7 @@ def extract_patterns(store: "OhmStore", domain: str = "ohm") -> list[dict]:
         List of anonymized pattern dicts.
     """
     eligible_types = frozenset({"pattern", "idea"})
-    rows = store.conn.execute(
-        "SELECT id, label, type, created_by FROM ohm_nodes "
-        "WHERE type IN ('pattern', 'idea')"
-    ).fetchall()
+    rows = store.conn.execute("SELECT id, label, type, created_by FROM ohm_nodes WHERE type IN ('pattern', 'idea')").fetchall()
 
     patterns = []
     for row in rows:
@@ -79,17 +76,19 @@ def extract_patterns(store: "OhmStore", domain: str = "ohm") -> list[dict]:
             continue
 
         pattern_id = f"pattern_{domain}_{hashlib.sha256(content.encode()).hexdigest()[:12]}"
-        patterns.append({
-            "id": pattern_id,
-            "label": content,
-            "content": content,
-            "confidence": 0.5,
-            "tags": [node_type, domain],
-            "domain": domain,
-            "sample_size": 1,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "provenance": "platform_pattern",
-        })
+        patterns.append(
+            {
+                "id": pattern_id,
+                "label": content,
+                "content": content,
+                "confidence": 0.5,
+                "tags": [node_type, domain],
+                "domain": domain,
+                "sample_size": 1,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "provenance": "platform_pattern",
+            }
+        )
 
     return patterns
 
@@ -176,8 +175,7 @@ def seed_patterns(store: "OhmStore", patterns: list[dict], domain: str = "ohm") 
         try:
             node_id = str(uuid.uuid4())
             store.conn.execute(
-                "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) "
-                "VALUES (?, ?, 'pattern', 'platform_pattern', CURRENT_TIMESTAMP)",
+                "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) VALUES (?, ?, 'pattern', 'platform_pattern', CURRENT_TIMESTAMP)",
                 [node_id, pattern["label"]],
             )
             count += 1

@@ -6,6 +6,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+from ohm.framework.exceptions import NodeNotFoundError, AuthenticationError
 from ohm.server import server as _server_module
 from ohm.server.nudges import generate_nudges, enrich_response
 
@@ -24,16 +25,13 @@ class GraphHandlerMixin:
     def _get_challenge_ratio(self) -> float:
         """Get the current graph challenge ratio, cached for 5 minutes."""
         import time
+
         now = time.time()
         if now - self._challenge_ratio_cache_time > 300:  # 5-minute cache
             try:
-                row = self.current_store.conn.execute(
-                    "SELECT COUNT(*) FROM edges WHERE edge_type = 'CHALLENGED_BY' AND deleted_at IS NULL"
-                ).fetchone()
+                row = self.current_store.conn.execute("SELECT COUNT(*) FROM edges WHERE edge_type = 'CHALLENGED_BY' AND deleted_at IS NULL").fetchone()
                 challenged = row[0] if row else 0
-                row2 = self.current_store.conn.execute(
-                    "SELECT COUNT(*) FROM edges WHERE layer = 'L3' AND deleted_at IS NULL"
-                ).fetchone()
+                row2 = self.current_store.conn.execute("SELECT COUNT(*) FROM edges WHERE layer = 'L3' AND deleted_at IS NULL").fetchone()
                 total_l3 = row2[0] if row2 else 1
                 ratio = challenged / max(total_l3, 1)
                 GraphHandlerMixin._challenge_ratio_cache = ratio
@@ -83,7 +81,9 @@ class GraphHandlerMixin:
 
                 logging.getLogger(__name__).warning(
                     "post_ingest hook %s failed (exit_code=%d): %s",
-                    r.hook_id, r.exit_code, r.stderr,
+                    r.hook_id,
+                    r.exit_code,
+                    r.stderr,
                 )
         return decorations
 
@@ -205,7 +205,7 @@ class GraphHandlerMixin:
             "overview": "OHM is a knowledge graph for multi-agent cognition. Write observations, create nodes and edges, challenge claims, and think in L0 fragments.",
             "writing": {
                 "create_node": "POST /node — Create any node type. Required: id, label, type. Optional: content, tags (list), metadata (dict), source_url, confidence, provenance, connects_to (list of existing node ids).",
-                "scratch": "POST /scratch — Write an L0 thinking fragment. Near-zero cost. Required: content. Optional: tags, connects_to, metadata. Auto-detects questions (?). Auto-links semantically. Fragments excluded from search/stats/neighborhood by default.",
+                "scratch": "POST /scratch -- Write an L0 thinking fragment. Near-zero cost. Required: content. Optional: tags, connects_to, metadata. Auto-detects questions (?). Auto-links semantically. Fragments excluded by default.",
                 "create_edge": "POST /edge — Link two nodes. Required: from, to, layer, edge_type. Optional: confidence, provenance, probability.",
                 "observe": "POST /observe/{id} — Record a measurement or observation on a node. Required: node_id, obs_type, value. Optional: notes, source, source_url, sigma. Also: POST /observations for bulk upload, GET /observations for listing.",
                 "challenge": "POST /challenge — Challenge an L3 interpretation. Required: edge_id. Optional: reason, confidence.",
@@ -217,7 +217,7 @@ class GraphHandlerMixin:
                 "stats": "GET /stats — Graph statistics. Excludes fragments by default. Add ?include_l0=true to include L0.",
                 "suggest": "GET /suggest?method=shared_tags&min_shared=2 — Find nodes that should be connected based on shared tags.",
                 "orphans": "GET /orphans — Find nodes with no edges. Good for finding isolated knowledge.",
-                "islands": "GET /islands â Find disconnected components (clusters of nodes isolated from the main graph). Each island is a knowledge domain needing bridges. Params: min_size (default 2), max_islands (default 20), layer, exclude_fragments (default true).",
+                "islands": "GET /islands -- Find disconnected components. Params: min_size (2), max_islands (20), layer, exclude_fragments (true).",
                 "welcome": "GET /welcome?agent=NAME -- Orientation packet for new/returning agents. Shows graph overview, your footprint, suggested connections, and recent activity.",
                 "orient": "GET /orient?agent=NAME&hours=N -- Context-recovery packet for agents who've lost context. Answers: Where was I? What did I miss? What should I do next? Terse and actionable.",
                 "listen": "GET /listen?since=ISO8601 — Change feed. See what agents have added recently.",
@@ -226,7 +226,13 @@ class GraphHandlerMixin:
                 "purpose": "Fragments, hunches, questions, raw associations. Unreliable by design (confidence=0.0). Excluded from search/stats/neighborhood by default.",
                 "when_to_scratch": "A hunch, a question, a quick observation, a connection you sense but can't articulate yet.",
                 "when_not_to_scratch": "A confident concept (use create_node), a verified fact (use create_node with source_url), a known relationship (use create_edge).",
-                "l0_edge_types": {"CONTEXT_OF": "Fragment relates to existing concept", "INSPIRED_BY": "Fragment was inspired by another node", "CONTRADICTS_FRAG": "Fragment contradicts another fragment", "REFINES_FRAG": "Fragment refines another fragment", "RESONANCE": "Independent agents noticed the same thing"},
+                "l0_edge_types": {
+                    "CONTEXT_OF": "Fragment relates to existing concept",
+                    "INSPIRED_BY": "Fragment was inspired by another node",
+                    "CONTRADICTS_FRAG": "Fragment contradicts another fragment",
+                    "REFINES_FRAG": "Fragment refines another fragment",
+                    "RESONANCE": "Independent agents noticed the same thing",
+                },
                 "lifecycle": "Write (scratch) → Auto-link (semantic) → Connect explicitly (link_fragment) → Promote to L1 concept (promote_fragment)",
             },
             "node_type_guide": {
@@ -243,10 +249,39 @@ class GraphHandlerMixin:
                 "task": "Action items with status, priority, assignment",
             },
             "edge_type_guide": {
-                "L0": {"CONTEXT_OF": "Fragment relates to existing concept", "INSPIRED_BY": "Fragment inspired by another node", "CONTRADICTS_FRAG": "Fragment contradicts another fragment", "REFINES_FRAG": "Fragment refines another fragment", "RESONANCE": "Independent agents noticed same thing"},
-                "L1": {"BELONGS_TO": "X belongs to Y (service to host, person to org)", "CONTAINS": "X contains Y (org contains team)", "HAS_COMPONENT": "X has component Y (system has service)", "PART_OF": "X is part of Y (reverse of CONTAINS)", "CAPABLE_OF": "X can do Y (agent capable of skill)"},
-                "L2": {"REFERENCES": "X references Y (citation, link)", "SERVES": "X serves Y (service serves agent)", "USES": "X uses Y (agent uses tool)", "FEEDS": "X feeds Y (data flow)", "RUNS_ON": "X runs on Y (service runs on host)", "HOSTS": "X hosts Y (host runs service, reverse of RUNS_ON)", "UPSTREAM_OF": "X is upstream of Y (dependency chain)", "TRANSITIONS_TO": "X transitions to Y (version upgrade)"},
-                "L3": {"CAUSES": "X causes Y (with confidence)", "SUPPORTS": "X supports Y (evidence for)", "CHALLENGED_BY": "X is challenged by Y (evidence against)", "CONTRADICTS": "X contradicts Y (incompatible claims)", "REFINES": "X refines Y (narrowing, clarifying)", "APPLIES_TO": "X applies to Y (pattern to instance)", "TRANSITIONS_TO": "X transitions to Y (state change)"},
+                "L0": {
+                    "CONTEXT_OF": "Fragment relates to existing concept",
+                    "INSPIRED_BY": "Fragment inspired by another node",
+                    "CONTRADICTS_FRAG": "Fragment contradicts another fragment",
+                    "REFINES_FRAG": "Fragment refines another fragment",
+                    "RESONANCE": "Independent agents noticed same thing",
+                },
+                "L1": {
+                    "BELONGS_TO": "X belongs to Y (service to host, person to org)",
+                    "CONTAINS": "X contains Y (org contains team)",
+                    "HAS_COMPONENT": "X has component Y (system has service)",
+                    "PART_OF": "X is part of Y (reverse of CONTAINS)",
+                    "CAPABLE_OF": "X can do Y (agent capable of skill)",
+                },
+                "L2": {
+                    "REFERENCES": "X references Y (citation, link)",
+                    "SERVES": "X serves Y (service serves agent)",
+                    "USES": "X uses Y (agent uses tool)",
+                    "FEEDS": "X feeds Y (data flow)",
+                    "RUNS_ON": "X runs on Y (service runs on host)",
+                    "HOSTS": "X hosts Y (host runs service, reverse of RUNS_ON)",
+                    "UPSTREAM_OF": "X is upstream of Y (dependency chain)",
+                    "TRANSITIONS_TO": "X transitions to Y (version upgrade)",
+                },
+                "L3": {
+                    "CAUSES": "X causes Y (with confidence)",
+                    "SUPPORTS": "X supports Y (evidence for)",
+                    "CHALLENGED_BY": "X is challenged by Y (evidence against)",
+                    "CONTRADICTS": "X contradicts Y (incompatible claims)",
+                    "REFINES": "X refines Y (narrowing, clarifying)",
+                    "APPLIES_TO": "X applies to Y (pattern to instance)",
+                    "TRANSITIONS_TO": "X transitions to Y (state change)",
+                },
                 "L4": {"DEPENDS_ON": "X depends on Y (infrastructure dependency)", "ENABLES": "X enables Y (prerequisite)", "THREATENS": "X threatens Y (risk)", "RISKS": "X risks Y (uncertainty)", "BLOCKS": "X blocks Y (obstacle)"},
             },
             "cross_link_rule": f"Nodes of type {sorted(schema.must_have_edge_node_types)} MUST have at least one edge when created. Use connects_to or create_edge in the same request.",
@@ -308,7 +343,7 @@ class GraphHandlerMixin:
             result["edges"] = edges
             result["edge_count"] = len(edges)
             self._json_response(200, result)
-        except NodeNotFoundError:
+        except NodeNotFoundError:  # noqa: F821
             raise
         except Exception as e:
             self._json_response(500, {"error": "deep_content_failed", "message": str(e)})
@@ -584,7 +619,9 @@ class GraphHandlerMixin:
             if self.no_auth or not self.tokens:
                 agent = "ohm"
             elif self.require_read_auth:
-                raise AuthenticationError("Authentication required — provide Bearer token")
+                raise AuthenticationError(  # noqa: F821
+                    "Authentication required — provide Bearer token"
+                )
             else:
                 agent = "ohm"
         since = qs.get("since", [None])[0]
@@ -649,6 +686,7 @@ class GraphHandlerMixin:
         if not results and not node_type:
             try:
                 from ohm.graph.queries import semantic_search
+
                 semantic_results = semantic_search(
                     self.current_store.conn,
                     query=query_text,
@@ -656,21 +694,24 @@ class GraphHandlerMixin:
                     include_l0=include_l0,
                 )
                 if semantic_results:
-                    self._json_response(200, {
-                        "results": [
-                            {
-                                "id": r.get("node_id", ""),
-                                "label": r.get("label", ""),
-                                "type": r.get("type", ""),
-                                "distance": round(r.get("distance", 1.0), 4),
-                                "match_method": "semantic",
-                            }
-                            for r in semantic_results
-                        ],
-                        "count": len(semantic_results),
-                        "fallback": "semantic",
-                        "tip": f"No exact text matches for '{query_text}'. Showing semantic matches instead. Use /semantic_search?q={query_text} for more options.",
-                    })
+                    self._json_response(
+                        200,
+                        {
+                            "results": [
+                                {
+                                    "id": r.get("node_id", ""),
+                                    "label": r.get("label", ""),
+                                    "type": r.get("type", ""),
+                                    "distance": round(r.get("distance", 1.0), 4),
+                                    "match_method": "semantic",
+                                }
+                                for r in semantic_results
+                            ],
+                            "count": len(semantic_results),
+                            "fallback": "semantic",
+                            "tip": f"No exact text matches for '{query_text}'. Showing semantic matches instead. Use /semantic_search?q={query_text} for more options.",
+                        },
+                    )
                     return
             except (ValueError, ImportError, Exception) as e:
                 logger.debug(f"Semantic fallback failed: {e}")
@@ -678,6 +719,7 @@ class GraphHandlerMixin:
             # OHM-tr71.9: Fuzzy matching fallback — try DuckDB jaro_winkler_similarity
             try:
                 from ohm.graph.queries import fuzzy_search as _fuzzy_search
+
                 fuzzy_results = _fuzzy_search(
                     self.current_store.conn,
                     query=query_text,
@@ -685,30 +727,36 @@ class GraphHandlerMixin:
                     include_l0=include_l0,
                 )
                 if fuzzy_results:
-                    self._json_response(200, {
-                        "results": [
-                            {
-                                "id": r.get("id", ""),
-                                "label": r.get("label", ""),
-                                "type": r.get("type", ""),
-                                "distance": r.get("distance", 0.0),
-                                "match_method": r.get("match_type", "fuzzy"),
-                            }
-                            for r in fuzzy_results
-                        ],
-                        "count": len(fuzzy_results),
-                        "fallback": "fuzzy",
-                        "tip": f"No exact matches for '{query_text}'. Showing fuzzy label matches instead.",
-                    })
+                    self._json_response(
+                        200,
+                        {
+                            "results": [
+                                {
+                                    "id": r.get("id", ""),
+                                    "label": r.get("label", ""),
+                                    "type": r.get("type", ""),
+                                    "distance": r.get("distance", 0.0),
+                                    "match_method": r.get("match_type", "fuzzy"),
+                                }
+                                for r in fuzzy_results
+                            ],
+                            "count": len(fuzzy_results),
+                            "fallback": "fuzzy",
+                            "tip": f"No exact matches for '{query_text}'. Showing fuzzy label matches instead.",
+                        },
+                    )
                     return
             except Exception as e:
                 logger.debug(f"Fuzzy fallback failed: {e}")
 
-            self._json_response(200, {
-                "results": [],
-                "count": 0,
-                "tip": f"No results for '{query_text}' via text, semantic, or fuzzy search. Try a different query.",
-            })
+            self._json_response(
+                200,
+                {
+                    "results": [],
+                    "count": 0,
+                    "tip": f"No results for '{query_text}' via text, semantic, or fuzzy search. Try a different query.",
+                },
+            )
             return
 
         self._json_response(200, results)
@@ -824,8 +872,7 @@ class GraphHandlerMixin:
                     f"Bayesian inference. See OHM-tjzh / ADR-018."
                 ),
                 "node_type": node_type,
-                "hint": "Add a 'connects_to' field with one or more existing node ids, "
-                "or use POST /batch to atomically create the node and at least one edge.",
+                "hint": "Add a 'connects_to' field with one or more existing node ids, or use POST /batch to atomically create the node and at least one edge.",
             }
 
         if not isinstance(connects_to, list) or not all(isinstance(c, str) for c in connects_to):
@@ -853,10 +900,7 @@ class GraphHandlerMixin:
         if missing:
             return {
                 "error": "cross_link_unknown_target",
-                "message": (
-                    f"connects_to references unknown node id(s): {missing}. "
-                    f"Cross-link targets must already exist in the graph."
-                ),
+                "message": (f"connects_to references unknown node id(s): {missing}. Cross-link targets must already exist in the graph."),
                 "missing": missing,
             }
 
@@ -897,17 +941,22 @@ class GraphHandlerMixin:
                 from ohm.graph.constraints import validate_layer_promotion
 
                 promote_valid, promote_warnings, promote_errors = validate_layer_promotion(
-                    body["id"], node_layer, target_layer,
+                    body["id"],
+                    node_layer,
+                    target_layer,
                     self.current_store.conn,
                     enforce=self.config.get("enforce_layer_gates", False),
                 )
                 if promote_errors:
-                    self._json_response(422, {
-                        "error": "layer_promotion_denied",
-                        "message": "Layer promotion constraints not satisfied",
-                        "constraint_errors": promote_errors,
-                        "constraint_warnings": promote_warnings,
-                    })
+                    self._json_response(
+                        422,
+                        {
+                            "error": "layer_promotion_denied",
+                            "message": "Layer promotion constraints not satisfied",
+                            "constraint_errors": promote_errors,
+                            "constraint_warnings": promote_warnings,
+                        },
+                    )
                     return
 
         hook_error = self._run_pre_ingest_hooks(agent, "node", body)
@@ -999,6 +1048,7 @@ class GraphHandlerMixin:
         if result.get("created", True):
             from ohm.queries import register_alias, register_content_hash
             from ohm.validation import normalize_alias, compute_content_hash
+
             node_id = result.get("id", body.get("id", ""))
             label = body.get("label", "")
             if node_id and label:
@@ -1083,6 +1133,7 @@ class GraphHandlerMixin:
 
         # ADR-021: Proactive discoverability — suggestions for scratch
         from ohm.server.suggestions import generate_suggestions
+
         suggestions = generate_suggestions(
             store=self.current_store,
             node_id=node.get("id", ""),
@@ -1217,17 +1268,22 @@ class GraphHandlerMixin:
         from ohm.graph.constraints import validate_layer_promotion
 
         promote_valid, promote_warnings, promote_errors = validate_layer_promotion(
-            fragment_id, "L0", "L1",
+            fragment_id,
+            "L0",
+            "L1",
             self.current_store.conn,
             enforce=self.config.get("enforce_layer_gates", False),
         )
         if promote_errors:
-            self._json_response(422, {
-                "error": "layer_promotion_denied",
-                "message": "Fragment does not satisfy L0→L1 promotion constraints",
-                "constraint_errors": promote_errors,
-                "constraint_warnings": promote_warnings,
-            })
+            self._json_response(
+                422,
+                {
+                    "error": "layer_promotion_denied",
+                    "message": "Fragment does not satisfy L0→L1 promotion constraints",
+                    "constraint_errors": promote_errors,
+                    "constraint_warnings": promote_warnings,
+                },
+            )
             return
 
         try:
@@ -1266,12 +1322,15 @@ class GraphHandlerMixin:
             enforce=self.config.get("enforce_layer_gates", False),
         )
         if edge_errors:
-            self._json_response(422, {
-                "error": "edge_constraint_denied",
-                "message": "Edge constraints not satisfied",
-                "constraint_errors": edge_errors,
-                "constraint_warnings": edge_warnings,
-            })
+            self._json_response(
+                422,
+                {
+                    "error": "edge_constraint_denied",
+                    "message": "Edge constraints not satisfied",
+                    "constraint_errors": edge_errors,
+                    "constraint_warnings": edge_warnings,
+                },
+            )
             return
 
         hook_error = self._run_pre_ingest_hooks(agent, "edge", body)
@@ -1329,6 +1388,7 @@ class GraphHandlerMixin:
         # ADR-021: Relational tags — add edge type as tag on both endpoints
         try:
             from ohm.server.relational_tags import add_relational_tags
+
             tag_result = add_relational_tags(
                 conn=self.current_store.conn,
                 from_node=body["from"],
@@ -1344,6 +1404,7 @@ class GraphHandlerMixin:
         # ADR-021: Proactive discoverability — post-write edge suggestions
         try:
             from ohm.server.suggestions import generate_edge_suggestions
+
             edge_suggestions = generate_edge_suggestions(
                 store=self.current_store,
                 from_node=body["from"],
@@ -1380,7 +1441,10 @@ class GraphHandlerMixin:
                 from ohm.graph.queries import reflect_challenge_to_fragments
 
                 reflected = reflect_challenge_to_fragments(
-                    self.current_store.conn, edge_id, result.get("id", ""), agent,
+                    self.current_store.conn,
+                    edge_id,
+                    result.get("id", ""),
+                    agent,
                 )
                 if reflected:
                     result["backflow_fragments"] = [r["fragment_id"] for r in reflected]
@@ -1620,16 +1684,12 @@ class GraphHandlerMixin:
                 invalid_ids.append(safe_cid)
 
         if not validated_cluster_ids:
-            raise ValidationError(
-                f"agent/synthesis requires at least one cluster_id that references an existing node. "
-                f"None of the provided cluster_ids were found: {cluster_ids}"
-            )
+            raise ValidationError(f"agent/synthesis requires at least one cluster_id that references an existing node. None of the provided cluster_ids were found: {cluster_ids}")
 
         if invalid_ids:
             import logging
-            logging.getLogger("ohm.handlers").warning(
-                "Synthesis cluster_ids not found, skipping: %s", invalid_ids
-            )
+
+            logging.getLogger("ohm.handlers").warning("Synthesis cluster_ids not found, skipping: %s", invalid_ids)
 
         node_id = generate_node_id(label)
         node_result = self.current_store.write_node(
@@ -2039,7 +2099,9 @@ class GraphHandlerMixin:
             if self.no_auth:
                 agent = "ohm"
             else:
-                raise AuthenticationError("Authentication required")
+                raise AuthenticationError(  # noqa: F821
+                    "Authentication required"
+                )
         nodes = self.current_store.execute(
             "SELECT * FROM ohm_nodes WHERE visibility = 'vault' AND created_by = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 100",
             [agent],
@@ -2083,18 +2145,21 @@ class GraphHandlerMixin:
 
         # OHM-tjzh: promotion requires at least one cross-link to shared graph
         from ohm.schema import requires_cross_link
+
         if requires_cross_link(node["type"] if len(node) > 3 else "concept"):
             edge_count = self.current_store.conn.execute(
                 "SELECT COUNT(*) FROM ohm_edges WHERE (from_node = ? OR to_node = ?) AND deleted_at IS NULL",
                 [node_id, node_id],
             ).fetchone()[0]
             if edge_count == 0:
-                self._json_response(422, {
-                    "error": "cross_link_required",
-                    "message": f"Vault node '{node_id}' has no edges. Per ADR-018 / OHM-tjzh, "
-                               f"nodes must have at least one edge before promotion to the shared graph.",
-                    "hint": "Add an edge to an existing shared-graph node via POST /edge, then retry promotion.",
-                })
+                self._json_response(
+                    422,
+                    {
+                        "error": "cross_link_required",
+                        "message": f"Vault node '{node_id}' has no edges. Per ADR-018 / OHM-tjzh, nodes must have at least one edge before promotion to the shared graph.",
+                        "hint": "Add an edge to an existing shared-graph node via POST /edge, then retry promotion.",
+                    },
+                )
                 return
 
         now = self.current_store._now()
@@ -2108,12 +2173,15 @@ class GraphHandlerMixin:
             [now, agent, node_id, node_id],
         )
 
-        self._json_response(200, {
-            "promoted": node_id,
-            "previous_visibility": "vault",
-            "new_visibility": "team",
-            "promoted_by": agent,
-        })
+        self._json_response(
+            200,
+            {
+                "promoted": node_id,
+                "previous_visibility": "vault",
+                "new_visibility": "team",
+                "promoted_by": agent,
+            },
+        )
 
     def _post_heartbeat(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /heartbeat — agent heartbeat with sync and orient enrichment.
@@ -2170,21 +2238,16 @@ class GraphHandlerMixin:
         """Lightweight orient data for heartbeat enrichment."""
         try:
             conn = self.current_store.read_conn
-            from datetime import datetime, timezone
-            hours = 24
+
+            _hours = 24  # noqa: F841
             # Last activity
             last_activity = conn.execute(
-                "SELECT MAX(la) FROM ("
-                "SELECT created_at AS la FROM ohm_nodes WHERE created_by = ? UNION ALL "
-                "SELECT created_at AS la FROM ohm_edges WHERE created_by = ? UNION ALL "
-                "SELECT created_at AS la FROM ohm_observations WHERE created_by = ?"
-                ")",
+                "SELECT MAX(la) FROM (SELECT created_at AS la FROM ohm_nodes WHERE created_by = ? UNION ALL SELECT created_at AS la FROM ohm_edges WHERE created_by = ? UNION ALL SELECT created_at AS la FROM ohm_observations WHERE created_by = ?)",
                 [agent, agent, agent],
             ).fetchone()[0]
             # Open tasks
             tasks = conn.execute(
-                "SELECT id, label, priority, due_date FROM ohm_nodes "
-                "WHERE assigned_to = ? AND task_status = 'open' AND deleted_at IS NULL ORDER BY priority DESC LIMIT 5",
+                "SELECT id, label, priority, due_date FROM ohm_nodes WHERE assigned_to = ? AND task_status = 'open' AND deleted_at IS NULL ORDER BY priority DESC LIMIT 5",
                 [agent],
             ).fetchall()
             return {
@@ -2199,6 +2262,7 @@ class GraphHandlerMixin:
         """Lightweight contradictions for heartbeat enrichment."""
         try:
             from ohm.methods import detect_contradictions
+
             result = detect_contradictions(self.current_store.read_conn, confidence_threshold=0.5)
             if isinstance(result, list):
                 return result[:limit]
@@ -2210,6 +2274,7 @@ class GraphHandlerMixin:
         """Lightweight stale observations for heartbeat enrichment."""
         try:
             from ohm.queries import query_stale_edges
+
             result = query_stale_edges(self.current_store.read_conn, stale_threshold=0.1)
             if isinstance(result, list):
                 return result[:limit]
@@ -2283,13 +2348,12 @@ class GraphHandlerMixin:
             raise NodeNotFoundError(f"Node not found: {node_id}")
 
         from ohm.server.boundary import enforce_l2_immutability
+
         enforce_l2_immutability(self.current_store.conn, agent, node_id)
 
         # Validate type change against schema
         if "type" in body and body["type"] not in self.schema_config.node_types:
-            raise ValidationError(
-                f"Invalid node type: '{body['type']}' — must be one of: {', '.join(sorted(self.schema_config.node_types))}"
-            )
+            raise ValidationError(f"Invalid node type: '{body['type']}' — must be one of: {', '.join(sorted(self.schema_config.node_types))}")
 
         now = datetime.now(timezone.utc).isoformat()
         patchable = [
@@ -2354,6 +2418,7 @@ class GraphHandlerMixin:
             raise NodeNotFoundError(f"Edge not found: {edge_id}")
 
         from ohm.server.boundary import enforce_write_boundary
+
         enforce_write_boundary(self.current_store.conn, agent, edge_id)
 
         now = datetime.now(timezone.utc).isoformat()
@@ -2380,12 +2445,14 @@ class GraphHandlerMixin:
         # Allow edge_type updates for causal restructuring (ADR-023)
         if "edge_type" in body:
             from ohm.validation import validate_identifier
+
             new_type = validate_identifier(body["edge_type"], name="edge_type")
             update_fields.append("edge_type = ?")
             update_params.append(new_type)
 
         if "probability_p50" in body and "probability" not in body:
             from ohm.pert import compute_pert_mean
+
             p05 = body.get("probability_p05", edge.get("probability_p05") or body["probability_p50"])
             p95 = body.get("probability_p95", edge.get("probability_p95") or body["probability_p50"])
             pert_mean = compute_pert_mean(p05, body["probability_p50"], p95)
@@ -2455,6 +2522,7 @@ class GraphHandlerMixin:
                 continue
 
             from ohm.server.boundary import enforce_write_boundary
+
             enforce_write_boundary(self.current_store.conn, agent, edge_id)
 
             update_fields = []
@@ -2472,6 +2540,7 @@ class GraphHandlerMixin:
 
             if "probability_p50" in item and "probability" not in item:
                 from ohm.pert import compute_pert_mean
+
                 p05 = item.get("probability_p05", edge.get("probability_p05") or item["probability_p50"])
                 p95 = item.get("probability_p95", edge.get("probability_p95") or item["probability_p50"])
                 pert_mean = compute_pert_mean(p05, item["probability_p50"], p95)
@@ -2538,8 +2607,6 @@ class GraphHandlerMixin:
         depth = min(max(int(body.get("depth", 2)), 1), 3)
         include_inference = body.get("include_inference", True)
         limit = min(max(int(body.get("limit", 5)), 1), 20)
-        asking_agent = body.get("agent", agent)
-
         # Step 1: Node search — text + semantic
         matched_nodes = []
         search_errors = []
@@ -2550,13 +2617,15 @@ class GraphHandlerMixin:
             # Check if question matches an existing node ID directly
             direct_node = self.current_store.get_node(question_lower)
             if direct_node:
-                matched_nodes.append({
-                    "id": direct_node["id"],
-                    "label": direct_node.get("label", ""),
-                    "type": direct_node.get("type", ""),
-                    "confidence": direct_node.get("confidence"),
-                    "match_method": "direct_id",
-                })
+                matched_nodes.append(
+                    {
+                        "id": direct_node["id"],
+                        "label": direct_node.get("label", ""),
+                        "type": direct_node.get("type", ""),
+                        "confidence": direct_node.get("confidence"),
+                        "match_method": "direct_id",
+                    }
+                )
         except Exception:
             pass
 
@@ -2566,13 +2635,15 @@ class GraphHandlerMixin:
                 try:
                     node = self.current_store.get_node(variant)
                     if node and node["id"] not in {n["id"] for n in matched_nodes}:
-                        matched_nodes.append({
-                            "id": node["id"],
-                            "label": node.get("label", ""),
-                            "type": node.get("type", ""),
-                            "confidence": node.get("confidence"),
-                            "match_method": "direct_id",
-                        })
+                        matched_nodes.append(
+                            {
+                                "id": node["id"],
+                                "label": node.get("label", ""),
+                                "type": node.get("type", ""),
+                                "confidence": node.get("confidence"),
+                                "match_method": "direct_id",
+                            }
+                        )
                         break
                 except Exception:
                     pass
@@ -2585,13 +2656,15 @@ class GraphHandlerMixin:
                 limit=limit,
             )
             for r in text_results:
-                matched_nodes.append({
-                    "id": r.get("id", ""),
-                    "label": r.get("label", ""),
-                    "type": r.get("type", ""),
-                    "confidence": r.get("confidence"),
-                    "match_method": "text",
-                })
+                matched_nodes.append(
+                    {
+                        "id": r.get("id", ""),
+                        "label": r.get("label", ""),
+                        "type": r.get("type", ""),
+                        "confidence": r.get("confidence"),
+                        "match_method": "text",
+                    }
+                )
         except Exception as e:
             search_errors.append(f"text_search: {e}")
 
@@ -2607,14 +2680,16 @@ class GraphHandlerMixin:
             for r in sem_results:
                 nid = r.get("node_id", r.get("id", ""))
                 if nid and nid not in existing_ids:
-                    matched_nodes.append({
-                        "id": nid,
-                        "label": r.get("label", ""),
-                        "type": r.get("type", ""),
-                        "confidence": r.get("confidence"),
-                        "distance": r.get("distance"),
-                        "match_method": "semantic",
-                    })
+                    matched_nodes.append(
+                        {
+                            "id": nid,
+                            "label": r.get("label", ""),
+                            "type": r.get("type", ""),
+                            "confidence": r.get("confidence"),
+                            "distance": r.get("distance"),
+                            "match_method": "semantic",
+                        }
+                    )
                     existing_ids.add(nid)
         except Exception as e:
             # Semantic search may be unavailable (no Ollama)
@@ -2624,6 +2699,7 @@ class GraphHandlerMixin:
         if not matched_nodes:
             try:
                 from ohm.graph.queries import fuzzy_search
+
                 fuzzy_results = fuzzy_search(
                     self.current_store.conn,
                     query=question,
@@ -2633,14 +2709,16 @@ class GraphHandlerMixin:
                 for r in fuzzy_results:
                     nid = r.get("id", "")
                     if nid and nid not in existing_ids:
-                        matched_nodes.append({
-                            "id": nid,
-                            "label": r.get("label", ""),
-                            "type": r.get("type", ""),
-                            "confidence": r.get("confidence"),
-                            "distance": r.get("distance"),
-                            "match_method": r.get("match_type", "fuzzy"),
-                        })
+                        matched_nodes.append(
+                            {
+                                "id": nid,
+                                "label": r.get("label", ""),
+                                "type": r.get("type", ""),
+                                "confidence": r.get("confidence"),
+                                "distance": r.get("distance"),
+                                "match_method": r.get("match_type", "fuzzy"),
+                            }
+                        )
                         existing_ids.add(nid)
             except Exception as e:
                 search_errors.append(f"fuzzy_search: {e}")
@@ -2656,7 +2734,9 @@ class GraphHandlerMixin:
             all_node_ids.add(nid)
             try:
                 n_edges = query_neighborhood(
-                    self.current_store.conn, nid, depth=depth,
+                    self.current_store.conn,
+                    nid,
+                    depth=depth,
                 )
                 for e in n_edges:
                     all_node_ids.add(e.get("from_node", e.get("from", "")))
@@ -2669,8 +2749,7 @@ class GraphHandlerMixin:
         if all_node_ids:
             placeholders = ",".join(["?"] * len(all_node_ids))
             node_details = self.current_store.execute(
-                f"SELECT id, label, type, confidence, content, tags, created_by, provenance "
-                f"FROM ohm_nodes WHERE id IN ({placeholders}) AND deleted_at IS NULL",
+                f"SELECT id, label, type, confidence, content, tags, created_by, provenance FROM ohm_nodes WHERE id IN ({placeholders}) AND deleted_at IS NULL",
                 list(all_node_ids),
             )
 
@@ -2679,7 +2758,6 @@ class GraphHandlerMixin:
         inference_errors = []
         if include_inference and PGMPY_AVAILABLE and matched_nodes:
             # Find nodes with causal edges (CAUSES, DEPENDS_ON, THREATENS, NEGATES)
-            causal_types = ["CAUSES", "DEPENDS_ON", "THREATENS", "NEGATES"]
             target_ids = [n["id"] for n in matched_nodes if n.get("id")]
             if target_ids:
                 placeholders = ",".join(["?"] * len(target_ids))
@@ -2752,17 +2830,19 @@ class GraphHandlerMixin:
                 challenge_node_ids + challenge_node_ids,
             )
             for ce in challenge_edges:
-                challenges.append({
-                    "edge_id": ce.get("id"),
-                    "challenger_node": ce.get("from_node"),
-                    "challenged_node": ce.get("to_node"),
-                    "challenger_label": ce.get("from_label", ""),
-                    "challenged_label": ce.get("to_label", ""),
-                    "challenge_type": ce.get("challenge_type"),
-                    "confidence": ce.get("confidence"),
-                    "provenance": ce.get("provenance"),
-                    "created_by": ce.get("created_by"),
-                })
+                challenges.append(
+                    {
+                        "edge_id": ce.get("id"),
+                        "challenger_node": ce.get("from_node"),
+                        "challenged_node": ce.get("to_node"),
+                        "challenger_label": ce.get("from_label", ""),
+                        "challenged_label": ce.get("to_label", ""),
+                        "challenge_type": ce.get("challenge_type"),
+                        "confidence": ce.get("confidence"),
+                        "provenance": ce.get("provenance"),
+                        "created_by": ce.get("created_by"),
+                    }
+                )
 
         # Step 5: Build synthesis
         # Confidence based on: search match quality + inference certainty + challenge coverage
@@ -2801,7 +2881,7 @@ class GraphHandlerMixin:
         synthesis_parts = []
 
         if matched_nodes:
-            node_labels = [f"{n['label']} ({n['id']})" for n in matched_nodes[:5] if n.get('label')]
+            node_labels = [f"{n['label']} ({n['id']})" for n in matched_nodes[:5] if n.get("label")]
             if node_labels:
                 synthesis_parts.append(f"Relevant nodes: {', '.join(node_labels)}.")
 
@@ -2811,9 +2891,7 @@ class GraphHandlerMixin:
                 if posterior:
                     p_good = posterior.get("good", 0)
                     p_bad = posterior.get("bad", 0)
-                    synthesis_parts.append(
-                        f"Bayesian inference on {target_id}: P(good)={p_good:.2%}, P(bad)={p_bad:.2%}."
-                    )
+                    synthesis_parts.append(f"Bayesian inference on {target_id}: P(good)={p_good:.2%}, P(bad)={p_bad:.2%}.")
 
         if challenges:
             challenge_descs = []

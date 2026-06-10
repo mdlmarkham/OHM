@@ -194,10 +194,12 @@ class OpenAIBackend(EmbeddingBackend):
             import urllib.request
 
             url = "https://api.openai.com/v1/embeddings"
-            payload = _json.dumps({
-                "model": self._model,
-                "input": texts,
-            }).encode("utf-8")
+            payload = _json.dumps(
+                {
+                    "model": self._model,
+                    "input": texts,
+                }
+            ).encode("utf-8")
             req = urllib.request.Request(
                 url,
                 data=payload,

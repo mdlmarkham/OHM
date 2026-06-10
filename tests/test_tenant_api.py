@@ -83,7 +83,9 @@ class TestProvisionEndpoint:
         port, server, store, tm = _start_mt_server(tmp_path)
         try:
             status, data = _req(
-                "POST", port, "/tenant/provision",
+                "POST",
+                port,
+                "/tenant/provision",
                 body={"customer_id": "acme_hvac", "domain": "ohm", "tier": "starter"},
                 token="admin-secret",
             )
@@ -101,7 +103,9 @@ class TestProvisionEndpoint:
         port, server, store, tm = _start_mt_server(tmp_path)
         try:
             _, data = _req(
-                "POST", port, "/tenant/provision",
+                "POST",
+                port,
+                "/tenant/provision",
                 body={"customer_id": "acme_hvac"},
                 token="admin-secret",
             )
@@ -118,10 +122,8 @@ class TestProvisionEndpoint:
     def test_provision_duplicate_returns_409(self, tmp_path):
         port, server, store, tm = _start_mt_server(tmp_path)
         try:
-            _req("POST", port, "/tenant/provision",
-                 body={"customer_id": "acme_hvac"}, token="admin-secret")
-            status, data = _req("POST", port, "/tenant/provision",
-                                body={"customer_id": "acme_hvac"}, token="admin-secret")
+            _req("POST", port, "/tenant/provision", body={"customer_id": "acme_hvac"}, token="admin-secret")
+            status, data = _req("POST", port, "/tenant/provision", body={"customer_id": "acme_hvac"}, token="admin-secret")
             assert status == 409
         finally:
             server.shutdown()
@@ -131,8 +133,7 @@ class TestProvisionEndpoint:
     def test_provision_missing_customer_id_returns_400(self, tmp_path):
         port, server, store, tm = _start_mt_server(tmp_path)
         try:
-            status, _ = _req("POST", port, "/tenant/provision",
-                              body={}, token="admin-secret")
+            status, _ = _req("POST", port, "/tenant/provision", body={}, token="admin-secret")
             assert status == 400
         finally:
             server.shutdown()
@@ -145,8 +146,7 @@ class TestProvisionEndpoint:
             # Add a non-admin agent token
             OhmHandler.tokens[_hash_token("regular-agent")] = "regular"
             OhmHandler.roles["regular"] = "read-write"
-            status, _ = _req("POST", port, "/tenant/provision",
-                              body={"customer_id": "acme_hvac"}, token="regular-agent")
+            status, _ = _req("POST", port, "/tenant/provision", body={"customer_id": "acme_hvac"}, token="regular-agent")
             assert status == 403
         finally:
             server.shutdown()
@@ -161,8 +161,7 @@ class TestProvisionEndpoint:
             ctoken, chash = _generate_customer_token("existing_tenant")
             OhmHandler.customer_tokens[chash] = "existing_tenant"
 
-            status, _ = _req("POST", port, "/tenant/provision",
-                              body={"customer_id": "new_tenant"}, token=ctoken)
+            status, _ = _req("POST", port, "/tenant/provision", body={"customer_id": "new_tenant"}, token=ctoken)
             assert status == 403
         finally:
             server.shutdown()
@@ -172,8 +171,7 @@ class TestProvisionEndpoint:
     def test_provision_no_auth_mode(self, tmp_path):
         port, server, store, tm = _start_mt_server(tmp_path, no_auth=True)
         try:
-            status, data = _req("POST", port, "/tenant/provision",
-                                 body={"customer_id": "free_tenant"})
+            status, data = _req("POST", port, "/tenant/provision", body={"customer_id": "free_tenant"})
             assert status == 201, data
         finally:
             server.shutdown()
@@ -299,8 +297,7 @@ class TestDeleteTenantEndpoint:
         port, server, store, tm = _start_mt_server(tmp_path)
         try:
             tm.provision("doomed_tenant")
-            status, data = _req("DELETE", port, "/tenant/doomed_tenant?confirm=true",
-                                token="admin-secret")
+            status, data = _req("DELETE", port, "/tenant/doomed_tenant?confirm=true", token="admin-secret")
             assert status == 200
             assert data["status"] == "deprovisioned"
         finally:
@@ -326,8 +323,7 @@ class TestDeleteTenantEndpoint:
             ctoken, chash = _generate_customer_token("revoked_tenant")
             OhmHandler.customer_tokens[chash] = "revoked_tenant"
 
-            _req("DELETE", port, "/tenant/revoked_tenant?confirm=true",
-                 token="admin-secret")
+            _req("DELETE", port, "/tenant/revoked_tenant?confirm=true", token="admin-secret")
             assert chash not in OhmHandler.customer_tokens
         finally:
             server.shutdown()
@@ -337,8 +333,7 @@ class TestDeleteTenantEndpoint:
     def test_delete_not_found_returns_404(self, tmp_path):
         port, server, store, tm = _start_mt_server(tmp_path)
         try:
-            status, _ = _req("DELETE", port, "/tenant/ghost?confirm=true",
-                             token="admin-secret")
+            status, _ = _req("DELETE", port, "/tenant/ghost?confirm=true", token="admin-secret")
             assert status == 404
         finally:
             server.shutdown()
@@ -357,8 +352,7 @@ class TestExportTenantEndpoint:
             ts = tm.get_store("export_tenant")
             ts.write_node("n1", "Node 1", "concept", agent_name="test")
 
-            status, data = _req("POST", port, "/tenant/export_tenant/export",
-                                body={}, token="admin-secret")
+            status, data = _req("POST", port, "/tenant/export_tenant/export", body={}, token="admin-secret")
             assert status == 200
             assert data["customer_id"] == "export_tenant"
             assert data["node_count"] >= 1
@@ -370,8 +364,7 @@ class TestExportTenantEndpoint:
     def test_export_not_found_returns_404(self, tmp_path):
         port, server, store, tm = _start_mt_server(tmp_path)
         try:
-            status, _ = _req("POST", port, "/tenant/ghost/export",
-                             body={}, token="admin-secret")
+            status, _ = _req("POST", port, "/tenant/ghost/export", body={}, token="admin-secret")
             assert status == 404
         finally:
             server.shutdown()

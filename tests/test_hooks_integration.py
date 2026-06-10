@@ -29,15 +29,19 @@ def _can_fork_sh():
     or if /bin/sh cannot fork for other reasons.
     """
     import os as _os
+
     # If sandbox is active, forking is intentionally disabled (NPROC=0)
     if _os.environ.get("OHM_SANDBOX_DISABLE", "") not in ("1", "true", "yes"):
         return False
     try:
         import subprocess
+
         result = subprocess.run(["sh", "-c", "sleep 0.1"], timeout=2, capture_output=True)
         return result.returncode == 0
     except Exception:
         return False
+
+
 from pathlib import Path
 
 import pytest
@@ -104,11 +108,16 @@ def hook_server(tmp_path):
 
 
 def _register_hook(port, event, command, timeout_ms=5000):
-    return _request("POST", port, "/hooks", body={
-        "event": event,
-        "command": command,
-        "timeout_ms": timeout_ms,
-    })
+    return _request(
+        "POST",
+        port,
+        "/hooks",
+        body={
+            "event": event,
+            "command": command,
+            "timeout_ms": timeout_ms,
+        },
+    )
 
 
 def _cleanup_hooks(port):
