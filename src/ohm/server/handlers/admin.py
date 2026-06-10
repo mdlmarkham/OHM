@@ -1584,7 +1584,11 @@ class AdminHandlerMixin:
         challenge_target = 0.05
         if total_l3 > 0:
             challenge_ratio = total_challenges / total_l3
-            challenge_score = max(0.0, 1.0 - abs(challenge_ratio - challenge_target) / challenge_target)
+            # Asymmetric: penalize below target, reward above target (more challenges = healthier)
+            if challenge_ratio >= challenge_target:
+                challenge_score = min(1.0, 0.5 + (challenge_ratio - challenge_target) / challenge_target * 0.5)
+            else:
+                challenge_score = max(0.0, challenge_ratio / challenge_target)
         else:
             challenge_score = 0.0
 
