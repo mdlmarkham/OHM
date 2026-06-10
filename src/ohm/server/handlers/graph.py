@@ -2738,10 +2738,10 @@ class GraphHandlerMixin:
                     nid,
                     depth=depth,
                 )
-                for e in n_edges:
-                    all_node_ids.add(e.get("from_node", e.get("from", "")))
-                    all_node_ids.add(e.get("to_node", e.get("to", "")))
-                    all_edges.append(e)
+                for edge in n_edges:
+                    all_node_ids.add(edge.get("from_node", edge.get("from", "")))
+                    all_node_ids.add(edge.get("to_node", edge.get("to", "")))
+                    all_edges.append(edge)
             except Exception:
                 pass
 
