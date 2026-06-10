@@ -388,6 +388,8 @@ def build_bayesian_network(
     seen_edges: dict[tuple[str, str], dict] = {}
     for row in rows:
         (from_node, to_node, edge_type, raw_probability, raw_confidence, prob_p05, prob_p50, prob_p95, conf_p05, conf_p50, conf_p95) = row
+        if from_node is None or to_node is None:
+            continue
         node_ids.add(from_node)
         node_ids.add(to_node)
 
