@@ -200,11 +200,14 @@ OHM's challenge mechanism is its most important structural feature. When an agen
 graph.challenge(
     edge_id="edge-123",
     reason="Evidence contradicts this interpretation",
-    confidence=0.7
+    confidence=0.7,
+    challenge_type="CONTRADICTS"  # Stored as metadata; edge_type is always CHALLENGED_BY
 )
 ```
 
 The original edge remains intact. The challenge is a separate edge with its own confidence. This preserves disagreement rather than averaging it away.
+
+Challenge type is stored in the edge's `provenance` field, not as `edge_type`. All challenge edges have `edge_type="CHALLENGED_BY"` regardless of the semantic challenge type (ADR-025).
 
 When agents don't challenge enough, the nudge system surfaces unchallenged high-confidence edges and suggests candidates for challenge.
 
@@ -275,9 +278,16 @@ GET  /suggest?method=nudge&agent=X              # Proactive discoverability
 # Writing
 POST /node                                     # Create node (auto-aliases, auto-embeddings)
 POST /edge                                     # Create edge (with constraint checking)
-POST /observe/{id}                             # Single observation
+POST /observe/{id}                             # Single observation (scale: probability|count|currency|percent|binary|unknown)
 POST /observations                             # Bulk observations
-POST /challenge                                # Challenge an edge
+POST /challenge/{edge_id}                      # Challenge an edge (stores challenge_type as metadata)
+POST /outcome                                  # Record outcome for source reliability tracking
+
+# Conversational Analytics (AND→OR)
+POST /ask                                      # Natural language → synthesized insights (ADR-025)
+
+# Agent Synthesis
+POST /agent/synthesis                          # Create synthesis from cluster of nodes
 
 # Analysis
 GET  /inference?target=X&evidence=Y:0          # Bayesian inference
@@ -382,16 +392,22 @@ See [ADR-006](docs/adr/0007-schema-evolution-and-type-governance.md) (graduated 
 
 ## Status
 
-**OHM v0.26.0.** Production use by 11 agents.
+**OHM v0.27.0.** Production use by 11 agents.
 
-**Graph**: 1,642 nodes · 2,666 edges · 1,160 observations · 3,139 aliases · 530 content hashes
+**Graph**: 1,415 nodes · 2,917 edges · 850+ observations · 15.8% verification rate · 14.7% challenge ratio
 
-**2,095 tests passing.** 140+ HTTP endpoints. 16 ADRs.
+**2,095 tests passing.** 142+ HTTP endpoints. 18 ADRs.
 
 ### Recent Shipments
 
 | Feature | ADR/Issue | Description |
 |---------|-----------|-------------|
+| Conversational analytics (/ask) | ADR-025 | Natural language → synthesized insights with Bayesian inference (AND→OR domain #49) |
+| Challenge type metadata | ADR-025 | `challenge_type` stored as metadata; `edge_type` always `CHALLENGED_BY` |
+| Binary scale support | ADR-025 | `/observe` accepts `scale=binary`, normalized to `probability` |
+| DuckLake sync throttle | — | 30s minimum interval; 60+ sec write latency → 50-130ms |
+| Outcome tracking | — | Record prediction outcomes; source reliability: accuracy, calibration, challenge rate |
+| Bayesian inference robustness | — | None-handling for edge from/to; 0-node guidance for unreachable targets |
 | Weibull temporal decay | OHM-24g9 | Continuous shape parameter κ for decay curves (accelerating, exponential, decelerating, binary, appreciating) |
 | Self-calibration | OHM-8fdb | Learned half-lives from supersession, authority decay toward community prior |
 | Layer promotion constraints | ADR-022 | SHACL-like write gates for L0→L1→L2→L3→L4 |
@@ -412,8 +428,12 @@ See [ADR-006](docs/adr/0007-schema-evolution-and-type-governance.md) (graduated 
 
 | Priority | Issue | Description |
 |----------|-------|-------------|
+| P1 | DuckLake orphans | 1075 orphaned rows in DuckLake; sync throttle mitigates but doesn't clean up |
+| P1 | Verification rate | 15.8% — need 10%+ for meaningful Bayesian calibration |
 | P2 | od01.4 | Causal discovery from observation data |
 | P2 | od01.5 | VoI→action: decision-theoretic edge creation |
+| P2 | Suggest noise | Filter Socrates/kevin pedagogy cross-domain suggestions |
+| P2 | Inference UX | Guidance for 0-node targets (unreachable in DAG) |
 
 ## Documentation
 
