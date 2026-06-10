@@ -403,7 +403,6 @@ class AnalysisHandlerMixin:
             island_id: Island ID (e.g., "island-1") from /admin/islands
             min_score: Minimum bridge score (default 0.0)
         """
-        import json
         from ohm.methods import find_islands
 
         island_id = qs.get("island_id", [None])[0]
@@ -525,7 +524,6 @@ class AnalysisHandlerMixin:
             challenge_ratio_nudge: When agent has >10 L3 edges and challenge ratio < 0.05
             recent_nodes_no_observations: Recent nodes with no observations
         """
-        import json
         from ohm.methods import find_islands
 
         agent = qs.get("agent", [None])[0]
@@ -675,7 +673,6 @@ class AnalysisHandlerMixin:
         Query params:
             node_id: The disconnected node to find connections for
         """
-        import json
 
         node_id = qs.get("node_id", [None])[0]
         if not node_id:
@@ -924,7 +921,6 @@ class AnalysisHandlerMixin:
         agent = qs.get("agent", [None])[0]
         since = qs.get("since", [None])[0]
 
-        import json as _json
         from ohm.graph.methods import find_islands
 
         conn = self.current_store.read_conn
@@ -1087,9 +1083,9 @@ class AnalysisHandlerMixin:
             return
 
         try:
-            hours = min(int(qs.get("hours", ["24"])[0]), 168)
+            min(int(qs.get("hours", ["24"])[0]), 168)
         except (ValueError, IndexError):
-            hours = 24
+            pass
 
         conn = self.current_store.read_conn
 

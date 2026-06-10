@@ -244,7 +244,6 @@ class Graph:
         Raises:
             NodeNotFoundError: If not found and create_if_missing=False.
         """
-        import re
 
         if len(node_id_or_label) == 36 and node_id_or_label.count("-") == 4:
             return node_id_or_label

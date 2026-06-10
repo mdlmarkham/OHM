@@ -967,6 +967,12 @@ def create_node(
 
     # Check for soft-deleted row with same ID (primary key collision avoidance)
     soft_deleted = conn.execute("SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NOT NULL", [node_id]).fetchone()
+    # Serialize tags and metadata to JSON
+    import json as _json
+
+    tags_json = _json.dumps(tags) if tags else None
+    metadata_json = _json.dumps(metadata) if metadata else None
+
     if soft_deleted:
         # Reactivate soft-deleted row with new data
         conn.execute(
@@ -982,12 +988,6 @@ def create_node(
         )
         _log_change(conn, "ohm_nodes", node_id, "UPDATE", created_by)
         return _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node_id]))[0]
-
-    # Serialize tags and metadata to JSON
-    import json as _json
-
-    tags_json = _json.dumps(tags) if tags else None
-    metadata_json = _json.dumps(metadata) if metadata else None
 
     conn.execute(
         """INSERT INTO ohm_nodes
@@ -3619,7 +3619,7 @@ def scratch(
     if url_match:
         url = url_match.group(0).rstrip(".,;:)")
 
-    node_id = generate_node_id(label)
+    generate_node_id(label)
 
     # Merge caller-provided metadata with auto-detected metadata
     auto_metadata = {}

@@ -406,7 +406,7 @@ def effective_layer(conn: DuckDBPyConnection, node_id: str, t: str | None = None
 
 def _build_constraint_status(conn: DuckDBPyConnection, node_id: str, layer: str, t: str | None = None) -> dict[str, Any]:
     status: dict[str, Any] = {}
-    layer_display = layer.replace("L", "L")
+    layer.replace("L", "L")
 
     transitions = {
         "L0": "L0_to_L1",
@@ -743,8 +743,8 @@ def batch_constraint_report(
                 }
                 layers[src_layer]["violations"][cname] = total - satisfied
 
-    total_nodes = sum(l["total"] for l in layers.values())
-    total_violations = sum(sum(l["violations"].values()) for l in layers.values())
+    total_nodes = sum(layer["total"] for layer in layers.values())
+    total_violations = sum(sum(layer["violations"].values()) for layer in layers.values())
 
     return {
         "constraint_report": layers,

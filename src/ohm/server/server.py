@@ -17,7 +17,7 @@ import sys
 import threading
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from pathlib import Path
@@ -72,9 +72,9 @@ def _prewarm_pgmpy() -> None:
     Subsequent calls are no-ops (Python's module cache).
     """
     try:
-        from pgmpy.inference import VariableElimination
-        from pgmpy.models import BayesianNetwork
-        from pgmpy.factors.discrete import TabularCPD
+        from pgmpy.inference import VariableElimination  # noqa: F401
+        from pgmpy.models import BayesianNetwork  # noqa: F401
+        from pgmpy.factors.discrete import TabularCPD  # noqa: F401
 
         logger.debug("pgmpy pre-warmed (imports loaded)")
     except ImportError:
@@ -87,7 +87,6 @@ def _register_builtin_hooks(store: OhmStore) -> None:
     Idempotent — if the hook already exists (same event + command + created_by),
     it is not duplicated.
     """
-    from ohm.hooks import VALID_HOOK_EVENTS
 
     builtins = [
         ("pre_ingest", "python:ohm.hooks_builtin.cross_link_check", "system"),
@@ -721,7 +720,7 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
         try:
             return self.tenant_manager.get_store(customer_id)
         except TenantNotFoundError:
-            raise NodeNotFoundError(f"Tenant not found — provision this tenant before use")
+            raise NodeNotFoundError("Tenant not found — provision this tenant before use")
 
     def log_message(self, format, *args):
         """Structured request logging with correlation ID."""
@@ -1886,7 +1885,7 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
                     try:
                         write_lock = self.tenant_manager.get_write_lock(customer_id)
                     except TenantNotFoundError:
-                        raise NodeNotFoundError(f"Tenant not found — provision this tenant before use")
+                        raise NodeNotFoundError("Tenant not found — provision this tenant before use")
                     with write_lock:
                         getattr(self, method_name)(path, qs, body, agent)
                 else:
@@ -1932,7 +1931,7 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
                     try:
                         write_lock = self.tenant_manager.get_write_lock(customer_id)
                     except TenantNotFoundError:
-                        raise NodeNotFoundError(f"Tenant not found — provision this tenant before use")
+                        raise NodeNotFoundError("Tenant not found — provision this tenant before use")
                     with write_lock:
                         getattr(self, method_name)(path, agent)
                 else:
@@ -2313,9 +2312,9 @@ def _prewarm_pgmpy() -> None:
     Subsequent calls are no-ops (Python's module cache).
     """
     try:
-        from pgmpy.inference import VariableElimination
-        from pgmpy.models import BayesianNetwork
-        from pgmpy.factors.discrete import TabularCPD
+        from pgmpy.inference import VariableElimination  # noqa: F401
+        from pgmpy.models import BayesianNetwork  # noqa: F401
+        from pgmpy.factors.discrete import TabularCPD  # noqa: F401
 
         logger.debug("pgmpy pre-warmed (imports loaded)")
     except ImportError:

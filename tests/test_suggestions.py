@@ -140,7 +140,8 @@ class TestSuggestionsInNodeCreation:
         import socket
 
         # Create temp store
-        import tempfile, os
+        import tempfile
+        import os
 
         tmpdir = tempfile.mkdtemp()
         db_path = os.path.join(tmpdir, "test_suggestions.duckdb")
@@ -179,7 +180,6 @@ class TestSuggestionsInNodeCreation:
     def _request(self, method, path, body=None):
         """Make an HTTP request to the test server."""
         from http.client import HTTPConnection
-        import json
 
         conn = HTTPConnection("127.0.0.1", self.port, timeout=5)
         if body:
@@ -453,7 +453,6 @@ class TestEdgeSuggestionsInHandler:
     def _request(self, method, path, body=None):
         """Make an HTTP request to the test server."""
         from http.client import HTTPConnection
-        import json
 
         conn = HTTPConnection("127.0.0.1", self.port, timeout=5)
         if body:

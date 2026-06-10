@@ -543,7 +543,6 @@ class AdminHandlerMixin:
         # Apply updates directly (admin bypass)
         updated = 0
         errors = []
-        from ohm.validation import validate_identifier
 
         for item in updates:
             try:
@@ -588,7 +587,6 @@ class AdminHandlerMixin:
           confidence_threshold: minimum confidence to flag (default 0.85)
           causal_only: if true, only scan CAUSES/PREDICTS/EXPECTS edges (default true)
         """
-        import json
         from datetime import datetime, timedelta
 
         days_threshold = int(qs.get("days_threshold", ["14"])[0])
@@ -772,7 +770,7 @@ class AdminHandlerMixin:
 
         Body (optional): {"keep_versions": N} — keep last N snapshot versions (default: 10)
         """
-        keep = body.get("keep_versions", 10) if body else 10
+        body.get("keep_versions", 10) if body else 10
         try:
             # Check if DuckLake is attached
             attached = self.current_store.conn.execute("SELECT database_name FROM duckdb_databases() WHERE database_name = 'ohm_lake'").fetchone()
@@ -1388,14 +1386,6 @@ class AdminHandlerMixin:
         # Slow path: per-node computation (includes chain_validity)
         from ohm.graph.constraints import (
             PROMOTION_CONSTRAINTS,
-            count_sources,
-            count_observations,
-            count_outcomes,
-            count_verified_outcomes,
-            count_open_challenges,
-            count_L3_supporting_nodes,
-            chain_validity,
-            count_context_links,
         )
 
         nodes = self.current_store.conn.execute("SELECT id, type FROM ohm_nodes WHERE deleted_at IS NULL").fetchall()
@@ -1458,8 +1448,8 @@ class AdminHandlerMixin:
             "constraint_report": layers,
             "summary": {},
         }
-        total_nodes = sum(l["total"] for l in layers.values())
-        total_violations = sum(sum(l["violations"].values()) for l in layers.values())
+        total_nodes = sum(layer["total"] for layer in layers.values())
+        total_violations = sum(sum(layer["violations"].values()) for layer in layers.values())
         response["summary"] = {
             "total_nodes": total_nodes,
             "total_violations": total_violations,
@@ -1775,7 +1765,7 @@ class AdminHandlerMixin:
         )
 
         islands = result.get("islands", [])
-        mainland_size = result.get("main_graph_size", 0)
+        result.get("main_graph_size", 0)
 
         # Get all node IDs of the main component for bridge suggestion
         main_component_ids = set()

@@ -294,7 +294,7 @@ def _find_orphan_connections(
             pass
 
     warning = {
-        "message": f"This node has no edges yet. Consider connecting it to existing nodes.",
+        "message": "This node has no edges yet. Consider connecting it to existing nodes.",
         "similar_orphans": similar_orphans[:MAX_ORPHAN_SUGGESTIONS],
         "similar_connected": similar_connected[:2],
     }

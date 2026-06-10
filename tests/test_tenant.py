@@ -245,7 +245,7 @@ class TestLazySchemaMigration:
         tm._evict("acme_hvac")
 
         # Re-access — lazy migration should sync meta.json
-        store = tm.get_store("acme_hvac")
+        tm.get_store("acme_hvac")
         meta = json.loads(meta_path.read_text())
         assert meta["schema_version"] == SCHEMA_VERSION
 
@@ -433,7 +433,7 @@ class TestCrashConsistentMigration:
         lock_path.write_text("{}")
 
         tm._evict("acme_hvac")
-        store = tm.get_store("acme_hvac")
+        tm.get_store("acme_hvac")
 
         # Lock file should be cleaned up (DB is already current)
         assert not lock_path.exists()
@@ -532,7 +532,7 @@ class TestWALCheckpointStrategy:
         monkeypatch.setattr("ohm.tenant._CHECKPOINT_INTERVAL_SECONDS", 0)
 
         tm.provision("acme_hvac")
-        store = tm.get_store("acme_hvac")
+        tm.get_store("acme_hvac")
 
         entry = tm._cache["acme_hvac"]
         assert entry.last_checkpoint_at == 0.0
@@ -544,7 +544,7 @@ class TestWALCheckpointStrategy:
 
     def test_wal_size_tracking(self, tm, tmp_path):
         tm.provision("acme_hvac")
-        store = tm.get_store("acme_hvac")
+        tm.get_store("acme_hvac")
 
         wal_size = tm._wal_size("acme_hvac")
         assert isinstance(wal_size, int)
@@ -565,7 +565,7 @@ class TestWALCheckpointStrategy:
 
     def test_checkpoint_tenant_method(self, tm, tmp_path):
         tm.provision("acme_hvac")
-        store = tm.get_store("acme_hvac")
+        tm.get_store("acme_hvac")
 
         entry = tm._cache["acme_hvac"]
         assert entry.last_checkpoint_at == 0.0
@@ -718,7 +718,7 @@ class TestPerTenantQuotas:
 
     def test_check_quota_allows_under_limit(self, tm):
         tm.provision("acme_hvac")
-        store = tm.get_store("acme_hvac")
+        tm.get_store("acme_hvac")
         tm.check_quota("acme_hvac", "nodes", amount=1)
 
     def test_check_quota_rejects_over_limit(self, tm, monkeypatch):
@@ -982,6 +982,6 @@ class TestTemplatePropagation:
         meta["template_version"] = 0
         tm._write_meta("acme_hvac", meta)
 
-        store = tm.get_store("acme_hvac")
+        tm.get_store("acme_hvac")
         meta_after = tm._read_meta("acme_hvac")
         assert meta_after["template_version"] > 0

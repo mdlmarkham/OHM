@@ -412,7 +412,6 @@ class TestSDKConnectHttpTenantId:
         from ohm.sdk import connect_http
 
         g = connect_http("http://127.0.0.1:8710", actor="test", tenant_id="acme_hvac")
-        import json
         import unittest.mock
 
         mock_response = unittest.mock.MagicMock()
@@ -435,7 +434,6 @@ class TestSDKConnectHttpTenantId:
         from ohm.sdk import connect_http
 
         g = connect_http("http://127.0.0.1:8710", actor="test")
-        import json
         import unittest.mock
 
         mock_response = unittest.mock.MagicMock()

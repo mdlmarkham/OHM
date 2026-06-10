@@ -258,7 +258,7 @@ class TestL3toL4:
 class TestEdgeConstraints:
     def test_causes_at_l1_rejected(self, db):
         from_node = _create_node(db, label="source", node_type="concept")
-        to_node = _create_node(db, label="target", node_type="concept")
+        _create_node(db, label="target", node_type="concept")
         ref_node = _create_node(db, label="ref", node_type="source", url="https://ref.com")
         _create_edge(db, from_node=from_node, to_node=ref_node, layer="L2", edge_type="REFERENCES")
 
@@ -276,7 +276,7 @@ class TestEdgeConstraints:
 
     def test_causes_at_l2_with_references_passes(self, db):
         from_node = _create_node(db, label="source", node_type="concept")
-        to_node = _create_node(db, label="target", node_type="concept")
+        _create_node(db, label="target", node_type="concept")
         ref_node = _create_node(db, label="ref", node_type="source", url="https://ref.com")
         _create_edge(db, from_node=from_node, to_node=ref_node, layer="L2", edge_type="REFERENCES")
 
@@ -293,7 +293,7 @@ class TestEdgeConstraints:
 
     def test_causes_without_references_gets_warning(self, db):
         from_node = _create_node(db, label="source", node_type="concept")
-        to_node = _create_node(db, label="target", node_type="concept")
+        _create_node(db, label="target", node_type="concept")
 
         from ohm.graph.constraints import validate_edge_constraints
 

@@ -265,7 +265,7 @@ def supersede_observation(
         raise ValueError(f"New observation not found: {new_obs_id}")
 
     new_cols = [d[0] for d in conn.description]
-    new_dict = dict(zip(new_cols, new))
+    dict(zip(new_cols, new))
 
     # Mark old as no longer active
     conn.execute(

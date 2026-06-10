@@ -44,7 +44,6 @@ def _can_fork_sh():
 
 from pathlib import Path
 
-import pytest
 
 from ohm.schema import DEFAULT_SCHEMA
 from ohm.server import OhmHandler

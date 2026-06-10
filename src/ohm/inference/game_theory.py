@@ -357,7 +357,7 @@ def _best_response_1(A: np.ndarray, p: np.ndarray) -> np.ndarray:
     """Compute player 1's best response probabilities to player 0's strategy p."""
     n_actions_1 = A.shape[1]
     expected = A.T @ p  # expected payoff for each of player 1's actions
-    max_val = np.max(expected)
+    np.max(expected)
     # Pure best response
     best = np.zeros(n_actions_1)
     best[np.argmax(expected)] = 1.0

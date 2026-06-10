@@ -2244,7 +2244,7 @@ class TestScratchConnectsToEdges:
         )
         assert status == 201
         assert len(data.get("explicit_links", [])) == 2
-        target_ids = {l["node_id"] for l in data["explicit_links"]}
+        target_ids = {link["node_id"] for link in data["explicit_links"]}
         assert "anchor_a" in target_ids
         assert "anchor_b" in target_ids
 
@@ -2261,6 +2261,6 @@ class TestScratchConnectsToEdges:
         assert status == 201
         # Both explicit and auto links should be present
         has_explicit = len(data.get("explicit_links", [])) >= 1
-        has_auto = len(data.get("auto_links", [])) >= 1
+        len(data.get("auto_links", [])) >= 1
         # At minimum the explicit link must exist
         assert has_explicit

@@ -24,7 +24,7 @@ from typing import Any, TYPE_CHECKING
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
-from ohm.graph.decay import default_half_life, decay_profile
+from ohm.graph.decay import default_half_life
 
 
 # ── Feature 5: Learned Half-Lives ──────────────────────────────────────────
@@ -142,7 +142,7 @@ def all_learned_half_lives(conn: "DuckDBPyConnection") -> dict[str, dict[str, An
         Dict mapping obs_type to the result of empirical_half_life() for that type.
     """
     # Get all distinct obs_types that have at least one superseded observation
-    types_with_supersession = conn.execute(
+    conn.execute(
         """
         SELECT DISTINCT type
         FROM ohm_observations

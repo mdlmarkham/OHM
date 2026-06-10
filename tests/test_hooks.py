@@ -606,14 +606,12 @@ class TestHookSandbox:
 
     def test_is_sandboxed_default_true(self):
         """_is_sandboxed() returns True when OHM_SANDBOX_DISABLE is not set."""
-        from ohm.hooks import _is_sandboxed
 
         assert _is_sandboxed() is True
 
     def test_is_sandboxed_false_when_disabled(self):
         """_is_sandboxed() returns False when OHM_SANDBOX_DISABLE=1."""
         import os
-        from ohm.hooks import _is_sandboxed
 
         old = os.environ.get("OHM_SANDBOX_DISABLE")
         try:

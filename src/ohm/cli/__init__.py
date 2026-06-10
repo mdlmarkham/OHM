@@ -839,7 +839,6 @@ def _is_process_running(pid: int) -> bool:
 
 def _handle_serve(args: argparse.Namespace) -> None:
     """Handle 'ohm serve' subcommands."""
-    import subprocess
     import sys
 
     cmd = args.serve_command
@@ -894,7 +893,7 @@ def _handle_serve(args: argparse.Namespace) -> None:
         try:
             pid = int(pid_file.read_text().strip())
             if not _is_process_running(pid):
-                print(f"ohmd not running (stale PID file)")
+                print("ohmd not running (stale PID file)")
                 pid_file.unlink()
                 return
 
@@ -1858,7 +1857,7 @@ def _handle_pert_auto(args: argparse.Namespace) -> None:
                 print(f"  mean:    {result['mean']}")
                 print(f"  variance: {result['variance']}")
             else:
-                print(f"  (no data)")
+                print("  (no data)")
     finally:
         conn.close()
 
@@ -1948,7 +1947,7 @@ def _handle_edge_stability(args: argparse.Namespace) -> None:
 
             print(json.dumps(result, indent=2, default=str))
         else:
-            print(f"── Edge Stability Analysis ──")
+            print("── Edge Stability Analysis ──")
             print(f"  Total edges: {result['n_edges']}")
             print(f"  Stable:      {result['n_stable']}")
             print(f"  Unstable:    {result['n_unstable']}")

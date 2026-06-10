@@ -170,7 +170,7 @@ class TestQueryRemoteInjectionPrevention:
         mock_conn.execute.return_value = mock_result
 
         with patch("ohm.quack.is_available", return_value=True):
-            result = query_remote(
+            query_remote(
                 mock_conn,
                 "quack:localhost",
                 "SELECT * FROM ohm_nodes LIMIT 10",
@@ -197,7 +197,7 @@ class TestQueryRemoteInjectionPrevention:
 
         with patch("ohm.quack.is_available", return_value=True):
             with patch.dict(os.environ, {"QUACK_TOKEN": "a" * 32}):
-                result = query_remote(
+                query_remote(
                     mock_conn,
                     "quack:localhost",
                     "SELECT 1",
@@ -237,7 +237,7 @@ class TestQueryRemoteInjectionPrevention:
 
         with patch("ohm.quack.is_available", return_value=True):
             with patch.dict(os.environ, {"QUACK_TOKEN": "a" * 32}):
-                result = start_server(mock_conn, "quack:localhost", token_env="QUACK_TOKEN")
+                start_server(mock_conn, "quack:localhost", token_env="QUACK_TOKEN")
                 # Check that quack_serve call does NOT contain the token
                 calls = mock_conn.execute.call_args_list
                 serve_call = [c for c in calls if "quack_serve" in c[0][0]]

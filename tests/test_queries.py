@@ -1947,11 +1947,11 @@ class TestFragmentResonance:
     def test_detect_resonance_shared_context(self, test_db):
         from ohm.queries import create_node, scratch, detect_fragment_resonance
 
-        anchor = create_node(test_db, label="Hormuz AND-Gate", node_type="pattern", created_by="test")
+        create_node(test_db, label="Hormuz AND-Gate", node_type="pattern", created_by="test")
         create_node(test_db, label="Supply Chain Disruption", node_type="pattern", created_by="test")
 
-        f1 = scratch(test_db, content="Hormuz AND-Gate and Supply Chain Disruption both matter", created_by="metis")
-        f2 = scratch(test_db, content="Hormuz AND-Gate and Supply Chain Disruption overlap", created_by="clio")
+        scratch(test_db, content="Hormuz AND-Gate and Supply Chain Disruption both matter", created_by="metis")
+        scratch(test_db, content="Hormuz AND-Gate and Supply Chain Disruption overlap", created_by="clio")
 
         result = detect_fragment_resonance(test_db, min_shared=2)
         assert len(result) >= 1
@@ -2053,7 +2053,7 @@ class TestScratchConnectsToEdges:
         target_b = create_node(test_db, label="Target B For Multi", node_type="concept", created_by="test")
         result = scratch(test_db, content="Multi hunch", created_by="test", connects_to=[target_a["id"], target_b["id"]])
         assert len(result["explicit_links"]) == 2
-        target_ids = {l["node_id"] for l in result["explicit_links"]}
+        target_ids = {link["node_id"] for link in result["explicit_links"]}
         assert target_a["id"] in target_ids
         assert target_b["id"] in target_ids
 
@@ -2149,8 +2149,8 @@ class TestFragmentClusters:
         """3 fragments sharing 2 targets form a cluster."""
         from ohm.queries import create_node, scratch, query_fragment_clusters
 
-        t1 = create_node(test_db, label="TargetOne", node_type="concept", created_by="test")
-        t2 = create_node(test_db, label="TargetTwo", node_type="concept", created_by="test")
+        create_node(test_db, label="TargetOne", node_type="concept", created_by="test")
+        create_node(test_db, label="TargetTwo", node_type="concept", created_by="test")
 
         # Three fragments all linking to both targets
         content = "TargetOne and TargetTwo are both discussed here"
@@ -2168,7 +2168,7 @@ class TestFragmentClusters:
         """2 fragments sharing targets do not form a cluster (need 3+)."""
         from ohm.queries import create_node, scratch, query_fragment_clusters
 
-        t1 = create_node(test_db, label="SharedTarget", node_type="concept", created_by="test")
+        create_node(test_db, label="SharedTarget", node_type="concept", created_by="test")
         content = "SharedTarget discussed here"
         scratch(test_db, content=content, created_by="agent_a")
         scratch(test_db, content=content, created_by="agent_b")
@@ -2180,8 +2180,8 @@ class TestFragmentClusters:
         """Separate clusters are identified independently."""
         from ohm.queries import create_node, scratch, query_fragment_clusters
 
-        c1 = create_node(test_db, label="ClusterA", node_type="concept", created_by="test")
-        c2 = create_node(test_db, label="ClusterB", node_type="concept", created_by="test")
+        create_node(test_db, label="ClusterA", node_type="concept", created_by="test")
+        create_node(test_db, label="ClusterB", node_type="concept", created_by="test")
 
         # Cluster A: 3 fragments sharing "ClusterA"
         for agent in ("alpha", "beta", "gamma"):
@@ -2236,7 +2236,7 @@ class TestFragmentEviction:
         """Fragment with L0 edges gets TTL extended instead of evicted."""
         from ohm.queries import create_node, scratch, evict_expired_fragments
 
-        concept = create_node(test_db, label="KeepAlive", node_type="concept", created_by="test")
+        create_node(test_db, label="KeepAlive", node_type="concept", created_by="test")
         frag = scratch(test_db, content="KeepAlive keeps this fragment alive", created_by="test")
         self._set_old_updated_at(test_db, frag["id"])
 
@@ -2311,7 +2311,7 @@ class TestFragmentDensityStats:
         from ohm.queries import query_stats, create_node, scratch
 
         # Create a concept and a fragment that links to it
-        concept = create_node(test_db, label="DensityMetric", node_type="concept", created_by="test")
+        create_node(test_db, label="DensityMetric", node_type="concept", created_by="test")
         scratch(test_db, content="DensityMetric test fragment", created_by="test")
 
         stats = query_stats(test_db, include_l0=True)

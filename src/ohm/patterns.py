@@ -28,7 +28,6 @@ import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 _PII_PATTERNS: list[tuple[str, str]] = [
     (r"\b\d{3}[-.]?\d{3}[-.]?\d{4}\b", "[PHONE]"),
@@ -51,7 +50,7 @@ def anonymize_text(text: str) -> str:
     return result
 
 
-def extract_patterns(store: "OhmStore", domain: str = "ohm") -> list[dict]:
+def extract_patterns(store: "OhmStore", domain: str = "ohm") -> list[dict]:  # noqa: F821
     """Extract L3 pattern/synthesis/idea nodes from a tenant's graph.
 
     Only extracts from tenants with shared_patterns=True in meta.json.
@@ -65,7 +64,7 @@ def extract_patterns(store: "OhmStore", domain: str = "ohm") -> list[dict]:
     Returns:
         List of anonymized pattern dicts.
     """
-    eligible_types = frozenset({"pattern", "idea"})
+    frozenset({"pattern", "idea"})
     rows = store.conn.execute("SELECT id, label, type, created_by FROM ohm_nodes WHERE type IN ('pattern', 'idea')").fetchall()
 
     patterns = []
@@ -155,7 +154,7 @@ def load_patterns(path: Path, domain: str) -> list[dict]:
         return []
 
 
-def seed_patterns(store: "OhmStore", patterns: list[dict], domain: str = "ohm") -> int:
+def seed_patterns(store: "OhmStore", patterns: list[dict], domain: str = "ohm") -> int:  # noqa: F821
     """Inject shared patterns into a tenant's graph on provision.
 
     Creates L3 nodes of type 'pattern' with provenance='platform_pattern'.
@@ -185,7 +184,7 @@ def seed_patterns(store: "OhmStore", patterns: list[dict], domain: str = "ohm") 
 
 
 def run_extraction(
-    tenant_manager: "TenantManager",
+    tenant_manager: "TenantManager",  # noqa: F821
     shared_dir: Path,
 ) -> dict:
     """Extract patterns from all opted-in tenants and merge into shared store.
@@ -197,7 +196,6 @@ def run_extraction(
     Returns:
         Dict with extraction results per domain.
     """
-    from ohm.tenant import TenantManager
 
     results = {}
     for tenant_meta in tenant_manager.list_tenants():

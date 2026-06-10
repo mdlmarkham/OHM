@@ -618,7 +618,7 @@ class TenantManager:
         def _vtuple(v: str) -> tuple[int, ...]:
             return tuple(int(x) for x in v.split("."))
 
-        target_key = _vtuple(SCHEMA_VERSION)
+        _vtuple(SCHEMA_VERSION)
         results = []
 
         for meta in self.list_tenants():
@@ -1206,7 +1206,7 @@ class TenantManager:
         def _wait_for_file_ready(path: Path, max_attempts: int = 10) -> bool:
             for attempt in range(max_attempts):
                 try:
-                    with open(str(path), "r+b") as f:
+                    with open(str(path), "r+b"):
                         pass
                     return True
                 except (IOError, OSError):
