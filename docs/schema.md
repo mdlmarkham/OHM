@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS ohm_edges (
     updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_by      VARCHAR,
     challenge_of    VARCHAR,
-    challenge_type  VARCHAR,                    -- 'CHALLENGED_BY','SUPPORTS','REFINES','CONTRADICTS'
+    challenge_type  VARCHAR,                    -- Semantic type: 'CONTRADICTS','REFUTES','QUESTIONS','SUPPORTS','REFINES' (ADR-025: stored as metadata, edge_type always CHALLENGED_BY)
     urgency         VARCHAR,                    -- NULL | 'critical' | 'high' | 'medium' | 'low'
     metadata        JSON
 );
@@ -58,12 +58,22 @@ CREATE TABLE IF NOT EXISTS ohm_observations (
     value       FLOAT,
     baseline    FLOAT,
     sigma       FLOAT,                          -- standard deviations from baseline
+    scale       VARCHAR,                        -- 'probability','count','currency','percent','binary','unknown' (ADR-025)
     source      VARCHAR,                        -- 'signal','research','conversation','analysis'
+    source_url  VARCHAR,                        -- ADR-013: required for external sources
     created_by  VARCHAR NOT NULL,
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     metadata    JSON
 );
 ```
+
+**Observation scales** (ADR-025):
+- `probability`: 0.0–1.0 probability
+- `count`: Integer count
+- `currency`: Monetary value
+- `percent`: Percentage (0–100)
+- `binary`: Boolean observation, normalized to `probability` (1.0=true, 0.0=false)
+- `unknown`: Unspecified scale
 
 ## Agent State
 
