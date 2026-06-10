@@ -1615,7 +1615,7 @@ def query_stale_edges(
                 ) AS decay_factor
             FROM ohm_edges
             WHERE created_at IS NOT NULL
-              AND (deleted_at IS NULL OR deleted_at = '')
+              AND (deleted_at IS NULL OR CAST(deleted_at AS VARCHAR) = '')
               AND {hl_case} > 0
               AND {hl_case} < 999999.0
         )
