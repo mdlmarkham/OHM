@@ -241,7 +241,7 @@ def _pg_password(args):
     if getattr(args, "pg_password_env", None):
         pw = os.environ.get(args.pg_password_env)
         if not pw:
-            print(f"ERROR: {args.pg_password_env!r} not set", file=sys.stderr); sys.exit(1)
+            print("ERROR: pg_password_env not set", file=sys.stderr); sys.exit(1)
         return pw
     if getattr(args, "pg_password", None):
         return args.pg_password

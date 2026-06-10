@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import os
 import tempfile
 from pathlib import Path
 from typing import Callable
@@ -100,7 +101,8 @@ def _mem_db(**kwargs) -> DuckDBSession:
 
 def _disk_db() -> tuple[str, DuckDBSession]:
     """Returns (path, session) for a temp disk-backed database."""
-    path = tempfile.mktemp(suffix=".duckdb")
+    fd, path = tempfile.mkstemp(suffix=".duckdb")
+    os.close(fd)
     return path, DuckDBSession(path)
 
 
@@ -521,7 +523,8 @@ def t_vec_bad_table():
 @_test("Writeback: Parquet dry-run prints row count, no file created")
 def t_wb_parquet_dryrun():
     import scripts.duckdb_writeback as wb
-    db_path = tempfile.mktemp(suffix=".duckdb")
+    fd, db_path = tempfile.mkstemp(suffix=".duckdb")
+    os.close(fd)
     try:
         import duckdb
         con = duckdb.connect(db_path)
@@ -545,7 +548,8 @@ def t_wb_parquet_dryrun():
 @_test("Writeback: Parquet write actually creates file")
 def t_wb_parquet_write():
     import scripts.duckdb_writeback as wb
-    db_path = tempfile.mktemp(suffix=".duckdb")
+    fd, db_path = tempfile.mkstemp(suffix=".duckdb")
+    os.close(fd)
     try:
         import duckdb
         con = duckdb.connect(db_path)
