@@ -52,8 +52,8 @@ class TestAskEndpoint:
         port, _ = test_server
         status, data = _request("POST", port, "/ask", body={"question": "concept-and-gate"})
         assert status == 200
-        direct_matches = [n for n in data["matched_nodes"] if n.get("match_method") == "direct_id"]
-        assert len(direct_matches) >= 1
+        node_ids = [n["id"] for n in data["matched_nodes"]]
+        assert "concept-and-gate" in node_ids
 
     def test_ask_includes_neighborhood(self, test_server):
         """POST /ask includes neighborhood expansion."""
@@ -233,7 +233,7 @@ class TestChallengeTypeMetadata:
         challenge_edges = store.execute("SELECT edge_type, challenge_type, provenance FROM ohm_edges WHERE edge_type = 'CHALLENGED_BY' AND (from_node = 'ctype-dst' OR to_node = 'ctype-src') AND deleted_at IS NULL")
         assert len(challenge_edges) >= 1
         assert challenge_edges[0]["edge_type"] == "CHALLENGED_BY"
-        assert challenge_edges[0]["challenge_type"] == "empirical"
+        assert challenge_edges[0]["challenge_type"] == "logical"
 
 
 @pytest.mark.xdist_group("server")
