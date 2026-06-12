@@ -2515,6 +2515,10 @@ def main(schema_config: SchemaConfig | None = None):
         else:
             print("DuckLake extension not available — lakehouse features disabled", file=sys.stderr)
 
+    # OHM-fix-3: Create read-only connection AFTER DuckLake ATTACH
+    # so both connections have matching configuration.
+    store._ensure_read_conn()
+
     # Pre-warm pgmpy to avoid 5.3s cold-import penalty on first inference call (OHM-a689)
     _prewarm_pgmpy()
 

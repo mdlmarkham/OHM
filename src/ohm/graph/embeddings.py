@@ -143,7 +143,10 @@ class OllamaBackend(EmbeddingBackend):
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=60) as resp:
+            # OHM-fix-2: Reduced timeout from 60s to 15s.
+            # 60s was causing 180s+ POST /node requests and daemon SIGSEGVs
+            # when Ollama was slow to respond (model loading, queueing).
+            with urllib.request.urlopen(req, timeout=15) as resp:
                 data = _json.loads(resp.read().decode("utf-8"))
                 embeddings = data.get("embeddings", [])
                 if isinstance(embeddings, list) and len(embeddings) == len(texts):

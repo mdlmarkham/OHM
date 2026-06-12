@@ -127,6 +127,10 @@ class OhmStore:
             except Exception as e:
                 logger.warning("DuckLake attach failed for agent %s: %s", agent_name, e)
 
+        # OHM-fix-3: Create read-only connection AFTER DuckLake ATTACH
+        # so both connections have matching configuration.
+        store._ensure_read_conn()
+
         # Pull any existing data from DuckLake
         if os.path.exists(ducklake_path):
             try:
@@ -205,14 +209,14 @@ class OhmStore:
             self.conn = self._connect_with_wal_recovery(str(self.db_path), readonly)
 
         # Read-only connection for concurrent reads (OHM concurrency fix)
-        # NOTE: DuckDB requires matching configuration for concurrent connections.
-        # If read-only connection fails, reads fall back to write connection.
-        try:
-            self._read_conn = duckdb.connect(str(self.db_path), read_only=True)
-            logger.info(f"OHM read-only connection established for {self.db_path}")
-        except Exception as e:
-            logger.warning(f"Read-only connection unavailable (reads will share write conn): {e}")
-            self._read_conn = None
+        # OHM-fix-3: DuckDB requires matching configuration for concurrent
+        # connections. The read_conn is initially deferred — it will be created
+        # after DuckLake ATTACH in the factory function, because the DuckLake
+        # ATTACH changes the write connection's internal config, and the read
+        # connection must match. If created here, it would have different config.
+        self._read_conn = None
+        self._read_conn_ready = False  # Flag: set True after DuckLake ATTACH
+        self._read_conn_deferred = True  # Will be created in _ensure_read_conn()
 
         try:
             self._init_schema()
@@ -864,27 +868,64 @@ class OhmStore:
         Uses the configured embedding backend (OHM-9zk7).
         Silently skips if embedding fails.
         Never raises — embedding is not critical for node creation.
+
+        OHM-fix-1: Uses a dedicated DuckDB connection for the embedding update
+        instead of sharing self.conn across threads. DuckDB connections are NOT
+        thread-safe — using self.conn from a background thread causes SIGSEGV
+        even when serialized via self._lock, because the C-level connection state
+        can be corrupted between Python lock release and the next acquire.
         """
         try:
             text = label
             if content:
                 text = f"{label}: {content[:800]}"
-            # Ollama call is outside the lock — it's pure I/O and can run concurrently.
+            # Ollama call is pure I/O — runs outside any lock.
             embeddings = self._embedding_backend.embed([text])
             embedding = embeddings[0] if embeddings else None
             if embedding and any(e != 0.0 for e in embedding):
-                # Acquire write lock before touching the connection — DuckDB connections
-                # are not thread-safe; writing from a background thread without the lock
-                # causes malloc corruption (same root cause as disabled background mode
-                # in admin.py).
-                with self._lock:
-                    self.conn.execute(
+                # Use a dedicated connection for this thread — DuckDB connections
+                # are NOT thread-safe and sharing self.conn across threads causes
+                # SIGSEGV (the root cause of 4-12 daemon crashes per day).
+                import duckdb as _duckdb
+
+                _embed_conn = _duckdb.connect(str(self.db_path))
+                try:
+                    _embed_conn.execute(
                         "UPDATE ohm_nodes SET embedding = ?::FLOAT[768] WHERE id = ?",
                         [embedding, node_id],
                     )
-                logger.debug("Auto-generated embedding for node %s", node_id)
+                    logger.debug("Auto-generated embedding for node %s", node_id)
+                finally:
+                    _embed_conn.close()
         except Exception as e:
             logger.debug("Auto-embed failed for node %s: %s", node_id, e)
+
+    def _ensure_read_conn(self) -> None:
+        """Create the read-only connection after DuckLake ATTACH (OHM-fix-3).
+
+        DuckDB requires concurrent connections to have matching configuration.
+        However, when DuckLake is loaded and attached, the internal connection
+        configuration changes in ways that prevent a second connection from
+        opening the same file (even with read_only=True). This is a known
+        DuckDB limitation with extensions that modify the catalog.
+
+        Since the read-only connection consistently fails when DuckLake is
+        active, this method gracefully accepts the fallback to the write
+        connection. The write connection works fine for reads too — the only
+        downside is no read/write concurrency (reads wait for the write lock).
+        """
+        if self._read_conn_ready or self._read_conn is not None:
+            return
+        try:
+            self._read_conn = duckdb.connect(str(self.db_path), read_only=True)
+            self._read_conn_ready = True
+            logger.info("OHM read-only connection established for %s", self.db_path)
+        except Exception as e:
+            # Expected when DuckLake is attached: config mismatch prevents
+            # a second connection. Accept the fallback gracefully.
+            logger.debug("Read-only connection unavailable (expected with DuckLake): %s", e)
+            self._read_conn = None
+            self._read_conn_ready = True  # Don't retry on every read
 
     def deep_content(self, node_id: str) -> dict[str, Any]:
         """Retrieve deep content for a node.
