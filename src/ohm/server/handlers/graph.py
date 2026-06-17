@@ -207,7 +207,7 @@ class GraphHandlerMixin:
                 "create_node": "POST /node — Create any node type. Required: id, label, type. Optional: content, tags (list), metadata (dict), source_url, confidence, provenance, connects_to (list of existing node ids).",
                 "scratch": "POST /scratch -- Write an L0 thinking fragment. Near-zero cost. Required: content. Optional: tags, connects_to, metadata. Auto-detects questions (?). Auto-links semantically. Fragments excluded by default.",
                 "create_edge": "POST /edge — Link two nodes. Required: from, to, layer, edge_type. Optional: confidence, provenance, probability.",
-                "observe": "POST /observe/{id} — Record a measurement or observation on a node. Required: node_id, obs_type, value. Optional: notes, source, source_url, sigma. Also: POST /observations for bulk upload, GET /observations for listing.",
+                "observe": "POST /observe/{id} — Record a measurement or observation on a node. Required: node_id, obs_type, value. Optional: notes, source, source_url, sigma, compression_degree (0-1), compression_type (inversion|normative_inversion|retrojection|composite), beneficiary (list of agent IDs), revisability (0-1). Also: POST /observations for bulk upload, GET /observations for listing. ADR-026: Myth Compression Framework fields.",
                 "challenge": "POST /challenge — Challenge an L3 interpretation. Required: edge_id. Optional: reason, confidence.",
             },
             "reading": {
@@ -1031,18 +1031,23 @@ class GraphHandlerMixin:
                 return sugg, nudge, island
 
             try:
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pool:
-                    future = _pool.submit(_suggestions_and_nudge)
+                _pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+                future = _pool.submit(_suggestions_and_nudge)
+                try:
                     suggestions, nudge, island = future.result(timeout=0.3)
-                result["suggestions"] = suggestions
-                if nudge:
-                    result["connectivity_warning"] = nudge["connectivity_warning"]
-                if island:
-                    result["island_warning"] = island["island_warning"]
-            except concurrent.futures.TimeoutError:
-                logger.debug("Suggestion budget exceeded (>300ms), skipping for this write")
-            except Exception as e:
-                logger.debug(f"Suggestions failed: {e}")
+                    result["suggestions"] = suggestions
+                    if nudge:
+                        result["connectivity_warning"] = nudge["connectivity_warning"]
+                    if island:
+                        result["island_warning"] = island["island_warning"]
+                except concurrent.futures.TimeoutError:
+                    logger.debug("Suggestion budget exceeded (>300ms), skipping for this write")
+                except Exception as e:
+                    logger.debug(f"Suggestions failed: {e}")
+                finally:
+                    _pool.shutdown(wait=False)
+            except Exception:
+                pass
 
         # OHM-g0kv Feature D: Auto-register alias and content hash on node creation
         if result.get("created", True):
@@ -1512,6 +1517,21 @@ class GraphHandlerMixin:
                 value = body.get("value")
                 if value is not None and (value < 0.0 or value > 1.0):
                     raise ValidationError(f"Observation value {value} is outside [0, 1] for scale='probability'")
+        # ADR-026: Validate compression framework fields
+        compression_type = body.get("compression_type")
+        if compression_type is not None:
+            from ohm.graph.schema import VALID_COMPRESSION_TYPES
+            if compression_type not in VALID_COMPRESSION_TYPES:
+                raise ValidationError(f"Invalid compression_type '{compression_type}' — must be one of: {', '.join(sorted(VALID_COMPRESSION_TYPES))}")
+        compression_degree = body.get("compression_degree")
+        if compression_degree is not None and (compression_degree < 0.0 or compression_degree > 1.0):
+            raise ValidationError(f"compression_degree {compression_degree} is outside [0, 1]")
+        revisability = body.get("revisability")
+        if revisability is not None and (revisability < 0.0 or revisability > 1.0):
+            raise ValidationError(f"revisability {revisability} is outside [0, 1]")
+        beneficiary = body.get("beneficiary")  # List of agent/node IDs
+        if beneficiary is not None and not isinstance(beneficiary, list):
+            raise ValidationError("beneficiary must be a list of strings")
         result = self.current_store.write_observation(
             node_id=node_id,
             type=obs_type,
@@ -1526,6 +1546,10 @@ class GraphHandlerMixin:
             agent_name=agent,
             half_life_days=body.get("half_life_days"),
             weibull_shape=body.get("weibull_shape"),
+            compression_degree=compression_degree,
+            compression_type=compression_type,
+            beneficiary=beneficiary,
+            revisability=revisability,
         )
         _server_module._trigger_webhooks(
             {

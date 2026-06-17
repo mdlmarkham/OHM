@@ -1406,3 +1406,400 @@ class AnalysisHandlerMixin:
                 "edges": [{"id": r[0], "from": r[1], "to": r[2], "type": r[3], "layer": r[4], "confidence": r[5], "created_by": r[6], "created_at": str(r[7])} for r in edges],
             },
         )
+
+    # ── ADR-026: Myth Compression Framework Query Endpoints ──────────────
+
+    def _get_myths(self, path: str, qs: dict) -> None:
+        """GET /myths — observations with high compression degree.
+
+        Query params:
+            degree: Minimum compression degree threshold (default: 0.6)
+            type: Filter by compression_type (inversion, normative_inversion, retrojection, composite)
+            revisability_min: Minimum revisability threshold (default: 0.0)
+            revisability_max: Maximum revisability threshold (default: 1.0)
+            limit: Maximum results (default: 50)
+        """
+        degree_min = float(qs.get("degree", ["0.6"])[0])
+        comp_type = qs.get("type", [None])[0]
+        revisability_min = float(qs.get("revisability_min", ["0.0"])[0])
+        revisability_max = float(qs.get("revisability_max", ["1.0"])[0])
+        limit = int(qs.get("limit", ["50"])[0])
+
+        conn = self.current_store.read_conn
+        conditions = [
+            "compression_degree IS NOT NULL",
+            "compression_degree >= ?",
+            "deleted_at IS NULL",
+            "revisability >= ?",
+            "revisability <= ?",
+        ]
+        params = [degree_min, revisability_min, revisability_max]
+        if comp_type:
+            conditions.append("compression_type = ?")
+            params.append(comp_type)
+        params.append(limit)
+
+        where_clause = " AND ".join(conditions)
+        rows = conn.execute(
+            f"""SELECT o.id, o.node_id, o.type, o.value, o.compression_degree,
+                      o.compression_type, o.beneficiary, o.revisability, o.notes, o.source
+               FROM ohm_observations o
+               WHERE {where_clause}
+               ORDER BY o.compression_degree DESC, o.revisability DESC
+               LIMIT ?""",
+            params,
+        ).fetchall()
+
+        myths = [
+            {
+                "id": r[0],
+                "node_id": r[1],
+                "obs_type": r[2],
+                "value": r[3],
+                "compression_degree": r[4],
+                "compression_type": r[5],
+                "beneficiary": json.loads(r[6]) if r[6] else [],
+                "revisability": r[7],
+                "notes": r[8],
+                "source": r[9],
+            }
+            for r in rows
+        ]
+
+        # Enrich with node labels
+        for myth in myths:
+            node = self.current_store.get_node(myth["node_id"])
+            myth["node_label"] = node.get("label", "") if node else ""
+
+        self._json_response(200, {"myths": myths, "count": len(myths)})
+
+    def _get_beneficiary(self, path: str, qs: dict) -> None:
+        """GET /beneficiary — find observations that benefit a specific agent.
+
+        Query params:
+            agent: Agent/node ID to search for (required)
+            degree_min: Minimum compression degree (default: 0.0)
+            limit: Maximum results (default: 50)
+        """
+        agent = qs.get("agent", [None])[0]
+        if not agent:
+            self._json_response(400, {"error": "agent parameter is required"})
+            return
+
+        degree_min = float(qs.get("degree_min", ["0.0"])[0])
+        limit = int(qs.get("limit", ["50"])[0])
+
+        conn = self.current_store.read_conn
+        # JSON string search for beneficiary list (DuckDB stores JSON as VARCHAR)
+        # Use LIKE for substring match on the JSON array string
+        all_obs = conn.execute(
+            """SELECT o.id, o.node_id, o.type, o.value, o.compression_degree,
+                      o.compression_type, o.beneficiary, o.revisability, o.notes, o.source
+               FROM ohm_observations o
+               WHERE o.beneficiary IS NOT NULL
+                 AND o.deleted_at IS NULL
+                 AND o.beneficiary LIKE ?
+               ORDER BY o.compression_degree DESC NULLS LAST
+               LIMIT 500""",
+            [f'%"{agent}"%'],
+        ).fetchall()
+
+        myths = []
+        for r in all_obs:
+            try:
+                ben = json.loads(r[6]) if r[6] else []
+            except (json.JSONDecodeError, TypeError):
+                ben = []
+            if agent not in ben:
+                continue
+            if r[4] is not None and r[4] < degree_min:
+                continue
+            myths.append({
+                "id": r[0],
+                "node_id": r[1],
+                "obs_type": r[2],
+                "value": r[3],
+                "compression_degree": r[4],
+                "compression_type": r[5],
+                "beneficiary": ben,
+                "revisability": r[7],
+                "notes": r[8],
+                "source": r[9],
+            })
+            if len(myths) >= limit:
+                break
+
+        self._json_response(200, {"agent": agent, "observations": myths, "count": len(myths)})
+
+    def _get_infrastructure(self, path: str, qs: dict) -> None:
+        """GET /infrastructure — find identity-constituting myths (high revisability).
+
+        These are claims that are hard to decompress because belief has converted
+        them into infrastructure. Challenge is perceived as attack.
+
+        Query params:
+            revisability_min: Minimum revisability (default: 0.6 = infrastructure grade)
+            degree_min: Minimum compression degree (default: 0.3)
+            limit: Maximum results (default: 50)
+        """
+        revisability_min = float(qs.get("revisability_min", ["0.6"])[0])
+        degree_min = float(qs.get("degree_min", ["0.3"])[0])
+        limit = int(qs.get("limit", ["50"])[0])
+
+        conn = self.current_store.read_conn
+        rows = conn.execute(
+            """SELECT o.id, o.node_id, o.type, o.value, o.compression_degree,
+                      o.compression_type, o.beneficiary, o.revisability, o.notes, o.source
+               FROM ohm_observations o
+               WHERE o.revisability IS NOT NULL
+                 AND o.revisability >= ?
+                 AND o.compression_degree IS NOT NULL
+                 AND o.compression_degree >= ?
+                 AND o.deleted_at IS NULL
+               ORDER BY o.revisability DESC, o.compression_degree DESC
+               LIMIT ?""",
+            [revisability_min, degree_min, limit],
+        ).fetchall()
+
+        myths = [
+            {
+                "id": r[0],
+                "node_id": r[1],
+                "obs_type": r[2],
+                "value": r[3],
+                "compression_degree": r[4],
+                "compression_type": r[5],
+                "beneficiary": json.loads(r[6]) if r[6] else [],
+                "revisability": r[7],
+                "notes": r[8],
+                "source": r[9],
+                "revisability_label": (
+                    "revisable" if r[7] and r[7] < 0.3 else
+                    "sticky" if r[7] and r[7] < 0.6 else
+                    "infrastructure" if r[7] and r[7] < 0.8 else
+                    "sacred"
+                ),
+                "compression_label": (
+                    "elaboration" if r[4] and r[4] < 0.3 else
+                    "compression" if r[4] and r[4] < 0.6 else
+                    "aggressive_compression" if r[4] and r[4] < 0.8 else
+                    "fabrication"
+                ),
+            }
+            for r in rows
+        ]
+
+        # Enrich with node labels
+        for myth in myths:
+            node = self.current_store.get_node(myth["node_id"])
+            myth["node_label"] = node.get("label", "") if node else ""
+
+        self._json_response(200, {"infrastructure_myths": myths, "count": len(myths)})
+
+    def _get_context_gate(self, path: str, qs: dict) -> None:
+        """GET /context-gate/<node_id> — context completeness diagnostic.
+
+        ADR-026: Context Gates. Computes confidence at three context layers
+        to measure the AND-gate value of combining observation context with
+        pattern context:
+
+          R1 (observations only): Direct observations on this node.
+          R2 (pattern only): Edge context from connected L2/L3 nodes.
+          R3 (combined): Both observations AND edge context.
+
+        The "lift" between best-single-context and combined-context measures
+        the AND-gate value: how much confidence you gain from combining
+        contexts that neither provides alone.
+
+        This is a diagnostic endpoint (visibility first, enforcement never).
+        Agents can see their context completeness score but are never forced
+        to act on it.
+
+        Query params:
+            depth: How many hops for pattern context (default: 1, max: 2)
+            max_neighbors: Max neighbors to consider (default: 20)
+        """
+        from ohm.exceptions import NodeNotFoundError
+        from ohm.validation import validate_identifier
+        from ohm.methods import compound_confidence
+        from datetime import datetime
+
+        node_id = path[14:]  # strip "/context-gate/"
+        node_id = validate_identifier(node_id, name="node_id")
+
+        node = self.current_store.get_node(node_id)
+        if not node:
+            raise NodeNotFoundError(f"Node not found: {node_id}")
+
+        depth = min(int(qs.get("depth", ["1"])[0]), 2)
+        max_neighbors = min(int(qs.get("max_neighbors", ["20"])[0]), 50)
+
+        conn = self.current_store.read_conn
+        now = datetime.now()
+
+        def _obs_confidence(sigma) -> float:
+            if sigma is not None and float(sigma) > 0:
+                return max(0.0, min(1.0, 1.0 / (1.0 + float(sigma))))
+            return 1.0
+
+        # ── R1: Observations only (direct evidence, no pattern history) ──
+        obs_rows = conn.execute(
+            "SELECT value, sigma, source, created_by, created_at "
+            "FROM ohm_observations WHERE node_id = ? AND deleted_at IS NULL "
+            "ORDER BY created_at DESC",
+            [node_id],
+        ).fetchall()
+
+        r1_observations = [
+            {
+                "confidence": _obs_confidence(r[1]),
+                "source": r[2],
+                "created_by": r[3],
+                "created_at": str(r[4]) if r[4] else None,
+            }
+            for r in obs_rows
+        ]
+        r1_result = compound_confidence(r1_observations, use_diversity_correlation=True)
+        r1_confidence = r1_result["compound_confidence"]
+
+        # ── R2: Pattern only (edge context, no direct observations) ──
+        # Collect neighbor node IDs via L2/L3 edges
+        if depth == 1:
+            neighbor_rows = conn.execute(
+                "SELECT DISTINCT CASE "
+                "  WHEN e.from_node = ? THEN e.to_node "
+                "  ELSE e.from_node END "
+                "FROM ohm_edges e "
+                "WHERE (e.from_node = ? OR e.to_node = ?) "
+                "  AND e.deleted_at IS NULL "
+                "  AND e.layer IN ('L2', 'L3') "
+                "LIMIT ?",
+                [node_id, node_id, node_id, max_neighbors],
+            ).fetchall()
+        else:
+            # depth == 2: two hops
+            neighbor_rows = conn.execute(
+                "WITH one_hop AS ("
+                "  SELECT DISTINCT CASE "
+                "    WHEN e.from_node = ? THEN e.to_node "
+                "    ELSE e.from_node END AS nid "
+                "  FROM ohm_edges e "
+                "  WHERE (e.from_node = ? OR e.to_node = ?) "
+                "    AND e.deleted_at IS NULL "
+                "    AND e.layer IN ('L2', 'L3')"
+                ") "
+                "SELECT DISTINCT CASE "
+                "  WHEN e.from_node IN (SELECT nid FROM one_hop) THEN e.to_node "
+                "  ELSE e.from_node END AS nid "
+                "FROM ohm_edges e "
+                "WHERE (e.from_node IN (SELECT nid FROM one_hop) "
+                "   OR e.to_node IN (SELECT nid FROM one_hop)) "
+                "  AND e.deleted_at IS NULL "
+                "  AND e.layer IN ('L2', 'L3') "
+                "  AND e.from_node != ? AND e.to_node != ? "
+                "LIMIT ?",
+                [node_id, node_id, node_id, node_id, node_id, max_neighbors],
+            ).fetchall()
+
+        neighbor_ids = [r[0] for r in neighbor_rows]
+
+        # Collect observations from neighbor nodes (pattern context)
+        pattern_obs = []
+        for nid in neighbor_ids[:max_neighbors]:
+            n_obs = conn.execute(
+                "SELECT value, sigma, source, created_by, created_at "
+                "FROM ohm_observations WHERE node_id = ? AND deleted_at IS NULL "
+                "ORDER BY created_at DESC LIMIT 5",
+                [nid],
+            ).fetchall()
+            pattern_obs.extend([
+                {
+                    "confidence": _obs_confidence(r[1]),
+                    "source": r[2],
+                    "created_by": r[3],
+                    "created_at": str(r[4]) if r[4] else None,
+                }
+                for r in n_obs
+            ])
+
+        r2_result = compound_confidence(pattern_obs, use_diversity_correlation=True)
+        r2_confidence = r2_result["compound_confidence"]
+
+        # ── R3: Combined (AND-gate of observation + pattern) ──
+        combined_obs = r1_observations + pattern_obs
+        r3_result = compound_confidence(combined_obs, use_diversity_correlation=True)
+        r3_confidence = r3_result["compound_confidence"]
+
+        # ── Compute lift ──
+        best_single = max(
+            r1_confidence if r1_confidence is not None else 0,
+            r2_confidence if r2_confidence is not None else 0,
+        )
+        lift = None
+        lift_pct = None
+        if r3_confidence is not None and best_single > 0:
+            lift = round(r3_confidence - best_single, 4)
+            lift_pct = round(lift / best_single * 100, 1) if best_single > 0 else None
+
+        # ── Diagnose context gap ──
+        # A node needs BOTH observations AND pattern context for high confidence.
+        # The diagnosis accounts for observation count, not just confidence value,
+        # because a single observation at 0.9 confidence is not "well-supported."
+        has_signal = r1_confidence is not None and len(r1_observations) >= 2 and r1_confidence > 0.3
+        has_pattern = r2_confidence is not None and len(pattern_obs) >= 2 and r2_confidence > 0.3
+        # High confidence synthesis requires BOTH layers with sufficient diversity
+        has_combined = has_signal and has_pattern and r3_confidence is not None and r3_confidence > 0.5
+
+        if r3_confidence is None:
+            diagnosis = "no_combined_confidence"
+            action = "Add observations or causal edges to this node."
+        elif has_combined:
+            diagnosis = "high_confidence_synthesis"
+            action = "Both context layers present. This node is well-supported."
+        elif has_signal and not has_pattern:
+            diagnosis = "has_signal_no_pattern"
+            action = "Add historical context or causal edges to connect this observation to existing patterns."
+        elif has_pattern and not has_signal:
+            diagnosis = "has_pattern_no_signal"
+            action = "Add current observations to ground this pattern in evidence."
+        elif not has_signal and not has_pattern:
+            diagnosis = "no_context"
+            action = "Needs both observations and connections. This node is orphaned from evidence."
+        else:
+            diagnosis = "medium_confidence_both_present"
+            action = "Context exists but not yet combining effectively. Consider adding more diverse sources or stronger causal edges."
+
+        result = {
+            "node_id": node_id,
+            "r1_observations_only": {
+                "confidence": r1_confidence,
+                "observation_count": len(r1_observations),
+                "diversity": {
+                    "agent_count": r1_result.get("source_diversity_metrics", {}).get("agent_count", 0),
+                    "diversity_correlation": r1_result.get("diversity_correlation"),
+                },
+            },
+            "r2_pattern_only": {
+                "confidence": r2_confidence,
+                "neighbor_count": len(neighbor_ids),
+                "pattern_observation_count": len(pattern_obs),
+                "diversity": {
+                    "agent_count": r2_result.get("source_diversity_metrics", {}).get("agent_count", 0),
+                    "diversity_correlation": r2_result.get("diversity_correlation"),
+                },
+            },
+            "r3_combined": {
+                "confidence": r3_confidence,
+                "total_observation_count": len(combined_obs),
+                "diversity": {
+                    "agent_count": r3_result.get("source_diversity_metrics", {}).get("agent_count", 0),
+                    "diversity_correlation": r3_result.get("diversity_correlation"),
+                },
+            },
+            "lift": lift,
+            "lift_pct": lift_pct,
+            "diagnosis": diagnosis,
+            "action": action,
+        }
+
+        self._json_response(200, result)

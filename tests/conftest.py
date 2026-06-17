@@ -338,6 +338,12 @@ def _start_test_server(store, tokens=None, roles=None, no_auth=False, schema_con
 
     _register_builtin_hooks(store)
 
+    # Pre-warm pgmpy imports to avoid 15s cold-import penalty on first request
+    try:
+        import ohm.inference.bayesian  # noqa: F401 — triggers PGMPY_AVAILABLE at module level
+    except Exception:
+        pass
+
     server = socketserver.TCPServer(
         ("127.0.0.1", 0),
         OhmHandler,
@@ -378,10 +384,15 @@ def _request(method, port, path, body=None, headers=None, token=None):
 @pytest.fixture
 def test_server(tmp_path):
     """Start a test server with a temp database (no-auth dev mode)."""
+    from ohm.graph.embeddings import NullBackend
     from ohm.store import OhmStore
 
     db_path = str(tmp_path / "test_server.duckdb")
-    store = OhmStore(db_path=db_path, agent_name="test_agent")
+    store = OhmStore(
+        db_path=db_path,
+        agent_name="test_agent",
+        embedding_backend=NullBackend(dimensions=768),
+    )
     port, server, thread = _start_test_server(store, no_auth=True)
     yield port, store
     server.shutdown()
@@ -392,10 +403,15 @@ def test_server(tmp_path):
 @pytest.fixture
 def auth_server(tmp_path):
     """Start a test server with token auth enabled."""
+    from ohm.graph.embeddings import NullBackend
     from ohm.store import OhmStore
 
     db_path = str(tmp_path / "test_auth.duckdb")
-    store = OhmStore(db_path=db_path, agent_name="test_agent")
+    store = OhmStore(
+        db_path=db_path,
+        agent_name="test_agent",
+        embedding_backend=NullBackend(dimensions=768),
+    )
     tokens = {"test-token-abc": "metis", "readonly-token": "observer"}
     roles = {"metis": "read-write", "observer": "read-only"}
     port, server, thread = _start_test_server(store, tokens=tokens, roles=roles)

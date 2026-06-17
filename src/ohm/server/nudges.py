@@ -347,6 +347,65 @@ def generate_nudges(
         except Exception:
             pass  # Never fail the write for a nudge
 
+    # ── ADR-026: Semantic edge validation nudge ───────────────────────────
+    # OrionBelt pattern: refuse wrong aggregates loudly.
+    # Advisory first — warn when edge semantics don't match node types.
+    if action == "edge" and edge_type and store is not None:
+        # Rule 1: Sources don't cause things — they support or reference them
+        if edge_type in ("CAUSES", "DEPENDS_ON", "BLOCKS", "ENABLES", "INFLUENCES", "THREATENS"):
+            for nid_param, direction in [("from", "source"), ("to", "target")]:
+                nid = from_node_id if nid_param == "from" else to_node_id
+                if nid:
+                    try:
+                        node_row = store.conn.execute(
+                            "SELECT type FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                            [nid],
+                        ).fetchone()
+                        if node_row and node_row[0] == "source":
+                            direction_label = "Source" if direction == "source" else "Target"
+                            nudges.append(
+                                {
+                                    "type": "semantic_edge_warning",
+                                    "message": f"{direction_label} node '{nid}' is type 'source'. "
+                                    f"Sources {('support' if edge_type == 'DEPENDS_ON' else 'reference')} claims — they don't "
+                                    f"{edge_type.lower()} outcomes. Consider SUPPORTS or REFERENCES instead.",
+                                    "severity": "warning",
+                                    "data": {
+                                        "edge_type": edge_type,
+                                        "node_id": nid,
+                                        "node_type": "source",
+                                        "suggested_types": ["SUPPORTS", "REFERENCES"],
+                                    },
+                                }
+                            )
+                    except Exception:
+                        pass  # Never fail the write for a nudge
+
+        # Rule 2: REFERENCES edges should have a source_url on the source node (ADR-013)
+        if edge_type == "REFERENCES" and from_node_id:
+            try:
+                source_row = store.conn.execute(
+                    "SELECT source_url FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                    [from_node_id],
+                ).fetchone()
+                if source_row and not source_row[0]:
+                    nudges.append(
+                        {
+                            "type": "semantic_edge_warning",
+                            "message": f"REFERENCES edge created, but source node '{from_node_id}' has no source_url. "
+                            "L2 citation edges should trace back to an external source (ADR-013). "
+                            "Add source_url to the source node for proper provenance tracking.",
+                            "severity": "hint",
+                            "data": {
+                                "edge_type": "REFERENCES",
+                                "node_id": from_node_id,
+                                "missing_field": "source_url",
+                            },
+                        }
+                    )
+            except Exception:
+                pass
+
     return nudges
 
 

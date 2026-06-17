@@ -500,6 +500,7 @@ def _build_router() -> _RouteRegistry:
 
     # GET prefix routes (parameterised paths like /node/{id})
     for _p in (
+        "/context-gate/",
         "/node/",
         "/deep/",
         "/edge/",
@@ -2098,6 +2099,7 @@ OhmHandler._GET_EXACT = {
 
 OhmHandler._GET_PREFIXES = [
     ("/tenant/", "_get_tenant_prefix"),
+    ("/context-gate/", "_get_context_gate"),
     ("/node/", "_get_node"),
     ("/deep/", "_get_deep"),
     ("/edge/", "_get_edge"),

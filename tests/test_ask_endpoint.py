@@ -41,7 +41,7 @@ class TestAskEndpoint:
     def test_ask_returns_matched_nodes(self, test_server):
         """POST /ask returns matched nodes for a relevant question."""
         port, _ = test_server
-        status, data = _request("POST", port, "/ask", body={"question": "AND-gate"})
+        status, data = _request("POST", port, "/ask", body={"question": "AND gate"})
         assert status == 200
         assert len(data["matched_nodes"]) >= 1
         node_ids = [n["id"] for n in data["matched_nodes"]]

@@ -231,6 +231,29 @@ VALID_OBSERVATION_SCALES = frozenset(
     }
 )
 
+# ── ADR-026: Myth Compression Framework ──────────────────────────────────────
+
+VALID_COMPRESSION_TYPES = frozenset(
+    {
+        "inversion",          # Lossless: AND→OR bypass, destroys necessity
+        "normative_inversion", # Lossless: AND→OR negation, destroys visibility
+        "retrojection",       # Lossy: OR→AND compression, destroys accuracy
+        "composite",          # Multiple operations on same target
+    }
+)
+
+# Compression degree ranges:
+#   0.0-0.3  Elaboration (high info preservation)
+#   0.3-0.6  Compression (medium)
+#   0.6-0.8  Aggressive compression (low)
+#   0.8-1.0  Fabrication (none)
+#
+# Revisability ranges:
+#   0.0-0.3  Revisable (can challenge with evidence)
+#   0.3-0.6  Sticky (challenge with counter-narrative)
+#   0.6-0.8  Infrastructure (identity-constituting, challenge = attack)
+#   0.8-1.0  Sacred (blasphemy to challenge, violence risk)
+
 # ── ADR-022: Layer Promotion Constraints ────────────────────────────────────
 
 # Export the constraint dictionaries for use by other modules.
@@ -913,7 +936,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.27.0"
+SCHEMA_VERSION = "0.28.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -1227,6 +1250,19 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
         [
             "ALTER TABLE ohm_discovery_queue ADD COLUMN IF NOT EXISTS p_value FLOAT",
             "ALTER TABLE ohm_discovery_queue ADD COLUMN IF NOT EXISTS metadata VARCHAR",
+        ],
+    ),
+    (
+        "0.28.0",
+        "ADR-026: Myth Compression Framework — add compression_degree, compression_type, beneficiary, revisability to observations",
+        [
+            "ALTER TABLE ohm_observations ADD COLUMN IF NOT EXISTS compression_degree FLOAT",
+            "ALTER TABLE ohm_observations ADD COLUMN IF NOT EXISTS compression_type VARCHAR",
+            "ALTER TABLE ohm_observations ADD COLUMN IF NOT EXISTS beneficiary JSON",
+            "ALTER TABLE ohm_observations ADD COLUMN IF NOT EXISTS revisability FLOAT",
+            "CREATE INDEX IF NOT EXISTS idx_obs_compression ON ohm_observations(compression_degree) WHERE compression_degree IS NOT NULL",
+            "CREATE INDEX IF NOT EXISTS idx_obs_revisability ON ohm_observations(revisability) WHERE revisability IS NOT NULL",
+            "CREATE INDEX IF NOT EXISTS idx_obs_comp_type ON ohm_observations(compression_type) WHERE compression_type IS NOT NULL",
         ],
     ),
 ]
