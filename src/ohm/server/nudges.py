@@ -381,25 +381,26 @@ def generate_nudges(
                     except Exception:
                         pass  # Never fail the write for a nudge
 
-        # Rule 2: REFERENCES edges should have a source_url on the source node (ADR-013)
+        # Rule 2: REFERENCES edges should have a URL on the source node (ADR-013)
+        # Nodes use 'url' column, not 'source_url' (that's on observations)
         if edge_type == "REFERENCES" and from_node_id:
             try:
                 source_row = store.conn.execute(
-                    "SELECT source_url FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                    "SELECT url FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
                     [from_node_id],
                 ).fetchone()
                 if source_row and not source_row[0]:
                     nudges.append(
                         {
                             "type": "semantic_edge_warning",
-                            "message": f"REFERENCES edge created, but source node '{from_node_id}' has no source_url. "
+                            "message": f"REFERENCES edge created, but source node '{from_node_id}' has no URL. "
                             "L2 citation edges should trace back to an external source (ADR-013). "
-                            "Add source_url to the source node for proper provenance tracking.",
+                            "Add url to the source node for proper provenance tracking.",
                             "severity": "hint",
                             "data": {
                                 "edge_type": "REFERENCES",
                                 "node_id": from_node_id,
-                                "missing_field": "source_url",
+                                "missing_field": "url",
                             },
                         }
                     )
