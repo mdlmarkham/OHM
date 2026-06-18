@@ -264,6 +264,52 @@ def _verify_token(provided: str, token_hash: str) -> bool:
     return secrets.compare_digest(_hash_token(provided), token_hash)
 
 
+def _lookup_role(roles: dict, agent: str, customer_id: str | None = None) -> str:
+    """Resolve an agent's role from either flat or customer-scoped role dict.
+
+    OHM-1s14.2: roles may be scoped per tenant to prevent collisions when
+    two tenants reuse the same agent name (e.g., both have an "admin" agent
+    with different privileges). Supports two formats transparently:
+
+      * Flat (legacy / single-tenant)::
+
+          {"metis": "read-write", "admin": "admin"}
+
+      * Scoped (multi-tenant)::
+
+          {"": {"metis": "read-write"},            # operator scope
+           "acme_hvac": {"admin": "admin"},         # tenant scope
+           "bos_inc": {"admin": "read-only"}}
+
+    The empty-string key ``""`` is the operator/global scope used for
+    agent tokens that are not tied to a specific tenant. When a customer
+    has no explicit role entry for the agent, the operator scope is used
+    as fallback so operator-level agents (e.g., metis) keep working
+    across tenants.
+
+    Args:
+        roles: Role dict (flat or scoped).
+        agent: Agent name from token lookup.
+        customer_id: Tenant id from ``_customer_id`` property, or None /
+            empty string for the operator scope.
+
+    Returns:
+        Role string ("read-write", "read-only", "admin", ...). Defaults
+        to "read-write" when no entry is found (consistent with legacy
+        behaviour).
+    """
+    if not roles:
+        return "read-write"
+    sample = next(iter(roles.values()), None)
+    if isinstance(sample, dict):
+        cid = customer_id or ""
+        tenant_roles = roles.get(cid, {})
+        if not tenant_roles and cid:
+            tenant_roles = roles.get("", {})
+        return tenant_roles.get(agent, "read-write")
+    return roles.get(agent, "read-write")
+
+
 def _build_token_lookup(tokens_config: dict) -> tuple[dict, dict]:
     """Build token lookup tables from config.
 
@@ -763,7 +809,7 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
                     self._authenticated_agent = agent_name
                     # Honor X-Ohm-Agent header if the authenticated agent has write access
                     ohm_agent = self.headers.get("X-Ohm-Agent")
-                    if ohm_agent and self.roles.get(agent_name, "read-write") != "read-only":
+                    if ohm_agent and _lookup_role(self.roles, agent_name, self._customer_id) != "read-only":
                         return ohm_agent
                     return agent_name
             for token_hash, customer_id in self.customer_tokens.items():
@@ -781,7 +827,7 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
                     self._authenticated_agent = agent_name
                     # Honor X-Ohm-Agent header if the authenticated agent has write access
                     ohm_agent = self.headers.get("X-Ohm-Agent")
-                    if ohm_agent and self.roles.get(agent_name, "read-write") != "read-only":
+                    if ohm_agent and _lookup_role(self.roles, agent_name, self._customer_id) != "read-only":
                         return ohm_agent
                     return agent_name
             for token_hash, customer_id in self.customer_tokens.items():
@@ -799,7 +845,7 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
 
     def _check_write_access(self, agent: str) -> None:
         """Verify agent has write access. Raises PermissionDeniedError if read-only."""
-        role = self.roles.get(agent, "read-write")
+        role = _lookup_role(self.roles, agent, self._customer_id)
         if role == "read-only":
             raise PermissionDeniedError(f"Agent '{agent}' has read-only access — writes are not permitted")
         return None
@@ -2168,7 +2214,21 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     token_hashes, config_roles = _build_token_lookup(config.get("tokens", {}))
     OhmHandler.tokens = token_hashes
     OhmHandler.customer_tokens = _build_customer_token_lookup(config.get("customer_tokens", {}))
-    OhmHandler.roles = config_roles if config_roles else config.get("roles", {})
+    resolved_roles = config_roles if config_roles else config.get("roles", {})
+    # OHM-1s14.2: scope roles by customer_id in multi-tenant mode to prevent
+    # collisions when two tenants reuse the same agent name (e.g., both have
+    # an "admin" agent with different privileges). The "" key is the operator
+    # scope (global agents like metis); tenant-specific roles live under their
+    # customer_id. The _lookup_role helper transparently supports both flat
+    # and scoped formats, so legacy single-tenant configs keep working.
+    if config.get("multi_tenant", False) and resolved_roles:
+        sample = next(iter(resolved_roles.values()), None)
+        if not isinstance(sample, dict):
+            OhmHandler.roles = {"": resolved_roles}
+        else:
+            OhmHandler.roles = resolved_roles
+    else:
+        OhmHandler.roles = resolved_roles
     OhmHandler.no_auth = config.get("no_auth", False)
     OhmHandler.require_read_auth = config.get("require_read_auth", False)
     OhmHandler.schema_config = schema_config

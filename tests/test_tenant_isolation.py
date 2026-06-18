@@ -24,7 +24,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ohm.server.server import OhmHandler, make_configured_handler
+from ohm.server.server import OhmHandler, make_configured_handler, _lookup_role
 
 
 def _make_handler_with_store(store):
@@ -107,3 +107,60 @@ class TestCurrentStore:
         handler.tenant_manager = None
         # No _resolved_customer_id / _customer_id route ⇒ falls back to self.store.
         assert handler.current_store is store
+
+
+class TestRoleLookup:
+    """OHM-1s14.2: _lookup_role supports both flat (legacy) and scoped
+    (multi-tenant) role dict formats to prevent cross-tenant role collisions."""
+
+    def test_empty_roles_defaults_to_read_write(self):
+        assert _lookup_role({}, "any_agent") == "read-write"
+        assert _lookup_role({}, "any_agent", "acme_hvac") == "read-write"
+
+    def test_flat_format_lookup(self):
+        roles = {"metis": "read-write", "viewer": "read-only"}
+        assert _lookup_role(roles, "metis") == "read-write"
+        assert _lookup_role(roles, "viewer") == "read-only"
+        assert _lookup_role(roles, "unknown") == "read-write"
+
+    def test_scoped_format_lookup_operator_scope(self):
+        roles = {"": {"metis": "read-write"}, "acme_hvac": {"admin": "admin"}}
+        # No customer_id → operator scope
+        assert _lookup_role(roles, "metis", None) == "read-write"
+        assert _lookup_role(roles, "metis", "") == "read-write"
+
+    def test_scoped_format_lookup_tenant_scope(self):
+        roles = {
+            "": {"metis": "read-write"},
+            "acme_hvac": {"admin": "admin"},
+            "bos_inc": {"admin": "read-only"},
+        }
+        assert _lookup_role(roles, "admin", "acme_hvac") == "admin"
+        assert _lookup_role(roles, "admin", "bos_inc") == "read-only"
+
+    def test_scoped_format_falls_back_to_operator_scope(self):
+        """When a tenant has no explicit role entry for the agent, the
+        operator scope ("") is used as fallback so global agents keep working."""
+        roles = {"": {"metis": "read-write"}, "acme_hvac": {"admin": "admin"}}
+        # metis has no entry under acme_hvac → fall back to operator scope
+        assert _lookup_role(roles, "metis", "acme_hvac") == "read-write"
+
+    def test_scoped_format_unknown_agent_defaults_to_read_write(self):
+        roles = {"": {"metis": "read-write"}, "acme_hvac": {"admin": "admin"}}
+        assert _lookup_role(roles, "unknown", "acme_hvac") == "read-write"
+        assert _lookup_role(roles, "unknown", None) == "read-write"
+
+    def test_same_agent_name_different_roles_across_tenants(self):
+        """The core audit concern: two tenants with the same agent name
+        but different roles must resolve independently."""
+        roles = {
+            "": {"admin": "read-write"},
+            "tenant_a": {"admin": "admin"},
+            "tenant_b": {"admin": "read-only"},
+        }
+        assert _lookup_role(roles, "admin", "tenant_a") == "admin"
+        assert _lookup_role(roles, "admin", "tenant_b") == "read-only"
+        # Operator scope is separate
+        assert _lookup_role(roles, "admin", None) == "read-write"
+        assert _lookup_role(roles, "admin", "") == "read-write"
+
