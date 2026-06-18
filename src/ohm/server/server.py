@@ -2121,6 +2121,30 @@ OhmHandler._GET_PREFIXES = [
 ]
 
 
+def make_configured_handler(store: OhmStore):
+    """OHM-1s14.1: bind `store` via handler closure rather than mutating
+    ``OhmHandler`` as a class-level global.
+
+    Each handler instance receives its own snapshot of ``store`` in
+    ``__init__``, eliminating the cross-thread bleed risk identified in the
+    OHM-ym2f audit: even if a future caller mutates ``OhmHandler.store``
+    mid-flight, in-flight handlers keep their own bound copy.
+
+    All other configuration (config, tokens, roles, schema_config,
+    multi_tenant, tenant_manager, ...) continues to live on the class via
+    ``install_globals`` — those will move to instance scope in follow-up
+    issues (OHM-1s14.2 / OHM-1s14.3 / OHM-1s14.4).
+    """
+    class _ConfiguredHandler(OhmHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.store = store
+
+    _ConfiguredHandler.__name__ = "OhmHandler"
+    _ConfiguredHandler.__qualname__ = "OhmHandler"
+    return _ConfiguredHandler
+
+
 def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None = None):
     """Run the HTTP server.
 
@@ -2140,7 +2164,6 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     if schema_config is None:
         schema_config = DEFAULT_SCHEMA
 
-    OhmHandler.store = store
     OhmHandler.config = config
     token_hashes, config_roles = _build_token_lookup(config.get("tokens", {}))
     OhmHandler.tokens = token_hashes
@@ -2207,7 +2230,7 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
         else:
             print("Quack extension not available — using HTTP-only mode", file=sys.stderr)
 
-    server = ThreadedHTTPServer((config["host"], config["port"]), OhmHandler)
+    server = ThreadedHTTPServer((config["host"], config["port"]), make_configured_handler(store))
     print(f"OHM daemon listening on {config['host']}:{config['port']}", file=sys.stderr)
 
     # Background DuckLake sync thread (OHM-1rwl): sync every sync_interval_seconds
