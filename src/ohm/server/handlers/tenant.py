@@ -25,7 +25,7 @@ class TenantHandlerMixin:
             raise AuthenticationError("Authentication required — provide Bearer token")
         if getattr(self, "_resolved_customer_id", None) is not None:
             raise PermissionDeniedError("Admin endpoints require an agent token, not a customer key")
-        role = self.roles.get(agent, "read-write")
+        role = _server_module._lookup_role(self.roles, agent, self._customer_id)
         if role != "admin":
             raise PermissionDeniedError(f"Agent '{agent}' requires 'admin' role for provisioning")
         return agent

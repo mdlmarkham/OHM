@@ -317,3 +317,57 @@ class TestBayesianCacheIsolation:
             for k, v in original_items:
                 _bayesian_network_cache[k] = v
 
+
+class TestRateLimitIsolation:
+    """OHM-1s14.4: rate limit store keyed by (client_ip, customer_id) so
+    tenants sharing a NAT/proxy IP get independent counters."""
+
+    def test_single_tenant_keys_on_ip_with_none_customer(self):
+        """Single-tenant mode: keys are (ip, None) — backward compatible."""
+        from ohm.server import server as _srv
+
+        store = MagicMock(name="store")
+        handler = _make_handler_with_store(store)
+        handler.multi_tenant = False
+        handler._resolved_customer_id = None
+        handler._get_client_ip = lambda: "10.0.0.1"
+
+        _srv._rate_limit_store.clear()
+        try:
+            assert handler._check_rate_limit() is True
+            # Key should be ("10.0.0.1", None)
+            assert ("10.0.0.1", None) in _srv._rate_limit_store
+            assert len(_srv._rate_limit_store[("10.0.0.1", None)]) == 1
+        finally:
+            _srv._rate_limit_store.clear()
+
+    def test_two_tenants_same_ip_get_independent_counters(self):
+        """Two tenants on the same IP must have independent rate limit counters."""
+        from ohm.server import server as _srv
+
+        store = MagicMock(name="store")
+        handler_a = _make_handler_with_store(store)
+        handler_a.multi_tenant = True
+        handler_a._resolved_customer_id = "tenant_a"
+        handler_a._get_client_ip = lambda: "10.0.0.99"
+
+        handler_b = _make_handler_with_store(store)
+        handler_b.multi_tenant = True
+        handler_b._resolved_customer_id = "tenant_b"
+        handler_b._get_client_ip = lambda: "10.0.0.99"  # same IP
+
+        _srv._rate_limit_store.clear()
+        try:
+            # Tenant A makes a request
+            assert handler_a._check_rate_limit() is True
+            # Tenant B makes a request on the SAME IP — should get its own counter
+            assert handler_b._check_rate_limit() is True
+
+            # Verify two independent entries exist
+            assert ("10.0.0.99", "tenant_a") in _srv._rate_limit_store
+            assert ("10.0.0.99", "tenant_b") in _srv._rate_limit_store
+            assert len(_srv._rate_limit_store[("10.0.0.99", "tenant_a")]) == 1
+            assert len(_srv._rate_limit_store[("10.0.0.99", "tenant_b")]) == 1
+        finally:
+            _srv._rate_limit_store.clear()
+

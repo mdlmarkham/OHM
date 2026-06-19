@@ -113,11 +113,13 @@ MAX_BATCH_SIZE = 500  # Maximum nodes + edges per /batch request
 RATE_LIMIT_WINDOW = 60  # seconds
 RATE_LIMIT_MAX_REQUESTS = 5000  # per window per IP
 
-# Simple in-memory rate limiter: {ip: [(timestamp, ...)]}
-# Keyed by client IP — provides DDoS/abuse protection at the network level.
-# Per-customer quota enforcement (keyed by customer_id) is tracked separately
-# in OHM-982m once tss4.3 customer API keys are available.
-_rate_limit_store: dict[str, list[float]] = {}
+# Simple in-memory rate limiter: {(ip, customer_id): [(timestamp, ...)]}
+# Keyed by (client_ip, customer_id) — provides DDoS/abuse protection at the
+# network level AND per-tenant quota isolation (OHM-1s14.4). customer_id=None
+# means single-tenant or operator-scope (agent token) requests.
+# Per-customer quota enforcement (resource-level, not rate-level) is tracked
+# separately in TenantManager.check_quota (OHM-982m).
+_rate_limit_store: dict[tuple[str, str | None], list[float]] = {}
 _rate_limit_lock = threading.Lock()
 
 # ── Metrics ────────────────────────────────────────────────
@@ -731,7 +733,7 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
         # X-Tenant-ID is only allowed for admin-role agents (OHM-tss4.19)
         agent = getattr(self, "_authenticated_agent", None)
         if agent is not None:
-            role = self.roles.get(agent, "read-write")
+            role = _lookup_role(self.roles, agent, None)  # operator scope (no customer_id yet)
             if role == "admin":
                 x_tenant = getattr(self, "headers", None)
                 if x_tenant is not None:
@@ -1075,34 +1077,41 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
         return peer
 
     def _check_rate_limit(self) -> bool:
-        """Check if the requesting IP is within rate limits. Returns True if allowed."""
+        """Check if the requesting IP is within rate limits. Returns True if allowed.
+
+        OHM-1s14.4: keyed by (client_ip, customer_id) so two tenants sharing a
+        NAT/proxy IP get independent rate limit counters. customer_id=None
+        (single-tenant or operator-scope agent token) preserves legacy behaviour.
+        """
         client_ip = self._get_client_ip()
+        customer_id = self._customer_id
+        key = (client_ip, customer_id)
         now = time.time()
         with _rate_limit_lock:
-            if client_ip not in _rate_limit_store:
-                _rate_limit_store[client_ip] = [now]
+            if key not in _rate_limit_store:
+                _rate_limit_store[key] = [now]
                 return True
 
             # Prune old entries
             window_start = now - RATE_LIMIT_WINDOW
-            _rate_limit_store[client_ip] = [ts for ts in _rate_limit_store[client_ip] if ts > window_start]
+            _rate_limit_store[key] = [ts for ts in _rate_limit_store[key] if ts > window_start]
 
-            # OHM-41g: Prune stale IP keys that have no recent timestamps.
-            # Without this, unique IPs accumulate forever.
-            if not _rate_limit_store[client_ip]:
-                del _rate_limit_store[client_ip]
+            # OHM-41g: Prune stale keys that have no recent timestamps.
+            # Without this, unique (ip, customer_id) pairs accumulate forever.
+            if not _rate_limit_store[key]:
+                del _rate_limit_store[key]
                 # Periodically prune other stale keys (every ~100 requests)
                 if len(_rate_limit_store) > 100:
-                    stale = [ip for ip, timestamps in _rate_limit_store.items() if not timestamps or timestamps[-1] < window_start]
-                    for ip in stale:
-                        del _rate_limit_store[ip]
-                _rate_limit_store[client_ip] = [now]
+                    stale = [k for k, timestamps in _rate_limit_store.items() if not timestamps or timestamps[-1] < window_start]
+                    for k in stale:
+                        del _rate_limit_store[k]
+                _rate_limit_store[key] = [now]
                 return True
 
-            if len(_rate_limit_store[client_ip]) >= RATE_LIMIT_MAX_REQUESTS:
+            if len(_rate_limit_store[key]) >= RATE_LIMIT_MAX_REQUESTS:
                 return False
 
-            _rate_limit_store[client_ip].append(now)
+            _rate_limit_store[key].append(now)
             return True
 
     def _read_body(self):
