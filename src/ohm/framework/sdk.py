@@ -611,6 +611,61 @@ class Graph:
             confidence=confidence,
         )
 
+    def run_oppositional_review(
+        self,
+        *,
+        target_node_id: str | None = None,
+        min_confidence: float = 0.5,
+        homogeneity_threshold: float = 0.8,
+        min_support_count: int = 2,
+        auto_challenge: bool = False,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """Run oppositional review (OHM-jbsr).
+
+        Detects CAUSES edges with homogeneous source_tier/agent support and
+        optionally auto-challenges them. Returns flagged_edges, challenged_edges,
+        and a review_summary. auto_challenge defaults to False (flag only).
+        """
+        from ohm.graph.methods import oppositional_review
+
+        return oppositional_review(
+            self._conn,
+            target_node_id=target_node_id,
+            min_confidence=min_confidence,
+            homogeneity_threshold=homogeneity_threshold,
+            min_support_count=min_support_count,
+            auto_challenge=auto_challenge,
+            reviewer_agent=self.actor,
+            limit=limit,
+        )
+
+    def detect_consensus_only(self, edge_id: str) -> dict[str, Any]:
+        """Check whether a CAUSES edge's support is consensus-only (OHM-2yq2).
+
+        Returns is_consensus_only, supporting_edges, strongest_tier,
+        strongest_ceiling, has_verified_outcome, recommended_ceiling.
+        """
+        from ohm.queries import detect_consensus_only_support
+
+        return detect_consensus_only_support(self._conn, edge_id=edge_id)
+
+    def fire_verification_nudge(self, edge_id: str, *, reason: str, confidence: float = 0.3) -> dict[str, Any]:
+        """Auto-fire a consensus-only challenge nudge on an edge (OHM-2yq2).
+
+        Idempotent: returns the existing CONSENSUS_FLAG nudge if one already
+        exists. Creates a CHALLENGED_BY edge with challenge_type='CONSENSUS_FLAG'.
+        """
+        from ohm.queries import fire_verification_nudge as _fire
+
+        return _fire(
+            self._conn,
+            edge_id=edge_id,
+            reason=reason,
+            created_by=self.actor,
+            confidence=confidence,
+        )
+
     def update_edge(
         self,
         edge_id: str,

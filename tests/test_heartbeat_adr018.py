@@ -28,7 +28,10 @@ def conn():
             confidence FLOAT DEFAULT 0.5,
             created_by VARCHAR,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            deleted_at TIMESTAMP
+            deleted_at TIMESTAMP,
+            provenance VARCHAR,
+            source_tier VARCHAR,
+            url VARCHAR
         )
     """)
     c.execute("""
@@ -41,7 +44,10 @@ def conn():
             confidence FLOAT DEFAULT 0.7,
             created_by VARCHAR,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            deleted_at TIMESTAMP
+            deleted_at TIMESTAMP,
+            challenge_of VARCHAR,
+            challenge_type VARCHAR,
+            source_tier VARCHAR
         )
     """)
     c.execute("""
@@ -104,6 +110,32 @@ def _edge(c, from_node, to_node, layer="L3", edge_type="CAUSES", confidence=0.8,
         """INSERT INTO ohm_edges (from_node, to_node, layer, edge_type, confidence, created_by)
            VALUES (?, ?, ?, ?, ?, ?)""",
         [from_node, to_node, layer, edge_type, confidence, created_by],
+    )
+
+
+def _research_node(c, node_id, label="Research Node", confidence=0.7, created_by="agent_a",
+                   provenance="research", source_tier=None, url=None):
+    c.execute(
+        """INSERT INTO ohm_nodes (id, label, confidence, created_by, provenance, source_tier, url)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        [node_id, label, confidence, created_by, provenance, source_tier, url],
+    )
+
+
+def _outcome(c, claim_node, created_by="agent_a"):
+    c.execute(
+        "INSERT INTO ohm_outcomes (claim_node, created_by) VALUES (?, ?)",
+        [claim_node, created_by],
+    )
+
+
+def _support_edge(c, target_edge_id, from_node, to_node, created_by="clio", source_tier="raw"):
+    c.execute(
+        """INSERT INTO ohm_edges
+             (from_node, to_node, layer, edge_type, confidence, created_by,
+              challenge_of, challenge_type, source_tier)
+           VALUES (?, ?, 'L3', 'SUPPORTS', 0.7, ?, ?, 'SUPPORTS', ?)""",
+        [from_node, to_node, created_by, target_edge_id, source_tier],
     )
 
 
@@ -277,13 +309,217 @@ class TestChallengeNudge:
         assert result["challenge_nudge"] == []
 
 
+# ── epistemic_nudges (OHM-secv) ──────────────────────────────────────────────
+
+
+class TestEpistemicNudges:
+    def test_empty_graph_no_epistemic_nudges(self, conn):
+        result = agent_heartbeat(conn, "agent_a")
+        assert result["epistemic_nudges"] == []
+        assert result["epistemic_nudge_count"] == 0
+
+    def test_web_research_node_without_tier_is_nudged(self, conn):
+        _research_node(conn, "r1", confidence=0.8, created_by="agent_a", provenance="research")
+        result = agent_heartbeat(conn, "agent_a")
+        ids = [n["node_id"] for n in result["epistemic_nudges"]]
+        assert "r1" in ids
+        assert result["epistemic_nudge_count"] >= 1
+
+    def test_web_research_node_with_tier_and_outcome_not_nudged(self, conn):
+        _research_node(conn, "r-tiered", confidence=0.8, created_by="agent_a",
+                       provenance="research", source_tier="preliminary")
+        _outcome(conn, "r-tiered")
+        result = agent_heartbeat(conn, "agent_a")
+        ids = [n["node_id"] for n in result["epistemic_nudges"]]
+        assert "r-tiered" not in ids
+
+    def test_outcome_without_tier_still_nudged(self, conn):
+        # OR semantics: outcome present but tier missing → still nudged (tier is the gap)
+        _research_node(conn, "r-outcome", confidence=0.8, created_by="agent_a",
+                       provenance="research", source_tier=None)
+        _outcome(conn, "r-outcome")
+        result = agent_heartbeat(conn, "agent_a")
+        ids = [n["node_id"] for n in result["epistemic_nudges"]]
+        assert "r-outcome" in ids
+
+    def test_tier_without_outcome_still_nudged(self, conn):
+        # OR semantics: tier present but no outcome → still nudged (outcome is the gap)
+        _research_node(conn, "r-tieronly", confidence=0.8, created_by="agent_a",
+                       provenance="research", source_tier="official")
+        result = agent_heartbeat(conn, "agent_a")
+        ids = [n["node_id"] for n in result["epistemic_nudges"]]
+        assert "r-tieronly" in ids
+
+    def test_non_research_provenance_not_nudged(self, conn):
+        _research_node(conn, "r-convo", confidence=0.95, created_by="agent_a",
+                       provenance="conversation", source_tier=None)
+        result = agent_heartbeat(conn, "agent_a")
+        ids = [n["node_id"] for n in result["epistemic_nudges"]]
+        assert "r-convo" not in ids
+
+    def test_other_agents_research_nodes_not_nudged(self, conn):
+        _research_node(conn, "r-other", confidence=0.95, created_by="agent_b",
+                       provenance="research", source_tier=None)
+        result = agent_heartbeat(conn, "agent_a")
+        ids = [n["node_id"] for n in result["epistemic_nudges"]]
+        assert "r-other" not in ids
+
+    def test_metis_research_and_clio_research_are_nudged(self, conn):
+        _research_node(conn, "r-metis", confidence=0.8, created_by="agent_a",
+                       provenance="metis-research", source_tier=None)
+        _research_node(conn, "r-clio", confidence=0.8, created_by="agent_a",
+                       provenance="clio-research", source_tier=None)
+        result = agent_heartbeat(conn, "agent_a")
+        ids = {n["node_id"] for n in result["epistemic_nudges"]}
+        assert {"r-metis", "r-clio"}.issubset(ids)
+
+    def test_epistemic_nudge_record_has_required_fields(self, conn):
+        _research_node(conn, "r-fields", label="My Research", confidence=0.77,
+                       created_by="agent_a", provenance="research",
+                       source_tier=None, url="https://example.com/x")
+        result = agent_heartbeat(conn, "agent_a")
+        assert result["epistemic_nudges"]
+        n = result["epistemic_nudges"][0]
+        for key in ("node_id", "label", "type", "confidence", "provenance",
+                    "source_tier", "url", "created_at", "age_days"):
+            assert key in n, f"Missing epistemic nudge field: {key}"
+        assert n["provenance"] == "research"
+        assert n["url"] == "https://example.com/x"
+
+    def test_count_always_present(self, conn):
+        result = agent_heartbeat(conn, "agent_a")
+        assert "epistemic_nudges" in result
+        assert "epistemic_nudge_count" in result
+        assert result["epistemic_nudge_count"] == len(result["epistemic_nudges"])
+
+    def test_sorted_by_confidence_desc(self, conn):
+        for conf in [0.6, 0.9, 0.7]:
+            _research_node(conn, f"r-{conf}", confidence=conf, created_by="agent_a",
+                           provenance="research", source_tier=None)
+        result = agent_heartbeat(conn, "agent_a")
+        confs = [n["confidence"] for n in result["epistemic_nudges"]]
+        assert confs == sorted(confs, reverse=True)
+
+    def test_capped_at_five(self, conn):
+        for i in range(10):
+            _research_node(conn, f"r-cap{i}", confidence=0.8, created_by="agent_a",
+                           provenance="research", source_tier=None)
+        result = agent_heartbeat(conn, "agent_a")
+        assert result["epistemic_nudge_count"] <= 5
+
+
+# ── consensus_nudge (OHM-2yq2) ───────────────────────────────────────────────
+
+
+class TestConsensusNudge:
+    def test_no_causes_no_consensus_nudge(self, conn):
+        result = agent_heartbeat(conn, "agent_a")
+        assert result["consensus_nudge"] == []
+        assert result["consensus_nudge_count"] == 0
+
+    def test_causes_with_support_no_outcome_is_nudged(self, conn):
+        _node(conn, "cs", created_by="agent_a")
+        _node(conn, "ct", created_by="agent_a")
+        eid = "cause-consensus"
+        conn.execute(
+            """INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, confidence, created_by)
+               VALUES (?, ?, ?, 'L3', 'CAUSES', 0.8, 'agent_a')""",
+            [eid, "cs", "ct"],
+        )
+        _support_edge(conn, eid, "cs", "ct", source_tier="raw")
+        result = agent_heartbeat(conn, "agent_a")
+        ids = [n["edge_id"] for n in result["consensus_nudge"]]
+        assert eid in ids
+
+    def test_causes_with_support_and_outcome_not_nudged(self, conn):
+        _node(conn, "cs2", created_by="agent_a")
+        _node(conn, "ct2", created_by="agent_a")
+        eid = "cause-verified"
+        conn.execute(
+            """INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, confidence, created_by)
+               VALUES (?, ?, ?, 'L3', 'CAUSES', 0.8, 'agent_a')""",
+            [eid, "cs2", "ct2"],
+        )
+        _support_edge(conn, eid, "cs2", "ct2", source_tier="raw")
+        _outcome(conn, "cs2")  # supporter's from_node now has an outcome
+        result = agent_heartbeat(conn, "agent_a")
+        ids = [n["edge_id"] for n in result["consensus_nudge"]]
+        assert eid not in ids
+
+    def test_causes_without_support_not_nudged(self, conn):
+        _node(conn, "cs3", created_by="agent_a")
+        _node(conn, "ct3", created_by="agent_a")
+        eid = "cause-bare"
+        conn.execute(
+            """INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, confidence, created_by)
+               VALUES (?, ?, ?, 'L3', 'CAUSES', 0.8, 'agent_a')""",
+            [eid, "cs3", "ct3"],
+        )
+        result = agent_heartbeat(conn, "agent_a")
+        ids = [n["edge_id"] for n in result["consensus_nudge"]]
+        assert eid not in ids
+
+    def test_other_agents_causes_not_nudged(self, conn):
+        _node(conn, "cs4", created_by="agent_b")
+        _node(conn, "ct4", created_by="agent_b")
+        eid = "cause-other"
+        conn.execute(
+            """INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, confidence, created_by)
+               VALUES (?, ?, ?, 'L3', 'CAUSES', 0.8, 'agent_b')""",
+            [eid, "cs4", "ct4"],
+        )
+        _support_edge(conn, eid, "cs4", "ct4", source_tier="raw")
+        result = agent_heartbeat(conn, "agent_a")
+        ids = [n["edge_id"] for n in result["consensus_nudge"]]
+        assert eid not in ids
+
+    def test_consensus_nudge_fields_present(self, conn):
+        _node(conn, "cs5", created_by="agent_a")
+        _node(conn, "ct5", created_by="agent_a")
+        eid = "cause-fields"
+        conn.execute(
+            """INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, confidence, created_by)
+               VALUES (?, ?, ?, 'L3', 'CAUSES', 0.8, 'agent_a')""",
+            [eid, "cs5", "ct5"],
+        )
+        _support_edge(conn, eid, "cs5", "ct5", source_tier="raw")
+        result = agent_heartbeat(conn, "agent_a")
+        n = next(x for x in result["consensus_nudge"] if x["edge_id"] == eid)
+        for key in ("edge_id", "from_node", "to_node", "confidence",
+                    "support_count", "strongest_tier"):
+            assert key in n, f"Missing consensus nudge field: {key}"
+        assert n["strongest_tier"] == "raw"
+
+    def test_count_always_present(self, conn):
+        result = agent_heartbeat(conn, "agent_a")
+        assert "consensus_nudge" in result
+        assert "consensus_nudge_count" in result
+        assert result["consensus_nudge_count"] == len(result["consensus_nudge"])
+
+    def test_capped_at_three(self, conn):
+        for i in range(5):
+            _node(conn, f"cs{i}", created_by="agent_a")
+            _node(conn, f"ct{i}", created_by="agent_a")
+            eid = f"cause-cap-{i}"
+            conn.execute(
+                """INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, confidence, created_by)
+                   VALUES (?, ?, ?, 'L3', 'CAUSES', 0.8, 'agent_a')""",
+                [eid, f"cs{i}", f"ct{i}"],
+            )
+            _support_edge(conn, eid, f"cs{i}", f"ct{i}", source_tier="raw")
+        result = agent_heartbeat(conn, "agent_a")
+        assert result["consensus_nudge_count"] <= 3
+
+
 # ── Combined response shape ───────────────────────────────────────────────────
 
 
 class TestHeartbeatResponseShape:
     def test_all_new_fields_always_present(self, conn):
         result = agent_heartbeat(conn, "agent_a")
-        for key in ("sacred_references", "sacred_references_count", "challenge_ratio", "challenge_nudge"):
+        for key in ("sacred_references", "sacred_references_count", "challenge_ratio",
+                    "challenge_nudge", "epistemic_nudges", "epistemic_nudge_count",
+                    "consensus_nudge", "consensus_nudge_count"):
             assert key in result, f"Missing heartbeat field: {key}"
 
     def test_heartbeat_creates_agent_state_on_first_call(self, conn):

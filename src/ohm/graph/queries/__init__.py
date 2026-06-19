@@ -1212,6 +1212,211 @@ def create_support(
     return _rows_to_dicts(conn.execute("SELECT * FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [support_id]))[0]
 
 
+def find_homogeneous_causes(
+    conn: DuckDBPyConnection,
+    *,
+    target_node_id: str | None = None,
+    min_confidence: float = 0.5,
+    homogeneity_threshold: float = 0.8,
+    min_support_count: int = 2,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Find L3 CAUSES edges whose supporting evidence is homogeneous (OHM-jbsr).
+
+    A CAUSES edge is flagged when its SUPPORTS edges (linked via challenge_of)
+    all share the same source_tier (or all lack one) — the recursive-agreement
+    pattern that oppositional review targets. homogeneity_score is 1.0 when
+    every supporter shares a single tier, falling toward 0 as distinct tiers
+    grow. Only edges with at least min_support_count supporters are considered.
+    """
+    from ohm.validation import validate_identifier
+
+    params: list[Any] = [min_confidence, min_support_count]
+    target_clause = ""
+    if target_node_id is not None:
+        target_node_id = validate_identifier(target_node_id, name="target_node_id")
+        target_clause = "AND e.to_node = ?"
+        params = [min_confidence, target_node_id, min_support_count]
+
+    rows = conn.execute(
+        f"""
+        SELECT
+            e.id, e.from_node, e.to_node, e.confidence, e.source_tier, e.created_by,
+            COUNT(sup.id) AS support_count,
+            COUNT(DISTINCT sup.source_tier) AS distinct_tiers,
+            COUNT(DISTINCT sup.created_by) AS distinct_agents,
+            MAX(sup.source_tier) AS support_tier
+        FROM ohm_edges e
+        LEFT JOIN ohm_edges sup ON (
+            sup.challenge_of = e.id
+            AND sup.edge_type = 'SUPPORTS'
+            AND sup.deleted_at IS NULL
+        )
+        WHERE e.edge_type = 'CAUSES'
+          AND e.layer = 'L3'
+          AND e.deleted_at IS NULL
+          AND e.confidence >= ?
+          {target_clause}
+        GROUP BY e.id, e.from_node, e.to_node, e.confidence, e.source_tier, e.created_by
+        HAVING COUNT(sup.id) >= ?
+        """,
+        params,
+    ).fetchall()
+
+    results: list[dict[str, Any]] = []
+    for row in rows:
+        (edge_id, from_node, to_node, confidence, source_tier, created_by,
+         support_count, distinct_tiers, distinct_agents, support_tier) = row
+        if support_count <= 0:
+            continue
+        score = 1.0 if distinct_tiers <= 1 else 1.0 - (distinct_tiers / support_count)
+        if score < homogeneity_threshold:
+            continue
+        tier_label = support_tier if support_tier is not None else "(unassigned)"
+        results.append({
+            "edge_id": edge_id,
+            "from_node": from_node,
+            "to_node": to_node,
+            "confidence": confidence,
+            "source_tier": source_tier,
+            "created_by": created_by,
+            "homogeneity_score": round(score, 4),
+            "support_count": int(support_count),
+            "distinct_tiers": int(distinct_tiers),
+            "distinct_agents": int(distinct_agents),
+            "support_tier": support_tier,
+            "reason": (
+                f"{support_count} supporting SUPPORTS edge(s) share source_tier "
+                f"'{tier_label}' from {distinct_agents} agent(s) — homogeneous support"
+            ),
+        })
+    results.sort(key=lambda r: (r["homogeneity_score"], r["confidence"]), reverse=True)
+    return results[:limit]
+
+
+def detect_consensus_only_support(
+    conn: DuckDBPyConnection,
+    *,
+    edge_id: str,
+) -> dict[str, Any]:
+    """Detect whether a CAUSES edge's strongest support is consensus-only (OHM-2yq2).
+
+    Consensus-only = the edge has >=1 SUPPORTS edge (linked via challenge_of)
+    but NONE of those supporters' from_nodes have a recorded outcome in
+    ohm_outcomes. Per the Hillman truth-vs-consensus framing, agreement without
+    observable outcome is consensus, not evidence. The recommended ceiling is
+    SOURCE_TIER_CEILINGS[strongest_tier] when consensus-only, else None.
+    """
+    from ohm.graph.schema import SOURCE_TIER_CEILINGS
+    from ohm.validation import validate_identifier
+
+    edge_id = validate_identifier(edge_id, name="edge_id")
+    supporters = conn.execute(
+        """SELECT id, from_node, confidence, source_tier, created_by
+           FROM ohm_edges
+           WHERE challenge_of = ? AND edge_type = 'SUPPORTS' AND deleted_at IS NULL""",
+        [edge_id],
+    ).fetchall()
+
+    if not supporters:
+        return {
+            "edge_id": edge_id,
+            "is_consensus_only": False,
+            "supporting_edges": [],
+            "strongest_tier": None,
+            "strongest_ceiling": None,
+            "has_verified_outcome": False,
+            "recommended_ceiling": None,
+        }
+
+    has_outcome = False
+    supporting: list[dict[str, Any]] = []
+    tiers: list[str] = []
+    for row in supporters:
+        sup_id, from_node, conf, tier, created_by = row
+        supporting.append({
+            "id": sup_id, "from_node": from_node, "confidence": conf,
+            "source_tier": tier, "created_by": created_by,
+        })
+        if tier is not None:
+            tiers.append(tier)
+        if not has_outcome:
+            oc = conn.execute(
+                "SELECT 1 FROM ohm_outcomes WHERE claim_node = ?", [from_node],
+            ).fetchone()
+            if oc:
+                has_outcome = True
+
+    strongest_tier = None
+    strongest_ceiling = None
+    if tiers:
+        strongest_tier = max(tiers, key=lambda t: SOURCE_TIER_CEILINGS.get(t, 0.0))
+        strongest_ceiling = SOURCE_TIER_CEILINGS.get(strongest_tier)
+
+    is_consensus_only = not has_outcome
+    return {
+        "edge_id": edge_id,
+        "is_consensus_only": is_consensus_only,
+        "supporting_edges": supporting,
+        "strongest_tier": strongest_tier,
+        "strongest_ceiling": strongest_ceiling,
+        "has_verified_outcome": has_outcome,
+        "recommended_ceiling": strongest_ceiling if is_consensus_only else None,
+    }
+
+
+def fire_verification_nudge(
+    conn: DuckDBPyConnection,
+    *,
+    edge_id: str,
+    reason: str,
+    created_by: str = "system",
+    confidence: float = 0.3,
+) -> dict[str, Any]:
+    """Auto-fire a consensus-only challenge nudge (OHM-2yq2).
+
+    Creates a CHALLENGED_BY edge with challenge_type='CONSENSUS_FLAG' referencing
+    the target edge. Idempotent: if a CONSENSUS_FLAG nudge already exists for the
+    edge, returns the existing one without creating a duplicate.
+    """
+    import uuid
+
+    from ohm.validation import validate_confidence, validate_identifier
+
+    edge_id = validate_identifier(edge_id, name="edge_id")
+    confidence = validate_confidence(confidence)
+
+    existing = conn.execute(
+        """SELECT id FROM ohm_edges
+           WHERE challenge_of = ? AND challenge_type = 'CONSENSUS_FLAG' AND deleted_at IS NULL""",
+        [edge_id],
+    ).fetchone()
+    if existing:
+        return _rows_to_dicts(
+            conn.execute("SELECT * FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [existing[0]])
+        )[0]
+
+    target = conn.execute(
+        "SELECT id, from_node, to_node, layer FROM ohm_edges WHERE id = ? AND deleted_at IS NULL",
+        [edge_id],
+    ).fetchone()
+    if target is None:
+        raise ValueError(f"Edge not found: {edge_id}")
+
+    challenge_id = str(uuid.uuid4())
+    conn.execute(
+        """INSERT INTO ohm_edges
+             (id, from_node, to_node, layer, edge_type, created_by,
+              confidence, condition, challenge_of, challenge_type)
+           VALUES (?, ?, ?, ?, 'CHALLENGED_BY', ?, ?, ?, ?, 'CONSENSUS_FLAG')""",
+        [challenge_id, target[1], target[2], target[3], created_by, confidence, reason, edge_id],
+    )
+    _log_change(conn, "ohm_edges", challenge_id, "INSERT", created_by)
+    return _rows_to_dicts(
+        conn.execute("SELECT * FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [challenge_id])
+    )[0]
+
+
 def delete_node(
     conn: DuckDBPyConnection,
     *,

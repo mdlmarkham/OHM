@@ -130,6 +130,35 @@ subprocess.run(["ohm", "graph", "write", "--from", node, ...])
 
 Why: The SDK runs in-process (no subprocess overhead), returns structured data (no text parsing), and supports batch operations. The CLI spawns a new process per command and returns text that must be parsed.
 
+## Sub-Agent Delegation
+
+**Delegate as often as practical.** OHM work falls into recurring shapes (research, schema, plumbing, tests, ADRs, search) that map onto specialized sub-agents. Default to dispatching a sub-agent rather than doing the work inline — it preserves the primary's context, runs in parallel, and is billed against Synthetic quota (not the tight OpenCode-Go `$12/5hr` window), so dispatch is cheap. Do the orchestrating; let sub-agents do the grinding.
+
+### When to dispatch which sub-agent
+
+| Trigger | Sub-agent | Notes |
+|---|---|---|
+| Need to understand existing patterns / find where code lives before changing it | `ohm-researcher` | Read-only, reports `file:line` + snippets. Dispatch **before** implementing. |
+| Fast find-by-pattern or keyword search across the codebase | `explore` | Read-only, cheap, high-volume. Prefer over manual grep/glob for non-trivial searches. |
+| Multi-step research or execution the primary shouldn't context-switch for | `general` | Code-capable. Use for background work the primary doesn't need to drive. |
+| Adding a column / `VALID_*` frozenset / `validate_*` / migration | `ohm-schemer` | Owns `SCHEMA_VERSION` bumps + idempotent `ALTER TABLE`. |
+| Wiring a field/operation through queries → store → SDK → handler | `ohm-plumber` | Mirrors the 4-layer pattern; preserves backward compat (None defaults). |
+| A feature needs test coverage | `ohm-test-writer` | Follows `tests/test_*.py` patterns; runs pytest to verify. |
+| A design decision must be captured | `ohm-adr-writer` | Writes `docs/adr/NNNN-*.md`, updates the README index. |
+
+### Delegation rules
+
+- **Parallelize independent work.** Send multiple Task calls in one message when the work is independent (e.g., a wave of research agents, one per issue). This is the highest-leverage habit — N sub-agents finish in the time of one.
+- **Research before implement.** For any non-trivial change, dispatch `ohm-researcher` first; implement from its findings. Skipping this is how conventions get broken.
+- **Sequence dependent work.** Schema (`ohm-schemer`) → plumbing (`ohm-plumber`) → tests (`ohm-test-writer`) → ADR (`ohm-adr-writer`) is the typical order for a new field. Don't run tests before the plumbing lands.
+- **Don't duplicate delegated work.** Once a sub-agent is dispatched for a unit of work, the primary should move to non-overlapping work or wait — don't redo the same investigation inline.
+- **Verify, don't trust.** Sub-agent output is generally reliable but should be checked against the codebase for high-stakes changes. Run the quality gates (`python -m pytest tests/ -v`) after implementation agents finish.
+- **The primary still owns the graph + Beads.** Sub-agents do not file Beads issues, claim/close work, commit, or push — only the primary does.
+
+### Model routing
+
+All project sub-agents run on **Synthetic** models (HuggingFace-hosted via the Synthetic provider), preserving the OpenCode-Go budget for the primary agent. Routing lives in `.opencode/agents/*.md` (frontmatter `model:`) and `.opencode/opencode.json` (built-in overrides); see `.opencode/agents/README.md` for the full table. **Restart opencode** after editing routing — config loads once at startup.
+
 ## Decision Policy — Phase 1 POMDP (OHM-od01.5)
 
 When facing a decision, the agent should ask the policy endpoint whether to **observe** (gather more information) or **act** (exploit current belief).

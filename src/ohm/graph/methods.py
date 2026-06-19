@@ -236,6 +236,66 @@ def detect_contradictions(
     }
 
 
+def oppositional_review(
+    conn: DuckDBPyConnection,
+    *,
+    target_node_id: str | None = None,
+    min_confidence: float = 0.5,
+    homogeneity_threshold: float = 0.8,
+    min_support_count: int = 2,
+    auto_challenge: bool = False,
+    reviewer_agent: str = "system_oppositional",
+    challenge_budget: int = 3,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Oppositional review — the institutional substitute for a dissenting peer reviewer (OHM-jbsr).
+
+    Detects L3 CAUSES edges whose support is homogeneous in source_tier and
+    agent authorship, then either flags them for agent review or (opt-in)
+    auto-creates low-confidence CHALLENGED_BY edges. Mirrors detect_contradictions:
+    the substrate detects, agents decide. auto_challenge defaults to False.
+
+    Phase 1 uses source_tier + agent homogeneity only. Phase 2 will add the
+    source_diversity_score dimension (OHM-qi6r); Phase 3 the embedding-cluster
+    dimension (OHM-wvz8.2).
+    """
+    from ohm.queries import create_challenge, find_homogeneous_causes
+
+    flagged = find_homogeneous_causes(
+        conn,
+        target_node_id=target_node_id,
+        min_confidence=min_confidence,
+        homogeneity_threshold=homogeneity_threshold,
+        min_support_count=min_support_count,
+        limit=limit,
+    )
+
+    challenged: list[dict[str, Any]] = []
+    if auto_challenge:
+        for entry in flagged[:challenge_budget]:
+            challenge = create_challenge(
+                conn,
+                edge_id=entry["edge_id"],
+                reason=entry["reason"],
+                created_by=reviewer_agent,
+                confidence=0.3,
+            )
+            challenged.append({"edge_id": entry["edge_id"], "challenge_id": challenge["id"]})
+
+    return {
+        "flagged_edges": flagged,
+        "challenged_edges": challenged,
+        "review_summary": {
+            "total_flagged": len(flagged),
+            "total_challenged": len(challenged),
+            "dimensions_used": ["source_tier", "agent_authorship"],
+            "homogeneity_threshold": homogeneity_threshold,
+            "min_support_count": min_support_count,
+            "auto_challenge": auto_challenge,
+        },
+    }
+
+
 def agent_heartbeat(
     conn: DuckDBPyConnection,
     agent_name: str,
@@ -443,6 +503,103 @@ def agent_heartbeat(
         ]
     else:
         state["challenge_nudge"] = []
+
+    # OHM-secv / ADR-018: Epistemic nudges for web-research nodes — nodes
+    # this agent imported from web research (research / metis-research /
+    # clio-research) that still lack a source_tier assessment or any
+    # recorded outcome. Nudge toward verification + tier assignment.
+    web_research_nudge = conn.execute(
+        """
+        SELECT n.id, n.label, n.type, n.confidence, n.provenance,
+               n.source_tier, n.url, n.created_at,
+               EXTRACT(DAY FROM CURRENT_TIMESTAMP - n.created_at) AS age_days
+        FROM ohm_nodes n
+        WHERE n.deleted_at IS NULL
+          AND n.created_by = ?
+          AND n.provenance IN ('research', 'metis-research', 'clio-research')
+          AND (
+              n.source_tier IS NULL
+              OR NOT EXISTS (
+                  SELECT 1 FROM ohm_outcomes oc
+                  WHERE oc.claim_node = n.id
+              )
+          )
+        ORDER BY n.confidence DESC, n.created_at ASC
+        LIMIT 5
+    """,
+        [agent_name],
+    ).fetchall()
+
+    if web_research_nudge:
+        state["epistemic_nudges"] = [
+            {
+                "node_id": row[0],
+                "label": row[1],
+                "type": row[2],
+                "confidence": row[3],
+                "provenance": row[4],
+                "source_tier": row[5],
+                "url": row[6],
+                "created_at": str(row[7]) if row[7] else None,
+                "age_days": round(float(row[8]), 1) if row[8] else 0.0,
+            }
+            for row in web_research_nudge
+        ]
+        state["epistemic_nudge_count"] = len(web_research_nudge)
+    else:
+        state["epistemic_nudges"] = []
+        state["epistemic_nudge_count"] = 0
+
+    # OHM-2yq2: Consensus-only nudge — the agent's CAUSES edges whose strongest
+    # support is agreement (SUPPORTS edges with no recorded outcomes on their
+    # from_nodes). Per the Hillman truth-vs-consensus framing these hit a
+    # confidence ceiling and deserve verification or challenge.
+    consensus_nudge = conn.execute(
+        """
+        SELECT e.id, e.from_node, e.to_node, e.confidence, e.source_tier,
+               fn.label AS from_label, tn.label AS to_label,
+               COUNT(sup.id) AS support_count,
+               MAX(sup.source_tier) AS strongest_tier
+        FROM ohm_edges e
+        LEFT JOIN ohm_edges sup ON (
+            sup.challenge_of = e.id AND sup.edge_type = 'SUPPORTS' AND sup.deleted_at IS NULL
+        )
+        LEFT JOIN ohm_nodes fn ON e.from_node = fn.id AND fn.deleted_at IS NULL
+        LEFT JOIN ohm_nodes tn ON e.to_node = tn.id AND tn.deleted_at IS NULL
+        WHERE e.layer = 'L3' AND e.edge_type = 'CAUSES'
+          AND e.deleted_at IS NULL AND e.created_by = ?
+        GROUP BY e.id, e.from_node, e.to_node, e.confidence, e.source_tier, fn.label, tn.label
+        HAVING COUNT(sup.id) > 0
+          AND NOT EXISTS (
+              SELECT 1 FROM ohm_edges s2
+              JOIN ohm_outcomes oc ON oc.claim_node = s2.from_node
+              WHERE s2.challenge_of = e.id AND s2.edge_type = 'SUPPORTS' AND s2.deleted_at IS NULL
+          )
+        ORDER BY e.confidence DESC
+        LIMIT 3
+    """,
+        [agent_name],
+    ).fetchall()
+
+    if consensus_nudge:
+        state["consensus_nudge"] = [
+            {
+                "edge_id": row[0],
+                "from_node": row[1],
+                "to_node": row[2],
+                "confidence": row[3],
+                "source_tier": row[4],
+                "from_label": row[5],
+                "to_label": row[6],
+                "support_count": int(row[7]),
+                "strongest_tier": row[8],
+            }
+            for row in consensus_nudge
+        ]
+        state["consensus_nudge_count"] = len(consensus_nudge)
+    else:
+        state["consensus_nudge"] = []
+        state["consensus_nudge_count"] = 0
 
     return state
 

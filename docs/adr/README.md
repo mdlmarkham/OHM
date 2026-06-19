@@ -408,3 +408,47 @@ Add a five-tier `source_tier` enum on `ohm_nodes` and `ohm_edges` with confidenc
 - Unlocks source diversity scoring (OHM-qi6r), tier-aware verification loops (OHM-2yq2), and oppositional review (OHM-jbsr)
 - Legacy write paths without tier pass NULL — protection is opt-in until callers migrate
 - See [full ADR](0028-source-tier-architecture.md)
+
+---
+
+## ADR-029: Consensus-Only Confidence Ceilings and Auto-Challenge Nudges
+
+**Date:** 2026-06-19
+**Status:** Accepted
+
+### Context
+
+Hillman's truth-vs-consensus framing and Cornell UGC poisoning (arxiv 2605.24245) show that recursive agreement loops compound into false confidence. ADR-028 added per-source confidence ceilings, but a CAUSES edge can still reach high confidence when many SUPPORTS edges agree even if none have recorded outcomes. The AND-gate of independent verification is missing for the support structure.
+
+### Decision
+
+Detect consensus-only support (SUPPORTS edges with no recorded outcomes on their from_nodes) via `detect_consensus_only_support()`. Recommend a confidence ceiling from the strongest supporter's tier when consensus-only. Auto-fire `CONSENSUS_FLAG` challenge nudges via `fire_verification_nudge()` (idempotent, low-confidence 0.3). Surface up to 3 consensus-only edges per heartbeat. No DDL — computed property, no schema change. CAUSES edges only (Phase 1).
+
+### Consequences
+
+- Consensus-only edges surfaced for verification but not forcibly ceiling-clamped at write time (deferred)
+- Auto-nudges capped at 3/heartbeat and idempotent to avoid spam
+- Bridges ADR-028 (source tier ceilings) and ADR-018 (verification loops)
+- See [full ADR](0029-consensus-verification-loops.md)
+
+---
+
+## ADR-030: Oppositional Review Pipeline
+
+**Date:** 2026-06-19
+**Status:** Accepted
+
+### Context
+
+Atlas framing: oppositional review is the institutional substitute for a dissenting peer reviewer. CAUSES edges whose support is homogeneous in source tier or agent authorship can form recursive agreement loops. ADR-028 made `source_tier` available; this ADR uses it as the first homogeneity dimension.
+
+### Decision
+
+`find_homogeneous_causes()` detects L3 CAUSES edges whose SUPPORTS edges share a single `source_tier` (homogeneity_score ≥ 0.8, min 2 supporters). `oppositional_review()` orchestrates detection + optional auto-challenge (default off, budget 3/run, confidence 0.3). Synthesis hook runs review on new clusters non-fatally. Phase 1 uses `source_tier` + `agent_authorship` only. No DDL — reuses existing columns. `reviewer_agent` defaults to `system_oppositional` to avoid self-challenge paradox.
+
+### Consequences
+
+- Flag-only default prevents over-charging on small homogeneous graphs
+- Phase 2 adds `source_diversity_score` + lexical similarity (OHM-qi6r); Phase 3 adds embedding clusters (OHM-wvz8.2)
+- Auto-challenges are low-confidence and clearly labeled; ADR-018 verification loops apply
+- See [full ADR](0030-oppositional-review-pipeline.md)

@@ -1777,6 +1777,44 @@ class GraphHandlerMixin:
                 result["warnings"].append(f"cluster_ids not found (skipped): {invalid_ids}")
             if edge_errors:
                 result["warnings"].extend(edge_errors)
+
+        # OHM-jbsr: Oppositional review — flag CAUSES edges with homogeneous
+        # source_tier/agent support that touch the clusters this synthesis
+        # backs. Non-fatal: never blocks the synthesis.
+        try:
+            from ohm.graph.methods import oppositional_review
+
+            all_flagged = []
+            seen = set()
+            for cid in validated_cluster_ids:
+                review = oppositional_review(
+                    self.current_store.conn,
+                    target_node_id=cid,
+                    auto_challenge=False,
+                    limit=10,
+                )
+                for entry in review["flagged_edges"]:
+                    if entry["edge_id"] not in seen:
+                        seen.add(entry["edge_id"])
+                        all_flagged.append(entry)
+            if all_flagged:
+                result["oppositional_review"] = {
+                    "flagged_edges": all_flagged,
+                    "challenged_edges": [],
+                    "review_summary": {
+                        "total_flagged": len(all_flagged),
+                        "total_challenged": 0,
+                        "dimensions_used": ["source_tier", "agent_authorship"],
+                        "auto_challenge": False,
+                    },
+                }
+        except Exception:
+            import logging
+
+            logging.getLogger("ohm.handlers").debug(
+                "oppositional review skipped for synthesis %s", node_id, exc_info=True
+            )
+
         self._json_response(201, result)
 
     def _post_batch(self, path: str, qs: dict, body: dict, agent: str) -> None:
