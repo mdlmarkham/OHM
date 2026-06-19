@@ -475,3 +475,28 @@ Pure-Python HD module at `src/ohm/inference/hd.py`. 10,000-bit hypervectors, see
 - All-pairs search won't scale past ~1K nodes without indexing (wvz8.2)
 - Primitive tokenization (whitespace split, no TF-IDF) — iterated later
 - See [full ADR](0031-hd-fingerprint-prototype.md)
+
+---
+
+## ADR-032: HD Membership Layer — Persistent Fingerprints in DuckDB
+
+**Date:** 2026-06-19
+**Status:** Accepted
+
+### Context
+
+ADR-031's compute-on-demand prototype recomputes all fingerprints per query and loses them on DB restart. Persistent storage eliminates redundant work and enables membership search without recomputation overhead.
+
+### Decision
+
+Add `hd_fingerprint BLOB` column to `ohm_nodes` (nullable, default NULL). Schema version `0.31.0` with idempotent ALTER TABLE. Partial index `WHERE hd_fingerprint IS NOT NULL`. `VALID_HD_DIMENSIONS = frozenset({10_000})` for validation. `validate_hd_fingerprint` checks byte length = `(dim+7)//8`. Opt-in storage via `update_node_hd_fingerprint` (not auto-populated on create). `hd_membership_search` fetches stored BLOBs, computes Hamming similarity in Python (DuckDB lacks BLOB XOR). `batch_update_hd_fingerprints` for bulk migration. Complementary to `semantic_search` (cosine on FLOAT[768]), not replacing it.
+
+### Consequences
+
+- Fingerprints survive DB restarts (unlike ADR-031 prototype)
+- Search is O(n) fetch + compare vs. O(n) with recomputation
+- Still brute-force Python-side; no HNSW for Hamming distance
+- 1.25 KB/node storage overhead
+- Future: `hybrid_search` combining cosine + Hamming with configurable weights
+
+- See [full ADR](0032-hd-membership-layer.md)
