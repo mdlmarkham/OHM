@@ -400,6 +400,7 @@ class Graph:
         current_best_action: str | None = None,
         action_alternatives: list[str] | None = None,
         connects_to: list[str] | None = None,
+        source_tier: str | None = None,
     ) -> dict[str, Any]:
         """Create a node and return its full record.
 
@@ -419,6 +420,10 @@ class Graph:
         Args:
             tags: Optional tags for categorization and discovery.
             metadata: Optional structured key-value data (JSON dict).
+            source_tier: Optional quality tier for the source (ADR-028). One of
+                raw/unverified/preliminary/official/verified. When set, confidence
+                must not exceed the tier's ceiling. None means tier not assessed
+                (no ceiling applied — backward compatible).
         """
         from ohm.queries import create_node
 
@@ -441,6 +446,7 @@ class Graph:
             current_best_action=current_best_action,
             action_alternatives=action_alternatives,
             connects_to=connects_to,
+            source_tier=source_tier,
         )
 
     def scratch(
@@ -544,11 +550,18 @@ class Graph:
         confidence_p05: float | None = None,
         confidence_p50: float | None = None,
         confidence_p95: float | None = None,
+        source_tier: str | None = None,
     ) -> dict[str, Any]:
         """Create an edge and return its full record.
 
         Returns the complete edge record including all fields
         (id, from_node, to_node, layer, edge_type, created_at, etc.).
+
+        Args:
+            source_tier: Optional quality tier for the source (ADR-028). One of
+                raw/unverified/preliminary/official/verified. When set, confidence
+                must not exceed the tier's ceiling. None means tier not assessed
+                (no ceiling applied — backward compatible).
         """
         from ohm.queries import create_edge
 
@@ -571,6 +584,7 @@ class Graph:
             confidence_p05=confidence_p05,
             confidence_p50=confidence_p50,
             confidence_p95=confidence_p95,
+            source_tier=source_tier,
         )
 
     def challenge(self, edge_id: str, *, reason: str, confidence: float = 0.5) -> dict[str, Any]:

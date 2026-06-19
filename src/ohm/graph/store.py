@@ -671,6 +671,7 @@ class OhmStore:
         action_alternatives: Optional[list[str]] = None,
         utility_usd_per_day: Optional[float] = None,
         utility_currency: Optional[str] = None,
+        source_tier: Optional[str] = None,
         agent_name: Optional[str] = None,
     ) -> dict[str, Any]:
         """Create or update a node. Attributed to the given agent.
@@ -687,11 +688,24 @@ class OhmStore:
             action_alternatives: For decision nodes: list of alternative actions.
             utility_usd_per_day: For decision nodes: monetary value of resolving uncertainty (USD/day).
             utility_currency: ISO 4217 currency code for utility_usd_per_day (e.g. "USD").
+            source_tier: Optional quality tier for the source (ADR-028). When set,
+                confidence must not exceed SOURCE_TIER_CEILINGS[tier]. None means
+                tier not assessed — no ceiling applied (backward compatible).
 
         Returns a dict with the node record and a 'created' key
         indicating whether this was a new creation (True) or an
         update of an existing node (False).
         """
+        from ohm.validation import (
+            validate_confidence,
+            validate_source_tier,
+            enforce_confidence_ceiling,
+        )
+
+        confidence = validate_confidence(confidence)
+        source_tier = validate_source_tier(source_tier)
+        enforce_confidence_ceiling(confidence, source_tier)
+
         actor = agent_name or self.agent_name
         metadata_json = json.dumps(metadata) if metadata else None
         tag_list = tags if tags else []
@@ -716,7 +730,8 @@ class OhmStore:
                     priority = ?, url = ?, task_status = ?, assigned_to = ?,
                     due_date = ?, utility_scale = ?, current_best_action = ?,
                     action_alternatives = ?, utility_usd_per_day = ?,
-                    utility_currency = ?, updated_at = ?, updated_by = ?
+                    utility_currency = ?, source_tier = ?,
+                    updated_at = ?, updated_by = ?
                 WHERE id = ?
                 """,
                 [
@@ -738,6 +753,7 @@ class OhmStore:
                     alternatives_json,
                     utility_usd_per_day,
                     utility_currency,
+                    source_tier,
                     now,
                     actor,
                     id,
@@ -765,6 +781,7 @@ class OhmStore:
                     assigned_to = ?, due_date = ?, utility_scale = ?,
                     current_best_action = ?, action_alternatives = ?,
                     utility_usd_per_day = ?, utility_currency = ?,
+                    source_tier = ?,
                     updated_at = ?, updated_by = ?,
                     deleted_at = NULL
                 WHERE id = ?
@@ -789,6 +806,7 @@ class OhmStore:
                     alternatives_json,
                     utility_usd_per_day,
                     utility_currency,
+                    source_tier,
                     now,
                     actor,
                     id,
@@ -811,8 +829,9 @@ class OhmStore:
                                    task_status, assigned_to, due_date,
                                    utility_scale, current_best_action, action_alternatives,
                                    utility_usd_per_day, utility_currency,
+                                   source_tier,
                                    created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 id,
@@ -835,6 +854,7 @@ class OhmStore:
                 alternatives_json,
                 utility_usd_per_day,
                 utility_currency,
+                source_tier,
                 now,
                 now,
             ],
@@ -1040,6 +1060,7 @@ class OhmStore:
         confidence_p05: Optional[float] = None,
         confidence_p50: Optional[float] = None,
         confidence_p95: Optional[float] = None,
+        source_tier: Optional[str] = None,
         agent_name: Optional[str] = None,
         deduplicate: bool = True,
     ) -> Optional[dict[str, Any]]:
@@ -1055,6 +1076,9 @@ class OhmStore:
             confidence_p05: PERT optimistic estimate for confidence.
             confidence_p50: PERT most-likely estimate for confidence.
             confidence_p95: PERT pessimistic estimate for confidence.
+            source_tier: Optional quality tier for the source (ADR-028). When set,
+                confidence must not exceed SOURCE_TIER_CEILINGS[tier]. None means
+                tier not assessed — no ceiling applied (backward compatible).
             deduplicate: If True, check for an existing non-deleted edge with the
                 same (from_node, to_node, edge_type, layer) and update it instead
                 of creating a duplicate. Default True.
@@ -1064,6 +1088,15 @@ class OhmStore:
         - L3/L4: creates with attribution, cannot overwrite
         - Challenge edges: create separate, don't modify
         """
+        from ohm.validation import (
+            validate_source_tier,
+            enforce_confidence_ceiling,
+        )
+
+        source_tier = validate_source_tier(source_tier)
+        if confidence is not None:
+            enforce_confidence_ceiling(confidence, source_tier)
+
         actor = agent_name or self.agent_name
         now = self._now()
 
@@ -1175,10 +1208,11 @@ class OhmStore:
                                     challenge_type, urgency, probability,
                                     probability_p05, probability_p50, probability_p95,
                                     confidence_p05, confidence_p50, confidence_p95,
+                                    source_tier,
                                     created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            [from_node, to_node, layer, edge_type, confidence, condition, provenance, actor, challenge_of, challenge_type, urgency, probability, probability_p05, probability_p50, probability_p95, confidence_p05, confidence_p50, confidence_p95, now, now],
+            [from_node, to_node, layer, edge_type, confidence, condition, provenance, actor, challenge_of, challenge_type, urgency, probability, probability_p05, probability_p50, probability_p95, confidence_p05, confidence_p50, confidence_p95, source_tier, now, now],
         )
 
         edge = self.execute_one(

@@ -984,6 +984,7 @@ class GraphHandlerMixin:
             action_alternatives=body.get("action_alternatives"),
             utility_usd_per_day=body.get("utility_usd_per_day"),
             utility_currency=body.get("utility_currency"),
+            source_tier=body.get("source_tier"),
             agent_name=agent,
         )
         event_type = "node.created" if result.get("created") else "node.updated"
@@ -1361,6 +1362,7 @@ class GraphHandlerMixin:
             confidence_p05=body.get("confidence_p05"),
             confidence_p50=body.get("confidence_p50"),
             confidence_p95=body.get("confidence_p95"),
+            source_tier=body.get("source_tier"),
             agent_name=agent,
         )
         decorations = self._run_post_ingest_hooks(agent, "edge", result)

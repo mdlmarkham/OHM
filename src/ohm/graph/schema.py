@@ -268,6 +268,29 @@ VALID_URGENCY = frozenset({"low", "normal", "high", "critical"})
 
 VALID_PRIORITY = frozenset({"P0", "P1", "P2", "P3", "P4"})
 
+# ── Source Tier (ADR-028) ───────────────────────────────────────────────────
+# Quality dimension for claims and edges. Bridges ADR-015 (citation_status)
+# and ADR-018.3 (verification decay). Each tier caps the confidence that can
+# be claimed — a 0.9 confidence from `raw` is rejected.
+
+VALID_SOURCE_TIERS = frozenset(
+    {
+        "raw",  # Single unverified claim, no corroboration
+        "unverified",  # Cited but no independent verification
+        "preliminary",  # One independent verification
+        "official",  # Institutional / peer-reviewed source
+        "verified",  # Multi-source confirmed + outcome recorded
+    }
+)
+
+SOURCE_TIER_CEILINGS: dict[str, float] = {
+    "raw": 0.3,
+    "unverified": 0.5,
+    "preliminary": 0.7,
+    "official": 0.9,
+    "verified": 1.0,
+}
+
 VALID_TASK_STATUSES = frozenset(
     {
         "open",  # New task, not yet started
@@ -974,7 +997,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.29.0"
+SCHEMA_VERSION = "0.30.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -1343,6 +1366,16 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             "CREATE INDEX IF NOT EXISTS idx_data_products_type ON ohm_data_products(type);",
             "CREATE INDEX IF NOT EXISTS idx_data_products_status ON ohm_data_products(status);",
             "CREATE INDEX IF NOT EXISTS idx_data_products_customer ON ohm_data_products(customer_id);",
+        ],
+    ),
+    (
+        "0.30.0",
+        "ADR-028: Source tier — add source_tier column to ohm_nodes/ohm_edges",
+        [
+            "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS source_tier VARCHAR;",
+            "ALTER TABLE ohm_edges ADD COLUMN IF NOT EXISTS source_tier VARCHAR;",
+            "CREATE INDEX IF NOT EXISTS idx_nodes_source_tier ON ohm_nodes(source_tier);",
+            "CREATE INDEX IF NOT EXISTS idx_edges_source_tier ON ohm_edges(source_tier);",
         ],
     ),
 ]

@@ -10,6 +10,8 @@ from ohm.validation import (
     validate_confidence,
     validate_depth,
     validate_pert_triple,
+    validate_source_tier,
+    enforce_confidence_ceiling,
 )
 
 
@@ -277,3 +279,53 @@ class TestValidatePERTTriple:
     def test_custom_name_in_error(self):
         with pytest.raises(ValueError, match="confidence PERT"):
             validate_pert_triple(0.6, 0.5, 0.9, name="confidence PERT")
+
+
+class TestValidateSourceTier:
+    """Tests for validate_source_tier (ADR-028)."""
+
+    @pytest.mark.parametrize(
+        "value",
+        ["raw", "unverified", "preliminary", "official", "verified"],
+    )
+    def test_valid_tiers(self, value):
+        assert validate_source_tier(value) == value
+
+    def test_none_passes_through(self):
+        assert validate_source_tier(None) is None
+
+    @pytest.mark.parametrize(
+        "value",
+        ["unknown", "primary", "PRIMARY", "Verified", "", "raw ", " raw"],
+    )
+    def test_invalid_tiers_raise(self, value):
+        with pytest.raises(ValueError, match="Invalid source_tier"):
+            validate_source_tier(value)
+
+
+class TestEnforceConfidenceCeiling:
+    """Tests for enforce_confidence_ceiling (ADR-028)."""
+
+    @pytest.mark.parametrize(
+        "tier,ceiling",
+        [
+            ("raw", 0.3),
+            ("unverified", 0.5),
+            ("preliminary", 0.7),
+            ("official", 0.9),
+            ("verified", 1.0),
+        ],
+    )
+    def test_at_ceiling_passes(self, tier, ceiling):
+        enforce_confidence_ceiling(ceiling, tier)
+
+    def test_above_ceiling_raises(self):
+        with pytest.raises(ValueError, match="exceeds ceiling"):
+            enforce_confidence_ceiling(0.5, "raw")
+
+    def test_none_tier_skips_check(self):
+        enforce_confidence_ceiling(1.0, None)
+        enforce_confidence_ceiling(0.0, None)
+
+    def test_just_above_ceiling_tolerance(self):
+        enforce_confidence_ceiling(0.3 + 1e-12, "raw")

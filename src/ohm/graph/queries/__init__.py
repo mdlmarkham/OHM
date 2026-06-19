@@ -906,6 +906,7 @@ def create_node(
     current_best_action: str | None = None,
     action_alternatives: list[str] | None = None,
     connects_to: list[str] | None = None,
+    source_tier: str | None = None,
 ) -> dict[str, Any]:
     """Create a new node and return its full record.
 
@@ -919,6 +920,9 @@ def create_node(
             to. Used by the cross-link requirement (OHM-tjzh / ADR-018) to prove
             the agent has anchored a derived claim to existing graph structure.
             Each id must already exist; the function does not auto-create edges.
+        source_tier: Optional quality tier for the source (ADR-028). When set,
+            confidence must not exceed SOURCE_TIER_CEILINGS[tier]. None means
+            tier not assessed — no ceiling applied (backward compatible).
     """
     import json
     from ohm.schema import (
@@ -926,13 +930,20 @@ def create_node(
         validate_node_type,
         VALID_PRIORITY,
     )
-    from ohm.validation import validate_confidence, validate_identifier
+    from ohm.validation import (
+        validate_confidence,
+        validate_identifier,
+        validate_source_tier,
+        enforce_confidence_ceiling,
+    )
 
     if not label or len(label) > 500:
         raise ValueError("Label must be non-empty and ≤ 500 characters")
     if not validate_node_type(node_type):
         raise ValueError(f"Invalid node type: {node_type}")
     confidence = validate_confidence(confidence)
+    source_tier = validate_source_tier(source_tier)
+    enforce_confidence_ceiling(confidence, source_tier)
     if priority is not None and priority not in VALID_PRIORITY:
         raise ValueError(f"Invalid priority: {priority}. Must be one of: {sorted(VALID_PRIORITY)}")
     if utility_scale is not None and not (0.0 <= utility_scale <= 1.0):
@@ -982,9 +993,10 @@ def create_node(
                 tags = ?, metadata = ?,
                 utility_scale = ?, utility_usd_per_day = ?, utility_currency = ?,
                 current_best_action = ?, action_alternatives = ?,
+                source_tier = ?,
                 deleted_at = NULL, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?""",
-            [label, node_type, content, created_by, visibility, provenance, confidence, priority, url, tags_json, metadata_json, utility_scale, utility_usd_per_day, utility_currency, current_best_action, alternatives_json, node_id],
+            [label, node_type, content, created_by, visibility, provenance, confidence, priority, url, tags_json, metadata_json, utility_scale, utility_usd_per_day, utility_currency, current_best_action, alternatives_json, source_tier, node_id],
         )
         _log_change(conn, "ohm_nodes", node_id, "UPDATE", created_by)
         return _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node_id]))[0]
@@ -992,9 +1004,9 @@ def create_node(
     conn.execute(
         """INSERT INTO ohm_nodes
            (id, label, type, content, created_by, visibility, provenance, confidence, priority, url,
-            tags, metadata, utility_scale, utility_usd_per_day, utility_currency, current_best_action, action_alternatives)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        [node_id, label, node_type, content, created_by, visibility, provenance, confidence, priority, url, tags_json, metadata_json, utility_scale, utility_usd_per_day, utility_currency, current_best_action, alternatives_json],
+            tags, metadata, utility_scale, utility_usd_per_day, utility_currency, current_best_action, action_alternatives, source_tier)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [node_id, label, node_type, content, created_by, visibility, provenance, confidence, priority, url, tags_json, metadata_json, utility_scale, utility_usd_per_day, utility_currency, current_best_action, alternatives_json, source_tier],
     )
     _log_change(conn, "ohm_nodes", node_id, "INSERT", created_by)
     # Return full node record
@@ -1071,17 +1083,30 @@ def create_edge(
     confidence_p05: float | None = None,
     confidence_p50: float | None = None,
     confidence_p95: float | None = None,
+    source_tier: str | None = None,
 ) -> dict[str, Any]:
-    """Create a new edge and return its full record. Validates layer/type compatibility."""
+    """Create a new edge and return its full record. Validates layer/type compatibility.
+
+    source_tier (ADR-028): Optional quality tier for the claim. When set,
+    confidence must not exceed SOURCE_TIER_CEILINGS[tier]. None means tier
+    not assessed — no ceiling applied (backward compatible).
+    """
     import uuid
     import json
 
     from ohm.schema import validate_edge_type, VALID_URGENCY
-    from ohm.validation import validate_confidence, validate_pert_triple
+    from ohm.validation import (
+        validate_confidence,
+        validate_pert_triple,
+        validate_source_tier,
+        enforce_confidence_ceiling,
+    )
 
     if not validate_edge_type(layer, edge_type):
         raise ValueError(f"Invalid edge type '{edge_type}' for layer '{layer}'")
     confidence = validate_confidence(confidence)
+    source_tier = validate_source_tier(source_tier)
+    enforce_confidence_ceiling(confidence, source_tier)
     if urgency is not None and urgency not in VALID_URGENCY:
         raise ValueError(f"Invalid urgency: {urgency}. Must be one of: {sorted(VALID_URGENCY)}")
 
@@ -1096,9 +1121,9 @@ def create_edge(
            (id, from_node, to_node, layer, edge_type, created_by,
             confidence, probability, urgency, condition, provenance, metadata,
             probability_p05, probability_p50, probability_p95,
-            confidence_p05, confidence_p50, confidence_p95)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        [edge_id, from_node, to_node, layer, edge_type, created_by, confidence, probability, urgency, condition, provenance, metadata_json, probability_p05, probability_p50, probability_p95, confidence_p05, confidence_p50, confidence_p95],
+            confidence_p05, confidence_p50, confidence_p95, source_tier)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [edge_id, from_node, to_node, layer, edge_type, created_by, confidence, probability, urgency, condition, provenance, metadata_json, probability_p05, probability_p50, probability_p95, confidence_p05, confidence_p50, confidence_p95, source_tier],
     )
     _log_change(conn, "ohm_edges", edge_id, "INSERT", created_by)
     # Return full edge record

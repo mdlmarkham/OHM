@@ -386,3 +386,25 @@ Store ODPS-compliant data product entries in a `ohm_data_products` DuckDB table 
 - Minimal friction: 10 required fields, no pricing/license infrastructure
 - Iceberg-ready: `access_url` can point to Iceberg tables without schema changes
 - See [full ADR](ADR-027-bos-odps-catalog-schema.md)
+
+---
+
+## ADR-028: Source Tier Architecture and Confidence Ceilings
+
+**Date:** 2026-06-19
+**Status:** Accepted
+
+### Context
+
+OHM's `confidence` field has a range check [0, 1] but no quality dimension — a 0.9 claim from a single Reddit post is indistinguishable from a 0.9 claim from a peer-reviewed replication. Cornell UGC poisoning (arxiv 2605.24245) shows user-generated content can claim institutional consensus that doesn't exist; Hillman's truth-vs-consensus framing makes institutional consensus an AND-gate on independent verifications, not an OR-gate on popularity. ADR-015's `citation_status` and ADR-018.3's 30d/365d half-life split both implicitly encode a source-quality dimension that has never been write-time enforced.
+
+### Decision
+
+Add a five-tier `source_tier` enum on `ohm_nodes` and `ohm_edges` with confidence ceilings: `raw` (0.3), `unverified` (0.5), `preliminary` (0.7), `official` (0.9), `verified` (1.0). NULL bypasses enforcement to preserve backward compatibility. `create_node` / `create_edge` raise `ValueError` when tier is set and confidence exceeds ceiling. No default — opt-in via the `source_tier=` parameter. Migration `0.30.0`.
+
+### Consequences
+
+- OHM can no longer confuse high-confidence claims with high-quality sources
+- Unlocks source diversity scoring (OHM-qi6r), tier-aware verification loops (OHM-2yq2), and oppositional review (OHM-jbsr)
+- Legacy write paths without tier pass NULL — protection is opt-in until callers migrate
+- See [full ADR](0028-source-tier-architecture.md)

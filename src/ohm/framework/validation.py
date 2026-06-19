@@ -82,6 +82,45 @@ def validate_confidence(value: float) -> float:
     return value
 
 
+def validate_source_tier(value: str | None) -> str | None:
+    """Validate that *value* is a known source tier (ADR-028).
+
+    Returns the value unchanged if it is None or a valid tier. Raises
+    ValueError for unknown tier strings.
+    """
+    if value is None:
+        return None
+    from ohm.graph.schema import VALID_SOURCE_TIERS
+
+    if value not in VALID_SOURCE_TIERS:
+        raise ValueError(
+            f"Invalid source_tier: '{value}' — must be one of: {sorted(VALID_SOURCE_TIERS)}"
+        )
+    return value
+
+
+def enforce_confidence_ceiling(
+    confidence: float,
+    source_tier: str | None,
+) -> None:
+    """Enforce the source-tier confidence ceiling (ADR-028).
+
+    If source_tier is None, no ceiling is applied (legacy write paths).
+    Otherwise the confidence must not exceed SOURCE_TIER_CEILINGS[tier].
+    """
+    if source_tier is None:
+        return
+    from ohm.graph.schema import SOURCE_TIER_CEILINGS
+
+    ceiling = SOURCE_TIER_CEILINGS.get(source_tier)
+    if ceiling is None:
+        return
+    if confidence > ceiling + 1e-9:
+        raise ValueError(
+            f"Confidence {confidence} exceeds ceiling {ceiling} for source_tier '{source_tier}'"
+        )
+
+
 def validate_depth(value: int, *, max_depth: int = 20) -> int:
     """Validate that *value* is a reasonable traversal depth."""
     if not (1 <= value <= max_depth):
