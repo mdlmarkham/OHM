@@ -500,3 +500,26 @@ Add `hd_fingerprint BLOB` column to `ohm_nodes` (nullable, default NULL). Schema
 - Future: `hybrid_search` combining cosine + Hamming with configurable weights
 
 - See [full ADR](0032-hd-membership-layer.md)
+
+---
+
+## ADR-033: Source Diversity Score — Independence-Weighted Shannon Entropy
+
+**Date:** 2026-06-19
+**Status:** Accepted
+
+### Context
+
+Cornell UGC poisoning (arxiv 2605.24245) shows deep-research agents poisoned when many UGC sources agree. Hillman's truth-vs-consensus framing identifies this as peer-review capture — "many agree" is not "independently verified." ADR-028/029/030 address quality ceilings and consensus detection but cannot measure whether sources are independent. Ten SUPPORTS edges from the same institution are one position, not ten verifications.
+
+### Decision
+
+Three nullable columns on `ohm_nodes`: `source_author`, `source_institution`, `data_origin` (validated against `VALID_DATA_ORIGINS` frozenset). Schema version `0.32.0`. `source_diversity_score` computes weighted normalized Shannon entropy over evidence sources (walk CAUSES/SUPPORTS/EXPECTS/PREDICTS depth=3): `score = 0.4*H(author) + 0.4*H(institution) + 0.2*H(origin)`. Falls back to `created_by` when `source_author` is NULL. Computed-on-read, annotates synthesis response. Four-layer plumbing (queries + store + SDK + server). Backward compatible (None defaults).
+
+### Consequences
+
+- Detects homogeneous UGC citation rings (low score → capture signal)
+- Distinguishes "many agree" from "independently verified" — the Hillman AND-gate
+- Requires agents to populate source_author/institution for full utility
+- Annotation only, not enforcement — low diversity feeds oppositional review (ADR-030)
+- See [full ADR](0033-source-diversity-score.md)
