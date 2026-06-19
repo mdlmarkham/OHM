@@ -907,6 +907,9 @@ def create_node(
     action_alternatives: list[str] | None = None,
     connects_to: list[str] | None = None,
     source_tier: str | None = None,
+    source_author: str | None = None,
+    source_institution: str | None = None,
+    data_origin: str | None = None,
 ) -> dict[str, Any]:
     """Create a new node and return its full record.
 
@@ -932,6 +935,7 @@ def create_node(
     )
     from ohm.validation import (
         validate_confidence,
+        validate_data_origin,
         validate_identifier,
         validate_source_tier,
         enforce_confidence_ceiling,
@@ -943,6 +947,7 @@ def create_node(
         raise ValueError(f"Invalid node type: {node_type}")
     confidence = validate_confidence(confidence)
     source_tier = validate_source_tier(source_tier)
+    data_origin = validate_data_origin(data_origin)
     enforce_confidence_ceiling(confidence, source_tier)
     if priority is not None and priority not in VALID_PRIORITY:
         raise ValueError(f"Invalid priority: {priority}. Must be one of: {sorted(VALID_PRIORITY)}")
@@ -994,9 +999,10 @@ def create_node(
                 utility_scale = ?, utility_usd_per_day = ?, utility_currency = ?,
                 current_best_action = ?, action_alternatives = ?,
                 source_tier = ?,
+                source_author = ?, source_institution = ?, data_origin = ?,
                 deleted_at = NULL, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?""",
-            [label, node_type, content, created_by, visibility, provenance, confidence, priority, url, tags_json, metadata_json, utility_scale, utility_usd_per_day, utility_currency, current_best_action, alternatives_json, source_tier, node_id],
+            [label, node_type, content, created_by, visibility, provenance, confidence, priority, url, tags_json, metadata_json, utility_scale, utility_usd_per_day, utility_currency, current_best_action, alternatives_json, source_tier, source_author, source_institution, data_origin, node_id],
         )
         _log_change(conn, "ohm_nodes", node_id, "UPDATE", created_by)
         return _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node_id]))[0]
@@ -1004,9 +1010,10 @@ def create_node(
     conn.execute(
         """INSERT INTO ohm_nodes
            (id, label, type, content, created_by, visibility, provenance, confidence, priority, url,
-            tags, metadata, utility_scale, utility_usd_per_day, utility_currency, current_best_action, action_alternatives, source_tier)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        [node_id, label, node_type, content, created_by, visibility, provenance, confidence, priority, url, tags_json, metadata_json, utility_scale, utility_usd_per_day, utility_currency, current_best_action, alternatives_json, source_tier],
+            tags, metadata, utility_scale, utility_usd_per_day, utility_currency, current_best_action, action_alternatives, source_tier,
+            source_author, source_institution, data_origin)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [node_id, label, node_type, content, created_by, visibility, provenance, confidence, priority, url, tags_json, metadata_json, utility_scale, utility_usd_per_day, utility_currency, current_best_action, alternatives_json, source_tier, source_author, source_institution, data_origin],
     )
     _log_change(conn, "ohm_nodes", node_id, "INSERT", created_by)
     # Return full node record

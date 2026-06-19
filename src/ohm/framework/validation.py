@@ -99,6 +99,23 @@ def validate_source_tier(value: str | None) -> str | None:
     return value
 
 
+def validate_data_origin(value: str | None) -> str | None:
+    """Validate that *value* is a known data origin (ADR-033).
+
+    Returns the value unchanged if it is None or a valid origin. Raises
+    ValueError for unknown origin strings.
+    """
+    if value is None:
+        return None
+    from ohm.graph.schema import VALID_DATA_ORIGINS
+
+    if value not in VALID_DATA_ORIGINS:
+        raise ValueError(
+            f"Invalid data_origin: '{value}' — must be one of: {sorted(VALID_DATA_ORIGINS)}"
+        )
+    return value
+
+
 def validate_hd_fingerprint(value: bytes | None, *, dimensions: int = 10000) -> bytes | None:
     """Validate that *value* is a bytes-like HD fingerprint of the expected size.
 

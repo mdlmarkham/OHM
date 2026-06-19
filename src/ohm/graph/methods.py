@@ -4150,3 +4150,90 @@ def hd_similarity_search(
             )
     results.sort(key=lambda x: x["hd_similarity"], reverse=True)
     return results[:limit]
+
+
+def source_diversity_score(
+    conn: DuckDBPyConnection,
+    node_id: str,
+    *,
+    max_depth: int = 3,
+) -> dict[str, Any]:
+    import math
+
+    from ohm.validation import validate_identifier
+
+    node_id = validate_identifier(node_id, name="node_id")
+
+    sources = conn.execute(
+        """WITH RECURSIVE evidence AS (
+            SELECT e.from_node, e.to_node, 1 AS depth
+            FROM ohm_edges e
+            WHERE e.to_node = ? AND e.deleted_at IS NULL
+              AND e.edge_type IN ('CAUSES', 'SUPPORTS', 'EXPECTS', 'PREDICTS')
+            UNION ALL
+            SELECT e2.from_node, e2.to_node, ev.depth + 1
+            FROM ohm_edges e2
+            JOIN evidence ev ON e2.to_node = ev.from_node
+            WHERE e2.deleted_at IS NULL
+              AND e2.edge_type IN ('CAUSES', 'SUPPORTS', 'EXPECTS', 'PREDICTS')
+              AND ev.depth < ?
+        )
+        SELECT DISTINCT n.id, n.source_author, n.source_institution, n.data_origin, n.created_by
+        FROM evidence ev
+        JOIN ohm_nodes n ON n.id = ev.from_node
+        WHERE n.deleted_at IS NULL""",
+        [node_id, max_depth],
+    ).fetchall()
+
+    if not sources:
+        return {
+            "node_id": node_id,
+            "score": 0.0,
+            "evidence_count": 0,
+            "author_diversity": 0.0,
+            "institution_diversity": 0.0,
+            "origin_diversity": 0.0,
+            "method": "weighted_shannon",
+        }
+
+    authors = [r[1] or r[4] or "unknown" for r in sources]
+    institutions = [r[2] or "unknown" for r in sources]
+    origins = [r[3] or "unknown" for r in sources]
+
+    def _shannon_entropy(values: list[str]) -> float:
+        if not values:
+            return 0.0
+        counts: dict[str, int] = {}
+        for v in values:
+            counts[v] = counts.get(v, 0) + 1
+        total = len(values)
+        entropy = 0.0
+        for c in counts.values():
+            p = c / total
+            if p > 0:
+                entropy -= p * math.log2(p)
+        max_entropy = math.log2(len(counts)) if len(counts) > 1 else 1.0
+        return entropy / max_entropy if max_entropy > 0 else 0.0
+
+    h_author = _shannon_entropy(authors)
+    h_institution = _shannon_entropy(institutions)
+    h_origin = _shannon_entropy(origins)
+
+    score = 0.4 * h_author + 0.4 * h_institution + 0.2 * h_origin
+
+    distinct_authors = len(set(authors))
+    distinct_institutions = len(set(institutions))
+    distinct_origins = len(set(origins))
+
+    return {
+        "node_id": node_id,
+        "score": round(score, 4),
+        "evidence_count": len(sources),
+        "author_diversity": round(h_author, 4),
+        "institution_diversity": round(h_institution, 4),
+        "origin_diversity": round(h_origin, 4),
+        "distinct_authors": distinct_authors,
+        "distinct_institutions": distinct_institutions,
+        "distinct_origins": distinct_origins,
+        "method": "weighted_shannon",
+    }

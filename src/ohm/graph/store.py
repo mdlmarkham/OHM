@@ -30,6 +30,8 @@ Usage (agent mode):
     # → {"pushed": 3, "pulled": 7, "last_sync": "..."}
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import os
@@ -672,6 +674,9 @@ class OhmStore:
         utility_usd_per_day: Optional[float] = None,
         utility_currency: Optional[str] = None,
         source_tier: Optional[str] = None,
+        source_author: str | None = None,
+        source_institution: str | None = None,
+        data_origin: str | None = None,
         agent_name: Optional[str] = None,
     ) -> dict[str, Any]:
         """Create or update a node. Attributed to the given agent.
@@ -698,12 +703,14 @@ class OhmStore:
         """
         from ohm.validation import (
             validate_confidence,
+            validate_data_origin,
             validate_source_tier,
             enforce_confidence_ceiling,
         )
 
         confidence = validate_confidence(confidence)
         source_tier = validate_source_tier(source_tier)
+        data_origin = validate_data_origin(data_origin)
         enforce_confidence_ceiling(confidence, source_tier)
 
         actor = agent_name or self.agent_name
@@ -731,6 +738,7 @@ class OhmStore:
                     due_date = ?, utility_scale = ?, current_best_action = ?,
                     action_alternatives = ?, utility_usd_per_day = ?,
                     utility_currency = ?, source_tier = ?,
+                    source_author = ?, source_institution = ?, data_origin = ?,
                     updated_at = ?, updated_by = ?
                 WHERE id = ?
                 """,
@@ -754,6 +762,9 @@ class OhmStore:
                     utility_usd_per_day,
                     utility_currency,
                     source_tier,
+                    source_author,
+                    source_institution,
+                    data_origin,
                     now,
                     actor,
                     id,
@@ -782,6 +793,7 @@ class OhmStore:
                     current_best_action = ?, action_alternatives = ?,
                     utility_usd_per_day = ?, utility_currency = ?,
                     source_tier = ?,
+                    source_author = ?, source_institution = ?, data_origin = ?,
                     updated_at = ?, updated_by = ?,
                     deleted_at = NULL
                 WHERE id = ?
@@ -807,6 +819,9 @@ class OhmStore:
                     utility_usd_per_day,
                     utility_currency,
                     source_tier,
+                    source_author,
+                    source_institution,
+                    data_origin,
                     now,
                     actor,
                     id,
@@ -830,8 +845,9 @@ class OhmStore:
                                    utility_scale, current_best_action, action_alternatives,
                                    utility_usd_per_day, utility_currency,
                                    source_tier,
+                                   source_author, source_institution, data_origin,
                                    created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 id,
@@ -855,6 +871,9 @@ class OhmStore:
                 utility_usd_per_day,
                 utility_currency,
                 source_tier,
+                source_author,
+                source_institution,
+                data_origin,
                 now,
                 now,
             ],

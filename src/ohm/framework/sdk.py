@@ -401,6 +401,9 @@ class Graph:
         action_alternatives: list[str] | None = None,
         connects_to: list[str] | None = None,
         source_tier: str | None = None,
+        source_author: str | None = None,
+        source_institution: str | None = None,
+        data_origin: str | None = None,
     ) -> dict[str, Any]:
         """Create a node and return its full record.
 
@@ -424,6 +427,10 @@ class Graph:
                 raw/unverified/preliminary/official/verified. When set, confidence
                 must not exceed the tier's ceiling. None means tier not assessed
                 (no ceiling applied — backward compatible).
+            source_author: Optional original author of the source (ADR-033).
+            source_institution: Optional institution the author belongs to (ADR-033).
+            data_origin: Optional data origin type (ADR-033). One of
+                ugc/peer_reviewed/government/news_wire/sensor/agent_synthesis/expert/unknown.
         """
         from ohm.queries import create_node
 
@@ -447,6 +454,9 @@ class Graph:
             action_alternatives=action_alternatives,
             connects_to=connects_to,
             source_tier=source_tier,
+            source_author=source_author,
+            source_institution=source_institution,
+            data_origin=data_origin,
         )
 
     def scratch(
@@ -752,6 +762,17 @@ class Graph:
         from ohm.graph.queries import batch_update_hd_fingerprints
 
         return batch_update_hd_fingerprints(self._conn, dim=dim, seed=seed, limit=limit)
+
+    def source_diversity(self, node_id: str, *, max_depth: int = 3) -> dict[str, Any]:
+        """Compute source diversity score for a node (OHM-qi6r, ADR-033).
+
+        Weighted Shannon entropy over author, institution, and data origin
+        of evidence sources. Falls back to created_by when source_author
+        is NULL. Score 0-1 where 1 = maximum diversity.
+        """
+        from ohm.graph.methods import source_diversity_score
+
+        return source_diversity_score(self._conn, node_id, max_depth=max_depth)
 
     def update_edge(
         self,

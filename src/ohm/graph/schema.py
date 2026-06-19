@@ -293,6 +293,19 @@ SOURCE_TIER_CEILINGS: dict[str, float] = {
     "verified": 1.0,
 }
 
+VALID_DATA_ORIGINS = frozenset(
+    {
+        "ugc",
+        "peer_reviewed",
+        "government",
+        "news_wire",
+        "sensor",
+        "agent_synthesis",
+        "expert",
+        "unknown",
+    }
+)
+
 VALID_TASK_STATUSES = frozenset(
     {
         "open",  # New task, not yet started
@@ -999,7 +1012,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.31.0"
+SCHEMA_VERSION = "0.32.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -1386,6 +1399,15 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
         [
             "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS hd_fingerprint BLOB;",
             "CREATE INDEX IF NOT EXISTS idx_ohm_nodes_hd_fingerprint ON ohm_nodes(id) WHERE hd_fingerprint IS NOT NULL;",
+        ],
+    ),
+    (
+        "0.32.0",
+        "ADR-033: Source diversity — add source_author, source_institution, data_origin columns",
+        [
+            "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS source_author VARCHAR;",
+            "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS source_institution VARCHAR;",
+            "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS data_origin VARCHAR;",
         ],
     ),
 ]
