@@ -362,3 +362,27 @@ One `ohmd` process, N isolated DuckDB files, per-tenant LRU cache. Customer API 
 - Single-writer serialization per tenant (concurrent reads OK)
 - Horizontal scaling path: consistent-hash router + N ohmd instances
 - See [full ADR](0015-multi-tenancy.md)
+
+---
+
+## ADR-027: BOS Internal ODPS Data Product Catalog Schema
+
+**Date:** 2026-06-19
+**Status:** Proposed
+
+### Context
+
+BOS (Business Operations System) agents produce structured recurring outputs (P&L, risk reports, research digests, audit summaries) with no standard way for other agents to discover or consume them. ODPS v4.1 (Linux Foundation) provides a contract layer for data products designed for AI-agent-first discovery.
+
+### Decision
+
+Store ODPS-compliant data product entries in a `ohm_data_products` DuckDB table with structured columns for queryable discovery plus full ODPS YAML for round-trip fidelity. Enforce 10 minimum fields (7 ODPS + 3 BOS-specific). Agent outputs map to ODPS types (reports, analytic view, decision support, data-driven service). Discovery via MCP endpoint. DuckDB-only storage (Iceberg deferred). Internal-only visibility until pilot proves discipline.
+
+### Consequences
+
+- Standard-based: ODPS v4.1 compliance enables portability
+- Agent-discoverable: MCP endpoint for any agent to find and consume products
+- Provenance-linked: `ohm_node_id` connects products to OHM graph
+- Minimal friction: 10 required fields, no pricing/license infrastructure
+- Iceberg-ready: `access_url` can point to Iceberg tables without schema changes
+- See [full ADR](ADR-027-bos-odps-catalog-schema.md)
