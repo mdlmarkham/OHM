@@ -452,3 +452,26 @@ Atlas framing: oppositional review is the institutional substitute for a dissent
 - Phase 2 adds `source_diversity_score` + lexical similarity (OHM-qi6r); Phase 3 adds embedding clusters (OHM-wvz8.2)
 - Auto-challenges are low-confidence and clearly labeled; ADR-018 verification loops apply
 - See [full ADR](0030-oppositional-review-pipeline.md)
+
+---
+
+## ADR-031: Hyperdimensional Fingerprinting Prototype
+
+**Date:** 2026-06-19
+**Status:** Accepted
+
+### Context
+
+OHM's semantic search (768-dim float embeddings + cosine distance) captures meaning but not structural/type similarity. Hyperdimensional computing with 10,000-bit binary hypervectors (XOR binding, majority-rule bundling, Hamming similarity) provides a complementary membership signal. This is a compute-on-demand prototype — no DDL, no persistent storage.
+
+### Decision
+
+Pure-Python HD module at `src/ohm/inference/hd.py`. 10,000-bit hypervectors, seeded SHA-256 counter-mode for determinism, XOR bind/unbind, majority-rule bundle. Node fingerprint = bind(type, label) ⊕ bundle(content, tags, provenance). Text fingerprint = majority-rule of whitespace-token vectors. Naive O(n²) all-pairs search. Version tag `tastebud_hd_v1`. No DDL / no BLOB column (deferred to OHM-wvz8.2).
+
+### Consequences
+
+- Fast approximate structural similarity complementary to semantic search
+- Deterministic and reproducible (same input + seed = same vector)
+- All-pairs search won't scale past ~1K nodes without indexing (wvz8.2)
+- Primitive tokenization (whitespace split, no TF-IDF) — iterated later
+- See [full ADR](0031-hd-fingerprint-prototype.md)
