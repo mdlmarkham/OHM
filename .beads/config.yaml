@@ -1,2 +1,2 @@
 issue-prefix: OHM
-sync.remote: git+http://local_proxy@127.0.0.1:33835/git/mdlmarkham/OHM
+sync.remote: "git+https://github.com/mdlmarkham/OHM.git"
