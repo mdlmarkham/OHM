@@ -148,6 +148,9 @@ LAYER_EDGE_TYPES: dict[str, frozenset[str]] = {
             "RECOVERED_BY",  # incident state machine
             "NEGOTIATES_WITH",  # SLAs, commitments
             "UPSTREAM_OF",  # Infrastructure: service dependency (OHM-infra)
+            # ── BOS ODPS data product provenance (ADR-027 / OHM-ovwq) ──
+            "PRODUCES",  # producer agent → data product node
+            "CONSUMES",  # consumer agent → data product node
         }
     ),
     "L3": frozenset(

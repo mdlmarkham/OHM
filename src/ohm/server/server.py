@@ -672,6 +672,7 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
 
 from ohm.server.handlers.admin import AdminHandlerMixin
 from ohm.server.handlers.analysis import AnalysisHandlerMixin
+from ohm.server.handlers.catalog import CatalogHandlerMixin
 from ohm.server.handlers.graph import GraphHandlerMixin
 from ohm.server.handlers.infra import InfraHandlerMixin
 from ohm.server.handlers.inference import InferenceHandlerMixin
@@ -679,7 +680,7 @@ from ohm.server.handlers.markov import MarkovHandlerMixin
 from ohm.server.handlers.tenant import TenantHandlerMixin
 
 
-class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, InfraHandlerMixin, InferenceHandlerMixin, MarkovHandlerMixin, TenantHandlerMixin, BaseHTTPRequestHandler):
+class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, CatalogHandlerMixin, GraphHandlerMixin, InfraHandlerMixin, InferenceHandlerMixin, MarkovHandlerMixin, TenantHandlerMixin, BaseHTTPRequestHandler):
     """HTTP request handler for OHM daemon."""
 
     store: Optional[OhmStore] = None  # single-tenant core store (always set)
@@ -2062,6 +2063,7 @@ OhmHandler._POST_EXACT = {
     "/edge": "_post_edge",
     "/observations": "_post_observations",
     "/outcome": "_post_outcome",
+    "/data-products": "_post_data_product",
     "/agent/synthesis": "_post_synthesis",
     "/ask": "_post_ask",
     "/batch": "_post_batch",
@@ -2115,6 +2117,7 @@ OhmHandler._GET_EXACT = {
     "/agents": "_get_agents",
     "/nodes": "_get_nodes",
     "/tasks": "_get_tasks",
+    "/data-products": "_get_data_products",
     "/listen": "_get_listen",
     "/search": "_get_search",
     "/semantic_search": "_get_semantic_search",
@@ -2194,6 +2197,7 @@ OhmHandler._GET_PREFIXES = [
     ("/node/", "_get_node"),
     ("/deep/", "_get_deep"),
     ("/edge/", "_get_edge"),
+    ("/data-products/", "_get_data_product"),
     ("/neighborhood/", "_get_neighborhood"),
     ("/path/", "_get_path"),
     ("/impact/", "_get_impact"),

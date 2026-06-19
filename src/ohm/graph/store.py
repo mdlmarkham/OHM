@@ -1535,6 +1535,8 @@ class OhmStore:
         confidence: Optional[float] = None,
         product_version: Optional[str] = None,
         odps_yaml: Optional[str] = None,
+        consumers: Optional[list[str]] = None,
+        auto_link: bool = True,
         agent_name: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
         """Insert or update an ODPS data product (ADR-027). Returns the full record.
@@ -1543,13 +1545,36 @@ class OhmStore:
         products are not graph edges, so this does not increment the graph
         generation counter.
 
+        OHM-ovwq: When ``ohm_node_id`` is None and ``auto_link`` is True, auto-creates
+        an OHM ``source`` node for the product, a ``PRODUCES`` L2 edge from the producer
+        agent node, and ``CONSUMES`` L2 edges from each consumer agent node. Seeds
+        ``source_reliability`` from the producer agent's outcome history.
+
         Args:
+            consumers: Optional list of consumer agent labels to link with CONSUMES edges.
+            auto_link: When True and ohm_node_id is None, auto-create the provenance
+                node and edges. Set False to register a bare catalog entry.
             agent_name: Agent to attribute the write to. Defaults to self.agent_name.
         """
         import uuid as _uuid
 
+        from ohm.graph.queries import _link_provenance, _seed_reliability
+
         actor = agent_name or self.agent_name
         now = self._now()
+
+        if ohm_node_id is None and auto_link:
+            ohm_node_id, source_reliability = _link_provenance(
+                self.conn, name=name, product_id=product_id, type=type,
+                producer_agent=producer_agent, created_by=actor,
+                description=description, access_url=access_url,
+                confidence=confidence, consumers=consumers,
+            )
+        elif ohm_node_id is None:
+            source_reliability = None
+        else:
+            source_reliability = _seed_reliability(self.conn, producer_agent, actor)
+
         existing = self.execute(
             "SELECT internal_id FROM ohm_data_products WHERE customer_id IS NOT DISTINCT FROM ? AND product_id = ? AND language = ? AND deleted_at IS NULL",
             [customer_id, product_id, language],
@@ -1562,13 +1587,15 @@ class OhmStore:
                        value_proposition = ?, description = ?, producer_agent = ?,
                        output_port_type = ?, access_format = ?, access_url = ?,
                        authentication_method = ?, output_file_formats = ?,
-                       ohm_node_id = ?, confidence = ?, product_version = ?,
+                       ohm_node_id = ?, confidence = ?, source_reliability = ?,
+                       product_version = ?,
                        odps_yaml = ?, updated = ?, updated_at = CURRENT_TIMESTAMP
                    WHERE internal_id = ?""",
                 [name, type, visibility, status, value_proposition, description,
                  producer_agent, output_port_type, access_format, access_url,
                  authentication_method, output_file_formats, ohm_node_id,
-                 confidence, product_version, odps_yaml, now, internal_id],
+                 confidence, source_reliability, product_version,
+                 odps_yaml, now, internal_id],
             )
             self._log_change("ohm_data_products", internal_id, "UPDATE", None, agent_name=actor)
             return self.execute_one("SELECT * FROM ohm_data_products WHERE internal_id = ?", [internal_id])
@@ -1579,12 +1606,12 @@ class OhmStore:
                (internal_id, customer_id, product_id, name, language, visibility, status, type,
                 value_proposition, description, producer_agent, output_port_type, access_format,
                 access_url, authentication_method, output_file_formats, ohm_node_id, confidence,
-                product_version, odps_yaml, created_by, created_at, updated_at, created, updated)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?)""",
+                source_reliability, product_version, odps_yaml, created_by, created_at, updated_at, created, updated)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?)""",
             [internal_id, customer_id, product_id, name, language, visibility, status, type,
              value_proposition, description, producer_agent, output_port_type, access_format,
              access_url, authentication_method, output_file_formats, ohm_node_id, confidence,
-             product_version, odps_yaml, actor, now, now],
+             source_reliability, product_version, odps_yaml, actor, now, now],
         )
         self._log_change("ohm_data_products", internal_id, "INSERT", None, agent_name=actor)
         return self.execute_one("SELECT * FROM ohm_data_products WHERE internal_id = ?", [internal_id])
