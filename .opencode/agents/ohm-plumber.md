@@ -1,7 +1,7 @@
 ---
 description: Wires OHM features through the four-layer stack — graph/queries to graph/store to framework/sdk to server/handlers. Use when a new field or operation needs to flow from HTTP body to store to DB to SDK. Preserves backward compatibility (None defaults, opt-in enforcement).
 mode: subagent
-model: synthetic/hf:MiniMaxAI/MiniMax-M3
+model: synthetic/hf:zai-org/GLM-5.1
 temperature: 0.0
 permission:
   edit: allow
