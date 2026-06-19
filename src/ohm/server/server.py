@@ -771,6 +771,42 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, GraphHandlerMixin, Inf
         except TenantNotFoundError:
             raise NodeNotFoundError("Tenant not found — provision this tenant before use")
 
+    # OHM-1s14.3: keys from meta.json that a tenant may override on top of the
+    # global server config. Server-level keys (quack, host, port, sync, etc.)
+    # are NOT overridable — they are infrastructure concerns.
+    _TENANT_CONFIG_ALLOWLIST = frozenset({"enforce_layer_gates", "embeddings"})
+
+    @property
+    def current_config(self) -> dict:
+        """Return config for the current request context.
+
+        Single-tenant: returns ``self.config`` directly (zero overhead).
+        Multi-tenant + agent token (customer_id=None): returns ``self.config``
+          (operator scope — global defaults apply).
+        Multi-tenant + customer token: merges global config with tenant-specific
+          overrides from ``meta.json`` for allowlisted keys only
+          (``enforce_layer_gates``, ``embeddings``). Server-level keys
+          (``quack``, ``host``, ``port``, ``sync_interval_seconds``, …) are
+          NOT overridable per tenant.
+
+        If the tenant's meta.json cannot be read (deleted, corrupted), falls
+        back to the global config so the request still succeeds.
+        """
+        if not self.multi_tenant:
+            return self.config
+        customer_id = self._customer_id
+        if customer_id is None or self.tenant_manager is None:
+            return self.config
+        try:
+            meta = self.tenant_manager.get_meta(customer_id)
+        except Exception:
+            return self.config
+        merged = dict(self.config)
+        for key in self._TENANT_CONFIG_ALLOWLIST:
+            if key in meta:
+                merged[key] = meta[key]
+        return merged
+
     def log_message(self, format, *args):
         """Structured request logging with correlation ID."""
         import re

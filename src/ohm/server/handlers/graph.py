@@ -945,7 +945,7 @@ class GraphHandlerMixin:
                     node_layer,
                     target_layer,
                     self.current_store.conn,
-                    enforce=self.config.get("enforce_layer_gates", False),
+                    enforce=self.current_config.get("enforce_layer_gates", False),
                 )
                 if promote_errors:
                     self._json_response(
@@ -1277,7 +1277,7 @@ class GraphHandlerMixin:
             "L0",
             "L1",
             self.current_store.conn,
-            enforce=self.config.get("enforce_layer_gates", False),
+            enforce=self.current_config.get("enforce_layer_gates", False),
         )
         if promote_errors:
             self._json_response(
@@ -1324,7 +1324,7 @@ class GraphHandlerMixin:
             conn=self.current_store.conn,
             from_node=body.get("from"),
             confidence=body.get("confidence"),
-            enforce=self.config.get("enforce_layer_gates", False),
+            enforce=self.current_config.get("enforce_layer_gates", False),
         )
         if edge_errors:
             self._json_response(

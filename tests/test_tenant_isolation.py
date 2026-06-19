@@ -371,3 +371,77 @@ class TestRateLimitIsolation:
         finally:
             _srv._rate_limit_store.clear()
 
+
+class TestCurrentConfig:
+    """OHM-1s14.3: per-tenant config overlay via the current_config property.
+
+    The property merges global config with tenant-specific overrides from
+    meta.json for an allowlisted set of keys (enforce_layer_gates, embeddings).
+    Server-level keys (quack, host, port) are NOT overridable per tenant."""
+
+    def test_single_tenant_returns_global_config(self):
+        store = MagicMock(name="store")
+        handler = _make_handler_with_store(store)
+        handler.multi_tenant = False
+        handler.config = {"quack": False, "enforce_layer_gates": False, "host": "0.0.0.0"}
+        assert handler.current_config is handler.config
+
+    def test_multi_tenant_no_customer_returns_global_config(self):
+        store = MagicMock(name="store")
+        handler = _make_handler_with_store(store)
+        handler.multi_tenant = True
+        handler._resolved_customer_id = None
+        handler.tenant_manager = None
+        handler.config = {"enforce_layer_gates": False}
+        assert handler.current_config is handler.config
+
+    def test_multi_tenant_merges_tenant_overrides(self):
+        """Tenant meta.json overrides allowlisted keys only."""
+        store = MagicMock(name="store")
+        handler = _make_handler_with_store(store)
+        handler.multi_tenant = True
+        handler._resolved_customer_id = "acme_hvac"
+        handler.config = {
+            "quack": False,
+            "enforce_layer_gates": False,
+            "host": "0.0.0.0",
+            "embeddings": {"allowed_hosts": ["localhost"]},
+        }
+
+        meta = {
+            "customer_id": "acme_hvac",
+            "domain": "ohm",
+            "tier": "starter",
+            "enforce_layer_gates": True,  # override
+            "embeddings": {"allowed_hosts": ["internal.acme.com"]},  # override
+            # quack and host are NOT in allowlist — should NOT be overridden
+        }
+        tm = MagicMock(name="tenant_manager")
+        tm.get_meta = MagicMock(return_value=meta)
+        handler.tenant_manager = tm
+
+        cfg = handler.current_config
+        # Allowlisted keys are overridden
+        assert cfg["enforce_layer_gates"] is True
+        assert cfg["embeddings"]["allowed_hosts"] == ["internal.acme.com"]
+        # Server-level keys are NOT overridden (stay from global)
+        assert cfg["quack"] is False
+        assert cfg["host"] == "0.0.0.0"
+        # Original global config is not mutated
+        assert handler.config["enforce_layer_gates"] is False
+
+    def test_multi_tenant_falls_back_when_meta_unreadable(self):
+        """If tenant_manager.get_meta raises, fall back to global config."""
+        store = MagicMock(name="store")
+        handler = _make_handler_with_store(store)
+        handler.multi_tenant = True
+        handler._resolved_customer_id = "ghost_tenant"
+        handler.config = {"enforce_layer_gates": False}
+
+        tm = MagicMock(name="tenant_manager")
+        tm.get_meta = MagicMock(side_effect=Exception("meta.json not found"))
+        handler.tenant_manager = tm
+
+        cfg = handler.current_config
+        assert cfg is handler.config
+

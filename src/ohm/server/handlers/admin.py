@@ -127,7 +127,7 @@ class AdminHandlerMixin:
                 _parsed = urlparse(ollama_url)
                 _allowed_hosts = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
                 # Config can extend the allowlist via embeddings.allowed_hosts
-                _cfg_hosts = (self.config or {}).get("embeddings", {}).get("allowed_hosts", [])
+                _cfg_hosts = (self.current_config or {}).get("embeddings", {}).get("allowed_hosts", [])
                 _allowed_hosts.update(_cfg_hosts)
                 if _parsed.hostname not in _allowed_hosts:
                     self._json_response(
