@@ -1,7 +1,7 @@
 ---
 description: Writes pytest test suites for OHM. Use when a feature needs test coverage. Follows existing patterns in tests/test_*.py — parametrize cases, use test_db fixture for in-memory DuckDB, group by TestXxx classes. High-volume bulk work.
 mode: subagent
-model: opencode-go/deepseek-v4-flash
+model: synthetic/hf:deepseek-ai/DeepSeek-V3.2
 temperature: 0.0
 permission:
   edit: allow

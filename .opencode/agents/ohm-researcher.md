@@ -1,7 +1,7 @@
 ---
 description: Deep codebase research and design exploration for OHM. Use when investigating existing patterns before implementing a feature, when you need to understand how validators, schema, queries, store, SDK, and handlers fit together. Reports file paths + line numbers + code snippets. Read-only.
 mode: subagent
-model: opencode-go/glm-5.2
+model: synthetic/hf:zai-org/GLM-5.1
 temperature: 0.1
 permission:
   edit: deny
