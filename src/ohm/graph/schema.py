@@ -932,11 +932,46 @@ DDL_STATEMENTS: list[str] = [
         created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """,
+    # ── Data Products (ADR-027 / OHM-ksi0) ────────────────────────────────
+    # ODPS v4.1-compliant data product catalog. Each row is one product in
+    # one language; full ODPS YAML kept in odps_yaml for round-trip fidelity.
+    """
+    CREATE TABLE IF NOT EXISTS ohm_data_products (
+        internal_id      VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        customer_id      VARCHAR,
+        product_id       VARCHAR NOT NULL,
+        name             VARCHAR NOT NULL,
+        language         VARCHAR DEFAULT 'en',
+        visibility       VARCHAR DEFAULT 'private',
+        status           VARCHAR DEFAULT 'draft',
+        type             VARCHAR NOT NULL,
+        value_proposition VARCHAR,
+        description      VARCHAR,
+        producer_agent   VARCHAR,
+        output_port_type VARCHAR,
+        access_format    VARCHAR,
+        access_url       VARCHAR,
+        authentication_method VARCHAR,
+        output_file_formats VARCHAR,
+        ohm_node_id      VARCHAR,
+        confidence       REAL,
+        source_reliability REAL,
+        product_version  VARCHAR,
+        created          VARCHAR,
+        updated          VARCHAR,
+        odps_yaml        TEXT,
+        created_by       VARCHAR,
+        created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        deleted_at       TIMESTAMP,
+        UNIQUE(customer_id, product_id, language)
+    );
+    """,
 ]
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.28.0"
+SCHEMA_VERSION = "0.29.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -1265,6 +1300,48 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             "CREATE INDEX IF NOT EXISTS idx_obs_comp_type ON ohm_observations(compression_type) WHERE compression_type IS NOT NULL",
         ],
     ),
+    (
+        "0.29.0",
+        "ADR-027: BOS ODPS data product catalog — add ohm_data_products table",
+        [
+            """
+            CREATE TABLE IF NOT EXISTS ohm_data_products (
+                internal_id      VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+                customer_id      VARCHAR,
+                product_id       VARCHAR NOT NULL,
+                name             VARCHAR NOT NULL,
+                language         VARCHAR DEFAULT 'en',
+                visibility       VARCHAR DEFAULT 'private',
+                status           VARCHAR DEFAULT 'draft',
+                type             VARCHAR NOT NULL,
+                value_proposition VARCHAR,
+                description      VARCHAR,
+                producer_agent   VARCHAR,
+                output_port_type VARCHAR,
+                access_format    VARCHAR,
+                access_url       VARCHAR,
+                authentication_method VARCHAR,
+                output_file_formats VARCHAR,
+                ohm_node_id      VARCHAR,
+                confidence       REAL,
+                source_reliability REAL,
+                product_version  VARCHAR,
+                created          VARCHAR,
+                updated          VARCHAR,
+                odps_yaml        TEXT,
+                created_by       VARCHAR,
+                created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                deleted_at       TIMESTAMP,
+                UNIQUE(customer_id, product_id, language)
+            );
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_data_products_producer ON ohm_data_products(producer_agent);",
+            "CREATE INDEX IF NOT EXISTS idx_data_products_type ON ohm_data_products(type);",
+            "CREATE INDEX IF NOT EXISTS idx_data_products_status ON ohm_data_products(status);",
+            "CREATE INDEX IF NOT EXISTS idx_data_products_customer ON ohm_data_products(customer_id);",
+        ],
+    ),
 ]
 
 # ── Indexes ─────────────────────────────────────────────────────────────────
@@ -1298,6 +1375,11 @@ INDEX_DDL: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_outcomes_claim ON ohm_outcomes(claim_node);",
     # Hook registry index
     "CREATE INDEX IF NOT EXISTS idx_hooks_event_enabled ON ohm_hooks(event, enabled);",
+    # Data Products indexes (ADR-027)
+    "CREATE INDEX IF NOT EXISTS idx_data_products_producer ON ohm_data_products(producer_agent);",
+    "CREATE INDEX IF NOT EXISTS idx_data_products_type ON ohm_data_products(type);",
+    "CREATE INDEX IF NOT EXISTS idx_data_products_status ON ohm_data_products(status);",
+    "CREATE INDEX IF NOT EXISTS idx_data_products_customer ON ohm_data_products(customer_id);",
 ]
 
 

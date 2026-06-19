@@ -1511,6 +1511,135 @@ class OhmStore:
         """Get an edge by ID."""
         return self.execute_one("SELECT * FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [edge_id])
 
+    # ── Data Products (ADR-027 / OHM-ksi0) ───────────────────────────────
+
+    def register_data_product(
+        self,
+        product_id: str,
+        name: str,
+        type: str,
+        *,
+        producer_agent: str,
+        customer_id: Optional[str] = None,
+        language: str = "en",
+        visibility: str = "private",
+        status: str = "draft",
+        value_proposition: Optional[str] = None,
+        description: Optional[str] = None,
+        output_port_type: Optional[str] = None,
+        access_format: Optional[str] = None,
+        access_url: Optional[str] = None,
+        authentication_method: Optional[str] = None,
+        output_file_formats: Optional[str] = None,
+        ohm_node_id: Optional[str] = None,
+        confidence: Optional[float] = None,
+        product_version: Optional[str] = None,
+        odps_yaml: Optional[str] = None,
+        agent_name: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Insert or update an ODPS data product (ADR-027). Returns the full record.
+
+        Upserts on the (customer_id, product_id, language) unique key. Data
+        products are not graph edges, so this does not increment the graph
+        generation counter.
+
+        Args:
+            agent_name: Agent to attribute the write to. Defaults to self.agent_name.
+        """
+        import uuid as _uuid
+
+        actor = agent_name or self.agent_name
+        now = self._now()
+        existing = self.execute(
+            "SELECT internal_id FROM ohm_data_products WHERE customer_id IS NOT DISTINCT FROM ? AND product_id = ? AND language = ? AND deleted_at IS NULL",
+            [customer_id, product_id, language],
+        )
+        if existing:
+            internal_id = existing[0]["internal_id"]
+            self.execute(
+                """UPDATE ohm_data_products SET
+                       name = ?, type = ?, visibility = ?, status = ?,
+                       value_proposition = ?, description = ?, producer_agent = ?,
+                       output_port_type = ?, access_format = ?, access_url = ?,
+                       authentication_method = ?, output_file_formats = ?,
+                       ohm_node_id = ?, confidence = ?, product_version = ?,
+                       odps_yaml = ?, updated = ?, updated_at = CURRENT_TIMESTAMP
+                   WHERE internal_id = ?""",
+                [name, type, visibility, status, value_proposition, description,
+                 producer_agent, output_port_type, access_format, access_url,
+                 authentication_method, output_file_formats, ohm_node_id,
+                 confidence, product_version, odps_yaml, now, internal_id],
+            )
+            self._log_change("ohm_data_products", internal_id, "UPDATE", None, agent_name=actor)
+            return self.execute_one("SELECT * FROM ohm_data_products WHERE internal_id = ?", [internal_id])
+
+        internal_id = str(_uuid.uuid4())
+        self.execute(
+            """INSERT INTO ohm_data_products
+               (internal_id, customer_id, product_id, name, language, visibility, status, type,
+                value_proposition, description, producer_agent, output_port_type, access_format,
+                access_url, authentication_method, output_file_formats, ohm_node_id, confidence,
+                product_version, odps_yaml, created_by, created_at, updated_at, created, updated)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?)""",
+            [internal_id, customer_id, product_id, name, language, visibility, status, type,
+             value_proposition, description, producer_agent, output_port_type, access_format,
+             access_url, authentication_method, output_file_formats, ohm_node_id, confidence,
+             product_version, odps_yaml, actor, now, now],
+        )
+        self._log_change("ohm_data_products", internal_id, "INSERT", None, agent_name=actor)
+        return self.execute_one("SELECT * FROM ohm_data_products WHERE internal_id = ?", [internal_id])
+
+    def get_data_product(self, internal_id: str) -> Optional[dict[str, Any]]:
+        """Get a data product by internal_id."""
+        return self.execute_one(
+            "SELECT * FROM ohm_data_products WHERE internal_id = ? AND deleted_at IS NULL",
+            [internal_id],
+        )
+
+    def get_data_product_by_odps_id(
+        self,
+        product_id: str,
+        *,
+        customer_id: Optional[str] = None,
+        language: str = "en",
+    ) -> Optional[dict[str, Any]]:
+        """Get a data product by its ODPS product_id (+ tenant + language)."""
+        return self.execute_one(
+            "SELECT * FROM ohm_data_products WHERE customer_id IS NOT DISTINCT FROM ? AND product_id = ? AND language = ? AND deleted_at IS NULL",
+            [customer_id, product_id, language],
+        )
+
+    def list_data_products(
+        self,
+        *,
+        producer_agent: Optional[str] = None,
+        type: Optional[str] = None,
+        status: Optional[str] = None,
+        customer_id: Optional[str] = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """List data products with optional filters."""
+        conditions = ["deleted_at IS NULL"]
+        params: list[Any] = []
+        if producer_agent:
+            conditions.append("producer_agent = ?")
+            params.append(producer_agent)
+        if type:
+            conditions.append("type = ?")
+            params.append(type)
+        if status:
+            conditions.append("status = ?")
+            params.append(status)
+        if customer_id is not None:
+            conditions.append("customer_id IS NOT DISTINCT FROM ?")
+            params.append(customer_id)
+        where = " WHERE " + " AND ".join(conditions)
+        params.append(limit)
+        return self.read_execute(
+            f"SELECT * FROM ohm_data_products{where} ORDER BY updated_at DESC LIMIT ?",
+            params,
+        )
+
     def delete_node(self, node_id: str, deleted_by: str) -> dict[str, Any]:
         """Soft-delete a node and all its associated edges and observations.
 

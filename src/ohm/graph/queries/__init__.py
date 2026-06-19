@@ -4506,3 +4506,135 @@ def evict_expired_fragments(
             result["evicted"].append(fid)
 
     return result
+
+
+# ── Data Products (ADR-027 / OHM-ksi0) ─────────────────────────────────────
+
+
+def register_data_product(
+    conn: DuckDBPyConnection,
+    *,
+    product_id: str,
+    name: str,
+    type: str,
+    producer_agent: str,
+    created_by: str,
+    customer_id: str | None = None,
+    language: str = "en",
+    visibility: str = "private",
+    status: str = "draft",
+    value_proposition: str | None = None,
+    description: str | None = None,
+    output_port_type: str | None = None,
+    access_format: str | None = None,
+    access_url: str | None = None,
+    authentication_method: str | None = None,
+    output_file_formats: str | None = None,
+    ohm_node_id: str | None = None,
+    confidence: float | None = None,
+    product_version: str | None = None,
+    odps_yaml: str | None = None,
+) -> dict[str, Any]:
+    """Insert or update an ODPS data product (ADR-027). Returns the full record."""
+    import uuid as _uuid
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+    existing = _rows_to_dicts(
+        conn.execute(
+            "SELECT internal_id FROM ohm_data_products WHERE customer_id IS NOT DISTINCT FROM ? AND product_id = ? AND language = ? AND deleted_at IS NULL",
+            [customer_id, product_id, language],
+        )
+    )
+    if existing:
+        internal_id = existing[0]["internal_id"]
+        conn.execute(
+            """UPDATE ohm_data_products SET
+                   name = ?, type = ?, visibility = ?, status = ?,
+                   value_proposition = ?, description = ?, producer_agent = ?,
+                   output_port_type = ?, access_format = ?, access_url = ?,
+                   authentication_method = ?, output_file_formats = ?,
+                   ohm_node_id = ?, confidence = ?, product_version = ?,
+                   odps_yaml = ?, updated = ?, updated_at = CURRENT_TIMESTAMP
+               WHERE internal_id = ?""",
+            [name, type, visibility, status, value_proposition, description,
+             producer_agent, output_port_type, access_format, access_url,
+             authentication_method, output_file_formats, ohm_node_id,
+             confidence, product_version, odps_yaml, now, internal_id],
+        )
+        _log_change(conn, "ohm_data_products", internal_id, "UPDATE", created_by)
+        rows = _rows_to_dicts(conn.execute("SELECT * FROM ohm_data_products WHERE internal_id = ?", [internal_id]))
+        return rows[0]
+
+    internal_id = str(_uuid.uuid4())
+    conn.execute(
+        """INSERT INTO ohm_data_products
+           (internal_id, customer_id, product_id, name, language, visibility, status, type,
+            value_proposition, description, producer_agent, output_port_type, access_format,
+            access_url, authentication_method, output_file_formats, ohm_node_id, confidence,
+            product_version, odps_yaml, created_by, created_at, updated_at, created, updated)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?)""",
+        [internal_id, customer_id, product_id, name, language, visibility, status, type,
+         value_proposition, description, producer_agent, output_port_type, access_format,
+         access_url, authentication_method, output_file_formats, ohm_node_id, confidence,
+         product_version, odps_yaml, created_by, now, now],
+    )
+    _log_change(conn, "ohm_data_products", internal_id, "INSERT", created_by)
+    rows = _rows_to_dicts(conn.execute("SELECT * FROM ohm_data_products WHERE internal_id = ?", [internal_id]))
+    return rows[0]
+
+
+def get_data_product(conn: DuckDBPyConnection, internal_id: str) -> dict[str, Any] | None:
+    """Get a data product by internal_id."""
+    rows = _rows_to_dicts(
+        conn.execute("SELECT * FROM ohm_data_products WHERE internal_id = ? AND deleted_at IS NULL", [internal_id])
+    )
+    return rows[0] if rows else None
+
+
+def get_data_product_by_odps_id(
+    conn: DuckDBPyConnection,
+    product_id: str,
+    *,
+    customer_id: str | None = None,
+    language: str = "en",
+) -> dict[str, Any] | None:
+    """Get a data product by its ODPS product_id (+ tenant + language)."""
+    rows = _rows_to_dicts(
+        conn.execute(
+            "SELECT * FROM ohm_data_products WHERE customer_id IS NOT DISTINCT FROM ? AND product_id = ? AND language = ? AND deleted_at IS NULL",
+            [customer_id, product_id, language],
+        )
+    )
+    return rows[0] if rows else None
+
+
+def list_data_products(
+    conn: DuckDBPyConnection,
+    *,
+    producer_agent: str | None = None,
+    type: str | None = None,
+    status: str | None = None,
+    customer_id: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """List data products with optional filters."""
+    conditions = ["deleted_at IS NULL"]
+    params: list[Any] = []
+    if producer_agent:
+        conditions.append("producer_agent = ?")
+        params.append(producer_agent)
+    if type:
+        conditions.append("type = ?")
+        params.append(type)
+    if status:
+        conditions.append("status = ?")
+        params.append(status)
+    if customer_id is not None:
+        conditions.append("customer_id IS NOT DISTINCT FROM ?")
+        params.append(customer_id)
+    where = " WHERE " + " AND ".join(conditions)
+    params.append(limit)
+    return _rows_to_dicts(
+        conn.execute(f"SELECT * FROM ohm_data_products{where} ORDER BY updated_at DESC LIMIT ?", params)
+    )
