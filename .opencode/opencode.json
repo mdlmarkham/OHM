@@ -3,5 +3,25 @@
   "server": {
     "port": 4196,
     "hostname": "127.0.0.1"
+  },
+  "agent": {
+    "explore": {
+      "description": "Fast read-only codebase search. Use for finding files by pattern, grepping code, answering 'where does X live?' questions.",
+      "mode": "subagent",
+      "model": "opencode-go/mimo-v2.5",
+      "temperature": 0.0,
+      "permission": {
+        "edit": "deny",
+        "bash": "deny",
+        "write": "deny",
+        "apply_patch": "deny"
+      }
+    },
+    "general": {
+      "description": "General-purpose multi-step research and execution. Use for parallel units of work that need code awareness but not deep project context.",
+      "mode": "subagent",
+      "model": "opencode-go/kimi-k2.7",
+      "temperature": 0.3
+    }
   }
 }
