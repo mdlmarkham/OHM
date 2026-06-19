@@ -666,6 +666,41 @@ class Graph:
             confidence=confidence,
         )
 
+    def fingerprint(self, node_id: str, *, dim: int = 10000, seed: int = 42) -> dict[str, Any]:
+        """Compute hyperdimensional fingerprint for a node (OHM-yk7z, ADR-031).
+
+        Returns fingerprint_hex, dimension, seed, method, and component list.
+        Pure computation — no DDL changes.
+        """
+        from ohm.graph.methods import compute_hd_fingerprint
+
+        return compute_hd_fingerprint(self._conn, node_id, dim=dim, seed=seed)
+
+    def hd_similarity_search(
+        self,
+        node_id: str,
+        *,
+        threshold: float = 0.65,
+        limit: int = 20,
+        dim: int = 10000,
+        seed: int = 42,
+    ) -> list[dict[str, Any]]:
+        """Find nodes with similar HD fingerprints (OHM-yk7z, ADR-031).
+
+        Naive all-pairs Hamming similarity. Returns list of dicts sorted
+        by hd_similarity descending, filtered by threshold.
+        """
+        from ohm.graph.methods import hd_similarity_search
+
+        return hd_similarity_search(
+            self._conn,
+            node_id,
+            threshold=threshold,
+            limit=limit,
+            dim=dim,
+            seed=seed,
+        )
+
     def update_edge(
         self,
         edge_id: str,

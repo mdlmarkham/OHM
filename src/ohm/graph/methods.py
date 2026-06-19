@@ -4014,3 +4014,139 @@ def find_islands(
         "main_graph_size": mainland_size,
         "coverage": coverage,
     }
+
+
+def compute_hd_fingerprint(
+    conn: DuckDBPyConnection,
+    node_id: str,
+    *,
+    dim: int = 10000,
+    seed: int = 42,
+) -> dict[str, Any]:
+    from ohm.exceptions import NodeNotFoundError
+    from ohm.inference.hd import DEFAULT_DIM, FP_VERSION, fingerprint_node, hamming_similarity
+    from ohm.validation import validate_identifier
+
+    node_id = validate_identifier(node_id, name="node_id")
+
+    row = conn.execute(
+        """SELECT id, label, type, content, tags, provenance
+           FROM ohm_nodes
+           WHERE id = ? AND deleted_at IS NULL""",
+        [node_id],
+    ).fetchone()
+    if not row:
+        raise NodeNotFoundError(f"Node {node_id} not found")
+
+    nid, label, ntype, content, tags_json, provenance = row
+    tags = None
+    if tags_json:
+        import json
+
+        try:
+            tags = json.loads(tags_json) if isinstance(tags_json, str) else tags_json
+        except (json.JSONDecodeError, TypeError):
+            tags = None
+
+    fp = fingerprint_node(
+        label=label,
+        node_type=ntype,
+        content=content,
+        tags=tags,
+        provenance=provenance,
+        dim=dim,
+        seed=seed,
+    )
+    fp["node_id"] = nid
+    fp["label"] = label
+    fp["type"] = ntype
+    return fp
+
+
+def hd_similarity_search(
+    conn: DuckDBPyConnection,
+    node_id: str,
+    *,
+    threshold: float = 0.65,
+    limit: int = 20,
+    dim: int = 10000,
+    seed: int = 42,
+) -> list[dict[str, Any]]:
+    from ohm.exceptions import NodeNotFoundError
+    from ohm.inference.hd import fingerprint_node, hamming_similarity
+    from ohm.validation import validate_identifier
+
+    node_id = validate_identifier(node_id, name="node_id")
+
+    row = conn.execute(
+        """SELECT id, label, type, content, tags, provenance
+           FROM ohm_nodes
+           WHERE id = ? AND deleted_at IS NULL""",
+        [node_id],
+    ).fetchone()
+    if not row:
+        raise NodeNotFoundError(f"Node {node_id} not found")
+
+    nid, label, ntype, content, tags_json, provenance = row
+    tags = None
+    if tags_json:
+        import json
+
+        try:
+            tags = json.loads(tags_json) if isinstance(tags_json, str) else tags_json
+        except (json.JSONDecodeError, TypeError):
+            tags = None
+
+    query_fp = fingerprint_node(
+        label=label,
+        node_type=ntype,
+        content=content,
+        tags=tags,
+        provenance=provenance,
+        dim=dim,
+        seed=seed,
+    )
+    query_bytes = bytearray.fromhex(query_fp["fingerprint_hex"])
+
+    rows = conn.execute(
+        """SELECT id, label, type, confidence, content, tags, provenance
+           FROM ohm_nodes
+           WHERE deleted_at IS NULL AND id != ?
+           ORDER BY confidence DESC""",
+        [node_id],
+    ).fetchall()
+
+    results = []
+    for r in rows:
+        rid, rlabel, rtype, rconf, rcontent, rtags_json, rprovenance = r
+        rtags = None
+        if rtags_json:
+            import json as _json
+
+            try:
+                rtags = _json.loads(rtags_json) if isinstance(rtags_json, str) else rtags_json
+            except (_json.JSONDecodeError, TypeError):
+                rtags = None
+        candidate_fp = fingerprint_node(
+            label=rlabel,
+            node_type=rtype,
+            content=rcontent,
+            tags=rtags,
+            provenance=rprovenance,
+            dim=dim,
+            seed=seed,
+        )
+        candidate_bytes = bytearray.fromhex(candidate_fp["fingerprint_hex"])
+        sim = hamming_similarity(query_bytes, candidate_bytes)
+        if sim >= threshold:
+            results.append(
+                {
+                    "node_id": rid,
+                    "label": rlabel,
+                    "type": rtype,
+                    "confidence": rconf,
+                    "hd_similarity": round(sim, 4),
+                }
+            )
+    results.sort(key=lambda x: x["hd_similarity"], reverse=True)
+    return results[:limit]
