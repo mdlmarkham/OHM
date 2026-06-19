@@ -5015,3 +5015,178 @@ def list_data_products(
     return _rows_to_dicts(
         conn.execute(f"SELECT * FROM ohm_data_products{where} ORDER BY updated_at DESC LIMIT ?", params)
     )
+
+
+def update_node_hd_fingerprint(
+    conn: DuckDBPyConnection,
+    node_id: str,
+    *,
+    dim: int = 10000,
+    seed: int = 42,
+) -> dict[str, Any]:
+    from ohm.exceptions import NodeNotFoundError
+    from ohm.inference.hd import fingerprint_node
+    from ohm.validation import validate_identifier, validate_hd_fingerprint
+
+    node_id = validate_identifier(node_id, name="node_id")
+
+    row = conn.execute(
+        """SELECT id, label, type, content, tags, provenance
+           FROM ohm_nodes
+           WHERE id = ? AND deleted_at IS NULL""",
+        [node_id],
+    ).fetchone()
+    if not row:
+        raise NodeNotFoundError(f"Node {node_id} not found")
+
+    nid, label, ntype, content, tags_json, provenance = row
+    tags = None
+    if tags_json:
+        import json
+
+        try:
+            tags = json.loads(tags_json) if isinstance(tags_json, str) else tags_json
+        except (json.JSONDecodeError, TypeError):
+            tags = None
+
+    fp = fingerprint_node(
+        label=label,
+        node_type=ntype,
+        content=content,
+        tags=tags,
+        provenance=provenance,
+        dim=dim,
+        seed=seed,
+    )
+    fp_bytes = bytes.fromhex(fp["fingerprint_hex"])
+    validate_hd_fingerprint(fp_bytes, dimensions=dim)
+
+    conn.execute(
+        "UPDATE ohm_nodes SET hd_fingerprint = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        [fp_bytes, node_id],
+    )
+    return {
+        "node_id": nid,
+        "label": label,
+        "type": ntype,
+        "fingerprint_hex": fp["fingerprint_hex"],
+        "dimension": fp["dimension"],
+        "seed": fp["seed"],
+        "method": fp["method"],
+        "stored": True,
+    }
+
+
+def hd_membership_search(
+    conn: DuckDBPyConnection,
+    query_fingerprint_hex: str,
+    *,
+    threshold: float = 0.65,
+    limit: int = 20,
+    node_type: str | None = None,
+    dim: int = 10000,
+) -> list[dict[str, Any]]:
+    from ohm.inference.hd import hamming_similarity
+    from ohm.validation import validate_hd_fingerprint
+
+    if not query_fingerprint_hex:
+        raise ValueError("query_fingerprint_hex must be non-empty")
+
+    query_bytes = bytearray.fromhex(query_fingerprint_hex)
+    validate_hd_fingerprint(bytes(query_bytes), dimensions=dim)
+
+    conditions = ["hd_fingerprint IS NOT NULL", "deleted_at IS NULL"]
+    params: list[Any] = []
+    if node_type is not None:
+        conditions.append("type = ?")
+        params.append(node_type)
+    where_sql = " AND ".join(conditions)
+
+    rows = conn.execute(
+        f"""SELECT id, label, type, confidence, hd_fingerprint
+            FROM ohm_nodes
+            WHERE {where_sql}""",
+        params,
+    ).fetchall()
+
+    results = []
+    for r in rows:
+        rid, rlabel, rtype, rconf, rfp_blob = r
+        if rfp_blob is None:
+            continue
+        candidate_bytes = bytearray(rfp_blob) if isinstance(rfp_blob, bytes) else bytearray(rfp_blob)
+        if len(candidate_bytes) != len(query_bytes):
+            continue
+        sim = hamming_similarity(query_bytes, candidate_bytes)
+        if sim >= threshold:
+            results.append(
+                {
+                    "node_id": rid,
+                    "label": rlabel,
+                    "type": rtype,
+                    "confidence": rconf,
+                    "hd_similarity": round(sim, 4),
+                }
+            )
+    results.sort(key=lambda x: x["hd_similarity"], reverse=True)
+    return results[:limit]
+
+
+def batch_update_hd_fingerprints(
+    conn: DuckDBPyConnection,
+    *,
+    dim: int = 10000,
+    seed: int = 42,
+    limit: int = 1000,
+) -> dict[str, Any]:
+    from ohm.inference.hd import fingerprint_node
+    from ohm.validation import validate_hd_fingerprint
+
+    rows = conn.execute(
+        """SELECT id, label, type, content, tags, provenance
+           FROM ohm_nodes
+           WHERE hd_fingerprint IS NULL AND deleted_at IS NULL
+           ORDER BY confidence DESC
+           LIMIT ?""",
+        [limit],
+    ).fetchall()
+
+    updated = 0
+    skipped = 0
+    for r in rows:
+        nid, label, ntype, content, tags_json, provenance = r
+        tags = None
+        if tags_json:
+            import json
+
+            try:
+                tags = json.loads(tags_json) if isinstance(tags_json, str) else tags_json
+            except (json.JSONDecodeError, TypeError):
+                tags = None
+        try:
+            fp = fingerprint_node(
+                label=label,
+                node_type=ntype,
+                content=content,
+                tags=tags,
+                provenance=provenance,
+                dim=dim,
+                seed=seed,
+            )
+            fp_bytes = bytes.fromhex(fp["fingerprint_hex"])
+            validate_hd_fingerprint(fp_bytes, dimensions=dim)
+            conn.execute(
+                "UPDATE ohm_nodes SET hd_fingerprint = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                [fp_bytes, nid],
+            )
+            updated += 1
+        except Exception:
+            skipped += 1
+
+    return {
+        "updated": updated,
+        "skipped": skipped,
+        "dimension": dim,
+        "seed": seed,
+        "method": "tastebud_hd_v1",
+    }

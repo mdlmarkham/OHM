@@ -99,6 +99,27 @@ def validate_source_tier(value: str | None) -> str | None:
     return value
 
 
+def validate_hd_fingerprint(value: bytes | None, *, dimensions: int = 10000) -> bytes | None:
+    """Validate that *value* is a bytes-like HD fingerprint of the expected size.
+
+    The expected byte length is ``(dimensions + 7) // 8``.  For the default
+    10,000-bit dimension this is 1,250 bytes.
+
+    Returns *value* unchanged if it is None or the correct length.  Raises
+    ``ValidationError`` on mismatch.
+    """
+    if value is None:
+        return None
+    expected = (dimensions + 7) // 8
+    if len(value) != expected:
+        from ohm.framework.exceptions import ValidationError
+
+        raise ValidationError(
+            f"Invalid hd_fingerprint: expected {expected} bytes ({dimensions} bits), got {len(value)}"
+        )
+    return value
+
+
 def enforce_confidence_ceiling(
     confidence: float,
     source_tier: str | None,

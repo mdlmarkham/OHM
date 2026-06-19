@@ -118,6 +118,8 @@ VALID_PROVENANCES = frozenset(
     }
 )
 
+VALID_HD_DIMENSIONS = frozenset({10000})
+
 # ── Edge Types by Layer ─────────────────────────────────────────────────────
 
 LAYER_EDGE_TYPES: dict[str, frozenset[str]] = {
@@ -997,7 +999,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.30.0"
+SCHEMA_VERSION = "0.31.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -1376,6 +1378,14 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             "ALTER TABLE ohm_edges ADD COLUMN IF NOT EXISTS source_tier VARCHAR;",
             "CREATE INDEX IF NOT EXISTS idx_nodes_source_tier ON ohm_nodes(source_tier);",
             "CREATE INDEX IF NOT EXISTS idx_edges_source_tier ON ohm_edges(source_tier);",
+        ],
+    ),
+    (
+        "0.31.0",
+        "ADR-032: HD fingerprint — add hd_fingerprint column to ohm_nodes",
+        [
+            "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS hd_fingerprint BLOB;",
+            "CREATE INDEX IF NOT EXISTS idx_ohm_nodes_hd_fingerprint ON ohm_nodes(id) WHERE hd_fingerprint IS NOT NULL;",
         ],
     ),
 ]

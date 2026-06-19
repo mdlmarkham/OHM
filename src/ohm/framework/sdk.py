@@ -701,6 +701,58 @@ class Graph:
             seed=seed,
         )
 
+    def update_hd_fingerprint(self, node_id: str, *, dim: int = 10000, seed: int = 42) -> dict[str, Any]:
+        """Compute and persist HD fingerprint for a node (OHM-wvz8.2, ADR-032).
+
+        Stores fingerprint in hd_fingerprint BLOB column for later
+        membership search. Returns fingerprint metadata.
+        """
+        from ohm.graph.queries import update_node_hd_fingerprint
+
+        return update_node_hd_fingerprint(self._conn, node_id, dim=dim, seed=seed)
+
+    def hd_membership_search(
+        self,
+        query_fingerprint_hex: str,
+        *,
+        threshold: float = 0.65,
+        limit: int = 20,
+        node_type: str | None = None,
+        dim: int = 10000,
+    ) -> list[dict[str, Any]]:
+        """Search stored HD fingerprints by Hamming similarity (OHM-wvz8.2).
+
+        Requires fingerprints to be pre-computed via update_hd_fingerprint()
+        or batch_update_hd_fingerprints(). Returns nodes sorted by
+        hd_similarity descending.
+        """
+        from ohm.graph.queries import hd_membership_search
+
+        return hd_membership_search(
+            self._conn,
+            query_fingerprint_hex,
+            threshold=threshold,
+            limit=limit,
+            node_type=node_type,
+            dim=dim,
+        )
+
+    def batch_update_hd_fingerprints(
+        self,
+        *,
+        dim: int = 10000,
+        seed: int = 42,
+        limit: int = 1000,
+    ) -> dict[str, Any]:
+        """Bulk-compute HD fingerprints for all nodes missing them (OHM-wvz8.2).
+
+        Iterates nodes where hd_fingerprint IS NULL, computes and stores.
+        Returns count of updated and skipped nodes.
+        """
+        from ohm.graph.queries import batch_update_hd_fingerprints
+
+        return batch_update_hd_fingerprints(self._conn, dim=dim, seed=seed, limit=limit)
+
     def update_edge(
         self,
         edge_id: str,

@@ -338,3 +338,179 @@ class TestSDKHDFingerprint:
             results = g.hd_similarity_search("n1", threshold=0.0)
             assert len(results) >= 1
             assert all("hd_similarity" in r for r in results)
+
+
+class TestUpdateHDFingerprint:
+    def test_update_stores_fingerprint(self, test_db):
+        from ohm.graph.queries import update_node_hd_fingerprint
+
+        conn = test_db
+        conn.execute(
+            """INSERT INTO ohm_nodes (id, label, type, created_by, visibility, confidence)
+               VALUES ('n1', 'test node', 'concept', 'test', 'team', 1.0)"""
+        )
+        result = update_node_hd_fingerprint(conn, "n1")
+        assert result["stored"] is True
+        assert result["node_id"] == "n1"
+        row = conn.execute("SELECT hd_fingerprint FROM ohm_nodes WHERE id = 'n1'").fetchone()
+        assert row[0] is not None
+        assert len(row[0]) == 1250
+
+    def test_update_missing_node_raises(self, test_db):
+        from ohm.exceptions import NodeNotFoundError
+        from ohm.graph.queries import update_node_hd_fingerprint
+
+        with pytest.raises(NodeNotFoundError):
+            update_node_hd_fingerprint(test_db, "nonexistent")
+
+    def test_sdk_update_hd_fingerprint(self, test_db):
+        from ohm.framework.sdk import Graph
+
+        conn = test_db
+        conn.execute(
+            """INSERT INTO ohm_nodes (id, label, type, created_by, visibility, confidence)
+               VALUES ('n1', 'test', 'concept', 'test', 'team', 1.0)"""
+        )
+        with Graph(conn, actor="test") as g:
+            result = g.update_hd_fingerprint("n1")
+            assert result["stored"] is True
+
+
+class TestHDMembershipSearch:
+    def test_search_stored_fingerprints(self, test_db):
+        from ohm.graph.queries import update_node_hd_fingerprint, hd_membership_search
+
+        conn = test_db
+        conn.execute(
+            """INSERT INTO ohm_nodes (id, label, type, created_by, visibility, provenance, confidence)
+               VALUES ('n1', 'nuclear reactor safety', 'concept', 'test', 'team', 'research', 0.9)"""
+        )
+        conn.execute(
+            """INSERT INTO ohm_nodes (id, label, type, created_by, visibility, provenance, confidence)
+               VALUES ('n2', 'nuclear reactor design', 'concept', 'test', 'team', 'research', 0.8)"""
+        )
+        conn.execute(
+            """INSERT INTO ohm_nodes (id, label, type, created_by, visibility, provenance, confidence)
+               VALUES ('n3', 'baking sourdough bread', 'concept', 'test', 'team', 'conversation', 0.7)"""
+        )
+        update_node_hd_fingerprint(conn, "n1")
+        update_node_hd_fingerprint(conn, "n2")
+        update_node_hd_fingerprint(conn, "n3")
+
+        fp_hex = conn.execute("SELECT hd_fingerprint FROM ohm_nodes WHERE id = 'n1'").fetchone()[0].hex()
+        results = hd_membership_search(conn, fp_hex, threshold=0.0, limit=10)
+        assert len(results) >= 2
+        n1_result = [r for r in results if r["node_id"] == "n1"]
+        assert len(n1_result) == 1
+        assert n1_result[0]["hd_similarity"] == 1.0
+        sims = [r["hd_similarity"] for r in results]
+        assert sims == sorted(sims, reverse=True)
+
+    def test_search_node_type_filter(self, test_db):
+        from ohm.graph.queries import update_node_hd_fingerprint, hd_membership_search
+
+        conn = test_db
+        conn.execute(
+            """INSERT INTO ohm_nodes (id, label, type, created_by, visibility, confidence)
+               VALUES ('n1', 'test', 'concept', 'test', 'team', 1.0)"""
+        )
+        conn.execute(
+            """INSERT INTO ohm_nodes (id, label, type, created_by, visibility, confidence)
+               VALUES ('n2', 'test', 'pattern', 'test', 'team', 1.0)"""
+        )
+        update_node_hd_fingerprint(conn, "n1")
+        update_node_hd_fingerprint(conn, "n2")
+
+        fp_hex = conn.execute("SELECT hd_fingerprint FROM ohm_nodes WHERE id = 'n1'").fetchone()[0].hex()
+        results = hd_membership_search(conn, fp_hex, node_type="pattern")
+        assert all(r["type"] == "pattern" for r in results)
+
+    def test_search_empty_hex_raises(self, test_db):
+        from ohm.graph.queries import hd_membership_search
+
+        with pytest.raises(ValueError, match="non-empty"):
+            hd_membership_search(test_db, "")
+
+    def test_sdk_hd_membership_search(self, test_db):
+        from ohm.framework.sdk import Graph
+
+        conn = test_db
+        conn.execute(
+            """INSERT INTO ohm_nodes (id, label, type, created_by, visibility, confidence)
+               VALUES ('n1', 'test alpha', 'concept', 'test', 'team', 1.0)"""
+        )
+        conn.execute(
+            """INSERT INTO ohm_nodes (id, label, type, created_by, visibility, confidence)
+               VALUES ('n2', 'test beta', 'concept', 'test', 'team', 1.0)"""
+        )
+        with Graph(conn, actor="test") as g:
+            g.update_hd_fingerprint("n1")
+            g.update_hd_fingerprint("n2")
+            fp_hex = conn.execute("SELECT hd_fingerprint FROM ohm_nodes WHERE id = 'n1'").fetchone()[0].hex()
+            results = g.hd_membership_search(fp_hex, threshold=0.0)
+            assert len(results) >= 1
+
+
+class TestBatchUpdateHDFingerprints:
+    def test_batch_updates_missing_fingerprints(self, test_db):
+        from ohm.graph.queries import batch_update_hd_fingerprints
+
+        conn = test_db
+        for i in range(5):
+            conn.execute(
+                """INSERT INTO ohm_nodes (id, label, type, created_by, visibility, confidence)
+                   VALUES (?, ?, 'concept', 'test', 'team', 1.0)""",
+                [f"n{i}", f"node {i}"],
+            )
+        result = batch_update_hd_fingerprints(conn)
+        assert result["updated"] == 5
+        assert result["skipped"] == 0
+        nulls = conn.execute("SELECT count(*) FROM ohm_nodes WHERE hd_fingerprint IS NULL AND deleted_at IS NULL").fetchone()[0]
+        assert nulls == 0
+
+    def test_batch_skips_already_fingerprinted(self, test_db):
+        from ohm.graph.queries import update_node_hd_fingerprint, batch_update_hd_fingerprints
+
+        conn = test_db
+        conn.execute(
+            """INSERT INTO ohm_nodes (id, label, type, created_by, visibility, confidence)
+               VALUES ('n1', 'test', 'concept', 'test', 'team', 1.0)"""
+        )
+        update_node_hd_fingerprint(conn, "n1")
+        result = batch_update_hd_fingerprints(conn)
+        assert result["updated"] == 0
+
+    def test_sdk_batch_update(self, test_db):
+        from ohm.framework.sdk import Graph
+
+        conn = test_db
+        for i in range(3):
+            conn.execute(
+                """INSERT INTO ohm_nodes (id, label, type, created_by, visibility, confidence)
+                   VALUES (?, ?, 'concept', 'test', 'team', 1.0)""",
+                [f"n{i}", f"node {i}"],
+            )
+        with Graph(conn, actor="test") as g:
+            result = g.batch_update_hd_fingerprints()
+            assert result["updated"] == 3
+
+
+class TestValidateHDFingerprint:
+    def test_valid_bytes(self):
+        from ohm.validation import validate_hd_fingerprint
+
+        fp = bytes(1250)
+        result = validate_hd_fingerprint(fp, dimensions=10000)
+        assert result == fp
+
+    def test_none_returns_none(self):
+        from ohm.validation import validate_hd_fingerprint
+
+        assert validate_hd_fingerprint(None, dimensions=10000) is None
+
+    def test_wrong_size_raises(self):
+        from ohm.exceptions import ValidationError
+        from ohm.validation import validate_hd_fingerprint
+
+        with pytest.raises(ValidationError):
+            validate_hd_fingerprint(bytes(100), dimensions=10000)
