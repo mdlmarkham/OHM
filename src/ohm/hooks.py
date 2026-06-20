@@ -330,8 +330,10 @@ class HookRunner:
         preexec_fn = _sandbox_preexec if (_is_sandboxed() and os.name == "posix") else None
 
         # OHM-sh11: split command into argv list — prevents shell injection
+        # On Windows, shlex.split with posix=True strips backslashes from
+        # paths (e.g. C:\Users\... → C:Users...). Use posix=False to preserve them.
         try:
-            cmd_args = shlex.split(hook.command)
+            cmd_args = shlex.split(hook.command, posix=os.name == "posix")
         except ValueError as exc:
             return HookResult(
                 hook_id=hook.id,

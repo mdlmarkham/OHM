@@ -162,7 +162,10 @@ class TestHookRunnerRunHook:
     """Tests for HookRunner.run_hook() — subprocess execution engine."""
 
     def test_shell_hook_captures_stdout(self, test_db):
-        hook = HookRecord(id="h1", event="pre_ingest", command="echo hello")
+        import sys
+
+        cmd = f"{sys.executable} -c print('hello')"
+        hook = HookRecord(id="h1", event="pre_ingest", command=cmd)
         runner = HookRunner(test_db)
         result = runner.run_hook(hook, {"agent": "metis"})
         assert result.success
@@ -170,11 +173,14 @@ class TestHookRunnerRunHook:
         assert result.exit_code == 0
 
     def test_shell_hook_nonzero_exit(self, test_db):
-        hook = HookRecord(id="h2", event="pre_ingest", command="/bin/false")
+        import sys
+
+        cmd = f"{sys.executable} -c 1/0"
+        hook = HookRecord(id="h2", event="pre_ingest", command=cmd)
         runner = HookRunner(test_db)
         result = runner.run_hook(hook, {})
         assert not result.success
-        assert result.exit_code == 1
+        assert result.exit_code != 0
 
     def test_shell_hook_command_not_found(self, test_db):
         hook = HookRecord(id="h3", event="pre_ingest", command="nonexistent_command_xyz_12345")
@@ -250,13 +256,17 @@ class TestHookRunnerRunHooks:
     """Tests for HookRunner.run_hooks() with multiple hooks."""
 
     def test_run_hooks_executes_all(self, test_db):
+        import sys
+
+        cmd = f'{sys.executable} -c "print(\'a\')"'
         test_db.execute(
             "INSERT INTO ohm_hooks (id, event, command, created_by) VALUES (?, ?, ?, ?)",
-            ["h1", "pre_ingest", "echo a", "test"],
+            ["h1", "pre_ingest", cmd, "test"],
         )
+        cmd2 = f'{sys.executable} -c "print(\'b\')"'
         test_db.execute(
             "INSERT INTO ohm_hooks (id, event, command, created_by) VALUES (?, ?, ?, ?)",
-            ["h2", "pre_ingest", "echo b", "test"],
+            ["h2", "pre_ingest", cmd2, "test"],
         )
         runner = HookRunner(test_db)
         results = runner.run_hooks("pre_ingest", {"agent": "metis"})
@@ -373,7 +383,10 @@ class TestHookInvocationLog:
     """Tests for ohm_hook_log audit trail (OHM-aznh.7)."""
 
     def test_shell_hook_creates_log_row(self, test_db):
-        hook = HookRecord(id="h1", event="pre_ingest", command="echo logged")
+        import sys
+
+        cmd = f"{sys.executable} -c print('logged')"
+        hook = HookRecord(id="h1", event="pre_ingest", command=cmd)
         runner = HookRunner(test_db)
         runner.run_hook(hook, {"agent": "metis"})
         rows = test_db.execute("SELECT * FROM ohm_hook_log").fetchall()
@@ -387,12 +400,15 @@ class TestHookInvocationLog:
         assert row["timed_out"] is False
 
     def test_failed_hook_creates_log_row(self, test_db):
-        hook = HookRecord(id="h2", event="pre_ingest", command="/bin/false")
+        import sys
+
+        cmd = f"{sys.executable} -c 1/0"
+        hook = HookRecord(id="h2", event="pre_ingest", command=cmd)
         runner = HookRunner(test_db)
         runner.run_hook(hook, {})
         rows = test_db.execute("SELECT exit_code, timed_out FROM ohm_hook_log").fetchall()
         assert len(rows) == 1
-        assert rows[0][0] == 1
+        assert rows[0][0] != 0
 
     @pytest.mark.skipif(not _can_fork(), reason="Environment cannot fork via /bin/sh")
     def test_timeout_hook_creates_log_row(self, test_db):
@@ -410,7 +426,10 @@ class TestHookInvocationLog:
         assert rows[0][0] is True
 
     def test_payload_logged(self, test_db):
-        hook = HookRecord(id="h4", event="post_ingest", command="echo ok")
+        import sys
+
+        cmd = f'{sys.executable} -c "print(\'ok\')"'
+        hook = HookRecord(id="h4", event="post_ingest", command=cmd)
         runner = HookRunner(test_db)
         runner.run_hook(hook, {"agent": "clio", "action": "node"})
         rows = test_db.execute("SELECT payload FROM ohm_hook_log").fetchall()
@@ -421,7 +440,10 @@ class TestHookInvocationLog:
         assert payload["agent"] == "clio"
 
     def test_multiple_invocations_create_multiple_rows(self, test_db):
-        hook = HookRecord(id="h5", event="pre_ingest", command="echo ok")
+        import sys
+
+        cmd = f'{sys.executable} -c "print(\'ok\')"'
+        hook = HookRecord(id="h5", event="pre_ingest", command=cmd)
         runner = HookRunner(test_db)
         runner.run_hook(hook, {})
         runner.run_hook(hook, {})

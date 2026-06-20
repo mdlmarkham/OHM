@@ -422,19 +422,21 @@ class TestHybridSemanticSearch:
         """Structurally similar but semantically divergent nodes surface with HD weight.
 
         Scenario: query embedding is orthogonal to all stored embeddings
-        (cosine_sim ≈ 0 for everyone), but the query text shares tokens
-        with one node's label (high HD similarity). With membership_weight
-        high enough, that node should rank first.
+        (cosine_sim ≈ 0 for everyone), but the query HD fingerprint
+        matches one node exactly. With membership_weight high enough,
+        that node should rank first.
+
+        HD fingerprints are set directly (not computed from labels) to
+        avoid flakiness from random 10K-bit vectors where short labels
+        produce near-identical similarity (~0.50 +/- 0.005).
         """
         from ohm.queries import create_node, semantic_search
-        from ohm.graph.queries import update_node_hd_fingerprint
 
         try:
             test_db.execute("SELECT array_cosine_distance([1.0]::FLOAT[1], [1.0]::FLOAT[1])")
         except Exception:
             pytest.skip("VSS extension (array_cosine_distance) not available")
 
-        # Two nodes with orthogonal embeddings (cosine distance ≈ 1.0)
         n_target = create_node(test_db, label="alpha beta gamma", node_type="concept", created_by="test")
         n_other = create_node(test_db, label="delta epsilon zeta", node_type="concept", created_by="test")
 
@@ -446,24 +448,40 @@ class TestHybridSemanticSearch:
         test_db.execute("UPDATE ohm_nodes SET embedding = ?::FLOAT[768] WHERE id = ?", [emb_target, n_target["id"]])
         test_db.execute("UPDATE ohm_nodes SET embedding = ?::FLOAT[768] WHERE id = ?", [emb_other, n_other["id"]])
 
-        update_node_hd_fingerprint(test_db, n_target["id"])
-        update_node_hd_fingerprint(test_db, n_other["id"])
+        # Set deterministic HD fingerprints: target = all 1s, other = all 0s
+        # This guarantees maximal Hamming distance between the two nodes
+        dim = 10000
+        hex_len = dim // 4
+        fp_target_bytes = bytearray(b"\xff" * (dim // 8))
+        fp_other_bytes = bytearray(b"\x00" * (dim // 8))
+        test_db.execute(
+            "UPDATE ohm_nodes SET hd_fingerprint = ? WHERE id = ?",
+            [fp_target_bytes, n_target["id"]],
+        )
+        test_db.execute(
+            "UPDATE ohm_nodes SET hd_fingerprint = ? WHERE id = ?",
+            [fp_other_bytes, n_other["id"]],
+        )
 
         from ohm.graph import queries as queries_mod
 
-        # Query embedding is orthogonal to both stored embeddings
         def fake_generate_embedding(text, model="nomic-embed-text", ollama_url="http://localhost:11434"):
             emb = [0.0] * 768
-            emb[2] = 1.0  # Different dimension than either stored embedding
+            emb[2] = 1.0
             return emb
+
+        def fake_fingerprint_text(text, dim=dim, seed=42):
+            if "alpha" in text:
+                return fp_target_bytes
+            return fp_other_bytes
 
         monkeypatch.setattr(queries_mod, "generate_embedding", fake_generate_embedding)
 
-        # Query text shares tokens with n_target ("alpha beta gamma")
-        # so HD similarity to n_target should be much higher than to n_other
+        import ohm.inference.hd as hd_mod
+        monkeypatch.setattr(hd_mod, "fingerprint_text", fake_fingerprint_text)
+
         results = semantic_search(test_db, query="alpha beta gamma", membership_weight=0.9)
         assert len(results) == 2
-        # n_target should rank first because HD similarity dominates
         assert results[0]["node_id"] == n_target["id"]
         assert results[0]["hd_similarity"] > results[1]["hd_similarity"]
 

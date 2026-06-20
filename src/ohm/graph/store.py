@@ -179,6 +179,7 @@ class OhmStore:
         self.quack_uri = quack_uri
         self.quack_token_env = quack_token_env
         self.quack_started = False
+        self.sync_degraded = False
         self.schema = schema or DEFAULT_SCHEMA
 
         # OHM-9zk7: Embedding backend (pluggable)
