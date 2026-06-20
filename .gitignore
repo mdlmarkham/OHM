@@ -48,3 +48,4 @@ venv/
 .beads/proxieddb/
 .claude/worktrees/
 .opencode/
+reports/
