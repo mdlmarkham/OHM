@@ -2,6 +2,8 @@
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 # Import shared test utilities from conftest.py
 from tests.conftest import _start_test_server, _request
 

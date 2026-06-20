@@ -12,6 +12,8 @@ Acceptance criteria:
   - concurrent writes to same tenant are consistent
   - LRU eviction + re-access reconnects correctly
   - end-to-end: write via customer token, read back same node
+
+Marks: integration, slow.
 """
 
 import json
@@ -24,6 +26,8 @@ from ohm.server import OhmHandler, _hash_token
 from ohm.server.server import _generate_customer_token
 from ohm.store import OhmStore
 from ohm.tenant import TenantManager
+
+pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
 
 # ── Server fixture ────────────────────────────────────────────────────────────

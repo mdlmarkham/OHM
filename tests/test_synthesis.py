@@ -1,9 +1,14 @@
-"""Tests for the /agent/synthesis endpoint and SDK write_synthesis method."""
+"""Tests for the /agent/synthesis endpoint and SDK write_synthesis method.
+
+Marks: integration.
+"""
 
 import json
 import socketserver
 import threading
 import pytest
+
+pytestmark = pytest.mark.integration
 from http.client import HTTPConnection
 
 from ohm.server import OhmHandler, _hash_token

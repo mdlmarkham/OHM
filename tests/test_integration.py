@@ -1,8 +1,12 @@
 """
 OHM Integration Tests — full workflow tests.
+
+Marks: integration.
 """
 
 import pytest
+
+pytestmark = pytest.mark.integration
 
 from ohm.store import OhmStore
 from ohm.queries import query_neighborhood

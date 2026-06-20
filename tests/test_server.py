@@ -3,8 +3,10 @@
 Starts a test server on a random port and tests all 17+ endpoints
 including auth, error handling, and edge cases.
 
-NOTE: Server tests share class-level state on OhmHandler (tokens, roles, etc.)
+Server tests share class-level state on OhmHandler (tokens, roles, etc.)
 and must run sequentially. They are grouped with xdist_group("server").
+
+Marks: integration (HTTP server required, slow setup/teardown).
 """
 
 import json
@@ -12,6 +14,8 @@ import threading
 from http.client import HTTPConnection
 
 import pytest
+
+pytestmark = pytest.mark.integration
 
 from ohm.server import OhmHandler, _hash_token, _verify_token, _build_token_lookup, _trigger_webhooks, _webhook_registry, _webhook_lock
 from ohm.schema import DEFAULT_SCHEMA, TOPO_SCHEMA

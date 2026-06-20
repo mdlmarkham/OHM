@@ -1,4 +1,11 @@
-"""Integration tests for the OHM CLI — execute commands against a real DB."""
+"""Integration tests for the OHM CLI — execute commands against a real DB.
+
+Marks: integration.
+"""
+
+import pytest
+
+pytestmark = pytest.mark.integration
 
 import json
 import os

@@ -2,7 +2,13 @@
 
 Tests that multiple agents can read/write concurrently without
 data loss or corruption (OHM-y2i.4.12).
+
+Marks: concurrent (platform-sensitive, DuckDB thread-safety issues on Windows).
 """
+
+import pytest
+
+pytestmark = [pytest.mark.concurrent, pytest.mark.slow]
 
 import json
 import threading

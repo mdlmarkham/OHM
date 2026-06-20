@@ -12,6 +12,8 @@ Tests the full hook lifecycle against a real HTTP server:
   9. No hooks registered: normal operation
 
 All tests run against a real HTTP server with a temp database.
+
+Marks: integration.
 """
 
 import json
@@ -20,6 +22,8 @@ import threading
 from http.client import HTTPConnection
 
 import pytest
+
+pytestmark = pytest.mark.integration
 
 
 def _can_fork_sh():

@@ -8,6 +8,8 @@ Measures TenantManager performance under concurrent load:
 
 Usage:
     pytest tests/test_multi_tenancy_perf.py -v --benchmark-only
+
+Marks: slow (HNSW index creation for 100 tenants is expensive).
 """
 
 from __future__ import annotations
@@ -17,6 +19,8 @@ import threading
 import pytest
 
 from ohm.tenant import TenantManager
+
+pytestmark = pytest.mark.slow
 
 
 @pytest.fixture
