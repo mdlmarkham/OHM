@@ -317,6 +317,27 @@ VALID_TASK_STATUSES = frozenset(
     }
 )
 
+# ── Emerging Concept Detection (OHM-tlqz) ────────────────────────────────────
+
+VALID_EMERGING_CONCEPT_STATUSES = frozenset({"unnamed", "naming_candidate", "named", "rejected"})
+
+EMERGING_CONCEPT_STABILITY_THRESHOLD = 0.45
+EMERGING_CONCEPT_MIN_OBSERVATIONS = 3
+
+# ── TELOS Signing (OHM-enwb) ─────────────────────────────────────────────────
+
+VALID_SIGNING_ALGORITHMS = frozenset({"ed25519", "hmac-sha256"})
+
+# ── Suggestions Lifecycle (OHM-xtzk) ────────────────────────────────────────
+
+VALID_SUGGESTION_TYPES = frozenset({"edge", "node_link"})
+VALID_SUGGESTION_STATUSES = frozenset({"ripe", "promoted", "expired", "rejected"})
+VALID_SUGGESTION_METHODS = frozenset({"semantic", "hd_membership", "orphan", "manual", "oppositional_review"})
+
+# ── Read Scopes (OHM-ybyb) ───────────────────────────────────────────────────
+
+VALID_READ_SCOPE_DIMENSIONS = frozenset({"layer", "source_tier", "node_id", "created_by"})
+
 # ── Layer Descriptions ──────────────────────────────────────────────────────
 
 LAYER_DESCRIPTIONS: dict[str, str] = {
@@ -1008,11 +1029,38 @@ DDL_STATEMENTS: list[str] = [
         UNIQUE(customer_id, product_id, language)
     );
     """,
+    # ── Suggestions Lifecycle (OHM-xtzk) ────────────────────────────────────────
+    """
+    CREATE TABLE IF NOT EXISTS ohm_suggestions (
+        id              VARCHAR PRIMARY KEY,
+        suggestion_type VARCHAR NOT NULL,
+        from_node       VARCHAR,
+        to_node         VARCHAR,
+        target_node     VARCHAR,
+        suggested_edge_type VARCHAR,
+        suggested_layer VARCHAR,
+        confidence      FLOAT DEFAULT 0.5,
+        status          VARCHAR DEFAULT 'ripe',
+        suggested_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        evidence_count  INTEGER DEFAULT 1,
+        ripeness_score  FLOAT DEFAULT 0.0,
+        last_ripened_at TIMESTAMP,
+        source_method   VARCHAR,
+        source_agent    VARCHAR,
+        metadata        JSON,
+        reviewed_by     VARCHAR,
+        reviewed_at     TIMESTAMP,
+        review_notes    TEXT,
+        created_by      VARCHAR NOT NULL,
+        created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        deleted_at      TIMESTAMP
+    );
+    """,
 ]
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.32.0"
+SCHEMA_VERSION = "0.33.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -1408,6 +1456,54 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS source_author VARCHAR;",
             "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS source_institution VARCHAR;",
             "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS data_origin VARCHAR;",
+        ],
+    ),
+    (
+        "0.33.0",
+        "ADR-034/035/036/037: emerging concepts + TELOS signing + suggestions lifecycle + read scopes",
+        [
+            # tlqz
+            "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS emerging_concept_score JSON;",
+            # enwb
+            "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS write_signature VARCHAR;",
+            "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS signing_key_id VARCHAR;",
+            "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS signed_at TIMESTAMP;",
+            "ALTER TABLE ohm_edges ADD COLUMN IF NOT EXISTS write_signature VARCHAR;",
+            "ALTER TABLE ohm_edges ADD COLUMN IF NOT EXISTS signing_key_id VARCHAR;",
+            "ALTER TABLE ohm_edges ADD COLUMN IF NOT EXISTS signed_at TIMESTAMP;",
+            "CREATE INDEX IF NOT EXISTS idx_ohm_nodes_signing_key_id ON ohm_nodes(signing_key_id) WHERE signing_key_id IS NOT NULL;",
+            "CREATE INDEX IF NOT EXISTS idx_ohm_edges_signing_key_id ON ohm_edges(signing_key_id) WHERE signing_key_id IS NOT NULL;",
+            # xtzk
+            """
+            CREATE TABLE IF NOT EXISTS ohm_suggestions (
+                id              VARCHAR PRIMARY KEY,
+                suggestion_type VARCHAR NOT NULL,
+                from_node       VARCHAR,
+                to_node         VARCHAR,
+                target_node     VARCHAR,
+                suggested_edge_type VARCHAR,
+                suggested_layer VARCHAR,
+                confidence      FLOAT DEFAULT 0.5,
+                status          VARCHAR DEFAULT 'ripe',
+                suggested_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                evidence_count  INTEGER DEFAULT 1,
+                ripeness_score  FLOAT DEFAULT 0.0,
+                last_ripened_at TIMESTAMP,
+                source_method   VARCHAR,
+                source_agent    VARCHAR,
+                metadata        JSON,
+                reviewed_by     VARCHAR,
+                reviewed_at     TIMESTAMP,
+                review_notes    TEXT,
+                created_by      VARCHAR NOT NULL,
+                created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                deleted_at      TIMESTAMP
+            );
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_ohm_suggestions_status ON ohm_suggestions(status) WHERE deleted_at IS NULL;",
+            "CREATE INDEX IF NOT EXISTS idx_ohm_suggestions_target ON ohm_suggestions(target_node) WHERE deleted_at IS NULL;",
+            # ybyb
+            "ALTER TABLE ohm_agent_config ADD COLUMN IF NOT EXISTS read_scope JSON;",
         ],
     ),
 ]

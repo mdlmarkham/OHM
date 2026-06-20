@@ -2212,15 +2212,15 @@ def query_snapshot(
     if node_id:
         nodes = _rows_to_dicts(
             conn.execute(
-                "SELECT * FROM ohm_nodes WHERE id = ? AND created_at <= ?",
-                [node_id, timestamp],
+                "SELECT * FROM ohm_nodes WHERE id = ? AND created_at <= ? AND (deleted_at IS NULL OR deleted_at > ?)",
+                [node_id, timestamp, timestamp],
             )
         )
     else:
         nodes = _rows_to_dicts(
             conn.execute(
-                "SELECT * FROM ohm_nodes WHERE created_at <= ? ORDER BY created_at",
-                [timestamp],
+                "SELECT * FROM ohm_nodes WHERE created_at <= ? AND (deleted_at IS NULL OR deleted_at > ?) ORDER BY created_at",
+                [timestamp, timestamp],
             )
         )
 
@@ -2228,22 +2228,22 @@ def query_snapshot(
     if edge_id:
         edges = _rows_to_dicts(
             conn.execute(
-                "SELECT * FROM ohm_edges WHERE id = ? AND created_at <= ?",
-                [edge_id, timestamp],
+                "SELECT * FROM ohm_edges WHERE id = ? AND created_at <= ? AND (deleted_at IS NULL OR deleted_at > ?)",
+                [edge_id, timestamp, timestamp],
             )
         )
     elif node_id:
         edges = _rows_to_dicts(
             conn.execute(
-                "SELECT * FROM ohm_edges WHERE (from_node = ? OR to_node = ?) AND created_at <= ? ORDER BY created_at",
-                [node_id, node_id, timestamp],
+                "SELECT * FROM ohm_edges WHERE (from_node = ? OR to_node = ?) AND created_at <= ? AND (deleted_at IS NULL OR deleted_at > ?) ORDER BY created_at",
+                [node_id, node_id, timestamp, timestamp],
             )
         )
     else:
         edges = _rows_to_dicts(
             conn.execute(
-                "SELECT * FROM ohm_edges WHERE created_at <= ? ORDER BY created_at",
-                [timestamp],
+                "SELECT * FROM ohm_edges WHERE created_at <= ? AND (deleted_at IS NULL OR deleted_at > ?) ORDER BY created_at",
+                [timestamp, timestamp],
             )
         )
 
@@ -2251,15 +2251,15 @@ def query_snapshot(
     if node_id:
         observations = _rows_to_dicts(
             conn.execute(
-                "SELECT * FROM ohm_observations WHERE node_id = ? AND created_at <= ? ORDER BY created_at",
-                [node_id, timestamp],
+                "SELECT * FROM ohm_observations WHERE node_id = ? AND created_at <= ? AND (deleted_at IS NULL OR deleted_at > ?) ORDER BY created_at",
+                [node_id, timestamp, timestamp],
             )
         )
     else:
         observations = _rows_to_dicts(
             conn.execute(
-                "SELECT * FROM ohm_observations WHERE created_at <= ? ORDER BY created_at",
-                [timestamp],
+                "SELECT * FROM ohm_observations WHERE created_at <= ? AND (deleted_at IS NULL OR deleted_at > ?) ORDER BY created_at",
+                [timestamp, timestamp],
             )
         )
 
@@ -5197,3 +5197,266 @@ def batch_update_hd_fingerprints(
         "seed": seed,
         "method": "tastebud_hd_v1",
     }
+
+
+def sign_node_write(
+    conn: DuckDBPyConnection,
+    node_id: str,
+    *,
+    key: bytes,
+    algorithm: str = "hmac-sha256",
+    key_id: str = "default",
+) -> dict[str, Any]:
+    from ohm.exceptions import NodeNotFoundError
+    from ohm.graph.crypto import sign_write
+    from ohm.validation import validate_identifier
+
+    node_id = validate_identifier(node_id, name="node_id")
+    row = conn.execute(
+        "SELECT id, label, type, content, created_by, confidence, visibility, provenance, source_tier FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+        [node_id],
+    ).fetchone()
+    if not row:
+        raise NodeNotFoundError(f"Node {node_id} not found")
+    record = {"id": row[0], "label": row[1], "type": row[2], "content": row[3], "created_by": row[4], "confidence": row[5], "visibility": row[6], "provenance": row[7], "source_tier": row[8]}
+    sig_data = sign_write(record, kind="node", key=key, algorithm=algorithm, key_id=key_id)
+    conn.execute(
+        "UPDATE ohm_nodes SET write_signature = ?, signing_key_id = ?, signed_at = ? WHERE id = ?",
+        [sig_data["write_signature"], sig_data["signing_key_id"], sig_data["signed_at"], node_id],
+    )
+    return {"node_id": node_id, **sig_data}
+
+
+def sign_edge_write(
+    conn: DuckDBPyConnection,
+    edge_id: str,
+    *,
+    key: bytes,
+    algorithm: str = "hmac-sha256",
+    key_id: str = "default",
+) -> dict[str, Any]:
+    from ohm.exceptions import EdgeNotFoundError
+    from ohm.graph.crypto import sign_write
+    from ohm.validation import validate_identifier
+
+    edge_id = validate_identifier(edge_id, name="edge_id")
+    row = conn.execute(
+        "SELECT id, from_node, to_node, layer, edge_type, created_by, confidence, probability, source_tier FROM ohm_edges WHERE id = ? AND deleted_at IS NULL",
+        [edge_id],
+    ).fetchone()
+    if not row:
+        raise EdgeNotFoundError(f"Edge {edge_id} not found")
+    record = {"id": row[0], "from_node": row[1], "to_node": row[2], "layer": row[3], "edge_type": row[4], "created_by": row[5], "confidence": row[6], "probability": row[7], "source_tier": row[8]}
+    sig_data = sign_write(record, kind="edge", key=key, algorithm=algorithm, key_id=key_id)
+    conn.execute(
+        "UPDATE ohm_edges SET write_signature = ?, signing_key_id = ?, signed_at = ? WHERE id = ?",
+        [sig_data["write_signature"], sig_data["signing_key_id"], sig_data["signed_at"], edge_id],
+    )
+    return {"edge_id": edge_id, **sig_data}
+
+
+def verify_node_write(
+    conn: DuckDBPyConnection,
+    node_id: str,
+    *,
+    key: bytes,
+) -> dict[str, Any]:
+    from ohm.graph.crypto import verify_write
+    from ohm.validation import validate_identifier
+
+    node_id = validate_identifier(node_id, name="node_id")
+    row = conn.execute(
+        "SELECT id, label, type, content, created_by, confidence, visibility, provenance, source_tier, write_signature FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+        [node_id],
+    ).fetchone()
+    if not row:
+        return {"node_id": node_id, "verified": False, "reason": "not_found"}
+    record = {"id": row[0], "label": row[1], "type": row[2], "content": row[3], "created_by": row[4], "confidence": row[5], "visibility": row[6], "provenance": row[7], "source_tier": row[8], "write_signature": row[9]}
+    verified = verify_write(record, kind="node", key=key)
+    return {"node_id": node_id, "verified": verified}
+
+
+def verify_edge_write(
+    conn: DuckDBPyConnection,
+    edge_id: str,
+    *,
+    key: bytes,
+) -> dict[str, Any]:
+    from ohm.graph.crypto import verify_write
+    from ohm.validation import validate_identifier
+
+    edge_id = validate_identifier(edge_id, name="edge_id")
+    row = conn.execute(
+        "SELECT id, from_node, to_node, layer, edge_type, created_by, confidence, probability, source_tier, write_signature FROM ohm_edges WHERE id = ? AND deleted_at IS NULL",
+        [edge_id],
+    ).fetchone()
+    if not row:
+        return {"edge_id": edge_id, "verified": False, "reason": "not_found"}
+    record = {"id": row[0], "from_node": row[1], "to_node": row[2], "layer": row[3], "edge_type": row[4], "created_by": row[5], "confidence": row[6], "probability": row[7], "source_tier": row[8], "write_signature": row[9]}
+    verified = verify_write(record, kind="edge", key=key)
+    return {"edge_id": edge_id, "verified": verified}
+
+
+def create_suggestion(
+    conn: DuckDBPyConnection,
+    *,
+    suggestion_type: str,
+    from_node: str | None = None,
+    to_node: str | None = None,
+    target_node: str | None = None,
+    suggested_edge_type: str | None = None,
+    suggested_layer: str | None = None,
+    confidence: float = 0.5,
+    source_method: str = "manual",
+    source_agent: str = "system",
+    metadata: dict | None = None,
+    created_by: str = "system",
+) -> dict[str, Any]:
+    import json
+    import uuid
+
+    from ohm.validation import validate_suggestion_type
+
+    suggestion_type = validate_suggestion_type(suggestion_type)
+
+    existing = conn.execute(
+        """SELECT id, evidence_count FROM ohm_suggestions
+           WHERE from_node IS NOT DISTINCT FROM ?
+             AND to_node IS NOT DISTINCT FROM ?
+             AND target_node IS NOT DISTINCT FROM ?
+             AND status = 'ripe' AND deleted_at IS NULL""",
+        [from_node, to_node, target_node],
+    ).fetchone()
+
+    if existing:
+        new_count = (existing[1] or 1) + 1
+        conn.execute(
+            "UPDATE ohm_suggestions SET evidence_count = ?, last_ripened_at = CURRENT_TIMESTAMP WHERE id = ?",
+            [new_count, existing[0]],
+        )
+        return _rows_to_dicts(conn.execute("SELECT * FROM ohm_suggestions WHERE id = ?", [existing[0]]))[0]
+
+    sid = f"sug_{uuid.uuid4().hex[:12]}"
+    metadata_json = json.dumps(metadata) if metadata else None
+    conn.execute(
+        """INSERT INTO ohm_suggestions
+           (id, suggestion_type, from_node, to_node, target_node, suggested_edge_type, suggested_layer,
+            confidence, status, source_method, source_agent, metadata, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ripe', ?, ?, ?, ?)""",
+        [sid, suggestion_type, from_node, to_node, target_node, suggested_edge_type, suggested_layer,
+         confidence, source_method, source_agent, metadata_json, created_by],
+    )
+    return _rows_to_dicts(conn.execute("SELECT * FROM ohm_suggestions WHERE id = ?", [sid]))[0]
+
+
+def query_suggestions(
+    conn: DuckDBPyConnection,
+    *,
+    status: str | None = None,
+    source_method: str | None = None,
+    target_node: str | None = None,
+    min_ripeness: float = 0.0,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    conditions = ["deleted_at IS NULL"]
+    params: list[Any] = []
+    if status is not None:
+        conditions.append("status = ?")
+        params.append(status)
+    if source_method is not None:
+        conditions.append("source_method = ?")
+        params.append(source_method)
+    if target_node is not None:
+        conditions.append("target_node = ?")
+        params.append(target_node)
+    if min_ripeness > 0:
+        conditions.append("ripeness_score >= ?")
+        params.append(min_ripeness)
+    where = " WHERE " + " AND ".join(conditions)
+    params.append(limit)
+    return _rows_to_dicts(
+        conn.execute(f"SELECT * FROM ohm_suggestions{where} ORDER BY ripeness_score DESC, suggested_at DESC LIMIT ?", params)
+    )
+
+
+def promote_suggestion(
+    conn: DuckDBPyConnection,
+    suggestion_id: str,
+    *,
+    promoted_by: str,
+    edge_layer: str = "L3",
+) -> dict[str, Any]:
+    from ohm.exceptions import OHMError
+    from ohm.validation import validate_identifier
+
+    suggestion_id = validate_identifier(suggestion_id, name="suggestion_id")
+    row = conn.execute(
+        "SELECT * FROM ohm_suggestions WHERE id = ? AND deleted_at IS NULL",
+        [suggestion_id],
+    ).fetchone()
+    if not row:
+        raise OHMError(f"Suggestion {suggestion_id} not found")
+
+    cols = [d[0] for d in conn.execute("SELECT * FROM ohm_suggestions WHERE id = ?", [suggestion_id]).description]
+    sug = dict(zip(cols, row))
+
+    if sug["status"] != "ripe":
+        raise OHMError(f"Suggestion {suggestion_id} status is '{sug['status']}', must be 'ripe' to promote")
+
+    if sug["suggestion_type"] == "edge" and sug["from_node"] and sug["to_node"] and sug["suggested_edge_type"]:
+        import uuid
+
+        edge_id = f"edge_{uuid.uuid4().hex[:12]}"
+        conn.execute(
+            """INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, created_by, confidence)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            [edge_id, sug["from_node"], sug["to_node"], sug["suggested_edge_type"], edge_layer, promoted_by, sug["confidence"]],
+        )
+
+    conn.execute(
+        "UPDATE ohm_suggestions SET status = 'promoted', reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP WHERE id = ?",
+        [promoted_by, suggestion_id],
+    )
+    return {"suggestion_id": suggestion_id, "status": "promoted", "promoted_by": promoted_by}
+
+
+def reject_suggestion(
+    conn: DuckDBPyConnection,
+    suggestion_id: str,
+    *,
+    rejected_by: str,
+    notes: str | None = None,
+) -> dict[str, Any]:
+    from ohm.exceptions import OHMError
+    from ohm.validation import validate_identifier
+
+    suggestion_id = validate_identifier(suggestion_id, name="suggestion_id")
+    row = conn.execute(
+        "SELECT status FROM ohm_suggestions WHERE id = ? AND deleted_at IS NULL",
+        [suggestion_id],
+    ).fetchone()
+    if not row:
+        raise OHMError(f"Suggestion {suggestion_id} not found")
+
+    conn.execute(
+        "UPDATE ohm_suggestions SET status = 'rejected', reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP, review_notes = ? WHERE id = ?",
+        [rejected_by, notes, suggestion_id],
+    )
+    return {"suggestion_id": suggestion_id, "status": "rejected"}
+
+
+def expire_suggestions(
+    conn: DuckDBPyConnection,
+    *,
+    max_age_days: int = 30,
+) -> dict[str, Any]:
+    conn.execute(
+        """UPDATE ohm_suggestions
+           SET status = 'expired'
+           WHERE status = 'ripe'
+             AND deleted_at IS NULL
+             AND suggested_at < CURRENT_TIMESTAMP - INTERVAL '?' DAY""",
+        [max_age_days],
+    )
+    count = conn.execute("SELECT changes()").fetchone()[0]
+    return {"expired_count": count}

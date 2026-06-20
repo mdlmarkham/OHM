@@ -37,6 +37,7 @@ class Graph:
         self.actor = actor
         self.token: str | None = None
         self.tenant_id: str | None = None
+        self._signing_key: bytes | None = None
 
     # ── Discovery (ADR-005) ───────────────────────────────────────────────
 
@@ -773,6 +774,132 @@ class Graph:
         from ohm.graph.methods import source_diversity_score
 
         return source_diversity_score(self._conn, node_id, max_depth=max_depth)
+
+    def detect_emerging_concepts(
+        self,
+        *,
+        residual_mass_threshold: float = 0.5,
+        stability_threshold: float = 0.7,
+        min_observations: int = 3,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Detect unknown-ingredient emerging concepts (OHM-tlqz, ADR-034).
+
+        Uses HD fingerprint residual mass to find nodes that are not
+        well-explained by existing concepts. Stability gate prevents
+        premature naming.
+        """
+        from ohm.graph.methods import detect_unknown_ingredients
+
+        return detect_unknown_ingredients(
+            self._conn,
+            residual_mass_threshold=residual_mass_threshold,
+            stability_threshold=stability_threshold,
+            min_observations=min_observations,
+            limit=limit,
+        )
+
+    def compute_residual_mass(self, node_id: str, *, dim: int = 10000, seed: int = 42) -> dict[str, Any]:
+        """Compute HD residual mass for a node (OHM-tlqz, ADR-034)."""
+        from ohm.graph.methods import compute_residual_mass
+
+        return compute_residual_mass(self._conn, node_id, dim=dim, seed=seed)
+
+    def update_emerging_concept_score(self, node_id: str, *, dim: int = 10000, seed: int = 42) -> dict[str, Any]:
+        """Compute and store emerging concept score (OHM-tlqz, ADR-034)."""
+        from ohm.graph.methods import update_emerging_concept_score
+
+        return update_emerging_concept_score(self._conn, node_id, dim=dim, seed=seed)
+
+    def name_emerging_concept(self, node_id: str, new_label: str, *, dim: int = 10000, seed: int = 42) -> dict[str, Any]:
+        """Promote an emerging concept with a new label (OHM-tlqz, ADR-034).
+
+        Gated on stability >= 0.7. Raises ValueError if unstable.
+        """
+        from ohm.graph.methods import promote_emerging_concept
+
+        return promote_emerging_concept(
+            self._conn,
+            node_id=node_id,
+            new_label=new_label,
+            promoted_by=self.actor,
+            dim=dim,
+            seed=seed,
+        )
+
+    def sign_node(self, node_id: str, *, key: bytes | None = None, algorithm: str = "hmac-sha256", key_id: str = "default") -> dict[str, Any]:
+        """Sign a node write with HMAC-SHA256 (OHM-enwb, ADR-035)."""
+        from ohm.graph.queries import sign_node_write
+        signing_key = key or self._signing_key
+        if not signing_key:
+            raise ValueError("No signing key available")
+        return sign_node_write(self._conn, node_id, key=signing_key, algorithm=algorithm, key_id=key_id)
+
+    def sign_edge(self, edge_id: str, *, key: bytes | None = None, algorithm: str = "hmac-sha256", key_id: str = "default") -> dict[str, Any]:
+        """Sign an edge write with HMAC-SHA256 (OHM-enwb, ADR-035)."""
+        from ohm.graph.queries import sign_edge_write
+        signing_key = key or self._signing_key
+        if not signing_key:
+            raise ValueError("No signing key available")
+        return sign_edge_write(self._conn, edge_id, key=signing_key, algorithm=algorithm, key_id=key_id)
+
+    def verify_node(self, node_id: str, *, key: bytes | None = None) -> dict[str, Any]:
+        """Verify a node's write signature (OHM-enwb, ADR-035)."""
+        from ohm.graph.queries import verify_node_write
+        signing_key = key or self._signing_key
+        if not signing_key:
+            raise ValueError("No signing key available")
+        return verify_node_write(self._conn, node_id, key=signing_key)
+
+    def verify_edge(self, edge_id: str, *, key: bytes | None = None) -> dict[str, Any]:
+        """Verify an edge's write signature (OHM-enwb, ADR-035)."""
+        from ohm.graph.queries import verify_edge_write
+        signing_key = key or self._signing_key
+        if not signing_key:
+            raise ValueError("No signing key available")
+        return verify_edge_write(self._conn, edge_id, key=signing_key)
+
+    def create_suggestion(self, **kwargs) -> dict[str, Any]:
+        """Create a suggestion for later triage (OHM-xtzk, ADR-036)."""
+        from ohm.graph.queries import create_suggestion
+        kwargs.setdefault("created_by", self.actor)
+        kwargs.setdefault("source_agent", self.actor)
+        return create_suggestion(self._conn, **kwargs)
+
+    def query_suggestions(self, **kwargs) -> list[dict[str, Any]]:
+        """Query suggestions by status/method/target (OHM-xtzk, ADR-036)."""
+        from ohm.graph.queries import query_suggestions
+        return query_suggestions(self._conn, **kwargs)
+
+    def promote_suggestion(self, suggestion_id: str, *, edge_layer: str = "L3") -> dict[str, Any]:
+        """Promote a ripe suggestion to a real edge (OHM-xtzk, ADR-036)."""
+        from ohm.graph.queries import promote_suggestion
+        return promote_suggestion(self._conn, suggestion_id, promoted_by=self.actor, edge_layer=edge_layer)
+
+    def reject_suggestion(self, suggestion_id: str, *, notes: str | None = None) -> dict[str, Any]:
+        """Reject a suggestion (OHM-xtzk, ADR-036)."""
+        from ohm.graph.queries import reject_suggestion
+        return reject_suggestion(self._conn, suggestion_id, rejected_by=self.actor, notes=notes)
+
+    def ripen_suggestions(self, *, dry_run: bool = False, max_age_days: int = 30, ripeness_threshold: float = 0.7) -> dict[str, Any]:
+        """Ripen suggestions and optionally auto-promote/expiry (OHM-xtzk, ADR-036)."""
+        from ohm.graph.methods import ripen_then_decide
+        return ripen_then_decide(self._conn, dry_run=dry_run, max_age_days=max_age_days, ripeness_threshold=ripeness_threshold)
+
+    def set_read_scope(self, scope: dict | None) -> dict[str, Any]:
+        """Set this agent's read scope (OHM-ybyb, ADR-037).
+
+        None = full access (backward compat). Scope dict keys: layer, source_tier, node_id, created_by.
+        """
+        from ohm.boundary import set_agent_read_scope
+
+        return set_agent_read_scope(self._conn, self.actor, scope)
+
+    def get_read_scope(self) -> dict | None:
+        """Get this agent's read scope (OHM-ybyb, ADR-037)."""
+        from ohm.boundary import get_agent_read_scope
+
+        return get_agent_read_scope(self._conn, self.actor)
 
     def update_edge(
         self,

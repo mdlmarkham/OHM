@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from datetime import datetime
     from duckdb import DuckDBPyConnection
 
 
@@ -4236,4 +4237,417 @@ def source_diversity_score(
         "distinct_institutions": distinct_institutions,
         "distinct_origins": distinct_origins,
         "method": "weighted_shannon",
+    }
+
+
+def compute_residual_mass(
+    conn: DuckDBPyConnection,
+    node_id: str,
+    *,
+    dim: int = 10000,
+    seed: int = 42,
+) -> dict[str, Any]:
+    from ohm.exceptions import NodeNotFoundError
+    from ohm.inference.hd import fingerprint_node, hamming_similarity
+    from ohm.validation import validate_identifier
+
+    node_id = validate_identifier(node_id, name="node_id")
+
+    row = conn.execute(
+        """SELECT id, label, type, content, tags, provenance, hd_fingerprint
+           FROM ohm_nodes
+           WHERE id = ? AND deleted_at IS NULL""",
+        [node_id],
+    ).fetchone()
+    if not row:
+        raise NodeNotFoundError(f"Node {node_id} not found")
+
+    nid, label, ntype, content, tags_json, provenance, stored_fp = row
+
+    if stored_fp is not None:
+        query_bytes = bytearray(stored_fp) if isinstance(stored_fp, bytes) else bytearray(stored_fp)
+    else:
+        tags = None
+        if tags_json:
+            import json
+
+            try:
+                tags = json.loads(tags_json) if isinstance(tags_json, str) else tags_json
+            except (json.JSONDecodeError, TypeError):
+                tags = None
+        fp = fingerprint_node(
+            label=label, node_type=ntype, content=content, tags=tags, provenance=provenance, dim=dim, seed=seed,
+        )
+        query_bytes = bytearray.fromhex(fp["fingerprint_hex"])
+
+    concepts = conn.execute(
+        """SELECT id, label, hd_fingerprint
+           FROM ohm_nodes
+           WHERE hd_fingerprint IS NOT NULL AND deleted_at IS NULL AND id != ?
+           ORDER BY confidence DESC""",
+        [node_id],
+    ).fetchall()
+
+    if not concepts:
+        return {
+            "node_id": nid,
+            "residual_mass": 1.0,
+            "max_similarity": 0.0,
+            "closest_concept": None,
+            "concept_count": 0,
+        }
+
+    max_sim = 0.0
+    closest_id = None
+    for cid, clabel, cfp in concepts:
+        candidate_bytes = bytearray(cfp) if isinstance(cfp, bytes) else bytearray(cfp)
+        if len(candidate_bytes) != len(query_bytes):
+            continue
+        sim = hamming_similarity(query_bytes, candidate_bytes)
+        if sim > max_sim:
+            max_sim = sim
+            closest_id = cid
+
+    return {
+        "node_id": nid,
+        "residual_mass": round(1.0 - max_sim, 4),
+        "max_similarity": round(max_sim, 4),
+        "closest_concept": closest_id,
+        "concept_count": len(concepts),
+    }
+
+
+def compute_emerging_concept_stability(
+    conn: DuckDBPyConnection,
+    node_id: str,
+    *,
+    dim: int = 10000,
+    seed: int = 42,
+) -> dict[str, Any]:
+    from ohm.validation import validate_identifier
+
+    node_id = validate_identifier(node_id, name="node_id")
+
+    rm = compute_residual_mass(conn, node_id, dim=dim, seed=seed)
+
+    evidence_count = conn.execute(
+        """SELECT COUNT(*) FROM ohm_edges
+           WHERE to_node = ? AND deleted_at IS NULL
+             AND edge_type IN ('CAUSES', 'SUPPORTS', 'EXPECTS', 'PREDICTS')""",
+        [node_id],
+    ).fetchone()[0]
+
+    observation_count = conn.execute(
+        """SELECT COUNT(*) FROM ohm_observations
+           WHERE node_id = ? AND deleted_at IS NULL""",
+        [node_id],
+    ).fetchone()[0]
+
+    total_observations = evidence_count + observation_count
+
+    if total_observations < 3:
+        stability = 0.0
+    else:
+        stability = rm["residual_mass"]
+
+    return {
+        "node_id": node_id,
+        "residual_mass": rm["residual_mass"],
+        "max_similarity": rm["max_similarity"],
+        "closest_concept": rm["closest_concept"],
+        "evidence_count": evidence_count,
+        "observation_count": observation_count,
+        "total_observations": total_observations,
+        "stability": round(stability, 4),
+    }
+
+
+def detect_unknown_ingredients(
+    conn: DuckDBPyConnection,
+    *,
+    residual_mass_threshold: float = 0.5,
+    stability_threshold: float = 0.7,
+    min_observations: int = 3,
+    limit: int = 20,
+    dim: int = 10000,
+    seed: int = 42,
+) -> list[dict[str, Any]]:
+    from ohm.inference.hd import fingerprint_node, hamming_similarity
+
+    nodes = conn.execute(
+        """SELECT id, label, type, content, tags, provenance, hd_fingerprint, confidence
+           FROM ohm_nodes
+           WHERE deleted_at IS NULL AND type IN ('concept', 'pattern', 'idea', 'fragment')
+           ORDER BY confidence DESC""",
+    ).fetchall()
+
+    concept_fps = [
+        (r[0], r[1], bytearray(r[6])) for r in nodes if r[6] is not None
+    ]
+
+    results = []
+    for r in nodes:
+        nid, label, ntype, content, tags_json, provenance, stored_fp, confidence = r
+
+        if stored_fp is not None:
+            query_bytes = bytearray(stored_fp) if isinstance(stored_fp, bytes) else bytearray(stored_fp)
+        else:
+            tags = None
+            if tags_json:
+                import json
+
+                try:
+                    tags = json.loads(tags_json) if isinstance(tags_json, str) else tags_json
+                except (json.JSONDecodeError, TypeError):
+                    tags = None
+            fp = fingerprint_node(
+                label=label, node_type=ntype, content=content, tags=tags, provenance=provenance, dim=dim, seed=seed,
+            )
+            query_bytes = bytearray.fromhex(fp["fingerprint_hex"])
+
+        max_sim = 0.0
+        for cid, clabel, cfp in concept_fps:
+            if cid == nid:
+                continue
+            if len(cfp) != len(query_bytes):
+                continue
+            sim = hamming_similarity(query_bytes, cfp)
+            if sim > max_sim:
+                max_sim = sim
+
+        residual_mass = 1.0 - max_sim
+
+        evidence_count = conn.execute(
+            """SELECT COUNT(*) FROM ohm_edges
+               WHERE to_node = ? AND deleted_at IS NULL
+                 AND edge_type IN ('CAUSES', 'SUPPORTS', 'EXPECTS', 'PREDICTS')""",
+            [nid],
+        ).fetchone()[0]
+
+        observation_count = conn.execute(
+            """SELECT COUNT(*) FROM ohm_observations
+               WHERE node_id = ? AND deleted_at IS NULL""",
+            [nid],
+        ).fetchone()[0]
+
+        total_obs = evidence_count + observation_count
+        if total_obs < min_observations:
+            continue
+
+        stability = residual_mass
+
+        if residual_mass >= residual_mass_threshold and stability >= stability_threshold:
+            results.append({
+                "node_id": nid,
+                "label": label,
+                "type": ntype,
+                "confidence": confidence,
+                "residual_mass": round(residual_mass, 4),
+                "max_similarity": round(max_sim, 4),
+                "stability": round(stability, 4),
+                "evidence_count": evidence_count,
+                "observation_count": observation_count,
+            })
+
+    results.sort(key=lambda x: x["residual_mass"], reverse=True)
+    return results[:limit]
+
+
+def update_emerging_concept_score(
+    conn: DuckDBPyConnection,
+    node_id: str,
+    *,
+    dim: int = 10000,
+    seed: int = 42,
+) -> dict[str, Any]:
+    import json
+    from datetime import datetime
+
+    from ohm.validation import validate_identifier
+
+    node_id = validate_identifier(node_id, name="node_id")
+
+    stability_info = compute_emerging_concept_stability(conn, node_id, dim=dim, seed=seed)
+
+    score = {
+        "residual_mass": stability_info["residual_mass"],
+        "stability": stability_info["stability"],
+        "observations_count": stability_info["total_observations"],
+        "max_similarity": stability_info["max_similarity"],
+        "closest_concept": stability_info["closest_concept"],
+        "last_updated": datetime.now().isoformat(),
+    }
+
+    status = "unnamed"
+    if stability_info["stability"] >= 0.7 and stability_info["residual_mass"] >= 0.5:
+        status = "naming_candidate"
+    score["status"] = status
+
+    conn.execute(
+        "UPDATE ohm_nodes SET emerging_concept_score = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        [json.dumps(score), node_id],
+    )
+
+    return {"node_id": node_id, "emerging_concept_score": score, "stored": True}
+
+
+def promote_emerging_concept(
+    conn: DuckDBPyConnection,
+    *,
+    node_id: str,
+    new_label: str,
+    promoted_by: str,
+    dim: int = 10000,
+    seed: int = 42,
+) -> dict[str, Any]:
+    import json
+    from datetime import datetime
+
+    from ohm.exceptions import NodeNotFoundError
+    from ohm.validation import validate_identifier
+
+    node_id = validate_identifier(node_id, name="node_id")
+
+    if not new_label or len(new_label) > 500:
+        raise ValueError("new_label must be non-empty and <= 500 characters")
+
+    stability_info = compute_emerging_concept_stability(conn, node_id, dim=dim, seed=seed)
+
+    if stability_info["stability"] < 0.45:
+        raise ValueError(
+            f"Cannot promote node {node_id}: stability {stability_info['stability']} < 0.45 threshold"
+        )
+
+    row = conn.execute(
+        "SELECT emerging_concept_score FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+        [node_id],
+    ).fetchone()
+    if not row:
+        raise NodeNotFoundError(f"Node {node_id} not found")
+
+    conn.execute(
+        "UPDATE ohm_nodes SET label = ?, updated_at = CURRENT_TIMESTAMP, updated_by = ? WHERE id = ?",
+        [new_label, promoted_by, node_id],
+    )
+
+    score = {
+        "residual_mass": stability_info["residual_mass"],
+        "stability": stability_info["stability"],
+        "observations_count": stability_info["total_observations"],
+        "status": "named",
+        "promoted_by": promoted_by,
+        "promoted_at": datetime.now().isoformat(),
+        "last_updated": datetime.now().isoformat(),
+    }
+    conn.execute(
+        "UPDATE ohm_nodes SET emerging_concept_score = ? WHERE id = ?",
+        [json.dumps(score), node_id],
+    )
+
+    return {
+        "node_id": node_id,
+        "old_label": None,
+        "new_label": new_label,
+        "promoted_by": promoted_by,
+        "status": "named",
+        "stability": stability_info["stability"],
+    }
+
+
+def compute_ripeness(
+    suggestion: dict[str, Any],
+    *,
+    now: datetime | None = None,
+    ripen_half_life_days: float = 7.0,
+    evidence_threshold: int = 2,
+) -> float:
+    import math
+    from datetime import datetime
+
+    if now is None:
+        now = datetime.now()
+
+    suggested_at = suggestion.get("suggested_at")
+    if suggested_at is None:
+        return 0.0
+    if isinstance(suggested_at, str):
+        suggested_at = datetime.fromisoformat(suggested_at.replace("Z", "+00:00").split("+")[0])
+
+    age_days = max(0.0, (now - suggested_at).total_seconds() / 86400.0)
+    time_factor = 1.0 - 0.5 ** (age_days / ripen_half_life_days)
+
+    evidence_count = suggestion.get("evidence_count", 1) or 1
+    evidence_factor = min(1.0, evidence_count / max(1, evidence_threshold))
+
+    confidence = suggestion.get("confidence", 0.5) or 0.5
+    confidence_factor = float(confidence)
+
+    return round(time_factor * evidence_factor * confidence_factor, 4)
+
+
+def ripen_then_decide(
+    conn: DuckDBPyConnection,
+    *,
+    dry_run: bool = False,
+    max_age_days: int = 30,
+    ripeness_threshold: float = 0.7,
+    ripen_half_life_days: float = 7.0,
+    evidence_threshold: int = 2,
+) -> dict[str, Any]:
+    from datetime import datetime, timedelta
+
+    from ohm.graph.queries import promote_suggestion, expire_suggestions
+
+    now = datetime.now()
+    cutoff = now - timedelta(days=max_age_days)
+
+    rows = conn.execute(
+        """SELECT * FROM ohm_suggestions
+           WHERE status = 'ripe' AND deleted_at IS NULL
+           ORDER BY suggested_at ASC""",
+    ).fetchall()
+
+    if not rows:
+        return {"ripened": 0, "promoted": 0, "expired": 0, "dry_run": dry_run}
+
+    cols = [d[0] for d in conn.execute("SELECT * FROM ohm_suggestions WHERE status = 'ripe' AND deleted_at IS NULL LIMIT 1").description]
+    suggestions = [dict(zip(cols, r)) for r in rows]
+
+    ripened = 0
+    promoted = 0
+    expired_count = 0
+
+    for sug in suggestions:
+        ripeness = compute_ripeness(sug, now=now, ripen_half_life_days=ripen_half_life_days, evidence_threshold=evidence_threshold)
+
+        if not dry_run:
+            conn.execute(
+                "UPDATE ohm_suggestions SET ripeness_score = ?, last_ripened_at = CURRENT_TIMESTAMP WHERE id = ?",
+                [ripeness, sug["id"]],
+            )
+        ripened += 1
+
+        suggested_at = sug.get("suggested_at")
+        if isinstance(suggested_at, str):
+            suggested_at = datetime.fromisoformat(suggested_at.replace("Z", "+00:00").split("+")[0])
+        if suggested_at and suggested_at < cutoff:
+            if not dry_run:
+                conn.execute(
+                    "UPDATE ohm_suggestions SET status = 'expired' WHERE id = ?",
+                    [sug["id"]],
+                )
+            expired_count += 1
+        elif ripeness >= ripeness_threshold and not dry_run:
+            try:
+                promote_suggestion(conn, sug["id"], promoted_by="system")
+                promoted += 1
+            except Exception:
+                pass
+
+    return {
+        "ripened": ripened,
+        "promoted": promoted,
+        "expired": expired_count,
+        "dry_run": dry_run,
+        "ripeness_threshold": ripeness_threshold,
     }

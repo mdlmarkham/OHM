@@ -163,3 +163,96 @@ def enforce_identity_evolution(conn, agent_name: str, edge_id: str) -> None:
     owner = get_edge_owner(conn, edge_id)
     edge_type = get_edge_type(conn, edge_id)
     check_can_evolve_identity_edge(agent_name, owner, edge_type)
+
+
+def get_agent_read_scope(conn, agent_name: str) -> dict | None:
+    """Resolve an agent's read scope from ohm_agent_config (OHM-ybyb, ADR-037).
+
+    Returns the read_scope JSON dict, or None for full access (backward compat).
+    """
+    row = conn.execute(
+        "SELECT read_scope FROM ohm_agent_config WHERE agent_name = ?",
+        [agent_name],
+    ).fetchone()
+    if not row or row[0] is None:
+        return None
+    import json
+
+    try:
+        scope = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+        return scope
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def enforce_read_scope(
+    conn,
+    agent_name: str,
+    *,
+    layer: str | None = None,
+    source_tier: str | None = None,
+    node_id: str | None = None,
+    created_by: str | None = None,
+) -> None:
+    """Enforce read-scope restrictions for an agent (OHM-ybyb, ADR-037).
+
+    Raises PermissionDeniedError if the agent's read_scope excludes the
+    requested resource. NULL scope = full access (backward compat).
+    """
+    scope = get_agent_read_scope(conn, agent_name)
+    if scope is None:
+        return
+
+    if layer is not None:
+        allowed_layers = scope.get("layer")
+        if allowed_layers is not None and layer not in allowed_layers:
+            raise PermissionDeniedError(
+                f"Agent '{agent_name}' read scope excludes layer '{layer}'"
+            )
+
+    if source_tier is not None:
+        allowed_tiers = scope.get("source_tier")
+        if allowed_tiers is not None and source_tier not in allowed_tiers:
+            raise PermissionDeniedError(
+                f"Agent '{agent_name}' read scope excludes source_tier '{source_tier}'"
+            )
+
+    if created_by is not None:
+        allowed_creators = scope.get("created_by")
+        if allowed_creators is not None and created_by not in allowed_creators:
+            raise PermissionDeniedError(
+                f"Agent '{agent_name}' read scope excludes nodes by '{created_by}'"
+            )
+
+    if node_id is not None:
+        allowed_nodes = scope.get("node_id")
+        if allowed_nodes is not None and node_id not in allowed_nodes:
+            raise PermissionDeniedError(
+                f"Agent '{agent_name}' read scope excludes node '{node_id}'"
+            )
+
+
+def set_agent_read_scope(conn, agent_name: str, scope: dict | None) -> dict:
+    """Set or clear an agent's read scope (OHM-ybyb, ADR-037)."""
+    import json
+
+    from ohm.validation import validate_read_scope
+
+    scope = validate_read_scope(scope)
+    scope_json = json.dumps(scope) if scope is not None else None
+
+    existing = conn.execute(
+        "SELECT agent_name FROM ohm_agent_config WHERE agent_name = ?",
+        [agent_name],
+    ).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE ohm_agent_config SET read_scope = ? WHERE agent_name = ?",
+            [scope_json, agent_name],
+        )
+    else:
+        conn.execute(
+            "INSERT INTO ohm_agent_config (agent_name, optimization_target, read_scope) VALUES (?, ?, ?)",
+            [agent_name, "balanced", scope_json],
+        )
+    return {"agent_name": agent_name, "read_scope": scope}
