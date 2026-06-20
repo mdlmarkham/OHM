@@ -523,3 +523,97 @@ Three nullable columns on `ohm_nodes`: `source_author`, `source_institution`, `d
 - Requires agents to populate source_author/institution for full utility
 - Annotation only, not enforcement — low diversity feeds oppositional review (ADR-030)
 - See [full ADR](0033-source-diversity-score.md)
+
+---
+
+## ADR-034: Emerging Concept Detection via HD Fingerprint Residual Mass
+
+**Date:** 2026-06-19
+**Status:** Accepted
+
+### Context
+
+OHM agents create nodes that may represent genuinely novel concepts the graph has not yet named. ADR-031/032 gave us persistent HD fingerprints with Hamming similarity, but no automated signal for structural novelty. The residual mass (1 − max_similarity_to_concepts) of a node's fingerprint against all stored fingerprints detects emerging concepts before they are named.
+
+### Decision
+
+`residual_mass = 1 - max_similarity_to_concepts`. Stability = residual_mass when total_observations ≥ 3, else 0.0. Stability threshold 0.45 for promotion (below random similarity floor ~0.5 for 10K-bit vectors). `emerging_concept_score JSON` column on `ohm_nodes` stores status lifecycle: unnamed → naming_candidate → named/rejected. `promote_emerging_concept()` gated on stability ≥ 0.45. `detect_unknown_ingredients()` scans for high-residual-mass nodes with sufficient evidence. Schema version 0.33.0.
+
+### Consequences
+
+- Automated detection of structurally novel nodes — no manual scanning
+- Residual mass grounded in HD theory (random floor ~0.5)
+- Evidence gate (≥3 observations) prevents noise promotion
+- O(n²) scan in `detect_unknown_ingredients()` — needs indexing at scale
+- JSON column not SQL-queryable without json extension functions
+- See [full ADR](0034-emerging-concept-detection.md)
+
+---
+
+## ADR-035: TELOS Signing — Cryptographic Audit Trail for Agent Writes
+
+**Date:** 2026-06-19
+**Status:** Accepted
+
+### Context
+
+OHM's `created_by` column attributes writes to agents but is a plain string — any agent can set `created_by="metis"` and the graph cannot detect forgery. ADR-003's boundary enforcement depends on `created_by` authenticity. ADR-017's encryption at rest protects confidentiality but not integrity. The graph needs a cryptographic audit trail: a signature over each write that can be verified later to prove the write came from a key holder.
+
+### Decision
+
+Three nullable columns on `ohm_nodes` and `ohm_edges`: `write_signature` (VARCHAR, algorithm-prefixed hex), `signing_key_id` (VARCHAR), `signed_at` (TIMESTAMP). NULL defaults = unsigned writes valid (flag, not reject). Canonical payload = sorted-key JSON of whitelisted fields (`NODE_FIELDS` / `EDGE_FIELDS`). HMAC-SHA256 default (stdlib only, `hmac` + `hashlib`). Ed25519 optional via `pynacl`. `sign_node_write` / `sign_edge_write` + `verify_node_write` / `verify_edge_write` in queries. SDK `_signing_key` property + `sign_node` / `sign_edge` / `verify_node` / `verify_edge` methods. Schema version 0.33.0. Partial indexes on `signing_key_id`. Graduated enforcement: Phase 1 advisory (opt-in), Phase 2 per-agent flag, Phase 3 boundary enforcement.
+
+### Consequences
+
+- Tamper evidence — post-signature modification invalidates signature
+- Zero-dependency default (HMAC-SHA256 via stdlib)
+- Backward compatible — NULL defaults, unsigned writes pass through
+- Post-hoc signing (not write-time) leaves unsigned window; Phase 2 mitigates
+- Canonical payload whitelist must be maintained as schema evolves
+- See [full ADR](0035-telos-signing.md)
+
+---
+
+## ADR-036: Ripen-Then-Decide Triage for Suggestions
+
+**Date:** 2026-06-19
+**Status:** Accepted
+
+### Context
+
+Agents and substrate methods produce candidate edges that should not be written directly to `ohm_edges`. Writing immediately pollutes the canonical graph with unverified suggestions and inflates confidence through recursive agreement (ADR-029). A staging area with automated triage that accumulates evidence over time bridges the gap.
+
+### Decision
+
+`ohm_suggestions` table with lifecycle: `ripe → promoted | expired | rejected`. `compute_ripeness = time_factor * evidence_factor * confidence_factor` (inverted decay — ripeness GROWS with age). `ripen_then_decide`: ripen all, auto-promote ≥ threshold (0.7), auto-expire stale (>30 days). Duplicate prevention: same `(from_node, to_node, target_node)` → increment `evidence_count`. Promoted suggestions create real edges in `ohm_edges`.
+
+### Consequences
+
+- Canonical graph stays clean — only promoted edges enter it
+- Evidence accumulates across agents — three independent suggestions = one strong suggestion
+- Auto-promote/auto-expire reduce manual triage burden
+- Multiplicative ripeness enforces AND-gate: time + evidence + confidence all required
+- See [full ADR](0036-suggestions-lifecycle.md)
+
+---
+
+## ADR-037: Per-Agent Read Scopes and Temporal Pinning
+
+**Date:** 2026-06-19
+**Status:** Accepted
+
+### Context
+
+ADR-003 enforces write boundaries but has no read-side equivalent — every agent reads everything. Soft-deleted items leaked into `query_snapshot` (no `deleted_at` filter). No point-in-time read capability exists without DuckLake (OHM-xgm).
+
+### Decision
+
+`read_scope` JSON column on `ohm_agent_config` with four dimensions: `layer`, `source_tier`, `created_by`, `node_id`. NULL = full access (backward compat). `enforce_read_scope()` in `boundary.py` — read-side parallel to ADR-003's `enforce_write_boundary()`. Bug fix: `query_snapshot` now filters `deleted_at` (soft-deleted items excluded from historical snapshots). Temporal pinning via `created_at <= timestamp` — full time-travel deferred to DuckLake (OHM-xgm). Schema version 0.33.0.
+
+### Consequences
+
+- Agents restricted to their trust boundary (layer, tier, provenance)
+- Multi-tenant agents scoped to `created_by: ["customer:{id}"]`
+- Soft-delete contract now consistent across all query paths
+- Temporal pinning is `created_at`-only, not MVCC — updated values after `as_of` are visible
+- See [full ADR](0037-read-scopes-temporal-pinning.md)
