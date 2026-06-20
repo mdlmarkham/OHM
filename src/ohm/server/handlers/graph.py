@@ -2314,6 +2314,25 @@ class GraphHandlerMixin:
         except Exception as exc:
             logger.debug("Heartbeat island nudge failed: %s", exc)
 
+        # OHM-jx4q: Orphan rate nudge in heartbeat
+        try:
+            from ohm.queries import query_graph_health
+
+            health = query_graph_health(self.current_store.conn)
+            total_nodes = health.get("total_nodes") or 0
+            orphans = health.get("orphan_nodes") or 0
+            orphan_rate = round(orphans / total_nodes, 4) if total_nodes else 0
+            if orphan_rate > 0.10:
+                result["orphan_rate_warning"] = {
+                    "orphan_rate": orphan_rate,
+                    "orphan_count": orphans,
+                    "total_nodes": total_nodes,
+                    "orphan_type_breakdown": health.get("orphan_type_breakdown", {}),
+                    "triage_endpoint": "GET /admin/orphan-triage",
+                }
+        except Exception as exc:
+            logger.debug("Heartbeat orphan rate nudge failed: %s", exc)
+
         # ADR-023: Proactive orient enrichment
         try:
             orient = self._get_orient_data(agent)

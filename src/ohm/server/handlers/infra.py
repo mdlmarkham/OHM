@@ -173,6 +173,7 @@ class InfraHandlerMixin:
                 "edge_count": graph.get("total_edges"),
                 "orphan_count": orphan_nodes,
                 "orphan_rate": round(orphan_nodes / total_nodes, 4) if total_nodes else 0,
+                "orphan_type_breakdown": graph.get("orphan_type_breakdown", {}),
                 "dead_end_count": dead_end_count,
                 "dead_end_rate": round(dead_end_count / total_nodes, 4) if total_nodes else 0,
                 "low_confidence_count": graph.get("low_confidence_unchallenged"),

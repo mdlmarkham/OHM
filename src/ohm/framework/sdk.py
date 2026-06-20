@@ -2141,6 +2141,32 @@ class Graph:
 
         return query_graph_health(self._conn)
 
+    def orphan_triage(
+        self,
+        *,
+        limit: int = 50,
+        min_confidence: float | None = None,
+    ) -> dict[str, Any]:
+        """Batch triage orphan nodes, producing link suggestions (OHM-jx4q).
+
+        Scans orphan nodes (zero edges) and generates suggestions for
+        connecting them to the graph via same-type matching and label overlap.
+
+        Args:
+            limit: Max orphans to process (default 50).
+            min_confidence: Only triage orphans with confidence >= this value.
+
+        Returns:
+            Dict with triaged_count, total_orphans, suggestions list, types_seen.
+        """
+        from ohm.queries import batch_orphan_triage
+
+        return batch_orphan_triage(
+            self._conn,
+            limit=limit,
+            min_confidence=min_confidence,
+        )
+
     def provenance(self, node_id: str, *, max_depth: int = 10) -> list[dict[str, Any]]:
         """Trace provenance chain backward from a node.
 

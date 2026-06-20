@@ -1556,6 +1556,19 @@ class AdminHandlerMixin:
         orphan_ratio = orphans / total_nodes
         non_orphan_ratio = 1.0 - orphan_ratio
 
+        orphan_type_rows = conn.execute("""
+            SELECT n.type, COUNT(*) as cnt
+            FROM ohm_nodes n
+            WHERE n.deleted_at IS NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM ohm_edges e
+                  WHERE e.deleted_at IS NULL AND (e.from_node = n.id OR e.to_node = n.id)
+              )
+            GROUP BY n.type
+            ORDER BY cnt DESC
+        """).fetchall()
+        raw_values["orphan_type_breakdown"] = {row[0]: row[1] for row in orphan_type_rows} if orphan_type_rows else {}
+
         # 3. Verification rate: verified causal edges / total causal edges (weight 0.25)
         causal_types = ("CAUSES", "PREDICTS", "EXPECTS")
         placeholders = ",".join(["?"] * len(causal_types))
@@ -1637,6 +1650,7 @@ class AdminHandlerMixin:
             "total_edges": total_edges,
             "connected_nodes": connected,
             "orphan_nodes": orphans,
+            "orphan_type_breakdown": None,
             "total_causal_edges": total_causal,
             "verified_causal_edges": verified_causal if total_causal > 0 else 0,
             "total_l3_edges": total_l3,
@@ -1765,6 +1779,29 @@ class AdminHandlerMixin:
                 "remediation_priorities": remediation_candidates[:5],
             },
         )
+
+    def _get_admin_orphan_triage(self, path: str, qs: dict) -> None:
+        """GET /admin/orphan-triage — batch triage orphan nodes (OHM-jx4q).
+
+        Scans orphan nodes and produces link suggestions for connecting them
+        to the graph. Query params:
+            limit: Max orphans to process (default 50)
+            min_confidence: Only triage orphans with confidence >= this value
+        """
+        from ohm.queries import batch_orphan_triage
+
+        conn = self.current_store.conn
+        limit = int(qs.get("limit", ["50"])[0])
+        min_confidence = qs.get("min_confidence", [None])[0]
+        if min_confidence is not None:
+            min_confidence = float(min_confidence)
+
+        result = batch_orphan_triage(
+            conn,
+            limit=min(limit, 200),
+            min_confidence=min_confidence,
+        )
+        self._json_response(200, result)
 
     # ── OHM-tr71: Proactive Discoverability ──────────────────────────────────
 

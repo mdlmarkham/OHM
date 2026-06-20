@@ -1760,8 +1760,22 @@ def query_graph_health(
     """).fetchone()
     dead_end_count = dead_end_row[0] if dead_end_row else 0
 
+    orphan_type_rows = conn.execute("""
+        SELECT n.type, COUNT(*) as cnt
+        FROM ohm_nodes n
+        WHERE n.deleted_at IS NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM ohm_edges e
+              WHERE e.from_node = n.id OR e.to_node = n.id
+          )
+        GROUP BY n.type
+        ORDER BY cnt DESC
+    """).fetchall()
+    orphan_type_breakdown = {row[0]: row[1] for row in orphan_type_rows} if orphan_type_rows else {}
+
     return {
         "orphan_nodes": orphans,
+        "orphan_type_breakdown": orphan_type_breakdown,
         "dead_end_count": dead_end_count,
         "low_confidence_unchallenged": low_conf,
         "dense_clusters": dense_count,
@@ -5565,3 +5579,175 @@ def expire_suggestions(
     )
     count = conn.execute("SELECT changes()").fetchone()[0]
     return {"expired_count": count}
+
+
+def batch_orphan_triage(
+    conn: DuckDBPyConnection,
+    *,
+    limit: int = 50,
+    exclude_types: frozenset[str] | None = None,
+    min_confidence: float | None = None,
+) -> dict[str, Any]:
+    """Batch triage orphan nodes, producing link suggestions.
+
+    Scans orphan nodes (zero edges) and generates suggestions for connecting
+    them to the graph. Uses two heuristics:
+    1. Same-type matching: orphan shares type with a connected node.
+    2. Label similarity: orphan label overlaps with connected node labels.
+
+    Returns a triage report with per-node suggestions and summary stats.
+
+    Args:
+        conn: DuckDB connection.
+        limit: Max orphans to process (default 50).
+        exclude_types: Node types to skip (default: fragment, agent, skill, value, goal).
+        min_confidence: Only triage orphans with confidence >= this value.
+    """
+    from ohm.validation import validate_identifier
+
+    if exclude_types is None:
+        exclude_types = frozenset({"fragment", "agent", "skill", "value", "goal"})
+
+    exclude_clause = ""
+    params: list[Any] = []
+    if exclude_types:
+        placeholders = ", ".join(["?"] * len(exclude_types))
+        exclude_clause = f"AND n.type NOT IN ({placeholders})"
+        params.extend(list(exclude_types))
+
+    confidence_clause = ""
+    if min_confidence is not None:
+        confidence_clause = "AND n.confidence >= ?"
+        params.append(min_confidence)
+
+    orphans = conn.execute(
+        f"""
+        SELECT n.id, n.label, n.type, n.confidence, n.created_by, n.created_at
+        FROM ohm_nodes n
+        WHERE n.deleted_at IS NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM ohm_edges e
+              WHERE (e.from_node = n.id OR e.to_node = n.id)
+                AND e.deleted_at IS NULL
+          )
+          {exclude_clause}
+          {confidence_clause}
+        ORDER BY n.confidence DESC NULLS LAST
+        LIMIT ?
+        """,
+        params + [limit],
+    ).fetchall()
+
+    if not orphans:
+        return {
+            "triaged_count": 0,
+            "total_orphans": 0,
+            "with_suggestions": 0,
+            "without_suggestions": 0,
+            "suggestions": [],
+            "types_seen": {},
+            "method": "batch_orphan_triage",
+        }
+
+    total_orphan_row = conn.execute("""
+        SELECT COUNT(*) FROM ohm_nodes n
+        WHERE n.deleted_at IS NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM ohm_edges e
+              WHERE (e.from_node = n.id OR e.to_node = n.id)
+                AND e.deleted_at IS NULL
+          )
+    """).fetchone()
+    total_orphans = total_orphan_row[0] if total_orphan_row else 0
+
+    types_seen: dict[str, int] = {}
+    suggestions: list[dict[str, Any]] = []
+
+    for row in orphans:
+        orphan_id, label, node_type, confidence, created_by, created_at = row
+        types_seen[node_type] = types_seen.get(node_type, 0) + 1
+
+        same_type_matches = conn.execute(
+            """
+            SELECT c.id, c.label, c.type
+            FROM ohm_nodes c
+            WHERE c.deleted_at IS NULL
+              AND c.type = ?
+              AND c.id != ?
+              AND EXISTS (
+                  SELECT 1 FROM ohm_edges e
+                  WHERE (e.from_node = c.id OR e.to_node = c.id)
+                    AND e.deleted_at IS NULL
+              )
+            ORDER BY c.confidence DESC NULLS LAST
+            LIMIT 3
+            """,
+            [node_type, orphan_id],
+        ).fetchall()
+
+        label_words = set(label.lower().split()) if label else set()
+        label_matches: list[tuple[str, str, str, int]] = []
+        if label_words and len(label_words) <= 20:
+            label_match_rows = conn.execute(
+                """
+                SELECT c.id, c.label, c.type
+                FROM ohm_nodes c
+                WHERE c.deleted_at IS NULL
+                  AND c.id != ?
+                  AND c.label IS NOT NULL
+                  AND EXISTS (
+                      SELECT 1 FROM ohm_edges e
+                      WHERE (e.from_node = c.id OR e.to_node = c.id)
+                        AND e.deleted_at IS NULL
+                  )
+                LIMIT 200
+                """,
+                [orphan_id],
+            ).fetchall()
+            for lm in label_match_rows:
+                target_words = set(lm[1].lower().split()) if lm[1] else set()
+                overlap = len(label_words & target_words)
+                if overlap >= 2:
+                    label_matches.append((lm[0], lm[1], lm[2], overlap))
+            label_matches.sort(key=lambda x: x[3], reverse=True)
+            label_matches = label_matches[:3]
+
+        node_suggestions = []
+        for m in same_type_matches:
+            node_suggestions.append({
+                "target_id": m[0],
+                "target_label": m[1],
+                "reason": f"Same type '{node_type}'",
+                "score": 0.6,
+                "edge_type": "APPLIES_TO",
+            })
+        for m in label_matches:
+            node_suggestions.append({
+                "target_id": m[0],
+                "target_label": m[1],
+                "reason": f"Label overlap ({m[3]} words)",
+                "score": 0.4 + 0.1 * m[3],
+                "edge_type": "APPLIES_TO",
+            })
+        node_suggestions.sort(key=lambda s: s["score"], reverse=True)
+        node_suggestions = node_suggestions[:3]
+
+        suggestions.append({
+            "orphan_id": orphan_id,
+            "orphan_label": label,
+            "orphan_type": node_type,
+            "confidence": confidence,
+            "created_by": created_by,
+            "suggestions": node_suggestions,
+        })
+
+    has_suggestions = sum(1 for s in suggestions if s["suggestions"])
+    return {
+        "triaged_count": len(orphans),
+        "total_orphans": total_orphans,
+        "with_suggestions": has_suggestions,
+        "without_suggestions": len(orphans) - has_suggestions,
+        "suggestions": suggestions,
+        "types_seen": types_seen,
+        "method": "batch_orphan_triage",
+    }

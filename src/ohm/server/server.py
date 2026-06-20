@@ -583,6 +583,7 @@ def _build_router() -> _RouteRegistry:
     r.add("GET", "/admin/checkpoint")
     r.add("POST", "/admin/checkpoint")
     r.add("GET", "/admin/verification-scan")
+    r.add("GET", "/admin/orphan-triage")
     r.add("POST", "/admin/observation-source-urls")
     r.add("POST", "/admin/source-node-urls")
     r.add("POST", "/admin/edge-layer-fix")
@@ -2176,6 +2177,7 @@ OhmHandler._GET_EXACT = {
     "/admin/verification-scan": "_get_admin_verification_scan",
     "/admin/constraint-report": "_get_admin_constraint_report",
     "/admin/health": "_get_admin_health",
+    "/admin/orphan-triage": "_get_admin_orphan_triage",
     "/admin/learned-half-lives": "_get_admin_learned_half_lives",
     "/admin/snapshots": "_get_admin_snapshots",
     "/graph/at": "_get_graph_at",
