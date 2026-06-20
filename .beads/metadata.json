@@ -2,6 +2,6 @@
   "database": "dolt",
   "backend": "dolt",
   "dolt_mode": "embedded",
-  "dolt_database": "beads",
+  "dolt_database": "OHM",
   "project_id": "45906694-13d5-4999-bf2f-51231fd32765"
 }
