@@ -332,6 +332,10 @@ class HookRunner:
         # OHM-sh11: split command into argv list — prevents shell injection
         # On Windows, shlex.split with posix=True strips backslashes from
         # paths (e.g. C:\Users\... → C:Users...). Use posix=False to preserve them.
+        # However, posix=False preserves quote chars in the split tokens,
+        # which is wrong for subprocess.Popen(shell=False) — it expects
+        # quotes stripped (as the OS receives them from a real shell).
+        # Strip leading/trailing matching quotes from each token on Windows.
         try:
             cmd_args = shlex.split(hook.command, posix=os.name == "posix")
         except ValueError as exc:
@@ -340,6 +344,8 @@ class HookRunner:
                 exit_code=1,
                 stderr=f"Invalid hook command (shlex parse error): {exc}",
             )
+        if os.name != "posix":
+            cmd_args = [a[1:-1] if len(a) >= 2 and a[0] == a[-1] and a[0] in ('"', "'") else a for a in cmd_args]
 
         try:
             proc = subprocess.Popen(

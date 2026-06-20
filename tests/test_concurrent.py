@@ -8,7 +8,7 @@ Marks: concurrent (platform-sensitive, DuckDB thread-safety issues on Windows).
 
 import pytest
 
-pytestmark = [pytest.mark.concurrent, pytest.mark.slow]
+pytestmark = [pytest.mark.concurrent, pytest.mark.slow, pytest.mark.skipif("sys.platform == 'win32'", reason="DuckDB thread-safety crashes on Windows")]
 
 import json
 import threading
@@ -42,7 +42,7 @@ def _start_server(store, tokens=None, roles=None, no_auth=False):
     OhmHandler.roles = roles or {}
     OhmHandler.no_auth = no_auth
 
-    server = socketserver.TCPServer(
+    server = socketserver.ThreadingTCPServer(
         ("127.0.0.1", 0),
         OhmHandler,
         bind_and_activate=False,
