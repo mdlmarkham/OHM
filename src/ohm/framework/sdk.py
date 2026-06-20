@@ -1180,10 +1180,35 @@ class Graph:
             created_by=self.actor,
         )
 
+        # OHM-8q5d: Aggregate source diversity across cluster_ids
+        try:
+            from ohm.graph.methods import source_diversity_score
+
+            cluster_diversity = []
+            for cid in cluster_ids:
+                ds = source_diversity_score(self._conn, cid)
+                cluster_diversity.append(ds)
+            if cluster_diversity:
+                avg_score = sum(d["score"] for d in cluster_diversity) / len(cluster_diversity)
+                source_div = {
+                    "cluster_diversity": cluster_diversity,
+                    "aggregate_score": round(avg_score, 4),
+                    "cluster_count": len(cluster_diversity),
+                }
+            else:
+                source_div = {
+                    "cluster_diversity": [],
+                    "aggregate_score": 0.0,
+                    "cluster_count": 0,
+                }
+        except Exception:
+            source_div = None
+
         return {
             "node": node_result if isinstance(node_result, dict) else {"id": node_id, "label": label},
             "edges_created": edges_created,
             "observation": obs_result,
+            "source_diversity": source_div,
         }
 
     def register_agent(
@@ -3929,7 +3954,15 @@ def connect_http(
             path = "/search?" + "&".join(params)
             return self._http_request("GET", path)
 
-        def semantic_search(self, query: str, *, node_type: str | None = None, limit: int = 10, min_confidence: float | None = None) -> list[dict[str, Any]]:
+        def semantic_search(
+            self,
+            query: str,
+            *,
+            node_type: str | None = None,
+            limit: int = 10,
+            min_confidence: float | None = None,
+            membership_weight: float | None = None,
+        ) -> list[dict[str, Any]]:
             """Search nodes via semantic similarity using embeddings.
 
             Args:
@@ -3937,9 +3970,19 @@ def connect_http(
                 node_type: Optional type filter.
                 limit: Maximum results (default 10).
                 min_confidence: Minimum confidence threshold.
+                membership_weight: Optional blend weight in [0, 1] for HD
+                    Hamming similarity alongside cosine similarity (OHM-xuf4).
+                    When None (default), pure cosine ranking is returned.
+                    When provided, each result also carries
+                    ``cosine_similarity``, ``hd_similarity``, and
+                    ``blended_score`` fields, and results are re-ranked by
+                    blended_score descending.
 
             Returns:
                 List of dicts with node_id, label, type, confidence, distance.
+                When ``membership_weight`` is set, each dict also carries
+                ``cosine_similarity``, ``hd_similarity`` (None if node has
+                no stored fingerprint), and ``blended_score``.
             """
             import urllib.parse
 
@@ -3948,6 +3991,8 @@ def connect_http(
                 params.append(f"type={node_type}")
             if min_confidence is not None:
                 params.append(f"min_confidence={min_confidence}")
+            if membership_weight is not None:
+                params.append(f"membership_weight={membership_weight}")
             path = "/semantic_search?" + "&".join(params)
             return self._http_request("GET", path)
 

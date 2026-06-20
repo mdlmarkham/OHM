@@ -1646,7 +1646,36 @@ class AdminHandlerMixin:
             "l1_edges": l1_edges,
             "l2_edges": l2_edges,
             "l3_edges": l3_edges,
+            "embedding_coverage": None,
+            "avg_manifold_density": None,
         }
+
+        # OHM-nnrw: embedding coverage and average manifold density
+        try:
+            nodes_with_embedding = conn.execute(
+                "SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL AND embedding IS NOT NULL"
+            ).fetchone()[0]
+            raw_values["embedding_coverage"] = round(nodes_with_embedding / total_nodes, 4) if total_nodes > 0 else 0.0
+
+            avg_density_row = conn.execute("""
+                SELECT AVG(density) FROM (
+                    SELECT 1 - AVG(
+                        array_cosine_distance(n.embedding, peer.embedding)
+                    ) AS density
+                    FROM ohm_nodes n,
+                    LATERAL (
+                        SELECT embedding FROM ohm_nodes peer
+                        WHERE peer.embedding IS NOT NULL AND peer.id != n.id
+                        ORDER BY array_cosine_distance(peer.embedding, n.embedding) ASC
+                        LIMIT 5
+                    ) peer
+                    WHERE n.deleted_at IS NULL AND n.embedding IS NOT NULL
+                    GROUP BY n.id
+                )
+            """).fetchone()
+            raw_values["avg_manifold_density"] = round(float(avg_density_row[0]), 4) if avg_density_row and avg_density_row[0] is not None else None
+        except Exception:
+            pass
 
         health_score = sum(weights[k] * scores[k] for k in weights)
         health_score_100 = round(health_score * 100, 1)

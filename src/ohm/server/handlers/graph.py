@@ -765,6 +765,9 @@ class GraphHandlerMixin:
         """GET /semantic_search — vector similarity search.
 
         OHM-a5rz.20: L0 fragments excluded by default. Pass ``?include_l0=true`` to include.
+        OHM-xuf4: Pass ``?membership_weight=0.3`` to blend HD Hamming similarity
+        alongside cosine similarity. Results then carry ``cosine_similarity``,
+        ``hd_similarity``, and ``blended_score`` fields.
         """
         from ohm.exceptions import ValidationError
 
@@ -775,6 +778,15 @@ class GraphHandlerMixin:
         limit = int(qs.get("limit", [10])[0])
         min_confidence = qs.get("min_confidence", [None])[0]
         include_l0 = qs.get("include_l0", ["false"])[0].lower() in ("true", "1", "yes")
+        membership_weight_raw = qs.get("membership_weight", [None])[0]
+        membership_weight: float | None = None
+        if membership_weight_raw is not None:
+            try:
+                membership_weight = float(membership_weight_raw)
+            except ValueError:
+                raise ValidationError("?membership_weight must be a number in [0, 1]")
+            if not 0.0 <= membership_weight <= 1.0:
+                raise ValidationError("?membership_weight must be in [0, 1]")
         if min_confidence is not None:
             try:
                 min_confidence = float(min_confidence)
@@ -790,6 +802,7 @@ class GraphHandlerMixin:
                 node_type=node_type,
                 min_confidence=min_confidence,
                 include_l0=include_l0,
+                membership_weight=membership_weight,
             )
             self._json_response(200, {"results": results, "count": len(results)})
         except ValueError as e:
@@ -1813,6 +1826,35 @@ class GraphHandlerMixin:
 
             logging.getLogger("ohm.handlers").debug(
                 "oppositional review skipped for synthesis %s", node_id, exc_info=True
+            )
+
+        # OHM-8q5d: Source diversity — aggregate Shannon entropy across
+        # evidence backing the cluster_ids. Non-fatal enrichment.
+        try:
+            from ohm.graph.methods import source_diversity_score
+
+            cluster_diversity = []
+            for cid in validated_cluster_ids:
+                ds = source_diversity_score(self.current_store.conn, cid)
+                cluster_diversity.append(ds)
+            if cluster_diversity:
+                avg_score = sum(d["score"] for d in cluster_diversity) / len(cluster_diversity)
+                result["source_diversity"] = {
+                    "cluster_diversity": cluster_diversity,
+                    "aggregate_score": round(avg_score, 4),
+                    "cluster_count": len(cluster_diversity),
+                }
+            else:
+                result["source_diversity"] = {
+                    "cluster_diversity": [],
+                    "aggregate_score": 0.0,
+                    "cluster_count": 0,
+                }
+        except Exception:
+            import logging
+
+            logging.getLogger("ohm.handlers").debug(
+                "source_diversity_score skipped for synthesis %s", node_id, exc_info=True
             )
 
         self._json_response(201, result)

@@ -3148,6 +3148,9 @@ def semantic_search(
     node_type: str | None = None,
     min_confidence: float | None = None,
     include_l0: bool = False,
+    membership_weight: float | None = None,
+    hd_dim: int = 10000,
+    hd_seed: int = 42,
 ) -> list[dict[str, Any]]:
     """Search nodes by semantic similarity using embedding vectors.
 
@@ -3166,9 +3169,20 @@ def semantic_search(
         node_type: Optional filter by node type.
         min_confidence: Optional minimum confidence threshold.
         include_l0: Include fragment-type nodes (default False, OHM-a5rz.20).
+        membership_weight: Optional blend weight in [0, 1] for HD Hamming
+            similarity alongside cosine similarity (OHM-xuf4). When None
+            (default), pure cosine ranking is returned unchanged. When
+            provided, each result also carries ``hd_similarity`` and a
+            ``blended_score`` = (1 - w) * cosine_sim + w * hd_sim, and
+            results are re-ranked by blended_score descending.
+        hd_dim: HD fingerprint dimension (default 10000).
+        hd_seed: HD fingerprint seed (default 42).
 
     Returns:
         List of dicts with node_id, label, type, distance, and confidence.
+        When ``membership_weight`` is set, each dict also carries
+        ``cosine_similarity``, ``hd_similarity`` (None if node has no
+        stored fingerprint), and ``blended_score``.
     """
     if not query or not query.strip():
         return []
@@ -3210,7 +3224,98 @@ def semantic_search(
     params.append(limit)
 
     result = conn.execute(sql, params)
-    return _rows_to_dicts(result)
+    rows = _rows_to_dicts(result)
+
+    if not rows:
+        return rows
+
+    if membership_weight is not None and not 0.0 <= membership_weight <= 1.0:
+        raise ValueError(f"membership_weight must be in [0, 1], got {membership_weight}")
+
+    # OHM-nnrw: Compute manifold_density_score for each result.
+    # k-NN density = 1 - (mean cosine distance to k nearest neighbors).
+    # Computed on-read, no cached column.
+    k_density = 5
+    node_ids = [r["node_id"] for r in rows]
+    placeholders = ",".join(["?"] * len(node_ids))
+    embed_rows = conn.execute(
+        f"""SELECT id, embedding FROM ohm_nodes
+            WHERE id IN ({placeholders}) AND embedding IS NOT NULL""",
+        node_ids,
+    ).fetchall()
+    embed_map: dict[str, list] = {}
+    for nid, emb in embed_rows:
+        if emb is not None:
+            embed_map[nid] = list(emb) if not isinstance(emb, list) else emb
+
+    for r in rows:
+        r["geodesic_distance"] = r.get("distance")
+        nid = r["node_id"]
+        if nid in embed_map:
+            emb = embed_map[nid]
+            try:
+                mean_dist_row = conn.execute(
+                    """SELECT AVG(d) FROM (
+                        SELECT array_cosine_distance(embedding, ?::FLOAT[768]) AS d
+                        FROM ohm_nodes
+                        WHERE embedding IS NOT NULL AND id != ?
+                        ORDER BY d ASC LIMIT ?
+                    )""",
+                    [emb, nid, k_density],
+                ).fetchone()
+                mean_dist = mean_dist_row[0] if mean_dist_row and mean_dist_row[0] is not None else 1.0
+                r["manifold_density_score"] = round(max(0.0, 1.0 - float(mean_dist)), 6)
+            except Exception:
+                r["manifold_density_score"] = None
+        else:
+            r["manifold_density_score"] = None
+
+    if membership_weight is None:
+        return rows
+
+    from ohm.inference.hd import fingerprint_text, hamming_similarity
+
+    query_fp = fingerprint_text(query, dim=hd_dim, seed=hd_seed)
+    query_bytes = bytes(query_fp)
+
+    node_ids = [r["node_id"] for r in rows]
+    if not node_ids:
+        return rows
+
+    placeholders = ",".join(["?"] * len(node_ids))
+    fp_rows = conn.execute(
+        f"""SELECT id, hd_fingerprint
+            FROM ohm_nodes
+            WHERE id IN ({placeholders}) AND hd_fingerprint IS NOT NULL""",
+        node_ids,
+    ).fetchall()
+
+    fp_map: dict[str, bytes] = {}
+    expected_len = (hd_dim + 7) // 8
+    for nid, fp_blob in fp_rows:
+        if fp_blob is None:
+            continue
+        candidate = bytes(fp_blob) if isinstance(fp_blob, (bytes, bytearray)) else bytes(fp_blob)
+        if len(candidate) != expected_len:
+            continue
+        fp_map[nid] = candidate
+
+    for r in rows:
+        distance = r.get("distance")
+        cosine_sim = 1.0 - float(distance) if distance is not None else 0.0
+        r["cosine_similarity"] = round(cosine_sim, 6)
+        nid = r["node_id"]
+        if nid in fp_map:
+            hd_sim = hamming_similarity(bytearray(query_bytes), bytearray(fp_map[nid]))
+            r["hd_similarity"] = round(hd_sim, 6)
+            blended = (1.0 - membership_weight) * cosine_sim + membership_weight * hd_sim
+        else:
+            r["hd_similarity"] = None
+            blended = (1.0 - membership_weight) * cosine_sim
+        r["blended_score"] = round(blended, 6)
+
+    rows.sort(key=lambda x: x["blended_score"], reverse=True)
+    return rows
 
 
 def search(

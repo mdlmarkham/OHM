@@ -195,3 +195,97 @@ class TestSynthesisSDK:
         assert len(neighbors) >= 2
 
         conn.close()
+
+
+class TestSynthesisSourceDiversity:
+    """OHM-8q5d: source_diversity in synthesis response."""
+
+    def test_sdk_synthesis_returns_source_diversity(self, tmp_path):
+        """SDK write_synthesis includes source_diversity with aggregate score."""
+        db_path = str(tmp_path / "test_synth_div.duckdb")
+        import duckdb
+        from ohm.schema import initialize_schema
+
+        conn = duckdb.connect(db_path)
+        initialize_schema(conn)
+
+        g = Graph(conn, actor="metis")
+
+        n1 = g.create_node(label="Cluster A", node_type="concept")
+        n2 = g.create_node(label="Cluster B", node_type="concept")
+
+        result = g.write_synthesis(
+            cluster_ids=[n1["id"], n2["id"]],
+            label="Synthesis Test",
+            content="Test content for diversity",
+            edge_type="SUPPORTS",
+            confidence=0.8,
+        )
+
+        assert "source_diversity" in result
+        sd = result["source_diversity"]
+        assert "cluster_diversity" in sd
+        assert "aggregate_score" in sd
+        assert "cluster_count" in sd
+        assert sd["cluster_count"] == 2
+        assert len(sd["cluster_diversity"]) == 2
+        for cd in sd["cluster_diversity"]:
+            assert "score" in cd
+            assert "evidence_count" in cd
+            assert "method" in cd
+
+        conn.close()
+
+    def test_sdk_synthesis_empty_clusters_zero_diversity(self, tmp_path):
+        """Synthesis with no valid cluster_ids returns zero aggregate diversity."""
+        db_path = str(tmp_path / "test_synth_div_empty.duckdb")
+        import duckdb
+        from ohm.schema import initialize_schema
+
+        conn = duckdb.connect(db_path)
+        initialize_schema(conn)
+
+        g = Graph(conn, actor="metis")
+
+        result = g.write_synthesis(
+            cluster_ids=[],
+            label="Empty Synthesis",
+            content="No clusters",
+            edge_type="SUPPORTS",
+            confidence=0.5,
+        )
+
+        assert "source_diversity" in result
+        sd = result["source_diversity"]
+        assert sd["aggregate_score"] == 0.0
+        assert sd["cluster_count"] == 0
+
+        conn.close()
+
+    def test_http_synthesis_returns_source_diversity(self, synthesis_server):
+        """POST /agent/synthesis includes source_diversity in response."""
+        port, _ = synthesis_server
+
+        _ = _request("POST", port, "/node", {"id": "concept-x", "label": "Concept X", "type": "concept"}, token="test-token")
+        _ = _request("POST", port, "/node", {"id": "concept-y", "label": "Concept Y", "type": "concept"}, token="test-token")
+
+        status, data = _request(
+            "POST",
+            port,
+            "/agent/synthesis",
+            {
+                "label": "X and Y synthesis",
+                "content": "Pattern connecting X and Y",
+                "cluster_ids": ["concept-x", "concept-y"],
+                "edge_type": "SUPPORTS",
+                "confidence": 0.8,
+            },
+            token="test-token",
+        )
+
+        assert status == 201
+        assert "source_diversity" in data
+        sd = data["source_diversity"]
+        assert "cluster_diversity" in sd
+        assert "aggregate_score" in sd
+        assert sd["cluster_count"] == 2
