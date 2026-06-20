@@ -136,14 +136,14 @@ class TestHookIntegration:
 
     def test_scenario1_pre_ingest_pass_node_succeeds(self, hook_server):
         port, _ = hook_server
-        _register_hook(port, "pre_ingest", "echo ok")
+        _register_hook(port, "pre_ingest", 'python -c "pass"')
         status, _ = _request("POST", port, "/node", body={"id": "s1", "label": "test", "type": "concept"})
         assert status == 201
         _cleanup_hooks(port)
 
     def test_scenario2_pre_ingest_fail_node_returns_422(self, hook_server):
         port, _ = hook_server
-        _register_hook(port, "pre_ingest", "/bin/false")
+        _register_hook(port, "pre_ingest", 'python -c "raise SystemExit(1)"')
         status, data = _request("POST", port, "/node", body={"id": "s2", "label": "rejected", "type": "concept"})
         assert status == 422
         assert data["error"] == "hook_rejected"
@@ -154,7 +154,7 @@ class TestHookIntegration:
         port, _ = hook_server
         _request("POST", port, "/node", body={"id": "from3", "label": "from", "type": "concept"})
         _request("POST", port, "/node", body={"id": "to3", "label": "to", "type": "concept"})
-        _register_hook(port, "pre_ingest", "exit 1")
+        _register_hook(port, "pre_ingest", 'python -c "raise SystemExit(1)"')
         status, data = _request("POST", port, "/edge", body={"from": "from3", "to": "to3", "type": "SUPPORTS", "layer": "L3"})
         assert status == 422
         assert data["error"] == "hook_rejected"
@@ -172,7 +172,7 @@ class TestHookIntegration:
 
     def test_scenario5_post_ingest_failure_still_succeeds(self, hook_server):
         port, _ = hook_server
-        _register_hook(port, "post_ingest", "exit 1")
+        _register_hook(port, "post_ingest", 'python -c "raise SystemExit(1)"')
         status, data = _request("POST", port, "/node", body={"id": "s5", "label": "still works", "type": "concept"})
         assert status == 201
         _cleanup_hooks(port)
@@ -208,14 +208,14 @@ class TestHookIntegration:
 
     def test_scenario8_multiple_pre_ingest_hooks_all_must_pass(self, hook_server):
         port, _ = hook_server
-        _register_hook(port, "pre_ingest", "echo first")
-        _register_hook(port, "pre_ingest", "echo second")
+        _register_hook(port, "pre_ingest", 'python -c "pass"')
+        _register_hook(port, "pre_ingest", 'python -c "pass"')
         status, _ = _request("POST", port, "/node", body={"id": "s8a", "label": "all pass", "type": "concept"})
         assert status == 201
         _cleanup_hooks(port)
 
-        _register_hook(port, "pre_ingest", "echo first")
-        _register_hook(port, "pre_ingest", "exit 1")
+        _register_hook(port, "pre_ingest", 'python -c "pass"')
+        _register_hook(port, "pre_ingest", 'python -c "raise SystemExit(1)"')
         status, data = _request("POST", port, "/node", body={"id": "s8b", "label": "second fails", "type": "concept"})
         assert status == 422
         assert data["error"] == "hook_rejected"
