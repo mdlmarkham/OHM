@@ -830,6 +830,7 @@ class Graph:
     def sign_node(self, node_id: str, *, key: bytes | None = None, algorithm: str = "hmac-sha256", key_id: str = "default") -> dict[str, Any]:
         """Sign a node write with HMAC-SHA256 (OHM-enwb, ADR-035)."""
         from ohm.graph.queries import sign_node_write
+
         signing_key = key or self._signing_key
         if not signing_key:
             raise ValueError("No signing key available")
@@ -838,6 +839,7 @@ class Graph:
     def sign_edge(self, edge_id: str, *, key: bytes | None = None, algorithm: str = "hmac-sha256", key_id: str = "default") -> dict[str, Any]:
         """Sign an edge write with HMAC-SHA256 (OHM-enwb, ADR-035)."""
         from ohm.graph.queries import sign_edge_write
+
         signing_key = key or self._signing_key
         if not signing_key:
             raise ValueError("No signing key available")
@@ -846,6 +848,7 @@ class Graph:
     def verify_node(self, node_id: str, *, key: bytes | None = None) -> dict[str, Any]:
         """Verify a node's write signature (OHM-enwb, ADR-035)."""
         from ohm.graph.queries import verify_node_write
+
         signing_key = key or self._signing_key
         if not signing_key:
             raise ValueError("No signing key available")
@@ -854,6 +857,7 @@ class Graph:
     def verify_edge(self, edge_id: str, *, key: bytes | None = None) -> dict[str, Any]:
         """Verify an edge's write signature (OHM-enwb, ADR-035)."""
         from ohm.graph.queries import verify_edge_write
+
         signing_key = key or self._signing_key
         if not signing_key:
             raise ValueError("No signing key available")
@@ -862,6 +866,7 @@ class Graph:
     def create_suggestion(self, **kwargs) -> dict[str, Any]:
         """Create a suggestion for later triage (OHM-xtzk, ADR-036)."""
         from ohm.graph.queries import create_suggestion
+
         kwargs.setdefault("created_by", self.actor)
         kwargs.setdefault("source_agent", self.actor)
         return create_suggestion(self._conn, **kwargs)
@@ -869,21 +874,25 @@ class Graph:
     def query_suggestions(self, **kwargs) -> list[dict[str, Any]]:
         """Query suggestions by status/method/target (OHM-xtzk, ADR-036)."""
         from ohm.graph.queries import query_suggestions
+
         return query_suggestions(self._conn, **kwargs)
 
     def promote_suggestion(self, suggestion_id: str, *, edge_layer: str = "L3") -> dict[str, Any]:
         """Promote a ripe suggestion to a real edge (OHM-xtzk, ADR-036)."""
         from ohm.graph.queries import promote_suggestion
+
         return promote_suggestion(self._conn, suggestion_id, promoted_by=self.actor, edge_layer=edge_layer)
 
     def reject_suggestion(self, suggestion_id: str, *, notes: str | None = None) -> dict[str, Any]:
         """Reject a suggestion (OHM-xtzk, ADR-036)."""
         from ohm.graph.queries import reject_suggestion
+
         return reject_suggestion(self._conn, suggestion_id, rejected_by=self.actor, notes=notes)
 
     def ripen_suggestions(self, *, dry_run: bool = False, max_age_days: int = 30, ripeness_threshold: float = 0.7) -> dict[str, Any]:
         """Ripen suggestions and optionally auto-promote/expiry (OHM-xtzk, ADR-036)."""
         from ohm.graph.methods import ripen_then_decide
+
         return ripen_then_decide(self._conn, dry_run=dry_run, max_age_days=max_age_days, ripeness_threshold=ripeness_threshold)
 
     def set_read_scope(self, scope: dict | None) -> dict[str, Any]:

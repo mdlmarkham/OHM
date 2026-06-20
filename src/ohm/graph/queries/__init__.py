@@ -1002,7 +1002,29 @@ def create_node(
                 source_author = ?, source_institution = ?, data_origin = ?,
                 deleted_at = NULL, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?""",
-            [label, node_type, content, created_by, visibility, provenance, confidence, priority, url, tags_json, metadata_json, utility_scale, utility_usd_per_day, utility_currency, current_best_action, alternatives_json, source_tier, source_author, source_institution, data_origin, node_id],
+            [
+                label,
+                node_type,
+                content,
+                created_by,
+                visibility,
+                provenance,
+                confidence,
+                priority,
+                url,
+                tags_json,
+                metadata_json,
+                utility_scale,
+                utility_usd_per_day,
+                utility_currency,
+                current_best_action,
+                alternatives_json,
+                source_tier,
+                source_author,
+                source_institution,
+                data_origin,
+                node_id,
+            ],
         )
         _log_change(conn, "ohm_nodes", node_id, "UPDATE", created_by)
         return _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node_id]))[0]
@@ -1013,7 +1035,29 @@ def create_node(
             tags, metadata, utility_scale, utility_usd_per_day, utility_currency, current_best_action, action_alternatives, source_tier,
             source_author, source_institution, data_origin)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        [node_id, label, node_type, content, created_by, visibility, provenance, confidence, priority, url, tags_json, metadata_json, utility_scale, utility_usd_per_day, utility_currency, current_best_action, alternatives_json, source_tier, source_author, source_institution, data_origin],
+        [
+            node_id,
+            label,
+            node_type,
+            content,
+            created_by,
+            visibility,
+            provenance,
+            confidence,
+            priority,
+            url,
+            tags_json,
+            metadata_json,
+            utility_scale,
+            utility_usd_per_day,
+            utility_currency,
+            current_best_action,
+            alternatives_json,
+            source_tier,
+            source_author,
+            source_institution,
+            data_origin,
+        ],
     )
     _log_change(conn, "ohm_nodes", node_id, "INSERT", created_by)
     # Return full node record
@@ -1272,31 +1316,29 @@ def find_homogeneous_causes(
 
     results: list[dict[str, Any]] = []
     for row in rows:
-        (edge_id, from_node, to_node, confidence, source_tier, created_by,
-         support_count, distinct_tiers, distinct_agents, support_tier) = row
+        (edge_id, from_node, to_node, confidence, source_tier, created_by, support_count, distinct_tiers, distinct_agents, support_tier) = row
         if support_count <= 0:
             continue
         score = 1.0 if distinct_tiers <= 1 else 1.0 - (distinct_tiers / support_count)
         if score < homogeneity_threshold:
             continue
         tier_label = support_tier if support_tier is not None else "(unassigned)"
-        results.append({
-            "edge_id": edge_id,
-            "from_node": from_node,
-            "to_node": to_node,
-            "confidence": confidence,
-            "source_tier": source_tier,
-            "created_by": created_by,
-            "homogeneity_score": round(score, 4),
-            "support_count": int(support_count),
-            "distinct_tiers": int(distinct_tiers),
-            "distinct_agents": int(distinct_agents),
-            "support_tier": support_tier,
-            "reason": (
-                f"{support_count} supporting SUPPORTS edge(s) share source_tier "
-                f"'{tier_label}' from {distinct_agents} agent(s) — homogeneous support"
-            ),
-        })
+        results.append(
+            {
+                "edge_id": edge_id,
+                "from_node": from_node,
+                "to_node": to_node,
+                "confidence": confidence,
+                "source_tier": source_tier,
+                "created_by": created_by,
+                "homogeneity_score": round(score, 4),
+                "support_count": int(support_count),
+                "distinct_tiers": int(distinct_tiers),
+                "distinct_agents": int(distinct_agents),
+                "support_tier": support_tier,
+                "reason": (f"{support_count} supporting SUPPORTS edge(s) share source_tier '{tier_label}' from {distinct_agents} agent(s) — homogeneous support"),
+            }
+        )
     results.sort(key=lambda r: (r["homogeneity_score"], r["confidence"]), reverse=True)
     return results[:limit]
 
@@ -1341,15 +1383,21 @@ def detect_consensus_only_support(
     tiers: list[str] = []
     for row in supporters:
         sup_id, from_node, conf, tier, created_by = row
-        supporting.append({
-            "id": sup_id, "from_node": from_node, "confidence": conf,
-            "source_tier": tier, "created_by": created_by,
-        })
+        supporting.append(
+            {
+                "id": sup_id,
+                "from_node": from_node,
+                "confidence": conf,
+                "source_tier": tier,
+                "created_by": created_by,
+            }
+        )
         if tier is not None:
             tiers.append(tier)
         if not has_outcome:
             oc = conn.execute(
-                "SELECT 1 FROM ohm_outcomes WHERE claim_node = ?", [from_node],
+                "SELECT 1 FROM ohm_outcomes WHERE claim_node = ?",
+                [from_node],
             ).fetchone()
             if oc:
                 has_outcome = True
@@ -1399,9 +1447,7 @@ def fire_verification_nudge(
         [edge_id],
     ).fetchone()
     if existing:
-        return _rows_to_dicts(
-            conn.execute("SELECT * FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [existing[0]])
-        )[0]
+        return _rows_to_dicts(conn.execute("SELECT * FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [existing[0]]))[0]
 
     target = conn.execute(
         "SELECT id, from_node, to_node, layer FROM ohm_edges WHERE id = ? AND deleted_at IS NULL",
@@ -1419,9 +1465,7 @@ def fire_verification_nudge(
         [challenge_id, target[1], target[2], target[3], created_by, confidence, reason, edge_id],
     )
     _log_change(conn, "ohm_edges", challenge_id, "INSERT", created_by)
-    return _rows_to_dicts(
-        conn.execute("SELECT * FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [challenge_id])
-    )[0]
+    return _rows_to_dicts(conn.execute("SELECT * FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [challenge_id]))[0]
 
 
 def delete_node(
@@ -4907,10 +4951,16 @@ def register_data_product(
 
     if ohm_node_id is None and auto_link:
         ohm_node_id, source_reliability = _link_provenance(
-            conn, name=name, product_id=product_id, type=type,
-            producer_agent=producer_agent, created_by=created_by,
-            description=description, access_url=access_url,
-            confidence=confidence, consumers=consumers,
+            conn,
+            name=name,
+            product_id=product_id,
+            type=type,
+            producer_agent=producer_agent,
+            created_by=created_by,
+            description=description,
+            access_url=access_url,
+            confidence=confidence,
+            consumers=consumers,
         )
     elif ohm_node_id is None:
         source_reliability = None
@@ -4935,11 +4985,27 @@ def register_data_product(
                    product_version = ?,
                    odps_yaml = ?, updated = ?, updated_at = CURRENT_TIMESTAMP
                WHERE internal_id = ?""",
-            [name, type, visibility, status, value_proposition, description,
-             producer_agent, output_port_type, access_format, access_url,
-             authentication_method, output_file_formats, ohm_node_id,
-             confidence, source_reliability, product_version,
-             odps_yaml, now, internal_id],
+            [
+                name,
+                type,
+                visibility,
+                status,
+                value_proposition,
+                description,
+                producer_agent,
+                output_port_type,
+                access_format,
+                access_url,
+                authentication_method,
+                output_file_formats,
+                ohm_node_id,
+                confidence,
+                source_reliability,
+                product_version,
+                odps_yaml,
+                now,
+                internal_id,
+            ],
         )
         _log_change(conn, "ohm_data_products", internal_id, "UPDATE", created_by)
         rows = _rows_to_dicts(conn.execute("SELECT * FROM ohm_data_products WHERE internal_id = ?", [internal_id]))
@@ -4953,10 +5019,32 @@ def register_data_product(
             access_url, authentication_method, output_file_formats, ohm_node_id, confidence,
             source_reliability, product_version, odps_yaml, created_by, created_at, updated_at, created, updated)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?)""",
-        [internal_id, customer_id, product_id, name, language, visibility, status, type,
-         value_proposition, description, producer_agent, output_port_type, access_format,
-         access_url, authentication_method, output_file_formats, ohm_node_id, confidence,
-         source_reliability, product_version, odps_yaml, created_by, now, now],
+        [
+            internal_id,
+            customer_id,
+            product_id,
+            name,
+            language,
+            visibility,
+            status,
+            type,
+            value_proposition,
+            description,
+            producer_agent,
+            output_port_type,
+            access_format,
+            access_url,
+            authentication_method,
+            output_file_formats,
+            ohm_node_id,
+            confidence,
+            source_reliability,
+            product_version,
+            odps_yaml,
+            created_by,
+            now,
+            now,
+        ],
     )
     _log_change(conn, "ohm_data_products", internal_id, "INSERT", created_by)
     rows = _rows_to_dicts(conn.execute("SELECT * FROM ohm_data_products WHERE internal_id = ?", [internal_id]))
@@ -5008,18 +5096,28 @@ def _link_provenance(
     prod_node = find_or_create_node(conn, label=producer_agent, node_type="agent", created_by=created_by)
 
     _idempotent_edge(
-        conn, from_node=prod_node["id"], to_node=ohm_node_id,
-        layer="L2", edge_type="PRODUCES", created_by=created_by,
-        confidence=confidence or 0.7, provenance="bos-data-product",
+        conn,
+        from_node=prod_node["id"],
+        to_node=ohm_node_id,
+        layer="L2",
+        edge_type="PRODUCES",
+        created_by=created_by,
+        confidence=confidence or 0.7,
+        provenance="bos-data-product",
     )
 
     if consumers:
         for consumer_label in consumers:
             consumer_node = find_or_create_node(conn, label=consumer_label, node_type="agent", created_by=created_by)
             _idempotent_edge(
-                conn, from_node=consumer_node["id"], to_node=ohm_node_id,
-                layer="L2", edge_type="CONSUMES", created_by=created_by,
-                confidence=0.5, provenance="bos-data-product",
+                conn,
+                from_node=consumer_node["id"],
+                to_node=ohm_node_id,
+                layer="L2",
+                edge_type="CONSUMES",
+                created_by=created_by,
+                confidence=0.5,
+                provenance="bos-data-product",
             )
 
     source_reliability = _seed_reliability(conn, producer_agent, created_by)
@@ -5044,9 +5142,14 @@ def _idempotent_edge(
     ).fetchone()
     if not existing:
         create_edge(
-            conn, from_node=from_node, to_node=to_node, layer=layer,
-            edge_type=edge_type, created_by=created_by,
-            confidence=confidence, provenance=provenance,
+            conn,
+            from_node=from_node,
+            to_node=to_node,
+            layer=layer,
+            edge_type=edge_type,
+            created_by=created_by,
+            confidence=confidence,
+            provenance=provenance,
         )
 
 
@@ -5067,9 +5170,7 @@ def refresh_data_product_provenance(
     if not producer:
         return None
 
-    prod_node = _rows_to_dicts(
-        conn.execute("SELECT id FROM ohm_nodes WHERE label = ? AND type = 'agent' AND deleted_at IS NULL", [producer])
-    )
+    prod_node = _rows_to_dicts(conn.execute("SELECT id FROM ohm_nodes WHERE label = ? AND type = 'agent' AND deleted_at IS NULL", [producer]))
     if not prod_node:
         return None
 
@@ -5089,9 +5190,7 @@ def refresh_data_product_provenance(
 
 def get_data_product(conn: DuckDBPyConnection, internal_id: str) -> dict[str, Any] | None:
     """Get a data product by internal_id."""
-    rows = _rows_to_dicts(
-        conn.execute("SELECT * FROM ohm_data_products WHERE internal_id = ? AND deleted_at IS NULL", [internal_id])
-    )
+    rows = _rows_to_dicts(conn.execute("SELECT * FROM ohm_data_products WHERE internal_id = ? AND deleted_at IS NULL", [internal_id]))
     return rows[0] if rows else None
 
 
@@ -5138,9 +5237,7 @@ def list_data_products(
         params.append(customer_id)
     where = " WHERE " + " AND ".join(conditions)
     params.append(limit)
-    return _rows_to_dicts(
-        conn.execute(f"SELECT * FROM ohm_data_products{where} ORDER BY updated_at DESC LIMIT ?", params)
-    )
+    return _rows_to_dicts(conn.execute(f"SELECT * FROM ohm_data_products{where} ORDER BY updated_at DESC LIMIT ?", params))
 
 
 def update_node_hd_fingerprint(
@@ -5462,8 +5559,7 @@ def create_suggestion(
            (id, suggestion_type, from_node, to_node, target_node, suggested_edge_type, suggested_layer,
             confidence, status, source_method, source_agent, metadata, created_by)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ripe', ?, ?, ?, ?)""",
-        [sid, suggestion_type, from_node, to_node, target_node, suggested_edge_type, suggested_layer,
-         confidence, source_method, source_agent, metadata_json, created_by],
+        [sid, suggestion_type, from_node, to_node, target_node, suggested_edge_type, suggested_layer, confidence, source_method, source_agent, metadata_json, created_by],
     )
     return _rows_to_dicts(conn.execute("SELECT * FROM ohm_suggestions WHERE id = ?", [sid]))[0]
 
@@ -5493,9 +5589,7 @@ def query_suggestions(
         params.append(min_ripeness)
     where = " WHERE " + " AND ".join(conditions)
     params.append(limit)
-    return _rows_to_dicts(
-        conn.execute(f"SELECT * FROM ohm_suggestions{where} ORDER BY ripeness_score DESC, suggested_at DESC LIMIT ?", params)
-    )
+    return _rows_to_dicts(conn.execute(f"SELECT * FROM ohm_suggestions{where} ORDER BY ripeness_score DESC, suggested_at DESC LIMIT ?", params))
 
 
 def promote_suggestion(
@@ -5714,32 +5808,38 @@ def batch_orphan_triage(
 
         node_suggestions = []
         for m in same_type_matches:
-            node_suggestions.append({
-                "target_id": m[0],
-                "target_label": m[1],
-                "reason": f"Same type '{node_type}'",
-                "score": 0.6,
-                "edge_type": "APPLIES_TO",
-            })
+            node_suggestions.append(
+                {
+                    "target_id": m[0],
+                    "target_label": m[1],
+                    "reason": f"Same type '{node_type}'",
+                    "score": 0.6,
+                    "edge_type": "APPLIES_TO",
+                }
+            )
         for m in label_matches:
-            node_suggestions.append({
-                "target_id": m[0],
-                "target_label": m[1],
-                "reason": f"Label overlap ({m[3]} words)",
-                "score": 0.4 + 0.1 * m[3],
-                "edge_type": "APPLIES_TO",
-            })
+            node_suggestions.append(
+                {
+                    "target_id": m[0],
+                    "target_label": m[1],
+                    "reason": f"Label overlap ({m[3]} words)",
+                    "score": 0.4 + 0.1 * m[3],
+                    "edge_type": "APPLIES_TO",
+                }
+            )
         node_suggestions.sort(key=lambda s: s["score"], reverse=True)
         node_suggestions = node_suggestions[:3]
 
-        suggestions.append({
-            "orphan_id": orphan_id,
-            "orphan_label": label,
-            "orphan_type": node_type,
-            "confidence": confidence,
-            "created_by": created_by,
-            "suggestions": node_suggestions,
-        })
+        suggestions.append(
+            {
+                "orphan_id": orphan_id,
+                "orphan_label": label,
+                "orphan_type": node_type,
+                "confidence": confidence,
+                "created_by": created_by,
+                "suggestions": node_suggestions,
+            }
+        )
 
     has_suggestions = sum(1 for s in suggestions if s["suggestions"])
     return {

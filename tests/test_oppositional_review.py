@@ -39,8 +39,7 @@ def _causes(conn, frm, to, created_by="metis", confidence=0.8) -> str:
     )["id"]
 
 
-def _support(conn, target_edge, target_from, target_to,
-             created_by="clio", source_tier="raw", confidence=0.7) -> str:
+def _support(conn, target_edge, target_from, target_to, created_by="clio", source_tier="raw", confidence=0.7) -> str:
     """Insert a SUPPORTS edge backing `target_edge` with a controlled source_tier.
 
     create_support() does not accept source_tier, so we insert directly to
@@ -57,8 +56,7 @@ def _support(conn, target_edge, target_from, target_to,
     return sid
 
 
-def _homogeneous_setup(conn, *, tiers=("raw", "raw"), agents=("clio", "clio"),
-                       cause_confidence=0.8) -> str:
+def _homogeneous_setup(conn, *, tiers=("raw", "raw"), agents=("clio", "clio"), cause_confidence=0.8) -> str:
     """Build a CAUSES edge with two SUPPORTS edges and return the causes edge id."""
     src = _node(conn, label="source")
     tgt = _node(conn, label="target")
@@ -121,8 +119,13 @@ class TestFindHomogeneousCauses:
         src = _node(test_db, label="s")
         tgt = _node(test_db, label="t")
         edge_id = create_edge(
-            test_db, from_node=src, to_node=tgt, layer="L3",
-            edge_type="SUPPORTS", created_by="metis", confidence=0.8,
+            test_db,
+            from_node=src,
+            to_node=tgt,
+            layer="L3",
+            edge_type="SUPPORTS",
+            created_by="metis",
+            confidence=0.8,
         )["id"]
         _support(test_db, edge_id, src, tgt, source_tier="raw")
         _support(test_db, edge_id, src, tgt, source_tier="raw")
@@ -155,13 +158,9 @@ class TestFindHomogeneousCauses:
 class TestOppositionalReview:
     def test_flag_only_does_not_create_challenges(self, test_db):
         _homogeneous_setup(test_db, tiers=("raw", "raw"))
-        before = test_db.execute(
-            "SELECT COUNT(*) FROM ohm_edges WHERE edge_type = 'CHALLENGED_BY'"
-        ).fetchone()[0]
+        before = test_db.execute("SELECT COUNT(*) FROM ohm_edges WHERE edge_type = 'CHALLENGED_BY'").fetchone()[0]
         result = oppositional_review(test_db, auto_challenge=False)
-        after = test_db.execute(
-            "SELECT COUNT(*) FROM ohm_edges WHERE edge_type = 'CHALLENGED_BY'"
-        ).fetchone()[0]
+        after = test_db.execute("SELECT COUNT(*) FROM ohm_edges WHERE edge_type = 'CHALLENGED_BY'").fetchone()[0]
         assert result["challenged_edges"] == []
         assert before == after
         assert result["flagged_edges"]
@@ -169,7 +168,9 @@ class TestOppositionalReview:
     def test_auto_challenge_creates_challenged_by(self, test_db):
         cause_id = _homogeneous_setup(test_db, tiers=("raw", "raw"))
         result = oppositional_review(
-            test_db, auto_challenge=True, reviewer_agent="system_oppositional",
+            test_db,
+            auto_challenge=True,
+            reviewer_agent="system_oppositional",
         )
         assert result["challenged_edges"]
         assert result["challenged_edges"][0]["edge_id"] == cause_id
@@ -183,8 +184,7 @@ class TestOppositionalReview:
         _homogeneous_setup(test_db, tiers=("raw", "raw"))
         result = oppositional_review(test_db)
         summary = result["review_summary"]
-        for key in ("total_flagged", "total_challenged", "dimensions_used",
-                    "homogeneity_threshold", "auto_challenge"):
+        for key in ("total_flagged", "total_challenged", "dimensions_used", "homogeneity_threshold", "auto_challenge"):
             assert key in summary, f"Missing summary field: {key}"
         assert "source_tier" in summary["dimensions_used"]
         assert summary["auto_challenge"] is False

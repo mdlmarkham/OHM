@@ -1,4 +1,5 @@
 """Tests for source diversity score (OHM-qi6r, ADR-033)."""
+
 from __future__ import annotations
 
 import pytest
@@ -141,9 +142,7 @@ class TestSourceDiversityScore:
         conn = test_db
         _setup_evidence_graph(conn)
         result = source_diversity_score(conn, "target")
-        expected = {"node_id", "score", "evidence_count", "author_diversity",
-                    "institution_diversity", "origin_diversity", "distinct_authors",
-                    "distinct_institutions", "distinct_origins", "method"}
+        expected = {"node_id", "score", "evidence_count", "author_diversity", "institution_diversity", "origin_diversity", "distinct_authors", "distinct_institutions", "distinct_origins", "method"}
         assert expected <= set(result.keys())
 
     def test_weighting_formula(self, test_db):

@@ -366,9 +366,7 @@ def generate_nudges(
                             nudges.append(
                                 {
                                     "type": "semantic_edge_warning",
-                                    "message": f"{direction_label} node '{nid}' is type 'source'. "
-                                    f"Sources {('support' if edge_type == 'DEPENDS_ON' else 'reference')} claims — they don't "
-                                    f"{edge_type.lower()} outcomes. Consider SUPPORTS or REFERENCES instead.",
+                                    "message": f"{direction_label} node '{nid}' is type 'source'. Sources {('support' if edge_type == 'DEPENDS_ON' else 'reference')} claims — they don't {edge_type.lower()} outcomes. Consider SUPPORTS or REFERENCES instead.",
                                     "severity": "warning",
                                     "data": {
                                         "edge_type": edge_type,
@@ -393,9 +391,7 @@ def generate_nudges(
                     nudges.append(
                         {
                             "type": "semantic_edge_warning",
-                            "message": f"REFERENCES edge created, but source node '{from_node_id}' has no URL. "
-                            "L2 citation edges should trace back to an external source (ADR-013). "
-                            "Add url to the source node for proper provenance tracking.",
+                            "message": f"REFERENCES edge created, but source node '{from_node_id}' has no URL. L2 citation edges should trace back to an external source (ADR-013). Add url to the source node for proper provenance tracking.",
                             "severity": "hint",
                             "data": {
                                 "edge_type": "REFERENCES",

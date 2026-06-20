@@ -1514,18 +1514,20 @@ class AnalysisHandlerMixin:
                 continue
             if r[4] is not None and r[4] < degree_min:
                 continue
-            myths.append({
-                "id": r[0],
-                "node_id": r[1],
-                "obs_type": r[2],
-                "value": r[3],
-                "compression_degree": r[4],
-                "compression_type": r[5],
-                "beneficiary": ben,
-                "revisability": r[7],
-                "notes": r[8],
-                "source": r[9],
-            })
+            myths.append(
+                {
+                    "id": r[0],
+                    "node_id": r[1],
+                    "obs_type": r[2],
+                    "value": r[3],
+                    "compression_degree": r[4],
+                    "compression_type": r[5],
+                    "beneficiary": ben,
+                    "revisability": r[7],
+                    "notes": r[8],
+                    "source": r[9],
+                }
+            )
             if len(myths) >= limit:
                 break
 
@@ -1573,18 +1575,8 @@ class AnalysisHandlerMixin:
                 "revisability": r[7],
                 "notes": r[8],
                 "source": r[9],
-                "revisability_label": (
-                    "revisable" if r[7] and r[7] < 0.3 else
-                    "sticky" if r[7] and r[7] < 0.6 else
-                    "infrastructure" if r[7] and r[7] < 0.8 else
-                    "sacred"
-                ),
-                "compression_label": (
-                    "elaboration" if r[4] and r[4] < 0.3 else
-                    "compression" if r[4] and r[4] < 0.6 else
-                    "aggressive_compression" if r[4] and r[4] < 0.8 else
-                    "fabrication"
-                ),
+                "revisability_label": ("revisable" if r[7] and r[7] < 0.3 else "sticky" if r[7] and r[7] < 0.6 else "infrastructure" if r[7] and r[7] < 0.8 else "sacred"),
+                "compression_label": ("elaboration" if r[4] and r[4] < 0.3 else "compression" if r[4] and r[4] < 0.6 else "aggressive_compression" if r[4] and r[4] < 0.8 else "fabrication"),
             }
             for r in rows
         ]
@@ -1644,9 +1636,7 @@ class AnalysisHandlerMixin:
 
         # ── R1: Observations only (direct evidence, no pattern history) ──
         obs_rows = conn.execute(
-            "SELECT value, sigma, source, created_by, created_at "
-            "FROM ohm_observations WHERE node_id = ? AND deleted_at IS NULL "
-            "ORDER BY created_at DESC",
+            "SELECT value, sigma, source, created_by, created_at FROM ohm_observations WHERE node_id = ? AND deleted_at IS NULL ORDER BY created_at DESC",
             [node_id],
         ).fetchall()
 
@@ -1666,14 +1656,7 @@ class AnalysisHandlerMixin:
         # Collect neighbor node IDs via L2/L3 edges
         if depth == 1:
             neighbor_rows = conn.execute(
-                "SELECT DISTINCT CASE "
-                "  WHEN e.from_node = ? THEN e.to_node "
-                "  ELSE e.from_node END "
-                "FROM ohm_edges e "
-                "WHERE (e.from_node = ? OR e.to_node = ?) "
-                "  AND e.deleted_at IS NULL "
-                "  AND e.layer IN ('L2', 'L3') "
-                "LIMIT ?",
+                "SELECT DISTINCT CASE   WHEN e.from_node = ? THEN e.to_node   ELSE e.from_node END FROM ohm_edges e WHERE (e.from_node = ? OR e.to_node = ?)   AND e.deleted_at IS NULL   AND e.layer IN ('L2', 'L3') LIMIT ?",
                 [node_id, node_id, node_id, max_neighbors],
             ).fetchall()
         else:
@@ -1707,20 +1690,20 @@ class AnalysisHandlerMixin:
         pattern_obs = []
         for nid in neighbor_ids[:max_neighbors]:
             n_obs = conn.execute(
-                "SELECT value, sigma, source, created_by, created_at "
-                "FROM ohm_observations WHERE node_id = ? AND deleted_at IS NULL "
-                "ORDER BY created_at DESC LIMIT 5",
+                "SELECT value, sigma, source, created_by, created_at FROM ohm_observations WHERE node_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 5",
                 [nid],
             ).fetchall()
-            pattern_obs.extend([
-                {
-                    "confidence": _obs_confidence(r[1]),
-                    "source": r[2],
-                    "created_by": r[3],
-                    "created_at": str(r[4]) if r[4] else None,
-                }
-                for r in n_obs
-            ])
+            pattern_obs.extend(
+                [
+                    {
+                        "confidence": _obs_confidence(r[1]),
+                        "source": r[2],
+                        "created_by": r[3],
+                        "created_at": str(r[4]) if r[4] else None,
+                    }
+                    for r in n_obs
+                ]
+            )
 
         r2_result = compound_confidence(pattern_obs, use_diversity_correlation=True)
         r2_confidence = r2_result["compound_confidence"]

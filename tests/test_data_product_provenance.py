@@ -77,12 +77,20 @@ class TestAutoProvenanceNode:
 
     def test_provenance_is_idempotent(self, test_db):
         register_data_product(
-            test_db, product_id="bos.test.4", name="Idempotent Product",
-            type="reports", producer_agent="hephaestus", created_by="test",
+            test_db,
+            product_id="bos.test.4",
+            name="Idempotent Product",
+            type="reports",
+            producer_agent="hephaestus",
+            created_by="test",
         )
         product = register_data_product(
-            test_db, product_id="bos.test.4", name="Idempotent Product Updated",
-            type="reports", producer_agent="hephaestus", created_by="test",
+            test_db,
+            product_id="bos.test.4",
+            name="Idempotent Product Updated",
+            type="reports",
+            producer_agent="hephaestus",
+            created_by="test",
         )
         produces = test_db.execute(
             "SELECT id FROM ohm_edges WHERE edge_type = 'PRODUCES' AND to_node = ? AND deleted_at IS NULL",
@@ -92,8 +100,12 @@ class TestAutoProvenanceNode:
 
     def test_auto_link_false_skips_node_creation(self, test_db):
         product = register_data_product(
-            test_db, product_id="bos.test.5", name="No Link",
-            type="reports", producer_agent="hephaestus", created_by="test",
+            test_db,
+            product_id="bos.test.5",
+            name="No Link",
+            type="reports",
+            producer_agent="hephaestus",
+            created_by="test",
             auto_link=False,
         )
         assert product["ohm_node_id"] is None
@@ -101,8 +113,12 @@ class TestAutoProvenanceNode:
     def test_explicit_ohm_node_id_preserved(self, test_db):
         node = find_or_create_node(test_db, label="Pre-existing Node", node_type="source", created_by="test")
         product = register_data_product(
-            test_db, product_id="bos.test.6", name="With Node",
-            type="reports", producer_agent="hephaestus", created_by="test",
+            test_db,
+            product_id="bos.test.6",
+            name="With Node",
+            type="reports",
+            producer_agent="hephaestus",
+            created_by="test",
             ohm_node_id=node["id"],
         )
         assert product["ohm_node_id"] == node["id"]
@@ -111,17 +127,23 @@ class TestAutoProvenanceNode:
 class TestSourceReliability:
     def test_reliability_seeded_on_registration(self, test_db):
         product = register_data_product(
-            test_db, product_id="bos.test.rel",
-            name="Reliability Test", type="reports",
-            producer_agent="hephaestus", created_by="test",
+            test_db,
+            product_id="bos.test.rel",
+            name="Reliability Test",
+            type="reports",
+            producer_agent="hephaestus",
+            created_by="test",
         )
         assert product["source_reliability"] is not None or product["source_reliability"] is None
 
     def test_refresh_updates_reliability_after_outcome(self, test_db):
         product = register_data_product(
-            test_db, product_id="bos.test.refresh",
-            name="Refresh Test", type="reports",
-            producer_agent="hephaestus", created_by="test",
+            test_db,
+            product_id="bos.test.refresh",
+            name="Refresh Test",
+            type="reports",
+            producer_agent="hephaestus",
+            created_by="test",
         )
         query_record_outcome(test_db, source_agent=product["ohm_node_id"], claim_node=product["ohm_node_id"], outcome=True, recorded_by="test")
         refreshed = refresh_data_product_provenance(test_db, product["internal_id"])

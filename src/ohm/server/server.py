@@ -2232,6 +2232,7 @@ def make_configured_handler(store: OhmStore):
     ``install_globals`` — those will move to instance scope in follow-up
     issues (OHM-1s14.2 / OHM-1s14.3 / OHM-1s14.4).
     """
+
     class _ConfiguredHandler(OhmHandler):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)

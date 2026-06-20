@@ -277,11 +277,11 @@ class TestBayesianCacheIsolation:
             None,  # layers
             None,  # root_nodes
             None,  # preferred_edges
-            100,   # max_nodes
-            0.5,   # root_prior
-            0.1,   # leak_probability
-            0.5,   # default_probability
-            30,    # half_life_days
+            100,  # max_nodes
+            0.5,  # root_prior
+            0.1,  # leak_probability
+            0.5,  # default_probability
+            30,  # half_life_days
             True,  # include_soft_evidence
             None,  # soft_edge_types
         )
@@ -297,7 +297,17 @@ class TestBayesianCacheIsolation:
         from ohm.inference.bayesian import _bayesian_network_cache
 
         common_params = (
-            None, None, None, None, 100, 0.5, 0.1, 0.5, 30, True, None,
+            None,
+            None,
+            None,
+            None,
+            100,
+            0.5,
+            0.1,
+            0.5,
+            30,
+            True,
+            None,
         )
         key_a = ("tenant_a",) + common_params
         key_b = ("tenant_b",) + common_params
@@ -444,4 +454,3 @@ class TestCurrentConfig:
 
         cfg = handler.current_config
         assert cfg is handler.config
-

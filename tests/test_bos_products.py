@@ -149,8 +149,11 @@ class TestProductRegistration:
         with ohm.connect(":memory:", actor="test") as graph:
             for product_id, name, ptype, producer, yaml_doc in _PRODUCTS:
                 graph.register_data_product(
-                    product_id, name, ptype,
-                    producer_agent=producer, status="production",
+                    product_id,
+                    name,
+                    ptype,
+                    producer_agent=producer,
+                    status="production",
                     visibility="organisation",
                 )
 
@@ -170,8 +173,11 @@ class TestProductRegistration:
         with ohm.connect(":memory:", actor="test") as graph:
             for product_id, name, ptype, producer, yaml_doc in _PRODUCTS:
                 graph.register_data_product(
-                    product_id, name, ptype,
-                    producer_agent=producer, status="production",
+                    product_id,
+                    name,
+                    ptype,
+                    producer_agent=producer,
+                    status="production",
                     visibility="organisation",
                 )
 
@@ -184,8 +190,11 @@ class TestProductRegistration:
         with ohm.connect(":memory:", actor="test") as graph:
             for product_id, name, ptype, producer, yaml_doc in _PRODUCTS:
                 graph.register_data_product(
-                    product_id, name, ptype,
-                    producer_agent=producer, status="production",
+                    product_id,
+                    name,
+                    ptype,
+                    producer_agent=producer,
+                    status="production",
                     visibility="organisation",
                 )
 
@@ -198,13 +207,19 @@ class TestProductRegistration:
         """Re-registering the same product updates it rather than duplicating."""
         with ohm.connect(":memory:", actor="test") as graph:
             graph.register_data_product(
-                "bos.pnl.monthly", "Monthly P&L v1", "reports",
-                producer_agent="hephaestus", status="draft",
+                "bos.pnl.monthly",
+                "Monthly P&L v1",
+                "reports",
+                producer_agent="hephaestus",
+                status="draft",
                 visibility="organisation",
             )
             graph.register_data_product(
-                "bos.pnl.monthly", "Monthly P&L v2", "reports",
-                producer_agent="hephaestus", status="production",
+                "bos.pnl.monthly",
+                "Monthly P&L v2",
+                "reports",
+                producer_agent="hephaestus",
+                status="production",
                 visibility="organisation",
             )
             products = graph.list_data_products()

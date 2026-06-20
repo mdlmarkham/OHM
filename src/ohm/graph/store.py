@@ -1232,7 +1232,29 @@ class OhmStore:
                                     created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            [from_node, to_node, layer, edge_type, confidence, condition, provenance, actor, challenge_of, challenge_type, urgency, probability, probability_p05, probability_p50, probability_p95, confidence_p05, confidence_p50, confidence_p95, source_tier, now, now],
+            [
+                from_node,
+                to_node,
+                layer,
+                edge_type,
+                confidence,
+                condition,
+                provenance,
+                actor,
+                challenge_of,
+                challenge_type,
+                urgency,
+                probability,
+                probability_p05,
+                probability_p50,
+                probability_p95,
+                confidence_p05,
+                confidence_p50,
+                confidence_p95,
+                source_tier,
+                now,
+                now,
+            ],
         )
 
         edge = self.execute_one(
@@ -1619,10 +1641,16 @@ class OhmStore:
 
         if ohm_node_id is None and auto_link:
             ohm_node_id, source_reliability = _link_provenance(
-                self.conn, name=name, product_id=product_id, type=type,
-                producer_agent=producer_agent, created_by=actor,
-                description=description, access_url=access_url,
-                confidence=confidence, consumers=consumers,
+                self.conn,
+                name=name,
+                product_id=product_id,
+                type=type,
+                producer_agent=producer_agent,
+                created_by=actor,
+                description=description,
+                access_url=access_url,
+                confidence=confidence,
+                consumers=consumers,
             )
         elif ohm_node_id is None:
             source_reliability = None
@@ -1645,11 +1673,27 @@ class OhmStore:
                        product_version = ?,
                        odps_yaml = ?, updated = ?, updated_at = CURRENT_TIMESTAMP
                    WHERE internal_id = ?""",
-                [name, type, visibility, status, value_proposition, description,
-                 producer_agent, output_port_type, access_format, access_url,
-                 authentication_method, output_file_formats, ohm_node_id,
-                 confidence, source_reliability, product_version,
-                 odps_yaml, now, internal_id],
+                [
+                    name,
+                    type,
+                    visibility,
+                    status,
+                    value_proposition,
+                    description,
+                    producer_agent,
+                    output_port_type,
+                    access_format,
+                    access_url,
+                    authentication_method,
+                    output_file_formats,
+                    ohm_node_id,
+                    confidence,
+                    source_reliability,
+                    product_version,
+                    odps_yaml,
+                    now,
+                    internal_id,
+                ],
             )
             self._log_change("ohm_data_products", internal_id, "UPDATE", None, agent_name=actor)
             return self.execute_one("SELECT * FROM ohm_data_products WHERE internal_id = ?", [internal_id])
@@ -1662,10 +1706,32 @@ class OhmStore:
                 access_url, authentication_method, output_file_formats, ohm_node_id, confidence,
                 source_reliability, product_version, odps_yaml, created_by, created_at, updated_at, created, updated)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?)""",
-            [internal_id, customer_id, product_id, name, language, visibility, status, type,
-             value_proposition, description, producer_agent, output_port_type, access_format,
-             access_url, authentication_method, output_file_formats, ohm_node_id, confidence,
-             source_reliability, product_version, odps_yaml, actor, now, now],
+            [
+                internal_id,
+                customer_id,
+                product_id,
+                name,
+                language,
+                visibility,
+                status,
+                type,
+                value_proposition,
+                description,
+                producer_agent,
+                output_port_type,
+                access_format,
+                access_url,
+                authentication_method,
+                output_file_formats,
+                ohm_node_id,
+                confidence,
+                source_reliability,
+                product_version,
+                odps_yaml,
+                actor,
+                now,
+                now,
+            ],
         )
         self._log_change("ohm_data_products", internal_id, "INSERT", None, agent_name=actor)
         return self.execute_one("SELECT * FROM ohm_data_products WHERE internal_id = ?", [internal_id])

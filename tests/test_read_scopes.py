@@ -1,4 +1,5 @@
 """Tests for per-agent read scopes and temporal pinning (OHM-ybyb, ADR-037)."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -75,9 +76,7 @@ class TestQuerySnapshotDeletedAt:
             """INSERT INTO ohm_nodes (id, label, type, created_by, visibility, confidence, created_at)
                VALUES ('n1', 'test', 'concept', 'a1', 'team', 0.9, '2024-01-01 10:00:00')"""
         )
-        conn.execute(
-            """UPDATE ohm_nodes SET deleted_at = '2024-06-01 10:00:00' WHERE id = 'n1'"""
-        )
+        conn.execute("""UPDATE ohm_nodes SET deleted_at = '2024-06-01 10:00:00' WHERE id = 'n1'""")
         result = query_snapshot(conn, "2024-03-01 10:00:00")
         node_ids = [n["id"] for n in result["nodes"]]
         assert "n1" in node_ids

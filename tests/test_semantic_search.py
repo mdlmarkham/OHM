@@ -478,6 +478,7 @@ class TestHybridSemanticSearch:
         monkeypatch.setattr(queries_mod, "generate_embedding", fake_generate_embedding)
 
         import ohm.inference.hd as hd_mod
+
         monkeypatch.setattr(hd_mod, "fingerprint_text", fake_fingerprint_text)
 
         results = semantic_search(test_db, query="alpha beta gamma", membership_weight=0.9)

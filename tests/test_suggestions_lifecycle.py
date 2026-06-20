@@ -1,4 +1,5 @@
 """Tests for suggestions lifecycle (OHM-xtzk, ADR-036)."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta

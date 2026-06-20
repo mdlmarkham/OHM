@@ -1,4 +1,5 @@
 """Tests for hyperdimensional fingerprinting (OHM-yk7z, ADR-031)."""
+
 from __future__ import annotations
 
 import pytest
@@ -191,6 +192,7 @@ class TestFingerprintNode:
     def test_empty_primitive_raises(self):
         with pytest.raises(HDError, match="non-empty"):
             from ohm.inference.hd import _base_vector
+
             _base_vector("", dim=DEFAULT_DIM, seed=DEFAULT_SEED)
 
     def test_invalid_dim_raises(self):
@@ -275,7 +277,10 @@ class TestHDSimilaritySearch:
             conn.execute(
                 """INSERT INTO ohm_nodes (id, label, type, created_by, visibility, confidence)
                    VALUES (?, ?, 'concept', 'test', 'team', 1.0)""",
-                [f"n{i}", f"node {i}", ],
+                [
+                    f"n{i}",
+                    f"node {i}",
+                ],
             )
         results = hd_similarity_search(conn, "n0", limit=2, threshold=0.0)
         assert len(results) <= 2

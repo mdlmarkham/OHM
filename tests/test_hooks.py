@@ -258,12 +258,12 @@ class TestHookRunnerRunHooks:
     def test_run_hooks_executes_all(self, test_db):
         import sys
 
-        cmd = f'{sys.executable} -c "print(\'a\')"'
+        cmd = f"{sys.executable} -c \"print('a')\""
         test_db.execute(
             "INSERT INTO ohm_hooks (id, event, command, created_by) VALUES (?, ?, ?, ?)",
             ["h1", "pre_ingest", cmd, "test"],
         )
-        cmd2 = f'{sys.executable} -c "print(\'b\')"'
+        cmd2 = f"{sys.executable} -c \"print('b')\""
         test_db.execute(
             "INSERT INTO ohm_hooks (id, event, command, created_by) VALUES (?, ?, ?, ?)",
             ["h2", "pre_ingest", cmd2, "test"],
@@ -428,7 +428,7 @@ class TestHookInvocationLog:
     def test_payload_logged(self, test_db):
         import sys
 
-        cmd = f'{sys.executable} -c "print(\'ok\')"'
+        cmd = f"{sys.executable} -c \"print('ok')\""
         hook = HookRecord(id="h4", event="post_ingest", command=cmd)
         runner = HookRunner(test_db)
         runner.run_hook(hook, {"agent": "clio", "action": "node"})
@@ -442,7 +442,7 @@ class TestHookInvocationLog:
     def test_multiple_invocations_create_multiple_rows(self, test_db):
         import sys
 
-        cmd = f'{sys.executable} -c "print(\'ok\')"'
+        cmd = f"{sys.executable} -c \"print('ok')\""
         hook = HookRecord(id="h5", event="pre_ingest", command=cmd)
         runner = HookRunner(test_db)
         runner.run_hook(hook, {})

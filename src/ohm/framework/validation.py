@@ -93,9 +93,7 @@ def validate_source_tier(value: str | None) -> str | None:
     from ohm.graph.schema import VALID_SOURCE_TIERS
 
     if value not in VALID_SOURCE_TIERS:
-        raise ValueError(
-            f"Invalid source_tier: '{value}' — must be one of: {sorted(VALID_SOURCE_TIERS)}"
-        )
+        raise ValueError(f"Invalid source_tier: '{value}' — must be one of: {sorted(VALID_SOURCE_TIERS)}")
     return value
 
 
@@ -110,9 +108,7 @@ def validate_data_origin(value: str | None) -> str | None:
     from ohm.graph.schema import VALID_DATA_ORIGINS
 
     if value not in VALID_DATA_ORIGINS:
-        raise ValueError(
-            f"Invalid data_origin: '{value}' — must be one of: {sorted(VALID_DATA_ORIGINS)}"
-        )
+        raise ValueError(f"Invalid data_origin: '{value}' — must be one of: {sorted(VALID_DATA_ORIGINS)}")
     return value
 
 
@@ -123,9 +119,7 @@ def validate_emerging_concept_status(value: str | None) -> str | None:
     from ohm.graph.schema import VALID_EMERGING_CONCEPT_STATUSES
 
     if value not in VALID_EMERGING_CONCEPT_STATUSES:
-        raise ValueError(
-            f"Invalid emerging_concept_status: '{value}' — must be one of: {sorted(VALID_EMERGING_CONCEPT_STATUSES)}"
-        )
+        raise ValueError(f"Invalid emerging_concept_status: '{value}' — must be one of: {sorted(VALID_EMERGING_CONCEPT_STATUSES)}")
     return value
 
 
@@ -136,9 +130,7 @@ def validate_signing_algorithm(value: str | None) -> str | None:
     from ohm.graph.schema import VALID_SIGNING_ALGORITHMS
 
     if value not in VALID_SIGNING_ALGORITHMS:
-        raise ValueError(
-            f"Invalid signing_algorithm: '{value}' — must be one of: {sorted(VALID_SIGNING_ALGORITHMS)}"
-        )
+        raise ValueError(f"Invalid signing_algorithm: '{value}' — must be one of: {sorted(VALID_SIGNING_ALGORITHMS)}")
     return value
 
 
@@ -149,9 +141,7 @@ def validate_suggestion_type(value: str | None) -> str | None:
     from ohm.graph.schema import VALID_SUGGESTION_TYPES
 
     if value not in VALID_SUGGESTION_TYPES:
-        raise ValueError(
-            f"Invalid suggestion_type: '{value}' — must be one of: {sorted(VALID_SUGGESTION_TYPES)}"
-        )
+        raise ValueError(f"Invalid suggestion_type: '{value}' — must be one of: {sorted(VALID_SUGGESTION_TYPES)}")
     return value
 
 
@@ -162,9 +152,7 @@ def validate_suggestion_status(value: str | None) -> str | None:
     from ohm.graph.schema import VALID_SUGGESTION_STATUSES
 
     if value not in VALID_SUGGESTION_STATUSES:
-        raise ValueError(
-            f"Invalid suggestion_status: '{value}' — must be one of: {sorted(VALID_SUGGESTION_STATUSES)}"
-        )
+        raise ValueError(f"Invalid suggestion_status: '{value}' — must be one of: {sorted(VALID_SUGGESTION_STATUSES)}")
     return value
 
 
@@ -175,19 +163,13 @@ def validate_read_scope(value: dict | None) -> dict | None:
     from ohm.graph.schema import VALID_READ_SCOPE_DIMENSIONS
 
     if not isinstance(value, dict):
-        raise ValueError(
-            f"Invalid read_scope: expected dict, got {type(value).__name__}"
-        )
+        raise ValueError(f"Invalid read_scope: expected dict, got {type(value).__name__}")
     invalid_keys = set(value.keys()) - VALID_READ_SCOPE_DIMENSIONS
     if invalid_keys:
-        raise ValueError(
-            f"Invalid read_scope keys: {sorted(invalid_keys)} — must be subset of: {sorted(VALID_READ_SCOPE_DIMENSIONS)}"
-        )
+        raise ValueError(f"Invalid read_scope keys: {sorted(invalid_keys)} — must be subset of: {sorted(VALID_READ_SCOPE_DIMENSIONS)}")
     for k, v in value.items():
         if not isinstance(v, list) or not all(isinstance(item, str) for item in v):
-            raise ValueError(
-                f"Invalid read_scope value for '{k}': expected list of strings"
-            )
+            raise ValueError(f"Invalid read_scope value for '{k}': expected list of strings")
     return value
 
 
@@ -206,9 +188,7 @@ def validate_hd_fingerprint(value: bytes | None, *, dimensions: int = 10000) -> 
     if len(value) != expected:
         from ohm.framework.exceptions import ValidationError
 
-        raise ValidationError(
-            f"Invalid hd_fingerprint: expected {expected} bytes ({dimensions} bits), got {len(value)}"
-        )
+        raise ValidationError(f"Invalid hd_fingerprint: expected {expected} bytes ({dimensions} bits), got {len(value)}")
     return value
 
 
@@ -229,9 +209,7 @@ def enforce_confidence_ceiling(
     if ceiling is None:
         return
     if confidence > ceiling + 1e-9:
-        raise ValueError(
-            f"Confidence {confidence} exceeds ceiling {ceiling} for source_tier '{source_tier}'"
-        )
+        raise ValueError(f"Confidence {confidence} exceeds ceiling {ceiling} for source_tier '{source_tier}'")
 
 
 def validate_depth(value: int, *, max_depth: int = 20) -> int:

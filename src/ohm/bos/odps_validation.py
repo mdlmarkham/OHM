@@ -114,9 +114,7 @@ def validate_bos(document: str | bytes | dict[str, Any], *, producer_agent: str 
     return {"valid": not errors, "errors": errors}
 
 
-def validate_registration(
-    document: str | bytes | dict[str, Any], *, producer_agent: str | None
-) -> dict[str, Any]:
+def validate_registration(document: str | bytes | dict[str, Any], *, producer_agent: str | None) -> dict[str, Any]:
     """Full registration gate: ODPS schema + BOS constraints.
 
     Returns ``{"valid", "errors", "odps_valid", "bos_valid", "compliance_level"}``.

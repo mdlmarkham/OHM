@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from ohm.exceptions import ValidationError
-from ohm.server import server as _server_module
 
 
 class CatalogHandlerMixin:
@@ -33,7 +31,7 @@ class CatalogHandlerMixin:
     def _get_data_product(self, path: str, qs: dict) -> None:
         """GET /data-products/{internal_id} — get a single data product."""
         prefix = "/data-products/"
-        internal_id = path[len(prefix):]
+        internal_id = path[len(prefix) :]
         if not internal_id:
             self._json_response(404, {"error": "not_found", "message": "internal_id required"})
             return
@@ -59,13 +57,16 @@ class CatalogHandlerMixin:
         if odps_yaml:
             result = validate_registration(odps_yaml, producer_agent=producer_agent)
             if not result["valid"]:
-                self._json_response(422, {
-                    "error": "validation_failed",
-                    "message": "ODPS document failed validation",
-                    "errors": result["errors"],
-                    "odps_valid": result["odps_valid"],
-                    "bos_valid": result["bos_valid"],
-                })
+                self._json_response(
+                    422,
+                    {
+                        "error": "validation_failed",
+                        "message": "ODPS document failed validation",
+                        "errors": result["errors"],
+                        "odps_valid": result["odps_valid"],
+                        "bos_valid": result["bos_valid"],
+                    },
+                )
                 return
 
         product = self.current_store.register_data_product(

@@ -206,30 +206,22 @@ def enforce_read_scope(
     if layer is not None:
         allowed_layers = scope.get("layer")
         if allowed_layers is not None and layer not in allowed_layers:
-            raise PermissionDeniedError(
-                f"Agent '{agent_name}' read scope excludes layer '{layer}'"
-            )
+            raise PermissionDeniedError(f"Agent '{agent_name}' read scope excludes layer '{layer}'")
 
     if source_tier is not None:
         allowed_tiers = scope.get("source_tier")
         if allowed_tiers is not None and source_tier not in allowed_tiers:
-            raise PermissionDeniedError(
-                f"Agent '{agent_name}' read scope excludes source_tier '{source_tier}'"
-            )
+            raise PermissionDeniedError(f"Agent '{agent_name}' read scope excludes source_tier '{source_tier}'")
 
     if created_by is not None:
         allowed_creators = scope.get("created_by")
         if allowed_creators is not None and created_by not in allowed_creators:
-            raise PermissionDeniedError(
-                f"Agent '{agent_name}' read scope excludes nodes by '{created_by}'"
-            )
+            raise PermissionDeniedError(f"Agent '{agent_name}' read scope excludes nodes by '{created_by}'")
 
     if node_id is not None:
         allowed_nodes = scope.get("node_id")
         if allowed_nodes is not None and node_id not in allowed_nodes:
-            raise PermissionDeniedError(
-                f"Agent '{agent_name}' read scope excludes node '{node_id}'"
-            )
+            raise PermissionDeniedError(f"Agent '{agent_name}' read scope excludes node '{node_id}'")
 
 
 def set_agent_read_scope(conn, agent_name: str, scope: dict | None) -> dict:

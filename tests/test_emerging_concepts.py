@@ -1,4 +1,5 @@
 """Tests for emerging concept detection (OHM-tlqz, ADR-034)."""
+
 from __future__ import annotations
 
 import pytest
@@ -92,7 +93,10 @@ class TestDetectUnknownIngredients:
         conn = test_db
         _setup_graph_with_fingerprints(conn)
         results = detect_unknown_ingredients(
-            conn, residual_mass_threshold=0.0, stability_threshold=0.0, min_observations=1,
+            conn,
+            residual_mass_threshold=0.0,
+            stability_threshold=0.0,
+            min_observations=1,
         )
         assert len(results) >= 1
         assert all("residual_mass" in r for r in results)
@@ -102,7 +106,9 @@ class TestDetectUnknownIngredients:
         conn = test_db
         _setup_graph_with_fingerprints(conn)
         results = detect_unknown_ingredients(
-            conn, residual_mass_threshold=0.99, stability_threshold=0.99,
+            conn,
+            residual_mass_threshold=0.99,
+            stability_threshold=0.99,
         )
         assert len(results) == 0
 
@@ -119,7 +125,10 @@ class TestDetectUnknownIngredients:
         conn = test_db
         _setup_graph_with_fingerprints(conn)
         results = detect_unknown_ingredients(
-            conn, residual_mass_threshold=0.0, stability_threshold=0.0, min_observations=1,
+            conn,
+            residual_mass_threshold=0.0,
+            stability_threshold=0.0,
+            min_observations=1,
         )
         masses = [r["residual_mass"] for r in results]
         assert masses == sorted(masses, reverse=True)
@@ -150,7 +159,10 @@ class TestPromoteEmergingConcept:
         conn = test_db
         _setup_graph_with_fingerprints(conn)
         result = promote_emerging_concept(
-            conn, node_id="emerging1", new_label="Quantum Biology", promoted_by="test",
+            conn,
+            node_id="emerging1",
+            new_label="Quantum Biology",
+            promoted_by="test",
         )
         assert result["status"] == "named"
         assert result["new_label"] == "Quantum Biology"
@@ -179,7 +191,9 @@ class TestSDKEmergingConcepts:
         _setup_graph_with_fingerprints(conn)
         with Graph(conn, actor="test") as g:
             results = g.detect_emerging_concepts(
-                residual_mass_threshold=0.0, stability_threshold=0.0, min_observations=1,
+                residual_mass_threshold=0.0,
+                stability_threshold=0.0,
+                min_observations=1,
             )
             assert len(results) >= 1
 

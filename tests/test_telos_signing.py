@@ -1,4 +1,5 @@
 """Tests for TELOS signing (OHM-enwb, ADR-035)."""
+
 from __future__ import annotations
 
 import pytest

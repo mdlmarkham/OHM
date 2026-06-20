@@ -17,9 +17,7 @@ class TestSourceTierSchema:
     """Migration sanity: source_tier column exists, ceiling values are sane."""
 
     def test_valid_source_tiers_match_doc(self):
-        assert VALID_SOURCE_TIERS == frozenset(
-            {"raw", "unverified", "preliminary", "official", "verified"}
-        )
+        assert VALID_SOURCE_TIERS == frozenset({"raw", "unverified", "preliminary", "official", "verified"})
 
     def test_ceilings_strictly_ordered(self):
         ordered = ["raw", "unverified", "preliminary", "official", "verified"]
@@ -34,21 +32,11 @@ class TestSourceTierSchema:
 
     def test_column_exists_on_both_tables(self, test_db):
         for table in ("ohm_nodes", "ohm_edges"):
-            cols = {
-                row[0]
-                for row in test_db.execute(
-                    f"SELECT column_name FROM duckdb_columns() WHERE table_name = '{table}'"
-                ).fetchall()
-            }
+            cols = {row[0] for row in test_db.execute(f"SELECT column_name FROM duckdb_columns() WHERE table_name = '{table}'").fetchall()}
             assert "source_tier" in cols, f"{table} missing source_tier column"
 
     def test_indexes_exist(self, test_db):
-        idx = {
-            row[0]
-            for row in test_db.execute(
-                "SELECT index_name FROM duckdb_indexes() WHERE table_name IN ('ohm_nodes', 'ohm_edges')"
-            ).fetchall()
-        }
+        idx = {row[0] for row in test_db.execute("SELECT index_name FROM duckdb_indexes() WHERE table_name IN ('ohm_nodes', 'ohm_edges')").fetchall()}
         assert "idx_nodes_source_tier" in idx
         assert "idx_edges_source_tier" in idx
 
@@ -76,21 +64,29 @@ class TestCreateNodeWithTier:
     def test_create_above_ceiling_raises(self, test_db):
         with pytest.raises(ValueError, match="exceeds ceiling"):
             queries_create_node(
-                test_db, label="Overconfident", created_by="metis",
-                source_tier="raw", confidence=0.5,
+                test_db,
+                label="Overconfident",
+                created_by="metis",
+                source_tier="raw",
+                confidence=0.5,
             )
 
     def test_create_at_ceiling_passes(self, test_db):
         n = queries_create_node(
-            test_db, label="At Limit", created_by="metis",
-            source_tier="raw", confidence=0.3,
+            test_db,
+            label="At Limit",
+            created_by="metis",
+            source_tier="raw",
+            confidence=0.3,
         )
         assert n["source_tier"] == "raw"
 
     def test_create_invalid_tier_raises(self, test_db):
         with pytest.raises(ValueError, match="Invalid source_tier"):
             queries_create_node(
-                test_db, label="Bogus", created_by="metis",
+                test_db,
+                label="Bogus",
+                created_by="metis",
                 source_tier="primary",
             )
 
@@ -106,8 +102,11 @@ class TestCreateNodeWithTier:
     )
     def test_each_tier_at_its_ceiling(self, test_db, tier, ceiling):
         n = queries_create_node(
-            test_db, label=f"At {tier}", created_by="metis",
-            source_tier=tier, confidence=ceiling,
+            test_db,
+            label=f"At {tier}",
+            created_by="metis",
+            source_tier=tier,
+            confidence=ceiling,
         )
         assert n["source_tier"] == tier
 
@@ -117,9 +116,14 @@ class TestCreateEdgeWithTier:
         a = queries_create_node(test_db, label="A", created_by="metis")
         b = queries_create_node(test_db, label="B", created_by="metis")
         e = queries_create_edge(
-            test_db, from_node=a["id"], to_node=b["id"],
-            layer="L3", edge_type="CAUSES", created_by="metis",
-            source_tier="preliminary", confidence=0.6,
+            test_db,
+            from_node=a["id"],
+            to_node=b["id"],
+            layer="L3",
+            edge_type="CAUSES",
+            created_by="metis",
+            source_tier="preliminary",
+            confidence=0.6,
         )
         assert e["source_tier"] == "preliminary"
 
@@ -128,9 +132,14 @@ class TestCreateEdgeWithTier:
         b = queries_create_node(test_db, label="B", created_by="metis")
         with pytest.raises(ValueError, match="exceeds ceiling"):
             queries_create_edge(
-                test_db, from_node=a["id"], to_node=b["id"],
-                layer="L3", edge_type="CAUSES", created_by="metis",
-                source_tier="raw", confidence=0.9,
+                test_db,
+                from_node=a["id"],
+                to_node=b["id"],
+                layer="L3",
+                edge_type="CAUSES",
+                created_by="metis",
+                source_tier="raw",
+                confidence=0.9,
             )
 
     def test_create_invalid_tier_raises(self, test_db):
@@ -138,8 +147,12 @@ class TestCreateEdgeWithTier:
         b = queries_create_node(test_db, label="B", created_by="metis")
         with pytest.raises(ValueError, match="Invalid source_tier"):
             queries_create_edge(
-                test_db, from_node=a["id"], to_node=b["id"],
-                layer="L3", edge_type="CAUSES", created_by="metis",
+                test_db,
+                from_node=a["id"],
+                to_node=b["id"],
+                layer="L3",
+                edge_type="CAUSES",
+                created_by="metis",
                 source_tier="bogus",
             )
 
@@ -179,9 +192,12 @@ class TestOhmStoreTier:
             store.write_node(id="store_a", label="A", type="concept", confidence=1.0)
             store.write_node(id="store_b", label="B", type="concept", confidence=1.0)
             edge = store.write_edge(
-                from_node="store_a", to_node="store_b",
-                edge_type="CAUSES", layer="L3",
-                confidence=0.6, source_tier="preliminary",
+                from_node="store_a",
+                to_node="store_b",
+                edge_type="CAUSES",
+                layer="L3",
+                confidence=0.6,
+                source_tier="preliminary",
             )
             assert edge is not None
             assert edge["source_tier"] == "preliminary"
@@ -195,9 +211,12 @@ class TestOhmStoreTier:
             store.write_node(id="store_d", label="D", type="concept", confidence=1.0)
             with pytest.raises(ValueError, match="exceeds ceiling"):
                 store.write_edge(
-                    from_node="store_c", to_node="store_d",
-                    edge_type="CAUSES", layer="L3",
-                    confidence=0.9, source_tier="raw",
+                    from_node="store_c",
+                    to_node="store_d",
+                    edge_type="CAUSES",
+                    layer="L3",
+                    confidence=0.9,
+                    source_tier="raw",
                 )
         finally:
             store.close()
@@ -254,8 +273,12 @@ class TestBackwardCompatibility:
         a = queries_create_node(test_db, label="Legacy A", created_by="metis")
         b = queries_create_node(test_db, label="Legacy B", created_by="metis")
         e = queries_create_edge(
-            test_db, from_node=a["id"], to_node=b["id"],
-            layer="L3", edge_type="CAUSES", created_by="metis",
+            test_db,
+            from_node=a["id"],
+            to_node=b["id"],
+            layer="L3",
+            edge_type="CAUSES",
+            created_by="metis",
             confidence=0.99,
         )
         assert e["source_tier"] is None

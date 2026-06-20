@@ -1666,9 +1666,7 @@ class AdminHandlerMixin:
 
         # OHM-nnrw: embedding coverage and average manifold density
         try:
-            nodes_with_embedding = conn.execute(
-                "SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL AND embedding IS NOT NULL"
-            ).fetchone()[0]
+            nodes_with_embedding = conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL AND embedding IS NOT NULL").fetchone()[0]
             raw_values["embedding_coverage"] = round(nodes_with_embedding / total_nodes, 4) if total_nodes > 0 else 0.0
 
             avg_density_row = conn.execute("""

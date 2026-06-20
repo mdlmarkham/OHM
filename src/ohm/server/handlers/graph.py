@@ -1536,6 +1536,7 @@ class GraphHandlerMixin:
         compression_type = body.get("compression_type")
         if compression_type is not None:
             from ohm.graph.schema import VALID_COMPRESSION_TYPES
+
             if compression_type not in VALID_COMPRESSION_TYPES:
                 raise ValidationError(f"Invalid compression_type '{compression_type}' — must be one of: {', '.join(sorted(VALID_COMPRESSION_TYPES))}")
         compression_degree = body.get("compression_degree")
@@ -1824,9 +1825,7 @@ class GraphHandlerMixin:
         except Exception:
             import logging
 
-            logging.getLogger("ohm.handlers").debug(
-                "oppositional review skipped for synthesis %s", node_id, exc_info=True
-            )
+            logging.getLogger("ohm.handlers").debug("oppositional review skipped for synthesis %s", node_id, exc_info=True)
 
         # OHM-8q5d: Source diversity — aggregate Shannon entropy across
         # evidence backing the cluster_ids. Non-fatal enrichment.
@@ -1853,9 +1852,7 @@ class GraphHandlerMixin:
         except Exception:
             import logging
 
-            logging.getLogger("ohm.handlers").debug(
-                "source_diversity_score skipped for synthesis %s", node_id, exc_info=True
-            )
+            logging.getLogger("ohm.handlers").debug("source_diversity_score skipped for synthesis %s", node_id, exc_info=True)
 
         self._json_response(201, result)
 

@@ -158,9 +158,13 @@ class TestPilotAdoption:
     def test_products_published_per_producer(self, test_db):
         for product in PILOT_PRODUCTS:
             register_data_product(
-                test_db, product_id=product["product_id"], name=product["name"],
-                type=product["type"], producer_agent=product["producer_agent"],
-                consumers=product["consumers"], created_by="pilot_runner",
+                test_db,
+                product_id=product["product_id"],
+                name=product["name"],
+                type=product["type"],
+                producer_agent=product["producer_agent"],
+                consumers=product["consumers"],
+                created_by="pilot_runner",
                 description=product["description"],
             )
 
@@ -175,14 +179,16 @@ class TestPilotAdoption:
     def test_cross_agent_consumptions(self, test_db):
         for product in PILOT_PRODUCTS:
             register_data_product(
-                test_db, product_id=product["product_id"], name=product["name"],
-                type=product["type"], producer_agent=product["producer_agent"],
-                consumers=product["consumers"], created_by="pilot_runner",
+                test_db,
+                product_id=product["product_id"],
+                name=product["name"],
+                type=product["type"],
+                producer_agent=product["producer_agent"],
+                consumers=product["consumers"],
+                created_by="pilot_runner",
             )
 
-        products = test_db.execute(
-            "SELECT internal_id FROM ohm_data_products WHERE deleted_at IS NULL"
-        ).fetchall()
+        products = test_db.execute("SELECT internal_id FROM ohm_data_products WHERE deleted_at IS NULL").fetchall()
         for row in products:
             internal_id = row[0]
             node_row = test_db.execute(
@@ -200,9 +206,12 @@ class TestPilotAdoption:
         port, store = test_server
         for product in PILOT_PRODUCTS:
             store.register_data_product(
-                product_id=product["product_id"], name=product["name"],
-                type=product["type"], producer_agent=product["producer_agent"],
-                consumers=product["consumers"], agent_name="pilot_runner",
+                product_id=product["product_id"],
+                name=product["name"],
+                type=product["type"],
+                producer_agent=product["producer_agent"],
+                consumers=product["consumers"],
+                agent_name="pilot_runner",
                 description=product["description"],
             )
 
@@ -214,9 +223,12 @@ class TestPilotAdoption:
         port, store = test_server
         for product in PILOT_PRODUCTS:
             store.register_data_product(
-                product_id=product["product_id"], name=product["name"],
-                type=product["type"], producer_agent=product["producer_agent"],
-                consumers=product["consumers"], agent_name="pilot_runner",
+                product_id=product["product_id"],
+                name=product["name"],
+                type=product["type"],
+                producer_agent=product["producer_agent"],
+                consumers=product["consumers"],
+                agent_name="pilot_runner",
             )
         status, data = _request("GET", port, "/data-products?producer_agent=clio")
         assert status == 200
@@ -229,8 +241,12 @@ class TestPilotReliabilityEvolution:
 
     def test_reliability_unchanged_before_outcomes(self, test_db):
         product = register_data_product(
-            test_db, product_id="bos.pilot.rel.1", name="Pilot Rel Test",
-            type="reports", producer_agent="metis", consumers=["clio"],
+            test_db,
+            product_id="bos.pilot.rel.1",
+            name="Pilot Rel Test",
+            type="reports",
+            producer_agent="metis",
+            consumers=["clio"],
             created_by="pilot_runner",
         )
         initial = product["source_reliability"]
@@ -238,28 +254,42 @@ class TestPilotReliabilityEvolution:
 
     def test_reliability_rises_with_positive_outcomes(self, test_db):
         product = register_data_product(
-            test_db, product_id="bos.pilot.rel.2", name="Pilot Rel Test 2",
-            type="reports", producer_agent="metis", consumers=["clio"],
+            test_db,
+            product_id="bos.pilot.rel.2",
+            name="Pilot Rel Test 2",
+            type="reports",
+            producer_agent="metis",
+            consumers=["clio"],
             created_by="pilot_runner",
         )
         for _ in range(5):
             query_record_outcome(
-                test_db, source_agent="metis", claim_node=product["ohm_node_id"],
-                outcome=True, recorded_by="pilot_runner",
+                test_db,
+                source_agent="metis",
+                claim_node=product["ohm_node_id"],
+                outcome=True,
+                recorded_by="pilot_runner",
             )
         refreshed = refresh_data_product_provenance(test_db, product["internal_id"])
         assert refreshed["source_reliability"] is not None
 
     def test_reliability_drops_with_negative_outcomes(self, test_db):
         product = register_data_product(
-            test_db, product_id="bos.pilot.rel.3", name="Pilot Rel Test 3",
-            type="reports", producer_agent="metis", consumers=["clio"],
+            test_db,
+            product_id="bos.pilot.rel.3",
+            name="Pilot Rel Test 3",
+            type="reports",
+            producer_agent="metis",
+            consumers=["clio"],
             created_by="pilot_runner",
         )
         for _ in range(3):
             query_record_outcome(
-                test_db, source_agent="metis", claim_node=product["ohm_node_id"],
-                outcome=False, recorded_by="pilot_runner",
+                test_db,
+                source_agent="metis",
+                claim_node=product["ohm_node_id"],
+                outcome=False,
+                recorded_by="pilot_runner",
             )
         refreshed = refresh_data_product_provenance(test_db, product["internal_id"])
         assert refreshed["source_reliability"] is not None
@@ -307,9 +337,13 @@ class TestPilotSummary:
                 continue
 
             p = register_data_product(
-                test_db, product_id=product["product_id"], name=product["name"],
-                type=product["type"], producer_agent=product["producer_agent"],
-                consumers=product["consumers"], created_by="pilot_runner",
+                test_db,
+                product_id=product["product_id"],
+                name=product["name"],
+                type=product["type"],
+                producer_agent=product["producer_agent"],
+                consumers=product["consumers"],
+                created_by="pilot_runner",
                 description=product["description"],
             )
             products_registered += 1

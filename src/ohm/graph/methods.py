@@ -4025,7 +4025,7 @@ def compute_hd_fingerprint(
     seed: int = 42,
 ) -> dict[str, Any]:
     from ohm.exceptions import NodeNotFoundError
-    from ohm.inference.hd import DEFAULT_DIM, FP_VERSION, fingerprint_node, hamming_similarity
+    from ohm.inference.hd import fingerprint_node
     from ohm.validation import validate_identifier
 
     node_id = validate_identifier(node_id, name="node_id")
@@ -4276,7 +4276,13 @@ def compute_residual_mass(
             except (json.JSONDecodeError, TypeError):
                 tags = None
         fp = fingerprint_node(
-            label=label, node_type=ntype, content=content, tags=tags, provenance=provenance, dim=dim, seed=seed,
+            label=label,
+            node_type=ntype,
+            content=content,
+            tags=tags,
+            provenance=provenance,
+            dim=dim,
+            seed=seed,
         )
         query_bytes = bytearray.fromhex(fp["fingerprint_hex"])
 
@@ -4381,9 +4387,7 @@ def detect_unknown_ingredients(
            ORDER BY confidence DESC""",
     ).fetchall()
 
-    concept_fps = [
-        (r[0], r[1], bytearray(r[6])) for r in nodes if r[6] is not None
-    ]
+    concept_fps = [(r[0], r[1], bytearray(r[6])) for r in nodes if r[6] is not None]
 
     results = []
     for r in nodes:
@@ -4401,7 +4405,13 @@ def detect_unknown_ingredients(
                 except (json.JSONDecodeError, TypeError):
                     tags = None
             fp = fingerprint_node(
-                label=label, node_type=ntype, content=content, tags=tags, provenance=provenance, dim=dim, seed=seed,
+                label=label,
+                node_type=ntype,
+                content=content,
+                tags=tags,
+                provenance=provenance,
+                dim=dim,
+                seed=seed,
             )
             query_bytes = bytearray.fromhex(fp["fingerprint_hex"])
 
@@ -4437,17 +4447,19 @@ def detect_unknown_ingredients(
         stability = residual_mass
 
         if residual_mass >= residual_mass_threshold and stability >= stability_threshold:
-            results.append({
-                "node_id": nid,
-                "label": label,
-                "type": ntype,
-                "confidence": confidence,
-                "residual_mass": round(residual_mass, 4),
-                "max_similarity": round(max_sim, 4),
-                "stability": round(stability, 4),
-                "evidence_count": evidence_count,
-                "observation_count": observation_count,
-            })
+            results.append(
+                {
+                    "node_id": nid,
+                    "label": label,
+                    "type": ntype,
+                    "confidence": confidence,
+                    "residual_mass": round(residual_mass, 4),
+                    "max_similarity": round(max_sim, 4),
+                    "stability": round(stability, 4),
+                    "evidence_count": evidence_count,
+                    "observation_count": observation_count,
+                }
+            )
 
     results.sort(key=lambda x: x["residual_mass"], reverse=True)
     return results[:limit]
@@ -4514,9 +4526,7 @@ def promote_emerging_concept(
     stability_info = compute_emerging_concept_stability(conn, node_id, dim=dim, seed=seed)
 
     if stability_info["stability"] < 0.45:
-        raise ValueError(
-            f"Cannot promote node {node_id}: stability {stability_info['stability']} < 0.45 threshold"
-        )
+        raise ValueError(f"Cannot promote node {node_id}: stability {stability_info['stability']} < 0.45 threshold")
 
     row = conn.execute(
         "SELECT emerging_concept_score FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
@@ -4561,7 +4571,6 @@ def compute_ripeness(
     ripen_half_life_days: float = 7.0,
     evidence_threshold: int = 2,
 ) -> float:
-    import math
     from datetime import datetime
 
     if now is None:
@@ -4596,7 +4605,7 @@ def ripen_then_decide(
 ) -> dict[str, Any]:
     from datetime import datetime, timedelta
 
-    from ohm.graph.queries import promote_suggestion, expire_suggestions
+    from ohm.graph.queries import promote_suggestion
 
     now = datetime.now()
     cutoff = now - timedelta(days=max_age_days)

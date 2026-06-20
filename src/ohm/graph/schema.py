@@ -240,10 +240,10 @@ VALID_OBSERVATION_SCALES = frozenset(
 
 VALID_COMPRESSION_TYPES = frozenset(
     {
-        "inversion",          # Lossless: AND→OR bypass, destroys necessity
-        "normative_inversion", # Lossless: AND→OR negation, destroys visibility
-        "retrojection",       # Lossy: OR→AND compression, destroys accuracy
-        "composite",          # Multiple operations on same target
+        "inversion",  # Lossless: AND→OR bypass, destroys necessity
+        "normative_inversion",  # Lossless: AND→OR negation, destroys visibility
+        "retrojection",  # Lossy: OR→AND compression, destroys accuracy
+        "composite",  # Multiple operations on same target
     }
 )
 

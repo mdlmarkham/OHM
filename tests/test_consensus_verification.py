@@ -31,8 +31,13 @@ def _node(conn, label="node", created_by="metis") -> str:
 
 def _causes(conn, frm, to, created_by="metis", confidence=0.8) -> str:
     return create_edge(
-        conn, from_node=frm, to_node=to, layer="L3", edge_type="CAUSES",
-        created_by=created_by, confidence=confidence,
+        conn,
+        from_node=frm,
+        to_node=to,
+        layer="L3",
+        edge_type="CAUSES",
+        created_by=created_by,
+        confidence=confidence,
     )["id"]
 
 
@@ -96,7 +101,9 @@ class TestDetectConsensusOnlySupport:
 
     def test_strongest_tier_is_highest_ceiling(self, test_db):
         cause_id, src, tgt = _setup_causes_with_support(
-            test_db, tiers=("raw", "official"), agents=("clio", "metis"),
+            test_db,
+            tiers=("raw", "official"),
+            agents=("clio", "metis"),
         )
         result = detect_consensus_only_support(test_db, edge_id=cause_id)
         assert result["is_consensus_only"] is True
@@ -120,7 +127,9 @@ class TestFireVerificationNudge:
     def test_creates_consensus_flag_challenge(self, test_db):
         cause_id, src, tgt = _setup_causes_with_support(test_db, tiers=("raw",))
         result = fire_verification_nudge(
-            test_db, edge_id=cause_id, reason="consensus-only support detected",
+            test_db,
+            edge_id=cause_id,
+            reason="consensus-only support detected",
         )
         assert result["edge_type"] == "CHALLENGED_BY"
         assert result["challenge_of"] == cause_id
@@ -142,7 +151,10 @@ class TestFireVerificationNudge:
     def test_custom_created_by(self, test_db):
         cause_id, src, tgt = _setup_causes_with_support(test_db, tiers=("raw",))
         result = fire_verification_nudge(
-            test_db, edge_id=cause_id, reason="r", created_by="metis",
+            test_db,
+            edge_id=cause_id,
+            reason="r",
+            created_by="metis",
         )
         assert result["created_by"] == "metis"
 
