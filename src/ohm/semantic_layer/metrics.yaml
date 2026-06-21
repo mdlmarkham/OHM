@@ -11,6 +11,12 @@ metrics:
       WHERE layer = 'L3'
         AND edge_type IN ('CAUSES', 'PREDICTS', 'EXPLAINS')
         AND deleted_at IS NULL
+    thresholds:
+      - when: < 0.3
+        action: create_task
+        title: Run more verification experiments
+        description: verification_rate is below 0.3; run additional verification experiments to validate causal claims.
+        priority: P1
 
   challenge_ratio:
     description: Ratio of challenged edges to total L3 edges
@@ -28,6 +34,12 @@ metrics:
         WHERE layer = 'L3'
           AND deleted_at IS NULL
       )
+    thresholds:
+      - when: < 0.05
+        action: prompt_agent
+        skill: critique
+        target: high_confidence_l3_edges
+        description: challenge_ratio is below 0.05; prompt the critique agent to challenge high-confidence L3 edges.
 
   source_reliability_avg:
     description: Average source reliability (p_accurate) across agents with recorded outcomes
@@ -43,3 +55,9 @@ metrics:
           )
         END AS value
       FROM ohm_outcomes
+    thresholds:
+      - when: < 0.6
+        action: create_task
+        title: Review low-reliability sources
+        description: source_reliability_avg is below 0.6; review agents/sources with low outcome accuracy.
+        priority: P2

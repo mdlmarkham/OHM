@@ -32,7 +32,8 @@ def load_metrics(path: Path | str | None = None) -> dict[str, dict[str, Any]]:
         path: Path to the metrics YAML file. Defaults to bundled metrics.yaml.
 
     Returns:
-        Dict mapping metric name to its definition dict.
+        Dict mapping metric name to its definition dict, including
+        'description', 'sql', and 'thresholds'.
     """
     if path is None:
         path = DEFAULT_METRICS_PATH
@@ -41,11 +42,12 @@ def load_metrics(path: Path | str | None = None) -> dict[str, dict[str, Any]]:
     metrics = raw.get("metrics", {})
     if not isinstance(metrics, dict):
         raise ValueError(f"Invalid metrics YAML: 'metrics' must be a mapping, got {type(metrics).__name__}")
-    # Materialise descriptions and SQL strings.
+    # Materialise descriptions and SQL strings, preserving thresholds.
     return {
         name: {
             "description": definition.get("description", ""),
             "sql": definition.get("sql", "").strip(),
+            "thresholds": definition.get("thresholds", []),
         }
         for name, definition in metrics.items()
         if isinstance(definition, dict)
@@ -126,6 +128,38 @@ def run_metrics(
             logger.warning("Metric %s failed: %s", name, exc)
             results[name] = None
     return results
+
+
+def run_metrics_and_actions(
+    conn: Any,
+    repo_path: str | None = None,
+    path: Path | str | None = None,
+    use_ibis: bool = True,
+    execute: bool = True,
+) -> dict[str, Any]:
+    """Run all metrics, evaluate thresholds, and optionally execute actions.
+
+    Args:
+        conn: DuckDB connection with OHM schema initialised.
+        repo_path: Optional Beads repo path for `create_task` actions.
+        path: Optional override for the metrics YAML file.
+        use_ibis: Whether to attempt Ibis execution. Defaults to True.
+        execute: If True, run actions; if False, only evaluate and list them.
+
+    Returns:
+        Dict with 'metrics', 'actions', and 'executed' (when execute=True).
+    """
+    from ohm.semantic_layer.actions import evaluate_thresholds, run_actions
+
+    metrics = load_metrics(path)
+    metric_values = run_metrics(conn, path=path, use_ibis=use_ibis)
+    actions = evaluate_thresholds(metric_values, metrics)
+    result: dict[str, Any] = {"metrics": metric_values, "actions": actions}
+    if execute:
+        repo = repo_path or "/root/olympus/OHM"
+        executed = run_actions(conn, repo_path=repo, actions=actions)
+        result["executed"] = executed
+    return result
 
 
 def list_metrics(path: Path | str | None = None) -> dict[str, str]:

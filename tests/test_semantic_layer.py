@@ -5,13 +5,21 @@ Covers:
 - SQL execution against in-memory DuckDB
 - HTTP endpoint integration
 - Metric correctness on a small constructed graph
+- Metrics → Actions threshold evaluation
 """
 
 from __future__ import annotations
 
 import pytest
 
-from ohm.semantic_layer import list_metrics, load_metrics, run_metrics
+from ohm.semantic_layer import (
+    evaluate_thresholds,
+    list_metrics,
+    load_metrics,
+    run_metrics,
+    run_metrics_and_actions,
+)
+from ohm.semantic_layer.actions import _parse_threshold, create_beads_task
 from ohm.queries import create_node, create_edge, create_challenge, query_record_outcome
 
 
@@ -24,6 +32,8 @@ class TestSemanticLayerMetrics:
         for name, definition in metrics.items():
             assert "sql" in definition
             assert definition["sql"].strip().upper().startswith("SELECT")
+            assert "thresholds" in definition
+            assert isinstance(definition["thresholds"], list)
 
     def test_list_metrics_has_descriptions(self):
         descriptions = list_metrics()
@@ -119,6 +129,151 @@ class TestSemanticLayerMetrics:
         assert values["source_reliability_avg"] == pytest.approx(2 / 3)
 
 
+class TestSemanticLayerThresholds:
+    """Unit tests for threshold parsing and action evaluation."""
+
+    def test_parse_threshold_variants(self):
+        assert _parse_threshold("< 0.3") == ("<", 0.3)
+        assert _parse_threshold("<=0.5") == ("<=", 0.5)
+        assert _parse_threshold("> 0.8") == (">", 0.8)
+        assert _parse_threshold(">=0.6") == (">=", 0.6)
+
+    def test_evaluate_thresholds_fires_when_values_low(self):
+        definitions = {
+            "verification_rate": {
+                "description": "verify",
+                "sql": "SELECT 1",
+                "thresholds": [
+                    {
+                        "when": "< 0.3",
+                        "action": "create_task",
+                        "title": "Run more verification experiments",
+                        "priority": "P1",
+                    }
+                ],
+            },
+            "challenge_ratio": {
+                "description": "challenge",
+                "sql": "SELECT 1",
+                "thresholds": [
+                    {
+                        "when": "< 0.05",
+                        "action": "prompt_agent",
+                        "skill": "critique",
+                        "target": "high_confidence_l3_edges",
+                    }
+                ],
+            },
+            "source_reliability_avg": {
+                "description": "reliability",
+                "sql": "SELECT 1",
+                "thresholds": [
+                    {
+                        "when": "< 0.6",
+                        "action": "create_task",
+                        "title": "Review low-reliability sources",
+                        "priority": "P2",
+                    }
+                ],
+            },
+        }
+        values = {
+            "verification_rate": 0.2,
+            "challenge_ratio": 0.01,
+            "source_reliability_avg": 0.55,
+        }
+        actions = evaluate_thresholds(values, definitions)
+        assert len(actions) == 3
+
+        by_metric = {a["metric"]: a for a in actions}
+        assert by_metric["verification_rate"]["action"] == "create_task"
+        assert by_metric["verification_rate"]["priority"] == "P1"
+        assert by_metric["challenge_ratio"]["action"] == "prompt_agent"
+        assert by_metric["challenge_ratio"]["skill"] == "critique"
+        assert by_metric["source_reliability_avg"]["priority"] == "P2"
+
+    def test_evaluate_thresholds_empty_when_values_high(self):
+        definitions = {
+            "verification_rate": {
+                "description": "verify",
+                "sql": "SELECT 1",
+                "thresholds": [{"when": "< 0.3", "action": "create_task", "title": "X", "priority": "P1"}],
+            }
+        }
+        actions = evaluate_thresholds({"verification_rate": 0.9}, definitions)
+        assert actions == []
+
+    def test_evaluate_thresholds_handles_none_values(self):
+        definitions = {
+            "verification_rate": {
+                "description": "verify",
+                "sql": "SELECT 1",
+                "thresholds": [{"when": "< 0.3", "action": "create_task", "title": "X", "priority": "P1"}],
+            }
+        }
+        actions = evaluate_thresholds({"verification_rate": None}, definitions)
+        assert actions == []
+
+
+class TestSemanticLayerActions:
+    """Tests for the action executor."""
+
+    def test_create_beads_task_creates_issue(self, tmp_path):
+        import subprocess
+
+        repo = tmp_path / "test_repo"
+        repo.mkdir()
+        subprocess.run(["bd", "init"], cwd=str(repo), check=True, capture_output=True)
+
+        result = create_beads_task(
+            repo_path=str(repo),
+            title="Test task",
+            description="Test description",
+            priority="P1",
+            labels=["ohm", "metrics"],
+        )
+        assert result["title"] == "Test task"
+        assert result["priority"] == "P1"
+        assert "ohm" in result["labels"]
+        assert result["issue_id"] is not None
+
+    def test_run_metrics_and_actions_lists_without_execution(self, test_db):
+        claim = create_node(test_db, label="Claim", node_type="concept", created_by="test_agent")
+        query_record_outcome(
+            test_db,
+            source_agent="low_reliability",
+            claim_node=claim["id"],
+            outcome=False,
+            recorded_by="test_agent",
+        )
+
+        result = run_metrics_and_actions(test_db, execute=False, use_ibis=False)
+        assert "metrics" in result
+        assert "actions" in result
+        assert "executed" not in result
+
+    def test_run_metrics_and_actions_executes_actions(self, test_db, tmp_path):
+        import subprocess
+
+        repo = tmp_path / "action_repo"
+        repo.mkdir()
+        subprocess.run(["bd", "init"], cwd=str(repo), check=True, capture_output=True)
+
+        claim = create_node(test_db, label="Claim", node_type="concept", created_by="test_agent")
+        query_record_outcome(
+            test_db,
+            source_agent="low_reliability",
+            claim_node=claim["id"],
+            outcome=False,
+            recorded_by="test_agent",
+        )
+
+        result = run_metrics_and_actions(test_db, repo_path=str(repo), execute=True, use_ibis=False)
+        assert "executed" in result
+        executed = result["executed"]
+        assert any(e["status"] == "created" for e in executed)
+
+
 class TestSemanticLayerEndpoint:
     """HTTP integration tests for the semantic-layer endpoint."""
 
@@ -131,6 +286,7 @@ class TestSemanticLayerEndpoint:
         assert body["count"] == 3
         assert set(body["metrics"]) == {"verification_rate", "challenge_ratio", "source_reliability_avg"}
         assert body["metrics"]["verification_rate"] is None
+        assert "actions" not in body
 
     def test_get_metrics_semantic_prometheus(self, test_server):
         port, _store = test_server
@@ -140,3 +296,46 @@ class TestSemanticLayerEndpoint:
         assert status == 200
         assert "ohm_semantic_layer_metrics" in body
         assert "verification_rate" in body
+
+    def test_get_metrics_semantic_actions_no_side_effects(self, test_server):
+        port, _store = test_server
+        from tests.conftest import _request
+
+        status, body = _request("GET", port, "/metrics/semantic?actions=true")
+        assert status == 200
+        assert body["count"] == 3
+        assert "actions" in body
+        assert isinstance(body["actions"], list)
+        # GET must not create anything; no executed key.
+        assert "executed" not in body
+
+    def test_post_metrics_semantic_actions_creates_tasks(self, test_server, tmp_path):
+        import subprocess
+
+        port, store = test_server
+        from tests.conftest import _request
+
+        # Seed a low-reliability outcome so a threshold fires.
+        claim = create_node(store.conn, label="Claim", node_type="concept", created_by="test_agent")
+        query_record_outcome(
+            store.conn,
+            source_agent="low_reliability",
+            claim_node=claim["id"],
+            outcome=False,
+            recorded_by="test_agent",
+        )
+
+        repo = tmp_path / "post_repo"
+        repo.mkdir()
+        subprocess.run(["bd", "init"], cwd=str(repo), check=True, capture_output=True)
+
+        status, body = _request(
+            "POST",
+            port,
+            "/metrics/semantic/actions",
+            body={"repo_path": str(repo)},
+        )
+        assert status == 200
+        assert "executed" in body
+        executed = body["executed"]
+        assert any(e["status"] == "created" for e in executed)

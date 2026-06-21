@@ -598,8 +598,9 @@ def _build_router() -> _RouteRegistry:
     # /decay: write-in-GET (legacy); registered as GET to avoid spurious 405
     r.add("GET", "/decay")
 
-    # Semantic-layer metrics endpoint
+    # Semantic-layer metrics endpoints
     r.add("GET", "/metrics/semantic")
+    r.add("POST", "/metrics/semantic/actions")
 
     # POST-only write endpoints (exact)
     for _p in (
@@ -2106,6 +2107,7 @@ OhmHandler._POST_EXACT = {
     "/admin/purge-orphans": "_post_admin_purge_orphans",
     "/admin/repair-dangling": "_post_admin_repair_dangling",
     "/discover/queue/review": "_post_discovery_review",
+    "/metrics/semantic/actions": "_post_metrics_semantic_actions",
     "/hooks": "_post_hooks",
 }
 

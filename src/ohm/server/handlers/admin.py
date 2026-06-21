@@ -1604,16 +1604,26 @@ class AdminHandlerMixin:
 
         Returns the current values of the OHM semantic-layer metric catalog
         as JSON. Supports ?format=prometheus to return text/plain exposition.
+
+        Query params:
+          actions=true — evaluate thresholds and include a list of would-fire
+          actions WITHOUT executing them (read-only).
         """
-        from ohm.semantic_layer import run_metrics
+        from ohm.semantic_layer import run_metrics, run_metrics_and_actions
 
         conn = self.current_store.conn
-        values = run_metrics(conn, use_ibis=False)
+        include_actions = qs.get("actions", [""])[0].lower() in ("true", "1", "yes")
         fmt = qs.get("format", [""])[0].lower()
+
+        if include_actions:
+            values = run_metrics_and_actions(conn, execute=False, use_ibis=False)
+        else:
+            values = {"metrics": run_metrics(conn, use_ibis=False), "actions": []}
+
         if fmt == "prometheus":
             lines = ["# HELP ohm_semantic_layer_metrics YAML-defined graph metrics"]
             lines.append("# TYPE ohm_semantic_layer_metrics gauge")
-            for name, value in values.items():
+            for name, value in values.get("metrics", {}).items():
                 lines.append(f'ohm_semantic_layer_metrics{{metric="{name}"}} {value if value is not None else "NaN"}')
             body_bytes = "\n".join(lines).encode()
             self.send_response(200)
@@ -1621,14 +1631,37 @@ class AdminHandlerMixin:
             self.send_header("Content-Length", str(len(body_bytes)))
             self.end_headers()
             self.wfile.write(body_bytes)
-        else:
-            self._json_response(
-                200,
-                {
-                    "metrics": values,
-                    "count": len(values),
-                },
-            )
+            return
+
+        response: dict[str, Any] = {
+            "metrics": values.get("metrics", {}),
+            "count": len(values.get("metrics", {})),
+        }
+        if include_actions:
+            response["actions"] = values.get("actions", [])
+
+        self._json_response(200, response)
+
+    def _post_metrics_semantic_actions(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /metrics/semantic/actions — evaluate thresholds and execute actions.
+
+        Runs the semantic-layer metrics, evaluates configured thresholds, and
+        creates Beads/OHM tasks for any that fire. Write auth is enforced by
+        the dispatcher before this method is called.
+        """
+        from ohm.semantic_layer import run_metrics_and_actions
+
+        repo_path = body.get("repo_path", "/root/olympus/OHM")
+        result = run_metrics_and_actions(self.current_store.conn, repo_path=repo_path, execute=True, use_ibis=False)
+        self._json_response(
+            200,
+            {
+                "metrics": result.get("metrics", {}),
+                "actions": result.get("actions", []),
+                "executed": result.get("executed", []),
+                "count": len(result.get("metrics", {})),
+            },
+        )
 
     # ── OHM-6lvk: Graph Health Scoring ─────────────────────────────────────
 
