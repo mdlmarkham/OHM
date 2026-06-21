@@ -964,3 +964,5 @@
 {"id":"int-8d96a264","kind":"field_change","created_at":"2026-06-21T12:22:51.982062663Z","actor":"root","issue_id":"OHM-sgnt","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
 {"id":"int-1d383234","kind":"field_change","created_at":"2026-06-21T15:22:55.940646849Z","actor":"root","issue_id":"OHM-nlbm","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
 {"id":"int-57390d2a","kind":"field_change","created_at":"2026-06-21T15:22:55.941262554Z","actor":"root","issue_id":"OHM-nlbm","extra":{"field":"assignee","new_value":"dev-agent","old_value":""}}
+{"id":"int-42deb401","kind":"field_change","created_at":"2026-06-21T16:26:36.343239638Z","actor":"root","issue_id":"OHM-pkbs","extra":{"field":"status","new_value":"closed","old_value":"open"}}
+{"id":"int-67997398","kind":"field_change","created_at":"2026-06-21T16:27:06.852300321Z","actor":"root","issue_id":"OHM-nlbm","extra":{"field":"status","new_value":"closed","old_value":"in_progress"}}
