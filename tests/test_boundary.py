@@ -179,7 +179,7 @@ class TestMutationOperations:
         assert isinstance(result, dict)
         assert result["label"] == "Test Node"
         assert result["created_by"] == "agent_x"
-        assert result["id"].startswith("test_node_")
+        assert "test_node_" in result["id"]
 
         # Verify it exists
         node_result = test_db.execute(

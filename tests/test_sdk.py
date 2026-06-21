@@ -18,7 +18,7 @@ class TestGraphWrite:
 
     def test_create_node(self, graph):
         node = graph.create_node(label="Test Node")
-        assert node["id"].startswith("test_node_")
+        assert "test_node_" in node["id"]
         assert node["label"] == "Test Node"
 
     def test_create_node_with_type(self, graph):

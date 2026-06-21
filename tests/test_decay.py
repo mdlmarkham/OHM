@@ -191,7 +191,11 @@ def mem_conn():
             half_life_days FLOAT,
             valid_from TIMESTAMP,
             valid_to TIMESTAMP,
-            supersedes_obs_id VARCHAR
+            supersedes_obs_id VARCHAR,
+            metadata JSON,
+            worktree_ref VARCHAR,
+            evaluation_script VARCHAR,
+            held_out BOOLEAN DEFAULT FALSE
         )
     """)
     yield conn
@@ -315,7 +319,11 @@ def test_write_observation_sets_half_life_days():
             half_life_days FLOAT,
             valid_from TIMESTAMP,
             valid_to TIMESTAMP,
-            supersedes_obs_id VARCHAR
+            supersedes_obs_id VARCHAR,
+            metadata JSON,
+            worktree_ref VARCHAR,
+            evaluation_script VARCHAR,
+            held_out BOOLEAN DEFAULT FALSE
         )
     """)
     # Also need change feed tables
@@ -360,7 +368,9 @@ def test_write_observation_explicit_half_life_override():
             deleted_at TIMESTAMP, notes VARCHAR, source_name VARCHAR,
             source_url VARCHAR, scale VARCHAR,
             half_life_days FLOAT, valid_from TIMESTAMP,
-            valid_to TIMESTAMP, supersedes_obs_id VARCHAR
+            valid_to TIMESTAMP, supersedes_obs_id VARCHAR,
+            metadata JSON, worktree_ref VARCHAR,
+            evaluation_script VARCHAR, held_out BOOLEAN DEFAULT FALSE
         )
     """)
     conn.execute("CREATE TABLE IF NOT EXISTS ohm_change_log (id BIGINT, table_name VARCHAR, row_id VARCHAR, operation VARCHAR, agent_name VARCHAR, layer VARCHAR, changed_at TIMESTAMP)")
