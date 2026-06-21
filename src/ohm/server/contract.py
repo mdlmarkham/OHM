@@ -71,6 +71,8 @@ class NamingConventions:
             "person": "person-",
             "institution": "institution-",
             "technology": "tech-",
+            "hypothesis": "hypothesis-",
+            "experiment": "experiment-",
         }
     )
 

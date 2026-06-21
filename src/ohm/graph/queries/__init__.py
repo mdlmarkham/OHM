@@ -979,7 +979,7 @@ def create_node(
     # Serialize action_alternatives to JSON if provided
     alternatives_json = json.dumps(action_alternatives) if action_alternatives is not None else None
 
-    node_id = generate_node_id(label)
+    node_id = generate_node_id(label, node_type)
 
     # Check for soft-deleted row with same ID (primary key collision avoidance)
     soft_deleted = conn.execute("SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NOT NULL", [node_id]).fetchone()
@@ -1608,6 +1608,10 @@ def create_observation(
     source_url: str | None = None,
     scale: str | None = None,
     half_life_days: float | None = None,
+    metadata: dict | None = None,
+    worktree_ref: str | None = None,
+    evaluation_script: str | None = None,
+    held_out: bool | None = None,
 ) -> dict[str, Any]:
     """Create an observation on a node or edge and return its full record."""
     from ohm.graph.schema import VALID_OBSERVATION_SCALES
@@ -1626,12 +1630,16 @@ def create_observation(
 
     obs_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
+    import json
+
+    metadata_json = json.dumps(metadata) if metadata else None
     conn.execute(
         """INSERT INTO ohm_observations
            (id, node_id, edge_id, type, value, baseline, sigma, source, created_by, notes,
-            source_name, source_url, scale, half_life_days, valid_from)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        [obs_id, node_id, edge_id, obs_type, value, baseline, sigma, source, created_by, notes, source_name, source_url, scale, half_life_days, now],
+            source_name, source_url, scale, half_life_days, valid_from,
+            metadata, worktree_ref, evaluation_script, held_out)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [obs_id, node_id, edge_id, obs_type, value, baseline, sigma, source, created_by, notes, source_name, source_url, scale, half_life_days, now, metadata_json, worktree_ref, evaluation_script, held_out],
     )
     _log_change(conn, "ohm_observations", obs_id, "INSERT", created_by)
     # Return full observation record

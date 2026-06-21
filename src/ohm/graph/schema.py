@@ -63,6 +63,8 @@ VALID_NODE_TYPES = frozenset(
         "task",  # Action items with status, priority, assignment
         "decision",  # Decision nodes with utility function (OHM-6mv.2)
         "fragment",  # L0 thinking fragments (OHM-a5rz.2)
+        "hypothesis",  # Testable research claim (OHM-ss22)
+        "experiment",  # Bounded evaluation with artifact + metrics (OHM-ss22)
     }
 )
 
@@ -87,6 +89,8 @@ MUST_HAVE_EDGE_NODE_TYPES: frozenset[str] = frozenset(
         "idea",
         "task",
         "decision",
+        "hypothesis",  # Dead-end claim unless linked to evidence (OHM-ss22)
+        "experiment",  # Dead-end unless linked to a hypothesis or concept (OHM-ss22)
         # Forward-compat (per OHM-tjzh spec)
         "synthesis",
         "observation",
@@ -177,6 +181,10 @@ LAYER_EDGE_TYPES: dict[str, frozenset[str]] = {
             "DELEGATED_TO",  # support: delegation
             "THREAT_CLUSTER",  # cybersecurity: IOC linkage
             "TRANSITIONS_TO",  # Markov: state transition edge (OHM-g09)
+            # ── Hypothesis-tree primitives (OHM-ss22) ──
+            "TESTS",  # experiment → hypothesis
+            "SUPPORTS_EVIDENCE",  # experiment → node/edge
+            "CONTRADICTS_EVIDENCE",  # experiment → node/edge
         }
     ),
     "L4": frozenset(
@@ -213,6 +221,7 @@ VALID_OBSERVATION_TYPES = frozenset(
         "support",
         "sentiment",  # customer support: sentiment observation
         "health_check",  # Infrastructure health/status (OHM-infra)
+        "experiment_result",  # Experiment measurement with dev/test metrics (OHM-ss22)
     }
 )
 
@@ -1060,7 +1069,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.33.0"
+SCHEMA_VERSION = "0.34.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -1506,6 +1515,25 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             "ALTER TABLE ohm_agent_config ADD COLUMN IF NOT EXISTS read_scope JSON;",
         ],
     ),
+    (
+        "0.34.0",
+        "Hypothesis-tree primitives for iterative research (OHM-ss22)",
+        [
+            "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS hypothesis_status VARCHAR;",
+            "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS artifact_ref VARCHAR;",
+            "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS dev_metric FLOAT;",
+            "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS test_metric FLOAT;",
+            "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS parent_hypothesis_id VARCHAR;",
+            "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS project_id VARCHAR;",
+            "ALTER TABLE ohm_observations ADD COLUMN IF NOT EXISTS worktree_ref VARCHAR;",
+            "ALTER TABLE ohm_observations ADD COLUMN IF NOT EXISTS evaluation_script VARCHAR;",
+            "ALTER TABLE ohm_observations ADD COLUMN IF NOT EXISTS held_out BOOLEAN DEFAULT FALSE;",
+            "CREATE INDEX IF NOT EXISTS idx_nodes_hypothesis_status ON ohm_nodes(hypothesis_status) WHERE hypothesis_status IS NOT NULL;",
+            "CREATE INDEX IF NOT EXISTS idx_nodes_project_id ON ohm_nodes(project_id) WHERE project_id IS NOT NULL;",
+            "CREATE INDEX IF NOT EXISTS idx_nodes_parent_hypothesis ON ohm_nodes(parent_hypothesis_id) WHERE parent_hypothesis_id IS NOT NULL;",
+            "CREATE INDEX IF NOT EXISTS idx_obs_held_out ON ohm_observations(held_out) WHERE held_out IS NOT NULL;",
+        ],
+    ),
 ]
 
 # ── Indexes ─────────────────────────────────────────────────────────────────
@@ -1818,16 +1846,22 @@ def requires_cross_link(node_type: str) -> bool:
     return node_type in MUST_HAVE_EDGE_NODE_TYPES
 
 
-def generate_node_id(label: str) -> str:
+def generate_node_id(label: str, node_type: str | None = None) -> str:
     """Generate a human-readable node ID from a label.
 
     Converts to lowercase, replaces spaces and special characters with
     underscores, transliterates unicode to ASCII, and appends a short
     suffix for uniqueness.
 
+    When *node_type* is provided, the returned ID is prefixed according
+    to the contract's ``type_prefixes`` mapping (e.g. ``hypothesis-``,
+    ``experiment-``). Unknown node types fall back to an unprefixed ID
+    for backward compatibility.
+
     Examples:
         'AND→OR conversion' → 'and-or-conversion_a1b2c3'
         'Café étude'        → 'cafe-etude_d4e5f6'
+        'Main Hypothesis'   → 'hypothesis-main-hypothesis_a1b2c3'
     """
     import unicodedata
     import re
@@ -1841,7 +1875,17 @@ def generate_node_id(label: str) -> str:
     if not base:
         base = "node"
 
+    # Collapse multiple underscores from punctuation stripping
+    base = re.sub(r"_+", "_", base)
+
     suffix = uuid.uuid4().hex[:6]
+
+    prefix = ""
+    if node_type:
+        from ohm.server.contract import NamingConventions  # local import avoids cycle
+        prefix = NamingConventions().type_prefixes.get(node_type, "")
+    if prefix:
+        return f"{prefix}{base}_{suffix}"
     return f"{base}_{suffix}"
 
 
