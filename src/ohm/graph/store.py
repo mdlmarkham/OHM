@@ -3253,6 +3253,7 @@ class OhmStore:
             nodes = self.conn.execute(f"SELECT * FROM {alias}.ohm_nodes AT (VERSION => {int(version)})").fetchall()
             node_columns = [desc[0] for desc in self.conn.description]
             nodes_dicts = [dict(zip(node_columns, row)) for row in nodes]
+            nodes_dicts = [n for n in nodes_dicts if n.get("deleted_at") is None]
         except Exception as e:
             return {
                 "version": version,
@@ -3268,6 +3269,7 @@ class OhmStore:
             edges = self.conn.execute(f"SELECT * FROM {alias}.ohm_edges AT (VERSION => {int(version)})").fetchall()
             edge_columns = [desc[0] for desc in self.conn.description]
             edges_dicts = [dict(zip(edge_columns, row)) for row in edges]
+            edges_dicts = [e for e in edges_dicts if e.get("deleted_at") is None]
         except Exception as e:
             return {
                 "version": version,
