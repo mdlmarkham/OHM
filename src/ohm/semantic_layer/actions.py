@@ -7,6 +7,7 @@ Evaluates YAML-defined metric thresholds and turns them into concrete actions:
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import subprocess
@@ -27,6 +28,83 @@ _OPERATORS = {
 _THRESHOLD_RE = re.compile(
     r"^\s*(?P<op><=|>=|<|>|==|!=)\s*(?P<value>[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)\s*$"
 )
+
+# Default rate-limit window for semantic-layer auto actions: same
+# (metric, threshold, action_type) cannot create duplicate tasks within
+# this many seconds.
+DEFAULT_RATE_LIMIT_SECONDS = 24 * 60 * 60  # 24 hours
+
+
+def _action_key(metric: str, threshold: str, action_type: str | None) -> str:
+    """Return a stable opaque key for a metric action."""
+    action_type = action_type or "unknown"
+    raw = f"{metric}|{threshold.strip()}|{action_type}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _action_table_exists(conn: Any) -> bool:
+    """Check whether the ohm_metric_action_log table exists."""
+    try:
+        result = conn.execute(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'ohm_metric_action_log'"
+        ).fetchone()
+        return bool(result and result[0])
+    except Exception:
+        return False
+
+
+def _is_rate_limited(
+    conn: Any,
+    metric: str,
+    threshold: str,
+    action_type: str | None,
+    window_seconds: float,
+) -> bool:
+    """Return True if this action already fired within the rate-limit window."""
+    if window_seconds <= 0 or not _action_table_exists(conn):
+        return False
+    try:
+        # INTERVAL does not accept a bound parameter in DuckDB, so the
+        # number of seconds is interpolated safely as an integer.
+        result = conn.execute(
+            f"""
+            SELECT COUNT(*) FROM ohm_metric_action_log
+            WHERE metric = ?
+              AND threshold = ?
+              AND action_type = ?
+              AND created_at >= CURRENT_TIMESTAMP - INTERVAL '{int(window_seconds)} seconds'
+            """,
+            [metric, threshold.strip(), action_type or "unknown"],
+        ).fetchone()
+        return bool(result and result[0] > 0)
+    except Exception as exc:
+        logger.warning("Rate-limit check failed for %s/%s: %s", metric, threshold, exc)
+        return False
+
+
+def _record_action(
+    conn: Any,
+    metric: str,
+    threshold: str,
+    action_type: str | None,
+    created_task_id: str | None = None,
+) -> dict[str, Any] | None:
+    """Record that a metric action fired so future runs can deduplicate."""
+    if not _action_table_exists(conn):
+        return None
+    try:
+        conn.execute(
+            """
+            INSERT INTO ohm_metric_action_log
+                (metric, threshold, action_type, created_task_id, created_at)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            [metric, threshold.strip(), action_type or "unknown", created_task_id],
+        )
+    except Exception as exc:
+        logger.warning("Failed to record metric action %s/%s: %s", metric, threshold, exc)
+        return None
+    return {"metric": metric, "threshold": threshold, "action_type": action_type}
 
 
 def _parse_threshold(condition: str) -> tuple[str, float]:
@@ -159,14 +237,19 @@ def run_actions(
     conn: Any,
     repo_path: str = "/root/olympus/OHM",
     actions: list[dict[str, Any]] | None = None,
+    rate_limit_window_seconds: float = DEFAULT_RATE_LIMIT_SECONDS,
 ) -> list[dict[str, Any]]:
     """Execute a list of threshold-derived actions.
 
     Args:
-        conn: DuckDB connection (used for `prompt_agent` / `create_task` fallback).
+        conn: DuckDB connection (used for `prompt_agent` / `create_task` fallback
+            and for recording action executions in `ohm_metric_action_log`).
         repo_path: Path to the Beads repository for `create_task` actions.
         actions: List of action dicts from `evaluate_thresholds()`. If None,
             the caller should have already provided computed actions.
+        rate_limit_window_seconds: Minimum seconds between creating the same
+            (metric, threshold, action_type) task. Default 24 hours. Set to 0
+            to disable deduplication.
 
     Returns:
         List of result dicts, one per executed action, including `action`,
@@ -182,7 +265,20 @@ def run_actions(
     for action in actions:
         action_type = action.get("action")
         metric = action.get("metric")
+        threshold = action.get("threshold", "")
         result: dict[str, Any] = {"metric": metric, "action": action_type, "status": "skipped"}
+
+        # OHM-wx42: deduplicate within the configured window. Same
+        # (metric, threshold, action_type) cannot create duplicate tasks.
+        if rate_limit_window_seconds > 0 and _is_rate_limited(
+            conn, metric, threshold, action_type, rate_limit_window_seconds
+        ):
+            result["status"] = "skipped"
+            result["reason"] = "rate_limited"
+            results.append(result)
+            continue
+
+        created_task_id: str | None = None
 
         if action_type == "create_task":
             title = action.get("title", f"Metric action for {metric}")
@@ -200,10 +296,13 @@ def run_actions(
                         priority=priority,
                         labels=labels,
                     )
+                    created_task_id = bead.get("issue_id")
                     result.update({"status": "created", "beads": bead})
                 else:
                     task = _create_ohm_task(conn, title, description, priority, labels)
+                    created_task_id = task.get("id")
                     result.update({"status": "created", "ohm_task": task})
+                _record_action(conn, metric, threshold, action_type, created_task_id)
             except Exception as exc:
                 logger.warning("create_task action failed for %s: %s", metric, exc)
                 result.update({"status": "error", "message": str(exc)})
@@ -222,7 +321,9 @@ def run_actions(
                     priority=action.get("priority", "P1"),
                     labels=action.get("labels", ["metrics", "prompt_agent", skill, target]),
                 )
+                created_task_id = task.get("id")
                 result.update({"status": "created", "skill": skill, "target": target, "ohm_task": task})
+                _record_action(conn, metric, threshold, action_type, created_task_id)
             except Exception as exc:
                 logger.warning("prompt_agent action failed for %s: %s", metric, exc)
                 result.update({"status": "error", "message": str(exc)})

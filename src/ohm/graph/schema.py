@@ -872,6 +872,28 @@ DDL_STATEMENTS: list[str] = [
         value VARCHAR NOT NULL
     );
     """,
+    # ── Metric Action Log (OHM-wx42) ─────────────────────────────────────
+    # Tracks when semantic-layer metric actions last fired so the same
+    # (metric, threshold, action_type) does not create duplicate tasks
+    # within a configurable rate-limit window.
+    """
+    CREATE TABLE IF NOT EXISTS ohm_metric_action_log (
+        id           VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        metric       VARCHAR NOT NULL,
+        threshold    VARCHAR NOT NULL,
+        action_type  VARCHAR NOT NULL,
+        created_task_id VARCHAR,
+        created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_metric_action_log_lookup
+        ON ohm_metric_action_log(metric, threshold, action_type, created_at);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_metric_action_log_created_at
+        ON ohm_metric_action_log(created_at);
+    """,
     # ── Webhook Outbox ────────────────────────────────────────────────────
     # Reliable webhook delivery with retry logic (OHM-ufjk)
     """
@@ -1069,7 +1091,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.34.0"
+SCHEMA_VERSION = "0.35.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -1532,6 +1554,24 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             "CREATE INDEX IF NOT EXISTS idx_nodes_project_id ON ohm_nodes(project_id);",
             "CREATE INDEX IF NOT EXISTS idx_nodes_parent_hypothesis ON ohm_nodes(parent_hypothesis_id);",
             "CREATE INDEX IF NOT EXISTS idx_obs_held_out ON ohm_observations(held_out);",
+        ],
+    ),
+    (
+        "0.35.0",
+        "OHM-wx42: semantic-layer metric action log for rate-limited auto actions",
+        [
+            """
+            CREATE TABLE IF NOT EXISTS ohm_metric_action_log (
+                id           VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+                metric       VARCHAR NOT NULL,
+                threshold    VARCHAR NOT NULL,
+                action_type  VARCHAR NOT NULL,
+                created_task_id VARCHAR,
+                created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_metric_action_log_lookup ON ohm_metric_action_log(metric, threshold, action_type, created_at);",
+            "CREATE INDEX IF NOT EXISTS idx_metric_action_log_created_at ON ohm_metric_action_log(created_at);",
         ],
     ),
 ]

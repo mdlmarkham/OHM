@@ -136,6 +136,7 @@ def run_metrics_and_actions(
     path: Path | str | None = None,
     use_ibis: bool = True,
     execute: bool = True,
+    rate_limit_window_seconds: float = 24 * 60 * 60,
 ) -> dict[str, Any]:
     """Run all metrics, evaluate thresholds, and optionally execute actions.
 
@@ -145,6 +146,8 @@ def run_metrics_and_actions(
         path: Optional override for the metrics YAML file.
         use_ibis: Whether to attempt Ibis execution. Defaults to True.
         execute: If True, run actions; if False, only evaluate and list them.
+        rate_limit_window_seconds: Minimum seconds between creating the same
+            (metric, threshold, action_type) task. Defaults to 24 hours.
 
     Returns:
         Dict with 'metrics', 'actions', and 'executed' (when execute=True).
@@ -157,7 +160,9 @@ def run_metrics_and_actions(
     result: dict[str, Any] = {"metrics": metric_values, "actions": actions}
     if execute:
         repo = repo_path or "/root/olympus/OHM"
-        executed = run_actions(conn, repo_path=repo, actions=actions)
+        executed = run_actions(
+            conn, repo_path=repo, actions=actions, rate_limit_window_seconds=rate_limit_window_seconds
+        )
         result["executed"] = executed
     return result
 

@@ -19,7 +19,14 @@ from ohm.semantic_layer import (
     run_metrics,
     run_metrics_and_actions,
 )
-from ohm.semantic_layer.actions import _parse_threshold, create_beads_task
+from ohm.semantic_layer.actions import (
+    _is_rate_limited,
+    _parse_threshold,
+    _record_action,
+    create_beads_task,
+    run_actions,
+)
+from ohm.server.server import DEFAULT_CONFIG
 from ohm.queries import create_node, create_edge, create_challenge, query_record_outcome
 
 
@@ -339,3 +346,97 @@ class TestSemanticLayerEndpoint:
         assert "executed" in body
         executed = body["executed"]
         assert any(e["status"] == "created" for e in executed)
+
+
+class TestSemanticLayerAutoActions:
+    """Tests for OHM-wx42 automatic metric actions + rate limiting."""
+
+    @pytest.fixture
+    def beads_repo(self, tmp_path):
+        import subprocess
+
+        repo = tmp_path / "auto_action_repo"
+        repo.mkdir()
+        subprocess.run(["bd", "init"], cwd=str(repo), check=True, capture_output=True)
+        return str(repo)
+
+    @pytest.fixture
+    def low_reliability_graph(self, test_db):
+        claim = create_node(test_db, label="Claim", node_type="concept", created_by="test_agent")
+        query_record_outcome(
+            test_db,
+            source_agent="low_reliability",
+            claim_node=claim["id"],
+            outcome=False,
+            recorded_by="test_agent",
+        )
+        return test_db
+
+    def test_default_config_has_auto_actions_disabled(self):
+        assert "semantic_layer" in DEFAULT_CONFIG
+        sl = DEFAULT_CONFIG["semantic_layer"]
+        assert sl["auto_actions_enabled"] is False
+        assert sl["auto_actions_interval_seconds"] == 3600
+        assert sl["auto_actions_rate_limit_seconds"] == 86400
+
+    def test_run_actions_respects_rate_limit_window(self, low_reliability_graph, beads_repo):
+        # First run creates the action.
+        result1 = run_metrics_and_actions(
+            low_reliability_graph,
+            repo_path=beads_repo,
+            execute=True,
+            use_ibis=False,
+            rate_limit_window_seconds=86400,
+        )
+        assert any(e["status"] == "created" for e in result1["executed"])
+
+        # Immediate rerun is rate-limited for the same (metric, threshold, action_type).
+        result2 = run_metrics_and_actions(
+            low_reliability_graph,
+            repo_path=beads_repo,
+            execute=True,
+            use_ibis=False,
+            rate_limit_window_seconds=86400,
+        )
+        assert all(e["status"] != "created" for e in result2["executed"])
+        assert any(e.get("reason") == "rate_limited" for e in result2["executed"])
+
+        # A zero-second window disables deduplication.
+        result3 = run_metrics_and_actions(
+            low_reliability_graph,
+            repo_path=beads_repo,
+            execute=True,
+            use_ibis=False,
+            rate_limit_window_seconds=0,
+        )
+        assert any(e["status"] == "created" for e in result3["executed"])
+
+    def test_auto_actions_disabled_does_not_create_tasks(self, low_reliability_graph, beads_repo):
+        # First call creates the action.
+        run_metrics_and_actions(
+            low_reliability_graph,
+            repo_path=beads_repo,
+            execute=True,
+            use_ibis=False,
+            rate_limit_window_seconds=86400,
+        )
+        # Second call is within the rate-limit window so it is skipped.
+        result = run_metrics_and_actions(
+            low_reliability_graph,
+            repo_path=beads_repo,
+            execute=True,
+            use_ibis=False,
+            rate_limit_window_seconds=86400,
+        )
+        assert "executed" in result
+        assert not any(e["status"] == "created" for e in result["executed"])
+        assert any(e.get("reason") == "rate_limited" for e in result["executed"])
+
+    def test_run_actions_rate_limit_helpers(self, test_db):
+        # _is_rate_limited returns False when no record exists.
+        assert _is_rate_limited(test_db, "verification_rate", "< 0.3", "create_task", 86400) is False
+        _record_action(test_db, "verification_rate", "< 0.3", "create_task", "task-1")
+        assert _is_rate_limited(test_db, "verification_rate", "< 0.3", "create_task", 86400) is True
+        assert _is_rate_limited(test_db, "verification_rate", "< 0.3", "create_task", 0) is False
+        # Different action type is not limited.
+        assert _is_rate_limited(test_db, "verification_rate", "< 0.3", "prompt_agent", 86400) is False

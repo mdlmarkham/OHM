@@ -54,6 +54,12 @@ DEFAULT_CONFIG = {
     },
     "log_level": "INFO",
     "multi_tenant": False,
+    "semantic_layer": {
+        # OHM-wx42: automatic semantic-layer metric actions.
+        "auto_actions_enabled": False,  # default disabled
+        "auto_actions_interval_seconds": 3600,  # run every 1 hour when enabled
+        "auto_actions_rate_limit_seconds": 86400,  # dedup window: 24 hours
+    },
     "ducklake": {
         "path": "",  # DuckLake catalog path (e.g., /var/lib/ohm/ohm_lake.ducklake)
         "data_path": "",  # Parquet data path (e.g., /var/lib/ohm/ohm_lake_data)
@@ -79,6 +85,33 @@ def _prewarm_pgmpy() -> None:
         logger.debug("pgmpy pre-warmed (imports loaded)")
     except ImportError:
         logger.info("pgmpy not available — Bayesian inference will be disabled")
+
+
+def run_metric_actions_heartbeat(conn: Any, repo_path: str | None = None) -> dict[str, Any]:
+    """Run semantic-layer metrics and execute threshold actions.
+
+    Intended to be called from the daemon's background scheduler or heartbeat
+    loop. Records the last execution time of each action in
+    `ohm_metric_action_log` so the same (metric, threshold, action_type) does
+    not create duplicate tasks within the configured window.
+
+    Args:
+        conn: DuckDB connection with OHM schema.
+        repo_path: Optional Beads repo path for `create_task` actions.
+
+    Returns:
+        Dict with 'metrics', 'actions', and 'executed'.
+    """
+    from ohm.semantic_layer import run_metrics_and_actions
+
+    repo = repo_path or "/root/olympus/OHM"
+    return run_metrics_and_actions(
+        conn,
+        repo_path=repo,
+        execute=True,
+        use_ibis=False,
+        rate_limit_window_seconds=DEFAULT_CONFIG["semantic_layer"]["auto_actions_rate_limit_seconds"],
+    )
 
 
 def _register_builtin_hooks(store: OhmStore) -> None:
@@ -2435,6 +2468,54 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
         _eviction_thread = threading.Thread(target=_eviction_loop, daemon=True, name="fragment-eviction")
         _eviction_thread.start()
 
+    # OHM-wx42: Background semantic-layer metric-actions thread.
+    # Runs only when enabled in config; respects rate-limit window in
+    # ohm_metric_action_log to avoid duplicate tasks.
+    semantic_layer_config = config.get("semantic_layer", DEFAULT_CONFIG["semantic_layer"])
+    _metric_actions_stop = threading.Event()
+
+    def _metric_actions_loop():
+        from ohm.semantic_layer import run_metrics_and_actions
+
+        interval = float(semantic_layer_config.get("auto_actions_interval_seconds", 3600))
+        rate_limit = float(semantic_layer_config.get("auto_actions_rate_limit_seconds", 86400))
+        repo = config.get("repo_path", "/root/olympus/OHM")
+        while not _metric_actions_stop.wait(interval):
+            try:
+                result = run_metrics_and_actions(
+                    store.conn,
+                    repo_path=repo,
+                    execute=True,
+                    use_ibis=False,
+                    rate_limit_window_seconds=rate_limit,
+                )
+                created = [e for e in result.get("executed", []) if e.get("status") == "created"]
+                skipped = [e for e in result.get("executed", []) if e.get("status") == "skipped"]
+                errors = [e for e in result.get("executed", []) if e.get("status") == "error"]
+                if created or skipped or errors:
+                    logger.info(
+                        "Semantic-layer auto actions: %d created, %d skipped, %d errors",
+                        len(created),
+                        len(skipped),
+                        len(errors),
+                    )
+            except Exception:
+                logger.exception("Semantic-layer auto actions heartbeat failed")
+
+    _metric_actions_thread: threading.Thread | None = None
+    if semantic_layer_config.get("auto_actions_enabled", False):
+        metric_actions_interval = float(semantic_layer_config.get("auto_actions_interval_seconds", 3600))
+        if metric_actions_interval > 0:
+            _metric_actions_thread = threading.Thread(
+                target=_metric_actions_loop, daemon=True, name="semantic-metric-actions"
+            )
+            _metric_actions_thread.start()
+            logger.info(
+                "Semantic-layer auto actions enabled (interval=%ss, rate_limit=%ss)",
+                metric_actions_interval,
+                semantic_layer_config.get("auto_actions_rate_limit_seconds", 86400),
+            )
+
     print(f"Schema: {schema_config.name}", file=sys.stderr)
     if OhmHandler.multi_tenant:
         print("Multi-tenancy: ENABLED", file=sys.stderr)
@@ -2450,6 +2531,7 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
         print("Shutting down...", file=sys.stderr)
         _sync_stop.set()
         _eviction_stop.set()
+        _metric_actions_stop.set()
         try:
             store.sync_heartbeat()
         except Exception:
