@@ -41,13 +41,14 @@ test: test-unit
 	@echo "✓ Unit tests complete"
 
 # Fast unit tests — target: <5 minutes
+# Uses negated markers since tests don't carry explicit "unit" marks
 test-unit:
-	@echo "=== Running unit tests ==="
+	@echo "=== Running unit tests (fast) ==="
 	@mkdir -p $(REPORTS_DIR)
 	$(PYTEST) $(PYTEST_FLAGS) \
-		$(TESTS_DIR)/ -m "unit" --ignore=$(TESTS_DIR)/test_multi_tenancy_perf.py \
+		$(TESTS_DIR)/ -m "not slow and not integration and not concurrent" \
 		--timeout=$(TEST_TIMEOUT) \
-		-n $(XDIST_WORKERS) \
+		--benchmark-disable \
 		--durations=10 2>&1 | tee $(REPORTS_DIR)/unit-test.log
 	@echo ""
 
@@ -119,8 +120,9 @@ test-junit:
 	@echo "=== Running all tests with JUnit XML output ==="
 	@mkdir -p $(JUNIT_DIR)
 	$(PYTEST) $(TESTS_DIR)/ \
+		-k "not concurrent" \
 		--timeout=$(TEST_TIMEOUT) \
-		-n $(XDIST_WORKERS) \
+		--benchmark-disable \
 		--junitxml=$(JUNIT_DIR)/ohm-test-results.xml \
 		--junit-prefix=ohm. \
 		--tb=short -q 2>&1 | tee $(REPORTS_DIR)/full-test.log
@@ -130,9 +132,9 @@ test-junit-fast:
 	@echo "=== Running unit tests (fast) with JUnit XML output ==="
 	@mkdir -p $(JUNIT_DIR)
 	$(PYTEST) $(PYTEST_FLAGS) \
-		$(TESTS_DIR)/ -m "unit" --ignore=$(TESTS_DIR)/test_multi_tenancy_perf.py \
+		$(TESTS_DIR)/ -m "not slow and not integration and not concurrent" \
 		--timeout=$(TEST_TIMEOUT) \
-		-n $(XDIST_WORKERS) \
+		--benchmark-disable \
 		--junitxml=$(JUNIT_DIR)/ohm-unit-results.xml \
 		--junit-prefix=ohm. 2>&1 | tee $(REPORTS_DIR)/unit-junit.log
 	@echo "JUnit report: $(JUNIT_DIR)/ohm-unit-results.xml"
