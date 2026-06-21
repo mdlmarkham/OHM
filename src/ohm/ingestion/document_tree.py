@@ -14,7 +14,10 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from bs4 import BeautifulSoup
+try:
+    from bs4 import BeautifulSoup
+except ImportError:
+    BeautifulSoup = None
 
 
 @dataclass
@@ -122,6 +125,8 @@ def parse_html_to_tree(
     and leaf blocks (paragraphs, tables, lists) attached to their nearest
     heading ancestor.
     """
+    if BeautifulSoup is None:
+        raise ImportError("beautifulsoup4 is required for HTML parsing — install with: pip install beautifulsoup4")
     soup = BeautifulSoup(html, "html.parser")
 
     # Try to find a document title
@@ -354,17 +359,104 @@ def keyword_overlap(text: str, labels: list[str], stop_words: set[str] | None = 
 
 
 _DEFAULT_STOP_WORDS: set[str] = {
-    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
-    "have", "has", "had", "do", "does", "did", "will", "would", "could",
-    "should", "may", "might", "must", "can", "shall", "of", "in", "on",
-    "at", "to", "for", "with", "by", "from", "up", "about", "into", "through",
-    "during", "before", "after", "above", "below", "between", "among", "and",
-    "or", "but", "so", "yet", "that", "this", "these", "those", "it", "its",
-    "they", "them", "their", "we", "our", "you", "your", "he", "she", "his",
-    "her", "i", "me", "my", "what", "which", "who", "when", "where", "why",
-    "how", "all", "any", "both", "each", "few", "more", "most", "other",
-    "some", "such", "no", "nor", "not", "only", "own", "same", "than", "too",
-    "very", "just", "as",
+    "the",
+    "a",
+    "an",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "being",
+    "have",
+    "has",
+    "had",
+    "do",
+    "does",
+    "did",
+    "will",
+    "would",
+    "could",
+    "should",
+    "may",
+    "might",
+    "must",
+    "can",
+    "shall",
+    "of",
+    "in",
+    "on",
+    "at",
+    "to",
+    "for",
+    "with",
+    "by",
+    "from",
+    "up",
+    "about",
+    "into",
+    "through",
+    "during",
+    "before",
+    "after",
+    "above",
+    "below",
+    "between",
+    "among",
+    "and",
+    "or",
+    "but",
+    "so",
+    "yet",
+    "that",
+    "this",
+    "these",
+    "those",
+    "it",
+    "its",
+    "they",
+    "them",
+    "their",
+    "we",
+    "our",
+    "you",
+    "your",
+    "he",
+    "she",
+    "his",
+    "her",
+    "i",
+    "me",
+    "my",
+    "what",
+    "which",
+    "who",
+    "when",
+    "where",
+    "why",
+    "how",
+    "all",
+    "any",
+    "both",
+    "each",
+    "few",
+    "more",
+    "most",
+    "other",
+    "some",
+    "such",
+    "no",
+    "nor",
+    "not",
+    "only",
+    "own",
+    "same",
+    "than",
+    "too",
+    "very",
+    "just",
+    "as",
 }
 
 

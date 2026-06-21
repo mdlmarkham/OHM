@@ -25,9 +25,7 @@ _OPERATORS = {
     "!=": lambda a, b: a is not None and b is not None and a != b,
 }
 
-_THRESHOLD_RE = re.compile(
-    r"^\s*(?P<op><=|>=|<|>|==|!=)\s*(?P<value>[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)\s*$"
-)
+_THRESHOLD_RE = re.compile(r"^\s*(?P<op><=|>=|<|>|==|!=)\s*(?P<value>[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)\s*$")
 
 # Default rate-limit window for semantic-layer auto actions: same
 # (metric, threshold, action_type) cannot create duplicate tasks within
@@ -45,9 +43,7 @@ def _action_key(metric: str, threshold: str, action_type: str | None) -> str:
 def _action_table_exists(conn: Any) -> bool:
     """Check whether the ohm_metric_action_log table exists."""
     try:
-        result = conn.execute(
-            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'ohm_metric_action_log'"
-        ).fetchone()
+        result = conn.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'ohm_metric_action_log'").fetchone()
         return bool(result and result[0])
     except Exception:
         return False
@@ -270,9 +266,7 @@ def run_actions(
 
         # OHM-wx42: deduplicate within the configured window. Same
         # (metric, threshold, action_type) cannot create duplicate tasks.
-        if rate_limit_window_seconds > 0 and _is_rate_limited(
-            conn, metric, threshold, action_type, rate_limit_window_seconds
-        ):
+        if rate_limit_window_seconds > 0 and _is_rate_limited(conn, metric, threshold, action_type, rate_limit_window_seconds):
             result["status"] = "skipped"
             result["reason"] = "rate_limited"
             results.append(result)

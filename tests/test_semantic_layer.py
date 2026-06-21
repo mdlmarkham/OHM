@@ -225,6 +225,10 @@ class TestSemanticLayerThresholds:
 class TestSemanticLayerActions:
     """Tests for the action executor."""
 
+    @pytest.mark.skipif(
+        __import__("sys").platform == "win32",
+        reason="bd subprocess not reliable on Windows",
+    )
     def test_create_beads_task_creates_issue(self, tmp_path):
         import subprocess
 
@@ -354,6 +358,11 @@ class TestSemanticLayerAutoActions:
     @pytest.fixture
     def beads_repo(self, tmp_path):
         import subprocess
+        import sys
+
+        pytest.importorskip("beads")
+        if sys.platform == "win32":
+            pytest.skip("bd subprocess not reliable on Windows")
 
         repo = tmp_path / "auto_action_repo"
         repo.mkdir()

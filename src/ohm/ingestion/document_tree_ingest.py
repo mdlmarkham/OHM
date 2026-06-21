@@ -43,9 +43,7 @@ def ingest_document_tree(
         Dict with created node ids, edge ids, and matched concepts.
     """
     if concept_labels is None and link_concepts:
-        rows = conn.execute(
-            "SELECT label FROM ohm_nodes WHERE type = 'concept' AND deleted_at IS NULL"
-        ).fetchall()
+        rows = conn.execute("SELECT label FROM ohm_nodes WHERE type = 'concept' AND deleted_at IS NULL").fetchall()
         concept_labels = [r[0] for r in rows]
 
     node_id_map: dict[str, str] = {}

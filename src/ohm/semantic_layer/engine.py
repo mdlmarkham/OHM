@@ -160,9 +160,7 @@ def run_metrics_and_actions(
     result: dict[str, Any] = {"metrics": metric_values, "actions": actions}
     if execute:
         repo = repo_path or "/root/olympus/OHM"
-        executed = run_actions(
-            conn, repo_path=repo, actions=actions, rate_limit_window_seconds=rate_limit_window_seconds
-        )
+        executed = run_actions(conn, repo_path=repo, actions=actions, rate_limit_window_seconds=rate_limit_window_seconds)
         result["executed"] = executed
     return result
 

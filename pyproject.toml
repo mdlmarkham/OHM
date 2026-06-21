@@ -29,6 +29,9 @@ bayesian = [
 causal = [
     "dowhy>=0.11",
 ]
+ingestion = [
+    "beautifulsoup4>=4.12",
+]
 markov = [
     "numpy>=1.24",
 ]
@@ -44,6 +47,7 @@ dev = [
      "ruff>=0.3.0",
      "mypy>=1.8.0",
      "requests>=2.28.0",
+     "beautifulsoup4>=4.12",
  ]
 
 [tool.ruff]

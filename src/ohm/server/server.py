@@ -2506,9 +2506,7 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     if semantic_layer_config.get("auto_actions_enabled", False):
         metric_actions_interval = float(semantic_layer_config.get("auto_actions_interval_seconds", 3600))
         if metric_actions_interval > 0:
-            _metric_actions_thread = threading.Thread(
-                target=_metric_actions_loop, daemon=True, name="semantic-metric-actions"
-            )
+            _metric_actions_thread = threading.Thread(target=_metric_actions_loop, daemon=True, name="semantic-metric-actions")
             _metric_actions_thread.start()
             logger.info(
                 "Semantic-layer auto actions enabled (interval=%ss, rate_limit=%ss)",

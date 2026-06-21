@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+pytest.importorskip("bs4")
+
 from ohm.ingestion.document_tree import (
     DocumentNode,
     DocumentTree,
@@ -141,9 +143,7 @@ class TestDocumentTreeIngestion:
         tree = parse_document(md, source_id="src-1")
         result = ingest_document_tree(test_db, tree, created_by="test_agent")
         assert result["source_id"]
-        row = test_db.execute(
-            "SELECT type FROM ohm_nodes WHERE id = ?", [result["source_id"]]
-        ).fetchone()
+        row = test_db.execute("SELECT type FROM ohm_nodes WHERE id = ?", [result["source_id"]]).fetchone()
         assert row[0] == "source"
 
     def test_ingest_creates_contains_edges(self, test_db):
@@ -152,9 +152,7 @@ class TestDocumentTreeIngestion:
         result = ingest_document_tree(test_db, tree, created_by="test_agent")
         assert len(result["created_edges"]) >= 2  # source→section, section→paragraph + reverses
 
-        edge_types = test_db.execute(
-            "SELECT edge_type, COUNT(*) FROM ohm_edges WHERE deleted_at IS NULL GROUP BY edge_type"
-        ).fetchall()
+        edge_types = test_db.execute("SELECT edge_type, COUNT(*) FROM ohm_edges WHERE deleted_at IS NULL GROUP BY edge_type").fetchall()
         counts = {row[0]: row[1] for row in edge_types}
         assert counts.get("CONTAINS", 0) >= 1
         assert counts.get("PART_OF", 0) >= 1
@@ -170,9 +168,7 @@ class TestDocumentTreeIngestion:
         )
         md = "# Article\n\nThe Hormuz AND-Gate controls maritime chokepoints."
         tree = parse_document(md, source_id="src-3")
-        result = ingest_document_tree(
-            test_db, tree, created_by="test_agent", concept_labels=["Hormuz AND-Gate"]
-        )
+        result = ingest_document_tree(test_db, tree, created_by="test_agent", concept_labels=["Hormuz AND-Gate"])
         assert result["matched_concepts"]
         assert result["matched_concepts"][0]["concept_label"] == "Hormuz AND-Gate"
 
