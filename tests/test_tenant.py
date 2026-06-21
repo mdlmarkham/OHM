@@ -21,6 +21,8 @@ import pytest
 
 from ohm.tenant import TenantAlreadyExistsError, TenantManager, TenantNotFoundError, _IDLE_EVICT_SECONDS
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def tm(tmp_path):

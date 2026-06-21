@@ -263,6 +263,10 @@ class TestSemanticLayerActions:
         assert "actions" in result
         assert "executed" not in result
 
+    @pytest.mark.skipif(
+        __import__("sys").platform == "win32",
+        reason="bd subprocess not reliable on Windows",
+    )
     def test_run_metrics_and_actions_executes_actions(self, test_db, tmp_path):
         import subprocess
 
@@ -320,6 +324,10 @@ class TestSemanticLayerEndpoint:
         # GET must not create anything; no executed key.
         assert "executed" not in body
 
+    @pytest.mark.skipif(
+        __import__("sys").platform == "win32",
+        reason="bd subprocess not reliable on Windows",
+    )
     def test_post_metrics_semantic_actions_creates_tasks(self, test_server, tmp_path):
         import subprocess
 

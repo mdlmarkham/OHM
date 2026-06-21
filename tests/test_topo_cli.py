@@ -7,6 +7,10 @@ import tempfile
 from ohm.cli import build_parser
 from tests.conftest import run_cli as _run_cli
 
+import pytest
+
+pytestmark = pytest.mark.integration
+
 
 # ── Parsing Tests ────────────────────────────────────────────────────────────
 

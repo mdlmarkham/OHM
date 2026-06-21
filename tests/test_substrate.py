@@ -9,6 +9,8 @@ import pytest
 
 from ohm.sdk import connect
 
+pytestmark = pytest.mark.slow
+
 
 @pytest.fixture
 def graph(tmp_path):

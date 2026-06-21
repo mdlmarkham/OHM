@@ -31,6 +31,8 @@ from ohm.server.server import (
 )
 from ohm.store import OhmStore
 
+pytestmark = pytest.mark.integration
+
 
 # ── Token generation ──────────────────────────────────────────────────────────
 

@@ -6,6 +6,8 @@ import duckdb
 import pytest
 from ohm.store import OhmStore
 
+pytestmark = pytest.mark.integration
+
 # Skip DuckLake tests in CI where ATTACH DATABASE may not work
 SKIP_CI = os.environ.get("CI") == "true" or os.environ.get("GITHUB_ACTIONS") == "true"
 

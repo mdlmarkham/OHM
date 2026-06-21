@@ -4,6 +4,8 @@ import pytest
 
 from ohm.store import OhmStore
 
+pytestmark = pytest.mark.integration
+
 
 class TestDuckLakeSync:
     """Tests for DuckLake push/pull sync."""

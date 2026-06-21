@@ -23,6 +23,8 @@ from ohm.server.server import _generate_customer_token
 from ohm.store import OhmStore
 from ohm.tenant import TenantManager
 
+pytestmark = pytest.mark.integration
+
 
 def _start_mt_server(tmp_path, admin_token="admin-secret", no_auth=False):
     """Start a multi-tenant test server with TenantManager."""
