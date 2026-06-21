@@ -229,14 +229,30 @@ class OhmStore:
 
             # Try to load DuckDB markdown extension (optional)
             # Enables rich content features: read_markdown, md_to_text, etc.
+            # INSTALL can hang on Windows; skip there. On Linux use SIGALRM
+            # as a timeout guard.
             self.markdown_available = False
-            try:
-                self.conn.execute("INSTALL markdown FROM community")
-                self.conn.execute("LOAD markdown")
-                self.markdown_available = True
-                logger.info("DuckDB markdown extension loaded — rich content features available")
-            except Exception:
-                logger.info("DuckDB markdown extension not available — rich content features disabled, OHM works fine without it")
+            if os.name == "posix":
+                try:
+                    import signal
+
+                    def _markdown_timeout(signum, frame):
+                        raise TimeoutError("DuckDB markdown extension install timed out")
+
+                    old_handler = signal.signal(signal.SIGALRM, _markdown_timeout)
+                    signal.alarm(5)
+                    try:
+                        self.conn.execute("INSTALL markdown FROM community")
+                        self.conn.execute("LOAD markdown")
+                        self.markdown_available = True
+                        logger.info("DuckDB markdown extension loaded — rich content features available")
+                    finally:
+                        signal.alarm(0)
+                        signal.signal(signal.SIGALRM, old_handler)
+                except Exception:
+                    logger.info("DuckDB markdown extension not available — rich content features disabled, OHM works fine without it")
+            else:
+                logger.info("DuckDB markdown extension skipped on Windows — rich content features disabled, OHM works fine without it")
 
             # Start Quack server if requested and available
             if self.quack and not self.readonly:
