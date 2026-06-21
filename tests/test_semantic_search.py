@@ -451,7 +451,6 @@ class TestHybridSemanticSearch:
         # Set deterministic HD fingerprints: target = all 1s, other = all 0s
         # This guarantees maximal Hamming distance between the two nodes
         dim = 10000
-        hex_len = dim // 4
         fp_target_bytes = bytearray(b"\xff" * (dim // 8))
         fp_other_bytes = bytearray(b"\x00" * (dim // 8))
         test_db.execute(
@@ -678,7 +677,7 @@ class TestManifoldDensityAndGeodesic:
             pytest.skip("VSS extension (array_cosine_distance) not available")
 
         n_with = create_node(test_db, label="has embedding", node_type="concept", created_by="test")
-        n_without = create_node(test_db, label="no embedding", node_type="concept", created_by="test")
+        _n_without = create_node(test_db, label="no embedding", node_type="concept", created_by="test")
 
         emb = [0.0] * 768
         emb[0] = 1.0

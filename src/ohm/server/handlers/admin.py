@@ -1567,8 +1567,6 @@ class AdminHandlerMixin:
             GROUP BY n.type
             ORDER BY cnt DESC
         """).fetchall()
-        raw_values["orphan_type_breakdown"] = {row[0]: row[1] for row in orphan_type_rows} if orphan_type_rows else {}
-
         # 3. Verification rate: verified causal edges / total causal edges (weight 0.25)
         causal_types = ("CAUSES", "PREDICTS", "EXPECTS")
         placeholders = ",".join(["?"] * len(causal_types))
@@ -1650,7 +1648,7 @@ class AdminHandlerMixin:
             "total_edges": total_edges,
             "connected_nodes": connected,
             "orphan_nodes": orphans,
-            "orphan_type_breakdown": None,
+            "orphan_type_breakdown": {row[0]: row[1] for row in orphan_type_rows} if orphan_type_rows else {},
             "total_causal_edges": total_causal,
             "verified_causal_edges": verified_causal if total_causal > 0 else 0,
             "total_l3_edges": total_l3,

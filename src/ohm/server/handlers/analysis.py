@@ -1614,7 +1614,6 @@ class AnalysisHandlerMixin:
         from ohm.exceptions import NodeNotFoundError
         from ohm.validation import validate_identifier
         from ohm.methods import compound_confidence
-        from datetime import datetime
 
         node_id = path[14:]  # strip "/context-gate/"
         node_id = validate_identifier(node_id, name="node_id")
@@ -1627,7 +1626,6 @@ class AnalysisHandlerMixin:
         max_neighbors = min(int(qs.get("max_neighbors", ["20"])[0]), 50)
 
         conn = self.current_store.read_conn
-        now = datetime.now()
 
         def _obs_confidence(sigma) -> float:
             if sigma is not None and float(sigma) > 0:

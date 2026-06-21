@@ -37,7 +37,7 @@ class TestBatchOrphanTriage:
         assert any("Same type" in s["reason"] for s in entry["suggestions"])
 
     def test_orphan_with_label_overlap(self, test_db):
-        orphan = create_node(test_db, label="oil supply disruption persian gulf", node_type="pattern", created_by="test")
+        _orphan = create_node(test_db, label="oil supply disruption persian gulf", node_type="pattern", created_by="test")
         conn_node = create_node(test_db, label="oil supply disruption hormuz", node_type="source", created_by="test")
         other = create_node(test_db, label="Other", node_type="concept", created_by="test")
         create_edge(test_db, from_node=conn_node["id"], to_node=other["id"], edge_type="DERIVES_FROM", layer="L2", created_by="test")
@@ -58,7 +58,7 @@ class TestBatchOrphanTriage:
         assert result["triaged_count"] == 0
 
     def test_min_confidence_filter(self, test_db):
-        low = create_node(test_db, label="Low conf", node_type="concept", created_by="test", confidence=0.2)
+        _low = create_node(test_db, label="Low conf", node_type="concept", created_by="test", confidence=0.2)
         high = create_node(test_db, label="High conf", node_type="concept", created_by="test", confidence=0.8)
         result = batch_orphan_triage(test_db, min_confidence=0.5)
         assert result["triaged_count"] == 1
@@ -72,7 +72,7 @@ class TestBatchOrphanTriage:
         assert result["total_orphans"] == 5
 
     def test_suggestions_sorted_by_score(self, test_db):
-        orphan = create_node(test_db, label="oil supply disruption persian gulf", node_type="concept", created_by="test")
+        _orphan = create_node(test_db, label="oil supply disruption persian gulf", node_type="concept", created_by="test")
         c1 = create_node(test_db, label="oil supply disruption hormuz strait", node_type="concept", created_by="test")
         src = create_node(test_db, label="Src", node_type="source", created_by="test")
         create_edge(test_db, from_node=c1["id"], to_node=src["id"], edge_type="DERIVES_FROM", layer="L2", created_by="test")

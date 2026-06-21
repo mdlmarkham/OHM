@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 
-
 class CatalogHandlerMixin:
     """Handler mixin for BOS ODPS data product catalog endpoints (ADR-027).
 

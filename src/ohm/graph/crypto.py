@@ -60,7 +60,6 @@ def sign_write(
     elif algorithm == "ed25519":
         try:
             from nacl.signing import SigningKey
-            from nacl.encoding import HexEncoder
         except ImportError:
             raise ImportError("ed25519 signing requires pynacl: pip install pynacl")
         payload = canonical_payload(record, kind=kind)
