@@ -719,6 +719,7 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
 
 from ohm.server.handlers.admin import AdminHandlerMixin
 from ohm.server.handlers.analysis import AnalysisHandlerMixin
+from ohm.server.handlers.ask import AskHandlerMixin
 from ohm.server.handlers.catalog import CatalogHandlerMixin
 from ohm.server.handlers.decision import DecisionHandlerMixin
 from ohm.server.handlers.graph import GraphHandlerMixin
@@ -728,7 +729,7 @@ from ohm.server.handlers.markov import MarkovHandlerMixin
 from ohm.server.handlers.tenant import TenantHandlerMixin
 
 
-class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, CatalogHandlerMixin, DecisionHandlerMixin, GraphHandlerMixin, InfraHandlerMixin, InferenceHandlerMixin, MarkovHandlerMixin, TenantHandlerMixin, BaseHTTPRequestHandler):
+class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, AskHandlerMixin, CatalogHandlerMixin, DecisionHandlerMixin, GraphHandlerMixin, InfraHandlerMixin, InferenceHandlerMixin, MarkovHandlerMixin, TenantHandlerMixin, BaseHTTPRequestHandler):
     """HTTP request handler for OHM daemon."""
 
     store: Optional[OhmStore] = None  # single-tenant core store (always set)

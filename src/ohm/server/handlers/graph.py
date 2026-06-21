@@ -2802,7 +2802,7 @@ class GraphHandlerMixin:
             response["errors"] = errors
         self._json_response(200 if not errors else 207, response)
 
-    def _post_ask(self, path: str, qs: dict, body: dict, agent: str) -> None:
+    def _post_ask_synthesis(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /ask — conversational analytics: natural language question → synthesized insights.
 
         Converts OHM's AND-gate interface into an OR-gate by orchestrating
