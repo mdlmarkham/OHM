@@ -205,7 +205,9 @@ def test_db():
 @pytest.fixture
 def db():
     """Create an in-memory test database with OHM schema for Bayesian tests."""
-    return create_test_db()
+    conn = create_test_db()
+    yield conn
+    conn.close()
 
 
 @pytest.fixture

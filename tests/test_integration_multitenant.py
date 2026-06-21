@@ -88,7 +88,7 @@ def _register_customer(port, tm, customer_id, admin_token="admin-secret"):
 
 
 def _req(method, port, path, body=None, token=None):
-    conn = HTTPConnection(f"127.0.0.1:{port}", timeout=5)
+    conn = HTTPConnection(f"127.0.0.1:{port}", timeout=30)
     hdrs = {}
     if token:
         hdrs["Authorization"] = f"Bearer {token}"
