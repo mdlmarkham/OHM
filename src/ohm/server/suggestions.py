@@ -32,6 +32,24 @@ MAX_ORPHAN_SUGGESTIONS = 3
 SUGGESTION_TIMEOUT_S = 0.5
 
 
+def _suggestion_conn(store: Any) -> Any:
+    """Return a dedicated read-only DuckDB connection for suggestion work.
+
+    The store's main write connection is not thread-safe and may be busy
+    handling the request that spawned the suggestion thread. Opening a
+    fresh read-only connection per suggestion call avoids concurrent use of
+    the same DuckDB connection object, which can segfault or abort.
+
+    Falls back to store.conn if a read-only connection cannot be opened.
+    """
+    try:
+        import duckdb
+
+        return duckdb.connect(str(store.db_path), read_only=True)
+    except Exception:
+        return store.conn
+
+
 def generate_suggestions(
     store: Any,
     node_id: str,
@@ -58,6 +76,8 @@ def generate_suggestions(
         "orphan_warning": None,
     }
 
+    conn = _suggestion_conn(store)
+
     # ── 1. Similar nodes (semantic search) ────────────────────────────────
     query_text = content or label or ""
     if query_text.strip():
@@ -65,7 +85,7 @@ def generate_suggestions(
             from ohm.graph.queries import semantic_search
 
             similar = semantic_search(
-                store.conn,
+                conn,
                 query=query_text[:500],  # Limit query length
                 limit=MAX_SIMILAR + 1,  # +1 to exclude self
                 include_l0=False,
@@ -88,7 +108,7 @@ def generate_suggestions(
     # ── 2. Shared tags ──────────────────────────────────────────────────
     if tags:
         try:
-            suggestions["shared_tags"] = _find_shared_tags(store, node_id, tags)
+            suggestions["shared_tags"] = _find_shared_tags(conn, node_id, tags)
         except Exception as e:
             logger.debug(f"Tag overlap query failed: {e}")
 
@@ -98,7 +118,7 @@ def generate_suggestions(
     # intra-domain (same-agent) connections, not cross-domain bridges.
     created_by = None
     try:
-        row = store.conn.execute(
+        row = conn.execute(
             "SELECT created_by FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
             [node_id],
         ).fetchone()
@@ -109,14 +129,14 @@ def generate_suggestions(
 
     if created_by and tags:
         try:
-            suggestions["cross_domain"] = _find_cross_domain(store, node_id, created_by, tags)
+            suggestions["cross_domain"] = _find_cross_domain(conn, node_id, created_by, tags)
         except Exception as e:
             logger.debug(f"Cross-domain suggestion failed: {e}")
 
     # ── 3. Orphan warning ────────────────────────────────────────────────
     if not has_edges:
         try:
-            suggestions["orphan_warning"] = _find_orphan_connections(store, node_id, query_text)
+            suggestions["orphan_warning"] = _find_orphan_connections(conn, node_id, query_text)
         except Exception as e:
             logger.debug(f"Orphan suggestion query failed: {e}")
 
@@ -124,7 +144,7 @@ def generate_suggestions(
 
 
 def _find_shared_tags(
-    store: Any,
+    conn: Any,
     node_id: str,
     tags: list[str],
 ) -> list[dict[str, Any]]:
@@ -136,7 +156,7 @@ def _find_shared_tags(
         return []
 
     # Query nodes with non-empty tags
-    rows = store.conn.execute(
+    rows = conn.execute(
         "SELECT id, label, type, tags FROM ohm_nodes WHERE tags IS NOT NULL AND tags != '[]' AND deleted_at IS NULL AND id != ?",
         [node_id],
     ).fetchall()
@@ -168,7 +188,7 @@ def _find_shared_tags(
 
 
 def _find_cross_domain(
-    store: Any,
+    conn: Any,
     node_id: str,
     created_by: str,
     tags: list[str],
@@ -184,7 +204,7 @@ def _find_cross_domain(
         return []
 
     # Find nodes NOT created by this agent that share tags
-    rows = store.conn.execute(
+    rows = conn.execute(
         "SELECT id, label, type, created_by, tags FROM ohm_nodes WHERE tags IS NOT NULL AND tags != '[]' AND deleted_at IS NULL AND id != ? AND created_by != ?",
         [node_id, created_by],
     ).fetchall()
@@ -218,7 +238,7 @@ def _find_cross_domain(
 
 
 def _find_orphan_connections(
-    store: Any,
+    conn: Any,
     node_id: str,
     query_text: str,
 ) -> dict[str, Any] | None:
@@ -228,7 +248,7 @@ def _find_orphan_connections(
     to both similar orphans and similar connected nodes.
     """
     # Find orphans (nodes with no edges)
-    orphans = store.conn.execute(
+    orphans = conn.execute(
         "SELECT n.id, n.label, n.type FROM ohm_nodes n "
         "WHERE n.deleted_at IS NULL AND n.id != ? "
         "AND n.id NOT IN (SELECT from_node FROM ohm_edges WHERE deleted_at IS NULL) "
@@ -248,7 +268,7 @@ def _find_orphan_connections(
             from ohm.graph.queries import semantic_search
 
             results = semantic_search(
-                store.conn,
+                conn,
                 query=query_text[:500],
                 limit=10,
                 include_l0=False,
@@ -275,7 +295,7 @@ def _find_orphan_connections(
             from ohm.graph.queries import semantic_search
 
             results = semantic_search(
-                store.conn,
+                conn,
                 query=query_text[:500],
                 limit=5,
                 include_l0=False,
@@ -325,14 +345,15 @@ def generate_edge_suggestions(
     }
 
     # ── 1. Related edges — what else connects to/from these nodes? ─────────
+    conn = _suggestion_conn(store)
     try:
         # Edges FROM this node
-        from_edges = store.conn.execute(
+        from_edges = conn.execute(
             "SELECT to_node, edge_type, layer, confidence FROM ohm_edges WHERE from_node = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 5",
             [from_node],
         ).fetchall()
         # Edges TO this node
-        to_edges = store.conn.execute(
+        to_edges = conn.execute(
             "SELECT from_node, edge_type, layer, confidence FROM ohm_edges WHERE to_node = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 5",
             [to_node],
         ).fetchall()
@@ -349,12 +370,12 @@ def generate_edge_suggestions(
     # ── 2. Edge patterns — common edge types from these node neighborhoods ──
     try:
         # What edge types does from_node typically use?
-        from_types = store.conn.execute(
+        from_types = conn.execute(
             "SELECT edge_type, COUNT(*) as cnt FROM ohm_edges WHERE from_node = ? AND deleted_at IS NULL GROUP BY edge_type ORDER BY cnt DESC LIMIT 3",
             [from_node],
         ).fetchall()
         # What edge types does to_node typically receive?
-        to_types = store.conn.execute(
+        to_types = conn.execute(
             "SELECT edge_type, COUNT(*) as cnt FROM ohm_edges WHERE to_node = ? AND deleted_at IS NULL GROUP BY edge_type ORDER BY cnt DESC LIMIT 3",
             [to_node],
         ).fetchall()
@@ -375,7 +396,7 @@ def generate_edge_suggestions(
         # Check if from_node or to_node was previously an orphan (no edges)
         # After creating this edge, they're no longer orphans
         for nid in [from_node, to_node]:
-            edge_count = store.conn.execute(
+            edge_count = conn.execute(
                 "SELECT COUNT(*) FROM ohm_edges WHERE (from_node = ? OR to_node = ?) AND deleted_at IS NULL",
                 [nid, nid],
             ).fetchone()[0]
@@ -405,9 +426,11 @@ def generate_connectivity_nudge(
     if not agent:
         return None
 
+    conn = _suggestion_conn(store)
+
     try:
         # Agent's node count (excluding fragments)
-        agent_nodes = store.conn.execute(
+        agent_nodes = conn.execute(
             "SELECT COUNT(*) FROM ohm_nodes WHERE created_by = ? AND deleted_at IS NULL AND type != 'fragment'",
             [agent],
         ).fetchone()[0]
@@ -416,14 +439,14 @@ def generate_connectivity_nudge(
             return None
 
         # Agent's edge count (edges they created)
-        agent_edges = store.conn.execute(
+        agent_edges = conn.execute(
             "SELECT COUNT(*) FROM ohm_edges WHERE created_by = ? AND deleted_at IS NULL",
             [agent],
         ).fetchone()[0]
 
         # Graph average connectivity
-        graph_nodes = store.conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL AND type != 'fragment'").fetchone()[0]
-        graph_edges = store.conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE deleted_at IS NULL").fetchone()[0]
+        graph_nodes = conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL AND type != 'fragment'").fetchone()[0]
+        graph_edges = conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE deleted_at IS NULL").fetchone()[0]
 
         agent_connectivity = agent_edges / max(agent_nodes, 1)
         graph_connectivity = graph_edges / max(graph_nodes, 1)
@@ -465,6 +488,8 @@ def generate_island_nudge(
     if not agent:
         return None
 
+    conn = _suggestion_conn(store)
+
     from ohm.methods import find_islands
 
     # Check cache
@@ -475,7 +500,7 @@ def generate_island_nudge(
 
     try:
         island_data = find_islands(
-            store.conn,
+            conn,
             exclude_fragments=True,
             min_size=2,
             max_islands=50,
@@ -488,7 +513,7 @@ def generate_island_nudge(
     # Find which island (if any) this agent belongs to
     agent_node_ids = set()
     try:
-        rows = store.conn.execute(
+        rows = conn.execute(
             "SELECT id FROM ohm_nodes WHERE created_by = ? AND deleted_at IS NULL AND type != 'fragment'",
             [agent],
         ).fetchall()
@@ -518,7 +543,7 @@ def generate_island_nudge(
     # Check cross-domain edges: how many edges connect this island to others?
     island_id_set = {n["id"] for n in agent_island.get("nodes", [])}
     try:
-        cross_edges = store.conn.execute(
+        cross_edges = conn.execute(
             """
             SELECT COUNT(*) FROM ohm_edges
             WHERE deleted_at IS NULL
