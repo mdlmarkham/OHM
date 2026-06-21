@@ -626,7 +626,16 @@ def _build_router() -> _RouteRegistry:
     r.add("POST", "/tasks")
 
     # POST prefix routes
-    for _p in ("/challenge/", "/support/", "/observe/", "/webhook/"):
+    for _p in (
+        "/challenge/",
+        "/support/",
+        "/observe/",
+        "/webhook/",
+        "/node/sign/",
+        "/node/verify/",
+        "/edge/sign/",
+        "/edge/verify/",
+    ):
         r.add("POST", _p)
 
     # PATCH
@@ -1846,6 +1855,8 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, CatalogHandlerMixin, G
                 # Public-read model: unauthenticated reads allowed
                 agent = "ohm"
 
+        self._current_agent = agent
+
         # pre_query hooks — can modify qs or block with 403
         qs = self._run_pre_query_hooks(agent, path, qs)
         if qs is None:
@@ -2102,6 +2113,10 @@ OhmHandler._POST_PREFIXES = [
     ("/observe/", "_post_observe"),
     ("/fragments/", "_post_fragment_action"),
     ("/observation/", "_post_observation_supersede"),
+    ("/node/sign/", "_post_node_sign"),
+    ("/node/verify/", "_post_node_verify"),
+    ("/edge/sign/", "_post_edge_sign"),
+    ("/edge/verify/", "_post_edge_verify"),
 ]
 
 OhmHandler._GET_EXACT = {

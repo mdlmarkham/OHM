@@ -206,6 +206,51 @@ class TestTelosSigningFields:
         assert data.get("signing_key_id") == "test-key-1"
         assert data.get("signed_at") is not None
 
+    def test_post_node_sign_endpoint(self, test_server):
+        port, _ = test_server
+        _request("POST", port, "/node", body={"id": "http-sign", "label": "HTTP Sign", "type": "concept"})
+        status, data = _request(
+            "POST",
+            port,
+            "/node/sign/http-sign",
+            body={"key": "secret-key", "key_id": "hk-1"},
+        )
+        assert status == 200
+        assert data["write_signature"] is not None
+        assert data["signing_key_id"] == "hk-1"
+
+    def test_post_node_verify_endpoint(self, test_server):
+        port, _ = test_server
+        _request("POST", port, "/node", body={"id": "http-verify", "label": "HTTP Verify", "type": "concept"})
+        _request("POST", port, "/node/sign/http-verify", body={"key": "secret-key", "key_id": "hk-1"})
+        status, data = _request(
+            "POST",
+            port,
+            "/node/verify/http-verify",
+            body={"key": "secret-key"},
+        )
+        assert status == 200
+        assert data["verified"] is True
+
+    def test_post_node_verify_wrong_key(self, test_server):
+        port, _ = test_server
+        _request("POST", port, "/node", body={"id": "http-verify-wrong", "label": "Wrong Key", "type": "concept"})
+        _request("POST", port, "/node/sign/http-verify-wrong", body={"key": "correct-key"})
+        status, data = _request(
+            "POST",
+            port,
+            "/node/verify/http-verify-wrong",
+            body={"key": "wrong-key"},
+        )
+        assert status == 200
+        assert data["verified"] is False
+
+    def test_post_node_sign_missing_key(self, test_server):
+        port, _ = test_server
+        _request("POST", port, "/node", body={"id": "no-key", "label": "No Key", "type": "concept"})
+        status, data = _request("POST", port, "/node/sign/no-key", body={})
+        assert status == 400
+
 
 @pytest.mark.xdist_group("server")
 class TestVerificationScanEndpoint:
