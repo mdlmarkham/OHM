@@ -1726,6 +1726,67 @@ class GraphHandlerMixin:
         )
         self._json_response(201, result)
 
+    def _post_node_sign(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /node/sign/<id> — sign a node's write with HMAC."""
+        from ohm.exceptions import ValidationError
+        from ohm.validation import validate_identifier
+
+        node_id = validate_identifier(path[len("/node/sign/") :], name="node_id")
+        key = body.get("key", "").encode()
+        key_id = body.get("key_id", "default")
+        algorithm = body.get("algorithm", "hmac-sha256")
+        if not key:
+            raise ValidationError("key is required")
+        from ohm.queries import sign_node_write
+
+        result = sign_node_write(self.current_store.conn, node_id, key=key, algorithm=algorithm, key_id=key_id)
+        self._json_response(200, result)
+
+    def _post_node_verify(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /node/verify/<id> — verify a node's write signature."""
+        from ohm.validation import validate_identifier
+
+        node_id = validate_identifier(path[len("/node/verify/") :], name="node_id")
+        key = body.get("key", "").encode()
+        if not key:
+            from ohm.exceptions import ValidationError
+
+            raise ValidationError("key is required")
+        from ohm.queries import verify_node_write
+
+        result = verify_node_write(self.current_store.conn, node_id, key=key)
+        self._json_response(200, result)
+
+    def _post_edge_sign(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /edge/sign/<id> — sign an edge's write with HMAC."""
+        from ohm.exceptions import ValidationError
+        from ohm.validation import validate_identifier
+
+        edge_id = validate_identifier(path[len("/edge/sign/") :], name="edge_id")
+        key = body.get("key", "").encode()
+        key_id = body.get("key_id", "default")
+        algorithm = body.get("algorithm", "hmac-sha256")
+        if not key:
+            raise ValidationError("key is required")
+        from ohm.queries import sign_edge_write
+
+        result = sign_edge_write(self.current_store.conn, edge_id, key=key, algorithm=algorithm, key_id=key_id)
+        self._json_response(200, result)
+
+    def _post_edge_verify(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /edge/verify/<id> — verify an edge's write signature."""
+        from ohm.exceptions import ValidationError
+        from ohm.validation import validate_identifier
+
+        edge_id = validate_identifier(path[len("/edge/verify/") :], name="edge_id")
+        key = body.get("key", "").encode()
+        if not key:
+            raise ValidationError("key is required")
+        from ohm.queries import verify_edge_write
+
+        result = verify_edge_write(self.current_store.conn, edge_id, key=key)
+        self._json_response(200, result)
+
     def _post_synthesis(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /agent/synthesis — one-call L3 writing: concept node + edges + observation."""
         from ohm.exceptions import ValidationError
