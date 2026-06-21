@@ -662,6 +662,9 @@ def _build_router() -> _RouteRegistry:
     r.add("GET", "/tasks")
     r.add("POST", "/tasks")
 
+    # Document library routes
+    r.add("POST", "/documents/upload")
+
     # POST prefix routes
     for _p in (
         "/challenge/",
@@ -722,6 +725,7 @@ from ohm.server.handlers.analysis import AnalysisHandlerMixin
 from ohm.server.handlers.ask import AskHandlerMixin
 from ohm.server.handlers.catalog import CatalogHandlerMixin
 from ohm.server.handlers.decision import DecisionHandlerMixin
+from ohm.server.handlers.documents import DocumentHandlerMixin
 from ohm.server.handlers.graph import GraphHandlerMixin
 from ohm.server.handlers.infra import InfraHandlerMixin
 from ohm.server.handlers.inference import InferenceHandlerMixin
@@ -729,7 +733,7 @@ from ohm.server.handlers.markov import MarkovHandlerMixin
 from ohm.server.handlers.tenant import TenantHandlerMixin
 
 
-class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, AskHandlerMixin, CatalogHandlerMixin, DecisionHandlerMixin, GraphHandlerMixin, InfraHandlerMixin, InferenceHandlerMixin, MarkovHandlerMixin, TenantHandlerMixin, BaseHTTPRequestHandler):
+class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, AskHandlerMixin, CatalogHandlerMixin, DecisionHandlerMixin, DocumentHandlerMixin, GraphHandlerMixin, InfraHandlerMixin, InferenceHandlerMixin, MarkovHandlerMixin, TenantHandlerMixin, BaseHTTPRequestHandler):
     """HTTP request handler for OHM daemon."""
 
     store: Optional[OhmStore] = None  # single-tenant core store (always set)
@@ -1200,8 +1204,13 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, AskHandlerMixin, Catal
             _rate_limit_store[key].append(now)
             return True
 
-    def _read_body(self):
-        """Read and parse JSON request body. Enforces size limit."""
+    def _read_body(self, allow_raw: bool = False):
+        """Read and parse JSON request body. Enforces size limit.
+
+        If ``allow_raw`` is True, non-JSON bodies are returned as raw bytes
+        instead of raising a validation error. This is used by endpoints that
+        accept multipart/form-data uploads.
+        """
         length = int(self.headers.get("Content-Length", 0))
         if length == 0:
             return {}
@@ -1211,6 +1220,8 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, AskHandlerMixin, Catal
         try:
             return json.loads(body)
         except json.JSONDecodeError as e:
+            if allow_raw:
+                return body
             raise ValidationError(f"Invalid JSON in request body: {e}")
 
     # ── Body Validation Schemas ─────────────────────────────
@@ -2012,7 +2023,15 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, AskHandlerMixin, Catal
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
         qs = parse_qs(parsed.query)
-        body = self._read_body()
+        body = self._read_body(allow_raw=path == "/documents/upload")
+        content_type = self.headers.get("Content-Type", "")
+
+        # Multipart file uploads are dispatched before JSON validation so the
+        # handler can parse the raw request body that _read_body returned.
+        if path == "/documents/upload" and content_type.startswith("multipart/form-data"):
+            getattr(self, "_post_documents_upload")(path, qs, body, agent)
+            return
+
         body = self._validate_body(path, body)
 
         method_name = self._POST_EXACT.get(path)
@@ -2124,6 +2143,7 @@ OhmHandler._POST_EXACT = {
     "/heartbeat": "_post_heartbeat",
     "/vault/promote": "_post_vault_promote",
     "/sync": "_post_sync",
+    "/documents/upload": "_post_documents_upload",
     "/tasks": "_post_task",
     "/deduplicate": "_post_deduplicate",
     "/admin/checkpoint": "_post_admin_checkpoint",
