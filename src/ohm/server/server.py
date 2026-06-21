@@ -1846,6 +1846,8 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, CatalogHandlerMixin, G
                 # Public-read model: unauthenticated reads allowed
                 agent = "ohm"
 
+        self._current_agent = agent
+
         # pre_query hooks — can modify qs or block with 403
         qs = self._run_pre_query_hooks(agent, path, qs)
         if qs is None:

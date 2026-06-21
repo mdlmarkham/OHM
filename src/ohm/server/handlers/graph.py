@@ -324,6 +324,16 @@ class GraphHandlerMixin:
         node_id = validate_identifier(node_id, name="node_id")
         node = self.current_store.get_node(node_id)
         if node:
+            from ohm.server.boundary import enforce_read_scope
+
+            agent = getattr(self, "_current_agent", "ohm")
+            enforce_read_scope(
+                self.current_store.conn,
+                agent,
+                node_id=node_id,
+                source_tier=node.get("source_tier"),
+                created_by=node.get("created_by"),
+            )
             # ADR-022: Add effective layer and constraint status
             from ohm.graph.constraints import effective_layer
 
@@ -364,6 +374,16 @@ class GraphHandlerMixin:
         edge_id = validate_identifier(edge_id, name="edge_id")
         edge = self.current_store.get_edge(edge_id)
         if edge:
+            from ohm.server.boundary import enforce_read_scope
+
+            agent = getattr(self, "_current_agent", "ohm")
+            enforce_read_scope(
+                self.current_store.conn,
+                agent,
+                layer=edge.get("layer"),
+                source_tier=edge.get("source_tier"),
+                created_by=edge.get("created_by"),
+            )
             self._json_response(200, edge)
         else:
             from ohm.exceptions import EdgeNotFoundError
@@ -559,6 +579,23 @@ class GraphHandlerMixin:
         if created_by:
             conditions.append("created_by = ?")
             params.append(created_by)
+
+        from ohm.server.boundary import get_agent_read_scope
+
+        agent = getattr(self, "_current_agent", "ohm")
+        scope = get_agent_read_scope(self.current_store.conn, agent)
+        if scope is not None:
+            allowed_tiers = scope.get("source_tier")
+            if allowed_tiers is not None:
+                placeholders = ",".join(["?"] * len(allowed_tiers))
+                conditions.append(f"(source_tier IS NULL OR source_tier IN ({placeholders}))")
+                params.extend(allowed_tiers)
+            allowed_creators = scope.get("created_by")
+            if allowed_creators is not None:
+                placeholders = ",".join(["?"] * len(allowed_creators))
+                conditions.append(f"created_by IN ({placeholders})")
+                params.extend(allowed_creators)
+
         params.append(limit)
         params.append(offset)
         sql = "SELECT * FROM ohm_nodes WHERE " + " AND ".join(conditions) + " ORDER BY created_at DESC LIMIT ? OFFSET ?"
