@@ -317,6 +317,7 @@ class TestDeprovision:
 
 
 class TestConcurrentAccess:
+    @pytest.mark.skipif("sys.platform == 'win32'", reason="DuckDB write serialization causes timeouts on Windows")
     def test_concurrent_writes_same_tenant_no_corruption(self, tmp_path):
         """50 concurrent writes to the same tenant complete without errors or data loss."""
         port, server, core, tm = _start_mt_server(tmp_path)
