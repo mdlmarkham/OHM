@@ -1,0 +1,45 @@
+metrics:
+  verification_rate:
+    description: Ratio of verified causal edges to total causal edges
+    sql: |
+      SELECT
+        CASE
+          WHEN COUNT(*) = 0 THEN NULL
+          ELSE COUNT(*) FILTER (WHERE write_signature IS NOT NULL) / COUNT(*)::DOUBLE
+        END AS value
+      FROM ohm_edges
+      WHERE layer = 'L3'
+        AND edge_type IN ('CAUSES', 'PREDICTS', 'EXPLAINS')
+        AND deleted_at IS NULL
+
+  challenge_ratio:
+    description: Ratio of challenged edges to total L3 edges
+    sql: |
+      SELECT
+        CASE
+          WHEN total = 0 THEN NULL
+          ELSE challenges::DOUBLE / total
+        END AS value
+      FROM (
+        SELECT
+          COUNT(*) FILTER (WHERE edge_type = 'CHALLENGED_BY') AS challenges,
+          COUNT(*) AS total
+        FROM ohm_edges
+        WHERE layer = 'L3'
+          AND deleted_at IS NULL
+      )
+
+  source_reliability_avg:
+    description: Average source reliability (p_accurate) across agents with recorded outcomes
+    sql: |
+      SELECT
+        CASE
+          WHEN COUNT(*) = 0 THEN NULL
+          ELSE AVG(
+            CASE
+              WHEN outcome THEN 1.0
+              ELSE 0.0
+            END
+          )
+        END AS value
+      FROM ohm_outcomes

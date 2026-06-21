@@ -580,6 +580,12 @@ def query_record_outcome(
     computation. Used in cybersecurity incident response to calibrate
     source trustworthiness over time.
 
+    When the claim_node is an experiment node, this also:
+    1. Creates an experiment_result observation on the experiment node.
+    2. Updates the hypothesis_status of linked hypotheses via TESTS edges:
+       - outcome=True + SUPPORTS_EVIDENCE dominant → hypothesis verified
+       - outcome=False + CONTRADICTS_EVIDENCE dominant → hypothesis pruned
+
     Args:
         conn: Database connection.
         source_agent: The agent whose claim is being evaluated.
@@ -589,7 +595,8 @@ def query_record_outcome(
         notes: Optional context about the outcome.
 
     Returns:
-        The created outcome record.
+        The created outcome record, with extra keys if hypothesis
+        status was updated.
     """
     import uuid
 
@@ -617,7 +624,93 @@ def query_record_outcome(
         [outcome_id, source_agent, claim_node, outcome, recorded_by, notes],
     )
     _log_change(conn, "ohm_outcomes", outcome_id, "INSERT", recorded_by)
-    return _rows_to_dicts(conn.execute("SELECT * FROM ohm_outcomes WHERE id = ?", [outcome_id]))[0]
+
+    result = _rows_to_dicts(conn.execute("SELECT * FROM ohm_outcomes WHERE id = ?", [outcome_id]))[0]
+
+    # ── Hypothesis-tree integration (OHM-nlbm) ──
+    # When an outcome is recorded on an experiment node:
+    # 1. Create experiment_result observation on the experiment
+    # 2. Update linked hypothesis statuses
+    node_type_row = conn.execute(
+        "SELECT type FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+        [claim_node],
+    ).fetchone()
+
+    hypothesis_updates = []
+
+    if node_type_row and node_type_row[0] == "experiment":
+        # 1. Create experiment_result observation on the experiment node
+        obs_id = str(uuid.uuid4())
+        obs_value = 1.0 if outcome else 0.0
+        try:
+            conn.execute(
+                """INSERT INTO ohm_observations
+                   (id, node_id, type, value, source, created_by, scale, created_at)
+                   VALUES (?, ?, 'experiment_result', ?, ?, ?, 'probability', CURRENT_TIMESTAMP)""",
+                [obs_id, claim_node, obs_value, source_agent, recorded_by],
+            )
+            _log_change(conn, "ohm_observations", obs_id, "INSERT", recorded_by)
+            result["experiment_result_observation"] = obs_id
+        except Exception:
+            # Non-fatal: if observation creation fails, continue
+            result["experiment_result_observation"] = None
+
+        # 2. Find hypotheses linked via TESTS edges and update their status
+        linked_hypotheses = conn.execute(
+            """
+            SELECT n.id, n.hypothesis_status
+            FROM ohm_edges e
+            JOIN ohm_nodes n ON n.id = e.to_node AND n.deleted_at IS NULL
+            WHERE e.from_node = ?
+              AND e.edge_type = 'TESTS'
+              AND e.deleted_at IS NULL
+            """,
+            [claim_node],
+        ).fetchall()
+
+        for hyp_id, current_status in linked_hypotheses:
+            new_status = None
+            if outcome:
+                # Positive outcome: check if SUPPORTS_EVIDENCE outweighs CONTRADICTS_EVIDENCE
+                support_count = conn.execute(
+                    "SELECT COUNT(*) FROM ohm_edges WHERE to_node = ? AND edge_type = 'SUPPORTS_EVIDENCE' AND deleted_at IS NULL",
+                    [hyp_id],
+                ).fetchone()[0]
+                contradict_count = conn.execute(
+                    "SELECT COUNT(*) FROM ohm_edges WHERE to_node = ? AND edge_type = 'CONTRADICTS_EVIDENCE' AND deleted_at IS NULL",
+                    [hyp_id],
+                ).fetchone()[0]
+                if support_count >= contradict_count:
+                    new_status = "verified"
+                else:
+                    new_status = "tested"
+            else:
+                # Negative outcome: check if CONTRADICTS_EVIDENCE outweighs SUPPORTS_EVIDENCE
+                support_count = conn.execute(
+                    "SELECT COUNT(*) FROM ohm_edges WHERE to_node = ? AND edge_type = 'SUPPORTS_EVIDENCE' AND deleted_at IS NULL",
+                    [hyp_id],
+                ).fetchone()[0]
+                contradict_count = conn.execute(
+                    "SELECT COUNT(*) FROM ohm_edges WHERE to_node = ? AND edge_type = 'CONTRADICTS_EVIDENCE' AND deleted_at IS NULL",
+                    [hyp_id],
+                ).fetchone()[0]
+                if contradict_count > support_count:
+                    new_status = "pruned"
+                else:
+                    new_status = "tested"
+
+            if new_status and new_status != current_status:
+                conn.execute(
+                    "UPDATE ohm_nodes SET hypothesis_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    [new_status, hyp_id],
+                )
+                _log_change(conn, "ohm_nodes", hyp_id, "UPDATE", recorded_by)
+                hypothesis_updates.append({"hypothesis_id": hyp_id, "old_status": current_status, "new_status": new_status})
+
+    if hypothesis_updates:
+        result["hypothesis_status_updates"] = hypothesis_updates
+
+    return result
 
 
 def query_source_reliability(

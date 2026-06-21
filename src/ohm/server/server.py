@@ -598,6 +598,9 @@ def _build_router() -> _RouteRegistry:
     # /decay: write-in-GET (legacy); registered as GET to avoid spurious 405
     r.add("GET", "/decay")
 
+    # Semantic-layer metrics endpoint
+    r.add("GET", "/metrics/semantic")
+
     # POST-only write endpoints (exact)
     for _p in (
         "/node",
@@ -2201,6 +2204,7 @@ OhmHandler._GET_EXACT = {
     "/source_reliability": "_get_source_reliability",
     "/webhooks/dead-letter": "_get_webhooks_dead_letter",
     "/webhooks/outbox": "_get_webhooks_outbox",
+    "/metrics/semantic": "_get_metrics_semantic",
     "/resolve": "_get_resolve",
     "/admin/alias-duplicates": "_get_alias_duplicates",
     "/admin/fragment-resonance": "_get_fragment_resonance",

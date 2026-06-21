@@ -695,7 +695,80 @@ class AdminHandlerMixin:
 
         reliability = [dict(zip(["source_agent", "total_outcomes", "accurate", "inaccurate", "p_accurate"], row)) for row in source_reliability]
 
-        # 4. Summary statistics
+        # 3. Unverified hypotheses (no TESTS edges or experiment_result observations)
+        unverified_hypotheses = conn.execute(
+            """
+            SELECT n.id, n.label, n.type, n.confidence, n.hypothesis_status,
+                   n.created_by, n.created_at
+            FROM ohm_nodes n
+            WHERE n.type = 'hypothesis'
+              AND n.deleted_at IS NULL
+              AND (n.hypothesis_status IS NULL OR n.hypothesis_status NOT IN ('verified', 'pruned', 'superseded'))
+              AND NOT EXISTS (
+                  SELECT 1 FROM ohm_edges e
+                  WHERE e.to_node = n.id AND e.edge_type = 'TESTS' AND e.deleted_at IS NULL
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM ohm_observations o
+                  WHERE o.node_id = n.id AND o.type = 'experiment_result' AND o.deleted_at IS NULL
+              )
+            ORDER BY n.confidence DESC
+        """,
+        ).fetchall()
+
+        unverified_hypotheses_list = []
+        for row in unverified_hypotheses:
+            d = dict(zip(["id", "label", "type", "confidence", "hypothesis_status", "created_by", "created_at"], row))
+            if d.get("created_at"):
+                try:
+                    created = datetime.fromisoformat(str(d["created_at"]).replace("Z", "+00:00"))
+                    d["age_days"] = round((datetime.utcnow() - created.replace(tzinfo=None)).total_seconds() / 86400, 1)
+                except (ValueError, TypeError):
+                    d["age_days"] = None
+            else:
+                d["age_days"] = None
+            unverified_hypotheses_list.append(d)
+
+        # 4. Hypotheses with conflicting evidence (CONTRADICTS_EVIDENCE > SUPPORTS_EVIDENCE)
+        conflicting_evidence = conn.execute(
+            """
+            SELECT n.id, n.label, n.hypothesis_status, n.confidence,
+                   SUM(CASE WHEN e.edge_type = 'SUPPORTS_EVIDENCE' THEN 1 ELSE 0 END) AS supporting,
+                   SUM(CASE WHEN e.edge_type = 'CONTRADICTS_EVIDENCE' THEN 1 ELSE 0 END) AS contradicting
+            FROM ohm_nodes n
+            JOIN ohm_edges e ON e.to_node = n.id
+              AND e.edge_type IN ('SUPPORTS_EVIDENCE', 'CONTRADICTS_EVIDENCE')
+              AND e.deleted_at IS NULL
+            WHERE n.type = 'hypothesis' AND n.deleted_at IS NULL
+            GROUP BY n.id, n.label, n.hypothesis_status, n.confidence
+            HAVING SUM(CASE WHEN e.edge_type = 'CONTRADICTS_EVIDENCE' THEN 1 ELSE 0 END) >
+                   SUM(CASE WHEN e.edge_type = 'SUPPORTS_EVIDENCE' THEN 1 ELSE 0 END)
+            ORDER BY n.confidence DESC
+        """,
+        ).fetchall()
+
+        conflicting_evidence_list = []
+        for row in conflicting_evidence:
+            d = dict(zip(["id", "label", "hypothesis_status", "confidence", "supporting", "contradicting"], row))
+            conflicting_evidence_list.append(d)
+
+        # 5. Source reliability scores per agent
+        source_reliability = conn.execute("""
+            SELECT source_agent,
+                   COUNT(*) AS total_outcomes,
+                   SUM(CASE WHEN outcome = TRUE THEN 1 ELSE 0 END) AS accurate,
+                   SUM(CASE WHEN outcome = FALSE THEN 1 ELSE 0 END) AS inaccurate,
+                   CASE WHEN COUNT(*) > 0
+                        THEN ROUND(CAST(SUM(CASE WHEN outcome = TRUE THEN 1 ELSE 0 END) AS DOUBLE) / COUNT(*), 3)
+                        ELSE NULL END AS p_accurate
+            FROM ohm_outcomes
+            GROUP BY source_agent
+            ORDER BY total_outcomes DESC
+        """).fetchall()
+
+        reliability = [dict(zip(["source_agent", "total_outcomes", "accurate", "inaccurate", "p_accurate"], row)) for row in source_reliability]
+
+        # 6. Summary statistics
         total_outcomes = conn.execute("SELECT COUNT(*) FROM ohm_outcomes").fetchone()[0]
         total_causal = conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE edge_type IN ('CAUSES','PREDICTS','EXPECTS') AND deleted_at IS NULL AND layer = 'L3'").fetchone()[0]
         total_challenges = conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE edge_type = 'CHALLENGED_BY' AND deleted_at IS NULL").fetchone()[0]
@@ -705,6 +778,17 @@ class AdminHandlerMixin:
         challenge_ratio = round(total_challenges / max(total_l3, 1), 4)
         l3_l2_ratio = round(total_l3 / max(total_l2, 1), 1)
 
+        # 7. Hypothesis verification summary
+        total_hypotheses = conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE type = 'hypothesis' AND deleted_at IS NULL").fetchone()[0]
+        verified_hypotheses = conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE type = 'hypothesis' AND hypothesis_status = 'verified' AND deleted_at IS NULL").fetchone()[0]
+        tested_hypotheses = conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE type = 'hypothesis' AND hypothesis_status = 'tested' AND deleted_at IS NULL").fetchone()[0]
+        pruned_hypotheses = conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE type = 'hypothesis' AND hypothesis_status = 'pruned' AND deleted_at IS NULL").fetchone()[0]
+        superseded_hypotheses = conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE type = 'hypothesis' AND hypothesis_status = 'superseded' AND deleted_at IS NULL").fetchone()[0]
+
+        total_tests_edges = conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE edge_type = 'TESTS' AND deleted_at IS NULL").fetchone()[0]
+        total_supports_evidence = conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE edge_type = 'SUPPORTS_EVIDENCE' AND deleted_at IS NULL").fetchone()[0]
+        total_contradicts_evidence = conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE edge_type = 'CONTRADICTS_EVIDENCE' AND deleted_at IS NULL").fetchone()[0]
+
         self._json_response(
             200,
             {
@@ -712,6 +796,10 @@ class AdminHandlerMixin:
                 "unverified_edge_count": len(unverified_edges),
                 "high_confidence_no_obs": high_conf_nodes[:50],
                 "high_confidence_no_obs_count": len(high_conf_nodes),
+                "unverified_hypotheses": unverified_hypotheses_list[:50],
+                "unverified_hypotheses_count": len(unverified_hypotheses_list),
+                "conflicting_evidence_hypotheses": conflicting_evidence_list[:50],
+                "conflicting_evidence_hypotheses_count": len(conflicting_evidence_list),
                 "source_reliability": reliability,
                 "summary": {
                     "total_outcomes_recorded": total_outcomes,
@@ -721,6 +809,15 @@ class AdminHandlerMixin:
                     "days_threshold": days_threshold,
                     "confidence_threshold": confidence_threshold,
                     "verification_rate": round(total_outcomes / max(total_causal, 1), 3),
+                    "total_hypotheses": total_hypotheses,
+                    "verified_hypotheses": verified_hypotheses,
+                    "tested_hypotheses": tested_hypotheses,
+                    "pruned_hypotheses": pruned_hypotheses,
+                    "superseded_hypotheses": superseded_hypotheses,
+                    "total_tests_edges": total_tests_edges,
+                    "total_supports_evidence": total_supports_evidence,
+                    "total_contradicts_evidence": total_contradicts_evidence,
+                    "hypothesis_verification_rate": round(verified_hypotheses / max(total_hypotheses, 1), 3),
                 },
             },
         )
@@ -1501,6 +1598,37 @@ class AdminHandlerMixin:
         conn = self.current_store.conn
         result = effective_reliability(conn, agent_id)
         self._json_response(200, result)
+
+    def _get_metrics_semantic(self, path: str, qs: dict) -> None:
+        """GET /metrics/semantic — YAML-defined semantic-layer metrics.
+
+        Returns the current values of the OHM semantic-layer metric catalog
+        as JSON. Supports ?format=prometheus to return text/plain exposition.
+        """
+        from ohm.semantic_layer import run_metrics
+
+        conn = self.current_store.conn
+        values = run_metrics(conn, use_ibis=False)
+        fmt = qs.get("format", [""])[0].lower()
+        if fmt == "prometheus":
+            lines = ["# HELP ohm_semantic_layer_metrics YAML-defined graph metrics"]
+            lines.append("# TYPE ohm_semantic_layer_metrics gauge")
+            for name, value in values.items():
+                lines.append(f'ohm_semantic_layer_metrics{{metric="{name}"}} {value if value is not None else "NaN"}')
+            body_bytes = "\n".join(lines).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+            self.send_header("Content-Length", str(len(body_bytes)))
+            self.end_headers()
+            self.wfile.write(body_bytes)
+        else:
+            self._json_response(
+                200,
+                {
+                    "metrics": values,
+                    "count": len(values),
+                },
+            )
 
     # ── OHM-6lvk: Graph Health Scoring ─────────────────────────────────────
 
