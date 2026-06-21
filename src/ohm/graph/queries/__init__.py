@@ -1060,6 +1060,8 @@ def create_node(
             utility_scale = _utility_scale_map[utility_scale]
         elif not isinstance(utility_scale, (int, float)):
             raise ValueError(f"utility_scale must be one of best/neutral/worst or a number, got {utility_scale}")
+        if isinstance(utility_scale, (int, float)) and not (0 <= utility_scale <= 1):
+            raise ValueError(f"utility_scale must be between 0 and 1, got {utility_scale}")
 
     # ADR-015: source_url is an alias for url (backward compat)
     if source_url is not None and url is None:
