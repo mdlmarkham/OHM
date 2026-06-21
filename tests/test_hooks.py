@@ -25,7 +25,7 @@ def _can_fork():
 
     # If sandbox is active, forking is intentionally disabled
     if os.environ.get("OHM_SANDBOX_DISABLE", "") not in ("1", "true", "yes"):
-        # Sandbox is active — NPROC limit prevents forking by design
+        # Sandbox is active - NPROC limit prevents forking by design
         return False
     try:
         import subprocess
@@ -159,12 +159,12 @@ class TestHookRunnerGetHooks:
 
 
 class TestHookRunnerRunHook:
-    """Tests for HookRunner.run_hook() — subprocess execution engine."""
+    """Tests for HookRunner.run_hook() - subprocess execution engine."""
 
     def test_shell_hook_captures_stdout(self, test_db):
         import sys
 
-        cmd = f"{sys.executable} -c print('hello')"
+        cmd = f"{sys.executable} -c \"print('hello')\""
         hook = HookRecord(id="h1", event="pre_ingest", command=cmd)
         runner = HookRunner(test_db)
         result = runner.run_hook(hook, {"agent": "metis"})
@@ -385,7 +385,7 @@ class TestHookInvocationLog:
     def test_shell_hook_creates_log_row(self, test_db):
         import sys
 
-        cmd = f"{sys.executable} -c print('logged')"
+        cmd = f"{sys.executable} -c \"print('logged')\""
         hook = HookRecord(id="h1", event="pre_ingest", command=cmd)
         runner = HookRunner(test_db)
         runner.run_hook(hook, {"agent": "metis"})
