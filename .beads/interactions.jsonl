@@ -967,3 +967,4 @@
 {"id":"int-42deb401","kind":"field_change","created_at":"2026-06-21T16:26:36.343239638Z","actor":"root","issue_id":"OHM-pkbs","extra":{"field":"status","new_value":"closed","old_value":"open"}}
 {"id":"int-67997398","kind":"field_change","created_at":"2026-06-21T16:27:06.852300321Z","actor":"root","issue_id":"OHM-nlbm","extra":{"field":"status","new_value":"closed","old_value":"in_progress"}}
 {"id":"int-5f39b940","kind":"field_change","created_at":"2026-06-21T18:44:23.479582391Z","actor":"root","issue_id":"OHM-wx42","extra":{"field":"status","new_value":"closed","old_value":"open"}}
+{"id":"int-11a30bd3","kind":"field_change","created_at":"2026-06-21T19:03:36.954488338Z","actor":"root","issue_id":"OHM-tbz0","extra":{"field":"status","new_value":"closed","old_value":"open"}}
