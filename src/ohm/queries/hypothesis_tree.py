@@ -1,4 +1,4 @@
-#"""Hypothesis-tree query helpers for OHM.
+"""Hypothesis-tree query helpers for OHM.
 
 Implements the query patterns defined in OHM-ss22:
 
@@ -150,24 +150,16 @@ def experiments_for_edge(
 
     # Check if the schema supports edge observations
     # This would require a join through ohm_observations.edge_id
-    obs_table = conn.execute(
-        "SELECT name FROM duckdb_tables() WHERE name = 'ohm_observations'"
-    ).fetchone()
+    obs_table = conn.execute("SELECT name FROM duckdb_tables() WHERE name = 'ohm_observations'").fetchone()
 
     if not obs_table:
-        raise NotImplementedError(
-            "Edge observations not supported: ohm_observations table missing or does not have edge_id column"
-        )
+        raise NotImplementedError("Edge observations not supported: ohm_observations table missing or does not have edge_id column")
 
     # Check if edge_id column exists
-    columns = conn.execute(
-        "SELECT column_name FROM duckdb_columns() WHERE table_name = 'ohm_observations' AND column_name = 'edge_id'"
-    ).fetchone()
+    columns = conn.execute("SELECT column_name FROM duckdb_columns() WHERE table_name = 'ohm_observations' AND column_name = 'edge_id'").fetchone()
 
     if not columns:
-        raise NotImplementedError(
-            "Edge observations not supported: ohm_observations.edge_id column missing"
-        )
+        raise NotImplementedError("Edge observations not supported: ohm_observations.edge_id column missing")
 
     query = """
         SELECT DISTINCT
@@ -265,9 +257,7 @@ def propagate_experiment_result(
     """
     from ohm.validation import validate_identifier
 
-    parent_hypothesis_id = validate_identifier(
-        parent_hypothesis_id, name="parent_hypothesis_id"
-    )
+    parent_hypothesis_id = validate_identifier(parent_hypothesis_id, name="parent_hypothesis_id")
 
     # Find all child hypotheses via REFINES edges
     child_query = """

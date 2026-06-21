@@ -1883,6 +1883,7 @@ def generate_node_id(label: str, node_type: str | None = None) -> str:
     prefix = ""
     if node_type:
         from ohm.server.contract import NamingConventions  # local import avoids cycle
+
         prefix = NamingConventions().type_prefixes.get(node_type, "")
     if prefix:
         return f"{prefix}{base}_{suffix}"

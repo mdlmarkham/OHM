@@ -428,9 +428,7 @@ class TestThreeLevelHypothesisTree:
         assert tree["exp_b"]["type"] == "experiment"
 
     def test_refines_edges_exist(self, test_db, tree):
-        rows = test_db.execute(
-            "SELECT edge_type, COUNT(*) FROM ohm_edges WHERE layer = 'L3' AND deleted_at IS NULL GROUP BY edge_type"
-        ).fetchall()
+        rows = test_db.execute("SELECT edge_type, COUNT(*) FROM ohm_edges WHERE layer = 'L3' AND deleted_at IS NULL GROUP BY edge_type").fetchall()
         counts = {row[0]: row[1] for row in rows}
         assert counts.get("REFINES", 0) == 2
         assert counts.get("TESTS", 0) == 2
@@ -502,9 +500,7 @@ class TestThreeLevelHypothesisTree:
         assert propagated == pytest.approx(root_expected, abs=1e-4)
 
     def test_experiment_result_observations_link_to_experiments(self, test_db, tree):
-        rows = test_db.execute(
-            "SELECT node_id, type, value FROM ohm_observations WHERE type = 'experiment_result' AND deleted_at IS NULL ORDER BY value DESC"
-        ).fetchall()
+        rows = test_db.execute("SELECT node_id, type, value FROM ohm_observations WHERE type = 'experiment_result' AND deleted_at IS NULL ORDER BY value DESC").fetchall()
         assert len(rows) == 2
         node_ids = {row[0] for row in rows}
         assert tree["exp_a"]["id"] in node_ids
