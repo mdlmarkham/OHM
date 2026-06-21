@@ -185,6 +185,8 @@ LAYER_EDGE_TYPES: dict[str, frozenset[str]] = {
             "TESTS",  # experiment → hypothesis
             "SUPPORTS_EVIDENCE",  # experiment → node/edge
             "CONTRADICTS_EVIDENCE",  # experiment → node/edge
+            # ── Decision nodes (OHM-6mv.2 + OHM-decision) ──
+            "DECISION_DEPENDS_ON",  # decision → hypothesis/concept
         }
     ),
     "L4": frozenset(
@@ -1234,8 +1236,8 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
         "0.17.0",
         "add USD utility columns to decision nodes for VoI calibration (OHM-fh3e)",
         [
-            "ALTER TABLE ohm_nodes ADD COLUMN utility_usd_per_day FLOAT",
-            "ALTER TABLE ohm_nodes ADD COLUMN utility_currency VARCHAR",
+            "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS utility_usd_per_day FLOAT",
+            "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS utility_currency VARCHAR",
         ],
     ),
     (

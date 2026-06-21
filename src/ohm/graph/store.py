@@ -685,7 +685,7 @@ class OhmStore:
         task_status: Optional[str] = None,
         assigned_to: Optional[str] = None,
         due_date: Optional[str] = None,
-        utility_scale: Optional[float] = None,
+        utility_scale: Optional[str | float] = None,
         current_best_action: Optional[str] = None,
         action_alternatives: Optional[list[str]] = None,
         utility_usd_per_day: Optional[float] = None,
@@ -705,7 +705,8 @@ class OhmStore:
             task_status: For task nodes: open/in_progress/blocked/review/done/cancelled.
             assigned_to: For task nodes: agent assigned to this task.
             due_date: For task nodes: ISO 8601 due date string.
-            utility_scale: For decision nodes: importance weight 0-1.
+            utility_scale: For decision nodes: importance weight 0-1, or
+                one of {'best' (1.0), 'neutral' (0.5), 'worst' (0.0)}.
             current_best_action: For decision nodes: currently preferred action.
             action_alternatives: For decision nodes: list of alternative actions.
             utility_usd_per_day: For decision nodes: monetary value of resolving uncertainty (USD/day).
@@ -736,6 +737,12 @@ class OhmStore:
         tags_json = json.dumps(tag_list) if tag_list else None
         alternatives_json = json.dumps(action_alternatives) if action_alternatives else None
         now = self._now()
+
+        # Normalize categorical utility_scale to numeric encoding
+        _utility_scale_map = {"best": 1.0, "neutral": 0.5, "worst": 0.0}
+        if utility_scale is not None and isinstance(utility_scale, str):
+            utility_scale = _utility_scale_map.get(utility_scale, utility_scale)
+
         # ADR-015: source_url is an alias for url (backward compat)
         if source_url is not None and url is None:
             url = source_url

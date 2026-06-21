@@ -720,6 +720,7 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
 from ohm.server.handlers.admin import AdminHandlerMixin
 from ohm.server.handlers.analysis import AnalysisHandlerMixin
 from ohm.server.handlers.catalog import CatalogHandlerMixin
+from ohm.server.handlers.decision import DecisionHandlerMixin
 from ohm.server.handlers.graph import GraphHandlerMixin
 from ohm.server.handlers.infra import InfraHandlerMixin
 from ohm.server.handlers.inference import InferenceHandlerMixin
@@ -727,7 +728,7 @@ from ohm.server.handlers.markov import MarkovHandlerMixin
 from ohm.server.handlers.tenant import TenantHandlerMixin
 
 
-class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, CatalogHandlerMixin, GraphHandlerMixin, InfraHandlerMixin, InferenceHandlerMixin, MarkovHandlerMixin, TenantHandlerMixin, BaseHTTPRequestHandler):
+class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, CatalogHandlerMixin, DecisionHandlerMixin, GraphHandlerMixin, InfraHandlerMixin, InferenceHandlerMixin, MarkovHandlerMixin, TenantHandlerMixin, BaseHTTPRequestHandler):
     """HTTP request handler for OHM daemon."""
 
     store: Optional[OhmStore] = None  # single-tenant core store (always set)
@@ -2250,6 +2251,7 @@ OhmHandler._GET_EXACT = {
 OhmHandler._GET_PREFIXES = [
     ("/tenant/", "_get_tenant_prefix"),
     ("/context-gate/", "_get_context_gate"),
+    ("/decision/", "_get_decision_recommendation"),
     ("/node/", "_get_node"),
     ("/deep/", "_get_deep"),
     ("/edge/", "_get_edge"),

@@ -395,7 +395,7 @@ class Graph:
         url: str | None = None,
         tags: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
-        utility_scale: float | None = None,
+        utility_scale: str | float | None = None,
         utility_usd_per_day: float | None = None,
         utility_currency: str | None = None,
         current_best_action: str | None = None,
@@ -412,7 +412,8 @@ class Graph:
         with a short unique suffix). Returns the complete node record including
         all fields (id, label, type, content, created_by, created_at, etc.).
 
-        For decision nodes (node_type='decision'), set utility_scale (0-1),
+        For decision nodes (node_type='decision'), set utility_scale to a numeric
+        0-1 value or one of {'best' (1.0), 'neutral' (0.5), 'worst' (0.0)},
         utility_usd_per_day (dollar-valued payoff), and action_alternatives to
         enable VoI analysis and game-theoretic payoffs.
 

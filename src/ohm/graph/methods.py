@@ -1666,6 +1666,7 @@ def apply_verification_decay(
     # Prune tested hypotheses whose supporting edges have decayed below threshold
     # Use a small epsilon tolerance to account for floating-point rounding
     _prune_threshold = min_confidence + 0.001
+    pruned_ids = []
     if not dry_run:
         pruned = conn.execute(
             """
@@ -1686,6 +1687,7 @@ def apply_verification_decay(
             [_prune_threshold],
         ).fetchall()
         pruned_count = len(pruned) if pruned else 0
+        pruned_ids = [row[0] for row in pruned]
     else:
         # In dry run, just count how many would be pruned
         pruned_count_result = conn.execute(
@@ -1706,6 +1708,15 @@ def apply_verification_decay(
             [_prune_threshold],
         ).fetchone()
         pruned_count = pruned_count_result[0] if pruned_count_result else 0
+
+    # Recompute any linked decision nodes for pruned hypotheses
+    if pruned_ids:
+        from ohm.decision import recompute_linked_decisions
+        for hyp_id in pruned_ids:
+            try:
+                recompute_linked_decisions(conn, hyp_id)
+            except Exception:
+                pass
 
     return {
         "decayed_count": len(decayed),

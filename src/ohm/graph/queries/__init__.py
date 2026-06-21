@@ -671,8 +671,8 @@ def query_record_outcome(
         for hyp_id, current_status in linked_hypotheses:
             new_status = None
             if outcome:
-                # Positive outcome: check if SUPPORTS_EVIDENCE outweighs CONTRADICTS_EVIDENCE
-                support_count = conn.execute(
+                # Positive outcome counts as supporting evidence.
+                support_count = 1 + conn.execute(
                     "SELECT COUNT(*) FROM ohm_edges WHERE to_node = ? AND edge_type = 'SUPPORTS_EVIDENCE' AND deleted_at IS NULL",
                     [hyp_id],
                 ).fetchone()[0]
@@ -680,17 +680,17 @@ def query_record_outcome(
                     "SELECT COUNT(*) FROM ohm_edges WHERE to_node = ? AND edge_type = 'CONTRADICTS_EVIDENCE' AND deleted_at IS NULL",
                     [hyp_id],
                 ).fetchone()[0]
-                if support_count >= contradict_count:
+                if support_count > contradict_count:
                     new_status = "verified"
                 else:
                     new_status = "tested"
             else:
-                # Negative outcome: check if CONTRADICTS_EVIDENCE outweighs SUPPORTS_EVIDENCE
+                # Negative outcome counts as contradicting evidence.
                 support_count = conn.execute(
                     "SELECT COUNT(*) FROM ohm_edges WHERE to_node = ? AND edge_type = 'SUPPORTS_EVIDENCE' AND deleted_at IS NULL",
                     [hyp_id],
                 ).fetchone()[0]
-                contradict_count = conn.execute(
+                contradict_count = 1 + conn.execute(
                     "SELECT COUNT(*) FROM ohm_edges WHERE to_node = ? AND edge_type = 'CONTRADICTS_EVIDENCE' AND deleted_at IS NULL",
                     [hyp_id],
                 ).fetchone()[0]
@@ -706,6 +706,14 @@ def query_record_outcome(
                 )
                 _log_change(conn, "ohm_nodes", hyp_id, "UPDATE", recorded_by)
                 hypothesis_updates.append({"hypothesis_id": hyp_id, "old_status": current_status, "new_status": new_status})
+                # Re-evaluate any decision nodes linked to this hypothesis
+                try:
+                    from ohm.decision import recompute_linked_decisions
+                    decision_updates = recompute_linked_decisions(conn, hyp_id)
+                    if decision_updates:
+                        hypothesis_updates[-1]["decision_updates"] = decision_updates
+                except Exception:
+                    pass
 
     if hypothesis_updates:
         result["hypothesis_status_updates"] = hypothesis_updates
@@ -993,7 +1001,7 @@ def create_node(
     source_url: str | None = None,
     tags: list[str] | None = None,
     metadata: dict | None = None,
-    utility_scale: float | None = None,
+    utility_scale: str | float | None = None,
     utility_usd_per_day: float | None = None,
     utility_currency: str | None = None,
     current_best_action: str | None = None,
@@ -1044,8 +1052,14 @@ def create_node(
     enforce_confidence_ceiling(confidence, source_tier)
     if priority is not None and priority not in VALID_PRIORITY:
         raise ValueError(f"Invalid priority: {priority}. Must be one of: {sorted(VALID_PRIORITY)}")
-    if utility_scale is not None and not (0.0 <= utility_scale <= 1.0):
-        raise ValueError(f"utility_scale must be between 0 and 1, got {utility_scale}")
+    _utility_scale_map = {"best": 1.0, "neutral": 0.5, "worst": 0.0}
+    if utility_scale is not None:
+        if isinstance(utility_scale, str):
+            if utility_scale not in _utility_scale_map:
+                raise ValueError(f"utility_scale must be one of best/neutral/worst, got {utility_scale}")
+            utility_scale = _utility_scale_map[utility_scale]
+        elif not isinstance(utility_scale, (int, float)):
+            raise ValueError(f"utility_scale must be one of best/neutral/worst or a number, got {utility_scale}")
 
     # ADR-015: source_url is an alias for url (backward compat)
     if source_url is not None and url is None:
