@@ -74,6 +74,8 @@ QUEUE_DIR = Path("/var/lib/ohm/ingestion")
 OHM_URL = os.environ.get("OHM_URL", "http://127.0.0.1:8710")
 OHM_TOKEN = os.environ.get("OHM_TOKEN", "")
 
+from ohm.ingestion.document_library_bridge import stage_documents as _stage_documents
+
 # Auto-load token from ohmd config if not set
 if not OHM_TOKEN:
     _cfg_path = "/etc/ohm/ohmd.json"
@@ -520,6 +522,10 @@ def stage_source():
         url = item.get("url", "")
         title = item.get("title", "")
 
+        # Skip document items — they are processed by stage_documents()
+        if item.get("kind") == "document":
+            continue
+
         if not url:
             continue
 
@@ -928,7 +934,7 @@ def stage_synthesize():
 
 def main():
     parser = argparse.ArgumentParser(description="OHM Staged Ingestion Pipeline")
-    parser.add_argument("--stage", choices=["fetch", "triage", "source", "assess", "synthesize", "full", "queue-status", "drain-triage"],
+    parser.add_argument("--stage", choices=["fetch", "triage", "source", "document", "assess", "synthesize", "full", "queue-status", "drain-triage"],
                         default="queue-status")
     parser.add_argument("--ohm-url", default=OHM_URL)
     parser.add_argument("--ohm-token", default=OHM_TOKEN)
@@ -950,6 +956,8 @@ def main():
         drain_triage()
     elif args.stage == "source":
         stage_source()
+    elif args.stage == "document":
+        _stage_documents(OHM_URL, OHM_TOKEN, QUEUE_DIR)
     elif args.stage == "assess":
         stage_assess()
     elif args.stage == "synthesize":
@@ -959,6 +967,8 @@ def main():
         stage_fetch()
         print("\n=== Stage 2: Triage ===")
         drain_triage()
+        print("\n=== Stage 3a: Document Library Ingestion ===")
+        _stage_documents(OHM_URL, OHM_TOKEN, QUEUE_DIR)
         print("\n=== Stage 3: Source Node Creation ===")
         stage_source()
         print("\n=== Stage 4: Assess (agent-driven) ===")
