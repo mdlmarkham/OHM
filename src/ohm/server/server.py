@@ -664,6 +664,7 @@ def _build_router() -> _RouteRegistry:
 
     # Document library routes
     r.add("POST", "/documents/upload")
+    r.add("GET", "/documents/*")
 
     # POST prefix routes
     for _p in (
@@ -967,6 +968,24 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, AskHandlerMixin, Catal
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
+
+    def _binary_response(
+        self,
+        status: int,
+        content_bytes: bytes,
+        content_type: str = "application/octet-stream",
+        filename: str | None = None,
+    ) -> None:
+        """Send a binary response with appropriate headers."""
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(content_bytes)))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        if filename:
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.end_headers()
+        self.wfile.write(content_bytes)
 
     def _method_not_allowed(self, allowed_methods: set[str]) -> None:
         """Send 405 Method Not Allowed with required Allow header (RFC 7231 §6.5.5)."""
@@ -2273,6 +2292,7 @@ OhmHandler._GET_PREFIXES = [
     ("/tenant/", "_get_tenant_prefix"),
     ("/context-gate/", "_get_context_gate"),
     ("/decision/", "_get_decision_recommendation"),
+    ("/documents/", "_get_document_prefix"),
     ("/node/", "_get_node"),
     ("/deep/", "_get_deep"),
     ("/edge/", "_get_edge"),

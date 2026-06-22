@@ -207,4 +207,68 @@ class DocumentHandlerMixin:
         }
         return mapping.get(content_type.split(";")[0].strip().lower())
 
+    def _get_document_prefix(self, path: str, qs: dict) -> None:
+        """GET /documents/<id> or /documents/<id>/download.
+
+        Returns JSON metadata for the document, or streams the raw file bytes
+        for the ``/download`` suffix.
+        """
+        from ohm.exceptions import NodeNotFoundError
+
+        prefix = "/documents/"
+        if not path.startswith(prefix):
+            raise ValidationError("Invalid document path")
+
+        remainder = path[len(prefix):]
+        if "/" in remainder:
+            document_id, action = remainder.split("/", 1)
+        else:
+            document_id, action = remainder, ""
+
+        if not document_id:
+            raise ValidationError("Missing document id")
+
+        store = self._document_store()
+        if not store.exists(document_id):
+            raise NodeNotFoundError(f"Document {document_id} not found")
+
+        record = store.get_record(document_id)
+
+        if action == "download":
+            content_bytes = store.get(document_id)
+            content_type = record.get("content_type", "application/octet-stream")
+            filename = record.get("filename", "document")
+            self._binary_response(200, content_bytes, content_type, filename)
+            return
+
+        if action:
+            raise ValidationError(f"Unknown document action: {action!r}")
+
+        # Enrich with source node details if available
+        source_node_id = record.get("source_node_id")
+        if source_node_id:
+            try:
+                node = self.current_store.get_node(source_node_id)
+                if node:
+                    record["source_node"] = node
+            except Exception:
+                pass
+
+        self._json_response(200, record)
+
+    def _binary_response(
+        self,
+        status: int,
+        content_bytes: bytes,
+        content_type: str,
+        filename: str,
+    ) -> None:
+        """Send a binary response with appropriate headers."""
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(content_bytes)))
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.end_headers()
+        self.wfile.write(content_bytes)
+
 

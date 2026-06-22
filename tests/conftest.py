@@ -368,8 +368,12 @@ def _request(method, port, path, body=None, headers=None, token=None):
     hdrs = headers or {}
     if token:
         hdrs["Authorization"] = f"Bearer {token}"
-    if body is not None:
+    if body is not None and "Content-Type" not in hdrs:
         hdrs["Content-Type"] = "application/json"
+        body_bytes = json.dumps(body).encode() if not isinstance(body, bytes) else body
+    elif body is not None and isinstance(body, bytes):
+        body_bytes = body
+    elif body is not None:
         body_bytes = json.dumps(body).encode()
     else:
         body_bytes = None

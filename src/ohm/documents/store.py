@@ -10,6 +10,7 @@ import os
 import shutil
 import uuid
 from abc import ABC, abstractmethod
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -108,6 +109,33 @@ class LocalDocumentStore(DocumentStore):
 
     def exists(self, document_id: str) -> bool:
         return self._shard_dir(document_id).exists()
+
+    def get_record(self, document_id: str) -> dict[str, Any]:
+        """Return the stored metadata record for ``document_id``."""
+        shard_dir = self._shard_dir(document_id)
+        meta_path = shard_dir / "meta.json"
+        if not meta_path.exists():
+            raise FileNotFoundError(f"Document not found: {document_id}")
+        import json
+
+        with open(meta_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def update_metadata(self, document_id: str, **kwargs: Any) -> dict[str, Any]:
+        """Update the metadata sidecar for ``document_id`` and return it."""
+        shard_dir = self._shard_dir(document_id)
+        meta_path = shard_dir / "meta.json"
+        if not meta_path.exists():
+            raise FileNotFoundError(f"Document not found: {document_id}")
+        import json
+
+        with open(meta_path, "r", encoding="utf-8") as f:
+            record = json.load(f)
+        record.update(kwargs)
+        record["updated_at"] = datetime.now(timezone.utc).isoformat()
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(record, f, indent=2)
+        return record
 
     def delete(self, document_id: str) -> None:
         shard_dir = self._shard_dir(document_id)

@@ -69,10 +69,14 @@ def ingest_file(
         tags=tags,
     )
 
+    # Link the persisted file record to its graph source node.
+    source_node_id = ingest_result["source_id"]
+    store.update_metadata(document_id, source_node_id=source_node_id)
+
     return {
         "document_id": document_id,
         "stored_record": stored,
-        "source_node_id": ingest_result["source_id"],
+        "source_node_id": source_node_id,
         "extracted_text_length": len(text),
         "tree_result": ingest_result,
     }

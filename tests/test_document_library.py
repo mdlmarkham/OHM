@@ -202,6 +202,56 @@ class TestDocumentUploadEndpoint:
         assert resp.status == 400
         assert "Unsupported" in data or "content type" in data.lower()
 
+    def test_get_document_metadata(self, test_server, tmp_path):
+        port, store = test_server
+        md = "# Uploaded Document\n\nThis file was uploaded via HTTP."
+        body, content_type = _multipart_body("upload.md", md.encode("utf-8"))
+        status, upload_data = _request(
+            "POST",
+            port,
+            "/documents/upload",
+            body=body,
+            headers={"Content-Type": content_type, "Content-Length": str(len(body))},
+        )
+        assert status == 200, upload_data
+        document_id = upload_data["document_id"]
+
+        status, data = _request("GET", port, f"/documents/{document_id}")
+        assert status == 200, data
+        assert data["document_id"] == document_id
+        assert data["filename"] == "upload.md"
+        assert data["content_type"] == "text/markdown"
+        assert "source_node" in data
+        assert data["source_node"]["type"] == "source"
+
+    def test_get_document_download(self, test_server, tmp_path):
+        port, store = test_server
+        md = "# Downloadable Document\n\nRetrieve me."
+        body, content_type = _multipart_body("download.md", md.encode("utf-8"))
+        status, upload_data = _request(
+            "POST",
+            port,
+            "/documents/upload",
+            body=body,
+            headers={"Content-Type": content_type, "Content-Length": str(len(body))},
+        )
+        assert status == 200, upload_data
+        document_id = upload_data["document_id"]
+
+        conn = _http_conn(port)
+        conn.request("GET", f"/documents/{document_id}/download")
+        resp = conn.getresponse()
+        body = resp.read()
+        conn.close()
+        assert resp.status == 200
+        assert resp.headers.get("Content-Type") == "text/markdown"
+        assert b"Retrieve me" in body
+
+    def test_get_missing_document_returns_404(self, test_server):
+        port, _ = test_server
+        status, data = _request("GET", port, "/documents/doc-doesnotexist1234")
+        assert status == 404
+
     def test_upload_url_fetch(self, test_server, tmp_path):
         port, store = test_server
         md = "# URL Document\n\nFetched from a local test server."
