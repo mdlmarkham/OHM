@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -1069,14 +1070,22 @@ class GraphHandlerMixin:
         result = enrich_response(result, nudges)
 
         # ADR-021: Proactive discoverability — post-write suggestions + connectivity nudge.
-        # Both run under a 300ms hard cap so they never delay the write response on slow
-        # graphs. If the budget is exceeded, the response omits suggestions (not an error).
+        # Run synchronously on the request thread under the write lock. Earlier versions used
+        # a ThreadPoolExecutor here, which shared DuckDB connection state across threads and
+        # caused intermittent segfaults during full-suite test runs (OHM-k0bi). A fresh
+        # read-only suggestion connection is opened per suggestion call and the deadline keeps
+        # the response bounded.
         if result.get("created", True):
-            import concurrent.futures
-            from ohm.server.suggestions import generate_suggestions, generate_connectivity_nudge, generate_island_nudge
+            from ohm.server.suggestions import (
+                SUGGESTION_TIMEOUT_S,
+                generate_suggestions,
+                generate_connectivity_nudge,
+                generate_island_nudge,
+            )
 
-            def _suggestions_and_nudge():
-                sugg = generate_suggestions(
+            deadline = time.time() + SUGGESTION_TIMEOUT_S
+            try:
+                suggestions = generate_suggestions(
                     store=self.current_store,
                     node_id=result.get("id", ""),
                     content=body.get("content"),
@@ -1084,29 +1093,21 @@ class GraphHandlerMixin:
                     tags=body.get("tags"),
                     node_type=body.get("type"),
                     has_edges=bool(body.get("connects_to")),
+                    deadline=deadline,
                 )
-                nudge = generate_connectivity_nudge(self.current_store, agent)
-                island = generate_island_nudge(self.current_store, agent)
-                return sugg, nudge, island
-
-            try:
-                _pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-                future = _pool.submit(_suggestions_and_nudge)
-                try:
-                    suggestions, nudge, island = future.result(timeout=0.3)
-                    result["suggestions"] = suggestions
-                    if nudge:
-                        result["connectivity_warning"] = nudge["connectivity_warning"]
-                    if island:
-                        result["island_warning"] = island["island_warning"]
-                except concurrent.futures.TimeoutError:
-                    logger.debug("Suggestion budget exceeded (>300ms), skipping for this write")
-                except Exception as e:
-                    logger.debug(f"Suggestions failed: {e}")
-                finally:
-                    _pool.shutdown(wait=False)
-            except Exception:
-                pass
+                nudge = generate_connectivity_nudge(
+                    self.current_store, agent, deadline=deadline
+                )
+                island = generate_island_nudge(
+                    self.current_store, agent, deadline=deadline
+                )
+                result["suggestions"] = suggestions
+                if nudge:
+                    result["connectivity_warning"] = nudge["connectivity_warning"]
+                if island:
+                    result["island_warning"] = island["island_warning"]
+            except Exception as e:
+                logger.debug("Suggestions failed: %s", e)
 
         # OHM-g0kv Feature D: Auto-register alias and content hash on node creation
         if result.get("created", True):
@@ -1196,8 +1197,9 @@ class GraphHandlerMixin:
             node["hook_decorations"] = decorations
 
         # ADR-021: Proactive discoverability — suggestions for scratch
-        from ohm.server.suggestions import generate_suggestions
+        from ohm.server.suggestions import SUGGESTION_TIMEOUT_S, generate_suggestions
 
+        deadline = time.time() + SUGGESTION_TIMEOUT_S
         suggestions = generate_suggestions(
             store=self.current_store,
             node_id=node.get("id", ""),
@@ -1206,6 +1208,7 @@ class GraphHandlerMixin:
             tags=body.get("tags"),
             node_type="fragment",
             has_edges=bool(body.get("connects_to")),
+            deadline=deadline,
         )
         node["suggestions"] = suggestions
 
@@ -1468,14 +1471,16 @@ class GraphHandlerMixin:
 
         # ADR-021: Proactive discoverability — post-write edge suggestions
         try:
-            from ohm.server.suggestions import generate_edge_suggestions
+            from ohm.server.suggestions import SUGGESTION_TIMEOUT_S, generate_edge_suggestions
 
+            deadline = time.time() + SUGGESTION_TIMEOUT_S
             edge_suggestions = generate_edge_suggestions(
                 store=self.current_store,
                 from_node=body["from"],
                 to_node=body["to"],
                 edge_type=body.get("type", ""),
                 layer=body.get("layer", "L3"),
+                deadline=deadline,
             )
             if edge_suggestions["related_edges"] or edge_suggestions["edge_patterns"] or edge_suggestions["orphan_resolved"]:
                 result["suggestions"] = edge_suggestions

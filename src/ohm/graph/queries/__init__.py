@@ -3287,6 +3287,7 @@ def generate_embedding(
     text: str,
     model: str = "nomic-embed-text",
     ollama_url: str = "http://localhost:11434",
+    timeout: float | None = None,
 ) -> list[float] | None:
     """Generate an embedding vector using Ollama.
 
@@ -3300,6 +3301,8 @@ def generate_embedding(
         text: Text to embed.
         model: Ollama model name (default: nomic-embed-text, 768 dimensions).
         ollama_url: Ollama API base URL.
+        timeout: Optional request timeout in seconds. Uses the backend default
+            when None.
 
     Returns:
         List of floats (embedding vector) or None on failure.
@@ -3310,7 +3313,7 @@ def generate_embedding(
     from ohm.graph.embeddings import OllamaBackend
 
     backend = OllamaBackend(model=model, ollama_url=ollama_url)
-    embeddings = backend.embed([text])
+    embeddings = backend.embed([text], timeout=timeout)
     if embeddings and any(e != 0.0 for e in embeddings[0]):
         return embeddings[0]
     return None
@@ -3326,6 +3329,7 @@ def semantic_search(
     membership_weight: float | None = None,
     hd_dim: int = 10000,
     hd_seed: int = 42,
+    embedding_timeout: float | None = None,
 ) -> list[dict[str, Any]]:
     """Search nodes by semantic similarity using embedding vectors.
 
@@ -3352,6 +3356,9 @@ def semantic_search(
             results are re-ranked by blended_score descending.
         hd_dim: HD fingerprint dimension (default 10000).
         hd_seed: HD fingerprint seed (default 42).
+        embedding_timeout: Optional timeout for the Ollama embedding call.
+            When None, uses the backend default. Useful for time-budgeted
+            callers such as post-write suggestions.
 
     Returns:
         List of dicts with node_id, label, type, distance, and confidence.
@@ -3362,7 +3369,7 @@ def semantic_search(
     if not query or not query.strip():
         return []
 
-    embedding = generate_embedding(query)
+    embedding = generate_embedding(query, timeout=embedding_timeout)
     if embedding is None:
         raise ValueError("Ollama is not available. Start Ollama with an embedding model (e.g., 'ollama pull nomic-embed-text') to use semantic search.")
 

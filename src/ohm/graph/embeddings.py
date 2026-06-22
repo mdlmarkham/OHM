@@ -114,7 +114,7 @@ class OllamaBackend(EmbeddingBackend):
     def dimensions(self) -> int:
         return 768
 
-    def is_available(self) -> bool:
+    def is_available(self, timeout: float = 5.0) -> bool:
         try:
             import urllib.request
 
@@ -122,14 +122,17 @@ class OllamaBackend(EmbeddingBackend):
                 f"{self._url.rstrip('/')}/api/tags",
                 method="GET",
             )
-            with urllib.request.urlopen(req, timeout=5) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return resp.status == 200
         except Exception:
             return False
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
+    def embed(self, texts: list[str], timeout: float | None = None) -> list[list[float]]:
         if not texts:
             return []
+
+        # Default timeout mirrors the original 3s hardcoded value.
+        request_timeout = timeout if timeout is not None else 3.0
 
         try:
             import json as _json
@@ -147,7 +150,9 @@ class OllamaBackend(EmbeddingBackend):
             # 15s was causing 15s+ POST /node delays when Ollama was
             # unavailable, because the ThreadPoolExecutor cleanup in
             # _post_node waited for the background thread to finish.
-            with urllib.request.urlopen(req, timeout=3) as resp:
+            # OHM-k0bi: timeout is now configurable so the suggestion path
+            # can use a shorter budget without blocking writes.
+            with urllib.request.urlopen(req, timeout=request_timeout) as resp:
                 data = _json.loads(resp.read().decode("utf-8"))
                 embeddings = data.get("embeddings", [])
                 if isinstance(embeddings, list) and len(embeddings) == len(texts):

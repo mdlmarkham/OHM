@@ -31,6 +31,20 @@ MAX_ORPHAN_SUGGESTIONS = 3
 # Performance budget: if suggestions take longer than this, skip them
 SUGGESTION_TIMEOUT_S = 0.5
 
+# Minimum time we need to attempt an embedding call inside the budget.
+_MIN_EMBEDDING_TIME_S = 0.05
+
+
+def _deadline_exceeded(deadline: float | None, margin: float = 0.0) -> bool:
+    """Return True if the suggestion deadline has been exceeded.
+
+    A small margin is reserved so we don't start an expensive operation
+    that is guaranteed to blow the budget.
+    """
+    if deadline is None:
+        return False
+    return time.time() + margin >= deadline
+
 
 def _suggestion_conn(store: Any) -> Any:
     """Return a dedicated read-only DuckDB connection for suggestion work.
@@ -58,6 +72,7 @@ def generate_suggestions(
     tags: list[str] | None = None,
     node_type: str | None = None,
     has_edges: bool = False,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     """Generate post-write suggestions for a newly created node.
 
@@ -69,6 +84,12 @@ def generate_suggestions(
     Suggestions never fail the write. If semantic search is unavailable,
     returns empty lists. This function is defensive — every path returns
     a valid suggestions dict.
+
+    Args:
+        deadline: Optional Unix timestamp after which expensive work
+            (semantic search, island detection) is skipped. Callers running
+            synchronously inside the request path should pass a deadline
+            to keep response latency bounded.
     """
     suggestions: dict[str, Any] = {
         "similar_nodes": [],
@@ -80,15 +101,17 @@ def generate_suggestions(
 
     # ── 1. Similar nodes (semantic search) ────────────────────────────────
     query_text = content or label or ""
-    if query_text.strip():
+    if query_text.strip() and not _deadline_exceeded(deadline, margin=_MIN_EMBEDDING_TIME_S):
         try:
             from ohm.graph.queries import semantic_search
 
+            remaining = max(0.0, (deadline - time.time())) if deadline else None
             similar = semantic_search(
                 conn,
                 query=query_text[:500],  # Limit query length
                 limit=MAX_SIMILAR + 1,  # +1 to exclude self
                 include_l0=False,
+                embedding_timeout=remaining,
             )
             # Exclude the newly created node from its own suggestions
             similar = [s for s in similar if s.get("node_id") != node_id][:MAX_SIMILAR]
@@ -106,9 +129,9 @@ def generate_suggestions(
             logger.debug(f"Semantic search unavailable for suggestions: {e}")
 
     # ── 2. Shared tags ──────────────────────────────────────────────────
-    if tags:
+    if tags and not _deadline_exceeded(deadline):
         try:
-            suggestions["shared_tags"] = _find_shared_tags(conn, node_id, tags)
+            suggestions["shared_tags"] = _find_shared_tags(conn, node_id, tags, deadline=deadline)
         except Exception as e:
             logger.debug(f"Tag overlap query failed: {e}")
 
@@ -117,26 +140,27 @@ def generate_suggestions(
     # This addresses Socrates's key gap: /suggest_connections only finds
     # intra-domain (same-agent) connections, not cross-domain bridges.
     created_by = None
-    try:
-        row = conn.execute(
-            "SELECT created_by FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
-            [node_id],
-        ).fetchone()
-        if row:
-            created_by = row[0]
-    except Exception:
-        pass
-
-    if created_by and tags:
+    if not _deadline_exceeded(deadline):
         try:
-            suggestions["cross_domain"] = _find_cross_domain(conn, node_id, created_by, tags)
+            row = conn.execute(
+                "SELECT created_by FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                [node_id],
+            ).fetchone()
+            if row:
+                created_by = row[0]
+        except Exception:
+            pass
+
+    if created_by and tags and not _deadline_exceeded(deadline):
+        try:
+            suggestions["cross_domain"] = _find_cross_domain(conn, node_id, created_by, tags, deadline=deadline)
         except Exception as e:
             logger.debug(f"Cross-domain suggestion failed: {e}")
 
     # ── 3. Orphan warning ────────────────────────────────────────────────
-    if not has_edges:
+    if not has_edges and not _deadline_exceeded(deadline):
         try:
-            suggestions["orphan_warning"] = _find_orphan_connections(conn, node_id, query_text)
+            suggestions["orphan_warning"] = _find_orphan_connections(conn, node_id, query_text, deadline=deadline)
         except Exception as e:
             logger.debug(f"Orphan suggestion query failed: {e}")
 
@@ -147,12 +171,16 @@ def _find_shared_tags(
     conn: Any,
     node_id: str,
     tags: list[str],
+    deadline: float | None = None,
 ) -> list[dict[str, Any]]:
     """Find nodes that share tags with the newly created node.
 
     Returns top 3 nodes by tag overlap count, excluding self.
     """
     if not tags:
+        return []
+
+    if _deadline_exceeded(deadline):
         return []
 
     # Query nodes with non-empty tags
@@ -192,6 +220,7 @@ def _find_cross_domain(
     node_id: str,
     created_by: str,
     tags: list[str],
+    deadline: float | None = None,
 ) -> list[dict[str, Any]]:
     """Find nodes from OTHER agents that share tags with this node.
 
@@ -201,6 +230,9 @@ def _find_cross_domain(
     because they're more surprising and valuable.
     """
     if not tags or not created_by:
+        return []
+
+    if _deadline_exceeded(deadline):
         return []
 
     # Find nodes NOT created by this agent that share tags
@@ -241,12 +273,16 @@ def _find_orphan_connections(
     conn: Any,
     node_id: str,
     query_text: str,
+    deadline: float | None = None,
 ) -> dict[str, Any] | None:
     """Suggest connections for an orphan node (no edges).
 
     Uses semantic search to find similar orphans, then suggests connecting
     to both similar orphans and similar connected nodes.
     """
+    if _deadline_exceeded(deadline):
+        return None
+
     # Find orphans (nodes with no edges)
     orphans = conn.execute(
         "SELECT n.id, n.label, n.type FROM ohm_nodes n "
@@ -263,15 +299,17 @@ def _find_orphan_connections(
 
     # If we have semantic search available, find semantically similar orphans
     similar_orphans = []
-    if query_text.strip():
+    if query_text.strip() and not _deadline_exceeded(deadline, margin=_MIN_EMBEDDING_TIME_S):
         try:
             from ohm.graph.queries import semantic_search
 
+            remaining = max(0.0, (deadline - time.time())) if deadline else None
             results = semantic_search(
                 conn,
                 query=query_text[:500],
                 limit=10,
                 include_l0=False,
+                embedding_timeout=remaining,
             )
             orphan_ids = {o[0] for o in orphans}
             for r in results:
@@ -290,15 +328,17 @@ def _find_orphan_connections(
 
     # Also suggest some connected nodes (not orphans) that are semantically similar
     similar_connected = []
-    if query_text.strip():
+    if query_text.strip() and not _deadline_exceeded(deadline, margin=_MIN_EMBEDDING_TIME_S):
         try:
             from ohm.graph.queries import semantic_search
 
+            remaining = max(0.0, (deadline - time.time())) if deadline else None
             results = semantic_search(
                 conn,
                 query=query_text[:500],
                 limit=5,
                 include_l0=False,
+                embedding_timeout=remaining,
             )
             for r in results:
                 rid = r.get("node_id", "")
@@ -328,6 +368,7 @@ def generate_edge_suggestions(
     to_node: str,
     edge_type: str,
     layer: str = "L3",
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     """Generate post-write suggestions for a newly created edge.
 
@@ -343,6 +384,9 @@ def generate_edge_suggestions(
         "edge_patterns": [],
         "orphan_resolved": False,
     }
+
+    if _deadline_exceeded(deadline):
+        return suggestions
 
     # ── 1. Related edges — what else connects to/from these nodes? ─────────
     conn = _suggestion_conn(store)
@@ -414,6 +458,7 @@ def generate_connectivity_nudge(
     store: Any,
     agent: str,
     threshold: float = 1.5,
+    deadline: float | None = None,
 ) -> dict[str, Any] | None:
     """Generate a connectivity nudge for agents with low edges-per-node.
 
@@ -423,7 +468,7 @@ def generate_connectivity_nudge(
 
     Returns None if no nudge is needed (agent is well-connected or unknown).
     """
-    if not agent:
+    if not agent or _deadline_exceeded(deadline):
         return None
 
     conn = _suggestion_conn(store)
@@ -473,6 +518,7 @@ def generate_island_nudge(
     agent: str,
     min_island_size: int = 20,
     min_cross_domain_edges: int = 2,
+    deadline: float | None = None,
 ) -> dict[str, Any] | None:
     """Generate an island isolation warning for agents with large disconnected domains.
 
@@ -485,7 +531,7 @@ def generate_island_nudge(
 
     Returns None if no nudge is needed.
     """
-    if not agent:
+    if not agent or _deadline_exceeded(deadline):
         return None
 
     conn = _suggestion_conn(store)
@@ -497,6 +543,10 @@ def generate_island_nudge(
     cached = _island_nudge_cache.get(agent)
     if cached and (now - cached[0]) < _ISLAND_CACHE_TTL:
         return cached[1]
+
+    if _deadline_exceeded(deadline):
+        _island_nudge_cache[agent] = (now, None)
+        return None
 
     try:
         island_data = find_islands(
