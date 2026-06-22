@@ -242,5 +242,144 @@ class TestBedrockConfiguration:
                 )
                 assert store._s3_reference_mode is True
 
-    def test_local_inner_means_no_s3_reference(self, bedrock_store):
-        assert bedrock_store._s3_reference_mode is False
+class TestBedrockMetadataAndRetrieval:
+    def test_save_propagates_metadata_to_direct_upload(self, bedrock_store, mock_agent_client):
+        document_id = f"doc-{uuid.uuid4().hex[:12]}"
+        metadata = {
+            "ohm_provenance": "document-library",
+            "ohm_tags": ["ai", "agents"],
+            "custom_number": 42,
+            "custom_bool": True,
+        }
+        bedrock_store.save(
+            document_id=document_id,
+            filename="meta.txt",
+            content_bytes=b"metadata test",
+            content_type="text/plain",
+            metadata=metadata,
+        )
+
+        mock_agent_client.ingest_knowledge_base_documents.assert_called_once()
+        docs = mock_agent_client.ingest_knowledge_base_documents.call_args.kwargs["documents"]
+        attrs = {a["key"]: a["value"] for a in docs[0]["metadata"]["inlineAttributes"]}
+
+        assert attrs["ohm_document_id"]["type"] == "STRING"
+        assert attrs["ohm_document_id"]["stringValue"] == document_id
+        assert attrs["ohm_tags"]["type"] == "STRING_LIST"
+        assert attrs["ohm_tags"]["stringListValue"] == ["ai", "agents"]
+        assert attrs["custom_number"]["type"] == "NUMBER"
+        assert attrs["custom_number"]["numberValue"] == 42.0
+        assert attrs["custom_bool"]["type"] == "BOOLEAN"
+        assert attrs["custom_bool"]["booleanValue"] is True
+
+    def test_sync_existing_document(self, bedrock_store, mock_agent_client):
+        document_id = f"doc-{uuid.uuid4().hex[:12]}"
+        bedrock_store.inner.save(
+            document_id=document_id,
+            filename="existing.txt",
+            content_bytes=b"existing content",
+            content_type="text/plain",
+        )
+        bedrock_store.inner.update_metadata(document_id, source_node_id="src-789", tags=["tag1"])
+        mock_agent_client.reset_mock()
+
+        result = bedrock_store.sync_existing_document(document_id)
+
+        assert result["document_id"] == document_id
+        assert result["bedrock_sync_status"] == "synced"
+        mock_agent_client.ingest_knowledge_base_documents.assert_called_once()
+        docs = mock_agent_client.ingest_knowledge_base_documents.call_args.kwargs["documents"]
+        attrs = {a["key"]: a["value"] for a in docs[0]["metadata"]["inlineAttributes"]}
+        assert attrs["ohm_source_node_id"]["stringValue"] == "src-789"
+        assert attrs["ohm_tags"]["stringListValue"] == ["tag1"]
+
+    def test_retrieve(self, bedrock_store, mock_agent_client):
+        mock_agent_client.retrieve.return_value = {
+            "retrievalResults": [
+                {"content": {"text": "chunk 1"}, "score": 0.95},
+                {"content": {"text": "chunk 2"}, "score": 0.87},
+            ]
+        }
+        results = bedrock_store.retrieve("agent systems", number_of_results=3)
+
+        assert len(results) == 2
+        mock_agent_client.retrieve.assert_called_once_with(
+            knowledgeBaseId="test-kb-id",
+            retrievalQuery={"text": "agent systems", "type": "TEXT"},
+            retrievalConfiguration={
+                "vectorSearchConfiguration": {"numberOfResults": 3}
+            },
+        )
+
+    def test_retrieve_with_filter(self, bedrock_store, mock_agent_client):
+        mock_agent_client.retrieve.return_value = {"retrievalResults": []}
+        filters = {"equals": {"key": "ohm_tags", "value": "ai"}}
+        bedrock_store.retrieve("agents", filters=filters)
+
+        call = mock_agent_client.retrieve.call_args
+        assert call.kwargs["retrievalConfiguration"]["vectorSearchConfiguration"]["filter"] == filters
+
+    def test_retrieve_and_generate(self, bedrock_store, mock_agent_client):
+        mock_agent_client.retrieve_and_generate.return_value = {
+            "output": {"text": "agents are systems that act"},
+            "citations": [],
+        }
+        result = bedrock_store.retrieve_and_generate(
+            "what is an agent?",
+            model_arn="arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-sonnet",
+            number_of_results=5,
+        )
+
+        assert result["output"]["text"] == "agents are systems that act"
+        call = mock_agent_client.retrieve_and_generate.call_args
+        assert call.kwargs["input"] == {"text": "what is an agent?", "type": "TEXT"}
+        kb_config = call.kwargs["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"]
+        assert kb_config["knowledgeBaseId"] == "test-kb-id"
+        assert kb_config["modelArn"] == "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-sonnet"
+        assert kb_config["retrievalConfiguration"]["vectorSearchConfiguration"]["numberOfResults"] == 5
+
+    def test_get_ingestion_status_requires_data_source_id(self, bedrock_store):
+        with pytest.raises(RuntimeError, match="OHM_BEDROCK_DATA_SOURCE_ID"):
+            bedrock_store.get_ingestion_status("job-123")
+
+    def test_s3_reference_start_ingestion_job(self, monkeypatch, bedrock_env, mock_agent_client):
+        monkeypatch.setenv("OHM_S3_BUCKET", "ohm-test-bucket")
+        monkeypatch.setenv("OHM_BEDROCK_DATA_SOURCE_ID", "ds-123")
+        moto = pytest.importorskip("moto")
+
+        with moto.mock_aws():
+            s3_store = S3DocumentStore()
+            s3_store.client.create_bucket(Bucket="ohm-test-bucket")
+
+            store = BedrockKnowledgeStore(
+                inner_store=s3_store,
+                knowledge_base_id="test-kb-id",
+                data_source_id="ds-123",
+                region="us-east-1",
+            )
+            store._agent_client = mock_agent_client
+            store._bedrock_agent_client.start_ingestion_job.return_value = {
+                "ingestionJobId": "job-abc",
+                "status": "STARTED",
+            }
+
+            record = store.save(
+                document_id="doc-123",
+                filename="s3.txt",
+                content_bytes=b"s3 content",
+                content_type="text/plain",
+            )
+
+            assert record["bedrock_sync_status"] == "synced"
+            store._bedrock_agent_client.start_ingestion_job.assert_called_once_with(
+                knowledgeBaseId="test-kb-id",
+                dataSourceId="ds-123",
+            )
+
+
+class TestBedrockDefaultInnerStoreAvoidsRecursion:
+    def test_bedrock_document_store_env_defaults_to_local(self, monkeypatch, tmp_path, mock_agent_client):
+        monkeypatch.setenv("OHM_DOCUMENT_STORE", "bedrock")
+        monkeypatch.setenv("OHM_BEDROCK_KB_ID", "test-kb-id")
+        store = BedrockKnowledgeStore(knowledge_base_id="test-kb-id")
+        assert isinstance(store.inner, LocalDocumentStore)

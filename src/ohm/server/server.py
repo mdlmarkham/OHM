@@ -2168,6 +2168,8 @@ OhmHandler._POST_EXACT = {
     "/vault/promote": "_post_vault_promote",
     "/sync": "_post_sync",
     "/documents/upload": "_post_documents_upload",
+    "/documents/bedrock/retrieve": "_post_document_bedrock_retrieve",
+    "/documents/bedrock/retrieve-and-generate": "_post_document_bedrock_retrieve_and_generate",
     "/tasks": "_post_task",
     "/deduplicate": "_post_deduplicate",
     "/admin/checkpoint": "_post_admin_checkpoint",
@@ -2201,6 +2203,7 @@ OhmHandler._POST_PREFIXES = [
     ("/node/verify/", "_post_node_verify"),
     ("/edge/sign/", "_post_edge_sign"),
     ("/edge/verify/", "_post_edge_verify"),
+    ("/documents/", "_post_document_sync_to_bedrock"),
 ]
 
 OhmHandler._GET_EXACT = {

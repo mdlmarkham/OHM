@@ -18,7 +18,7 @@ from typing import Any
 from ohm.documents.extract import extract_text
 from ohm.documents.ingest import ingest_file
 from ohm.documents.store import BedrockKnowledgeStore, DocumentStore, LocalDocumentStore, S3DocumentStore
-from ohm.exceptions import ValidationError
+from ohm.exceptions import NodeNotFoundError, ValidationError
 
 
 SUPPORTED_CONTENT_TYPES = {
@@ -99,6 +99,84 @@ class DocumentHandlerMixin:
             return LocalDocumentStore()
         store_root = Path(str(self.current_store.db_path)).parent / "documents"
         return LocalDocumentStore(str(store_root))
+
+    def _bedrock_store(self) -> BedrockKnowledgeStore:
+        """Return a BedrockKnowledgeStore, wrapping the current inner store if possible.
+
+        If the configured document store is already a BedrockKnowledgeStore,
+        use it directly. Otherwise wrap the default inner store so that
+        explicit sync/retrieve endpoints still work even when the default
+        backend is local or s3.
+        """
+        store = self._document_store()
+        if isinstance(store, BedrockKnowledgeStore):
+            return store
+        return BedrockKnowledgeStore(inner_store=store)
+
+    def _post_document_sync_to_bedrock(self, path: str, qs: dict, body: Any, agent: str) -> None:
+        """POST /documents/{id}/sync-to-bedrock — sync an existing document to Bedrock.
+
+        Useful when Bedrock is enabled after documents already exist, or
+        when an earlier automatic sync failed.
+        """
+        document_id = self._extract_document_id(path, suffix="sync-to-bedrock")
+        if document_id is None:
+            self._json_response(404, {"error": f"Unknown document action: {path}"})
+            return
+
+        store = self._bedrock_store()
+        if not store.inner.exists(document_id):
+            raise NodeNotFoundError(f"Document {document_id} not found")
+
+        result = store.sync_existing_document(document_id)
+        self._json_response(200, result)
+
+    def _post_document_bedrock_retrieve(self, path: str, qs: dict, body: Any, agent: str) -> None:
+        """POST /documents/bedrock/retrieve — query the Bedrock Knowledge Base."""
+        query = body.get("query") if isinstance(body, dict) else None
+        if not query or not isinstance(query, str):
+            raise ValidationError("JSON body requires a 'query' string field")
+
+        number_of_results = body.get("number_of_results", 5)
+        filters = body.get("filters")
+        store = self._bedrock_store()
+        results = store.retrieve(
+            query=query,
+            number_of_results=number_of_results,
+            filters=filters,
+        )
+        self._json_response(200, {"results": results, "knowledge_base_id": store.knowledge_base_id})
+
+    def _post_document_bedrock_retrieve_and_generate(self, path: str, qs: dict, body: Any, agent: str) -> None:
+        """POST /documents/bedrock/retrieve-and-generate — RAG response from Bedrock."""
+        query = body.get("query") if isinstance(body, dict) else None
+        if not query or not isinstance(query, str):
+            raise ValidationError("JSON body requires a 'query' string field")
+
+        number_of_results = body.get("number_of_results", 5)
+        model_arn = body.get("model_arn")
+        filters = body.get("filters")
+        store = self._bedrock_store()
+        result = store.retrieve_and_generate(
+            query=query,
+            model_arn=model_arn,
+            number_of_results=number_of_results,
+            filters=filters,
+        )
+        self._json_response(200, {**result, "knowledge_base_id": store.knowledge_base_id})
+
+    @staticmethod
+    def _extract_document_id(path: str, suffix: str) -> str | None:
+        """Parse ``/documents/{document_id}/{suffix}`` and return the id."""
+        prefix = "/documents/"
+        if not path.startswith(prefix):
+            return None
+        remainder = path[len(prefix):]
+        expected_suffix = f"/{suffix}"
+        if not remainder.endswith(expected_suffix):
+            return None
+        document_id = remainder[: -len(expected_suffix)]
+        return document_id if document_id else None
 
     def _parse_multipart_upload(self, raw_body: Any) -> tuple[str, bytes, str | None]:
         """Parse a multipart/form-data body using the stdlib email parser.

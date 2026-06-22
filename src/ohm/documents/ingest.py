@@ -44,11 +44,23 @@ def ingest_file(
     """
     document_id = f"doc-{uuid.uuid4().hex[:12]}"
 
+    metadata = {
+        "ohm_document_id": document_id,
+        "ohm_filename": filename,
+        "ohm_content_type": content_type,
+        "ohm_provenance": provenance,
+    }
+    if tags:
+        metadata["ohm_tags"] = tags
+    if source_url:
+        metadata["ohm_source_url"] = source_url
+
     stored = store.save(
         document_id=document_id,
         filename=filename,
         content_bytes=content_bytes,
         content_type=content_type,
+        metadata=metadata,
     )
 
     text = extract_text(content_bytes, content_type, filename=filename)
