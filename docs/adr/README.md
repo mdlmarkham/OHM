@@ -617,3 +617,27 @@ ADR-003 enforces write boundaries but has no read-side equivalent — every agen
 - Soft-delete contract now consistent across all query paths
 - Temporal pinning is `created_at`-only, not MVCC — updated values after `as_of` are visible
 - See [full ADR](0037-read-scopes-temporal-pinning.md)
+
+---
+
+## ADR-039: Bedrock Knowledge Store — Write-Through Wrapper for Managed Embeddings
+
+**Date:** 2026-06-21
+**Status:** Accepted
+
+### Context
+
+OHM's document library has `LocalDocumentStore` and `S3DocumentStore` backends. AWS Bedrock Knowledge Bases provide managed embeddings and agentic RAG, but Bedrock KB is a retrieval service, not a raw document store — `get`/`exists` semantics don't map. OHM still needs raw bytes for its own ingestion pipeline.
+
+### Decision
+
+`BedrockKnowledgeStore` is a write-through wrapper (not standalone): wraps an inner `DocumentStore`, delegates all reads to it, syncs to Bedrock KB on `save()`. Two sync strategies: S3 reference mode (trigger ingestion job on configured S3 data source) and direct upload mode (`IngestKnowledgeBaseDocuments` API). Bedrock sync failure does not block document persistence (graceful degradation). Selected via `OHM_DOCUMENT_STORE=bedrock`. New `aws` optional dependency group (`boto3>=1.34.0`). `OHM_BEDROCK_KB_ID` required. `bedrock` config section added to `DEFAULT_CONFIG`.
+
+### Consequences
+
+- Managed embeddings without maintaining a vector index
+- S3 reference mode avoids double-upload
+- Graceful degradation: local persistence succeeds even if Bedrock sync fails
+- `boto3` imported lazily — zero overhead for non-AWS deployments
+- Fire-and-forget sync means eventual consistency between local store and KB
+- See [full ADR](0039-bedrock-knowledge-store.md)

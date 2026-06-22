@@ -22,6 +22,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+aws = [
+    "boto3>=1.34.0",
+]
 bayesian = [
     "pgmpy>=0.9",
     "networkx>=3.0",

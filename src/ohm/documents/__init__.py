@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from ohm.documents.extract import extract_text
 from ohm.documents.ingest import ingest_file
-from ohm.documents.store import DocumentStore, LocalDocumentStore, S3DocumentStore
+from ohm.documents.store import BedrockKnowledgeStore, DocumentStore, LocalDocumentStore, S3DocumentStore
 
 __all__ = [
+    "BedrockKnowledgeStore",
     "DocumentStore",
     "extract_text",
     "ingest_file",

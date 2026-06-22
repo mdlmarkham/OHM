@@ -65,6 +65,11 @@ DEFAULT_CONFIG = {
         "data_path": "",  # Parquet data path (e.g., /var/lib/ohm/ohm_lake_data)
         "sync_interval_seconds": 60,  # How often to sync to DuckLake
     },
+    "bedrock": {
+        "knowledge_base_id": "",  # OHM_BEDROCK_KB_ID env var
+        "data_source_id": "",     # OHM_BEDROCK_DATA_SOURCE_ID env var
+        "region": "us-east-1",    # AWS_REGION / OHM_BEDROCK_REGION
+    },
 }
 
 _START_TIME = time.time()

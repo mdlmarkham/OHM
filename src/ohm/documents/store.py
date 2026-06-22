@@ -1,7 +1,7 @@
 """Document storage backends for the OHM document library.
 
-Provides a simple abstract base class plus a local-filesystem implementation.
-S3 support is stubbed for future expansion.
+Provides a simple abstract base class plus local-filesystem, S3, and
+AWS Bedrock Knowledge Base implementations.
 """
 
 from __future__ import annotations
@@ -294,6 +294,180 @@ class S3DocumentStore(DocumentStore):
         self.client.delete_objects(
             Bucket=self.bucket,
             Delete={"Objects": [{"Key": k} for k in keys_to_delete]},
+        )
+
+    @staticmethod
+    def _guess_extension(content_type: str) -> str | None:
+        mapping = {
+            "application/pdf": "pdf",
+            "text/plain": "txt",
+            "text/markdown": "md",
+            "text/html": "html",
+        }
+        return mapping.get(content_type.lower().split(";")[0].strip())
+
+
+class BedrockKnowledgeStore(DocumentStore):
+    """Write-through wrapper that syncs OHM documents to an AWS Bedrock Knowledge Base.
+
+    Wraps an inner ``DocumentStore`` (Local or S3) for raw byte persistence.
+    On ``save()`` the document is stored via the inner store AND pushed to a
+    Bedrock Knowledge Base for managed embeddings and agentic RAG.
+
+    Two sync strategies:
+
+    1. **S3 reference** — when the inner store is ``S3DocumentStore`` the
+       Bedrock KB can use an S3 data source pointing at the same bucket/prefix.
+       In this mode ``save()`` only triggers an ingestion job on the data source
+       (the S3 → Bedrock sync is handled by the data source configuration).
+    2. **Direct upload** — when the inner store is ``LocalDocumentStore`` (or
+       any non-S3 store), ``save()`` calls
+       ``bedrock-agent-runtime:IngestKnowledgeBaseDocuments`` to push the
+       document content directly.
+
+    Configuration (environment variables):
+
+    - ``OHM_BEDROCK_KB_ID`` — Bedrock Knowledge Base ID (required)
+    - ``OHM_BEDROCK_REGION`` / ``AWS_REGION`` / ``AWS_DEFAULT_REGION`` —
+      region (default: us-east-1)
+    - ``OHM_BEDROCK_DATA_SOURCE_ID`` — data source ID inside the KB
+      (required for S3 reference mode; optional for direct upload)
+    """
+
+    def __init__(
+        self,
+        inner_store: DocumentStore | None = None,
+        knowledge_base_id: str | None = None,
+        data_source_id: str | None = None,
+        region: str | None = None,
+    ) -> None:
+        import boto3
+
+        self.inner = inner_store or self._default_inner_store()
+
+        self.knowledge_base_id = (
+            knowledge_base_id
+            or os.environ.get("OHM_BEDROCK_KB_ID")
+        )
+        if not self.knowledge_base_id:
+            raise RuntimeError(
+                "BedrockKnowledgeStore requires OHM_BEDROCK_KB_ID environment variable"
+            )
+
+        self.data_source_id = (
+            data_source_id
+            or os.environ.get("OHM_BEDROCK_DATA_SOURCE_ID")
+        )
+
+        self.region = (
+            region
+            or os.environ.get("OHM_BEDROCK_REGION")
+            or os.environ.get("AWS_REGION")
+            or os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+        )
+
+        self._s3_reference_mode = isinstance(self.inner, S3DocumentStore)
+
+        session = boto3.Session()
+        self._agent_client = session.client(
+            "bedrock-agent-runtime",
+            region_name=self.region,
+        )
+
+    @staticmethod
+    def _default_inner_store() -> DocumentStore:
+        backend = os.environ.get("OHM_DOCUMENT_STORE", "local").lower()
+        if backend == "s3":
+            return S3DocumentStore()
+        return LocalDocumentStore()
+
+    def save(
+        self,
+        document_id: str,
+        filename: str,
+        content_bytes: bytes,
+        content_type: str,
+    ) -> dict[str, Any]:
+        record = self.inner.save(document_id, filename, content_bytes, content_type)
+        try:
+            self._sync_to_bedrock(document_id, filename, content_bytes, content_type)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Bedrock KB sync failed for %s: %s", document_id, exc
+            )
+            record["bedrock_sync_status"] = "failed"
+            record["bedrock_sync_error"] = str(exc)
+        else:
+            record["bedrock_sync_status"] = "synced"
+            record["bedrock_kb_id"] = self.knowledge_base_id
+        return record
+
+    def get(self, document_id: str) -> bytes:
+        return self.inner.get(document_id)
+
+    def exists(self, document_id: str) -> bool:
+        return self.inner.exists(document_id)
+
+    def get_record(self, document_id: str) -> dict[str, Any]:
+        return self.inner.get_record(document_id)
+
+    def update_metadata(self, document_id: str, **kwargs: Any) -> dict[str, Any]:
+        return self.inner.update_metadata(document_id, **kwargs)
+
+    def delete(self, document_id: str) -> None:
+        self.inner.delete(document_id)
+
+    def _sync_to_bedrock(
+        self,
+        document_id: str,
+        filename: str,
+        content_bytes: bytes,
+        content_type: str,
+    ) -> None:
+        if self._s3_reference_mode and self.data_source_id:
+            self._sync_s3_reference(document_id)
+        else:
+            self._sync_direct_upload(document_id, filename, content_bytes, content_type)
+
+    def _sync_s3_reference(self, document_id: str) -> None:
+        import boto3
+
+        client = boto3.client("bedrock-agent", region_name=self.region)
+        client.start_ingestion_job(
+            knowledgeBaseId=self.knowledge_base_id,
+            dataSourceId=self.data_source_id,
+        )
+
+    def _sync_direct_upload(
+        self,
+        document_id: str,
+        filename: str,
+        content_bytes: bytes,
+        content_type: str,
+    ) -> None:
+        self._agent_client.ingest_knowledge_base_documents(
+            knowledgeBaseId=self.knowledge_base_id,
+            documents=[
+                {
+                    "content": {
+                        "type": "CUSTOM",
+                        "custom": {
+                            "customDocumentIdentifier": {
+                                "id": document_id,
+                            },
+                            "sourceType": "IN_LINE",
+                            "inlineContent": {
+                                "type": "TEXT",
+                                "textContent": {
+                                    "data": content_bytes.decode("utf-8", errors="replace"),
+                                    "mimeType": content_type,
+                                },
+                            },
+                        },
+                    },
+                },
+            ],
         )
 
     @staticmethod
