@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import time
 
+from ohm.server import suggestions as _suggestions_module
+
 logger = logging.getLogger(__name__)
 
 from ohm.framework.exceptions import NodeNotFoundError, AuthenticationError
@@ -1075,17 +1077,10 @@ class GraphHandlerMixin:
         # caused intermittent segfaults during full-suite test runs (OHM-k0bi). A fresh
         # read-only suggestion connection is opened per suggestion call and the deadline keeps
         # the response bounded.
-        if result.get("created", True):
-            from ohm.server.suggestions import (
-                SUGGESTION_TIMEOUT_S,
-                generate_suggestions,
-                generate_connectivity_nudge,
-                generate_island_nudge,
-            )
-
-            deadline = time.time() + SUGGESTION_TIMEOUT_S
+        if result.get("created", True) and _suggestions_module._suggestions_enabled():
+            deadline = time.time() + _suggestions_module.SUGGESTION_TIMEOUT_S
             try:
-                suggestions = generate_suggestions(
+                sugg = _suggestions_module.generate_suggestions(
                     store=self.current_store,
                     node_id=result.get("id", ""),
                     content=body.get("content"),
@@ -1094,14 +1089,15 @@ class GraphHandlerMixin:
                     node_type=body.get("type"),
                     has_edges=bool(body.get("connects_to")),
                     deadline=deadline,
+                    use_store_conn=True,
                 )
-                nudge = generate_connectivity_nudge(
+                nudge = _suggestions_module.generate_connectivity_nudge(
                     self.current_store, agent, deadline=deadline
                 )
-                island = generate_island_nudge(
+                island = _suggestions_module.generate_island_nudge(
                     self.current_store, agent, deadline=deadline
                 )
-                result["suggestions"] = suggestions
+                result["suggestions"] = sugg
                 if nudge:
                     result["connectivity_warning"] = nudge["connectivity_warning"]
                 if island:
@@ -1197,20 +1193,20 @@ class GraphHandlerMixin:
             node["hook_decorations"] = decorations
 
         # ADR-021: Proactive discoverability — suggestions for scratch
-        from ohm.server.suggestions import SUGGESTION_TIMEOUT_S, generate_suggestions
-
-        deadline = time.time() + SUGGESTION_TIMEOUT_S
-        suggestions = generate_suggestions(
-            store=self.current_store,
-            node_id=node.get("id", ""),
-            content=content,
-            label=node.get("label"),
-            tags=body.get("tags"),
-            node_type="fragment",
-            has_edges=bool(body.get("connects_to")),
-            deadline=deadline,
-        )
-        node["suggestions"] = suggestions
+        if _suggestions_module._suggestions_enabled():
+            deadline = time.time() + _suggestions_module.SUGGESTION_TIMEOUT_S
+            sugg = _suggestions_module.generate_suggestions(
+                store=self.current_store,
+                node_id=node.get("id", ""),
+                content=content,
+                label=node.get("label"),
+                tags=body.get("tags"),
+                node_type="fragment",
+                has_edges=bool(body.get("connects_to")),
+                deadline=deadline,
+                use_store_conn=True,
+            )
+            node["suggestions"] = sugg
 
         self._json_response(201, node)
 
@@ -1470,23 +1466,23 @@ class GraphHandlerMixin:
             logger.debug(f"Relational tag enrichment failed: {e}")
 
         # ADR-021: Proactive discoverability — post-write edge suggestions
-        try:
-            from ohm.server.suggestions import SUGGESTION_TIMEOUT_S, generate_edge_suggestions
-
-            deadline = time.time() + SUGGESTION_TIMEOUT_S
-            edge_suggestions = generate_edge_suggestions(
-                store=self.current_store,
-                from_node=body["from"],
-                to_node=body["to"],
-                edge_type=body.get("type", ""),
-                layer=body.get("layer", "L3"),
-                deadline=deadline,
-            )
-            if edge_suggestions["related_edges"] or edge_suggestions["edge_patterns"] or edge_suggestions["orphan_resolved"]:
-                result["suggestions"] = edge_suggestions
-        except Exception as e:
-            # Suggestions never fail the write
-            logger.debug(f"Edge suggestions failed: {e}")
+        if _suggestions_module._suggestions_enabled():
+            try:
+                deadline = time.time() + _suggestions_module.SUGGESTION_TIMEOUT_S
+                edge_suggestions = _suggestions_module.generate_edge_suggestions(
+                    store=self.current_store,
+                    from_node=body["from"],
+                    to_node=body["to"],
+                    edge_type=body.get("type", ""),
+                    layer=body.get("layer", "L3"),
+                    deadline=deadline,
+                    use_store_conn=True,
+                )
+                if edge_suggestions["related_edges"] or edge_suggestions["edge_patterns"] or edge_suggestions["orphan_resolved"]:
+                    result["suggestions"] = edge_suggestions
+            except Exception as e:
+                # Suggestions never fail the write
+                logger.debug(f"Edge suggestions failed: {e}")
 
         # ADR-022: Include constraint warnings in response (advisory mode)
         if edge_warnings:

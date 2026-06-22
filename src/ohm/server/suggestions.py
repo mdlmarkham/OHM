@@ -34,6 +34,15 @@ SUGGESTION_TIMEOUT_S = 0.5
 # Minimum time we need to attempt an embedding call inside the budget.
 _MIN_EMBEDDING_TIME_S = 0.05
 
+# Feature toggle: set OHM_DISABLE_SUGGESTIONS=1 to skip post-write
+# suggestions entirely. Useful in test suites where the suggestion behavior
+# itself is not under test, because generating suggestions adds ~0.5s to
+# every POST /node /edge /scratch request.
+def _suggestions_enabled() -> bool:
+    import os as _os
+
+    return _os.environ.get("OHM_DISABLE_SUGGESTIONS", "") not in ("1", "true", "yes")
+
 
 def _deadline_exceeded(deadline: float | None, margin: float = 0.0) -> bool:
     """Return True if the suggestion deadline has been exceeded.
@@ -46,16 +55,24 @@ def _deadline_exceeded(deadline: float | None, margin: float = 0.0) -> bool:
     return time.time() + margin >= deadline
 
 
-def _suggestion_conn(store: Any) -> Any:
-    """Return a dedicated read-only DuckDB connection for suggestion work.
+def _suggestion_conn(store: Any, use_store_conn: bool = False) -> Any:
+    """Return a connection for suggestion work.
 
-    The store's main write connection is not thread-safe and may be busy
-    handling the request that spawned the suggestion thread. Opening a
-    fresh read-only connection per suggestion call avoids concurrent use of
-    the same DuckDB connection object, which can segfault or abort.
+    When called synchronously from a request handler thread that already holds
+    the store's write lock, ``use_store_conn=True`` lets us reuse the store's
+    main connection. This avoids the overhead of opening a fresh read-only
+    DuckDB connection for every write request.
+
+    For background/threads contexts, open a dedicated read-only connection per
+    call. The store's main write connection is not thread-safe and may be busy
+    handling the request that spawned the suggestion thread. Opening a fresh
+    read-only connection per suggestion call avoids concurrent use of the same
+    DuckDB connection object, which can segfault or abort (OHM-k0bi).
 
     Falls back to store.conn if a read-only connection cannot be opened.
     """
+    if use_store_conn and hasattr(store, "conn"):
+        return store.conn
     try:
         import duckdb
 
@@ -73,6 +90,7 @@ def generate_suggestions(
     node_type: str | None = None,
     has_edges: bool = False,
     deadline: float | None = None,
+    use_store_conn: bool = False,
 ) -> dict[str, Any]:
     """Generate post-write suggestions for a newly created node.
 
@@ -90,6 +108,10 @@ def generate_suggestions(
             (semantic search, island detection) is skipped. Callers running
             synchronously inside the request path should pass a deadline
             to keep response latency bounded.
+        use_store_conn: When True, reuse the store's main connection
+            instead of opening a fresh read-only DuckDB connection. Safe
+            only when called synchronously from the request thread while
+            holding the store's write lock.
     """
     suggestions: dict[str, Any] = {
         "similar_nodes": [],
@@ -97,7 +119,7 @@ def generate_suggestions(
         "orphan_warning": None,
     }
 
-    conn = _suggestion_conn(store)
+    conn = _suggestion_conn(store, use_store_conn=use_store_conn)
 
     # ── 1. Similar nodes (semantic search) ────────────────────────────────
     query_text = content or label or ""
@@ -136,9 +158,6 @@ def generate_suggestions(
             logger.debug(f"Tag overlap query failed: {e}")
 
     # ── 2b. Cross-domain bridges ──────────────────────────────────────────
-    # Find nodes from OTHER agents that share tags or semantic similarity.
-    # This addresses Socrates's key gap: /suggest_connections only finds
-    # intra-domain (same-agent) connections, not cross-domain bridges.
     created_by = None
     if not _deadline_exceeded(deadline):
         try:
@@ -369,6 +388,7 @@ def generate_edge_suggestions(
     edge_type: str,
     layer: str = "L3",
     deadline: float | None = None,
+    use_store_conn: bool = False,
 ) -> dict[str, Any]:
     """Generate post-write suggestions for a newly created edge.
 
@@ -378,6 +398,10 @@ def generate_edge_suggestions(
         orphan_resolved: True if this edge resolved an orphan warning
 
     Suggestions never fail the write. Every path returns a valid dict.
+
+    Args:
+        use_store_conn: When True, reuse the store's main connection. Safe
+            only when called synchronously while holding the write lock.
     """
     suggestions: dict[str, Any] = {
         "related_edges": [],
@@ -389,7 +413,7 @@ def generate_edge_suggestions(
         return suggestions
 
     # ── 1. Related edges — what else connects to/from these nodes? ─────────
-    conn = _suggestion_conn(store)
+    conn = _suggestion_conn(store, use_store_conn=use_store_conn)
     try:
         # Edges FROM this node
         from_edges = conn.execute(

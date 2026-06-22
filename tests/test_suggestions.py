@@ -10,6 +10,12 @@ import pytest
 from unittest.mock import patch, MagicMock
 
 
+@pytest.fixture(autouse=True)
+def _enable_suggestions(monkeypatch):
+    """Suggestions are disabled by default in tests; re-enable them here."""
+    monkeypatch.delenv("OHM_DISABLE_SUGGESTIONS", raising=False)
+
+
 # ── Unit tests for suggestions module ────────────────────────────────────
 
 

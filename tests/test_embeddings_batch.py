@@ -24,10 +24,13 @@ def _ohmd_running(host: str = "127.0.0.1", port: int = 8710) -> bool:
         return False
 
 
-pytestmark = pytest.mark.skipif(
-    not _ohmd_running(),
-    reason="ohmd not running on 127.0.0.1:8710 — integration test requires a live server",
-)
+pytestmark = [
+    pytest.mark.skipif(
+        not _ohmd_running(),
+        reason="ohmd not running on 127.0.0.1:8710 — integration test requires a live server",
+    ),
+    pytest.mark.slow,  # depends on live Ollama; can take >30s for batches
+]
 
 
 def _request(method, path, token="ohm-test-token"):

@@ -19,6 +19,26 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _disable_suggestions_in_tests():
+    """Disable post-write suggestions by default during the test session.
+
+    Generating suggestions adds ~0.5s to every POST /node /edge /scratch
+    request. Most tests are not exercising suggestion logic, so disabling
+    them dramatically speeds up the suite. Tests that specifically verify
+    suggestions can re-enable them by clearing this env var.
+    """
+    import os as _os
+
+    old = _os.environ.get("OHM_DISABLE_SUGGESTIONS")
+    _os.environ["OHM_DISABLE_SUGGESTIONS"] = "1"
+    yield
+    if old is None:
+        _os.environ.pop("OHM_DISABLE_SUGGESTIONS", None)
+    else:
+        _os.environ["OHM_DISABLE_SUGGESTIONS"] = old
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _cleanup_duckdb_tmp_files():
     """Remove orphaned .tmp- files from the DuckDB extensions directory.
 

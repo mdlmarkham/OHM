@@ -308,7 +308,7 @@ class TestHybridSemanticSearch:
         # Stub generate_embedding to avoid Ollama dependency
         from ohm.graph import queries as queries_mod
 
-        def fake_generate_embedding(text, model="nomic-embed-text", ollama_url="http://localhost:11434"):
+        def fake_generate_embedding(text, model="nomic-embed-text", ollama_url="http://localhost:11434", **kwargs):
             return [0.0] * 768
 
         monkeypatch.setattr(queries_mod, "generate_embedding", fake_generate_embedding)
@@ -329,7 +329,7 @@ class TestHybridSemanticSearch:
 
         from ohm.graph import queries as queries_mod
 
-        def fake_generate_embedding(text, model="nomic-embed-text", ollama_url="http://localhost:11434"):
+        def fake_generate_embedding(text, model="nomic-embed-text", ollama_url="http://localhost:11434", **kwargs):
             return [0.0] * 768
 
         monkeypatch.setattr(queries_mod, "generate_embedding", fake_generate_embedding)
@@ -352,7 +352,7 @@ class TestHybridSemanticSearch:
         from ohm.graph import queries as queries_mod
 
         # Use a non-zero query embedding aligned with the tech embeddings
-        def fake_generate_embedding(text, model="nomic-embed-text", ollama_url="http://localhost:11434"):
+        def fake_generate_embedding(text, model="nomic-embed-text", ollama_url="http://localhost:11434", **kwargs):
             emb = [0.0] * 768
             emb[0] = 0.9
             emb[1] = 0.8
@@ -404,7 +404,7 @@ class TestHybridSemanticSearch:
 
         from ohm.graph import queries as queries_mod
 
-        def fake_generate_embedding(text, model="nomic-embed-text", ollama_url="http://localhost:11434"):
+        def fake_generate_embedding(text, model="nomic-embed-text", ollama_url="http://localhost:11434", **kwargs):
             return [0.0] * 768
 
         monkeypatch.setattr(queries_mod, "generate_embedding", fake_generate_embedding)
@@ -464,7 +464,7 @@ class TestHybridSemanticSearch:
 
         from ohm.graph import queries as queries_mod
 
-        def fake_generate_embedding(text, model="nomic-embed-text", ollama_url="http://localhost:11434"):
+        def fake_generate_embedding(text, model="nomic-embed-text", ollama_url="http://localhost:11434", **kwargs):
             emb = [0.0] * 768
             emb[2] = 1.0
             return emb
@@ -504,7 +504,7 @@ class TestHybridSemanticSearch:
 
         from ohm.graph import queries as queries_mod
 
-        def fake_generate_embedding(text, model="nomic-embed-text", ollama_url="http://localhost:11434"):
+        def fake_generate_embedding(text, model="nomic-embed-text", ollama_url="http://localhost:11434", **kwargs):
             return [0.0] * 768
 
         monkeypatch.setattr(queries_mod, "generate_embedding", fake_generate_embedding)
@@ -607,7 +607,7 @@ class TestManifoldDensityAndGeodesic:
 
         dense_ids, sparse_id = self._seed_density_graph(test_db)
 
-        def fake_generate_embedding(text, model="nomic-embed-text", ollama_url="http://localhost:11434"):
+        def fake_generate_embedding(text, model="nomic-embed-text", ollama_url="http://localhost:11434", **kwargs):
             emb = [0.0] * 768
             emb[0] = 0.9
             emb[1] = 0.8
@@ -627,7 +627,7 @@ class TestManifoldDensityAndGeodesic:
 
         dense_ids, sparse_id = self._seed_density_graph(test_db)
 
-        def fake_generate_embedding(text, model="nomic-embed-text", ollama_url="http://localhost:11434"):
+        def fake_generate_embedding(text, model="nomic-embed-text", ollama_url="http://localhost:11434", **kwargs):
             emb = [0.0] * 768
             emb[0] = 0.9
             emb[1] = 0.8
@@ -652,7 +652,7 @@ class TestManifoldDensityAndGeodesic:
 
         dense_ids, sparse_id = self._seed_density_graph(test_db)
 
-        def fake_generate_embedding(text, model="nomic-embed-text", ollama_url="http://localhost:11434"):
+        def fake_generate_embedding(text, model="nomic-embed-text", ollama_url="http://localhost:11434", **kwargs):
             emb = [0.0] * 768
             emb[0] = 0.9
             emb[1] = 0.8
@@ -686,7 +686,7 @@ class TestManifoldDensityAndGeodesic:
             [emb, n_with["id"]],
         )
 
-        def fake_generate_embedding(text, model="nomic-embed-text", ollama_url="http://localhost:11434"):
+        def fake_generate_embedding(text, model="nomic-embed-text", ollama_url="http://localhost:11434", **kwargs):
             return [0.0] * 768
 
         monkeypatch.setattr(queries_mod, "generate_embedding", fake_generate_embedding)

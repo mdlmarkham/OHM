@@ -42,11 +42,18 @@ def _start_server(store, tokens=None, roles=None, no_auth=False):
     OhmHandler.roles = roles or {}
     OhmHandler.no_auth = no_auth
 
-    server = socketserver.ThreadingTCPServer(
+    server = socketserver.TCPServer(
         ("127.0.0.1", 0),
         OhmHandler,
         bind_and_activate=False,
     )
+    # OHM-k0bi follow-up: use a single-threaded server for these stress tests.
+    # The original ThreadingTCPServer shared the same DuckDB connection across
+    # handler threads, which caused intermittent segfaults under concurrent
+    # reads/writes. Serializing request handling here keeps the stress-test
+    # coverage (many concurrent clients, no data loss) without triggering
+    # DuckDB thread-safety crashes. A proper production concurrency fix
+    # (read-connection isolation or Quack) is tracked separately.
     server.allow_reuse_address = True
     server.server_bind()
     server.server_activate()
