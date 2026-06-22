@@ -81,6 +81,12 @@ def _clear_bayesian_cache():
     bay._bayesian_network_cache.clear()
 
 
+try:
+    import ohm.inference.bayesian  # noqa: F401 — pay pgmpy cold-import penalty once per session
+except Exception:
+    pass
+
+
 def wait_for_port(host: str, port: int, timeout: float = 5.0) -> None:
     """Poll until a TCP port is accepting connections (replaces blind sleep)."""
     import socket
@@ -359,12 +365,6 @@ def _start_test_server(store, tokens=None, roles=None, no_auth=False, schema_con
         OhmHandler.require_read_auth = require_read_auth
 
     _register_builtin_hooks(store)
-
-    # Pre-warm pgmpy imports to avoid 15s cold-import penalty on first request
-    try:
-        import ohm.inference.bayesian  # noqa: F401 — triggers PGMPY_AVAILABLE at module level
-    except Exception:
-        pass
 
     server = socketserver.TCPServer(
         ("127.0.0.1", 0),
