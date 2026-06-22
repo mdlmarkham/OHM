@@ -295,11 +295,7 @@ def _http_conn(port: int):
 # ── S3 stub test ─────────────────────────────────────────────────────────
 
 
-def test_s3_document_store_raises_not_implemented():
-    store = S3DocumentStore()
-    with pytest.raises(NotImplementedError):
-        store.save("doc-1", "x.txt", b"x", "text/plain")
-    with pytest.raises(NotImplementedError):
-        store.get("doc-1")
-    with pytest.raises(NotImplementedError):
-        store.exists("doc-1")
+def test_s3_document_store_requires_bucket_env():
+    """S3DocumentStore now requires bucket configuration; verify helpful error."""
+    with pytest.raises(RuntimeError, match="OHM_S3_BUCKET"):
+        S3DocumentStore()

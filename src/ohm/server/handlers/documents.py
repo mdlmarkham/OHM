@@ -17,7 +17,7 @@ from typing import Any
 
 from ohm.documents.extract import extract_text
 from ohm.documents.ingest import ingest_file
-from ohm.documents.store import LocalDocumentStore
+from ohm.documents.store import DocumentStore, LocalDocumentStore, S3DocumentStore
 from ohm.exceptions import ValidationError
 
 
@@ -82,12 +82,17 @@ class DocumentHandlerMixin:
             },
         )
 
-    def _document_store(self) -> LocalDocumentStore:
-        """Return a LocalDocumentStore instance.
+    def _document_store(self) -> DocumentStore:
+        """Return a DocumentStore instance.
 
-        Uses ``OHM_DOCUMENT_PATH`` env var if available; otherwise a path under
-        the same directory as the OHM database so dev/test stores stay isolated.
+        Uses ``OHM_DOCUMENT_STORE`` env var to pick backend (local or s3).
+        For local storage, uses ``OHM_DOCUMENT_PATH`` if set; otherwise a
+        path under the same directory as the OHM database so dev/test stores
+        stay isolated.
         """
+        backend = os.environ.get("OHM_DOCUMENT_STORE", "local").lower()
+        if backend == "s3":
+            return S3DocumentStore()
         if os.environ.get("OHM_DOCUMENT_PATH"):
             return LocalDocumentStore()
         store_root = Path(str(self.current_store.db_path)).parent / "documents"
