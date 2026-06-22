@@ -3310,6 +3310,12 @@ def generate_embedding(
     if not text or not text.strip():
         return None
 
+    # Test/CI guard: skip slow Ollama network attempts when embeddings are not needed.
+    import os
+
+    if os.environ.get("OHM_DISABLE_EMBEDDINGS") == "1":
+        return None
+
     from ohm.graph.embeddings import OllamaBackend
 
     backend = OllamaBackend(model=model, ollama_url=ollama_url)

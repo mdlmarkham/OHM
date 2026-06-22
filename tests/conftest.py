@@ -39,6 +39,27 @@ def _disable_suggestions_in_tests():
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _disable_embeddings_in_tests():
+    """Skip slow Ollama embedding calls by default during the test session.
+
+    Auto-linking and resonance logic call generate_embedding(), which hits the
+    Ollama API with a multi-second timeout when Ollama is not running. Most tests
+    do not need real embeddings (they either use substring fallback or patch the
+    function). Disabling embeddings avoids ~2-3s per scratch/auto-link call.
+    Tests that specifically exercise live embeddings (slow tests) can clear this.
+    """
+    import os as _os
+
+    old = _os.environ.get("OHM_DISABLE_EMBEDDINGS")
+    _os.environ["OHM_DISABLE_EMBEDDINGS"] = "1"
+    yield
+    if old is None:
+        _os.environ.pop("OHM_DISABLE_EMBEDDINGS", None)
+    else:
+        _os.environ["OHM_DISABLE_EMBEDDINGS"] = old
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _cleanup_duckdb_tmp_files():
     """Remove orphaned .tmp- files from the DuckDB extensions directory.
 
