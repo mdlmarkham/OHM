@@ -158,6 +158,38 @@ class TestGraphRead:
         results = graph.listen(topics=["climate"])
         assert isinstance(results, list)
 
+    # ── OHM-b7l7: changes() personalized delta ──
+
+    def test_changes_returns_dict_with_core_fields(self, graph):
+        """changes() returns a dict with the legacy core fields."""
+        graph.create_node(label="Anchor A", node_type="concept")
+        r = graph.changes()
+        assert isinstance(r, dict)
+        for k in ("since", "agent", "query_timestamp", "node_total", "edge_total", "nodes", "edges"):
+            assert k in r
+        # SDK is always called with an actor → all five agent sections present
+        for k in (
+            "new_observations_on_my_nodes",
+            "edges_touching_my_nodes",
+            "challenges_to_my_edges",
+            "tasks_assigned_or_status_changed",
+            "stale_nodes_needing_refresh",
+        ):
+            assert k in r and isinstance(r[k], list)
+
+    def test_changes_agent_name_matches_actor(self, graph):
+        """changes() uses graph.actor as the agent filter (OHM-b7l7)."""
+        r = graph.changes()
+        assert r["agent"] == graph.actor
+
+    def test_changes_with_since_in_future_returns_empty(self, graph):
+        graph.create_node(label="Anchor", node_type="concept")
+        r = graph.changes(since="3000-01-01T00:00:00")
+        assert r["nodes"] == []
+        assert r["edges"] == []
+        assert r["node_total"] == 0
+        assert r["edge_total"] == 0
+
     def test_agent_state(self, graph):
         graph.set_focus("testing")
         results = graph.agent_state()

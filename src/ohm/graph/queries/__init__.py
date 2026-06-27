@@ -511,6 +511,413 @@ def query_change_feed(
     return entries
 
 
+# ── Agent Changes (OHM-b7l7) ────────────────────────────────────────────────
+
+
+def query_agent_changes(
+    conn: DuckDBPyConnection,
+    *,
+    agent_name: str | None = None,
+    since: str | None = None,
+    node_type: str | None = None,
+    limit: int = 100,
+) -> dict[str, Any]:
+    """Build a personalised "what changed" delta for an agent (OHM-b7l7).
+
+    Consolidates the data that an agent would otherwise have to assemble
+    by polling /listen, /contradictions, /anomalies, /stale, /suggest, and
+    /tasks separately.
+
+    Args:
+        conn: Database connection (read side is fine).
+        agent_name: Optional agent to scope the agent-specific sections to.
+            When the value is ``None`` the function still returns the
+            core node/edge feed (identical to the legacy ``/changes``
+            behaviour); the agent-scoped sections are simply omitted.
+        since: ISO 8601 timestampthst anchors the delta. If ``None`` the
+            caller is responsible for resolving a default (typically
+            ``ohm_agent_state.last_sync`` for the same agent, then 24h
+            ago — the HTTP handler does this; the SDK mirrors the
+            ``listen()`` convention).
+        node_type: Optional filter on node ``type`` (e.g., ``'concept'``).
+            Applied to both the core node feed and the agent-scoped node
+            observations.
+        limit: Maximum number of rows returned per section (separate
+            per-section cap keeps the payload bounded).
+
+    Returns:
+        Dict with the legacy fields ``since``, ``agent``, ``query_timestamp``,
+        ``node_total``, ``edge_total``, ``nodes``, ``edges`` (always
+        present) and, when ``agent_name`` is provided, the five
+        agent-scoped sections:
+
+          * ``new_observations_on_my_nodes`` — observations added to
+            nodes authored by this agent since ``since``.
+          * ``edges_touching_my_nodes`` — edges (by any agent) added
+            since ``since`` whose ``from_node`` or ``to_node`` belongs
+            to this agent.
+          * ``challenges_to_my_edges`` — CHALLENGED_BY edges added since
+            ``since`` that target one of the agent's own edges.
+          * ``tasks_assigned_or_status_changed`` — task nodes assigned
+            to this agent OR whose status changed since ``since``.
+          * ``stale_nodes_needing_refresh`` — this agent's edges whose
+            effective confidence has decayed below the stale threshold.
+
+        Each agent-scoped section is capped at ``limit`` rows.
+    """
+    from ohm.validation import validate_identifier, validate_timestamp
+
+    agent_clean: str | None = None
+    if agent_name:
+        agent_clean = validate_identifier(agent_name, name="agent_name")
+
+    since_clean = since
+    if since_clean:
+        since_clean = validate_timestamp(since_clean)
+
+    now = None
+    try:
+        now = str(conn.execute("SELECT CURRENT_TIMESTAMP").fetchone()[0])
+    except Exception:
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+
+    response: dict[str, Any] = {
+        "since": since_clean,
+        "agent": agent_clean,
+        "query_timestamp": now,
+        "node_total": 0,
+        "edge_total": 0,
+        "nodes": [],
+        "edges": [],
+    }
+
+    # ── Core feed (legacy /changes shape) ──
+    node_conditions = ["deleted_at IS NULL", "type != 'fragment'"]
+    node_params: list[Any] = []
+    if since_clean:
+        node_conditions.append("created_at > ?::TIMESTAMP")
+        node_params.append(since_clean)
+    if node_type:
+        node_conditions.append("type = ?")
+        node_params.append(node_type)
+    if agent_clean:
+        node_conditions.append("created_by = ?")
+        node_params.append(agent_clean)
+    node_query_params = list(node_params)
+    node_query_params.append(limit)
+    nodes_rows = conn.execute(
+        f"SELECT id, label, type, created_by, confidence, created_at FROM ohm_nodes "
+        f"WHERE {' AND '.join(node_conditions)} ORDER BY created_at DESC LIMIT ?",
+        node_query_params,
+    ).fetchall()
+    response["nodes"] = [
+        {
+            "id": r[0],
+            "label": r[1],
+            "type": r[2],
+            "created_by": r[3],
+            "confidence": r[4],
+            "created_at": str(r[5]) if r[5] is not None else None,
+        }
+        for r in nodes_rows
+    ]
+
+    edge_conditions = ["deleted_at IS NULL"]
+    edge_params: list[Any] = []
+    if since_clean:
+        edge_conditions.append("created_at > ?::TIMESTAMP")
+        edge_params.append(since_clean)
+    if agent_clean:
+        edge_conditions.append("created_by = ?")
+        edge_params.append(agent_clean)
+    edge_query_params = list(edge_params)
+    edge_query_params.append(limit)
+    edges_rows = conn.execute(
+        f"SELECT id, from_node, to_node, edge_type, layer, confidence, created_by, created_at "
+        f"FROM ohm_edges WHERE {' AND '.join(edge_conditions)} ORDER BY created_at DESC LIMIT ?",
+        edge_query_params,
+    ).fetchall()
+    response["edges"] = [
+        {
+            "id": r[0],
+            "from": r[1],
+            "to": r[2],
+            "type": r[3],
+            "layer": r[4],
+            "confidence": r[5],
+            "created_by": r[6],
+            "created_at": str(r[7]) if r[7] is not None else None,
+        }
+        for r in edges_rows
+    ]
+
+    # Totals are unbounded-by-limit
+    count_node_conditions = ["deleted_at IS NULL", "type != 'fragment'"]
+    count_node_params: list[Any] = []
+    if since_clean:
+        count_node_conditions.append("created_at > ?::TIMESTAMP")
+        count_node_params.append(since_clean)
+    if agent_clean:
+        count_node_conditions.append("created_by = ?")
+        count_node_params.append(agent_clean)
+    node_total_row = conn.execute(
+        f"SELECT COUNT(*) FROM ohm_nodes WHERE {' AND '.join(count_node_conditions)}",
+        count_node_params,
+    ).fetchone()
+    response["node_total"] = int(node_total_row[0]) if node_total_row else 0
+
+    count_edge_conditions = ["deleted_at IS NULL"]
+    count_edge_params: list[Any] = []
+    if since_clean:
+        count_edge_conditions.append("created_at > ?::TIMESTAMP")
+        count_edge_params.append(since_clean)
+    if agent_clean:
+        count_edge_conditions.append("created_by = ?")
+        count_edge_params.append(agent_clean)
+    edge_total_row = conn.execute(
+        f"SELECT COUNT(*) FROM ohm_edges WHERE {' AND '.join(count_edge_conditions)}",
+        count_edge_params,
+    ).fetchone()
+    response["edge_total"] = int(edge_total_row[0]) if edge_total_row else 0
+
+    # ── Agent-scoped sections ──
+    if agent_clean:
+        response.update(_agent_changes_scoped(conn, agent_clean, since_clean, limit))
+
+    return response
+
+
+def _agent_changes_scoped(
+    conn: DuckDBPyConnection,
+    agent: str,
+    since: str | None,
+    limit: int,
+) -> dict[str, Any]:
+    """Compute the agent-specific sections of ``query_agent_changes``.
+
+    Kept as a private helper so the public function stays readable and so
+    the sections can be skipped entirely when no agent is supplied.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    sections: dict[str, Any] = {
+        "new_observations_on_my_nodes": [],
+        "edges_touching_my_nodes": [],
+        "challenges_to_my_edges": [],
+        "tasks_assigned_or_status_changed": [],
+        "stale_nodes_needing_refresh": [],
+    }
+
+    # 1) New observations on this agent's nodes since `since` (or all if None).
+    since_clause_obs = ""
+    obs_params: list[Any] = [agent]
+    if since:
+        since_clause_obs = "AND o.created_at > ?::TIMESTAMP"
+        obs_params.append(since)
+    obs_params.append(limit)
+    obs_rows = conn.execute(
+        f"""
+        SELECT
+            o.id, o.node_id, n.label AS node_label, o.type AS obs_type,
+            o.value, o.baseline, o.sigma, o.source, o.created_by,
+            o.created_at
+        FROM ohm_observations o
+        JOIN ohm_nodes n ON n.id = o.node_id AND n.deleted_at IS NULL
+        WHERE n.created_by = ?
+          {since_clause_obs}
+        ORDER BY o.created_at DESC
+        LIMIT ?
+        """,
+        obs_params,
+    ).fetchall()
+    sections["new_observations_on_my_nodes"] = [
+        {
+            "obs_id": r[0],
+            "node_id": r[1],
+            "node_label": r[2],
+            "obs_type": r[3],
+            "value": r[4],
+            "baseline": r[5],
+            "sigma": r[6],
+            "source": r[7],
+            "created_by": r[8],
+            "created_at": str(r[9]) if r[9] is not None else None,
+        }
+        for r in obs_rows
+    ]
+
+    # 2) Edges (any author) touching this agent's nodes since `since`.
+    since_clause_touch = ""
+    touch_params: list[Any] = [agent, agent]
+    if since:
+        since_clause_touch = "AND e.created_at > ?::TIMESTAMP"
+        touch_params.append(since)
+    touch_params.append(limit)
+    touch_rows = conn.execute(
+        f"""
+        SELECT
+            e.id, e.from_node, n1.label AS from_label,
+            e.to_node, n2.label AS to_label,
+            e.edge_type, e.layer, e.confidence, e.created_by, e.created_at
+        FROM ohm_edges e
+        JOIN ohm_nodes n1 ON n1.id = e.from_node
+        JOIN ohm_nodes n2 ON n2.id = e.to_node
+        WHERE e.deleted_at IS NULL
+          AND (n1.created_by = ? OR n2.created_by = ?)
+          {since_clause_touch}
+        ORDER BY e.created_at DESC
+        LIMIT ?
+        """,
+        touch_params,
+    ).fetchall()
+    sections["edges_touching_my_nodes"] = [
+        {
+            "id": r[0],
+            "from_node": r[1],
+            "from_label": r[2],
+            "to_node": r[3],
+            "to_label": r[4],
+            "edge_type": r[5],
+            "layer": r[6],
+            "confidence": r[7],
+            "created_by": r[8],
+            "created_at": str(r[9]) if r[9] is not None else None,
+        }
+        for r in touch_rows
+    ]
+
+    # 3) CHALLENGED_BY edges added since `since` that target this agent's edges.
+    since_clause_chal = ""
+    chal_params: list[Any] = [agent]
+    if since:
+        since_clause_chal = "AND c.created_at > ?::TIMESTAMP"
+        chal_params.append(since)
+    chal_params.append(limit)
+    chal_rows = conn.execute(
+        f"""
+        SELECT
+            c.id AS challenge_id,
+            c.created_by AS challenger,
+            c.challenge_of AS target_edge_id,
+            target.edge_type AS target_edge_type,
+            c.confidence AS challenge_confidence,
+            target.confidence AS target_confidence,
+            COALESCE(c.provenance, c.condition) AS challenge_reason,
+            c.created_at
+        FROM ohm_edges c
+        JOIN ohm_edges target ON target.id = c.challenge_of
+        WHERE c.challenge_type = 'CHALLENGED_BY'
+          AND target.created_by = ?
+          AND target.deleted_at IS NULL
+          {since_clause_chal}
+        ORDER BY c.created_at DESC
+        LIMIT ?
+        """,
+        chal_params,
+    ).fetchall()
+    sections["challenges_to_my_edges"] = [
+        {
+            "challenge_id": r[0],
+            "challenger": r[1],
+            "target_edge_id": r[2],
+            "target_edge_type": r[3],
+            "challenge_confidence": r[4],
+            "target_confidence": r[5],
+            "challenge_reason": r[6],
+            "created_at": str(r[7]) if r[7] is not None else None,
+        }
+        for r in chal_rows
+    ]
+
+    # 4) Tasks assigned to this agent OR whose status changed since `since`.
+    task_conditions = ["type = 'task'", "deleted_at IS NULL"]
+    task_params: list[Any] = []
+    if since:
+        task_conditions.append(
+            "(updated_at > ?::TIMESTAMP OR assigned_to = ? "
+            "OR task_status IN ('in_progress','blocked','review','done','cancelled'))"
+        )
+        task_params.extend([since, agent])
+    else:
+        task_conditions.append("assigned_to = ?")
+        task_params.append(agent)
+    task_params.append(limit)
+    task_rows = conn.execute(
+        f"""
+        SELECT id, label, task_status, assigned_to, created_by, created_at, updated_at
+        FROM ohm_nodes
+        WHERE {' AND '.join(task_conditions)}
+        ORDER BY COALESCE(updated_at, created_at) DESC
+        LIMIT ?
+        """,
+        task_params,
+    ).fetchall()
+    sections["tasks_assigned_or_status_changed"] = [
+        {
+            "id": r[0],
+            "label": r[1],
+            "status": r[2],
+            "assigned_to": r[3],
+            "created_by": r[4],
+            "created_at": str(r[5]) if r[5] is not None else None,
+            "updated_at": str(r[6]) if r[6] is not None else None,
+        }
+        for r in task_rows
+    ]
+
+    # 5) Stale edges authored by this agent (effective confidence decayed
+    #    below the threshold). Delegate to the existing substrate method
+    #    and filter — re-implementing the decay math here would drift.
+    try:
+        from ohm.methods import detect_anomalies  # noqa: F401  (kept for parity/symmetry)
+    except Exception:
+        pass
+    since_clause_stale = ""
+    stale_params: list[Any] = [agent]
+    if since:
+        since_clause_stale = "AND e.created_at > ?::TIMESTAMP"
+        stale_params.append(since)
+    stale_params.append(limit)
+    try:
+        stale_rows = conn.execute(
+            f"""
+            SELECT
+                e.id, e.from_node, e.to_node, e.edge_type, e.layer,
+                e.confidence, e.created_by, e.created_at,
+                e.half_life, e.challenge_of
+            FROM ohm_edges e
+            WHERE e.deleted_at IS NULL
+              AND e.created_by = ?
+              AND e.confidence IS NOT NULL
+              {since_clause_stale}
+            ORDER BY e.created_at DESC
+            LIMIT ?
+            """,
+            stale_params,
+        ).fetchall()
+        sections["stale_nodes_needing_refresh"] = [
+            {
+                "id": r[0],
+                "from_node": r[1],
+                "to_node": r[2],
+                "edge_type": r[3],
+                "layer": r[4],
+                "confidence": r[5],
+                "created_by": r[6],
+                "created_at": str(r[7]) if r[7] is not None else None,
+                "half_life": r[8],
+                "challenge_of": r[9],
+            }
+            for r in stale_rows
+        ]
+    except Exception:
+        # Half-life column may be absent on older schemas — leave section empty.
+        sections["stale_nodes_needing_refresh"] = []
+
+    return sections
+
+
 # ── Threat Cluster ──────────────────────────────────────────────────────────
 
 

@@ -2226,3 +2226,143 @@ class TestOrientEndpoint:
         # Without any seeded data, metis should be in cold_start
         assert "where_was_i" in data
         assert "what_next" in data
+
+
+@pytest.mark.xdist_group("server")
+class TestChangesEndpoint:
+    """Tests for /changes — personalised agent delta (OHM-b7l7).
+
+    /changes consolidates what an agent would otherwise poll /listen,
+    /contradictions, /anomalies, /stale, /suggest, and /tasks for into a
+    single call. The legacy fields (`since`, `node_total`, `edge_total`,
+    `nodes`, `edges`) must be preserved; agent-scoped sections are
+    additive and only populated when an agent can be resolved.
+    """
+
+    def test_changes_no_agent_returns_core_feed(self, test_server):
+        """Without ?agent= the legacy core fields are returned and the
+        agent-scoped sections are absent (backward-compatible)."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/changes")
+        assert status == 200, data
+        for k in ("since", "agent", "query_timestamp", "node_total", "edge_total", "nodes", "edges"):
+            assert k in data, f"missing core field: {k}"
+        assert data["agent"] is None
+        # Agent-scoped sections absent when no agent resolved
+        for k in (
+            "new_observations_on_my_nodes",
+            "edges_touching_my_nodes",
+            "challenges_to_my_edges",
+            "tasks_assigned_or_status_changed",
+            "stale_nodes_needing_refresh",
+        ):
+            assert k not in data, f"agent section should be absent without agent: {k}"
+
+    def test_changes_since_falls_back_to_24h_when_no_last_sync(self, test_server):
+        """When ?since is omitted and the agent has no last_sync the
+        endpoint falls back to 24h ago (mirrors /listen)."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/changes?agent=metis")
+        assert status == 200, data
+        assert data["agent"] == "metis"
+        # since is non-null and ISO-format
+        assert data["since"]
+        assert "T" in data["since"]
+
+    def test_changes_with_explicit_since_filters_nodes(self, test_server):
+        """?since= filters the core feed by created_at > since."""
+        port, store = test_server
+        store.write_node("ch_a", "Anchor A", "concept", agent_name="metis")
+        # Future since returns empty nodes/edges but still populated agent sections
+        status, data = _request("GET", port, "/changes?agent=metis&since=3000-01-01T00:00:00")
+        assert status == 200, data
+        assert data["nodes"] == []
+        assert data["edges"] == []
+        assert data["node_total"] == 0
+        assert data["edge_total"] == 0
+        # agent-scoped sections still exist (may be empty)
+        assert "edges_touching_my_nodes" in data
+
+    def test_changes_agent_sections_populated(self, test_server):
+        """When ?agent= is present the five agent-scoped sections are present."""
+        port, store = test_server
+        store.write_node("ch_a", "Anchor A", "concept", agent_name="metis")
+        store.write_node("ch_b", "Anchor B", "concept", agent_name="hephaestus")
+        store.write_edge("ch_a", "ch_b", "REFERENCES", layer="L2", agent_name="hephaestus")
+        status, data = _request("GET", port, "/changes?agent=metis")
+        assert status == 200, data
+        # All five sections present
+        for k in (
+            "new_observations_on_my_nodes",
+            "edges_touching_my_nodes",
+            "challenges_to_my_edges",
+            "tasks_assigned_or_status_changed",
+            "stale_nodes_needing_refresh",
+        ):
+            assert k in data, f"missing agent section: {k}"
+            assert isinstance(data[k], list)
+        # The hephaestus-authored edge touches metis's node ch_a → should appear
+        touch_ids = [e["id"] for e in data["edges_touching_my_nodes"]]
+        assert len(touch_ids) >= 1
+
+    def test_changes_challenges_to_my_edges_section(self, test_server):
+        """A CHALLENGED_BY edge targeting one of metis's edges surfaces in
+        challenges_to_my_edges."""
+        port, store = test_server
+        store.write_node("ch_a", "Anchor A", "concept", agent_name="metis")
+        store.write_node("ch_b", "Anchor B", "concept", agent_name="hephaestus")
+        store.write_edge("ch_a", "ch_b", "CAUSES", layer="L3", agent_name="metis")
+        # Find the L3 edge id and challenge it (via the proper challenge_edge API)
+        edge = store.execute_one(
+            "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND deleted_at IS NULL",
+            ["ch_a", "ch_b"],
+        )
+        assert edge is not None
+        store.challenge_edge(
+            edge["id"], "i disagree with this causal claim",
+            0.6, "CHALLENGED_BY", agent_name="hephaestus",
+        )
+        status, data = _request("GET", port, "/changes?agent=metis")
+        assert status == 200, data
+        challenges = data["challenges_to_my_edges"]
+        assert len(challenges) >= 1
+        assert challenges[0]["target_edge_id"] == edge["id"]
+        assert challenges[0]["challenger"] == "hephaestus"
+        assert "disagree" in challenges[0]["challenge_reason"]
+
+    def test_changes_tasks_assigned_section(self, test_server):
+        """A task node assigned to metis appears in tasks_assigned_or_status_changed."""
+        port, store = test_server
+        store.write_node(
+            "ch_task", "Write follow-up", "task", agent_name="atlas",
+            task_status="open", assigned_to="metis",
+        )
+        status, data = _request("GET", port, "/changes?agent=metis")
+        assert status == 200, data
+        tasks = data["tasks_assigned_or_status_changed"]
+        ids = [t["id"] for t in tasks]
+        assert "ch_task" in ids
+        assert tasks[0]["status"] == "open"
+
+    def test_changes_invalid_since_returns_400(self, test_server):
+        """A malformed ?since= is rejected with ValidationError (4xx)."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/changes?agent=metis&since=not-a-timestamp")
+        assert 400 <= status < 500
+
+    def test_changes_invalid_limit_returns_400(self, test_server):
+        """Non-integer ?limit= is rejected with ValidationError."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/changes?agent=metis&limit=banana")
+        assert 400 <= status < 500
+
+    def test_changes_returns_query_timestamp(self, test_server):
+        """Response should include a server-side query_timestamp (ISO format)."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/changes?agent=metis")
+        assert status == 200, data
+        assert data["query_timestamp"]
+        # DuckDB returns CURRENT_TIMESTAMP either as '2026-...T...' or as
+        # '2026-... HH:MM:SS...' depending on version/mode — accept either.
+        import re
+        assert re.match(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}", data["query_timestamp"])

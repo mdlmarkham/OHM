@@ -2798,6 +2798,76 @@ class Graph:
         """
         return self.listen()
 
+    def changes(
+        self,
+        *,
+        since: str | None = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """Personalized "what changed" delta for this agent (OHM-b7l7).
+
+        Consolidates what an agent would otherwise poll /listen,
+        /contradictions, /anomalies, /stale, /suggest, and /tasks for
+        into a single call. Always returns the legacy core fields
+        (``since``, ``agent``, ``query_timestamp``, ``node_total``,
+        ``edge_total``, ``nodes``, ``edges``). Because the SDK is
+        always called with an actor, the agent-scoped sections are
+        also returned:
+
+          * ``new_observations_on_my_nodes``
+          * ``edges_touching_my_nodes``
+          * ``challenges_to_my_edges``
+          * ``tasks_assigned_or_status_changed``
+          * ``stale_nodes_needing_refresh``
+
+        Args:
+            since: ISO 8601 timestamp. Optional — falls back to this
+                agent's ``ohm_agent_state.last_sync``, then 24h ago
+                (mirrors the ``listen()`` fallback).
+            limit: Per-section row cap (default 100).
+
+        Returns:
+            Dict with the core fields plus the five agent-scoped
+            sections.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        from ohm.queries import query_agent_changes
+
+        agent = self.actor
+        resolved_since = since
+        if resolved_since is None:
+            try:
+                row = self._conn.execute(
+                    "SELECT last_sync FROM ohm_agent_state WHERE agent_name = ?",
+                    [agent],
+                ).fetchone()
+                if row and row[0]:
+                    resolved_since = str(row[0])
+            except Exception:
+                pass
+        if resolved_since is None:
+            resolved_since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+
+        result = query_agent_changes(
+            self._conn,
+            agent_name=agent,
+            since=resolved_since,
+            limit=limit,
+        )
+
+        # Bump last_sync so the next call only returns the delta since
+        # this one (mirrors listen()'s side effect).
+        try:
+            self._conn.execute(
+                "UPDATE ohm_agent_state SET last_sync = now() WHERE agent_name = ?",
+                [agent],
+            )
+        except Exception:
+            pass
+
+        return result
+
     def urgent_changes(
         self,
         *,
@@ -4000,6 +4070,19 @@ def connect_http(
             path = "/listen"
             if params:
                 path += "?" + "&".join(params)
+            return self._http_request("GET", path)
+
+        def changes(self, *, since: str | None = None, limit: int = 100, **kwargs) -> dict[str, Any]:
+            """Get personalized changes delta from the daemon (OHM-b7l7).
+
+            Delegates to ``GET /changes`` with the agent name implicit in
+            the daemon-side authentication token.
+            """
+            params = []
+            if since:
+                params.append(f"since={since}")
+            params.append(f"limit={limit}")
+            path = "/changes?" + "&".join(params)
             return self._http_request("GET", path)
 
         def search(self, query: str, *, node_type: str | None = None, limit: int = 20, include_l0: bool = False) -> list[dict[str, Any]]:

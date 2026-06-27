@@ -1364,77 +1364,75 @@ class AnalysisHandlerMixin:
         )
 
     def _get_changes(self, path: str, qs: dict) -> None:
-        """GET /changes?since=ISO8601 — what's new since a timestamp.
+        """GET /changes — personalised "what changed" delta (OHM-b7l7).
 
-        OHM-tr71.11: Returns all nodes, edges, and observations created
-        after the given timestamp. Helps agents catch up on what they missed.
+        Consolidates 6 poll-style endpoints (``/listen``, ``/contradictions``,
+        ``/anomalies``, ``/stale``, ``/suggest``, ``/tasks``) into a single
+        agent-scoped response.
+
+        Query params:
+            since: ISO 8601 timestamp. Optional — falls back to the
+                agent's ``ohm_agent_state.last_sync`` value and then to
+                24h ago (mirrors the ``/listen`` convention).
+            agent: Agent name to scope the personalised sections to.
+                Optional — falls back to the authenticated agent.
+            type: Optional node-type filter (legacy compatibility).
+            limit: Per-section row cap (default 100).
+
+        Response:
+            Always: ``since``, ``agent``, ``query_timestamp``,
+            ``node_total``, ``edge_total``, ``nodes``, ``edges``.
+            When ``agent`` is resolved: also ``new_observations_on_my_nodes``,
+            ``edges_touching_my_nodes``, ``challenges_to_my_edges``,
+            ``tasks_assigned_or_status_changed``,
+            ``stale_nodes_needing_refresh``.
+
+        Backward compatibility: the legacy fields (`since`, `node_total`,
+        `edge_total`, `nodes`, `edges`) are preserved unchanged. The
+        agent-scoped sections are additive — existing clients ignore them.
         """
+        from datetime import datetime, timedelta, timezone
+
         from ohm.exceptions import ValidationError
+        from ohm.queries import query_agent_changes
 
-        since = qs.get("since", [None])[0]
-        if not since:
-            raise ValidationError("?since=ISO8601_TIMESTAMP is required (e.g., 2026-06-06T00:00:00)")
-
-        limit = int(qs.get("limit", [100])[0])
-        agent = qs.get("agent", [None])[0]
+        since_param = qs.get("since", [None])[0]
+        agent_param = qs.get("agent", [None])[0]
         node_type = qs.get("type", [None])[0]
+        try:
+            limit = int(qs.get("limit", [100])[0])
+        except (TypeError, ValueError):
+            raise ValidationError("limit must be an integer")
+        if limit <= 0 or limit > 1000:
+            limit = 100
 
-        conn = self.current_store.read_conn
+        # Resolve agent: ?agent= overrides the authenticated principal.
+        auth_agent = getattr(self, "_current_agent", None)
+        if not agent_param:
+            agent_param = auth_agent if auth_agent and auth_agent != "ohm" else None
 
-        # Nodes
-        node_conditions = ["deleted_at IS NULL", "type != 'fragment'", "created_at > ?::TIMESTAMP"]
-        params = [since]
-        if agent:
-            node_conditions.append("created_by = ?")
-            params.append(agent)
-        if node_type:
-            node_conditions.append("type = ?")
-            params.append(node_type)
-        params.append(limit)
+        # Resolve `since` in priority order: explicit param → last_sync
+        # for this agent → 24h ago.
+        since = since_param
+        if not since and agent_param:
+            try:
+                state = self.current_store.get_agent_state(agent_param)
+                if state and state.get("last_sync"):
+                    ls = state["last_sync"]
+                    since = ls.isoformat() if isinstance(ls, datetime) else str(ls)
+            except Exception:
+                pass
+        if not since:
+            since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
 
-        nodes = conn.execute(
-            f"SELECT id, label, type, created_by, confidence, created_at FROM ohm_nodes WHERE {' AND '.join(node_conditions)} ORDER BY created_at DESC LIMIT ?",
-            params,
-        ).fetchall()
-
-        # Edges
-        edge_params = [since]
-        edge_agent = ""
-        if agent:
-            edge_agent = "AND created_by = ?"
-            edge_params.append(agent)
-        edge_params.append(limit)
-
-        edges = conn.execute(
-            f"SELECT id, from_node, to_node, edge_type, layer, confidence, created_by, created_at FROM ohm_edges WHERE deleted_at IS NULL AND created_at > ?::TIMESTAMP {edge_agent} ORDER BY created_at DESC LIMIT ?",
-            edge_params,
-        ).fetchall()
-
-        # Count totals (not limited)
-        count_params = [since]
-        count_agent = ""
-        if agent:
-            count_agent = "AND created_by = ?"
-            count_params.append(agent)
-        node_total = conn.execute(
-            f"SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL AND type != 'fragment' AND created_at > ?::TIMESTAMP {count_agent}",
-            count_params,
-        ).fetchone()[0]
-        edge_total = conn.execute(
-            f"SELECT COUNT(*) FROM ohm_edges WHERE deleted_at IS NULL AND created_at > ?::TIMESTAMP {count_agent}",
-            count_params,
-        ).fetchone()[0]
-
-        self._json_response(
-            200,
-            {
-                "since": since,
-                "node_total": node_total,
-                "edge_total": edge_total,
-                "nodes": [{"id": r[0], "label": r[1], "type": r[2], "created_by": r[3], "confidence": r[4], "created_at": str(r[5])} for r in nodes],
-                "edges": [{"id": r[0], "from": r[1], "to": r[2], "type": r[3], "layer": r[4], "confidence": r[5], "created_by": r[6], "created_at": str(r[7])} for r in edges],
-            },
+        result = query_agent_changes(
+            self.current_store.read_conn,
+            agent_name=agent_param,
+            since=since,
+            node_type=node_type,
+            limit=limit,
         )
+        self._json_response(200, result)
 
     # ── ADR-026: Myth Compression Framework Query Endpoints ──────────────
 
