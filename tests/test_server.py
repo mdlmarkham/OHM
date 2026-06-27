@@ -2170,3 +2170,59 @@ class TestScratchConnectsToEdges:
         len(data.get("auto_links", [])) >= 1
         # At minimum the explicit link must exist
         assert has_explicit
+
+
+@pytest.mark.xdist_group("server")
+class TestOrientEndpoint:
+    """Tests for /orient context-recovery endpoint.
+
+    OHM-cod4: /orient was returning 500 'NoneType' object is not subscriptable
+    when an agent had no activity. Fixed by hardening fetchone()[0] patterns
+    and dict access in _get_orient.
+    """
+
+    def test_orient_unknown_agent_returns_200_cold_start(self, test_server):
+        """Agent with no nodes should return 200 with cold_start guidance."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/orient?agent=ghost_agent")
+        assert status == 200, data
+        assert data["cold_start"] is True
+        assert data["where_was_i"]["last_activity"] is None
+        assert data["where_was_i"]["time_since"] is None
+        assert data["what_next"]["orphan_count"] == 0
+        assert "bootstrap_guide" in data
+
+    def test_orient_missing_agent_param_returns_400(self, test_server):
+        """Missing agent query param should return 400."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/orient")
+        assert status == 400
+        assert data["error"] == "agent parameter required"
+
+    def test_orient_with_seeded_activity_returns_full_packet(self, test_server):
+        """An agent with nodes and edges should return the full orient packet."""
+        port, store = test_server
+        store.write_node("orient_a", "Anchor A", "concept", confidence=0.8, agent_name="metis")
+        store.write_node("orient_b", "Anchor B", "concept", confidence=0.6, agent_name="metis")
+        store.write_edge("orient_a", "orient_b", "REFERENCES", layer="L2", agent_name="metis")
+        status, data = _request("GET", port, "/orient?agent=metis")
+        assert status == 200, data
+        assert "where_was_i" in data
+        assert "what_did_i_miss" in data
+        assert "what_next" in data
+        assert data["where_was_i"]["last_activity"] is not None
+        assert data["cold_start"] is False
+
+    def test_orient_handles_empty_db_no_fetchone_crash(self, test_server):
+        """Regression: fetchone()[0] must not raise on empty tables.
+
+        OHM-cod4 root cause was unbounded NoneType subscripting when fetchone()
+        returned None on edge cases. Even an empty agent footprint should
+        produce a 200 response, never a 500.
+        """
+        port, _ = test_server
+        status, data = _request("GET", port, "/orient?agent=metis")
+        assert status == 200, f"expected 200 got {status}: {data}"
+        # Without any seeded data, metis should be in cold_start
+        assert "where_was_i" in data
+        assert "what_next" in data
