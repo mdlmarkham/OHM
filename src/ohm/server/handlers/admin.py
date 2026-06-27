@@ -2112,3 +2112,29 @@ class AdminHandlerMixin:
                 "total_orphan_nodes": result.get("orphan_count", 0),
             },
         )
+
+    def _post_admin_sync_beads(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /admin/sync-beads — sync Beads issues into OHM task nodes (OHM-sdrr).
+
+        Body params (all optional):
+            issues: Explicit list of Beads issue dicts to sync. If omitted,
+                    issues are fetched from the ``bd`` CLI (or .beads/issues.jsonl
+                    fallback).
+            actor:  Agent name to attribute the writes to (default: "system").
+
+        Returns:
+            Sync report: {created, updated, skipped, errors, total}.
+        """
+        from ohm.integrations.beads_sync import fetch_beads_issues, sync_beads_to_ohm_tasks
+
+        issues = body.get("issues")
+        if not issues:
+            issues = fetch_beads_issues()
+        sync_actor = body.get("actor", "system")
+
+        result = sync_beads_to_ohm_tasks(
+            self.current_store.conn,
+            issues,
+            actor=sync_actor,
+        )
+        self._json_response(200, result)
