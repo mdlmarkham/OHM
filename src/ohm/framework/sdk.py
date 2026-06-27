@@ -1625,6 +1625,43 @@ class Graph:
 
         return result
 
+    def complete_task_with_outcome(
+        self,
+        task_node_id_or_label: str,
+        outcome: str,
+        *,
+        notes: str | None = None,
+        claim_node: str | None = None,
+    ) -> dict[str, Any]:
+        """Close a task with a recorded outcome against its expected_claim (OHM-f5iq).
+
+        Wraps :func:`ohm.graph.queries.query_close_task_with_outcome`. Sets
+        ``task_status='done'``, stores the outcome on the task node, and
+        records an ``ohm_outcomes`` row against the claim (using the task's
+        ``created_by`` as the source agent being evaluated).
+
+        Args:
+            task_node_id_or_label: Task node id or label.
+            outcome: ``TRUE``, ``FALSE``, or ``AMBIGUOUS``.
+            notes: Optional justification.
+            claim_node: Optional explicit claim node id (defaults to the
+                task's ``expected_claim`` column).
+
+        Returns:
+            Dict with ``task``, ``outcome``, and ``outcome_record``.
+        """
+        from ohm.graph.queries import query_close_task_with_outcome
+
+        task_id = self._resolve_label_or_id(task_node_id_or_label, create_if_missing=False)
+        return query_close_task_with_outcome(
+            self._conn,
+            task_id=task_id,
+            outcome=outcome,
+            recorded_by=self.actor,
+            notes=notes,
+            claim_node=claim_node,
+        )
+
     def neighborhood(
         self,
         node_id: str,
@@ -4328,6 +4365,41 @@ def connect_http(
                 "provenance": node.get("provenance"),
             }
             return self._http_request("POST", "/node?create_only=false", body)
+
+        def complete_task_with_outcome(
+            self,
+            task_id: str,
+            outcome: str,
+            *,
+            notes: str | None = None,
+            claim_node: str | None = None,
+        ) -> dict[str, Any]:
+            """Close a task and record its outcome against the linked claim (OHM-f5iq).
+
+            Args:
+                task_id: The task node id to close.
+                outcome: ``TRUE`` (claim confirmed), ``FALSE`` (claim falsified),
+                    or ``AMBIGUOUS`` (could not determine).
+                notes: Optional justification for the outcome.
+                claim_node: Optional explicit claim node id. Defaults to the
+                    task's ``expected_claim`` column.
+
+            Returns:
+                Dict with ``task`` (updated node), ``outcome`` (canonical
+                uppercase), and ``outcome_record`` (or None when AMBIGUOUS
+                with no claim).
+            """
+            from .schema import VALID_TASK_OUTCOMES
+
+            normalized = str(outcome).upper()
+            if normalized not in VALID_TASK_OUTCOMES:
+                raise ValueError(f"Invalid outcome: {outcome} — must be one of: {', '.join(sorted(VALID_TASK_OUTCOMES))}")
+            body: dict[str, Any] = {"outcome": normalized}
+            if notes is not None:
+                body["notes"] = notes
+            if claim_node is not None:
+                body["claim_node"] = claim_node
+            return self._http_request("POST", f"/tasks/{task_id}/outcome", body)
 
         def bayesian_inference(
             self,

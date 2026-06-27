@@ -721,6 +721,102 @@ def query_record_outcome(
     return result
 
 
+def query_close_task_with_outcome(
+    conn: DuckDBPyConnection,
+    *,
+    task_id: str,
+    outcome: str,
+    recorded_by: str,
+    notes: str | None = None,
+    claim_node: str | None = None,
+) -> dict[str, Any]:
+    """Close a task and record its outcome against the linked claim (OHM-f5iq).
+
+    This closes the feedback loop between execution and beliefs:
+    1. Sets ``task_status = 'done'`` and stores ``outcome`` / ``outcome_notes``
+       on the task node.
+    2. If the task has an ``expected_claim`` (or *claim_node* is supplied),
+       records an entry in ``ohm_outcomes`` via :func:`query_record_outcome`
+       with ``source_agent`` set to the task's ``created_by`` — the agent
+       whose prediction is being evaluated.
+    3. Returns the updated task node, the outcome row, and any hypothesis
+       cascades triggered downstream.
+
+    Args:
+        conn: Database connection.
+        task_id: The task node id to close.
+        outcome: One of ``TRUE`` / ``FALSE`` / ``AMBIGUOUS`` (see
+            :data:`ohm.graph.schema.VALID_TASK_OUTCOMES`).
+        recorded_by: Agent recording the outcome.
+        notes: Optional justification for the outcome.
+        claim_node: Optional explicit claim node id. Defaults to the
+            task's ``expected_claim`` column. When neither is set and
+            *outcome* is ``AMBIGUOUS``, no outcome row is written.
+
+    Returns:
+        Dict with ``task`` (updated node), ``outcome_record`` (or None),
+        and ``outcome`` (the canonical uppercase value).
+
+    Raises:
+        NodeNotFoundError: If the task id does not exist or is not a task.
+        ValidationError: If *outcome* is not a valid value.
+    """
+    from ohm.exceptions import NodeNotFoundError, ValidationError
+    from ohm.framework.validation import validate_task_outcome
+    from ohm.validation import validate_identifier
+
+    task_id = validate_identifier(task_id, name="task_id")
+    recorded_by = validate_identifier(recorded_by, name="recorded_by")
+    try:
+        outcome = validate_task_outcome(outcome) or ""
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
+    if outcome not in ("TRUE", "FALSE", "AMBIGUOUS"):
+        raise ValidationError(f"outcome must be TRUE, FALSE, or AMBIGUOUS — got {outcome!r}")
+
+    # Fetch the task row. Must exist and be a task.
+    row = conn.execute(
+        "SELECT id, type, created_by, expected_claim, task_status FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+        [task_id],
+    ).fetchone()
+    if not row:
+        raise NodeNotFoundError(f"task not found: {task_id}")
+    if row[1] != "task":
+        raise ValidationError(f"Node {task_id} is type={row[1]!r}, not 'task'")
+
+    source_agent = row[2] or recorded_by
+    expected_claim = claim_node or row[3]
+
+    # 1. Update the task node: status done, record outcome + notes.
+    conn.execute(
+        "UPDATE ohm_nodes SET task_status = 'done', outcome = ?, outcome_notes = ?, updated_at = CURRENT_TIMESTAMP, updated_by = ? WHERE id = ?",
+        [outcome, notes, recorded_by, task_id],
+    )
+    _log_change(conn, "ohm_nodes", task_id, "UPDATE", recorded_by)
+
+    task = _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ?", [task_id]))[0]
+
+    # 2. Record the outcome against the claim, if we have one.
+    #    AMBIGUOUS with no claim is a valid state (task closed without a
+    #    testable prediction) — skip the outcome row in that case.
+    outcome_record: dict | None = None
+    if expected_claim and outcome in ("TRUE", "FALSE"):
+        outcome_record = query_record_outcome(
+            conn,
+            source_agent=source_agent,
+            claim_node=validate_identifier(expected_claim, name="claim_node"),
+            outcome=(outcome == "TRUE"),
+            recorded_by=recorded_by,
+            notes=notes or f"Task {task_id} closed with outcome={outcome}",
+        )
+
+    return {
+        "task": task,
+        "outcome": outcome,
+        "outcome_record": outcome_record,
+    }
+
+
 def query_source_reliability(
     conn: DuckDBPyConnection,
     source_agent: str,

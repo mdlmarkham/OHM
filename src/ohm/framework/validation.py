@@ -123,6 +123,22 @@ def validate_emerging_concept_status(value: str | None) -> str | None:
     return value
 
 
+def validate_task_outcome(value: str | None) -> str | None:
+    """Validate that *value* is a known task outcome (OHM-f5iq).
+
+    Accepts TRUE / FALSE / AMBIGUOUS (case-insensitive) or None.
+    Returns the canonical uppercase form or None.
+    """
+    if value is None:
+        return None
+    from ohm.graph.schema import VALID_TASK_OUTCOMES
+
+    normalized = str(value).upper()
+    if normalized not in VALID_TASK_OUTCOMES:
+        raise ValueError(f"Invalid task outcome: '{value}' — must be one of: {sorted(VALID_TASK_OUTCOMES)}")
+    return normalized
+
+
 def validate_signing_algorithm(value: str | None) -> str | None:
     """Validate that *value* is a known signing algorithm."""
     if value is None:

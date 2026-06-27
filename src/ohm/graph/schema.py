@@ -328,6 +328,12 @@ VALID_TASK_STATUSES = frozenset(
     }
 )
 
+# OHM-f5iq: outcome values recorded when a task is closed.
+# TRUE = the task's expected_claim was confirmed by the work.
+# FALSE = the task's expected_claim was falsified.
+# AMBIGUOUS = the work could not determine the claim either way.
+VALID_TASK_OUTCOMES = frozenset({"TRUE", "FALSE", "AMBIGUOUS"})
+
 # ── Emerging Concept Detection (OHM-tlqz) ────────────────────────────────────
 
 VALID_EMERGING_CONCEPT_STATUSES = frozenset({"unnamed", "naming_candidate", "named", "rejected"})
@@ -750,6 +756,10 @@ DDL_STATEMENTS: list[str] = [
         utility_scale FLOAT,            -- Decision node: how much does being wrong matter? (0-1)
         current_best_action VARCHAR,    -- Decision node: what we'd do with current info
         action_alternatives JSON,       -- Decision node: what we'd do if we knew more
+        expected_claim   VARCHAR,       -- Task node: id of the claim this task tests (OHM-f5iq)
+        success_criteria TEXT,          -- Task node: how to judge whether the claim held (OHM-f5iq)
+        outcome          VARCHAR,       -- Task node: TRUE/FALSE/AMBIGUOUS recorded on close (OHM-f5iq)
+        outcome_notes    TEXT,          -- Task node: free-text justification for the outcome (OHM-f5iq)
         deleted_at    TIMESTAMP          -- Soft delete: NULL = active, set = deleted
     );
     """,
@@ -1093,7 +1103,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.35.0"
+SCHEMA_VERSION = "0.36.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -1574,6 +1584,16 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             """,
             "CREATE INDEX IF NOT EXISTS idx_metric_action_log_lookup ON ohm_metric_action_log(metric, threshold, action_type, created_at);",
             "CREATE INDEX IF NOT EXISTS idx_metric_action_log_created_at ON ohm_metric_action_log(created_at);",
+        ],
+    ),
+    (
+        "0.36.0",
+        "OHM-f5iq: outcome feedback loop — task expected_claim, success_criteria, outcome, outcome_notes",
+        [
+            "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS expected_claim VARCHAR;",
+            "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS success_criteria TEXT;",
+            "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS outcome VARCHAR;",
+            "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS outcome_notes TEXT;",
         ],
     ),
 ]

@@ -2298,6 +2298,44 @@ class GraphHandlerMixin:
         else:
             self._json_response(200, result)
 
+    def _post_task_action(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /tasks/<id>/... — task sub-actions (OHM-f5iq).
+
+        Currently dispatches ``/tasks/<id>/outcome`` to close a task with a
+        recorded outcome. Returns 404 for unknown sub-paths.
+        """
+        from ohm.exceptions import ValidationError
+        from ohm.validation import validate_identifier
+
+        sub = path[len("/tasks/") :]
+        parts = sub.split("/", 1)
+        if len(parts) != 2 or parts[1] != "outcome":
+            self._json_response(404, {"error": "unknown_task_action", "path": path})
+            return
+        task_id = validate_identifier(parts[0], name="task_id")
+
+        outcome = body.get("outcome")
+        notes = body.get("notes")
+        claim_node = body.get("claim_node")
+        if outcome is None:
+            raise ValidationError("outcome is required (TRUE, FALSE, or AMBIGUOUS)")
+
+        from ohm.graph.queries import query_close_task_with_outcome
+
+        result = query_close_task_with_outcome(
+            self.current_store.conn,
+            task_id=task_id,
+            outcome=str(outcome),
+            recorded_by=agent,
+            notes=notes,
+            claim_node=claim_node,
+        )
+        _server_module._trigger_webhooks(
+            {"type": "task.completed", "agent": agent, "task": result["task"], "outcome": result["outcome"]},
+            customer_id=self._customer_id,
+        )
+        self._json_response(200, result)
+
     def _get_vault(self, path: str, qs: dict) -> None:
         """GET /vault — list vault contents for the authenticated agent (OHM-cuu0).
 
@@ -2604,6 +2642,8 @@ class GraphHandlerMixin:
             "action_alternatives",
             "utility_usd_per_day",
             "utility_currency",
+            "expected_claim",
+            "success_criteria",
         ]
         update_fields = []
         update_params = []

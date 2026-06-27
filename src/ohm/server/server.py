@@ -681,6 +681,7 @@ def _build_router() -> _RouteRegistry:
         "/node/verify/",
         "/edge/sign/",
         "/edge/verify/",
+        "/tasks/",
     ):
         r.add("POST", _p)
 
@@ -1710,6 +1711,8 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, AskHandlerMixin, Catal
                 "action_alternatives",
                 "utility_usd_per_day",
                 "utility_currency",
+                "expected_claim",
+                "success_criteria",
             ]
             update_fields = []
             update_params = []
@@ -2204,6 +2207,7 @@ OhmHandler._POST_PREFIXES = [
     ("/edge/sign/", "_post_edge_sign"),
     ("/edge/verify/", "_post_edge_verify"),
     ("/documents/", "_post_document_sync_to_bedrock"),
+    ("/tasks/", "_post_task_action"),
 ]
 
 OhmHandler._GET_EXACT = {
