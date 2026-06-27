@@ -33,13 +33,17 @@ class TestDecisionSchema:
             assert "DECISION_DEPENDS_ON" not in LAYER_EDGE_TYPES.get(layer, frozenset())
 
     def test_schema_version_bumped(self):
-        assert SCHEMA_VERSION == "0.35.0"
+        assert SCHEMA_VERSION == "0.36.0"
 
-    def test_migration_0_35_1_present(self):
-        assert True  # no schema bump needed for categorical utility_scale encoding
+    def test_migration_0_36_0_present(self):
+        from ohm.schema import MIGRATIONS
+        versions = [v for v, _, _ in MIGRATIONS]
+        assert "0.36.0" in versions
 
-    def test_migration_0_35_1_description(self):
-        assert True
+    def test_migration_0_36_0_description(self):
+        from ohm.schema import MIGRATIONS
+        match = [m for m in MIGRATIONS if m[0] == "0.36.0"]
+        assert match and "outcome" in match[0][1].lower()
 
 
 class TestDecisionNodeCreation:

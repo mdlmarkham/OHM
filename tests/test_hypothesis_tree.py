@@ -48,7 +48,7 @@ class TestSchemaPrimitives:
         assert "experiment_result" in VALID_OBSERVATION_TYPES
 
     def test_schema_version_bumped(self):
-        assert SCHEMA_VERSION == "0.35.0"
+        assert SCHEMA_VERSION == "0.36.0"
 
     def test_migration_0_35_0_present(self):
         versions = [m[0] for m in MIGRATIONS]
@@ -58,6 +58,15 @@ class TestSchemaPrimitives:
         migration = next(m for m in MIGRATIONS if m[0] == "0.35.0")
         assert "metric action log" in migration[1].lower()
         assert any("ohm_metric_action_log" in stmt for stmt in migration[2])
+
+    def test_migration_0_36_0_present(self):
+        versions = [m[0] for m in MIGRATIONS]
+        assert "0.36.0" in versions
+
+    def test_migration_0_36_0_description(self):
+        migration = next(m for m in MIGRATIONS if m[0] == "0.36.0")
+        assert "outcome" in migration[1].lower()
+        assert any("ohm_nodes" in stmt for stmt in migration[2])
 
     def test_migration_0_34_0_present(self):
         versions = [m[0] for m in MIGRATIONS]

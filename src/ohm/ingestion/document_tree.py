@@ -19,6 +19,11 @@ try:
 except ImportError:
     BeautifulSoup = None
 
+try:
+    import markdown as _markdown_lib
+except ImportError:
+    _markdown_lib = None
+
 
 @dataclass
 class DocumentNode:
@@ -270,11 +275,36 @@ def parse_markdown_to_tree(
     Uses the markdown parser to convert to HTML, then reuses the HTML tree
     parser. Headings become sections; paragraphs/lists/tables become leaf
     nodes under their nearest heading ancestor.
-    """
-    import markdown as md
 
-    html = md.markdown(markdown, extensions=["tables", "fenced_code"])
+    Falls back to a single-paragraph tree when the optional ``markdown``
+    package is unavailable, so basic text extraction still works without the
+    ingestion extra installed.
+    """
     source_id = source_id or f"source-{uuid.uuid4().hex[:8]}"
+
+    if _markdown_lib is None:
+        title = default_title
+        m = re.search(r"^\s*#{1,6}\s+(.+?)\s*$", markdown, re.MULTILINE)
+        if m:
+            title = m.group(1)
+        root = DocumentNode(
+            id=source_id,
+            title=title,
+            text=markdown.strip(),
+            level=0,
+            parent_id=None,
+            node_type="source",
+        )
+        tree = DocumentTree(
+            source_id=source_id,
+            title=title,
+            content_type="markdown",
+            root=root,
+            flat=[root],
+        )
+        return tree
+
+    html = _markdown_lib.markdown(markdown, extensions=["tables", "fenced_code"])
 
     # The HTML parser will pick up the first <h1> as title. We preserve the
     # default title fallback in case the markdown has no h1.

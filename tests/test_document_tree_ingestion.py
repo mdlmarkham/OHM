@@ -131,6 +131,33 @@ Deep paragraph.
         assert keyword_overlap("", ["foo"]) == []
         assert keyword_overlap("foo", []) == []
 
+    def test_markdown_fallback_without_markdown_lib(self, monkeypatch):
+        """parse_markdown_to_tree should still return a usable tree when the
+        optional `markdown` package is not installed (OHM-qmmw graceful fallback).
+        """
+        import ohm.ingestion.document_tree as dt
+
+        monkeypatch.setattr(dt, "_markdown_lib", None)
+        md = "# Fallback Title\n\nA paragraph of body text."
+        tree = parse_markdown_to_tree(md, source_id="src-fallback")
+        assert tree.content_type == "markdown"
+        assert tree.title == "Fallback Title"
+        assert tree.root.id == "src-fallback"
+        assert "A paragraph of body text." in tree.root.text
+        assert tree.flat == [tree.root]
+
+    def test_markdown_fallback_no_heading_uses_default_title(self, monkeypatch):
+        import ohm.ingestion.document_tree as dt
+
+        monkeypatch.setattr(dt, "_markdown_lib", None)
+        tree = parse_markdown_to_tree(
+            "Just body, no heading.",
+            source_id="src-fallback-2",
+            default_title="Doc",
+        )
+        assert tree.title == "Doc"
+        assert tree.root.text == "Just body, no heading."
+
 
 # ── Graph ingestion tests ──────────────────────────────────────────────────
 
