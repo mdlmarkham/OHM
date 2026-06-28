@@ -2346,6 +2346,7 @@ OhmHandler._GET_PREFIXES = [
     ("/compound_confidence/", "_get_compound_confidence"),
     ("/observation/", "_get_observation"),
     ("/synthesis/", "_get_synthesis_validity"),
+    ("/narrative/", "_get_narrative"),
 ]
 
 

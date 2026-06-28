@@ -1771,6 +1771,36 @@ class Graph:
             direction=direction,
         )
 
+    def narrative(
+        self,
+        node_id: str,
+        *,
+        depth: int = 2,
+    ) -> dict[str, Any]:
+        """Neighborhood narrative — "You care about X because of Y and Z" (OHM-q9rt.1).
+
+        Returns a contextualized explanation of why this node matters, including
+        reasoning chains (edge paths from connected nodes), evidence (observations),
+        and a human-readable connections summary.
+
+        Args:
+            node_id: Target node to narrate.
+            depth: How many hops to walk (default 2).
+
+        Returns:
+            Dict with node, why_it_matters (list of reasoning chains),
+            evidence (list of observations), connections_summary (str),
+            connection_count, evidence_count, and agent_context.
+        """
+        from ohm.queries import query_neighborhood_narrative
+
+        return query_neighborhood_narrative(
+            self._conn,
+            node_id,
+            agent_name=self.actor,
+            depth=depth,
+        )
+
     def path(
         self,
         from_node: str,

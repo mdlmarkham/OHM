@@ -6653,3 +6653,187 @@ def batch_orphan_triage(
         "types_seen": types_seen,
         "method": "batch_orphan_triage",
     }
+
+
+# ── Neighborhood Narrative (OHM-q9rt.1) ─────────────────────────────────────
+
+
+def query_neighborhood_narrative(
+    conn: DuckDBPyConnection,
+    node_id: str,
+    *,
+    agent_name: str | None = None,
+    depth: int = 2,
+) -> dict[str, Any]:
+    """Build a contextualized narrative for a node — "You care about X because of Y and Z".
+
+    Walks the edges touching *node_id* and builds reasoning chains that explain
+    WHY an agent should care about this node. When *agent_name* is provided,
+    the narrative is personalized: it highlights edges authored by that agent
+    and traces paths from the agent's claims to this node.
+
+    Args:
+        conn: Database connection.
+        node_id: Target node to build the narrative for.
+        agent_name: Optional agent to personalize the narrative for.
+        depth: How many hops to walk (default 2 — immediate neighbors + their neighbors).
+
+    Returns:
+        Dict with:
+          - node: {id, label, type, confidence}
+          - why_it_matters: list of reasoning chains, each:
+              {path: [{node_id, label, type}, ...], edges: [{edge_type, confidence, layer, created_by}], summary: str}
+          - evidence: observations on this node and its immediate neighbors
+          - connections_summary: human-readable string
+          - agent_context: when agent_name is set, the agent's edges touching this node
+    """
+    from ohm.validation import validate_identifier, validate_depth
+    from ohm.graph.decay import confidence_at
+
+    node_id = validate_identifier(node_id, name="node_id")
+    depth = validate_depth(depth)
+
+    # Fetch the target node
+    node_row = conn.execute(
+        "SELECT id, label, type, confidence, created_by FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+        [node_id],
+    ).fetchone()
+    if not node_row:
+        from ohm.exceptions import NodeNotFoundError
+        raise NodeNotFoundError(f"Node not found: {node_id}")
+
+    node_info = {
+        "id": node_row[0],
+        "label": node_row[1],
+        "type": node_row[2],
+        "confidence": node_row[3],
+        "created_by": node_row[4],
+    }
+
+    # Fetch immediate neighbors (1-hop edges touching this node)
+    edges = conn.execute(
+        """SELECT e.id, e.from_node, e.to_node, e.edge_type, e.layer,
+                  e.confidence, e.created_by, e.created_at,
+                  nf.label AS from_label, nf.type AS from_type,
+                  nt.label AS to_label, nt.type AS to_type
+           FROM ohm_edges e
+           LEFT JOIN ohm_nodes nf ON nf.id = e.from_node AND nf.deleted_at IS NULL
+           LEFT JOIN ohm_nodes nt ON nt.id = e.to_node AND nt.deleted_at IS NULL
+           WHERE (e.from_node = ? OR e.to_node = ?)
+             AND e.deleted_at IS NULL
+             AND e.layer != 'L0'
+           ORDER BY e.confidence DESC
+           LIMIT 50""",
+        [node_id, node_id],
+    ).fetchall()
+
+    # Build reasoning chains
+    why_it_matters: list[dict[str, Any]] = []
+    agent_edges: list[dict[str, Any]] = []
+
+    for row in edges:
+        eid, from_node, to_node, edge_type, layer, conf, created_by, created_at, \
+            from_label, from_type, to_label, to_type = row
+
+        # Determine the "other" node (the one that's not the target)
+        if from_node == node_id:
+            other_id, other_label, other_type = to_node, to_label, to_type
+            direction = "outgoing"
+        else:
+            other_id, other_label, other_type = from_node, from_label, from_type
+            direction = "incoming"
+
+        edge_info = {
+            "edge_id": eid,
+            "edge_type": edge_type,
+            "layer": layer,
+            "confidence": conf,
+            "created_by": created_by,
+            "direction": direction,
+        }
+
+        chain = {
+            "path": [
+                {"node_id": other_id, "label": other_label, "type": other_type},
+                {"node_id": node_id, "label": node_info["label"], "type": node_info["type"]},
+            ],
+            "edges": [edge_info],
+            "summary": f"{other_label} {edge_type} {node_info['label']}",
+        }
+        why_it_matters.append(chain)
+
+        if agent_name and created_by == agent_name:
+            agent_edges.append({
+                "edge_id": eid,
+                "other_node": {"id": other_id, "label": other_label, "type": other_type},
+                "edge_type": edge_type,
+                "confidence": conf,
+                "direction": direction,
+            })
+
+    # Fetch observations on this node and its immediate neighbors
+    neighbor_ids = [node_id]
+    for row in edges:
+        other = row[1] if row[2] == node_id else row[2]
+        if other and other not in neighbor_ids:
+            neighbor_ids.append(other)
+
+    # Limit to avoid huge queries
+    neighbor_ids = neighbor_ids[:20]
+    placeholders = ",".join(["?"] * len(neighbor_ids))
+    obs_rows = conn.execute(
+        f"""SELECT o.id, o.node_id, o.type, o.value, o.baseline, o.created_by,
+                   o.created_at, n.label AS node_label
+            FROM ohm_observations o
+            LEFT JOIN ohm_nodes n ON n.id = o.node_id
+            WHERE o.node_id IN ({placeholders})
+              AND o.deleted_at IS NULL
+            ORDER BY o.created_at DESC
+            LIMIT 50""",
+        neighbor_ids,
+    ).fetchall()
+
+    evidence = []
+    for row in obs_rows:
+        obs = {
+            "obs_id": row[0],
+            "node_id": row[1],
+            "obs_type": row[2],
+            "value": row[3],
+            "baseline": row[4],
+            "created_by": row[5],
+            "created_at": str(row[6]) if row[6] else None,
+            "node_label": row[7],
+        }
+        evidence.append(obs)
+
+    # Build connections summary
+    edge_types = [c["edges"][0]["edge_type"] for c in why_it_matters]
+    if not edge_types:
+        summary = f"{node_info['label']} has no connections yet."
+    elif len(edge_types) == 1:
+        summary = f"You care about {node_info['label']} because it {edge_types[0]} something."
+    else:
+        type_counts: dict[str, int] = {}
+        for et in edge_types:
+            type_counts[et] = type_counts.get(et, 0) + 1
+        parts = [f"{count} {et}" for et, count in sorted(type_counts.items(), key=lambda x: -x[1])]
+        summary = f"{node_info['label']} is connected via {', '.join(parts)}."
+
+    result: dict[str, Any] = {
+        "node": node_info,
+        "why_it_matters": why_it_matters,
+        "evidence": evidence,
+        "connections_summary": summary,
+        "connection_count": len(why_it_matters),
+        "evidence_count": len(evidence),
+    }
+
+    if agent_name:
+        result["agent_context"] = {
+            "agent": agent_name,
+            "my_edges": agent_edges,
+            "my_edge_count": len(agent_edges),
+        }
+
+    return result

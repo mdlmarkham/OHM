@@ -246,6 +246,27 @@ class TestGraphRead:
         assert "summary" in result
         assert result["summary"]["threshold"] == 0.85
 
+    # ── OHM-q9rt.1: narrative SDK method ──
+
+    def test_narrative_returns_dict(self, graph):
+        a = graph.create_node(label="Node A", node_type="concept")["id"]
+        b = graph.create_node(label="Node B", node_type="concept")["id"]
+        graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
+        result = graph.narrative(a)
+        assert isinstance(result, dict)
+        assert result["node"]["label"] == "Node A"
+        assert result["connection_count"] >= 1
+
+    def test_narrative_agent_context(self, graph):
+        a = graph.create_node(label="Source", node_type="concept")["id"]
+        graph.create_edge(
+            from_node=a, to_node=graph.create_node(label="Target")["id"],
+            edge_type="SUPPORTS", layer="L3",
+        )
+        result = graph.narrative(a)
+        assert "agent_context" in result
+        assert result["agent_context"]["agent"] == graph.actor
+
     def test_agent_state(self, graph):
         graph.set_focus("testing")
         results = graph.agent_state()

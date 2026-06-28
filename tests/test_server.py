@@ -2470,3 +2470,34 @@ class TestAdminDuplicatesEndpoint:
         status, data = _request("GET", port, "/admin/duplicates")
         assert status == 200, data
         assert data["summary"]["total"] == 0
+
+
+@pytest.mark.xdist_group("server")
+class TestNarrativeEndpoint:
+    """Tests for GET /narrative/{node_id} — neighborhood narrative (OHM-q9rt.1)."""
+
+    def test_narrative_returns_node_and_chains(self, test_server):
+        port, store = test_server
+        store.write_node("narr_a", "Hormuz AND-Gate", "concept", agent_name="metis")
+        store.write_node("narr_b", "Chokepoint", "concept", agent_name="metis")
+        store.write_edge("narr_a", "narr_b", "CAUSES", layer="L3", agent_name="metis")
+        status, data = _request("GET", port, "/narrative/narr_a")
+        assert status == 200, data
+        assert data["node"]["label"] == "Hormuz AND-Gate"
+        assert data["connection_count"] >= 1
+        assert len(data["why_it_matters"]) >= 1
+
+    def test_narrative_with_agent_param(self, test_server):
+        port, store = test_server
+        store.write_node("narr_c", "Source", "concept", agent_name="metis")
+        store.write_node("narr_d", "Target", "concept", agent_name="hephaestus")
+        store.write_edge("narr_c", "narr_d", "SUPPORTS", layer="L3", agent_name="metis")
+        status, data = _request("GET", port, "/narrative/narr_c?agent=metis")
+        assert status == 200, data
+        assert "agent_context" in data
+        assert data["agent_context"]["agent"] == "metis"
+
+    def test_narrative_missing_node_returns_404(self, test_server):
+        port, _ = test_server
+        status, data = _request("GET", port, "/narrative/does-not-exist-1234")
+        assert status == 404

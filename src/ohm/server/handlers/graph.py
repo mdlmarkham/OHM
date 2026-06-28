@@ -990,6 +990,40 @@ class GraphHandlerMixin:
         obs["decay_profile"] = _dp(obs.get("half_life_days"), obs.get("weibull_shape"))
         self._json_response(200, obs)
 
+    def _get_narrative(self, path: str, qs: dict) -> None:
+        """GET /narrative/{node_id}?agent=NAME — neighborhood narrative (OHM-q9rt.1).
+
+        Returns a contextualized explanation of WHY an agent should care about
+        a node, including reasoning chains, evidence, and a human-readable
+        connections summary.
+        """
+        from ohm.queries import query_neighborhood_narrative
+
+        prefix = "/narrative/"
+        if not path.startswith(prefix):
+            from ohm.exceptions import ValidationError
+            raise ValidationError("Invalid narrative path")
+        node_id = path[len(prefix):]
+        if not node_id:
+            from ohm.exceptions import ValidationError
+            raise ValidationError("Missing node id")
+
+        agent = qs.get("agent", [None])[0]
+        if not agent:
+            agent = getattr(self, "_current_agent", None)
+            if agent and agent == "ohm":
+                agent = None
+
+        depth = int(qs.get("depth", [2])[0])
+
+        result = query_neighborhood_narrative(
+            self.current_store.read_conn,
+            node_id,
+            agent_name=agent,
+            depth=depth,
+        )
+        self._json_response(200, result)
+
     def _enforce_cross_link_requirement(self, node_id: str, body: dict) -> dict | None:
         """Return a 422 response body if *body* describes a node that must link.
 
