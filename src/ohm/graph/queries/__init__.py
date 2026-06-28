@@ -2220,6 +2220,7 @@ def create_observation(
     source_url: str | None = None,
     scale: str | None = None,
     half_life_days: float | None = None,
+    weibull_shape: float | None = None,
     metadata: dict | None = None,
     worktree_ref: str | None = None,
     evaluation_script: str | None = None,
@@ -2227,7 +2228,7 @@ def create_observation(
 ) -> dict[str, Any]:
     """Create an observation on a node or edge and return its full record."""
     from ohm.graph.schema import VALID_OBSERVATION_SCALES
-    from ohm.graph.decay import default_half_life
+    from ohm.graph.decay import default_half_life, default_weibull_shape
 
     if scale is not None and scale not in VALID_OBSERVATION_SCALES:
         raise ValueError(f"Invalid scale '{scale}' — must be one of: {', '.join(sorted(VALID_OBSERVATION_SCALES))}")
@@ -2239,6 +2240,9 @@ def create_observation(
     # OHM-xdd4: resolve half_life_days — explicit override > type default
     if half_life_days is None:
         half_life_days = default_half_life(obs_type)
+    # OHM-24g9: resolve weibull_shape — explicit override > type default
+    if weibull_shape is None:
+        weibull_shape = default_weibull_shape(obs_type)
 
     obs_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
@@ -2248,10 +2252,10 @@ def create_observation(
     conn.execute(
         """INSERT INTO ohm_observations
            (id, node_id, edge_id, type, value, baseline, sigma, source, created_by, notes,
-            source_name, source_url, scale, half_life_days, valid_from,
+            source_name, source_url, scale, half_life_days, weibull_shape, valid_from,
             metadata, worktree_ref, evaluation_script, held_out)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        [obs_id, node_id, edge_id, obs_type, value, baseline, sigma, source, created_by, notes, source_name, source_url, scale, half_life_days, now, metadata_json, worktree_ref, evaluation_script, held_out],
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [obs_id, node_id, edge_id, obs_type, value, baseline, sigma, source, created_by, notes, source_name, source_url, scale, half_life_days, weibull_shape, now, metadata_json, worktree_ref, evaluation_script, held_out],
     )
     _log_change(conn, "ohm_observations", obs_id, "INSERT", created_by)
     # Return full observation record

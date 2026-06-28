@@ -894,6 +894,102 @@ class GraphHandlerMixin:
         total = total_result[0]["cnt"] if total_result else len(results)
         self._json_response(200, {"observations": results, "total": total, "limit": limit, "offset": offset})
 
+    def _get_observation(self, path: str, qs: dict) -> None:
+        """GET /observation/{id} or /observation/{id}/confidence (OHM-60pd).
+
+        Without the ``/confidence`` suffix: returns the raw observation record.
+        With ``/confidence``: returns effective confidence + decay metadata:
+
+            {
+              "observation_id": "...",
+              "effective_confidence": 0.42,
+              "weibull_shape": 1.0,
+              "half_life_days": 7.0,
+              "decay_function": "weibull",
+              "decay_profile": "perishable",
+              "age_days": 3.5,
+              "evaluated_at": "2026-06-28T..."
+            }
+
+        Query params for /confidence:
+            at: ISO 8601 timestamp to evaluate at (default: now).
+        """
+        from datetime import datetime, timezone
+        from ohm.graph.decay import confidence_at, decay_profile, default_weibull_shape
+        from ohm.exceptions import NodeNotFoundError, ValidationError
+        from ohm.validation import validate_timestamp
+
+        prefix = "/observation/"
+        if not path.startswith(prefix):
+            raise ValidationError("Invalid observation path")
+        remainder = path[len(prefix):]
+
+        if "/" in remainder:
+            obs_id, action = remainder.split("/", 1)
+        else:
+            obs_id, action = remainder, ""
+
+        if not obs_id:
+            raise ValidationError("Missing observation id")
+
+        conn = self.current_store.read_conn
+        row = conn.execute(
+            "SELECT * FROM ohm_observations WHERE id = ? AND deleted_at IS NULL",
+            [obs_id],
+        ).fetchone()
+        if row is None:
+            raise NodeNotFoundError(f"Observation {obs_id} not found")
+        cols = [d[0] for d in conn.description]
+        obs = dict(zip(cols, row))
+
+        if action == "confidence":
+            at_str = qs.get("at", [None])[0]
+            if at_str:
+                at_str = validate_timestamp(at_str)
+                t = datetime.fromisoformat(at_str.replace("Z", "+00:00"))
+                if t.tzinfo is None:
+                    t = t.replace(tzinfo=timezone.utc)
+            else:
+                t = datetime.now(timezone.utc)
+
+            eff = confidence_at(obs, t=t)
+            shape = obs.get("weibull_shape")
+            if shape is None:
+                shape = default_weibull_shape(obs.get("type", "_default"))
+            hl = obs.get("half_life_days")
+            fn = "weibull" if shape is not None else "exponential"
+
+            # Compute age_days for the response
+            anchor = obs.get("valid_from") or obs.get("created_at")
+            age_days = None
+            if anchor is not None:
+                if isinstance(anchor, str):
+                    anchor = datetime.fromisoformat(anchor.replace("Z", "+00:00"))
+                if anchor.tzinfo is None:
+                    anchor = anchor.replace(tzinfo=timezone.utc)
+                age_days = max(0.0, (t - anchor).total_seconds() / 86400.0)
+
+            self._json_response(200, {
+                "observation_id": obs_id,
+                "effective_confidence": round(eff, 6),
+                "weibull_shape": shape,
+                "half_life_days": hl,
+                "decay_function": fn,
+                "decay_profile": decay_profile(hl, shape),
+                "age_days": round(age_days, 4) if age_days is not None else None,
+                "evaluated_at": t.isoformat(),
+            })
+            return
+
+        if action:
+            raise ValidationError(f"Unknown observation action: {action!r}")
+
+        # Enrich with effective_confidence + decay_profile for convenience
+        from ohm.graph.decay import confidence_at as _ca, decay_profile as _dp
+        obs["effective_confidence"] = round(_ca(obs), 6)
+        obs["decay_profile"] = _dp(obs.get("half_life_days"), obs.get("weibull_shape"))
+        self._json_response(200, obs)
+
     def _enforce_cross_link_requirement(self, node_id: str, body: dict) -> dict | None:
         """Return a 422 response body if *body* describes a node that must link.
 

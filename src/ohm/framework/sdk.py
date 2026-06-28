@@ -1979,6 +1979,77 @@ class Graph:
             dry_run=dry_run,
         )
 
+    def confidence_at(
+        self,
+        observation_id: str,
+        *,
+        at: str | None = None,
+    ) -> dict[str, Any]:
+        """Compute effective confidence for an observation at a point in time (OHM-60pd).
+
+        Wraps ``GET /observation/{id}/confidence`` on the HTTP path and
+        ``confidence_at()`` from ``ohm.graph.decay`` on the local path.
+
+        Args:
+            observation_id: The observation to evaluate.
+            at: ISO 8601 timestamp to evaluate at. Defaults to now.
+
+        Returns:
+            Dict with observation_id, effective_confidence, weibull_shape,
+            half_life_days, decay_function, decay_profile, age_days,
+            and evaluated_at.
+        """
+        from datetime import datetime, timezone
+        from ohm.graph.decay import confidence_at as _confidence_at, decay_profile as _dp, default_weibull_shape
+        from ohm.validation import validate_identifier, validate_timestamp
+
+        obs_id = validate_identifier(observation_id, name="observation_id")
+        t = None
+        if at:
+            at = validate_timestamp(at)
+            t = datetime.fromisoformat(at.replace("Z", "+00:00"))
+            if t.tzinfo is None:
+                t = t.replace(tzinfo=timezone.utc)
+        else:
+            t = datetime.now(timezone.utc)
+
+        row = self._conn.execute(
+            "SELECT * FROM ohm_observations WHERE id = ? AND deleted_at IS NULL",
+            [obs_id],
+        ).fetchone()
+        if row is None:
+            from ohm.exceptions import NodeNotFoundError
+            raise NodeNotFoundError(f"Observation {obs_id} not found")
+        cols = [d[0] for d in self._conn.description]
+        obs = dict(zip(cols, row))
+
+        eff = _confidence_at(obs, t=t)
+        shape = obs.get("weibull_shape")
+        if shape is None:
+            shape = default_weibull_shape(obs.get("type", "_default"))
+        hl = obs.get("half_life_days")
+        fn = "weibull" if shape is not None else "exponential"
+
+        anchor = obs.get("valid_from") or obs.get("created_at")
+        age_days = None
+        if anchor is not None:
+            if isinstance(anchor, str):
+                anchor = datetime.fromisoformat(anchor.replace("Z", "+00:00"))
+            if anchor.tzinfo is None:
+                anchor = anchor.replace(tzinfo=timezone.utc)
+            age_days = max(0.0, (t - anchor).total_seconds() / 86400.0)
+
+        return {
+            "observation_id": obs_id,
+            "effective_confidence": round(eff, 6),
+            "weibull_shape": shape,
+            "half_life_days": hl,
+            "decay_function": fn,
+            "decay_profile": _dp(hl, shape),
+            "age_days": round(age_days, 4) if age_days is not None else None,
+            "evaluated_at": t.isoformat(),
+        }
+
     def expiring_soon(
         self,
         *,

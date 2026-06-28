@@ -190,6 +190,31 @@ class TestGraphRead:
         assert r["node_total"] == 0
         assert r["edge_total"] == 0
 
+    # ── OHM-60pd: confidence_at() SDK method ──
+
+    def test_confidence_at_returns_dict(self, graph):
+        """confidence_at() returns a dict with the full confidence packet."""
+        from ohm.queries import create_observation
+        n = graph.create_node(label="Test", node_type="concept")["id"]
+        obs = create_observation(
+            graph._conn, node_id=n, obs_type="measurement",
+            created_by="test_agent", value=0.9, half_life_days=7.0, weibull_shape=1.0,
+        )
+        r = graph.confidence_at(obs["id"])
+        assert isinstance(r, dict)
+        assert r["observation_id"] == obs["id"]
+        for k in ("effective_confidence", "weibull_shape", "half_life_days",
+                   "decay_function", "decay_profile", "age_days", "evaluated_at"):
+            assert k in r
+        assert r["weibull_shape"] == 1.0
+        assert r["decay_function"] == "weibull"
+
+    def test_confidence_at_missing_raises(self, graph):
+        """confidence_at() raises NodeNotFoundError for a missing observation."""
+        from ohm.exceptions import NodeNotFoundError
+        with pytest.raises(NodeNotFoundError):
+            graph.confidence_at("does-not-exist-1234")
+
     def test_agent_state(self, graph):
         graph.set_focus("testing")
         results = graph.agent_state()

@@ -2366,3 +2366,82 @@ class TestChangesEndpoint:
         # '2026-... HH:MM:SS...' depending on version/mode — accept either.
         import re
         assert re.match(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}", data["query_timestamp"])
+
+
+@pytest.mark.xdist_group("server")
+class TestObservationConfidenceEndpoint:
+    """Tests for GET /observation/{id} and /observation/{id}/confidence (OHM-60pd)."""
+
+    def test_get_observation_returns_record_with_confidence(self, test_server):
+        """GET /observation/{id} returns the raw record enriched with
+        effective_confidence and decay_profile."""
+        port, store = test_server
+        store.write_node("obs_n1", "Node", "concept", agent_name="metis")
+        store.write_observation("obs_n1", "measurement", value=0.9, agent_name="metis", half_life_days=7.0, weibull_shape=1.0)
+        obs_id = store.execute_one(
+            "SELECT id FROM ohm_observations WHERE node_id = 'obs_n1' ORDER BY created_at DESC LIMIT 1"
+        )["id"]
+        status, data = _request("GET", port, f"/observation/{obs_id}")
+        assert status == 200, data
+        assert data["id"] == obs_id
+        assert "effective_confidence" in data
+        assert "decay_profile" in data
+        assert data["weibull_shape"] == 1.0
+
+    def test_get_observation_confidence_returns_full_packet(self, test_server):
+        """GET /observation/{id}/confidence returns the full confidence packet."""
+        port, store = test_server
+        store.write_node("obs_n2", "Node 2", "concept", agent_name="metis")
+        store.write_observation("obs_n2", "sentiment", value=0.8, agent_name="metis")
+        obs_id = store.execute_one(
+            "SELECT id FROM ohm_observations WHERE node_id = 'obs_n2' ORDER BY created_at DESC LIMIT 1"
+        )["id"]
+        status, data = _request("GET", port, f"/observation/{obs_id}/confidence")
+        assert status == 200, data
+        assert data["observation_id"] == obs_id
+        for k in ("effective_confidence", "weibull_shape", "half_life_days",
+                   "decay_function", "decay_profile", "age_days", "evaluated_at"):
+            assert k in data, f"missing key: {k}"
+        # sentiment default: weibull_shape=1.5, half_life=3.0
+        assert data["weibull_shape"] == 1.5
+        assert data["half_life_days"] == 3.0
+        assert data["decay_function"] == "weibull"
+        assert data["decay_profile"] == "fast-perishable"
+
+    def test_get_observation_confidence_with_at_param(self, test_server):
+        """?at=ISO8601 evaluates confidence at a specific time."""
+        port, store = test_server
+        store.write_node("obs_n3", "Node 3", "concept", agent_name="metis")
+        store.write_observation("obs_n3", "measurement", value=1.0, agent_name="metis", half_life_days=7.0, weibull_shape=1.0)
+        obs_id = store.execute_one(
+            "SELECT id FROM ohm_observations WHERE node_id = 'obs_n3' ORDER BY created_at DESC LIMIT 1"
+        )["id"]
+        # Evaluate 7 days from now → should be ~0.5 (one half-life, κ=1)
+        from datetime import datetime, timedelta, timezone
+        future = (datetime.now(timezone.utc) + timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        status, data = _request("GET", port, f"/observation/{obs_id}/confidence?at={future}")
+        assert status == 200, data
+        assert data["effective_confidence"] == pytest.approx(0.5, abs=0.05)
+
+    def test_get_observation_confidence_missing_returns_404(self, test_server):
+        """A non-existent observation id returns 404."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/observation/does-not-exist-1234/confidence")
+        assert status == 404
+
+    def test_get_observation_missing_returns_404(self, test_server):
+        """GET /observation/{id} with a missing id returns 404."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/observation/does-not-exist-1234")
+        assert status == 404
+
+    def test_get_observation_confidence_invalid_at_returns_400(self, test_server):
+        """A malformed ?at= returns a 4xx."""
+        port, store = test_server
+        store.write_node("obs_n4", "Node 4", "concept", agent_name="metis")
+        store.write_observation("obs_n4", "measurement", value=0.9, agent_name="metis")
+        obs_id = store.execute_one(
+            "SELECT id FROM ohm_observations WHERE node_id = 'obs_n4' ORDER BY created_at DESC LIMIT 1"
+        )["id"]
+        status, data = _request("GET", port, f"/observation/{obs_id}/confidence?at=not-a-timestamp")
+        assert 400 <= status < 500

@@ -24,7 +24,7 @@ from typing import Any, TYPE_CHECKING
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
-from ohm.graph.decay import default_half_life
+from ohm.graph.decay import default_half_life, default_weibull_shape
 
 
 # ── Feature 5: Learned Half-Lives ──────────────────────────────────────────
@@ -79,6 +79,7 @@ def empirical_half_life(
             "n_samples": n_samples,
             "median_age_at_supersession": None,
             "default_half_life": fallback,
+            "weibull_shape": default_weibull_shape(obs_type),
             "using_default": True,
             "note": f"Only {n_samples} superseded observations; need {MIN_SAMPLES} for learned half-life. Using default.",
         }
@@ -111,6 +112,7 @@ def empirical_half_life(
             "n_samples": 0,
             "median_age_at_supersession": None,
             "default_half_life": fallback,
+            "weibull_shape": default_weibull_shape(obs_type),
             "using_default": True,
             "note": "No positive ages at supersession. Using default.",
         }
@@ -130,6 +132,7 @@ def empirical_half_life(
         "n_samples": n_samples,
         "median_age_at_supersession": round(median_age, 2),
         "default_half_life": fallback,
+        "weibull_shape": default_weibull_shape(obs_type),
         "using_default": False,
         "note": None,
     }

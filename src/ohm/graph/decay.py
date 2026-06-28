@@ -340,7 +340,7 @@ def get_observation_chain(
         if isinstance(eval_at, str):
             eval_at = datetime.fromisoformat(eval_at.replace("Z", "+00:00"))
         row["effective_confidence"] = round(confidence_at(row, t=eval_at), 4)
-        row["decay_profile"] = decay_profile(row.get("half_life_days"))
+        row["decay_profile"] = decay_profile(row.get("half_life_days"), row.get("weibull_shape"))
 
     return rows
 
@@ -386,7 +386,7 @@ def get_active_observations(
         eff = confidence_at(row, t=t)
         if eff >= min_validity:
             row["effective_confidence"] = round(eff, 4)
-            row["decay_profile"] = decay_profile(row.get("half_life_days"))
+            row["decay_profile"] = decay_profile(row.get("half_life_days"), row.get("weibull_shape"))
             enriched.append(row)
 
     return enriched
