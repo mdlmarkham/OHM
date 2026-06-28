@@ -1017,6 +1017,45 @@ class AdminHandlerMixin:
             },
         })
 
+    def _post_admin_hooks_stage(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /admin/hooks/<stage> — run hooks for an ingestion stage (OHM-tjkx).
+
+        Body: the payload to pass to each hook on stdin.
+        Response: list of HookResult dicts with exit_code, stdout, stderr,
+        duration_ms, and timed_out.
+        """
+        from ohm.hooks import HookRunner, VALID_HOOK_EVENTS
+        from ohm.exceptions import ValidationError
+
+        prefix = "/admin/hooks/"
+        if not path.startswith(prefix):
+            raise ValidationError("Invalid hook path")
+        event = path[len(prefix):]
+
+        if event not in VALID_HOOK_EVENTS:
+            raise ValidationError(
+                f"Invalid hook event: {event!r}. Must be one of: {', '.join(sorted(VALID_HOOK_EVENTS))}"
+            )
+
+        runner = HookRunner(self.current_store.conn)
+        results = runner.run_hooks(event, body or {})
+        self._json_response(200, {
+            "event": event,
+            "hooks_run": len(results),
+            "results": [
+                {
+                    "hook_id": r.hook_id,
+                    "exit_code": r.exit_code,
+                    "success": r.success,
+                    "stdout": r.stdout[:1000],
+                    "stderr": r.stderr[:1000],
+                    "duration_ms": round(r.duration_ms, 2),
+                    "timed_out": r.timed_out,
+                }
+                for r in results
+            ],
+        })
+
     def _post_admin_merge(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /admin/merge — merge duplicate nodes (OHM-g0kv.6).
 

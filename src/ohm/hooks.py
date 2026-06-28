@@ -1,7 +1,8 @@
-"""Hook system for OHM staged ingestion pipeline (OHM-aznh).
+"""Hook system for OHM staged ingestion pipeline (OHM-aznh, OHM-tjkx).
 
-Provides deterministic pre/post processing around graph writes.
-Hooks are registered in the ohm_hooks table and executed by HookRunner.
+Provides deterministic pre/post processing around graph writes and
+ingestion pipeline stages. Hooks are registered in the ohm_hooks table
+and executed by HookRunner.
 
 Hook events:
   pre_ingest  - runs before graph write, can abort with non-zero exit
@@ -9,11 +10,22 @@ Hook events:
   pre_query   - runs before GET handlers, can modify query params
   post_query  - runs after GET handlers, can decorate response
 
+Ingestion pipeline stage events (OHM-tjkx):
+  pre_fetch     - before fetching a document from a URL or local path
+  post_fetch    - after fetch, can validate/normalize the fetched content
+  pre_parse     - before parsing content into a document tree
+  post_parse    - after parse, can inspect/modify the tree structure
+  pre_commit    - before writing parsed nodes/edges to the graph
+  post_commit   - after commit, receives the created source node + edges
+  on_error      - fallback/cleanup when any stage fails
+
 OHM-aznh.8: Hook subprocesses are sandboxed by default:
 - Environment whitelist: only OHM_HOOK_EVENT, OHM_HOOK_ID, OHM_CUSTOMER_ID
 - Linux: preexec_fn with setrlimit (RLIMIT_AS, RLIMIT_NOFILE, RLIMIT_NPROC=0)
 - Windows: best-effort (env sandbox + CREATE_NEW_PROCESS_GROUP).
 - Set OHM_SANDBOX_DISABLE=1 to run unsandboxed (dev mode, logs warning).
+
+OHM-tjkx: CI mode (BEADS_HOOKS=0 or --no-hooks) bypasses all hooks.
 """
 
 from __future__ import annotations
@@ -29,10 +41,38 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-VALID_HOOK_EVENTS = frozenset({"pre_ingest", "post_ingest", "pre_query", "post_query"})
+VALID_HOOK_EVENTS = frozenset({
+    # Graph write hooks (OHM-aznh)
+    "pre_ingest", "post_ingest",
+    # Query hooks (OHM-aznh)
+    "pre_query", "post_query",
+    # Ingestion pipeline stage hooks (OHM-tjkx)
+    "pre_fetch", "post_fetch",
+    "pre_parse", "post_parse",
+    "pre_commit", "post_commit",
+    "on_error",
+})
+
+# Ingestion pipeline stages in order (OHM-tjkx).
+# Each stage has a pre_<stage> and post_<stage> hook event.
+INGESTION_STAGES = ("fetch", "parse", "commit")
 
 _SHELL_NOT_FOUND_EXIT = 127
 _TIMEOUT_EXIT = 124
+
+
+def hooks_enabled() -> bool:
+    """Check if hooks are enabled (OHM-tjkx CI mode).
+
+    Returns False when BEADS_HOOKS=0 or OHM_NO_HOOKS=1 is set.
+    Used by the ingestion pipeline to bypass all hook execution in CI.
+    """
+    val = os.environ.get("BEADS_HOOKS", "1")
+    if val == "0":
+        return False
+    if os.environ.get("OHM_NO_HOOKS", "0") == "1":
+        return False
+    return True
 
 
 @dataclass

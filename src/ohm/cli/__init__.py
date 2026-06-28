@@ -708,6 +708,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Max traversal depth (default: 5)",
     )
 
+    # ── hooks ────────────────────────────────────────────────────────────
+    hooks_parser = subparsers.add_parser("hooks", help="Hook management (OHM-tjkx)")
+    hooks_sub = hooks_parser.add_subparsers(dest="hooks_command", help="Hook commands")
+
+    # hooks list
+    hooks_list = hooks_sub.add_parser("list", help="List registered hooks")
+    hooks_list.add_argument("--event", default=None, help="Filter by event (e.g., pre_fetch)")
+    hooks_list.add_argument("--db", default=None, help="Database path (default: ~/.ohm/ohm.duckdb)")
+
+    # hooks run
+    hooks_run = hooks_sub.add_parser("run", help="Run hooks for a stage event")
+    hooks_run.add_argument("event", help="Hook event to run (e.g., pre_fetch, post_commit)")
+    hooks_run.add_argument("--payload", default=None, help="Path to JSON payload file (default: stdin)")
+    hooks_run.add_argument("--db", default=None, help="Database path (default: ~/.ohm/ohm.duckdb)")
+
     return parser
 
 
@@ -763,6 +778,8 @@ def _dispatch(args: argparse.Namespace) -> None:
         _handle_sync(args)
     elif args.command == "topo":
         _handle_topo(args)
+    elif args.command == "hooks":
+        _handle_hooks(args)
 
 
 def _handle_sync(args: argparse.Namespace) -> None:
@@ -2888,3 +2905,85 @@ def _handle_fragments(args: argparse.Namespace) -> None:
                 print(f"  [{created_str}] {label} ({fid}) by {creator}")
     finally:
         conn.close()
+
+
+def _handle_hooks(args: argparse.Namespace) -> None:
+    """Handle 'ohm hooks' subcommands (OHM-tjkx)."""
+    import duckdb as _duckdb
+    import json as _json
+    import sys as _sys
+
+    db_path = args.db or os.environ.get("OHM_DB_PATH", str(Path.home() / ".ohm" / "ohm.duckdb"))
+
+    if args.hooks_command == "list":
+        conn = _duckdb.connect(db_path)
+        try:
+            from ohm.hooks import VALID_HOOK_EVENTS
+            from ohm.schema import initialize_schema
+            initialize_schema(conn)
+
+            event_filter = args.event
+            sql = "SELECT id, event, command, timeout_ms, enabled, created_by FROM ohm_hooks"
+            params = []
+            if event_filter:
+                sql += " WHERE event = ?"
+                params.append(event_filter)
+            sql += " ORDER BY event, id"
+            rows = conn.execute(sql, params).fetchall()
+            if not rows:
+                print("No hooks registered.")
+                print(f"Valid events: {', '.join(sorted(VALID_HOOK_EVENTS))}")
+                return
+            print(f"Hooks ({len(rows)}):")
+            for row in rows:
+                hid, event, command, timeout, enabled, creator = row
+                status = "enabled" if enabled else "disabled"
+                print(f"  [{event}] {hid} ({status}, {timeout}ms) by {creator}")
+                print(f"    command: {command[:80]}")
+            print(f"\nValid events: {', '.join(sorted(VALID_HOOK_EVENTS))}")
+        finally:
+            conn.close()
+
+    elif args.hooks_command == "run":
+        conn = _duckdb.connect(db_path)
+        try:
+            from ohm.hooks import HookRunner, VALID_HOOK_EVENTS
+            from ohm.schema import initialize_schema
+            initialize_schema(conn)
+
+            event = args.event
+            if event not in VALID_HOOK_EVENTS:
+                print(f"Error: invalid event '{event}'. Valid: {', '.join(sorted(VALID_HOOK_EVENTS))}")
+                _sys.exit(1)
+
+            # Load payload from file or stdin
+            if args.payload:
+                with open(args.payload, "r") as f:
+                    payload = _json.load(f)
+            else:
+                payload_text = _sys.stdin.read()
+                payload = _json.loads(payload_text) if payload_text.strip() else {}
+
+            runner = HookRunner(conn)
+            results = runner.run_hooks(event, payload)
+            print(_json.dumps({
+                "event": event,
+                "hooks_run": len(results),
+                "results": [
+                    {
+                        "hook_id": r.hook_id,
+                        "exit_code": r.exit_code,
+                        "success": r.success,
+                        "stdout": r.stdout[:500],
+                        "stderr": r.stderr[:500],
+                        "duration_ms": round(r.duration_ms, 2),
+                        "timed_out": r.timed_out,
+                    }
+                    for r in results
+                ],
+            }, indent=2))
+        finally:
+            conn.close()
+    else:
+        print("Usage: ohm hooks [list|run] ...")
+        _sys.exit(1)

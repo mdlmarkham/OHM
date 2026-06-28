@@ -684,6 +684,7 @@ def _build_router() -> _RouteRegistry:
         "/edge/sign/",
         "/edge/verify/",
         "/tasks/",
+        "/admin/hooks/",
     ):
         r.add("POST", _p)
 
@@ -2227,6 +2228,7 @@ OhmHandler._POST_PREFIXES = [
     ("/edge/verify/", "_post_edge_verify"),
     ("/documents/", "_post_document_sync_to_bedrock"),
     ("/tasks/", "_post_task_action"),
+    ("/admin/hooks/", "_post_admin_hooks_stage"),
 ]
 
 OhmHandler._GET_EXACT = {
