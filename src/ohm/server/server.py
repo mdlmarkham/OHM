@@ -720,6 +720,7 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
     request_queue_size = 128  # OHM-yv35: avoid connection resets under burst load (default was 5)
     timeout = 60  # seconds before dropping a stuck request thread
+    _ohm_store = None  # Set by run_server for fallback access in current_store
 
     def handle_error(self, request, client_address):
         """Log request errors without crashing."""
@@ -822,6 +823,18 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, AskHandlerMixin, Catal
         403 is reserved for actual authorisation failures (wrong role, cross-tenant key).
         """
         if not self.multi_tenant:
+            if self.store is None:
+                import logging
+                logger = logging.getLogger("ohm.server")
+                logger.critical(
+                    f"current_store: self.store is None! handler={self}, "
+                    f"server={getattr(self, 'server', None)}"
+                )
+                # Fallback: try to get store from server object
+                server = getattr(self, 'server', None)
+                if server is not None and hasattr(server, '_ohm_store') and server._ohm_store is not None:
+                    logger.warning("current_store: falling back to server._ohm_store")
+                    return server._ohm_store
             return self.store
         customer_id = self._customer_id
         if customer_id is None or self.tenant_manager is None:
@@ -1936,7 +1949,10 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, AskHandlerMixin, Catal
         self._current_agent = agent
 
         # pre_query hooks — can modify qs or block with 403
-        qs = self._run_pre_query_hooks(agent, path, qs)
+        try:
+            qs = self._run_pre_query_hooks(agent, path, qs)
+        except Exception:
+            logging.getLogger(__name__).exception("pre_query hooks failed, continuing without modification")
         if qs is None:
             return
 
@@ -2346,8 +2362,16 @@ def make_configured_handler(store: OhmStore):
 
     class _ConfiguredHandler(OhmHandler):
         def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
+            # OHM-fix-handler-store: bind store BEFORE super().__init__().
+            # BaseHTTPRequestHandler.__init__() may call self.handle() before
+            # returning, which can route to an endpoint that accesses
+            # self.current_store. If store is set after super(), endpoints see
+            # None and fail with "'NoneType' object has no attribute 'conn'".
             self.store = store
+            super().__init__(*args, **kwargs)
+            # Also store on the server for fallback access (safe after super).
+            if hasattr(self, 'server') and self.server is not None:
+                self.server._ohm_store = store
 
     _ConfiguredHandler.__name__ = "OhmHandler"
     _ConfiguredHandler.__qualname__ = "OhmHandler"
@@ -2454,6 +2478,7 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
             print("Quack extension not available — using HTTP-only mode", file=sys.stderr)
 
     server = ThreadedHTTPServer((config["host"], config["port"]), make_configured_handler(store))
+    server._ohm_store = store  # Fallback for current_store if handler.store is None
     print(f"OHM daemon listening on {config['host']}:{config['port']}", file=sys.stderr)
 
     # Background DuckLake sync thread (OHM-1rwl): sync every sync_interval_seconds

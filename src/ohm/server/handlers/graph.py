@@ -606,7 +606,7 @@ class GraphHandlerMixin:
         count_sql = "SELECT COUNT(*) as cnt FROM ohm_nodes WHERE " + " AND ".join(conditions)
         count_params = params[:-2]
         total_result = self.current_store.execute(count_sql, count_params)
-        total = total_result[0]["cnt"] if total_result else len(results)
+        total = total_result[0].get("cnt", len(results)) if total_result else len(results)
         self._json_response(
             200,
             {
@@ -646,7 +646,7 @@ class GraphHandlerMixin:
         count_sql = "SELECT COUNT(*) as cnt FROM ohm_nodes WHERE " + " AND ".join(conditions)
         count_params = params[:-2]
         total_result = self.current_store.execute(count_sql, count_params)
-        total = total_result[0]["cnt"] if total_result else len(results)
+        total = total_result[0].get("cnt", len(results)) if total_result else len(results)
         self._json_response(
             200,
             {
@@ -891,7 +891,7 @@ class GraphHandlerMixin:
         count_sql = "SELECT COUNT(*) as cnt FROM ohm_observations WHERE " + " AND ".join(conditions)
         count_params = params[:-2]
         total_result = self.current_store.execute(count_sql, count_params)
-        total = total_result[0]["cnt"] if total_result else len(results)
+        total = total_result[0].get("cnt", len(results)) if total_result else len(results)
         self._json_response(200, {"observations": results, "total": total, "limit": limit, "offset": offset})
 
     def _get_observation(self, path: str, qs: dict) -> None:

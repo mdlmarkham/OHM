@@ -1937,7 +1937,7 @@ def suggest_causes(
 ) -> dict[str, Any]:
     """Suggest candidate CAUSES edges from existing non-causal relationships.
 
-    Scans DEPENDS_ON, APPLIES_TO, REFINES, INFLUENCES, and EXPECTED_LIKELIHOOD
+    Scans DEPENDS_ON, APPLIES_TO, REFINES, ENABLES, INFLUENCES, and EXPECTED_LIKELIHOOD
     edges for node pairs that are connected but lack a CAUSES edge. These are
     candidates for causal relationships that should be evaluated by agents.
 
@@ -1958,7 +1958,7 @@ def suggest_causes(
     reader = _coerce_reader(conn)
 
     # Candidate edge types that might indicate causal relationships
-    candidate_types = ["DEPENDS_ON", "APPLIES_TO", "REFINES", "INFLUENCES", "EXPECTED_LIKELIHOOD"]
+    candidate_types = ["DEPENDS_ON", "APPLIES_TO", "REFINES", "ENABLES", "INFLUENCES", "EXPECTED_LIKELIHOOD"]
 
     # Find all edges of candidate types with confidence set (respect layer scope)
     _cand_records = reader.get_edges(edge_types=candidate_types, layers=layers)
