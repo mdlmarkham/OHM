@@ -240,10 +240,19 @@ def _rows_to_hook_records(result: Any) -> list[HookRecord]:
     records = []
     for row in result.fetchall():
         d = dict(zip(columns, row))
+        event = str(d.get("event", ""))
+        if event not in VALID_HOOK_EVENTS:
+            logger.warning(
+                "Skipping invalid hook record %s: event=%r is not in %s",
+                d.get("id"),
+                event,
+                sorted(VALID_HOOK_EVENTS),
+            )
+            continue
         records.append(
             HookRecord(
                 id=str(d.get("id", "")),
-                event=str(d.get("event", "")),
+                event=event,
                 command=str(d.get("command", "")),
                 timeout_ms=int(d["timeout_ms"]) if d.get("timeout_ms") is not None else 5000,
                 enabled=bool(d["enabled"]) if d.get("enabled") is not None else True,
@@ -269,7 +278,9 @@ class HookRunner:
         """Return hooks registered for the given event.
 
         Args:
-            event: One of pre_ingest, post_ingest, pre_query, post_query.
+            event: One of pre_ingest, post_ingest, pre_query, post_query,
+                pre_fetch, post_fetch, pre_parse, post_parse, pre_commit,
+                post_commit, or on_error.
             enabled_only: If True, only return enabled hooks.
 
         Returns:
