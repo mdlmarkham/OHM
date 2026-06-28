@@ -6,7 +6,14 @@ import duckdb
 import pytest
 
 from ohm.schema import initialize_schema
-from ohm.queries import create_node, create_edge, create_observation, query_neighborhood_narrative, query_claim_lineage
+from ohm.queries import (
+    create_node,
+    create_edge,
+    create_observation,
+    query_neighborhood_narrative,
+    query_claim_lineage,
+    query_contradiction_summary,
+)
 
 
 @pytest.fixture
@@ -196,3 +203,94 @@ class TestClaimLineage:
         import json
         serialized = json.dumps(r, default=str)
         assert "Demand Rationing" in serialized
+
+
+# ── Contradiction Summary (OHM-q9rt.3) ─────────────────────────────────────
+
+
+class TestContradictionSummary:
+    """Tests for query_contradiction_summary() (OHM-q9rt.3)."""
+
+    def test_no_contradiction_on_neutral_node(self, test_conn):
+        n = create_node(test_conn, label="Neutral", node_type="concept", created_by="test")
+        create_observation(test_conn, node_id=n["id"], obs_type="measurement",
+                           created_by="test", value=0.5, baseline=0.5)
+        r = query_contradiction_summary(test_conn, n["id"])
+        assert r["has_contradiction"] is False
+        assert r["recommendation"] == "no_contradiction"
+
+    def test_detects_opposite_observations(self, test_conn):
+        n = create_node(test_conn, label="Price Index", node_type="concept", created_by="metis")
+        create_observation(test_conn, node_id=n["id"], obs_type="measurement",
+                           created_by="metis", value=0.9, baseline=0.5)
+        create_observation(test_conn, node_id=n["id"], obs_type="measurement",
+                           created_by="hephaestus", value=0.1, baseline=0.5)
+        r = query_contradiction_summary(test_conn, n["id"])
+        assert r["has_contradiction"] is True
+        assert len(r["sides"]) == 2
+        directions = [s["direction"] for s in r["sides"]]
+        assert "above_baseline" in directions
+        assert "below_baseline" in directions
+
+    def test_sides_have_agents_and_observations(self, test_conn):
+        n = create_node(test_conn, label="Debated", node_type="concept", created_by="metis")
+        create_observation(test_conn, node_id=n["id"], obs_type="measurement",
+                           created_by="metis", value=0.9, baseline=0.5)
+        create_observation(test_conn, node_id=n["id"], obs_type="measurement",
+                           created_by="hephaestus", value=0.1, baseline=0.5)
+        r = query_contradiction_summary(test_conn, n["id"])
+        for side in r["sides"]:
+            assert len(side["agents"]) >= 1
+            assert len(side["observations"]) >= 1
+            assert "effective_confidence" in side
+            assert side["observation_count"] >= 1
+
+    def test_recommendation_identifies_stronger_side(self, test_conn):
+        n = create_node(test_conn, label="Contested", node_type="concept", created_by="metis")
+        create_observation(test_conn, node_id=n["id"], obs_type="measurement",
+                           created_by="metis", value=0.95, baseline=0.5)
+        create_observation(test_conn, node_id=n["id"], obs_type="measurement",
+                           created_by="hephaestus", value=0.05, baseline=0.5)
+        r = query_contradiction_summary(test_conn, n["id"])
+        assert "stronger" in r["recommendation"].lower()
+
+    def test_recommendation_unresolved_when_balanced(self, test_conn):
+        # Use identical values on opposite sides of baseline to get balanced confidence
+        n = create_node(test_conn, label="Balanced", node_type="concept", created_by="metis")
+        create_observation(test_conn, node_id=n["id"], obs_type="measurement",
+                           created_by="metis", value=0.5, baseline=0.5)
+        # Two agents with the SAME value but both at baseline — neutral, no contradiction
+        create_observation(test_conn, node_id=n["id"], obs_type="measurement",
+                           created_by="hephaestus", value=0.5, baseline=0.5)
+        r = query_contradiction_summary(test_conn, n["id"])
+        # Both observations are at baseline → no above/below split → no contradiction
+        assert r["has_contradiction"] is False
+        assert r["recommendation"] == "no_contradiction"
+
+    def test_returns_node_info(self, test_conn):
+        n = create_node(test_conn, label="Target", node_type="concept", created_by="test")
+        r = query_contradiction_summary(test_conn, n["id"])
+        assert r["node"]["id"] == n["id"]
+        assert r["node"]["label"] == "Target"
+
+    def test_missing_node_raises(self, test_conn):
+        from ohm.exceptions import NodeNotFoundError
+        with pytest.raises(NodeNotFoundError):
+            query_contradiction_summary(test_conn, "does-not-exist-1234")
+
+    def test_no_observations_returns_empty_sides(self, test_conn):
+        n = create_node(test_conn, label="Empty", node_type="concept", created_by="test")
+        r = query_contradiction_summary(test_conn, n["id"])
+        assert r["has_contradiction"] is False
+        assert r["total_observations"] == 0
+
+    def test_json_serializable(self, test_conn):
+        n = create_node(test_conn, label="Serial", node_type="concept", created_by="metis")
+        create_observation(test_conn, node_id=n["id"], obs_type="measurement",
+                           created_by="metis", value=0.9, baseline=0.5)
+        create_observation(test_conn, node_id=n["id"], obs_type="measurement",
+                           created_by="hephaestus", value=0.1, baseline=0.5)
+        r = query_contradiction_summary(test_conn, n["id"])
+        import json
+        serialized = json.dumps(r, default=str)
+        assert "Serial" in serialized

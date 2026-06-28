@@ -289,6 +289,28 @@ class TestGraphRead:
         assert result["total_nodes"] == 0
         assert result["lineage"] == []
 
+    # ── OHM-q9rt.3: contradiction_summary SDK method ──
+
+    def test_contradiction_summary_no_contradiction(self, graph):
+        from ohm.queries import create_observation
+        n = graph.create_node(label="Safe", node_type="concept")["id"]
+        create_observation(graph._conn, node_id=n, obs_type="measurement",
+                           created_by="test_agent", value=0.5, baseline=0.5)
+        result = graph.contradiction_summary(n)
+        assert isinstance(result, dict)
+        assert result["has_contradiction"] is False
+
+    def test_contradiction_summary_detects_conflict(self, graph):
+        from ohm.queries import create_observation
+        n = graph.create_node(label="Contested", node_type="concept")["id"]
+        create_observation(graph._conn, node_id=n, obs_type="measurement",
+                           created_by="test_agent", value=0.9, baseline=0.5)
+        create_observation(graph._conn, node_id=n, obs_type="measurement",
+                           created_by="other_agent", value=0.1, baseline=0.5)
+        result = graph.contradiction_summary(n)
+        assert result["has_contradiction"] is True
+        assert len(result["sides"]) == 2
+
     def test_agent_state(self, graph):
         graph.set_focus("testing")
         results = graph.agent_state()

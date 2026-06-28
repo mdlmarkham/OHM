@@ -2524,3 +2524,30 @@ class TestLineageEndpoint:
         port, _ = test_server
         status, data = _request("GET", port, "/lineage/does-not-exist-1234")
         assert status == 404
+
+
+@pytest.mark.xdist_group("server")
+class TestContradictionSummaryEndpoint:
+    """Tests for GET /contradiction/{node_id} — contradiction summary (OHM-q9rt.3)."""
+
+    def test_contradiction_returns_sides(self, test_server):
+        port, store = test_server
+        store.write_node("con_n", "Debated Price", "concept", agent_name="metis")
+        store.write_observation("con_n", "measurement", value=0.9, baseline=0.5, agent_name="metis")
+        store.write_observation("con_n", "measurement", value=0.1, baseline=0.5, agent_name="hephaestus")
+        status, data = _request("GET", port, "/contradiction/con_n")
+        assert status == 200, data
+        assert data["has_contradiction"] is True
+        assert len(data["sides"]) == 2
+
+    def test_contradiction_no_conflict_returns_false(self, test_server):
+        port, store = test_server
+        store.write_node("con_safe", "Safe Node", "concept", agent_name="metis")
+        status, data = _request("GET", port, "/contradiction/con_safe")
+        assert status == 200, data
+        assert data["has_contradiction"] is False
+
+    def test_contradiction_missing_node_returns_404(self, test_server):
+        port, _ = test_server
+        status, data = _request("GET", port, "/contradiction/does-not-exist-1234")
+        assert status == 404

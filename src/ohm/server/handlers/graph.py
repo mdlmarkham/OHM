@@ -1051,6 +1051,30 @@ class GraphHandlerMixin:
         )
         self._json_response(200, result)
 
+    def _get_contradiction_summary(self, path: str, qs: dict) -> None:
+        """GET /contradiction/{node_id} — contradiction summary (OHM-q9rt.3).
+
+        Returns a structured "both sides" view of contradictions involving
+        a node: groups of conflicting observations, their agents, effective
+        confidence (with decay), existing challenges, and a recommendation.
+        """
+        from ohm.queries import query_contradiction_summary
+
+        prefix = "/contradiction/"
+        if not path.startswith(prefix):
+            from ohm.exceptions import ValidationError
+            raise ValidationError("Invalid contradiction path")
+        node_id = path[len(prefix):]
+        if not node_id:
+            from ohm.exceptions import ValidationError
+            raise ValidationError("Missing node id")
+
+        result = query_contradiction_summary(
+            self.current_store.read_conn,
+            node_id,
+        )
+        self._json_response(200, result)
+
     def _enforce_cross_link_requirement(self, node_id: str, body: dict) -> dict | None:
         """Return a 422 response body if *body* describes a node that must link.
 

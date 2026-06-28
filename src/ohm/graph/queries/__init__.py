@@ -7057,3 +7057,198 @@ def query_claim_lineage(
         "total_sources": len(sources),
         "total_gaps": len(gaps),
     }
+
+
+# ── Contradiction Summary (OHM-q9rt.3) ──────────────────────────────────────
+
+
+def query_contradiction_summary(
+    conn: DuckDBPyConnection,
+    node_id: str,
+) -> dict[str, Any]:
+    """Build a structured summary of contradictions involving a node (OHM-q9rt.3).
+
+    Given a node with contradictory observations or challenged edges, returns
+    a "both sides" view: groups of conflicting observations, their supporting
+    agents, effective confidence (with decay), existing reconciliation attempts
+    (challenges/NEGATES), and a recommendation for which side has stronger evidence.
+
+    Args:
+        conn: Database connection.
+        node_id: The node to analyze for contradictions.
+
+    Returns:
+        Dict with:
+          - node: {id, label, type, confidence}
+          - sides: list of conflicting observation groups, each with:
+              {agent, observations, effective_confidence, supporting_edges}
+          - challenges: CHALLENGED_BY edges targeting edges that touch this node
+          - recommendation: which side has stronger evidence (or 'unresolved')
+          - has_contradiction: bool
+    """
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import NodeNotFoundError
+    from ohm.graph.decay import confidence_at
+
+    node_id = validate_identifier(node_id, name="node_id")
+
+    # Fetch the target node
+    node_row = conn.execute(
+        "SELECT id, label, type, confidence FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+        [node_id],
+    ).fetchone()
+    if not node_row:
+        raise NodeNotFoundError(f"Node not found: {node_id}")
+
+    node_info = {
+        "id": node_row[0],
+        "label": node_row[1],
+        "type": node_row[2],
+        "confidence": node_row[3],
+    }
+
+    # 1. Find opposing observations on this node (different agents, opposite directions from baseline)
+    obs_rows = conn.execute(
+        """SELECT o.id, o.type, o.value, o.baseline, o.sigma, o.created_by,
+                  o.created_at, o.source, o.half_life_days, o.weibull_shape,
+                  o.valid_from, o.valid_to
+           FROM ohm_observations o
+           WHERE o.node_id = ?
+             AND o.deleted_at IS NULL
+             AND o.value IS NOT NULL
+           ORDER BY o.created_at DESC
+           LIMIT 100""",
+        [node_id],
+    ).fetchall()
+
+    # Group observations by direction relative to baseline
+    above: list[dict[str, Any]] = []
+    below: list[dict[str, Any]] = []
+    neutral: list[dict[str, Any]] = []
+
+    for row in obs_rows:
+        obs = {
+            "obs_id": row[0],
+            "obs_type": row[1],
+            "value": row[2],
+            "baseline": row[3],
+            "sigma": row[4],
+            "created_by": row[5],
+            "created_at": str(row[6]) if row[6] else None,
+            "source": row[7],
+            "effective_confidence": round(confidence_at({
+                "value": row[2],
+                "half_life_days": row[8],
+                "weibull_shape": row[9],
+                "valid_from": row[10],
+                "valid_to": row[11],
+                "type": row[1],
+                "created_at": str(row[6]) if row[6] else None,
+            }), 4),
+        }
+        if row[3] is not None and row[2] is not None:
+            if row[2] > row[3]:
+                above.append(obs)
+            elif row[2] < row[3]:
+                below.append(obs)
+            else:
+                neutral.append(obs)
+        else:
+            neutral.append(obs)
+
+    # Build sides: each side is a group of observations + the agents who made them
+    sides: list[dict[str, Any]] = []
+
+    if above:
+        agents_above = list({o["created_by"] for o in above if o["created_by"]})
+        avg_conf_above = sum(o["effective_confidence"] for o in above) / len(above)
+        sides.append({
+            "direction": "above_baseline",
+            "agents": agents_above,
+            "observations": above,
+            "effective_confidence": round(avg_conf_above, 4),
+            "observation_count": len(above),
+        })
+
+    if below:
+        agents_below = list({o["created_by"] for o in below if o["created_by"]})
+        avg_conf_below = sum(o["effective_confidence"] for o in below) / len(below)
+        sides.append({
+            "direction": "below_baseline",
+            "agents": agents_below,
+            "observations": below,
+            "effective_confidence": round(avg_conf_below, 4),
+            "observation_count": len(below),
+        })
+
+    if neutral and not above and not below:
+        sides.append({
+            "direction": "neutral",
+            "agents": list({o["created_by"] for o in neutral if o["created_by"]}),
+            "observations": neutral,
+            "effective_confidence": round(
+                sum(o["effective_confidence"] for o in neutral) / len(neutral), 4
+            ) if neutral else 0.0,
+            "observation_count": len(neutral),
+        })
+
+    # 2. Find CHALLENGED_BY edges targeting edges that touch this node
+    challenge_rows = conn.execute(
+        """SELECT c.id AS challenge_id, c.challenge_of AS target_edge_id,
+                  c.created_by AS challenger, c.confidence AS challenge_confidence,
+                  c.provenance AS reason, c.created_at,
+                  target.edge_type AS target_edge_type,
+                  target.created_by AS target_author,
+                  target.confidence AS target_confidence
+           FROM ohm_edges c
+           JOIN ohm_edges target ON target.id = c.challenge_of
+           WHERE c.challenge_type = 'CHALLENGED_BY'
+             AND (target.from_node = ? OR target.to_node = ?)
+             AND target.deleted_at IS NULL
+           ORDER BY c.confidence DESC, c.created_at DESC
+           LIMIT 50""",
+        [node_id, node_id],
+    ).fetchall()
+
+    challenges = [
+        {
+            "challenge_id": row[0],
+            "target_edge_id": row[1],
+            "challenger": row[2],
+            "challenge_confidence": row[3],
+            "reason": row[4],
+            "created_at": str(row[5]) if row[5] else None,
+            "target_edge_type": row[6],
+            "target_author": row[7],
+            "target_confidence": row[8],
+        }
+        for row in challenge_rows
+    ]
+
+    # 3. Recommendation: which side has stronger evidence?
+    has_contradiction = len(sides) >= 2 or len(challenges) > 0
+    recommendation = "no_contradiction"
+
+    if len(sides) >= 2:
+        # Compare effective confidence × observation count
+        side0_weight = sides[0]["effective_confidence"] * sides[0]["observation_count"]
+        side1_weight = sides[1]["effective_confidence"] * sides[1]["observation_count"]
+        if side0_weight > side1_weight * 1.2:
+            recommendation = f"Side '{sides[0]['direction']}' has stronger evidence (conf={sides[0]['effective_confidence']}, count={sides[0]['observation_count']})"
+        elif side1_weight > side0_weight * 1.2:
+            recommendation = f"Side '{sides[1]['direction']}' has stronger evidence (conf={sides[1]['effective_confidence']}, count={sides[1]['observation_count']})"
+        else:
+            recommendation = "unresolved — both sides have comparable evidence"
+
+    if challenges and not has_contradiction:
+        recommendation = f"{len(challenges)} challenge(s) registered — review required"
+
+    return {
+        "node": node_info,
+        "sides": sides,
+        "challenges": challenges,
+        "recommendation": recommendation,
+        "has_contradiction": has_contradiction,
+        "total_observations": len(obs_rows),
+        "total_challenges": len(challenges),
+    }

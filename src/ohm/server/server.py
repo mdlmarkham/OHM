@@ -2348,6 +2348,7 @@ OhmHandler._GET_PREFIXES = [
     ("/synthesis/", "_get_synthesis_validity"),
     ("/narrative/", "_get_narrative"),
     ("/lineage/", "_get_lineage"),
+    ("/contradiction/", "_get_contradiction_summary"),
 ]
 
 

@@ -1829,6 +1829,24 @@ class Graph:
             max_depth=max_depth,
         )
 
+    def contradiction_summary(self, node_id: str) -> dict[str, Any]:
+        """Contradiction summary — "these two observations disagree" (OHM-q9rt.3).
+
+        Returns a structured "both sides" view of contradictions involving a
+        node: groups of conflicting observations, their agents, effective
+        confidence (with decay), existing challenges, and a recommendation.
+
+        Args:
+            node_id: The node to analyze for contradictions.
+
+        Returns:
+            Dict with node, sides (list of conflicting groups), challenges,
+            recommendation, has_contradiction (bool), totals.
+        """
+        from ohm.queries import query_contradiction_summary
+
+        return query_contradiction_summary(self._conn, node_id)
+
     def path(
         self,
         from_node: str,
