@@ -299,3 +299,124 @@ def test_s3_document_store_requires_bucket_env():
     """S3DocumentStore now requires bucket configuration; verify helpful error."""
     with pytest.raises(RuntimeError, match="OHM_S3_BUCKET"):
         S3DocumentStore()
+
+
+# ── S3 backend roundtrip tests (OHM-2ibj) ──────────────────────────────────
+# Use moto.mock_aws() to provide a fake S3 endpoint in-process so we can
+# exercise save/get/exists/get_record/update_metadata/delete against a real
+# boto3 client without AWS credentials or network access.
+
+
+class TestS3DocumentStore:
+    """End-to-end S3DocumentStore roundtrip against a moto-mocked S3."""
+
+    @pytest.fixture(autouse=True)
+    def _s3_env(self, monkeypatch):
+        monkeypatch.setenv("OHM_S3_BUCKET", "ohm-test-bucket")
+        monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test-key")
+        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test-secret")
+        monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+        monkeypatch.delenv("AWS_ENDPOINT_URL", raising=False)
+        monkeypatch.delenv("S3_ENDPOINT_URL", raising=False)
+
+    def _store(self):
+        moto = pytest.importorskip("moto")
+        ctx = moto.mock_aws()
+        ctx.start()
+        store = S3DocumentStore()
+        store.client.create_bucket(Bucket="ohm-test-bucket")
+        # Make the context manager manageable by the test — stop in teardown.
+        self._moto_ctx = ctx
+        return store
+
+    def teardown_method(self):
+        ctx = getattr(self, "_moto_ctx", None)
+        if ctx is not None:
+            try:
+                ctx.stop()
+            except RuntimeError:
+                pass
+            self._moto_ctx = None
+
+    def test_save_get_exists_roundtrip(self):
+        store = self._store()
+        document_id = f"doc-{uuid.uuid4().hex[:12]}"
+        data = b"hello s3 document"
+        record = store.save(document_id, "hello.txt", data, "text/plain")
+        assert store.exists(document_id)
+        assert store.get(document_id) == data
+        assert record["size"] == len(data)
+        assert record["uri"].startswith("s3://")
+        assert record["bucket"] == "ohm-test-bucket"
+        assert record["key"].endswith("hello.txt")
+
+    def test_pdf_save_uses_pdf_extension(self):
+        store = self._store()
+        document_id = f"doc-{uuid.uuid4().hex[:12]}"
+        pdf = _make_pdf_bytes()
+        record = store.save(document_id, "report.pdf", pdf, "application/pdf")
+        # The stored S3 object key should end with .pdf
+        assert record["key"].endswith("report.pdf")
+        assert store.get(document_id) == pdf
+
+    def test_get_record_returns_metadata(self):
+        store = self._store()
+        document_id = f"doc-{uuid.uuid4().hex[:12]}"
+        store.save(document_id, "note.md", b"# Title", "text/markdown")
+        record = store.get_record(document_id)
+        assert record["document_id"] == document_id
+        assert record["filename"] == "note.md"
+        assert record["content_type"] == "text/markdown"
+        assert record["size"] == 7
+
+    def test_get_missing_raises_filenotfound(self):
+        store = self._store()
+        with pytest.raises(FileNotFoundError):
+            store.get("does-not-exist-1234")
+
+    def test_get_record_missing_raises_filenotfound(self):
+        store = self._store()
+        with pytest.raises(FileNotFoundError):
+            store.get_record("does-not-exist-1234")
+
+    def test_exists_false_for_unknown(self):
+        store = self._store()
+        assert store.exists("does-not-exist-1234") is False
+
+    def test_update_metadata_persists(self):
+        store = self._store()
+        document_id = f"doc-{uuid.uuid4().hex[:12]}"
+        store.save(document_id, "doc.txt", b"body", "text/plain")
+        updated = store.update_metadata(
+            document_id,
+            source_node_id="node-abc",
+            tags=["test", "ingest"],
+        )
+        assert updated["source_node_id"] == "node-abc"
+        assert "updated_at" in updated
+        # Re-read to confirm persistence
+        reread = store.get_record(document_id)
+        assert reread["source_node_id"] == "node-abc"
+        assert reread["tags"] == ["test", "ingest"]
+
+    def test_delete_removes_objects(self):
+        store = self._store()
+        document_id = f"doc-{uuid.uuid4().hex[:12]}"
+        store.save(document_id, "gone.txt", b"bye", "text/plain")
+        assert store.exists(document_id)
+        store.delete(document_id)
+        assert store.exists(document_id) is False
+        with pytest.raises(FileNotFoundError):
+            store.get(document_id)
+
+    def test_custom_prefix_respects_namespace(self, monkeypatch):
+        # Re-init with a different prefix to confirm objects land under it.
+        monkeypatch.setenv("OHM_S3_PREFIX", "custom/prefix/")
+        moto = pytest.importorskip("moto")
+        with moto.mock_aws():
+            store = S3DocumentStore()
+            store.client.create_bucket(Bucket="ohm-test-bucket")
+            document_id = f"doc-{uuid.uuid4().hex[:12]}"
+            record = store.save(document_id, "f.txt", b"hi", "text/plain")
+            assert record["key"].startswith("custom/prefix/")
+            assert store.get(document_id) == b"hi"
