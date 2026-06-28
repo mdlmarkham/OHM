@@ -7252,3 +7252,172 @@ def query_contradiction_summary(
         "total_observations": len(obs_rows),
         "total_challenges": len(challenges),
     }
+
+
+# ── Task Context (OHM-q9rt.4) ───────────────────────────────────────────────
+
+
+def query_task_context(
+    conn: DuckDBPyConnection,
+    task_id: str,
+) -> dict[str, Any]:
+    """Bundle a task node with its relevant subgraph and expected outcome (OHM-q9rt.4).
+
+    Given a task node, returns the task with its 2-hop subgraph, rationale
+    chain (decisions/observations that led to it), expected outcome, and any
+    blocking tasks.
+
+    Args:
+        conn: Database connection.
+        task_id: The task node ID.
+
+    Returns:
+        Dict with:
+          - task: {id, label, type, status, assigned_to, expected_claim,
+                   success_criteria, outcome, outcome_notes, created_by, created_at}
+          - subgraph: {nodes: [...], edges: [...]} within 2 hops
+          - rationale: list of reasoning chain entries (nodes connected via
+            DECISION_DEPENDS_ON, DERIVES_FROM, REFERENCES edges)
+          - expected_outcome: success_criteria text or a derived summary
+          - blocking: list of other task nodes that block this one
+          - blocked_by_count: int
+    """
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import NodeNotFoundError
+
+    task_id = validate_identifier(task_id, name="task_id")
+
+    # Fetch the task node with all task-specific fields
+    task_row = conn.execute(
+        """SELECT id, label, type, task_status, assigned_to, expected_claim,
+                  success_criteria, outcome, outcome_notes, created_by, created_at,
+                  due_date, priority, confidence
+           FROM ohm_nodes
+           WHERE id = ? AND deleted_at IS NULL""",
+        [task_id],
+    ).fetchone()
+    if not task_row:
+        raise NodeNotFoundError(f"Task not found: {task_id}")
+
+    task = {
+        "id": task_row[0],
+        "label": task_row[1],
+        "type": task_row[2],
+        "status": task_row[3],
+        "assigned_to": task_row[4],
+        "expected_claim": task_row[5],
+        "success_criteria": task_row[6],
+        "outcome": task_row[7],
+        "outcome_notes": task_row[8],
+        "created_by": task_row[9],
+        "created_at": str(task_row[10]) if task_row[10] else None,
+        "due_date": str(task_row[11]) if task_row[11] else None,
+        "priority": task_row[12],
+        "confidence": task_row[13],
+    }
+
+    # Fetch 2-hop subgraph using the existing neighborhood query
+    subgraph_edges = query_neighborhood(conn, task_id, depth=2)
+
+    # Extract unique node IDs from the subgraph edges
+    subgraph_node_ids = {task_id}
+    for e in subgraph_edges:
+        fn = e.get("from_node")
+        tn = e.get("to_node")
+        if fn:
+            subgraph_node_ids.add(fn)
+        if tn:
+            subgraph_node_ids.add(tn)
+
+    # Fetch node info for all nodes in the subgraph
+    subgraph_nodes = []
+    if subgraph_node_ids:
+        placeholders = ",".join(["?"] * len(subgraph_node_ids))
+        node_rows = conn.execute(
+            f"""SELECT id, label, type, confidence, created_by
+                FROM ohm_nodes
+                WHERE id IN ({placeholders}) AND deleted_at IS NULL""",
+            list(subgraph_node_ids),
+        ).fetchall()
+        subgraph_nodes = [
+            {"id": r[0], "label": r[1], "type": r[2], "confidence": r[3], "created_by": r[4]}
+            for r in node_rows
+        ]
+
+    # Rationale: trace back through DECISION_DEPENDS_ON, DERIVES_FROM,
+    # REFERENCES, SUPPORTS edges to find the reasoning chain
+    rationale_types = ("DECISION_DEPENDS_ON", "DERIVES_FROM", "REFERENCES", "SUPPORTS", "TESTS")
+    rationale_rows = conn.execute(
+        f"""SELECT e.id, e.from_node, e.to_node, e.edge_type, e.layer,
+                  e.confidence, e.created_by,
+                  nf.label AS from_label, nf.type AS from_type,
+                  nt.label AS to_label, nt.type AS to_type
+           FROM ohm_edges e
+           LEFT JOIN ohm_nodes nf ON nf.id = e.from_node AND nf.deleted_at IS NULL
+           LEFT JOIN ohm_nodes nt ON nt.id = e.to_node AND nt.deleted_at IS NULL
+           WHERE (e.from_node = ? OR e.to_node = ?)
+             AND e.edge_type IN ({','.join(['?'] * len(rationale_types))})
+             AND e.deleted_at IS NULL
+           ORDER BY e.confidence DESC
+           LIMIT 20""",
+        [task_id, task_id, *rationale_types],
+    ).fetchall()
+
+    rationale = [
+        {
+            "edge_id": row[0],
+            "from_node": {"id": row[1], "label": row[7], "type": row[8]},
+            "to_node": {"id": row[2], "label": row[9], "type": row[10]},
+            "edge_type": row[3],
+            "layer": row[4],
+            "confidence": row[5],
+            "created_by": row[6],
+        }
+        for row in rationale_rows
+    ]
+
+    # Blocking: find other task nodes that block this one via DEPENDS_ON or
+    # BLOCKED_BY edges, or tasks that this task DEPENDS_ON
+    blocking_rows = conn.execute(
+        """SELECT b.id, b.label, b.task_status, b.assigned_to,
+                  e.edge_type, e.confidence
+           FROM ohm_edges e
+           JOIN ohm_nodes b ON b.id = CASE WHEN e.from_node = ? THEN e.to_node ELSE e.from_node END
+           WHERE (e.from_node = ? OR e.to_node = ?)
+             AND b.type = 'task'
+             AND b.id != ?
+             AND b.deleted_at IS NULL
+             AND e.deleted_at IS NULL
+             AND e.edge_type IN ('DEPENDS_ON', 'BLOCKED_BY', 'BLOCKS')
+           ORDER BY b.task_status""",
+        [task_id, task_id, task_id, task_id],
+    ).fetchall()
+
+    blocking = [
+        {
+            "task_id": row[0],
+            "label": row[1],
+            "status": row[2],
+            "assigned_to": row[3],
+            "edge_type": row[4],
+            "confidence": row[5],
+        }
+        for row in blocking_rows
+    ]
+
+    # Expected outcome: use success_criteria if available, otherwise derive
+    expected_outcome = task["success_criteria"]
+    if not expected_outcome and task["expected_claim"]:
+        expected_outcome = f"Verify claim: {task['expected_claim']}"
+
+    return {
+        "task": task,
+        "subgraph": {
+            "nodes": subgraph_nodes,
+            "edges": subgraph_edges,
+        },
+        "rationale": rationale,
+        "expected_outcome": expected_outcome,
+        "blocking": blocking,
+        "blocked_by_count": len(blocking),
+    }

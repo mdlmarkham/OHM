@@ -2349,6 +2349,7 @@ OhmHandler._GET_PREFIXES = [
     ("/narrative/", "_get_narrative"),
     ("/lineage/", "_get_lineage"),
     ("/contradiction/", "_get_contradiction_summary"),
+    ("/task-context/", "_get_task_context"),
 ]
 
 

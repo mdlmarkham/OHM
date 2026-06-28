@@ -2551,3 +2551,24 @@ class TestContradictionSummaryEndpoint:
         port, _ = test_server
         status, data = _request("GET", port, "/contradiction/does-not-exist-1234")
         assert status == 404
+
+
+@pytest.mark.xdist_group("server")
+class TestTaskContextEndpoint:
+    """Tests for GET /task-context/{task_id} — task context binding (OHM-q9rt.4)."""
+
+    def test_task_context_returns_task_and_subgraph(self, test_server):
+        port, store = test_server
+        store.write_node("tc_task", "Verify Claim", "task", agent_name="metis")
+        store.write_node("tc_dec", "Decision", "decision", agent_name="metis")
+        store.write_edge("tc_task", "tc_dec", "DECISION_DEPENDS_ON", layer="L3", agent_name="metis")
+        status, data = _request("GET", port, "/task-context/tc_task")
+        assert status == 200, data
+        assert data["task"]["label"] == "Verify Claim"
+        assert len(data["subgraph"]["nodes"]) >= 2
+        assert len(data["rationale"]) >= 1
+
+    def test_task_context_missing_returns_404(self, test_server):
+        port, _ = test_server
+        status, data = _request("GET", port, "/task-context/does-not-exist-1234")
+        assert status == 404

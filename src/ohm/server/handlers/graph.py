@@ -1075,6 +1075,29 @@ class GraphHandlerMixin:
         )
         self._json_response(200, result)
 
+    def _get_task_context(self, path: str, qs: dict) -> None:
+        """GET /task-context/{task_id} — task context binding (OHM-q9rt.4).
+
+        Returns a task bundled with its 2-hop subgraph, rationale chain,
+        expected outcome, and blocking tasks.
+        """
+        from ohm.queries import query_task_context
+
+        prefix = "/task-context/"
+        if not path.startswith(prefix):
+            from ohm.exceptions import ValidationError
+            raise ValidationError("Invalid task-context path")
+        task_id = path[len(prefix):]
+        if not task_id:
+            from ohm.exceptions import ValidationError
+            raise ValidationError("Missing task id")
+
+        result = query_task_context(
+            self.current_store.read_conn,
+            task_id,
+        )
+        self._json_response(200, result)
+
     def _enforce_cross_link_requirement(self, node_id: str, body: dict) -> dict | None:
         """Return a 422 response body if *body* describes a node that must link.
 

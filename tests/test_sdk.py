@@ -311,6 +311,27 @@ class TestGraphRead:
         assert result["has_contradiction"] is True
         assert len(result["sides"]) == 2
 
+    # ── OHM-q9rt.4: task_context SDK method ──
+
+    def test_task_context_returns_task(self, graph):
+        task = graph.create_node(label="My Task", node_type="task")["id"]
+        graph._conn.execute(
+            "UPDATE ohm_nodes SET task_status = ? WHERE id = ?",
+            ["open", task],
+        )
+        result = graph.task_context(task)
+        assert isinstance(result, dict)
+        assert result["task"]["label"] == "My Task"
+        assert result["task"]["status"] == "open"
+
+    def test_task_context_with_subgraph(self, graph):
+        task = graph.create_node(label="Linked Task", node_type="task")["id"]
+        dec = graph.create_node(label="Decision", node_type="decision")["id"]
+        graph.create_edge(from_node=task, to_node=dec, edge_type="DECISION_DEPENDS_ON", layer="L3")
+        result = graph.task_context(task)
+        assert len(result["subgraph"]["nodes"]) >= 2
+        assert len(result["rationale"]) >= 1
+
     def test_agent_state(self, graph):
         graph.set_focus("testing")
         results = graph.agent_state()

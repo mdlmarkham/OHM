@@ -1847,6 +1847,24 @@ class Graph:
 
         return query_contradiction_summary(self._conn, node_id)
 
+    def task_context(self, task_id: str) -> dict[str, Any]:
+        """Task context binding — task + subgraph + rationale (OHM-q9rt.4).
+
+        Returns a task node bundled with its 2-hop subgraph, rationale chain
+        (decisions/observations that led to it), expected outcome, and any
+        blocking tasks.
+
+        Args:
+            task_id: The task node ID.
+
+        Returns:
+            Dict with task, subgraph (nodes + edges), rationale,
+            expected_outcome, blocking, blocked_by_count.
+        """
+        from ohm.queries import query_task_context
+
+        return query_task_context(self._conn, task_id)
+
     def path(
         self,
         from_node: str,

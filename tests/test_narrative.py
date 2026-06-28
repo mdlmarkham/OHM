@@ -13,6 +13,7 @@ from ohm.queries import (
     query_neighborhood_narrative,
     query_claim_lineage,
     query_contradiction_summary,
+    query_task_context,
 )
 
 
@@ -294,3 +295,95 @@ class TestContradictionSummary:
         import json
         serialized = json.dumps(r, default=str)
         assert "Serial" in serialized
+
+
+# ── Task Context (OHM-q9rt.4) ───────────────────────────────────────────────
+
+
+def _seed_task_graph(conn):
+    """Create a task with a decision link and a blocker."""
+    task = create_node(conn, label="Verify Hormuz Claim", node_type="task", created_by="metis")
+    conn.execute(
+        "UPDATE ohm_nodes SET task_status = ?, assigned_to = ?, success_criteria = ?, expected_claim = ? WHERE id = ?",
+        ["open", "metis", "Claim holds for 30 days", "hormuz_claim", task["id"]],
+    )
+    decision = create_node(conn, label="Strategic Decision", node_type="decision", created_by="metis")
+    create_edge(conn, from_node=task["id"], to_node=decision["id"],
+                edge_type="DECISION_DEPENDS_ON", layer="L3", created_by="metis")
+    blocker = create_node(conn, label="Gather Data", node_type="task", created_by="hephaestus")
+    conn.execute("UPDATE ohm_nodes SET task_status = ? WHERE id = ?", ["in_progress", blocker["id"]])
+    create_edge(conn, from_node=task["id"], to_node=blocker["id"],
+                edge_type="DEPENDS_ON", layer="L4", created_by="metis")
+    return {"task": task, "decision": decision, "blocker": blocker}
+
+
+class TestTaskContext:
+    """Tests for query_task_context() (OHM-q9rt.4)."""
+
+    def test_returns_task_info(self, test_conn):
+        nodes = _seed_task_graph(test_conn)
+        r = query_task_context(test_conn, nodes["task"]["id"])
+        assert r["task"]["label"] == "Verify Hormuz Claim"
+        assert r["task"]["status"] == "open"
+        assert r["task"]["assigned_to"] == "metis"
+
+    def test_returns_subgraph(self, test_conn):
+        nodes = _seed_task_graph(test_conn)
+        r = query_task_context(test_conn, nodes["task"]["id"])
+        assert "subgraph" in r
+        assert len(r["subgraph"]["nodes"]) >= 3  # task + decision + blocker
+        assert len(r["subgraph"]["edges"]) >= 2
+
+    def test_returns_rationale(self, test_conn):
+        nodes = _seed_task_graph(test_conn)
+        r = query_task_context(test_conn, nodes["task"]["id"])
+        assert len(r["rationale"]) >= 1
+        types = [e["edge_type"] for e in r["rationale"]]
+        assert "DECISION_DEPENDS_ON" in types
+
+    def test_expected_outcome_from_success_criteria(self, test_conn):
+        nodes = _seed_task_graph(test_conn)
+        r = query_task_context(test_conn, nodes["task"]["id"])
+        assert r["expected_outcome"] == "Claim holds for 30 days"
+
+    def test_expected_outcome_fallback_to_expected_claim(self, test_conn):
+        task = create_node(test_conn, label="Task No Criteria", node_type="task", created_by="test")
+        conn_execute = test_conn.execute(
+            "UPDATE ohm_nodes SET task_status = ?, expected_claim = ?, success_criteria = NULL WHERE id = ?",
+            ["open", "some_claim_id", task["id"]],
+        )
+        r = query_task_context(test_conn, task["id"])
+        assert "some_claim_id" in r["expected_outcome"]
+
+    def test_blocking_tasks(self, test_conn):
+        nodes = _seed_task_graph(test_conn)
+        r = query_task_context(test_conn, nodes["task"]["id"])
+        assert r["blocked_by_count"] >= 1
+        blocking_labels = [b["label"] for b in r["blocking"]]
+        assert "Gather Data" in blocking_labels
+
+    def test_blocking_task_has_status(self, test_conn):
+        nodes = _seed_task_graph(test_conn)
+        r = query_task_context(test_conn, nodes["task"]["id"])
+        for b in r["blocking"]:
+            assert b["status"] is not None
+
+    def test_missing_task_raises(self, test_conn):
+        from ohm.exceptions import NodeNotFoundError
+        with pytest.raises(NodeNotFoundError):
+            query_task_context(test_conn, "does-not-exist-1234")
+
+    def test_isolated_task_has_empty_subgraph(self, test_conn):
+        task = create_node(test_conn, label="Lonely Task", node_type="task", created_by="test")
+        test_conn.execute("UPDATE ohm_nodes SET task_status = ? WHERE id = ?", ["open", task["id"]])
+        r = query_task_context(test_conn, task["id"])
+        assert len(r["subgraph"]["nodes"]) == 1  # just the task itself
+        assert len(r["rationale"]) == 0
+        assert r["blocked_by_count"] == 0
+
+    def test_json_serializable(self, test_conn):
+        nodes = _seed_task_graph(test_conn)
+        r = query_task_context(test_conn, nodes["task"]["id"])
+        import json
+        serialized = json.dumps(r, default=str)
+        assert "Verify Hormuz" in serialized
