@@ -332,6 +332,21 @@ class TestGraphRead:
         assert len(result["subgraph"]["nodes"]) >= 2
         assert len(result["rationale"]) >= 1
 
+    # ── OHM-q9rt.5: confidence_report SDK method ──
+
+    def test_confidence_report_returns_dict(self, graph):
+        result = graph.confidence_report(since="2000-01-01T00:00:00")
+        assert isinstance(result, dict)
+        assert result["agent"] == graph.actor
+        assert "summary" in result
+
+    def test_confidence_report_detects_new_beliefs(self, graph):
+        a = graph.create_node(label="A", node_type="concept")["id"]
+        b = graph.create_node(label="B", node_type="concept")["id"]
+        graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
+        result = graph.confidence_report(since="2000-01-01T00:00:00")
+        assert result["summary"]["new"] >= 1
+
     def test_agent_state(self, graph):
         graph.set_focus("testing")
         results = graph.agent_state()

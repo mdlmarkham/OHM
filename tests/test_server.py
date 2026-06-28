@@ -2572,3 +2572,24 @@ class TestTaskContextEndpoint:
         port, _ = test_server
         status, data = _request("GET", port, "/task-context/does-not-exist-1234")
         assert status == 404
+
+
+@pytest.mark.xdist_group("server")
+class TestConfidenceReportEndpoint:
+    """Tests for GET /confidence-report — per-agent confidence report (OHM-q9rt.5)."""
+
+    def test_confidence_report_returns_summary(self, test_server):
+        port, store = test_server
+        store.write_node("cr_a", "A", "concept", agent_name="metis")
+        store.write_node("cr_b", "B", "concept", agent_name="metis")
+        store.write_edge("cr_a", "cr_b", "CAUSES", layer="L3", agent_name="metis")
+        status, data = _request("GET", port, "/confidence-report?agent=metis&since=2000-01-01T00:00:00")
+        assert status == 200, data
+        assert data["agent"] == "metis"
+        assert "summary" in data
+        assert data["summary"]["new"] >= 1
+
+    def test_confidence_report_missing_agent_returns_400(self, test_server):
+        port, _ = test_server
+        status, data = _request("GET", port, "/confidence-report")
+        assert status == 400

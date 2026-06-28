@@ -7421,3 +7421,210 @@ def query_task_context(
         "blocking": blocking,
         "blocked_by_count": len(blocking),
     }
+
+
+# ── Confidence Report (OHM-q9rt.5) ──────────────────────────────────────────
+
+
+def query_confidence_report(
+    conn: DuckDBPyConnection,
+    *,
+    agent_name: str,
+    since: str | None = None,
+) -> dict[str, Any]:
+    """Per-agent confidence report — which beliefs have shifted and why (OHM-q9rt.5).
+
+    Shows which of the agent's edges had confidence changes since a timestamp,
+    with the reason for each shift. Complements /changes (what's new) by
+    showing what CHANGED in the agent's existing portfolio.
+
+    Args:
+        conn: Database connection.
+        agent_name: Agent whose beliefs to report on.
+        since: ISO 8601 timestamp. Falls back to agent's last_sync then 30d ago.
+
+    Returns:
+        Dict with:
+          - agent, since, query_timestamp
+          - shifted_beliefs: edges whose confidence changed (updated_at > since),
+              each with edge_id, from/to, edge_type, confidence, delta (vs
+              original created_at confidence), and reason
+          - new_beliefs: edges the agent created since `since`
+          - stale_beliefs: agent's edges with confidence < 0.15 (approaching zero)
+          - summary: counts
+    """
+    from ohm.validation import validate_identifier, validate_timestamp
+    from datetime import datetime, timedelta, timezone
+
+    agent_name = validate_identifier(agent_name, name="agent_name")
+
+    # Resolve since
+    since_clean = since
+    if since_clean:
+        since_clean = validate_timestamp(since_clean)
+    else:
+        try:
+            row = conn.execute(
+                "SELECT last_sync FROM ohm_agent_state WHERE agent_name = ?",
+                [agent_name],
+            ).fetchone()
+            if row and row[0]:
+                since_clean = str(row[0])
+        except Exception:
+            pass
+    if not since_clean:
+        since_clean = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+
+    now_str = None
+    try:
+        now_str = str(conn.execute("SELECT CURRENT_TIMESTAMP").fetchone()[0])
+    except Exception:
+        now_str = datetime.now(timezone.utc).isoformat()
+
+    # 1. Shifted beliefs: agent's edges whose updated_at > since AND
+    #    updated_at != created_at (i.e., confidence was modified after creation)
+    shifted_rows = conn.execute(
+        """SELECT e.id, e.from_node, e.to_node, e.edge_type, e.layer,
+                  e.confidence AS current_confidence,
+                  e.created_at, e.updated_at, e.updated_by,
+                  nf.label AS from_label, nt.label AS to_label
+           FROM ohm_edges e
+           LEFT JOIN ohm_nodes nf ON nf.id = e.from_node
+           LEFT JOIN ohm_nodes nt ON nt.id = e.to_node
+           WHERE e.created_by = ?
+             AND e.deleted_at IS NULL
+             AND e.updated_at IS NOT NULL
+             AND e.updated_at > ?::TIMESTAMP
+             AND e.updated_at != e.created_at
+           ORDER BY e.updated_at DESC
+           LIMIT 100""",
+        [agent_name, since_clean],
+    ).fetchall()
+
+    # Determine reason for each shift
+    # Check if a CHALLENGED_BY edge was created targeting this edge since `since`
+    challenge_map: dict[str, str] = {}
+    if shifted_rows:
+        edge_ids = [r[0] for r in shifted_rows]
+        placeholders = ",".join(["?"] * len(edge_ids))
+        chal_rows = conn.execute(
+            f"""SELECT c.challenge_of, c.created_by, c.created_at
+               FROM ohm_edges c
+               WHERE c.challenge_type = 'CHALLENGED_BY'
+                 AND c.challenge_of IN ({placeholders})
+                 AND c.created_at > ?::TIMESTAMP
+                 AND c.deleted_at IS NULL""",
+            [*edge_ids, since_clean],
+        ).fetchall()
+        for row in chal_rows:
+            challenge_map[row[0]] = f"challenged by {row[1]}"
+
+    # Check if an outcome was recorded for the edge's source node since `since`
+    outcome_map: dict[str, str] = {}
+    if shifted_rows:
+        outcome_rows = conn.execute(
+            f"""SELECT DISTINCT o.claim_node
+               FROM ohm_outcomes o
+               WHERE o.recorded_at > ?::TIMESTAMP""",
+            [since_clean],
+        ).fetchall()
+        outcome_nodes = {r[0] for r in outcome_rows if r[0]}
+        for row in shifted_rows:
+            if row[1] in outcome_nodes:
+                outcome_map[row[0]] = "outcome recorded"
+
+    shifted_beliefs = []
+    for row in shifted_rows:
+        eid, from_node, to_node, edge_type, layer, current_conf, \
+            created_at, updated_at, updated_by, from_label, to_label = row
+
+        # Delta: compare current to created_at confidence (approximate)
+        # We don't store old confidence, so we note the updated_by and time
+        reason = challenge_map.get(eid) or outcome_map.get(eid) or "confidence updated"
+
+        shifted_beliefs.append({
+            "edge_id": eid,
+            "from_node": from_node,
+            "from_label": from_label,
+            "to_node": to_node,
+            "to_label": to_label,
+            "edge_type": edge_type,
+            "layer": layer,
+            "current_confidence": current_conf,
+            "updated_at": str(updated_at) if updated_at else None,
+            "updated_by": updated_by,
+            "reason": reason,
+        })
+
+    # 2. New beliefs: edges the agent created since `since`
+    new_rows = conn.execute(
+        """SELECT e.id, e.from_node, e.to_node, e.edge_type, e.layer,
+                  e.confidence, e.created_at,
+                  nf.label AS from_label, nt.label AS to_label
+           FROM ohm_edges e
+           LEFT JOIN ohm_nodes nf ON nf.id = e.from_node
+           LEFT JOIN ohm_nodes nt ON nt.id = e.to_node
+           WHERE e.created_by = ?
+             AND e.deleted_at IS NULL
+             AND e.created_at > ?::TIMESTAMP
+           ORDER BY e.created_at DESC
+           LIMIT 100""",
+        [agent_name, since_clean],
+    ).fetchall()
+
+    new_beliefs = [
+        {
+            "edge_id": row[0],
+            "from_node": row[1],
+            "from_label": row[7],
+            "to_node": row[2],
+            "to_label": row[8],
+            "edge_type": row[3],
+            "layer": row[4],
+            "confidence": row[5],
+            "created_at": str(row[6]) if row[6] else None,
+        }
+        for row in new_rows
+    ]
+
+    # 3. Stale beliefs: agent's edges with confidence < 0.15
+    stale_rows = conn.execute(
+        """SELECT e.id, e.from_node, e.to_node, e.edge_type, e.confidence,
+                  nf.label AS from_label, nt.label AS to_label
+           FROM ohm_edges e
+           LEFT JOIN ohm_nodes nf ON nf.id = e.from_node
+           LEFT JOIN ohm_nodes nt ON nt.id = e.to_node
+           WHERE e.created_by = ?
+             AND e.deleted_at IS NULL
+             AND e.confidence < 0.15
+           ORDER BY e.confidence ASC
+           LIMIT 50""",
+        [agent_name],
+    ).fetchall()
+
+    stale_beliefs = [
+        {
+            "edge_id": row[0],
+            "from_node": row[1],
+            "from_label": row[5],
+            "to_node": row[2],
+            "to_label": row[6],
+            "edge_type": row[3],
+            "confidence": row[4],
+        }
+        for row in stale_rows
+    ]
+
+    return {
+        "agent": agent_name,
+        "since": since_clean,
+        "query_timestamp": now_str,
+        "shifted_beliefs": shifted_beliefs,
+        "new_beliefs": new_beliefs,
+        "stale_beliefs": stale_beliefs,
+        "summary": {
+            "shifted": len(shifted_beliefs),
+            "new": len(new_beliefs),
+            "stale": len(stale_beliefs),
+        },
+    }

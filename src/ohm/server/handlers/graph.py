@@ -1098,6 +1098,30 @@ class GraphHandlerMixin:
         )
         self._json_response(200, result)
 
+    def _get_confidence_report(self, path: str, qs: dict) -> None:
+        """GET /confidence-report?agent=NAME&since=ISO8601 — confidence report (OHM-q9rt.5).
+
+        Returns a per-agent report showing which of their edges had confidence
+        changes since a timestamp, with the reason for each shift.
+        """
+        from ohm.queries import query_confidence_report
+        from ohm.exceptions import ValidationError
+
+        agent = qs.get("agent", [None])[0]
+        if not agent:
+            agent = getattr(self, "_current_agent", None)
+            if not agent or agent == "ohm":
+                raise ValidationError("agent parameter is required")
+
+        since = qs.get("since", [None])[0]
+
+        result = query_confidence_report(
+            self.current_store.read_conn,
+            agent_name=agent,
+            since=since,
+        )
+        self._json_response(200, result)
+
     def _enforce_cross_link_requirement(self, node_id: str, body: dict) -> dict | None:
         """Return a 422 response body if *body* describes a node that must link.
 

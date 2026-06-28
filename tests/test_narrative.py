@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import duckdb
 import pytest
 
@@ -14,6 +15,7 @@ from ohm.queries import (
     query_claim_lineage,
     query_contradiction_summary,
     query_task_context,
+    query_confidence_report,
 )
 
 
@@ -387,3 +389,72 @@ class TestTaskContext:
         import json
         serialized = json.dumps(r, default=str)
         assert "Verify Hormuz" in serialized
+
+
+# ── Confidence Report (OHM-q9rt.5) ──────────────────────────────────────────
+
+
+class TestConfidenceReport:
+    """Tests for query_confidence_report() (OHM-q9rt.5)."""
+
+    def test_returns_agent_and_since(self, test_conn):
+        r = query_confidence_report(test_conn, agent_name="metis", since="2000-01-01T00:00:00")
+        assert r["agent"] == "metis"
+        assert r["since"] == "2000-01-01T00:00:00"
+        assert "query_timestamp" in r
+
+    def test_empty_agent_returns_empty_sections(self, test_conn):
+        r = query_confidence_report(test_conn, agent_name="ghost_agent", since="2000-01-01T00:00:00")
+        assert r["summary"]["shifted"] == 0
+        assert r["summary"]["new"] == 0
+        assert r["summary"]["stale"] == 0
+
+    def test_new_beliefs_detected(self, test_conn):
+        a = create_node(test_conn, label="A", node_type="concept", created_by="metis")
+        b = create_node(test_conn, label="B", node_type="concept", created_by="metis")
+        create_edge(test_conn, from_node=a["id"], to_node=b["id"],
+                    edge_type="CAUSES", layer="L3", created_by="metis")
+        r = query_confidence_report(test_conn, agent_name="metis", since="2000-01-01T00:00:00")
+        assert r["summary"]["new"] >= 1
+
+    def test_shifted_beliefs_detected(self, test_conn):
+        a = create_node(test_conn, label="A", node_type="concept", created_by="metis")
+        b = create_node(test_conn, label="B", node_type="concept", created_by="metis")
+        e = create_edge(test_conn, from_node=a["id"], to_node=b["id"],
+                        edge_type="CAUSES", layer="L3", created_by="metis")
+        # Wait for updated_at to differ from created_at
+        time.sleep(0.02)
+        test_conn.execute(
+            "UPDATE ohm_edges SET confidence = 0.3, updated_at = CURRENT_TIMESTAMP, updated_by = ? WHERE id = ?",
+            ["hephaestus", e["id"]],
+        )
+        r = query_confidence_report(test_conn, agent_name="metis", since="2000-01-01T00:00:00")
+        assert r["summary"]["shifted"] >= 1
+        shifted = r["shifted_beliefs"][0]
+        assert shifted["reason"] == "confidence updated"
+        assert shifted["current_confidence"] == pytest.approx(0.3, abs=0.01)
+
+    def test_stale_beliefs_detected(self, test_conn):
+        a = create_node(test_conn, label="A", node_type="concept", created_by="metis")
+        b = create_node(test_conn, label="B", node_type="concept", created_by="metis")
+        e = create_edge(test_conn, from_node=a["id"], to_node=b["id"],
+                        edge_type="CAUSES", layer="L3", created_by="metis")
+        test_conn.execute("UPDATE ohm_edges SET confidence = 0.05 WHERE id = ?", [e["id"]])
+        r = query_confidence_report(test_conn, agent_name="metis", since="2000-01-01T00:00:00")
+        assert r["summary"]["stale"] >= 1
+
+    def test_since_falls_back_to_last_sync(self, test_conn):
+        # No last_sync set → falls back to 30 days ago
+        r = query_confidence_report(test_conn, agent_name="metis")
+        assert r["since"] is not None
+        assert "T" in r["since"] or "-" in r["since"]
+
+    def test_json_serializable(self, test_conn):
+        a = create_node(test_conn, label="A", node_type="concept", created_by="metis")
+        b = create_node(test_conn, label="B", node_type="concept", created_by="metis")
+        create_edge(test_conn, from_node=a["id"], to_node=b["id"],
+                    edge_type="CAUSES", layer="L3", created_by="metis")
+        r = query_confidence_report(test_conn, agent_name="metis", since="2000-01-01T00:00:00")
+        import json
+        serialized = json.dumps(r, default=str)
+        assert "metis" in serialized

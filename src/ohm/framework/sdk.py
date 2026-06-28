@@ -1865,6 +1865,24 @@ class Graph:
 
         return query_task_context(self._conn, task_id)
 
+    def confidence_report(self, *, since: str | None = None) -> dict[str, Any]:
+        """Per-agent confidence report — which beliefs have shifted (OHM-q9rt.5).
+
+        Shows which of this agent's edges had confidence changes since a
+        timestamp, with the reason for each shift. Complements changes() by
+        showing what CHANGED in the agent's existing portfolio.
+
+        Args:
+            since: ISO 8601 timestamp. Falls back to last_sync then 30d ago.
+
+        Returns:
+            Dict with agent, since, shifted_beliefs (with reason), new_beliefs,
+            stale_beliefs, and summary counts.
+        """
+        from ohm.queries import query_confidence_report
+
+        return query_confidence_report(self._conn, agent_name=self.actor, since=since)
+
     def path(
         self,
         from_node: str,

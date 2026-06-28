@@ -2352,6 +2352,9 @@ OhmHandler._GET_PREFIXES = [
     ("/task-context/", "_get_task_context"),
 ]
 
+# Exact GET routes that aren't in the prefix list
+OhmHandler._GET_EXACT["/confidence-report"] = "_get_confidence_report"
+
 
 def make_configured_handler(store: OhmStore):
     """OHM-1s14.1: bind `store` via handler closure rather than mutating
