@@ -2501,3 +2501,26 @@ class TestNarrativeEndpoint:
         port, _ = test_server
         status, data = _request("GET", port, "/narrative/does-not-exist-1234")
         assert status == 404
+
+
+@pytest.mark.xdist_group("server")
+class TestLineageEndpoint:
+    """Tests for GET /lineage/{node_id} — claim lineage (OHM-q9rt.2)."""
+
+    def test_lineage_returns_claim_and_tree(self, test_server):
+        port, store = test_server
+        store.write_node("lin_src", "Source Doc", "source", agent_name="metis")
+        store.write_node("lin_obs", "Observation", "concept", agent_name="metis")
+        store.write_node("lin_pat", "Pattern", "pattern", agent_name="metis")
+        store.write_edge("lin_obs", "lin_src", "REFERENCES", layer="L2", agent_name="metis")
+        store.write_edge("lin_pat", "lin_obs", "DERIVES_FROM", layer="L2", agent_name="metis")
+        status, data = _request("GET", port, "/lineage/lin_pat")
+        assert status == 200, data
+        assert data["claim"]["label"] == "Pattern"
+        assert data["total_nodes"] >= 2
+        assert data["total_sources"] >= 1
+
+    def test_lineage_missing_node_returns_404(self, test_server):
+        port, _ = test_server
+        status, data = _request("GET", port, "/lineage/does-not-exist-1234")
+        assert status == 404

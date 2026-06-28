@@ -1801,6 +1801,34 @@ class Graph:
             depth=depth,
         )
 
+    def lineage(
+        self,
+        node_id: str,
+        *,
+        max_depth: int = 10,
+    ) -> dict[str, Any]:
+        """Claim lineage — explode a synthesis into supporting evidence (OHM-q9rt.2).
+
+        Traces backward through provenance edges (DERIVES_FROM, REFERENCES,
+        SUPPORTS, etc.) to find all supporting observations and source nodes.
+        Returns a tree with confidence products, gap detection, and source leaves.
+
+        Args:
+            node_id: The claim/synthesis/pattern node to trace from.
+            max_depth: Maximum chain depth (default 10).
+
+        Returns:
+            Dict with claim, lineage (tree), sources (leaves), gaps (weak links),
+            max_confidence, min_confidence, chain_depth, total_nodes/sources/gaps.
+        """
+        from ohm.queries import query_claim_lineage
+
+        return query_claim_lineage(
+            self._conn,
+            node_id,
+            max_depth=max_depth,
+        )
+
     def path(
         self,
         from_node: str,

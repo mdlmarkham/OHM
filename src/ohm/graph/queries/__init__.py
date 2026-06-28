@@ -6837,3 +6837,223 @@ def query_neighborhood_narrative(
         }
 
     return result
+
+
+# ── Claim Lineage (OHM-q9rt.2) ──────────────────────────────────────────────
+
+
+def query_claim_lineage(
+    conn: DuckDBPyConnection,
+    node_id: str,
+    *,
+    max_depth: int = 10,
+) -> dict[str, Any]:
+    """Explode a synthesis/pattern/decision node into its supporting evidence chain.
+
+    Traces backward through provenance edges (DERIVES_FROM, REFERENCES,
+    INFLUENCES, SUPPORTS, SUPPORTS_EVIDENCE, TESTS) to find all supporting
+    observations and source nodes. Returns a tree structure with confidence
+    products, gap detection (nodes with no observations), and source leaves.
+
+    Args:
+        conn: Database connection.
+        node_id: The claim/synthesis/pattern node to trace from.
+        max_depth: Maximum chain depth (default 10).
+
+    Returns:
+        Dict with:
+          - claim: the target node {id, label, type, confidence}
+          - lineage: tree of supporting nodes, each with:
+              {node_id, label, type, depth, edge_type, edge_confidence,
+               confidence_chain, observations, children: [...]}
+          - sources: list of source nodes at the leaves (type='source')
+          - gaps: nodes in the chain with NO observations (weak links)
+          - max_confidence: highest confidence_chain across all leaves
+          - min_confidence: lowest confidence_chain (weakest link)
+    """
+    from ohm.validation import validate_identifier, validate_depth
+    from ohm.exceptions import NodeNotFoundError
+
+    node_id = validate_identifier(node_id, name="node_id")
+    max_depth = validate_depth(max_depth)
+
+    # Fetch the target node
+    node_row = conn.execute(
+        "SELECT id, label, type, confidence FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+        [node_id],
+    ).fetchone()
+    if not node_row:
+        raise NodeNotFoundError(f"Node not found: {node_id}")
+
+    claim = {
+        "id": node_row[0],
+        "label": node_row[1],
+        "type": node_row[2],
+        "confidence": node_row[3],
+    }
+
+    # Walk provenance edges (L2 + L3 evidence edges)
+    provenance_types = (
+        "DERIVES_FROM", "REFERENCES", "INFLUENCES", "SUPPORTS",
+        "SUPPORTS_EVIDENCE", "CONTRADICTS_EVIDENCE", "TESTS",
+    )
+    placeholders = ",".join(["?"] * len(provenance_types))
+
+    chain_rows = conn.execute(
+        f"""
+        WITH RECURSIVE lineage AS (
+            SELECT
+                ? AS node_id,
+                '' AS from_node,
+                '' AS edge_id,
+                '' AS edge_type,
+                1.0 AS conf_product,
+                0 AS depth,
+                []::VARCHAR[] AS path
+            UNION ALL
+            SELECT
+                e.to_node AS node_id,
+                e.from_node AS from_node,
+                e.id AS edge_id,
+                e.edge_type AS edge_type,
+                lc.conf_product * COALESCE(e.confidence, 1.0) AS conf_product,
+                lc.depth + 1 AS depth,
+                array_append(lc.path, e.id) AS path
+            FROM lineage lc
+            JOIN ohm_edges e ON e.from_node = lc.node_id
+            WHERE lc.depth < ?
+              AND e.edge_type IN ({placeholders})
+              AND e.deleted_at IS NULL
+              AND NOT array_contains(lc.path, e.id)
+        )
+        SELECT
+            lc.node_id,
+            lc.from_node,
+            lc.edge_id,
+            lc.edge_type,
+            ROUND(lc.conf_product, 6) AS confidence_chain,
+            lc.depth,
+            n.label AS node_label,
+            n.type AS node_type,
+            n.confidence AS node_confidence,
+            n.created_by AS node_created_by
+        FROM lineage lc
+        LEFT JOIN ohm_nodes n ON n.id = lc.node_id AND n.deleted_at IS NULL
+        WHERE lc.depth > 0
+        ORDER BY lc.depth, lc.conf_product DESC
+        """,
+        [node_id, max_depth, *provenance_types],
+    ).fetchall()
+
+    # Fetch observations for all nodes in the chain (plus the claim itself)
+    all_node_ids = {node_id}
+    for row in chain_rows:
+        if row[0]:
+            all_node_ids.add(row[0])
+
+    obs_map: dict[str, list[dict[str, Any]]] = {}
+    if all_node_ids:
+        obs_placeholders = ",".join(["?"] * len(all_node_ids))
+        obs_rows = conn.execute(
+            f"""SELECT o.id, o.node_id, o.type, o.value, o.baseline,
+                      o.created_by, o.created_at, o.source
+               FROM ohm_observations o
+               WHERE o.node_id IN ({obs_placeholders})
+                 AND o.deleted_at IS NULL
+               ORDER BY o.created_at DESC""",
+            list(all_node_ids),
+        ).fetchall()
+        for row in obs_rows:
+            nid = row[1]
+            if nid not in obs_map:
+                obs_map[nid] = []
+            obs_map[nid].append({
+                "obs_id": row[0],
+                "obs_type": row[2],
+                "value": row[3],
+                "baseline": row[4],
+                "created_by": row[5],
+                "created_at": str(row[6]) if row[6] else None,
+                "source": row[7],
+            })
+
+    # Build tree: each chain row is a parent→child relationship
+    # from_node is the parent (closer to claim), node_id is the child (further)
+    tree_nodes: dict[str, dict[str, Any]] = {}
+
+    def _get_tree_node(nid: str, label: str, ntype: str, depth: int,
+                       edge_type: str, edge_conf: float, conf_chain: float,
+                       created_by: str) -> dict[str, Any]:
+        if nid not in tree_nodes:
+            tree_nodes[nid] = {
+                "node_id": nid,
+                "label": label,
+                "type": ntype,
+                "depth": depth,
+                "edge_type": edge_type,
+                "edge_confidence": edge_conf,
+                "confidence_chain": conf_chain,
+                "created_by": created_by,
+                "observations": obs_map.get(nid, []),
+                "children": [],
+            }
+        return tree_nodes[nid]
+
+    sources: list[dict[str, Any]] = []
+    gaps: list[dict[str, Any]] = []
+    all_confidences: list[float] = []
+
+    for row in chain_rows:
+        child_id, parent_id, edge_id, edge_type, conf_chain, depth, \
+            child_label, child_type, child_conf, child_created_by = row
+
+        if not child_id:
+            continue
+
+        child_node = _get_tree_node(
+            child_id, child_label or child_id, child_type or "unknown",
+            depth, edge_type, child_conf or 1.0, conf_chain,
+            child_created_by or "unknown",
+        )
+
+        # Track source nodes (leaves)
+        if child_type == "source":
+            sources.append({
+                "node_id": child_id,
+                "label": child_label,
+                "depth": depth,
+                "confidence_chain": conf_chain,
+            })
+
+        # Track gaps (nodes with no observations)
+        if not obs_map.get(child_id):
+            gaps.append({
+                "node_id": child_id,
+                "label": child_label,
+                "type": child_type,
+                "depth": depth,
+                "edge_type": edge_type,
+            })
+
+        all_confidences.append(conf_chain)
+
+        # Attach to parent in tree
+        if parent_id and parent_id in tree_nodes:
+            tree_nodes[parent_id]["children"].append(child_node)
+
+    # Also add claim's own observations to the tree root
+    claim_obs = obs_map.get(node_id, [])
+
+    return {
+        "claim": claim,
+        "claim_observations": claim_obs,
+        "lineage": list(tree_nodes.values()),
+        "sources": sources,
+        "gaps": gaps,
+        "max_confidence": max(all_confidences) if all_confidences else None,
+        "min_confidence": min(all_confidences) if all_confidences else None,
+        "chain_depth": max((r[5] for r in chain_rows), default=0),
+        "total_nodes": len(tree_nodes),
+        "total_sources": len(sources),
+        "total_gaps": len(gaps),
+    }

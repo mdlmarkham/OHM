@@ -267,6 +267,28 @@ class TestGraphRead:
         assert "agent_context" in result
         assert result["agent_context"]["agent"] == graph.actor
 
+    # ── OHM-q9rt.2: lineage SDK method ──
+
+    def test_lineage_returns_dict(self, graph):
+        from ohm.queries import create_observation
+        src = graph.create_node(label="Source Doc", node_type="source")["id"]
+        obs = graph.create_node(label="Observation", node_type="concept")["id"]
+        pat = graph.create_node(label="Pattern", node_type="pattern")["id"]
+        graph.create_edge(from_node=obs, to_node=src, edge_type="REFERENCES", layer="L2")
+        graph.create_edge(from_node=pat, to_node=obs, edge_type="DERIVES_FROM", layer="L2")
+        create_observation(graph._conn, node_id=obs, obs_type="measurement", created_by="test_agent", value=0.85)
+        result = graph.lineage(pat)
+        assert isinstance(result, dict)
+        assert result["claim"]["label"] == "Pattern"
+        assert result["total_nodes"] >= 2
+        assert result["total_sources"] >= 1
+
+    def test_lineage_isolated_node(self, graph):
+        n = graph.create_node(label="Lonely", node_type="pattern")["id"]
+        result = graph.lineage(n)
+        assert result["total_nodes"] == 0
+        assert result["lineage"] == []
+
     def test_agent_state(self, graph):
         graph.set_focus("testing")
         results = graph.agent_state()

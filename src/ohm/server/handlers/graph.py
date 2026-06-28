@@ -1024,6 +1024,33 @@ class GraphHandlerMixin:
         )
         self._json_response(200, result)
 
+    def _get_lineage(self, path: str, qs: dict) -> None:
+        """GET /lineage/{node_id} — claim lineage (OHM-q9rt.2).
+
+        Explodes a synthesis/pattern/decision node into its supporting
+        evidence chain: tree of supporting nodes with observations, source
+        leaves, confidence products, and gap detection.
+        """
+        from ohm.queries import query_claim_lineage
+
+        prefix = "/lineage/"
+        if not path.startswith(prefix):
+            from ohm.exceptions import ValidationError
+            raise ValidationError("Invalid lineage path")
+        node_id = path[len(prefix):]
+        if not node_id:
+            from ohm.exceptions import ValidationError
+            raise ValidationError("Missing node id")
+
+        max_depth = int(qs.get("depth", [10])[0])
+
+        result = query_claim_lineage(
+            self.current_store.read_conn,
+            node_id,
+            max_depth=max_depth,
+        )
+        self._json_response(200, result)
+
     def _enforce_cross_link_requirement(self, node_id: str, body: dict) -> dict | None:
         """Return a 422 response body if *body* describes a node that must link.
 

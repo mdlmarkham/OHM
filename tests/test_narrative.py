@@ -6,7 +6,7 @@ import duckdb
 import pytest
 
 from ohm.schema import initialize_schema
-from ohm.queries import create_node, create_edge, query_neighborhood_narrative
+from ohm.queries import create_node, create_edge, create_observation, query_neighborhood_narrative, query_claim_lineage
 
 
 @pytest.fixture
@@ -110,3 +110,89 @@ class TestNeighborhoodNarrative:
         # Should be JSON-serializable for HTTP response
         serialized = json.dumps(r, default=str)
         assert "Hormuz" in serialized
+
+
+# ── Claim Lineage (OHM-q9rt.2) ──────────────────────────────────────────────
+
+
+def _seed_lineage_graph(conn):
+    """Create: Pattern --DERIVES_FROM--> Observation --REFERENCES--> Source."""
+    src = create_node(conn, label="Reuters Article", node_type="source", created_by="metis")
+    obs = create_node(conn, label="Price Observation", node_type="concept", created_by="metis")
+    pattern = create_node(conn, label="Demand Rationing Pattern", node_type="pattern", created_by="metis")
+    create_edge(conn, from_node=obs["id"], to_node=src["id"], edge_type="REFERENCES", layer="L2", created_by="metis")
+    create_edge(conn, from_node=pattern["id"], to_node=obs["id"], edge_type="DERIVES_FROM", layer="L2", created_by="metis")
+    create_observation(conn, node_id=obs["id"], obs_type="measurement", created_by="metis", value=0.85)
+    return {"src": src, "obs": obs, "pattern": pattern}
+
+
+class TestClaimLineage:
+    """Tests for query_claim_lineage() (OHM-q9rt.2)."""
+
+    def test_returns_claim_info(self, test_conn):
+        nodes = _seed_lineage_graph(test_conn)
+        r = query_claim_lineage(test_conn, nodes["pattern"]["id"])
+        assert r["claim"]["label"] == "Demand Rationing Pattern"
+        assert r["claim"]["type"] == "pattern"
+
+    def test_returns_lineage_tree(self, test_conn):
+        nodes = _seed_lineage_graph(test_conn)
+        r = query_claim_lineage(test_conn, nodes["pattern"]["id"])
+        assert r["total_nodes"] == 2  # obs + src
+        assert len(r["lineage"]) >= 1
+
+    def test_sources_at_leaves(self, test_conn):
+        nodes = _seed_lineage_graph(test_conn)
+        r = query_claim_lineage(test_conn, nodes["pattern"]["id"])
+        assert r["total_sources"] == 1
+        assert r["sources"][0]["label"] == "Reuters Article"
+        assert r["sources"][0]["node_id"] == nodes["src"]["id"]
+
+    def test_confidence_chain_product(self, test_conn):
+        nodes = _seed_lineage_graph(test_conn)
+        r = query_claim_lineage(test_conn, nodes["pattern"]["id"])
+        # Two edges at default 0.7 confidence → product ≈ 0.49
+        assert r["min_confidence"] is not None
+        assert r["max_confidence"] is not None
+        assert r["min_confidence"] <= r["max_confidence"]
+
+    def test_gaps_detected(self, test_conn):
+        nodes = _seed_lineage_graph(test_conn)
+        r = query_claim_lineage(test_conn, nodes["pattern"]["id"])
+        # Source node has no observations → it's a gap
+        assert r["total_gaps"] >= 1
+        gap_labels = [g["label"] for g in r["gaps"]]
+        assert "Reuters Article" in gap_labels
+
+    def test_observations_on_chain_nodes(self, test_conn):
+        nodes = _seed_lineage_graph(test_conn)
+        r = query_claim_lineage(test_conn, nodes["pattern"]["id"])
+        # The Observation node should have observations attached
+        obs_nodes = [n for n in r["lineage"] if n["type"] == "concept"]
+        assert len(obs_nodes) >= 1
+        assert len(obs_nodes[0]["observations"]) >= 1
+
+    def test_chain_depth(self, test_conn):
+        nodes = _seed_lineage_graph(test_conn)
+        r = query_claim_lineage(test_conn, nodes["pattern"]["id"])
+        assert r["chain_depth"] == 2  # pattern→obs→src
+
+    def test_missing_node_raises(self, test_conn):
+        from ohm.exceptions import NodeNotFoundError
+        with pytest.raises(NodeNotFoundError):
+            query_claim_lineage(test_conn, "does-not-exist-1234")
+
+    def test_isolated_node_has_empty_lineage(self, test_conn):
+        n = create_node(test_conn, label="Lonely Pattern", node_type="pattern", created_by="test")
+        r = query_claim_lineage(test_conn, n["id"])
+        assert r["total_nodes"] == 0
+        assert r["total_sources"] == 0
+        assert r["total_gaps"] == 0
+        assert r["lineage"] == []
+
+    def test_json_serializable(self, test_conn):
+        nodes = _seed_lineage_graph(test_conn)
+        r = query_claim_lineage(test_conn, nodes["pattern"]["id"])
+        import json
+        serialized = json.dumps(r, default=str)
+        assert "Demand Rationing" in serialized
