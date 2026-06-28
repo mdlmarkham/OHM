@@ -2445,3 +2445,28 @@ class TestObservationConfidenceEndpoint:
         )["id"]
         status, data = _request("GET", port, f"/observation/{obs_id}/confidence?at=not-a-timestamp")
         assert 400 <= status < 500
+
+
+@pytest.mark.xdist_group("server")
+class TestAdminDuplicatesEndpoint:
+    """Tests for GET /admin/duplicates — combined duplicate detection (OHM-z2gp)."""
+
+    def test_admin_duplicates_returns_summary(self, test_server):
+        port, _ = test_server
+        status, data = _request("GET", port, "/admin/duplicates")
+        assert status == 200, data
+        for k in ("alias_collisions", "content_hash_collisions", "semantic_duplicates", "summary"):
+            assert k in data
+        assert data["summary"]["threshold"] == 0.85
+
+    def test_admin_duplicates_with_threshold(self, test_server):
+        port, _ = test_server
+        status, data = _request("GET", port, "/admin/duplicates?threshold=0.95")
+        assert status == 200, data
+        assert data["summary"]["threshold"] == 0.95
+
+    def test_admin_duplicates_empty_db(self, test_server):
+        port, _ = test_server
+        status, data = _request("GET", port, "/admin/duplicates")
+        assert status == 200, data
+        assert data["summary"]["total"] == 0

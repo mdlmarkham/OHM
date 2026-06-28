@@ -212,3 +212,132 @@ class TestAliasDuplicateDetection:
         register_alias(test_db, alias_norm="beta", node_id="n2")
         result = detect_alias_duplicates(test_db)
         assert result == []
+
+
+# ── OHM-z2gp: queries/ path alias + merge + semantic dedup ──────────────────
+
+
+class TestCreateNodeAutoAlias:
+    """create_node() in queries/ should auto-register aliases (OHM-z2gp)."""
+
+    def test_create_node_registers_alias(self, test_db):
+        from ohm.queries import create_node, resolve_alias
+
+        node = create_node(test_db, label="Test Concept Alpha", node_type="concept", created_by="test")
+        results = resolve_alias(test_db, alias_norm="test_concept_alpha")
+        assert len(results) == 1
+        assert results[0]["node_id"] == node["id"]
+
+    def test_create_node_alias_idempotent(self, test_db):
+        from ohm.queries import create_node
+
+        n1 = create_node(test_db, label="Unique Label", node_type="concept", created_by="test")
+        # The alias should exist — creating another node with same label
+        # should NOT overwrite the first alias (it's a separate node with
+        # a different auto-generated id)
+        n2 = create_node(test_db, label="Unique Label", node_type="concept", created_by="test")
+        assert n1["id"] != n2["id"]
+        # Both aliases should exist
+        from ohm.queries import resolve_alias
+        results = resolve_alias(test_db, alias_norm="unique_label")
+        assert len(results) == 2
+
+
+class TestFindOrCreateAliasResolution:
+    """find_or_create_node() should use alias resolution first (OHM-z2gp)."""
+
+    def test_find_or_create_finds_via_alias(self, test_db):
+        from ohm.queries import create_node, find_or_create_node
+
+        original = create_node(test_db, label="Hormuz AND-Gate", node_type="concept", created_by="metis")
+        # Search with a differently-cased label that normalizes to the same alias
+        found = find_or_create_node(test_db, label="hormuz and-gate", node_type="concept", created_by="metis")
+        assert found["id"] == original["id"]
+        assert found.get("created") is False
+
+    def test_find_or_create_finds_via_label_fallback(self, test_db):
+        from ohm.queries import find_or_create_node
+
+        # Insert a node directly (bypassing create_node alias registration)
+        test_db.execute(
+            "INSERT INTO ohm_nodes (id, label, type, created_by) VALUES (?, ?, ?, ?)",
+            ["manual-1", "Manual Node", "concept", "test"],
+        )
+        found = find_or_create_node(test_db, label="Manual Node", node_type="concept", created_by="test")
+        assert found["id"] == "manual-1"
+        assert found.get("created") is False
+
+    def test_find_or_create_creates_when_not_found(self, test_db):
+        from ohm.queries import find_or_create_node
+
+        node = find_or_create_node(test_db, label="Brand New Concept", node_type="concept", created_by="test")
+        assert node.get("created") is True
+        assert node["label"] == "Brand New Concept"
+
+
+class TestMergeNodesQueries:
+    """merge_nodes() in queries/ — re-points edges/observations and soft-deletes (OHM-z2gp)."""
+
+    def test_merge_soft_deletes_merge_node(self, test_db):
+        from ohm.queries import create_node, merge_nodes
+
+        keep = create_node(test_db, label="Keep Me", node_type="concept", created_by="metis")
+        merge = create_node(test_db, label="Merge Me", node_type="concept", created_by="metis")
+        result = merge_nodes(test_db, keep_id=keep["id"], merge_id=merge["id"], merged_by="metis")
+        assert result["keep"] == keep["id"]
+        assert result["merged"] == merge["id"]
+        # merge node should be soft-deleted
+        row = test_db.execute("SELECT deleted_at FROM ohm_nodes WHERE id = ?", [merge["id"]]).fetchone()
+        assert row[0] is not None
+
+    def test_merge_same_id_raises(self, test_db):
+        from ohm.queries import create_node, merge_nodes
+        import pytest as _pytest
+
+        n = create_node(test_db, label="Same", node_type="concept", created_by="metis")
+        with _pytest.raises(ValueError, match="nothing to merge"):
+            merge_nodes(test_db, keep_id=n["id"], merge_id=n["id"], merged_by="metis")
+
+    def test_merge_missing_keep_raises(self, test_db):
+        from ohm.queries import merge_nodes
+        from ohm.exceptions import NodeNotFoundError
+        import pytest as _pytest
+
+        test_db.execute("INSERT INTO ohm_nodes (id, label, type, created_by) VALUES (?, ?, ?, ?)", ["real-1", "Real", "concept", "test"])
+        with _pytest.raises(NodeNotFoundError):
+            merge_nodes(test_db, keep_id="does-not-exist", merge_id="real-1", merged_by="test")
+
+    def test_merge_repoints_edges(self, test_db):
+        from ohm.queries import create_node, create_edge, merge_nodes
+
+        a = create_node(test_db, label="A", node_type="concept", created_by="metis")
+        b = create_node(test_db, label="B", node_type="concept", created_by="metis")
+        c = create_node(test_db, label="C", node_type="concept", created_by="metis")
+        # Edge from b → c
+        create_edge(test_db, from_node=b["id"], to_node=c["id"], edge_type="CAUSES", layer="L3", created_by="metis")
+        # Merge b into a
+        merge_nodes(test_db, keep_id=a["id"], merge_id=b["id"], merged_by="metis")
+        # Edge should now be from a → c
+        edges = test_db.execute(
+            "SELECT from_node, to_node FROM ohm_edges WHERE from_node = ? AND deleted_at IS NULL",
+            [a["id"]],
+        ).fetchall()
+        assert len(edges) == 1
+        assert edges[0][1] == c["id"]
+
+
+class TestSemanticDuplicates:
+    """detect_semantic_duplicates() finds nodes with similar embeddings (OHM-z2gp)."""
+
+    def test_no_embeddings_returns_empty(self, test_db):
+        from ohm.methods import detect_semantic_duplicates
+
+        test_db.execute("INSERT INTO ohm_nodes (id, label, type, created_by) VALUES (?, ?, ?, ?)", ["n1", "A", "concept", "test"])
+        result = detect_semantic_duplicates(test_db)
+        assert result == []
+
+    def test_returns_empty_on_empty_db(self, test_db):
+        from ohm.methods import detect_semantic_duplicates
+
+        result = detect_semantic_duplicates(test_db, similarity_threshold=0.85)
+        assert result == []

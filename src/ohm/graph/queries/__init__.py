@@ -1672,6 +1672,26 @@ def create_node(
         ],
     )
     _log_change(conn, "ohm_nodes", node_id, "INSERT", created_by)
+
+    # OHM-z2gp: auto-register alias so future create_node() calls with the
+    # same label can find this node via resolve_node_by_alias().
+    try:
+        from ohm.validation import normalize_alias
+        norm = normalize_alias(label)
+        if norm:
+            existing_alias = conn.execute(
+                "SELECT 1 FROM ohm_aliases WHERE alias_norm = ? AND node_id = ?",
+                [norm, node_id],
+            ).fetchone()
+            if not existing_alias:
+                import uuid as _uuid
+                conn.execute(
+                    "INSERT INTO ohm_aliases (id, alias_norm, node_id) VALUES (?, ?, ?)",
+                    [str(_uuid.uuid4()), norm, node_id],
+                )
+    except Exception:
+        pass
+
     # Return full node record
     return _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node_id]))[0]
 
@@ -1689,14 +1709,35 @@ def find_or_create_node(
     priority: str | None = None,
     url: str | None = None,
 ) -> dict[str, Any]:
-    """Find an existing node by label and type, or create one if not found.
+    """Find an existing node by alias, label, or type, or create one if not found.
 
     Used for idempotent agent registration — avoids creating duplicate
     value/goal/skill/topic nodes when re-registering.
 
+    Resolution order (OHM-z2gp):
+    1. Alias resolution — normalize the label, check ohm_aliases
+    2. Label + type match — case-insensitive exact match
+    3. Create new node
+
     Returns the existing or newly created node record.
     """
-    # Try to find an existing node with matching label and type (case-insensitive)
+    # 1. Try alias resolution first (OHM-z2gp)
+    try:
+        from ohm.queries import resolve_node_by_alias
+        resolved = resolve_node_by_alias(conn, query=label)
+        if resolved and resolved.get("type") == node_type:
+            node = _rows_to_dicts(
+                conn.execute(
+                    "SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                    [resolved["id"]],
+                )
+            )[0]
+            node["created"] = False
+            return node
+    except Exception:
+        pass
+
+    # 2. Try to find an existing node with matching label and type (case-insensitive)
     existing = _rows_to_dicts(
         conn.execute(
             "SELECT * FROM ohm_nodes WHERE LOWER(label) = LOWER(?) AND type = ? AND deleted_at IS NULL LIMIT 1",
@@ -1708,7 +1749,7 @@ def find_or_create_node(
         node["created"] = False
         return node
 
-    # Not found — create a new one
+    # 3. Not found — create a new one
     node = create_node(
         conn,
         label=label,
@@ -1724,6 +1765,130 @@ def find_or_create_node(
     # Add a 'created' flag to distinguish find vs create
     node["created"] = True
     return node
+
+
+def merge_nodes(
+    conn: DuckDBPyConnection,
+    *,
+    keep_id: str,
+    merge_id: str,
+    merged_by: str,
+) -> dict[str, Any]:
+    """Merge *merge_id* into *keep_id* and soft-delete *merge_id* (OHM-z2gp).
+
+    Re-points all edges and observations from the merge target to the
+    keep target, then soft-deletes the merge node. Duplicate edges
+    (same from, to, type, layer) are silently skipped so the operation
+    is idempotent.
+
+    This is the queries/ path equivalent of OhmStore.merge_nodes() —
+    accessible to SDK and CLI without going through the HTTP daemon.
+
+    Args:
+        conn: Database connection.
+        keep_id: Node ID to keep (canonical).
+        merge_id: Node ID to merge away (soft-deleted).
+        merged_by: Agent performing the merge.
+
+    Returns:
+        Dict with keep, merged, edges_repointed, observations_repointed,
+        and merged_by.
+
+    Raises:
+        NodeNotFoundError: If either node does not exist.
+        ValueError: If keep_id equals merge_id.
+    """
+    from ohm.exceptions import NodeNotFoundError
+    from ohm.validation import validate_identifier
+    from datetime import datetime, timezone
+
+    keep_id = validate_identifier(keep_id, name="keep_id")
+    merge_id = validate_identifier(merge_id, name="merge_id")
+
+    if keep_id == merge_id:
+        raise ValueError(f"keep_id equals merge_id ({keep_id!r}) — nothing to merge")
+
+    keep = conn.execute(
+        "SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [keep_id]
+    ).fetchone()
+    if not keep:
+        raise NodeNotFoundError(f"Keep node not found: {keep_id}")
+
+    merge = conn.execute(
+        "SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [merge_id]
+    ).fetchone()
+    if not merge:
+        raise NodeNotFoundError(f"Merge node not found: {merge_id}")
+
+    now = datetime.now(timezone.utc)
+
+    # 1. Re-point edges FROM merge_id → keep_id (skip duplicates)
+    conn.execute(
+        """UPDATE ohm_edges SET from_node = ?, updated_at = ?, updated_by = ?
+           WHERE from_node = ? AND deleted_at IS NULL
+             AND (to_node, layer, edge_type) NOT IN (
+               SELECT to_node, layer, edge_type FROM ohm_edges
+               WHERE from_node = ? AND deleted_at IS NULL
+             )""",
+        [keep_id, now, merged_by, merge_id, keep_id],
+    )
+
+    # 2. Re-point edges TO merge_id → keep_id (skip duplicates)
+    conn.execute(
+        """UPDATE ohm_edges SET to_node = ?, updated_at = ?, updated_by = ?
+           WHERE to_node = ? AND deleted_at IS NULL
+             AND (from_node, layer, edge_type) NOT IN (
+               SELECT from_node, layer, edge_type FROM ohm_edges
+               WHERE to_node = ? AND deleted_at IS NULL
+             )""",
+        [keep_id, now, merged_by, merge_id, keep_id],
+    )
+
+    # 3. Re-point observations
+    conn.execute(
+        "UPDATE ohm_observations SET node_id = ? WHERE node_id = ? AND deleted_at IS NULL",
+        [keep_id, merge_id],
+    )
+
+    # 4. Soft-delete exact-duplicate edges that remain
+    conn.execute(
+        """UPDATE ohm_edges SET deleted_at = ?, updated_at = ?, updated_by = ?
+           WHERE id IN (
+             SELECT e.id FROM ohm_edges e
+             JOIN ohm_edges k ON e.from_node = k.from_node
+               AND e.to_node = k.to_node
+               AND e.layer = k.layer
+               AND e.edge_type = k.edge_type
+             WHERE e.from_node = ? AND e.deleted_at IS NULL
+               AND k.from_node = ? AND k.deleted_at IS NULL
+           )""",
+        [now, now, merged_by, merge_id, keep_id],
+    )
+
+    # 5. Soft-delete the merge node
+    conn.execute(
+        "UPDATE ohm_nodes SET deleted_at = ?, updated_at = ?, updated_by = ? WHERE id = ?",
+        [now, now, merged_by, merge_id],
+    )
+    _log_change(conn, "ohm_nodes", merge_id, "MERGE", merged_by)
+
+    # Count results
+    edges_repointed = conn.execute(
+        "SELECT COUNT(*) FROM ohm_edges WHERE (from_node = ? OR to_node = ?) AND updated_by = ? AND deleted_at IS NULL",
+        [keep_id, keep_id, merged_by],
+    ).fetchone()[0]
+    obs_repointed = conn.execute(
+        "SELECT COUNT(*) FROM ohm_observations WHERE node_id = ? AND deleted_at IS NULL",
+        [keep_id],
+    ).fetchone()[0]
+
+    return {
+        "keep": keep_id,
+        "merged": merge_id,
+        "edges_repointed": edges_repointed,
+        "observations_repointed": obs_repointed,
+        "merged_by": merged_by,
+    }
 
 
 def create_edge(

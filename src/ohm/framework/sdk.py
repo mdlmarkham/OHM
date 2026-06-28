@@ -1403,6 +1403,96 @@ class Graph:
             confidence=confidence,
         )
 
+    def resolve_node(
+        self,
+        query: str,
+        *,
+        node_type: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Resolve a query string to a node via alias matching (OHM-z2gp).
+
+        Normalizes the query label, checks ohm_aliases, and returns the
+        first matching node record. Returns None if no match found.
+
+        Args:
+            query: Label or alias to search for.
+            node_type: Optional — only return nodes of this type.
+
+        Returns:
+            Node record dict or None.
+        """
+        from ohm.queries import resolve_node_by_alias
+
+        result = resolve_node_by_alias(self._conn, query=query)
+        if result is None:
+            return None
+        if node_type and result.get("type") != node_type:
+            return None
+        return result
+
+    def merge_nodes(
+        self,
+        keep_id: str,
+        merge_id: str,
+    ) -> dict[str, Any]:
+        """Merge two nodes — re-point edges/observations and soft-delete the
+        duplicate (OHM-z2gp).
+
+        Args:
+            keep_id: Node ID to keep (canonical).
+            merge_id: Node ID to merge away (soft-deleted).
+
+        Returns:
+            Dict with keep, merged, edges_repointed, observations_repointed.
+        """
+        from ohm.queries import merge_nodes as _merge_nodes
+
+        return _merge_nodes(
+            self._conn,
+            keep_id=keep_id,
+            merge_id=merge_id,
+            merged_by=self.actor,
+        )
+
+    def find_duplicates(
+        self,
+        *,
+        threshold: float = 0.85,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """Find duplicate nodes via alias, content hash, and semantic similarity
+        (OHM-z2gp).
+
+        Args:
+            threshold: Cosine similarity threshold for semantic duplicates
+                (default 0.85).
+            limit: Max pairs per strategy.
+
+        Returns:
+            Dict with alias_collisions, content_hash_collisions,
+            semantic_duplicates, and summary.
+        """
+        from ohm.methods import detect_alias_duplicates, detect_semantic_duplicates
+
+        alias_dups = detect_alias_duplicates(self._conn, limit=limit)
+        semantic_dups = detect_semantic_duplicates(
+            self._conn, similarity_threshold=threshold, limit=limit
+        )
+        alias_collisions = [d for d in alias_dups if d.get("kind") == "alias_collision"]
+        hash_collisions = [d for d in alias_dups if d.get("kind") == "content_hash_collision"]
+        return {
+            "alias_collisions": alias_collisions,
+            "content_hash_collisions": hash_collisions,
+            "semantic_duplicates": semantic_dups,
+            "summary": {
+                "total": len(alias_collisions) + len(hash_collisions) + len(semantic_dups),
+                "alias_collisions": len(alias_collisions),
+                "content_hash_collisions": len(hash_collisions),
+                "semantic_duplicates": len(semantic_dups),
+                "threshold": threshold,
+            },
+        }
+
     def search_nodes(
         self,
         query: str,

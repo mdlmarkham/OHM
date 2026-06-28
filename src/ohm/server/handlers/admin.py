@@ -977,6 +977,46 @@ class AdminHandlerMixin:
         result = detect_alias_duplicates(self.current_store.conn, limit=limit)
         self._json_response(200, {"duplicates": result, "count": len(result)})
 
+    def _get_admin_duplicates(self, path: str, qs: dict) -> None:
+        """GET /admin/duplicates — combined duplicate detection (OHM-z2gp).
+
+        Runs all three duplicate detection strategies and returns a unified
+        response:
+          - alias_collisions: same normalized label → different nodes
+          - content_hash_collisions: same content hash → different nodes
+          - semantic_duplicates: embedding cosine similarity ≥ threshold
+
+        Query params:
+            threshold: cosine similarity threshold (default 0.85)
+            limit: max pairs per strategy (default 50)
+        """
+        from ohm.methods import detect_alias_duplicates, detect_semantic_duplicates
+
+        limit = int(qs.get("limit", [50])[0])
+        threshold = float(qs.get("threshold", [0.85])[0])
+
+        alias_dups = detect_alias_duplicates(self.current_store.conn, limit=limit)
+        semantic_dups = detect_semantic_duplicates(
+            self.current_store.conn, similarity_threshold=threshold, limit=limit
+        )
+
+        # Split alias dups by kind
+        alias_collisions = [d for d in alias_dups if d.get("kind") == "alias_collision"]
+        hash_collisions = [d for d in alias_dups if d.get("kind") == "content_hash_collision"]
+
+        self._json_response(200, {
+            "alias_collisions": alias_collisions,
+            "content_hash_collisions": hash_collisions,
+            "semantic_duplicates": semantic_dups,
+            "summary": {
+                "total": len(alias_collisions) + len(hash_collisions) + len(semantic_dups),
+                "alias_collisions": len(alias_collisions),
+                "content_hash_collisions": len(hash_collisions),
+                "semantic_duplicates": len(semantic_dups),
+                "threshold": threshold,
+            },
+        })
+
     def _post_admin_merge(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /admin/merge — merge duplicate nodes (OHM-g0kv.6).
 

@@ -1049,6 +1049,63 @@ def detect_alias_duplicates(
     return alias_dups + hash_dups
 
 
+def detect_semantic_duplicates(
+    conn: DuckDBPyConnection,
+    *,
+    similarity_threshold: float = 0.85,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Find node pairs whose embeddings exceed a cosine similarity threshold (OHM-z2gp).
+
+    Uses DuckDB's ``array_cosine_similarity`` on the ``embedding`` column.
+    Falls back gracefully when embeddings are not available (returns empty list).
+
+    Args:
+        similarity_threshold: Minimum cosine similarity (default 0.85).
+        limit: Maximum number of pairs to return.
+
+    Returns:
+        List of dicts with node_a, label_a, node_b, label_b, similarity,
+        and kind='semantic_duplicate'.
+    """
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT
+                a.id AS node_a, a.label AS label_a, a.type AS type_a,
+                b.id AS node_b, b.label AS label_b, b.type AS type_b,
+                array_cosine_similarity(a.embedding, b.embedding) AS similarity
+            FROM ohm_nodes a
+            JOIN ohm_nodes b ON a.id < b.id
+            WHERE a.deleted_at IS NULL
+              AND b.deleted_at IS NULL
+              AND a.embedding IS NOT NULL
+              AND b.embedding IS NOT NULL
+              AND array_cosine_similarity(a.embedding, b.embedding) >= ?
+            ORDER BY similarity DESC
+            LIMIT ?
+            """,
+            [similarity_threshold, limit],
+        ).fetchall()
+    except Exception:
+        # Embeddings column or array_cosine_similarity not available
+        return []
+
+    return [
+        {
+            "node_a": row[0],
+            "label_a": row[1],
+            "type_a": row[2],
+            "node_b": row[3],
+            "label_b": row[4],
+            "type_b": row[5],
+            "similarity": round(row[6], 4) if row[6] is not None else None,
+            "kind": "semantic_duplicate",
+        }
+        for row in rows
+    ]
+
+
 def compute_confidence_calibration(
     conn: DuckDBPyConnection,
     agent_name: str,

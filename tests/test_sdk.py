@@ -215,6 +215,37 @@ class TestGraphRead:
         with pytest.raises(NodeNotFoundError):
             graph.confidence_at("does-not-exist-1234")
 
+    # ── OHM-z2gp: dedup SDK methods ──
+
+    def test_resolve_node_finds_existing(self, graph):
+        graph.create_node(label="Hormuz AND-Gate", node_type="concept")
+        result = graph.resolve_node("hormuz and-gate")
+        assert result is not None
+        assert result["label"] == "Hormuz AND-Gate"
+
+    def test_resolve_node_no_match_returns_none(self, graph):
+        result = graph.resolve_node("nonexistent concept xyz")
+        assert result is None
+
+    def test_merge_nodes_sdk(self, graph):
+        a = graph.create_node(label="Keep This", node_type="concept")["id"]
+        b = graph.create_node(label="Merge This", node_type="concept")["id"]
+        result = graph.merge_nodes(keep_id=a, merge_id=b)
+        assert result["keep"] == a
+        assert result["merged"] == b
+        row = graph._conn.execute("SELECT deleted_at FROM ohm_nodes WHERE id = ?", [b]).fetchone()
+        assert row[0] is not None
+
+    def test_find_duplicates_returns_dict(self, graph):
+        graph.create_node(label="Alpha", node_type="concept")
+        graph.create_node(label="Beta", node_type="concept")
+        result = graph.find_duplicates()
+        assert "alias_collisions" in result
+        assert "content_hash_collisions" in result
+        assert "semantic_duplicates" in result
+        assert "summary" in result
+        assert result["summary"]["threshold"] == 0.85
+
     def test_agent_state(self, graph):
         graph.set_focus("testing")
         results = graph.agent_state()

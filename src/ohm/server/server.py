@@ -622,6 +622,7 @@ def _build_router() -> _RouteRegistry:
     r.add("POST", "/admin/checkpoint")
     r.add("GET", "/admin/verification-scan")
     r.add("GET", "/admin/orphan-triage")
+    r.add("GET", "/admin/duplicates")
     r.add("POST", "/admin/observation-source-urls")
     r.add("POST", "/admin/source-node-urls")
     r.add("POST", "/admin/edge-layer-fix")
@@ -2313,6 +2314,7 @@ OhmHandler._GET_EXACT = {
     "/metrics/semantic": "_get_metrics_semantic",
     "/resolve": "_get_resolve",
     "/admin/alias-duplicates": "_get_alias_duplicates",
+    "/admin/duplicates": "_get_admin_duplicates",
     "/admin/fragment-resonance": "_get_fragment_resonance",
     "/tenants": "_get_tenants",
 }
