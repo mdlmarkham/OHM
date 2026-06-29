@@ -106,6 +106,13 @@ class AdminHandlerMixin:
         try:
             # Build a safe IN clause with the frozenset of valid events.
             placeholders = ",".join(["?"] * len(VALID_HOOK_EVENTS))
+            # Count invalid rows first so we can report an accurate number even
+            # when DuckDB's cursor.rowcount is unavailable.
+            count_row = self.current_store.conn.execute(
+                f"""SELECT COUNT(*) FROM ohm_hooks WHERE event NOT IN ({placeholders})""",
+                list(VALID_HOOK_EVENTS),
+            ).fetchone()
+            invalid_count = count_row[0] if count_row else 0
             # Sample a few invalid rows for the response (read-only check).
             sample_rows = self.current_store.conn.execute(
                 f"""SELECT id, event, command, created_by, created_at
@@ -146,7 +153,7 @@ class AdminHandlerMixin:
                             WHERE event NOT IN ({placeholders})""",
                         list(VALID_HOOK_EVENTS),
                     )
-            deleted = cur.rowcount if hasattr(cur, "rowcount") else -1
+            deleted = invalid_count
             self._json_response(
                 200,
                 {
