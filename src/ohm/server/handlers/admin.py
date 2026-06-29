@@ -90,6 +90,74 @@ class AdminHandlerMixin:
         except Exception as e:
             self._json_response(500, {"error": "checkpoint_failed", "message": str(e)})
 
+    def _post_admin_cleanup_hooks(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /admin/cleanup-hooks — remove ohm_hooks rows with invalid event values.
+
+        The ohm_hooks table is tenant-writable and can accumulate corrupt rows
+        where the `event` column contains a node id or other garbage instead of
+        a valid hook event name. This endpoint deletes those rows so they stop
+        triggering skip warnings at every hook invocation.
+
+        Returns:
+          {"deleted": int, "valid_events": list, "sample_invalid": list}
+        """
+        from ohm.hooks import VALID_HOOK_EVENTS
+
+        try:
+            # Build a safe IN clause with the frozenset of valid events.
+            placeholders = ",".join(["?"] * len(VALID_HOOK_EVENTS))
+            # Sample a few invalid rows for the response (read-only check).
+            sample_rows = self.current_store.conn.execute(
+                f"""SELECT id, event, command, created_by, created_at
+                    FROM ohm_hooks
+                    WHERE event NOT IN ({placeholders})
+                    ORDER BY created_at ASC
+                    LIMIT 10""",
+                list(VALID_HOOK_EVENTS),
+            ).fetchall()
+            sample = [
+                {
+                    "id": row[0],
+                    "event": row[1],
+                    "command": row[2][:80] if row[2] else None,
+                    "created_by": row[3],
+                    "created_at": str(row[4]) if row[4] else None,
+                }
+                for row in sample_rows
+            ]
+            # Delete invalid rows inside the global write lock.
+            with self._write_lock:
+                customer_id = self._customer_id
+                if customer_id and self.tenant_manager:
+                    from ohm.tenant import TenantNotFoundError
+                    try:
+                        write_lock = self.tenant_manager.get_write_lock(customer_id)
+                    except TenantNotFoundError:
+                        raise NodeNotFoundError("Tenant not found — provision this tenant before use")
+                    with write_lock:
+                        cur = self.current_store.conn.execute(
+                            f"""DELETE FROM ohm_hooks
+                                WHERE event NOT IN ({placeholders})""",
+                            list(VALID_HOOK_EVENTS),
+                        )
+                else:
+                    cur = self.current_store.conn.execute(
+                        f"""DELETE FROM ohm_hooks
+                            WHERE event NOT IN ({placeholders})""",
+                        list(VALID_HOOK_EVENTS),
+                    )
+            deleted = cur.rowcount if hasattr(cur, "rowcount") else -1
+            self._json_response(
+                200,
+                {
+                    "deleted": deleted,
+                    "valid_events": sorted(VALID_HOOK_EVENTS),
+                    "sample_invalid": sample,
+                },
+            )
+        except Exception as e:
+            self._json_response(500, {"error": "cleanup_hooks_failed", "message": str(e)})
+
     def _get_admin_embeddings(self, path: str, qs: dict) -> None:
         """GET /admin/embeddings — batch generate embeddings."""
         try:

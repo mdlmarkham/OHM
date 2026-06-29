@@ -620,6 +620,7 @@ def _build_router() -> _RouteRegistry:
     r.add("POST", "/deduplicate")
     r.add("GET", "/admin/checkpoint")
     r.add("POST", "/admin/checkpoint")
+    r.add("POST", "/admin/cleanup-hooks")
     r.add("GET", "/admin/verification-scan")
     r.add("GET", "/admin/orphan-triage")
     r.add("GET", "/admin/duplicates")
@@ -2195,6 +2196,7 @@ OhmHandler._POST_EXACT = {
     "/tasks": "_post_task",
     "/deduplicate": "_post_deduplicate",
     "/admin/checkpoint": "_post_admin_checkpoint",
+    "/admin/cleanup-hooks": "_post_admin_cleanup_hooks",
     "/admin/observation-source-urls": "_post_admin_observation_source_urls",
     "/admin/source-node-urls": "_post_admin_source_node_urls",
     "/admin/edge-layer-fix": "_post_admin_edge_layer_fix",
