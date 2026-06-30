@@ -2628,3 +2628,43 @@ class TestScenarioEndpoint:
         port, _ = test_server
         status, data = _request("POST", port, "/scenario", body={})
         assert status == 400
+
+
+@pytest.mark.xdist_group("server")
+class TestAutonomyLoopEndpoint:
+    """Tests for the autonomy loop API (OHM-446a)."""
+
+    def test_propose_action_endpoint(self, test_server):
+        port, store = test_server
+        store.write_node("al_target", "Target", "concept", agent_name="metis")
+        store.write_node("al_scn", "Scenario", "scenario", agent_name="metis")
+        store.write_edge("al_scn", "al_target", "EVALUATES", layer="L3", agent_name="metis")
+        body = {"scenario_id": "al_scn", "label": "Increase stock", "rationale": "Risk mitigation"}
+        status, data = _request("POST", port, "/propose-action", body=body)
+        assert status == 201, data
+        assert data["type"] == "action"
+        assert data["task_status"] == "proposed"
+
+    def test_execute_action_endpoint(self, test_server):
+        port, store = test_server
+        store.write_node("al_t2", "T", "concept", agent_name="metis")
+        store.write_node("al_s2", "S", "scenario", agent_name="metis")
+        store.write_edge("al_s2", "al_t2", "EVALUATES", layer="L3", agent_name="metis")
+        # Propose first
+        body = {"scenario_id": "al_s2", "label": "Test action"}
+        status, action = _request("POST", port, "/propose-action", body=body)
+        assert status == 201
+        # Execute
+        exec_body = {"action_id": action["id"], "outcome": "TRUE", "outcome_notes": "Success"}
+        status, data = _request("POST", port, "/execute-action", body=exec_body)
+        assert status == 200, data
+        assert data["task_status"] == "executed"
+        assert data["outcome"] == "TRUE"
+
+    def test_loop_status_endpoint(self, test_server):
+        port, _ = test_server
+        status, data = _request("GET", port, "/loop-status")
+        assert status == 200, data
+        assert "summary" in data
+        assert "proposed" in data
+        assert "executed" in data

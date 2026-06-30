@@ -635,6 +635,9 @@ def _build_router() -> _RouteRegistry:
     r.add("POST", "/admin/evict-fragments")
     r.add("POST", "/admin/sync-beads")
     r.add("POST", "/scenario")
+    r.add("POST", "/propose-action")
+    r.add("POST", "/execute-action")
+    r.add("GET", "/loop-status")
     r.add("GET", "/admin/health")
 
     # /decay: write-in-GET (legacy); registered as GET to avoid spurious 405
@@ -2358,6 +2361,9 @@ OhmHandler._GET_PREFIXES = [
 # Exact GET routes that aren't in the prefix list
 OhmHandler._GET_EXACT["/confidence-report"] = "_get_confidence_report"
 OhmHandler._POST_EXACT["/scenario"] = "_post_scenario"
+OhmHandler._POST_EXACT["/propose-action"] = "_post_propose_action"
+OhmHandler._POST_EXACT["/execute-action"] = "_post_execute_action"
+OhmHandler._GET_EXACT["/loop-status"] = "_get_loop_status"
 
 
 def make_configured_handler(store: OhmStore):

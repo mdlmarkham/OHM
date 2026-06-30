@@ -366,6 +366,31 @@ class TestGraphRead:
         assert "cascade" in result
         assert "baseline" not in result
 
+    # ── OHM-446a: autonomy loop SDK methods ──
+
+    def test_propose_action_sdk(self, graph):
+        from ohm.queries import create_node
+        target = create_node(graph._conn, label="T", node_type="concept", created_by="test_agent")
+        scenario = create_node(graph._conn, label="S", node_type="scenario", created_by="test_agent", connects_to=[target["id"]])
+        action = graph.propose_action(scenario_id=scenario["id"], label="Do X")
+        assert action["type"] == "action"
+        assert action["task_status"] == "proposed"
+
+    def test_execute_action_sdk(self, graph):
+        from ohm.queries import create_node
+        target = create_node(graph._conn, label="T", node_type="concept", created_by="test_agent")
+        scenario = create_node(graph._conn, label="S", node_type="scenario", created_by="test_agent", connects_to=[target["id"]])
+        action = graph.propose_action(scenario_id=scenario["id"], label="Do X")
+        result = graph.execute_action(action["id"], outcome="TRUE")
+        assert result["task_status"] == "executed"
+        assert result["outcome"] == "TRUE"
+
+    def test_loop_status_sdk(self, graph):
+        result = graph.loop_status()
+        assert isinstance(result, dict)
+        assert "summary" in result
+        assert "proposed" in result
+
     def test_agent_state(self, graph):
         graph.set_focus("testing")
         results = graph.agent_state()

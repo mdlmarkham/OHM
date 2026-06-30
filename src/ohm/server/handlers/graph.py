@@ -1182,6 +1182,67 @@ class GraphHandlerMixin:
 
         self._json_response(200, result)
 
+    def _post_propose_action(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /propose-action — propose an action linked to a scenario (OHM-446a).
+
+        Body: {scenario_id, label, rationale?, connects_to?}
+        """
+        from ohm.queries import propose_action
+        from ohm.exceptions import ValidationError
+
+        scenario_id = body.get("scenario_id")
+        label = body.get("label")
+        if not scenario_id:
+            raise ValidationError("scenario_id is required")
+        if not label:
+            raise ValidationError("label is required")
+
+        result = propose_action(
+            self.current_store.conn,
+            scenario_id=scenario_id,
+            label=label,
+            created_by=agent,
+            rationale=body.get("rationale"),
+            connects_to=body.get("connects_to"),
+        )
+        self._json_response(201, result)
+
+    def _post_execute_action(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /execute-action — mark an action as executed (OHM-446a).
+
+        Body: {action_id, outcome?, outcome_notes?}
+        """
+        from ohm.queries import execute_action
+        from ohm.exceptions import ValidationError, NodeNotFoundError
+
+        action_id = body.get("action_id")
+        if not action_id:
+            raise ValidationError("action_id is required")
+
+        try:
+            result = execute_action(
+                self.current_store.conn,
+                action_id=action_id,
+                executed_by=agent,
+                outcome=body.get("outcome"),
+                outcome_notes=body.get("outcome_notes"),
+            )
+            self._json_response(200, result)
+        except NodeNotFoundError as e:
+            self._json_response(404, {"error": "not_found", "message": str(e)})
+
+    def _get_loop_status(self, path: str, qs: dict) -> None:
+        """GET /loop-status — autonomy loop status (OHM-446a).
+
+        Returns proposed/executed actions and recent scenarios.
+        Optional ?agent= filter.
+        """
+        from ohm.queries import query_loop_status
+
+        agent = qs.get("agent", [None])[0]
+        result = query_loop_status(self.current_store.read_conn, agent_name=agent)
+        self._json_response(200, result)
+
     def _enforce_cross_link_requirement(self, node_id: str, body: dict) -> dict | None:
         """Return a 422 response body if *body* describes a node that must link.
 

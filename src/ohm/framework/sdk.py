@@ -1941,6 +1941,79 @@ class Graph:
         )
         return {"node_id": node_id, "cascade": cascade}
 
+    def propose_action(
+        self,
+        scenario_id: str,
+        label: str,
+        *,
+        rationale: str | None = None,
+        connects_to: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Propose an action linked to a scenario (OHM-446a).
+
+        Creates an ``action`` node and links it to the scenario via
+        ``PROPOSES_ACTION`` L3 edge.
+
+        Args:
+            scenario_id: The scenario node that suggests this action.
+            label: Human-readable action description.
+            rationale: Optional explanation.
+            connects_to: Additional nodes to cross-link.
+
+        Returns:
+            The created action node record.
+        """
+        from ohm.queries import propose_action
+
+        return propose_action(
+            self._conn,
+            scenario_id=scenario_id,
+            label=label,
+            created_by=self.actor,
+            rationale=rationale,
+            connects_to=connects_to,
+        )
+
+    def execute_action(
+        self,
+        action_id: str,
+        *,
+        outcome: str | None = None,
+        outcome_notes: str | None = None,
+    ) -> dict[str, Any]:
+        """Mark an action as executed and record the outcome (OHM-446a).
+
+        Sets the action's status to 'executed', records the outcome,
+        and creates an EXECUTED_BY L4 edge.
+
+        Args:
+            action_id: The action node to execute.
+            outcome: TRUE/FALSE/AMBIGUOUS/DEFERRED.
+            outcome_notes: Free-text notes on the execution.
+
+        Returns:
+            The updated action node record.
+        """
+        from ohm.queries import execute_action
+
+        return execute_action(
+            self._conn,
+            action_id=action_id,
+            executed_by=self.actor,
+            outcome=outcome,
+            outcome_notes=outcome_notes,
+        )
+
+    def loop_status(self) -> dict[str, Any]:
+        """Return the autonomy loop status — proposed/executed actions (OHM-446a).
+
+        Returns:
+            Dict with proposed, executed, recent_scenarios, and summary.
+        """
+        from ohm.queries import query_loop_status
+
+        return query_loop_status(self._conn, agent_name=self.actor)
+
     def path(
         self,
         from_node: str,

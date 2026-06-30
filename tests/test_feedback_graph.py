@@ -216,3 +216,99 @@ class TestGateGovernance:
                         ["A AND B AND C", e["id"]])
         row = test_db.execute("SELECT constraint_expr FROM ohm_edges WHERE id = ?", [e["id"]]).fetchone()
         assert row[0] == "A AND B AND C"
+
+
+# ── Autonomy Loop API (OHM-446a) ────────────────────────────────────────────
+
+
+class TestProposeAction:
+    """Tests for propose_action() (OHM-446a)."""
+
+    def test_creates_action_node(self, test_db):
+        from ohm.queries import create_node, propose_action
+        target = create_node(test_db, label="Target", node_type="concept", created_by="metis")
+        scenario = create_node(test_db, label="Scenario", node_type="scenario", created_by="metis", connects_to=[target["id"]])
+        action = propose_action(test_db, scenario_id=scenario["id"], label="Do something", created_by="metis")
+        assert action["type"] == "action"
+        assert action["task_status"] == "proposed"
+
+    def test_links_to_scenario(self, test_db):
+        from ohm.queries import create_node, propose_action
+        target = create_node(test_db, label="T", node_type="concept", created_by="metis")
+        scenario = create_node(test_db, label="S", node_type="scenario", created_by="metis", connects_to=[target["id"]])
+        action = propose_action(test_db, scenario_id=scenario["id"], label="A", created_by="metis")
+        edges = test_db.execute(
+            "SELECT edge_type FROM ohm_edges WHERE from_node = ? AND to_node = ? AND deleted_at IS NULL",
+            [scenario["id"], action["id"]],
+        ).fetchall()
+        assert len(edges) >= 1
+        assert edges[0][0] == "PROPOSES_ACTION"
+
+
+class TestExecuteAction:
+    """Tests for execute_action() (OHM-446a)."""
+
+    def test_sets_status_to_executed(self, test_db):
+        from ohm.queries import create_node, propose_action, execute_action
+        target = create_node(test_db, label="T", node_type="concept", created_by="metis")
+        scenario = create_node(test_db, label="S", node_type="scenario", created_by="metis", connects_to=[target["id"]])
+        action = propose_action(test_db, scenario_id=scenario["id"], label="A", created_by="metis")
+        result = execute_action(test_db, action_id=action["id"], executed_by="metis", outcome="TRUE")
+        assert result["task_status"] == "executed"
+        assert result["outcome"] == "TRUE"
+
+    def test_creates_executed_by_edge(self, test_db):
+        from ohm.queries import create_node, propose_action, execute_action
+        target = create_node(test_db, label="T", node_type="concept", created_by="metis")
+        scenario = create_node(test_db, label="S", node_type="scenario", created_by="metis", connects_to=[target["id"]])
+        action = propose_action(test_db, scenario_id=scenario["id"], label="A", created_by="metis")
+        execute_action(test_db, action_id=action["id"], executed_by="metis", outcome="FALSE", outcome_notes="Failed")
+        edges = test_db.execute(
+            "SELECT edge_type FROM ohm_edges WHERE from_node = ? AND edge_type = 'EXECUTED_BY' AND deleted_at IS NULL",
+            [action["id"]],
+        ).fetchall()
+        assert len(edges) >= 1
+
+    def test_missing_action_raises(self, test_db):
+        from ohm.queries import execute_action
+        from ohm.exceptions import NodeNotFoundError
+        with pytest.raises(NodeNotFoundError):
+            execute_action(test_db, action_id="does-not-exist", executed_by="metis")
+
+
+class TestLoopStatus:
+    """Tests for query_loop_status() (OHM-446a)."""
+
+    def test_empty_loop_returns_empty(self, test_db):
+        from ohm.queries import query_loop_status
+        status = query_loop_status(test_db)
+        assert status["summary"]["total"] == 0
+        assert status["summary"]["proposed"] == 0
+
+    def test_shows_proposed_actions(self, test_db):
+        from ohm.queries import create_node, propose_action, query_loop_status
+        target = create_node(test_db, label="T", node_type="concept", created_by="metis")
+        scenario = create_node(test_db, label="S", node_type="scenario", created_by="metis", connects_to=[target["id"]])
+        propose_action(test_db, scenario_id=scenario["id"], label="A", created_by="metis")
+        status = query_loop_status(test_db)
+        assert status["summary"]["proposed"] == 1
+        assert len(status["proposed"]) == 1
+
+    def test_shows_executed_actions_with_outcomes(self, test_db):
+        from ohm.queries import create_node, propose_action, execute_action, query_loop_status
+        target = create_node(test_db, label="T", node_type="concept", created_by="metis")
+        scenario = create_node(test_db, label="S", node_type="scenario", created_by="metis", connects_to=[target["id"]])
+        action = propose_action(test_db, scenario_id=scenario["id"], label="A", created_by="metis")
+        execute_action(test_db, action_id=action["id"], executed_by="metis", outcome="TRUE")
+        status = query_loop_status(test_db)
+        assert status["summary"]["executed"] == 1
+        assert status["summary"]["outcomes"].get("TRUE") == 1
+
+    def test_shows_recent_scenarios(self, test_db):
+        from ohm.queries import create_node, propose_action, query_loop_status
+        target = create_node(test_db, label="T", node_type="concept", created_by="metis")
+        scenario = create_node(test_db, label="My Scenario", node_type="scenario", created_by="metis", connects_to=[target["id"]])
+        propose_action(test_db, scenario_id=scenario["id"], label="A", created_by="metis")
+        status = query_loop_status(test_db)
+        assert len(status["recent_scenarios"]) >= 1
+        assert status["recent_scenarios"][0]["label"] == "My Scenario"
