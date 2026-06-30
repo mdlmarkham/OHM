@@ -36,7 +36,9 @@
     "ensemble_vote",
     "freshness_threshold",
     "feed_investment",
-    "mode_switch"
+    "mode_switch",
+    "twin_design_session",
+    "twin_design_proposal"
   ],
   "layer_edge_types": {
     "L0": [
@@ -94,6 +96,11 @@
       "DRIFT_SIGNAL",
       "GOVERNS_FRESHNESS",
       "INVESTS_IN",
+      "PROPOSES",
+      "APPROVES",
+      "DECLINES",
+      "MODIFIES",
+      "INSTANTIATED_FROM",
       "BLOCKS",
       "DEPENDS_ON",
       "ENABLES",

@@ -83,6 +83,9 @@ VALID_NODE_TYPES = frozenset(
         "freshness_threshold",  # Per-decision freshness constraint (OHM-2x2u)
         "feed_investment",  # VoI-driven observation investment plan (OHM-2x2u)
         "mode_switch",  # Real-time/deliberative mode transition record (OHM-2x2u)
+        # ── Twin design session types (OHM-konq) ──
+        "twin_design_session",  # A conversational twin design session
+        "twin_design_proposal",  # A specific twin configuration proposal
     }
 )
 
@@ -122,6 +125,9 @@ MUST_HAVE_EDGE_NODE_TYPES: frozenset[str] = frozenset(
         "drift_event",  # Must link to the twin/model it signals
         "validation_run",  # Must link to the model_candidate it validates
         "ensemble_vote",  # Must link to the twin it votes on
+        # Twin design session types (OHM-konq)
+        "twin_design_session",  # Must link to goal/context nodes
+        "twin_design_proposal",  # Must link to the session that proposed it
         # Forward-compat (per OHM-tjzh spec)
         "synthesis",
         "observation",
@@ -248,6 +254,12 @@ LAYER_EDGE_TYPES: dict[str, frozenset[str]] = {
             # ── Temporal decision layer (OHM-2x2u) ──
             "GOVERNS_FRESHNESS",  # freshness_threshold → decision (freshness constraint)
             "INVESTS_IN",  # feed_investment → decision (VoI-driven observation plan)
+            # ── Twin design session edges (OHM-konq) ──
+            "PROPOSES",  # session → proposal (session proposes a twin config)
+            "APPROVES",  # user → proposal (user approves a proposal)
+            "DECLINES",  # user → proposal (user declines a proposal)
+            "MODIFIES",  # user → proposal (user requests modifications)
+            "INSTANTIATED_FROM",  # twin → session (twin was designed by this session)
         }
     ),
     "L4": frozenset(

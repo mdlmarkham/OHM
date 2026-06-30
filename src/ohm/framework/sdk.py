@@ -4666,6 +4666,163 @@ class Graph:
 
         return delete_edge(self._conn, edge_id=edge_id, deleted_by=self.actor)
 
+    def start_twin_design_session(
+        self,
+        goal: str,
+        *,
+        context: dict[str, Any] | None = None,
+        label: str | None = None,
+    ) -> dict[str, Any]:
+        from ohm.queries import start_twin_design_session
+
+        return start_twin_design_session(
+            self._conn,
+            goal=goal,
+            context=context,
+            created_by=self.actor,
+            label=label,
+        )
+
+    def transition_session(
+        self,
+        session_id: str,
+        *,
+        to_state: str,
+        notes: str | None = None,
+    ) -> dict[str, Any]:
+        from ohm.queries import transition_session
+
+        return transition_session(
+            self._conn,
+            session_id=session_id,
+            to_state=to_state,
+            notes=notes,
+            created_by=self.actor,
+        )
+
+    def add_session_observation(
+        self,
+        session_id: str,
+        *,
+        observations: dict[str, Any],
+    ) -> dict[str, Any]:
+        from ohm.queries import add_session_observation
+
+        return add_session_observation(
+            self._conn,
+            session_id=session_id,
+            observations=observations,
+            created_by=self.actor,
+        )
+
+    def propose_twin_config(
+        self,
+        session_id: str,
+        *,
+        decision_node_id: str | None = None,
+        preferred_template_id: str | None = None,
+        preferred_model_id: str | None = None,
+        confidence_threshold: float = 0.6,
+    ) -> dict[str, Any]:
+        from ohm.queries import propose_twin_config
+
+        return propose_twin_config(
+            self._conn,
+            session_id=session_id,
+            decision_node_id=decision_node_id,
+            preferred_template_id=preferred_template_id,
+            preferred_model_id=preferred_model_id,
+            confidence_threshold=confidence_threshold,
+            created_by=self.actor,
+        )
+
+    def review_proposal(
+        self,
+        session_id: str,
+        proposal_id: str,
+        *,
+        decision: str,
+        approved_aspects: list[str] | None = None,
+        declined_aspects: list[str] | None = None,
+        modifications: dict[str, Any] | None = None,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        from ohm.queries import review_proposal
+
+        return review_proposal(
+            self._conn,
+            session_id=session_id,
+            proposal_id=proposal_id,
+            decision=decision,
+            approved_aspects=approved_aspects,
+            declined_aspects=declined_aspects,
+            modifications=modifications,
+            reason=reason,
+            created_by=self.actor,
+        )
+
+    def instantiate_from_session(
+        self,
+        session_id: str,
+    ) -> dict[str, Any]:
+        from ohm.queries import instantiate_from_session
+
+        return instantiate_from_session(
+            self._conn,
+            session_id=session_id,
+            created_by=self.actor,
+        )
+
+    def record_calibration(
+        self,
+        session_id: str,
+        *,
+        observations: dict[str, float],
+        actuals: dict[str, float],
+    ) -> dict[str, Any]:
+        from ohm.queries import record_calibration
+
+        return record_calibration(
+            self._conn,
+            session_id=session_id,
+            observations=observations,
+            actuals=actuals,
+            created_by=self.actor,
+        )
+
+    def evolve_session(
+        self,
+        session_id: str,
+        *,
+        reason: str,
+        proposed_changes: dict[str, Any],
+    ) -> dict[str, Any]:
+        from ohm.queries import evolve_session
+
+        return evolve_session(
+            self._conn,
+            session_id=session_id,
+            reason=reason,
+            proposed_changes=proposed_changes,
+            created_by=self.actor,
+        )
+
+    def get_session_state(
+        self,
+        session_id: str,
+    ) -> dict[str, Any]:
+        from ohm.queries import get_session_state
+
+        return get_session_state(self._conn, session_id=session_id)
+
+    def get_session_audit(
+        self,
+        session_id: str,
+    ) -> dict[str, Any]:
+        from ohm.queries import get_session_audit
+
+        return get_session_audit(self._conn, session_id=session_id)
+
     def close(self) -> None:
         """Close the database connection."""
         self._conn.close()

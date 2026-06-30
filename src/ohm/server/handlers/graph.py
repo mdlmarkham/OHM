@@ -4244,3 +4244,153 @@ class GraphHandlerMixin:
             self._json_response(200, {"ok": True, "data": result})
         except NodeNotFoundError as e:
             self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
+
+    def _post_twin_design_start(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        from ohm.queries import start_twin_design_session
+        from ohm.exceptions import ValidationError
+
+        goal = body.get("goal")
+        if not goal:
+            raise ValidationError("goal is required")
+
+        result = start_twin_design_session(
+            self.current_store.conn,
+            goal=goal,
+            context=body.get("context"),
+            created_by=agent,
+            label=body.get("label"),
+        )
+        self._json_response(201, {"ok": True, "data": result})
+
+    def _route_twin_design_post(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        from ohm.exceptions import ValidationError
+
+        parts = path.strip("/").split("/")
+        if len(parts) < 3:
+            raise ValidationError("POST /twin/design/{session_id}/{action} required")
+
+        session_id = parts[2]
+        action = parts[3] if len(parts) >= 4 else ""
+
+        if action == "transition":
+            to_state = body.get("to_state")
+            if not to_state:
+                raise ValidationError("to_state is required")
+            from ohm.queries import transition_session
+            result = transition_session(
+                self.current_store.conn,
+                session_id=session_id,
+                to_state=to_state,
+                notes=body.get("notes"),
+                created_by=agent,
+            )
+            self._json_response(200, {"ok": True, "data": result})
+        elif action == "observe":
+            observations = body.get("observations")
+            if not observations:
+                raise ValidationError("observations is required")
+            from ohm.queries import add_session_observation
+            result = add_session_observation(
+                self.current_store.conn,
+                session_id=session_id,
+                observations=observations,
+                created_by=agent,
+            )
+            self._json_response(200, {"ok": True, "data": result})
+        elif action == "propose":
+            from ohm.queries import propose_twin_config
+            result = propose_twin_config(
+                self.current_store.conn,
+                session_id=session_id,
+                decision_node_id=body.get("decision_node_id"),
+                preferred_template_id=body.get("preferred_template_id"),
+                preferred_model_id=body.get("preferred_model_id"),
+                confidence_threshold=body.get("confidence_threshold", 0.6),
+                created_by=agent,
+            )
+            self._json_response(201, {"ok": True, "data": result})
+        elif action == "review":
+            proposal_id = body.get("proposal_id")
+            decision = body.get("decision")
+            if not proposal_id:
+                raise ValidationError("proposal_id is required")
+            if not decision:
+                raise ValidationError("decision is required")
+            from ohm.queries import review_proposal
+            result = review_proposal(
+                self.current_store.conn,
+                session_id=session_id,
+                proposal_id=proposal_id,
+                decision=decision,
+                approved_aspects=body.get("approved_aspects"),
+                declined_aspects=body.get("declined_aspects"),
+                modifications=body.get("modifications"),
+                reason=body.get("reason"),
+                created_by=agent,
+            )
+            self._json_response(200, {"ok": True, "data": result})
+        elif action == "instantiate":
+            from ohm.queries import instantiate_from_session
+            result = instantiate_from_session(
+                self.current_store.conn,
+                session_id=session_id,
+                created_by=agent,
+            )
+            self._json_response(201, {"ok": True, "data": result})
+        elif action == "calibrate":
+            observations = body.get("observations")
+            actuals = body.get("actuals")
+            if not observations or not actuals:
+                raise ValidationError("observations and actuals are required")
+            from ohm.queries import record_calibration
+            result = record_calibration(
+                self.current_store.conn,
+                session_id=session_id,
+                observations=observations,
+                actuals=actuals,
+                created_by=agent,
+            )
+            self._json_response(200, {"ok": True, "data": result})
+        elif action == "evolve":
+            reason = body.get("reason")
+            proposed_changes = body.get("proposed_changes")
+            if not reason:
+                raise ValidationError("reason is required")
+            from ohm.queries import evolve_session
+            result = evolve_session(
+                self.current_store.conn,
+                session_id=session_id,
+                reason=reason,
+                proposed_changes=proposed_changes or {},
+                created_by=agent,
+            )
+            self._json_response(200, {"ok": True, "data": result})
+        else:
+            raise ValidationError(f"unknown twin design action: {action}")
+
+    def _route_twin_design_get(self, path: str, qs: dict) -> None:
+        from ohm.exceptions import ValidationError
+
+        parts = path.strip("/").split("/")
+        if len(parts) < 3:
+            raise ValidationError("GET /twin/design/{session_id}/{state|audit} required")
+
+        session_id = parts[2]
+        action = parts[3] if len(parts) >= 4 else "state"
+
+        if action == "state":
+            from ohm.queries import get_session_state
+            result = get_session_state(
+                self.current_store.read_conn,
+                session_id=session_id,
+            )
+            self._json_response(200, {"ok": True, "data": result})
+        elif action == "audit":
+            from ohm.queries import get_session_audit
+            result = get_session_audit(
+                self.current_store.read_conn,
+                session_id=session_id,
+            )
+            self._json_response(200, {"ok": True, "data": result})
+        else:
+            raise ValidationError(f"unknown twin design GET action: {action}")

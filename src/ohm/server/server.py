@@ -690,8 +690,17 @@ def _build_router() -> _RouteRegistry:
         "/edge/verify/",
         "/tasks/",
         "/admin/hooks/",
+        "/twin/design/",
     ):
         r.add("POST", _p)
+
+    # GET prefix routes for twin design
+    r.add("GET", "/twin/design/")
+
+    # POST exact routes for twin
+    r.add("POST", "/twin/register")
+    r.add("POST", "/twin/assemble")
+    r.add("POST", "/twin/design/start")
 
     # PATCH
     r.add("PATCH", "/node/")
@@ -2366,6 +2375,9 @@ OhmHandler._POST_EXACT["/execute-action"] = "_post_execute_action"
 OhmHandler._GET_EXACT["/loop-status"] = "_get_loop_status"
 OhmHandler._POST_EXACT["/twin/register"] = "_post_register_twin"
 OhmHandler._POST_EXACT["/twin/assemble"] = "_post_assemble_twin"
+OhmHandler._POST_EXACT["/twin/design/start"] = "_post_twin_design_start"
+OhmHandler._POST_PREFIXES.append(("/twin/design/", "_route_twin_design_post"))
+OhmHandler._GET_PREFIXES.append(("/twin/design/", "_route_twin_design_get"))
 OhmHandler._POST_PREFIXES.append(("/twin/", "_post_validate_action"))
 OhmHandler._GET_PREFIXES.append(("/twin/", "_route_twin_get"))
 OhmHandler._POST_EXACT["/twin-template"] = "_post_create_twin_template"
