@@ -1442,8 +1442,10 @@ class GraphHandlerMixin:
             provenance=body.get("provenance"),
             store=self.current_store,
             node=body,
+            source_tier=body.get("source_tier"),
+            metadata=body.get("metadata") if isinstance(body.get("metadata"), dict) else None,
         )
-        result = enrich_response(result, nudges)
+        result = enrich_response(result, nudges, store=self.current_store, agent=agent, action="node", target_id=result.get("id"))
 
         # ADR-021: Proactive discoverability — post-write suggestions + connectivity nudge.
         # Run synchronously on the request thread under the write lock. Earlier versions used
@@ -1809,10 +1811,11 @@ class GraphHandlerMixin:
         )
         # ADR-017 + ADR-023: Cognitive nudge enrichment with causal guidance
         _challenge_ratio = self._get_challenge_ratio()
+        _edge_type_for_nudge = _resolve_type_field(body, "edge_type", "type")
         nudges = generate_nudges(
             action="edge",
             node_id=body.get("to") or body.get("from"),
-            edge_type=_resolve_type_field(body, "edge_type", "type"),
+            edge_type=_edge_type_for_nudge,
             confidence=body.get("confidence"),
             provenance=body.get("provenance"),
             tags=None,
@@ -1820,8 +1823,11 @@ class GraphHandlerMixin:
             from_node_id=body.get("from"),
             to_node_id=body.get("to"),
             challenge_ratio=_challenge_ratio,
+            source_tier=body.get("source_tier"),
+            condition=body.get("condition"),
+            metadata=body.get("metadata") if isinstance(body.get("metadata"), dict) else None,
         )
-        result = enrich_response(result, nudges)
+        result = enrich_response(result, nudges, store=self.current_store, agent=agent, action="edge", target_id=result.get("id") if isinstance(result, dict) else None)
 
         # ADR-021: Relational tags — add edge type as tag on both endpoints
         try:
@@ -2003,8 +2009,10 @@ class GraphHandlerMixin:
             provenance=body.get("source"),
             source_url=body.get("source_url"),
             store=self.current_store,
+            obs_type=_resolve_type_field(body, "obs_type", "type", default="measurement") or "measurement",
+            half_life_days=body.get("half_life_days"),
         )
-        result = enrich_response(result, nudges)
+        result = enrich_response(result, nudges, store=self.current_store, agent=agent, action="observation", target_id=node_id)
         self._json_response(201, result)
 
     def _post_observations(self, path: str, qs: dict, body: dict, agent: str) -> None:

@@ -146,6 +146,11 @@ def generate_nudges(
     from_node_id: str | None = None,
     to_node_id: str | None = None,
     challenge_ratio: float | None = None,
+    source_tier: str | None = None,
+    condition: str | None = None,
+    metadata: dict | None = None,
+    obs_type: str | None = None,
+    half_life_days: float | None = None,
 ) -> list[dict]:
     """Generate cognitive nudges based on what the agent just wrote.
 
@@ -163,6 +168,11 @@ def generate_nudges(
         from_node_id: Source node ID of the edge
         to_node_id: Target node ID of the edge
         challenge_ratio: Current graph challenge ratio (for dynamic nudges)
+        source_tier: Source quality tier (raw, unverified, preliminary, official, verified)
+        condition: Edge condition field (if set, indicates a mechanism was specified)
+        metadata: Edge or node metadata dict (may contain 'mechanism' key)
+        obs_type: Observation type (for decay-relevant types like 'measurement')
+        half_life_days: Observation decay half-life (if set, indicates perishable data)
 
     Returns:
         List of nudge dicts with "type", "message", and optional "data"
@@ -403,11 +413,138 @@ def generate_nudges(
             except Exception:
                 pass
 
+    # ── OHM-jdfq: High confidence + weak source nudge ─────────────────────
+    # ADR-028: source_tier ceilings exist but agents may still write high
+    # confidence with a weak tier. Nudge them to reconcile.
+    if confidence is not None and source_tier is not None:
+        weak_tiers = {"raw", "unverified"}
+        if confidence >= 0.8 and source_tier in weak_tiers:
+            nudges.append(
+                {
+                    "type": "high_confidence_weak_source",
+                    "message": f"Confidence is {confidence:.2f} but source_tier is '{source_tier}'. "
+                    f"Weak sources (raw, unverified) have confidence ceilings of 0.3-0.5. "
+                    f"Consider downgrading confidence or adding stronger evidence.",
+                    "severity": "warning",
+                    "data": {
+                        "confidence": confidence,
+                        "source_tier": source_tier,
+                        "ceiling": 0.3 if source_tier == "raw" else 0.5,
+                    },
+                }
+            )
+
+    # ── OHM-jdfq: Causal edge without mechanism nudge ─────────────────────
+    # ADR-023: Causal edges feed the Bayesian network. A mechanism helps
+    # other agents understand WHY the causation holds, not just THAT it does.
+    if action == "edge" and edge_type and edge_type in CAUSAL_EDGE_TYPES:
+        has_mechanism = bool(condition and condition.strip()) or bool(
+            metadata and metadata.get("mechanism")
+        )
+        if not has_mechanism:
+            nudges.append(
+                {
+                    "type": "causal_edge_missing_mechanism",
+                    "message": f"You wrote {edge_type} but didn't specify a mediating mechanism. "
+                    f"What's the causal pathway? Add a 'condition' field or "
+                    f"metadata.mechanism to help other agents understand why this causation holds.",
+                    "severity": "suggestion",
+                    "data": {
+                        "edge_type": edge_type,
+                        "suggested_fields": ["condition", "metadata.mechanism"],
+                    },
+                }
+            )
+
+    # ── OHM-jdfq: Fast-decaying observation nudge ─────────────────────────
+    # If the observation has a half_life_days set (perishable data), check
+    # whether existing observations on this node have already decayed.
+    if action == "observation" and node_id and store and half_life_days is not None:
+        try:
+            from ohm.graph.queries import compute_confidence_with_decay
+
+            rows = store.conn.execute(
+                """SELECT o.value, o.created_at
+                   FROM ohm_observations o
+                   WHERE o.node_id = ? AND o.deleted_at IS NULL
+                   ORDER BY o.created_at DESC LIMIT 5""",
+                [node_id],
+            ).fetchall()
+            stale_count = 0
+            max_decayed = 1.0
+            for row in rows:
+                val, created_at = row[0], row[1]
+                if val is not None and created_at is not None:
+                    decay = compute_confidence_with_decay(
+                        store.conn,
+                        base_confidence=float(val),
+                        last_observed_at=created_at,
+                        half_life_days=half_life_days,
+                        floor=0.1,
+                    )
+                    if decay["decayed_confidence"] <= 0.2:
+                        stale_count += 1
+                        max_decayed = min(max_decayed, decay["decayed_confidence"])
+            if stale_count >= 2:
+                nudges.append(
+                    {
+                        "type": "fast_decaying_observation",
+                        "message": f"This node has {stale_count} observations that have decayed "
+                        f"below 0.2 confidence (half-life {half_life_days}d). "
+                        f"Refresh with new measurements to maintain signal quality.",
+                        "severity": "hint",
+                        "data": {
+                            "stale_count": stale_count,
+                            "half_life_days": half_life_days,
+                            "max_decayed_confidence": round(max_decayed, 4),
+                        },
+                    }
+                )
+        except Exception:
+            pass  # Never fail the write for a nudge
+
     return nudges
 
 
-def enrich_response(response: dict, nudges: list[dict]) -> dict:
-    """Add nudges to an API response without breaking existing clients."""
+def enrich_response(response: dict, nudges: list[dict], store: Any = None, agent: str = "unknown", action: str = "unknown", target_id: str | None = None) -> dict:
+    """Add nudges to an API response without breaking existing clients.
+
+    When a store is provided, each nudge is also persisted to ohm_nudge_log
+    for quality analytics (OHM-jdfq). The log entry's `accepted` field is
+    initially NULL — it's filled in later if the agent acts on the nudge.
+    """
     if nudges:
         response["nudges"] = nudges
+        if store is not None:
+            _persist_nudge_log(store, agent, action, target_id, nudges)
     return response
+
+
+def _persist_nudge_log(store: Any, agent: str, action: str, target_id: str | None, nudges: list[dict]) -> None:
+    """Write nudge entries to ohm_nudge_log (OHM-jdfq).
+
+    Best-effort: never fails the write if logging fails. Each nudge gets
+    its own row so analytics can group by nudge_type.
+    """
+    import json as _json
+    import uuid as _uuid
+
+    try:
+        for n in nudges:
+            nudge_id = f"nudge_{_uuid.uuid4().hex[:12]}"
+            store.conn.execute(
+                """INSERT INTO ohm_nudge_log (id, agent, action, nudge_type, severity, target_id, message, metadata)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                [
+                    nudge_id,
+                    agent,
+                    action,
+                    n.get("type", "unknown"),
+                    n.get("severity", "info"),
+                    target_id,
+                    n.get("message", ""),
+                    _json.dumps(n.get("data", {})) if n.get("data") else None,
+                ],
+            )
+    except Exception:
+        logger.debug("nudge log persistence failed", exc_info=True)
