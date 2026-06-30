@@ -16,6 +16,7 @@ All queries use standard SQL recursive CTEs (zero-dependency, works through Quac
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Sequence
 
 if TYPE_CHECKING:
@@ -8027,19 +8028,172 @@ def execute_action(
     return _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ?", [action_id]))[0]
 
 
+def compute_confidence_with_decay(
+    conn: DuckDBPyConnection,
+    *,
+    base_confidence: float,
+    last_observed_at: datetime | str | None,
+    half_life_days: float = 30.0,
+    floor: float = 0.1,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Compute decayed confidence based on observation age (OHM-2x2u).
+
+    Decay model: confidence(t) = max(floor, base * 2^(-age_days / half_life))
+    """
+    import math
+    from datetime import datetime as _dt, timezone as _tz
+
+    if last_observed_at is None:
+        return {
+            "decayed_confidence": base_confidence,
+            "age_days": None,
+            "decay_factor": 1.0,
+            "is_stale": False,
+        }
+
+    if now is None:
+        now = _dt.now(_tz.utc)
+
+    if isinstance(last_observed_at, str):
+        last_observed_at = _dt.fromisoformat(last_observed_at.replace("Z", "+00:00"))
+    if last_observed_at.tzinfo is None:
+        last_observed_at = last_observed_at.replace(tzinfo=_tz.utc)
+
+    age_seconds = max(0.0, (now - last_observed_at).total_seconds())
+    age_days = age_seconds / 86400.0
+
+    if half_life_days <= 0:
+        decay_factor = 1.0
+    else:
+        decay_factor = 2.0 ** (-age_days / half_life_days)
+
+    decayed = max(floor, base_confidence * decay_factor)
+    is_stale = decayed <= floor
+
+    return {
+        "decayed_confidence": round(decayed, 6),
+        "age_days": round(age_days, 4),
+        "decay_factor": round(decay_factor, 6),
+        "is_stale": is_stale,
+    }
+
+
+def apply_decay_to_edges(
+    conn: DuckDBPyConnection,
+    *,
+    half_life_days: float = 30.0,
+    floor: float = 0.1,
+    dry_run: bool = True,
+    created_by: str | None = None,
+) -> dict[str, Any]:
+    """Apply decay to all edges' effective confidence based on their last observation (OHM-2x2u).
+
+    If dry_run=True (default), returns what would change without modifying.
+    If dry_run=False, UPDATE ohm_edges SET confidence = decayed_value and store
+    original confidence in metadata.confidence_original.
+    """
+    import json
+    import math
+
+    defaults = {"L1": float("inf"), "L2": float("inf"), "L3": 90.0, "L4": 30.0}
+    when_clauses = " ".join(
+        f"WHEN '{k}' THEN {999999.0 if v == float('inf') or v <= 0 else float(v)}"
+        for k, v in defaults.items()
+    )
+    hl_case = f"CASE layer {when_clauses} ELSE 90.0 END"
+
+    rows = conn.execute(
+        f"""
+        SELECT
+            id, confidence, layer, created_at, metadata,
+            {hl_case} AS half_life,
+            GREATEST(date_diff('day', created_at, CURRENT_TIMESTAMP), 0)::DOUBLE AS age_days
+        FROM ohm_edges
+        WHERE deleted_at IS NULL
+          AND confidence IS NOT NULL
+          AND layer IN ('L3', 'L4')
+        """,
+    ).fetchall()
+
+    edges_examined = len(rows)
+    edges_decayed = 0
+    summary: list[dict[str, Any]] = []
+    total_decay_factor = 0.0
+
+    for row in rows:
+        edge_id, original_conf, layer, created_at, metadata_json, hl, age = row
+        hl = float(hl)
+        age = float(age)
+        original_conf = float(original_conf) if original_conf is not None else original_conf
+        if original_conf is None or original_conf <= 0:
+            continue
+
+        if hl <= 0 or hl >= 999999:
+            continue
+
+        decay_factor = 2.0 ** (-age / hl)
+        decayed_conf = max(floor, original_conf * decay_factor)
+
+        if decayed_conf < original_conf:
+            edges_decayed += 1
+            total_decay_factor += decay_factor
+
+            entry = {
+                "id": edge_id,
+                "layer": layer,
+                "original_confidence": round(original_conf, 6),
+                "decayed_confidence": round(decayed_conf, 6),
+                "decay_factor": round(decay_factor, 6),
+                "age_days": round(age, 4),
+            }
+            summary.append(entry)
+
+            if not dry_run:
+                existing_meta = {}
+                if metadata_json:
+                    try:
+                        existing_meta = json.loads(metadata_json) if isinstance(metadata_json, str) else metadata_json
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                existing_meta["confidence_original"] = original_conf
+                meta_str = json.dumps(existing_meta)
+
+                conn.execute(
+                    "UPDATE ohm_edges SET confidence = ?, metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    [round(decayed_conf, 6), meta_str, edge_id],
+                )
+                agent = created_by or "decay"
+                _log_change(conn, "ohm_edges", edge_id, "UPDATE", agent)
+
+    avg_decay = round(total_decay_factor / edges_decayed, 6) if edges_decayed > 0 else 1.0
+
+    return {
+        "edges_examined": edges_examined,
+        "edges_decayed": edges_decayed,
+        "average_decay_factor": avg_decay,
+        "summary": summary[:100],
+    }
+
+
 def query_loop_status(
     conn: DuckDBPyConnection,
     *,
     agent_name: str | None = None,
+    half_life_days: float = 30.0,
 ) -> dict[str, Any]:
     """Return the status of the autonomy loop — proposed/executed actions (OHM-446a).
 
     Summarizes the action lifecycle: how many actions are proposed,
     executing, executed, with what outcomes. Optionally filtered by agent.
 
+    Extended with temporal section (OHM-2x2u): upcoming evaluations,
+    stale feeds, compromised/stuck gates, and decay summary.
+
     Args:
         conn: Database connection.
         agent_name: Optional filter — only actions proposed by this agent.
+        half_life_days: Half-life for confidence decay computation (default 30).
 
     Returns:
         Dict with:
@@ -8047,6 +8201,8 @@ def query_loop_status(
           - executed: list of action nodes with status 'executed'
           - summary: counts by status and outcome
           - recent_scenarios: scenario nodes linked to recent actions
+          - temporal: dict with upcoming_evaluations, stale_feeds,
+            compromised_gates, stuck_gates, decay_summary
     """
     conditions = ["type = 'action'", "deleted_at IS NULL"]
     params: list[Any] = []
@@ -8056,7 +8212,7 @@ def query_loop_status(
 
     action_rows = conn.execute(
         f"""SELECT id, label, task_status, outcome, outcome_notes,
-                  created_by, created_at, updated_at
+                   created_by, created_at, updated_at
            FROM ohm_nodes
            WHERE {' AND '.join(conditions)}
            ORDER BY COALESCE(updated_at, created_at) DESC
@@ -8106,6 +8262,130 @@ def query_loop_status(
         for row in scenario_rows
     ]
 
+    # ── Temporal section (OHM-2x2u) ──
+
+    # Upcoming evaluations: decision nodes with freshness thresholds
+    upcoming_eval_rows = conn.execute(
+        """SELECT d.id AS decision_id, d.label,
+                  ft.metadata AS ft_metadata,
+                  d.updated_at AS next_evaluation_due
+           FROM ohm_nodes d
+           JOIN ohm_edges e ON e.to_node = d.id AND e.edge_type = 'GOVERNS_FRESHNESS' AND e.deleted_at IS NULL
+           JOIN ohm_nodes ft ON ft.id = e.from_node AND ft.deleted_at IS NULL
+           WHERE d.type = 'decision' AND d.deleted_at IS NULL
+           ORDER BY d.updated_at ASC
+           LIMIT 50""",
+    ).fetchall()
+
+    upcoming_evaluations = []
+    for row in upcoming_eval_rows:
+        entry = {
+            "decision_id": row[0],
+            "label": row[1] or "",
+            "next_evaluation_due": str(row[3]) if row[3] else None,
+            "freshness_pressure": None,
+        }
+        if row[2]:
+            import json as _json
+            try:
+                meta = _json.loads(row[2]) if isinstance(row[2], str) else row[2]
+                entry["freshness_pressure"] = meta.get("max_age_seconds")
+            except Exception:
+                pass
+        upcoming_evaluations.append(entry)
+
+    # Stale feeds: nodes feeding decisions where latest observation is old
+    stale_feed_rows = conn.execute(
+        """SELECT DISTINCT n.id AS feed_node_id, n.label,
+                  EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - COALESCE(o.created_at, n.created_at)))::DOUBLE AS age_seconds
+           FROM ohm_nodes n
+           JOIN ohm_edges e ON e.from_node = n.id AND e.edge_type = 'FEEDS' AND e.deleted_at IS NULL
+           LEFT JOIN ohm_observations o ON o.node_id = n.id AND o.deleted_at IS NULL
+           WHERE n.deleted_at IS NULL
+           ORDER BY age_seconds DESC
+           LIMIT 50""",
+    ).fetchall()
+
+    stale_feeds = []
+    for row in stale_feed_rows:
+        feed_node_id = row[0]
+        age_seconds = row[2] if row[2] is not None else 0.0
+        feeding_decision_rows = conn.execute(
+            """SELECT DISTINCT e.to_node
+               FROM ohm_edges e
+               WHERE e.from_node = ? AND e.edge_type = 'FEEDS' AND e.deleted_at IS NULL
+               LIMIT 20""",
+            [feed_node_id],
+        ).fetchall()
+        feeding_ids = [r[0] for r in feeding_decision_rows]
+        stale_feeds.append({
+            "feed_node_id": feed_node_id,
+            "label": row[1] or "",
+            "age_seconds": round(age_seconds, 2),
+            "feeding_decision_ids": feeding_ids,
+        })
+
+    # Compromised gates: nodes with gate_status='compromised'
+    compromised_rows = conn.execute(
+        """SELECT id, label, gate_type, gate_status
+           FROM ohm_nodes
+           WHERE gate_status = 'compromised' AND deleted_at IS NULL
+           ORDER BY updated_at DESC
+           LIMIT 50""",
+    ).fetchall()
+
+    compromised_gates = [
+        {
+            "node_id": row[0],
+            "label": row[1] or "",
+            "gate_status": "compromised",
+            "gate_type": row[2],
+        }
+        for row in compromised_rows
+    ]
+
+    # Stuck gates: nodes with gate_status='failed' AND old updated_at
+    stuck_rows = conn.execute(
+        """SELECT id, label, gate_type, updated_at
+           FROM ohm_nodes
+           WHERE gate_status = 'failed'
+             AND deleted_at IS NULL
+             AND updated_at < CURRENT_TIMESTAMP - INTERVAL '7 days'
+           ORDER BY updated_at ASC
+           LIMIT 50""",
+    ).fetchall()
+
+    stuck_gates = [
+        {
+            "node_id": row[0],
+            "label": row[1] or "",
+            "gate_status": "failed",
+            "gate_type": row[2],
+            "since": str(row[3]) if row[3] else None,
+        }
+        for row in stuck_rows
+    ]
+
+    # Decay summary: call apply_decay_to_edges(dry_run=True)
+    decay_result = apply_decay_to_edges(
+        conn,
+        half_life_days=half_life_days,
+        floor=0.1,
+        dry_run=True,
+    )
+
+    temporal = {
+        "upcoming_evaluations": upcoming_evaluations,
+        "stale_feeds": stale_feeds,
+        "compromised_gates": compromised_gates,
+        "stuck_gates": stuck_gates,
+        "decay_summary": {
+            "edges_examined": decay_result["edges_examined"],
+            "edges_decayed": decay_result["edges_decayed"],
+            "average_decay_factor": decay_result["average_decay_factor"],
+        },
+    }
+
     return {
         "proposed": proposed,
         "executed": executed,
@@ -8116,6 +8396,7 @@ def query_loop_status(
             "executed": len(executed),
             "outcomes": outcomes,
         },
+        "temporal": temporal,
     }
 
 
@@ -9461,6 +9742,9 @@ def promote_model(
     *,
     model_candidate_id: str,
     created_by: str,
+    policy: str = "accuracy",
+    decision_node_id: str | None = None,
+    min_improvement: float = 0.0,
 ) -> dict[str, Any]:
     """Promote a model candidate to active status for its twin (OHM-75tw).
 
@@ -9471,16 +9755,30 @@ def promote_model(
         conn: Database connection.
         model_candidate_id: The model candidate to promote.
         created_by: Agent performing the promotion.
+        policy: Promotion policy — "accuracy" (default) or "decision_value".
+        decision_node_id: Required when policy="decision_value".
+        min_improvement: Minimum decision_value improvement over active model
+            (only used with policy="decision_value").
 
     Returns:
-        The promoted model_candidate node record.
+        The promoted model_candidate node record with promotion metadata.
     """
     import json as _json
 
     from ohm.validation import validate_identifier
-    from ohm.exceptions import NodeNotFoundError
+    from ohm.exceptions import NodeNotFoundError, ValidationError
 
     model_candidate_id = validate_identifier(model_candidate_id, name="model_candidate_id")
+
+    valid_policies = {"accuracy", "decision_value"}
+    if policy not in valid_policies:
+        raise ValidationError(f"Invalid policy '{policy}' — must be one of {sorted(valid_policies)}")
+
+    if policy == "decision_value" and not decision_node_id:
+        raise ValidationError("decision_node_id is required when policy='decision_value'")
+
+    if decision_node_id is not None:
+        decision_node_id = validate_identifier(decision_node_id, name="decision_node_id")
 
     candidate_row = conn.execute(
         "SELECT id, metadata FROM ohm_nodes WHERE id = ? AND type = 'model_candidate' AND deleted_at IS NULL",
@@ -9496,6 +9794,55 @@ def promote_model(
         [model_candidate_id],
     ))
     twin_ids = [e["to_node"] for e in twin_edges]
+
+    candidate_decision_value = None
+    active_model_id = None
+    active_decision_value = None
+
+    if policy == "decision_value" and decision_node_id is not None:
+        candidate_dv = compute_decision_value(
+            conn,
+            model_id=model_candidate_id,
+            decision_node_id=decision_node_id,
+            utility_scale=1.0,
+        )
+        candidate_decision_value = candidate_dv["decision_value_score"]
+
+        for twin_id in twin_ids:
+            active_candidates = _rows_to_dicts(conn.execute(
+                """SELECT n.id, n.metadata FROM ohm_nodes n
+                   JOIN ohm_edges e ON e.from_node = n.id AND e.to_node = ? AND e.edge_type = 'EVALUATES' AND e.deleted_at IS NULL
+                   WHERE n.type = 'model_candidate' AND n.id != ? AND n.deleted_at IS NULL""",
+                [twin_id, model_candidate_id],
+            ))
+            for ac in active_candidates:
+                ac_meta_raw = ac.get("metadata")
+                ac_meta = {}
+                if ac_meta_raw:
+                    try:
+                        ac_meta = _json.loads(ac_meta_raw) if isinstance(ac_meta_raw, str) else ac_meta_raw
+                    except (_json.JSONDecodeError, TypeError):
+                        pass
+                if ac_meta.get("gate_status") == "active":
+                    active_model_id = ac["id"]
+                    active_dv = compute_decision_value(
+                        conn,
+                        model_id=ac["id"],
+                        decision_node_id=decision_node_id,
+                        utility_scale=1.0,
+                    )
+                    active_decision_value = active_dv["decision_value_score"]
+                    break
+            if active_model_id:
+                break
+
+        if active_model_id is not None and active_decision_value is not None:
+            if candidate_decision_value < active_decision_value + min_improvement:
+                raise ValidationError(
+                    f"Candidate decision_value ({candidate_decision_value}) does not exceed "
+                    f"active model ({active_model_id}) decision_value ({active_decision_value}) "
+                    f"+ min_improvement ({min_improvement})"
+                )
 
     for twin_id in twin_ids:
         other_candidates = _rows_to_dicts(conn.execute(
@@ -9526,6 +9873,11 @@ def promote_model(
         except (_json.JSONDecodeError, TypeError):
             pass
     current_meta["gate_status"] = "active"
+    current_meta["promotion_policy"] = policy
+    if candidate_decision_value is not None:
+        current_meta["promotion_decision_value"] = candidate_decision_value
+    if active_model_id is not None:
+        current_meta["previous_active_id"] = active_model_id
     conn.execute(
         "UPDATE ohm_nodes SET metadata = ? WHERE id = ?",
         [_json.dumps(current_meta), model_candidate_id],
@@ -9533,7 +9885,13 @@ def promote_model(
 
     _log_change(conn, "ohm_nodes", model_candidate_id, "PROMOTE_MODEL", created_by)
 
-    return _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [model_candidate_id]))[0]
+    result = _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [model_candidate_id]))[0]
+    result["promotion_policy"] = policy
+    if candidate_decision_value is not None:
+        result["promotion_decision_value"] = candidate_decision_value
+    if active_model_id is not None:
+        result["previous_active_id"] = active_model_id
+    return result
 
 
 # ── Operational Twin Models (OHM-bf45) ────────────────────────────────────────
@@ -11360,4 +11718,526 @@ def get_session_audit(
         "proposals": proposals,
         "approvals": approvals,
         "instantiations": instantiations,
+    }
+
+
+def set_promotion_policy(
+    conn: DuckDBPyConnection,
+    *,
+    model_candidate_id: str,
+    policy: str,
+    decision_node_id: str | None = None,
+    min_improvement: float = 0.0,
+    created_by: str,
+) -> dict[str, Any]:
+    import json as _json
+
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import NodeNotFoundError, ValidationError
+
+    model_candidate_id = validate_identifier(model_candidate_id, name="model_candidate_id")
+
+    valid_policies = {"accuracy", "decision_value"}
+    if policy not in valid_policies:
+        raise ValidationError(f"Invalid policy '{policy}' — must be one of {sorted(valid_policies)}")
+
+    if policy == "decision_value" and not decision_node_id:
+        raise ValidationError("decision_node_id is required when policy='decision_value'")
+
+    if decision_node_id is not None:
+        decision_node_id = validate_identifier(decision_node_id, name="decision_node_id")
+
+    candidate_row = conn.execute(
+        "SELECT id, metadata FROM ohm_nodes WHERE id = ? AND type = 'model_candidate' AND deleted_at IS NULL",
+        [model_candidate_id],
+    ).fetchone()
+    if not candidate_row:
+        raise NodeNotFoundError(f"Model candidate not found: {model_candidate_id}")
+
+    current_meta_raw = candidate_row[1]
+    current_meta: dict[str, Any] = {}
+    if current_meta_raw:
+        try:
+            current_meta = _json.loads(current_meta_raw) if isinstance(current_meta_raw, str) else current_meta_raw
+        except (_json.JSONDecodeError, TypeError):
+            pass
+
+    current_meta["promotion_policy"] = policy
+    if decision_node_id is not None:
+        current_meta["decision_node_id"] = decision_node_id
+    current_meta["min_improvement"] = min_improvement
+
+    conn.execute(
+        "UPDATE ohm_nodes SET metadata = ? WHERE id = ?",
+        [_json.dumps(current_meta), model_candidate_id],
+    )
+
+    _log_change(conn, "ohm_nodes", model_candidate_id, "SET_PROMOTION_POLICY", created_by)
+
+    return _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [model_candidate_id]))[0]
+
+
+def auto_promote_best_model(
+    conn: DuckDBPyConnection,
+    *,
+    twin_id: str,
+    decision_node_id: str | None = None,
+    policy: str = "decision_value",
+    min_improvement: float = 0.0,
+    created_by: str,
+) -> dict[str, Any]:
+    import json as _json
+
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import NodeNotFoundError, ValidationError
+
+    twin_id = validate_identifier(twin_id, name="twin_id")
+
+    twin = conn.execute(
+        "SELECT id, label FROM ohm_nodes WHERE id = ? AND type = 'twin' AND deleted_at IS NULL",
+        [twin_id],
+    ).fetchone()
+    if not twin:
+        raise NodeNotFoundError(f"Twin not found: {twin_id}")
+
+    candidates = _rows_to_dicts(conn.execute(
+        """SELECT n.id, n.label, n.metadata FROM ohm_nodes n
+           JOIN ohm_edges e ON e.from_node = n.id AND e.to_node = ? AND e.edge_type = 'EVALUATES' AND e.deleted_at IS NULL
+           WHERE n.type = 'model_candidate' AND n.deleted_at IS NULL""",
+        [twin_id],
+    ))
+
+    if not candidates:
+        return {"promoted": None, "twin_id": twin_id, "ranking": []}
+
+    ranked: list[dict[str, Any]] = []
+    for c in candidates:
+        score = None
+        if policy == "decision_value" and decision_node_id is not None:
+            try:
+                dv = compute_decision_value(
+                    conn,
+                    model_id=c["id"],
+                    decision_node_id=decision_node_id,
+                    utility_scale=1.0,
+                )
+                score = dv["decision_value_score"]
+            except (NodeNotFoundError, ValueError):
+                pass
+        else:
+            eval_nodes = _rows_to_dicts(conn.execute(
+                """SELECT n.metadata FROM ohm_nodes n
+                   JOIN ohm_edges e ON e.from_node = ? AND e.to_node = n.id AND e.edge_type = 'EVALUATED_BY' AND e.deleted_at IS NULL
+                   WHERE n.type = 'model_evaluation' AND n.deleted_at IS NULL
+                   ORDER BY n.created_at DESC LIMIT 1""",
+                [c["id"]],
+            ))
+            if eval_nodes:
+                ev_meta_raw = eval_nodes[0].get("metadata")
+                if ev_meta_raw:
+                    try:
+                        ev_parsed = _json.loads(ev_meta_raw) if isinstance(ev_meta_raw, str) else ev_meta_raw
+                        score = ev_parsed.get("composite_score")
+                    except (_json.JSONDecodeError, TypeError):
+                        pass
+
+        ranked.append({
+            "model_candidate_id": c["id"],
+            "label": c.get("label", ""),
+            "score": score,
+        })
+
+    if policy == "decision_value":
+        ranked.sort(key=lambda r: r["score"] if r["score"] is not None else float("-inf"), reverse=True)
+    else:
+        ranked.sort(key=lambda r: r["score"] if r["score"] is not None else float("-inf"), reverse=True)
+
+    best = ranked[0] if ranked else None
+    promoted = None
+
+    if best and best["score"] is not None:
+        try:
+            promoted = promote_model(
+                conn,
+                model_candidate_id=best["model_candidate_id"],
+                created_by=created_by,
+                policy=policy,
+                decision_node_id=decision_node_id,
+                min_improvement=min_improvement,
+            )
+        except ValidationError:
+            pass
+
+    return {
+        "promoted": promoted,
+        "twin_id": twin_id,
+        "ranking": ranked,
+    }
+
+
+def register_twin_with_bindings(
+    conn: DuckDBPyConnection,
+    *,
+    label: str,
+    target_node_id: str,
+    decision_node_id: str | None = None,
+    feed_node_ids: Sequence[str] | None = None,
+    model_candidate_ids: Sequence[str] | None = None,
+    created_by: str,
+    description: str | None = None,
+    endpoint_url: str | None = None,
+) -> dict[str, Any]:
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import NodeNotFoundError
+
+    target_node_id = validate_identifier(target_node_id, name="target_node_id")
+
+    target = conn.execute(
+        "SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+        [target_node_id],
+    ).fetchone()
+    if not target:
+        raise NodeNotFoundError(f"Target node not found: {target_node_id}")
+
+    if decision_node_id is not None:
+        decision_node_id = validate_identifier(decision_node_id, name="decision_node_id")
+        decision = conn.execute(
+            "SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+            [decision_node_id],
+        ).fetchone()
+        if not decision:
+            raise NodeNotFoundError(f"Decision node not found: {decision_node_id}")
+
+    validated_feeds: list[str] = []
+    if feed_node_ids is not None:
+        for fid in feed_node_ids:
+            fid = validate_identifier(fid, name="feed_node_id")
+            exists = conn.execute(
+                "SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                [fid],
+            ).fetchone()
+            if not exists:
+                raise NodeNotFoundError(f"Feed node not found: {fid}")
+            validated_feeds.append(fid)
+
+    validated_models: list[str] = []
+    if model_candidate_ids is not None:
+        for mid in model_candidate_ids:
+            mid = validate_identifier(mid, name="model_candidate_id")
+            exists = conn.execute(
+                "SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                [mid],
+            ).fetchone()
+            if not exists:
+                raise NodeNotFoundError(f"Model candidate node not found: {mid}")
+            validated_models.append(mid)
+
+    twin = create_node(
+        conn,
+        label=label,
+        node_type="twin",
+        content=description,
+        created_by=created_by,
+        url=endpoint_url,
+        connects_to=[target_node_id] + validated_feeds + validated_models,
+    )
+
+    conn.execute(
+        "UPDATE ohm_nodes SET gate_type = 'external' WHERE id = ?",
+        [twin["id"]],
+    )
+
+    create_edge(
+        conn,
+        from_node=twin["id"],
+        to_node=target_node_id,
+        edge_type="EVALUATES",
+        layer="L3",
+        created_by=created_by,
+    )
+
+    if decision_node_id is not None:
+        create_edge(
+            conn,
+            from_node=twin["id"],
+            to_node=decision_node_id,
+            edge_type="DECISION_DEPENDS_ON",
+            layer="L3",
+            created_by=created_by,
+        )
+
+    for fid in validated_feeds:
+        create_edge(
+            conn,
+            from_node=fid,
+            to_node=twin["id"],
+            edge_type="FEEDS",
+            layer="L2",
+            created_by=created_by,
+        )
+
+    for mid in validated_models:
+        create_edge(
+            conn,
+            from_node=mid,
+            to_node=twin["id"],
+            edge_type="APPLIES_TO",
+            layer="L3",
+            created_by=created_by,
+        )
+
+    _log_change(conn, "ohm_nodes", twin["id"], "REGISTER_TWIN_WITH_BINDINGS", created_by)
+
+    twin = _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [twin["id"]]))[0]
+
+    return {
+        "twin": twin,
+        "target_node_id": target_node_id,
+        "decision_bound": decision_node_id is not None,
+        "feeds_bound": len(validated_feeds),
+        "models_bound": len(validated_models),
+    }
+
+
+def add_twin_bindings(
+    conn: DuckDBPyConnection,
+    *,
+    twin_id: str,
+    feed_node_ids: Sequence[str] | None = None,
+    feed_node_ids_remove: Sequence[str] | None = None,
+    created_by: str,
+) -> dict[str, Any]:
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import NodeNotFoundError
+
+    twin_id = validate_identifier(twin_id, name="twin_id")
+
+    twin = conn.execute(
+        "SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+        [twin_id],
+    ).fetchone()
+    if not twin:
+        raise NodeNotFoundError(f"Twin not found: {twin_id}")
+
+    added: list[str] = []
+    if feed_node_ids is not None:
+        for fid in feed_node_ids:
+            fid = validate_identifier(fid, name="feed_node_id")
+            exists = conn.execute(
+                "SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                [fid],
+            ).fetchone()
+            if not exists:
+                raise NodeNotFoundError(f"Feed node not found: {fid}")
+            existing_edge = conn.execute(
+                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = 'FEEDS' AND deleted_at IS NULL",
+                [fid, twin_id],
+            ).fetchone()
+            if not existing_edge:
+                create_edge(
+                    conn,
+                    from_node=fid,
+                    to_node=twin_id,
+                    edge_type="FEEDS",
+                    layer="L2",
+                    created_by=created_by,
+                )
+                added.append(fid)
+
+    removed: list[str] = []
+    if feed_node_ids_remove is not None:
+        for fid in feed_node_ids_remove:
+            fid = validate_identifier(fid, name="feed_node_ids_remove entry")
+            edge = conn.execute(
+                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = 'FEEDS' AND deleted_at IS NULL",
+                [fid, twin_id],
+            ).fetchone()
+            if edge:
+                conn.execute(
+                    "UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    [edge[0]],
+                )
+                _log_change(conn, "ohm_edges", edge[0], "SOFT_DELETE", created_by)
+                removed.append(fid)
+
+    current_feeds = _rows_to_dicts(conn.execute(
+        """SELECT e.from_node AS feed_id, n.label
+           FROM ohm_edges e
+           JOIN ohm_nodes n ON n.id = e.from_node AND n.deleted_at IS NULL
+           WHERE e.to_node = ? AND e.edge_type = 'FEEDS' AND e.deleted_at IS NULL""",
+        [twin_id],
+    ))
+
+    return {
+        "twin_id": twin_id,
+        "added": added,
+        "removed": removed,
+        "current_feeds": current_feeds,
+    }
+
+
+def attach_twin_models(
+    conn: DuckDBPyConnection,
+    *,
+    twin_id: str,
+    model_candidate_ids: Sequence[str] | None = None,
+    model_candidate_ids_remove: Sequence[str] | None = None,
+    created_by: str,
+) -> dict[str, Any]:
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import NodeNotFoundError
+
+    twin_id = validate_identifier(twin_id, name="twin_id")
+
+    twin = conn.execute(
+        "SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+        [twin_id],
+    ).fetchone()
+    if not twin:
+        raise NodeNotFoundError(f"Twin not found: {twin_id}")
+
+    added: list[str] = []
+    if model_candidate_ids is not None:
+        for mid in model_candidate_ids:
+            mid = validate_identifier(mid, name="model_candidate_id")
+            exists = conn.execute(
+                "SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                [mid],
+            ).fetchone()
+            if not exists:
+                raise NodeNotFoundError(f"Model candidate node not found: {mid}")
+            existing_edge = conn.execute(
+                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = 'APPLIES_TO' AND deleted_at IS NULL",
+                [mid, twin_id],
+            ).fetchone()
+            if not existing_edge:
+                create_edge(
+                    conn,
+                    from_node=mid,
+                    to_node=twin_id,
+                    edge_type="APPLIES_TO",
+                    layer="L3",
+                    created_by=created_by,
+                )
+                added.append(mid)
+
+    removed: list[str] = []
+    if model_candidate_ids_remove is not None:
+        for mid in model_candidate_ids_remove:
+            mid = validate_identifier(mid, name="model_candidate_ids_remove entry")
+            edge = conn.execute(
+                "SELECT id FROM ohm_edges WHERE from_node = ? AND to_node = ? AND edge_type = 'APPLIES_TO' AND deleted_at IS NULL",
+                [mid, twin_id],
+            ).fetchone()
+            if edge:
+                conn.execute(
+                    "UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    [edge[0]],
+                )
+                _log_change(conn, "ohm_edges", edge[0], "SOFT_DELETE", created_by)
+                removed.append(mid)
+
+    current_models = _rows_to_dicts(conn.execute(
+        """SELECT e.from_node AS model_id, n.label
+           FROM ohm_edges e
+           JOIN ohm_nodes n ON n.id = e.from_node AND n.deleted_at IS NULL
+           WHERE e.to_node = ? AND e.edge_type = 'APPLIES_TO' AND e.deleted_at IS NULL""",
+        [twin_id],
+    ))
+
+    return {
+        "twin_id": twin_id,
+        "added": added,
+        "removed": removed,
+        "current_models": current_models,
+    }
+
+
+def get_twin_readiness(
+    conn: DuckDBPyConnection,
+    *,
+    twin_id: str,
+) -> dict[str, Any]:
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import NodeNotFoundError
+
+    twin_id = validate_identifier(twin_id, name="twin_id")
+
+    twin = conn.execute(
+        "SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+        [twin_id],
+    ).fetchone()
+    if not twin:
+        raise NodeNotFoundError(f"Twin not found: {twin_id}")
+
+    target_bound = bool(conn.execute(
+        "SELECT 1 FROM ohm_edges WHERE from_node = ? AND edge_type = 'EVALUATES' AND deleted_at IS NULL",
+        [twin_id],
+    ).fetchone())
+
+    decision_bound = bool(conn.execute(
+        "SELECT 1 FROM ohm_edges WHERE from_node = ? AND edge_type = 'DECISION_DEPENDS_ON' AND deleted_at IS NULL",
+        [twin_id],
+    ).fetchone())
+
+    feeds_present = bool(conn.execute(
+        "SELECT 1 FROM ohm_edges WHERE to_node = ? AND edge_type = 'FEEDS' AND deleted_at IS NULL",
+        [twin_id],
+    ).fetchone())
+
+    feeds_fresh = False
+    if feeds_present:
+        feed_edges = _rows_to_dicts(conn.execute(
+            """SELECT e.from_node AS feed_id
+               FROM ohm_edges e
+               WHERE e.to_node = ? AND e.edge_type = 'FEEDS' AND e.deleted_at IS NULL""",
+            [twin_id],
+        ))
+        feed_ids = [fe["feed_id"] for fe in feed_edges]
+        if feed_ids:
+            placeholders = ",".join(["?"] * len(feed_ids))
+            fresh_count = conn.execute(
+                f"""SELECT COUNT(DISTINCT o.node_id)
+                    FROM ohm_observations o
+                    WHERE o.node_id IN ({placeholders})
+                      AND o.deleted_at IS NULL
+                      AND o.created_at > CURRENT_TIMESTAMP - INTERVAL '7 days'""",
+                feed_ids,
+            ).fetchone()[0]
+            feeds_fresh = fresh_count == len(feed_ids)
+
+    models_available = bool(conn.execute(
+        """SELECT 1 FROM ohm_edges e
+           JOIN ohm_nodes n ON n.id = e.from_node AND n.deleted_at IS NULL
+           WHERE e.to_node = ? AND e.edge_type = 'APPLIES_TO' AND e.deleted_at IS NULL
+             AND (n.metadata IS NULL OR n.metadata NOT LIKE '%archived%')""",
+        [twin_id],
+    ).fetchone())
+
+    models_evaluated = bool(conn.execute(
+        """SELECT 1 FROM ohm_edges e
+           WHERE e.to_node = ? AND e.edge_type = 'EVALUATED_BY' AND e.deleted_at IS NULL""",
+        [twin_id],
+    ).fetchone())
+
+    gates = {
+        "target_bound": target_bound,
+        "decision_bound": decision_bound,
+        "feeds_present": feeds_present,
+        "feeds_fresh": feeds_fresh,
+        "models_available": models_available,
+        "models_evaluated": models_evaluated,
+    }
+
+    critical_gates = ["target_bound", "feeds_present", "models_available"]
+    ready = all(gates[g] for g in critical_gates)
+    missing = [g for g, v in gates.items() if not v]
+    blocking = [g for g in critical_gates if not gates[g]]
+
+    return {
+        "twin_id": twin_id,
+        "gates": gates,
+        "ready": ready,
+        "missing": missing,
+        "blocking": blocking,
     }

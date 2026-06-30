@@ -630,6 +630,7 @@ def _build_router() -> _RouteRegistry:
     r.add("POST", "/admin/pert-backfill")
     r.add("POST", "/admin/backfill-relational-tags")
     r.add("POST", "/admin/verification-decay")
+    r.add("POST", "/admin/apply-decay")
     r.add("POST", "/admin/merge")
     r.add("POST", "/admin/vacuum-lake")
     r.add("POST", "/admin/evict-fragments")
@@ -2216,6 +2217,7 @@ OhmHandler._POST_EXACT = {
     "/admin/pert-backfill": "_post_admin_pert_backfill",
     "/admin/backfill-relational-tags": "_post_admin_backfill_relational_tags",
     "/admin/verification-decay": "_post_admin_verification_decay",
+    "/admin/apply-decay": "_post_admin_apply_decay",
     "/admin/merge": "_post_admin_merge",
     "/admin/backfill-aliases": "_post_admin_backfill_aliases",
     "/admin/backfill-content-hashes": "_post_admin_backfill_content_hashes",
@@ -2374,6 +2376,7 @@ OhmHandler._POST_EXACT["/propose-action"] = "_post_propose_action"
 OhmHandler._POST_EXACT["/execute-action"] = "_post_execute_action"
 OhmHandler._GET_EXACT["/loop-status"] = "_get_loop_status"
 OhmHandler._POST_EXACT["/twin/register"] = "_post_register_twin"
+OhmHandler._POST_EXACT["/twin/register-with-bindings"] = "_post_register_twin_with_bindings"
 OhmHandler._POST_EXACT["/twin/assemble"] = "_post_assemble_twin"
 OhmHandler._POST_EXACT["/twin/design/start"] = "_post_twin_design_start"
 OhmHandler._POST_PREFIXES.append(("/twin/design/", "_route_twin_design_post"))

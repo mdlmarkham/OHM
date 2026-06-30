@@ -928,6 +928,29 @@ class AdminHandlerMixin:
         )
         self._json_response(200, result)
 
+    def _post_admin_apply_decay(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /admin/apply-decay — Apply confidence decay to L3/L4 edges (OHM-2x2u).
+
+        Body params:
+            dry_run (bool): If true, return what would change without modifying. Default true.
+            half_life_days (float): Override half-life for all layers. Default 30.
+            floor (float): Minimum confidence after decay. Default 0.1.
+        """
+        from ohm.queries import apply_decay_to_edges
+
+        dry_run = body.get("dry_run", True)
+        half_life_days = float(body.get("half_life_days", 30.0))
+        floor = float(body.get("floor", 0.1))
+
+        result = apply_decay_to_edges(
+            self.current_store.conn,
+            half_life_days=half_life_days,
+            floor=floor,
+            dry_run=dry_run,
+            created_by=agent,
+        )
+        self._json_response(200, result)
+
     def _get_admin_snapshots(self, path: str, qs: dict) -> None:
         """GET /admin/snapshots — list DuckLake snapshots."""
         snapshots = self.current_store.list_snapshots()

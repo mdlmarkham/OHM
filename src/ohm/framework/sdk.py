@@ -2004,15 +2004,77 @@ class Graph:
             outcome_notes=outcome_notes,
         )
 
-    def loop_status(self) -> dict[str, Any]:
+    def loop_status(self, *, half_life_days: float = 30.0) -> dict[str, Any]:
         """Return the autonomy loop status — proposed/executed actions (OHM-446a).
 
+        Extended with temporal section (OHM-2x2u): upcoming evaluations,
+        stale feeds, compromised/stuck gates, and decay summary.
+
+        Args:
+            half_life_days: Half-life for confidence decay computation (default 30).
+
         Returns:
-            Dict with proposed, executed, recent_scenarios, and summary.
+            Dict with proposed, executed, recent_scenarios, summary, and temporal.
         """
         from ohm.queries import query_loop_status
 
-        return query_loop_status(self._conn, agent_name=self.actor)
+        return query_loop_status(self._conn, agent_name=self.actor, half_life_days=half_life_days)
+
+    def compute_confidence_with_decay(
+        self,
+        *,
+        base_confidence: float,
+        last_observed_at: str | None = None,
+        half_life_days: float = 30.0,
+        floor: float = 0.1,
+    ) -> dict[str, Any]:
+        """Compute decayed confidence based on observation age (OHM-2x2u).
+
+        Args:
+            base_confidence: Original confidence value.
+            last_observed_at: ISO 8601 timestamp of last observation.
+            half_life_days: Half-life for decay (default 30).
+            floor: Minimum confidence after decay (default 0.1).
+
+        Returns:
+            Dict with decayed_confidence, age_days, decay_factor, is_stale.
+        """
+        from ohm.queries import compute_confidence_with_decay
+
+        return compute_confidence_with_decay(
+            self._conn,
+            base_confidence=base_confidence,
+            last_observed_at=last_observed_at,
+            half_life_days=half_life_days,
+            floor=floor,
+        )
+
+    def apply_decay_to_edges(
+        self,
+        *,
+        half_life_days: float = 30.0,
+        floor: float = 0.1,
+        dry_run: bool = True,
+    ) -> dict[str, Any]:
+        """Apply confidence decay to L3/L4 edges (OHM-2x2u).
+
+        Args:
+            half_life_days: Override half-life for all layers (default 30).
+            floor: Minimum confidence after decay (default 0.1).
+            dry_run: If true, return what would change without modifying (default true).
+
+        Returns:
+            Dict with edges_examined, edges_decayed, average_decay_factor, summary.
+        """
+        from ohm.queries import apply_decay_to_edges
+
+        return apply_decay_to_edges(
+            self._conn,
+            half_life_days=half_life_days,
+            floor=floor,
+            dry_run=dry_run,
+            created_by=self.actor,
+        )
 
     def register_twin(
         self,
@@ -2046,6 +2108,112 @@ class Graph:
             description=description,
             connects_to=connects_to,
         )
+
+    def register_twin_with_bindings(
+        self,
+        label: str,
+        target_node_id: str,
+        *,
+        decision_node_id: str | None = None,
+        feed_node_ids: list[str] | None = None,
+        model_candidate_ids: list[str] | None = None,
+        description: str | None = None,
+        endpoint_url: str | None = None,
+    ) -> dict[str, Any]:
+        """Register a twin with bindings in one call (OHM-f7tl).
+
+        Args:
+            label: Human-readable twin name.
+            target_node_id: The node this twin models.
+            decision_node_id: Optional decision node to bind.
+            feed_node_ids: Optional feed nodes to bind.
+            model_candidate_ids: Optional model candidates to attach.
+            description: Optional description.
+            endpoint_url: Optional URL of the external twin service.
+
+        Returns:
+            Dict with twin, target_node_id, decision_bound, feeds_bound, models_bound.
+        """
+        from ohm.queries import register_twin_with_bindings
+
+        return register_twin_with_bindings(
+            self._conn,
+            label=label,
+            target_node_id=target_node_id,
+            decision_node_id=decision_node_id,
+            feed_node_ids=feed_node_ids,
+            model_candidate_ids=model_candidate_ids,
+            created_by=self.actor,
+            description=description,
+            endpoint_url=endpoint_url,
+        )
+
+    def add_twin_bindings(
+        self,
+        twin_id: str,
+        *,
+        feed_node_ids: list[str] | None = None,
+        feed_node_ids_remove: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Add or remove feed bindings on a twin (OHM-f7tl).
+
+        Args:
+            twin_id: The twin node ID.
+            feed_node_ids: Feed nodes to add.
+            feed_node_ids_remove: Feed nodes to remove.
+
+        Returns:
+            Dict with twin_id, added, removed, current_feeds.
+        """
+        from ohm.queries import add_twin_bindings
+
+        return add_twin_bindings(
+            self._conn,
+            twin_id=twin_id,
+            feed_node_ids=feed_node_ids,
+            feed_node_ids_remove=feed_node_ids_remove,
+            created_by=self.actor,
+        )
+
+    def attach_twin_models(
+        self,
+        twin_id: str,
+        *,
+        model_candidate_ids: list[str] | None = None,
+        model_candidate_ids_remove: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Attach or detach model candidates on a twin (OHM-f7tl).
+
+        Args:
+            twin_id: The twin node ID.
+            model_candidate_ids: Model candidates to attach.
+            model_candidate_ids_remove: Model candidates to detach.
+
+        Returns:
+            Dict with twin_id, added, removed, current_models.
+        """
+        from ohm.queries import attach_twin_models
+
+        return attach_twin_models(
+            self._conn,
+            twin_id=twin_id,
+            model_candidate_ids=model_candidate_ids,
+            model_candidate_ids_remove=model_candidate_ids_remove,
+            created_by=self.actor,
+        )
+
+    def get_twin_readiness(self, twin_id: str) -> dict[str, Any]:
+        """Check twin readiness gates (OHM-f7tl).
+
+        Args:
+            twin_id: The twin node ID.
+
+        Returns:
+            Dict with twin_id, gates, ready, missing, blocking.
+        """
+        from ohm.queries import get_twin_readiness
+
+        return get_twin_readiness(self._conn, twin_id=twin_id)
 
     def twin_predict(
         self,
@@ -2331,11 +2499,18 @@ class Graph:
     def promote_model(
         self,
         model_candidate_id: str,
+        *,
+        policy: str = "accuracy",
+        decision_node_id: str | None = None,
+        min_improvement: float = 0.0,
     ) -> dict[str, Any]:
         """Promote a model candidate to active status for its twin (OHM-75tw).
 
         Args:
             model_candidate_id: The model candidate to promote.
+            policy: Promotion policy — "accuracy" (default) or "decision_value".
+            decision_node_id: Required when policy="decision_value".
+            min_improvement: Minimum decision_value improvement over active model.
 
         Returns:
             The promoted model_candidate node record.
@@ -2346,6 +2521,9 @@ class Graph:
             self._conn,
             model_candidate_id=model_candidate_id,
             created_by=self.actor,
+            policy=policy,
+            decision_node_id=decision_node_id,
+            min_improvement=min_improvement,
         )
 
     def register_shadow_model(
@@ -2369,6 +2547,66 @@ class Graph:
             model_parameters=model_parameters,
             description=description,
             connects_to=connects_to,
+        )
+
+    def set_promotion_policy(
+        self,
+        model_candidate_id: str,
+        *,
+        policy: str,
+        decision_node_id: str | None = None,
+        min_improvement: float = 0.0,
+    ) -> dict[str, Any]:
+        """Set promotion policy on a model candidate (OHM-75tw).
+
+        Args:
+            model_candidate_id: The model candidate to configure.
+            policy: "accuracy" or "decision_value".
+            decision_node_id: Required when policy="decision_value".
+            min_improvement: Minimum decision_value improvement threshold.
+
+        Returns:
+            The updated model_candidate node record.
+        """
+        from ohm.queries import set_promotion_policy
+
+        return set_promotion_policy(
+            self._conn,
+            model_candidate_id=model_candidate_id,
+            policy=policy,
+            decision_node_id=decision_node_id,
+            min_improvement=min_improvement,
+            created_by=self.actor,
+        )
+
+    def auto_promote_best_model(
+        self,
+        twin_id: str,
+        *,
+        decision_node_id: str | None = None,
+        policy: str = "decision_value",
+        min_improvement: float = 0.0,
+    ) -> dict[str, Any]:
+        """Auto-promote the best model for a twin (OHM-75tw).
+
+        Args:
+            twin_id: The twin whose models to evaluate.
+            decision_node_id: Required when policy="decision_value".
+            policy: "decision_value" (default) or "accuracy".
+            min_improvement: Minimum improvement threshold.
+
+        Returns:
+            Dict with promoted model, twin_id, and ranking.
+        """
+        from ohm.queries import auto_promote_best_model
+
+        return auto_promote_best_model(
+            self._conn,
+            twin_id=twin_id,
+            decision_node_id=decision_node_id,
+            policy=policy,
+            min_improvement=min_improvement,
+            created_by=self.actor,
         )
 
     def detect_drift(

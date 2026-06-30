@@ -1235,12 +1235,19 @@ class GraphHandlerMixin:
         """GET /loop-status — autonomy loop status (OHM-446a).
 
         Returns proposed/executed actions and recent scenarios.
-        Optional ?agent= filter.
+        Optional ?agent= filter. Optional ?half_life_days= for decay integration.
         """
         from ohm.queries import query_loop_status
 
         agent = qs.get("agent", [None])[0]
-        result = query_loop_status(self.current_store.read_conn, agent_name=agent)
+        half_life_days = 30.0
+        hld = qs.get("half_life_days", [None])[0]
+        if hld is not None:
+            try:
+                half_life_days = float(hld)
+            except (ValueError, TypeError):
+                pass
+        result = query_loop_status(self.current_store.read_conn, agent_name=agent, half_life_days=half_life_days)
         self._json_response(200, result)
 
     def _enforce_cross_link_requirement(self, node_id: str, body: dict) -> dict | None:
@@ -3589,6 +3596,88 @@ class GraphHandlerMixin:
         except NodeNotFoundError as e:
             self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
 
+    def _post_register_twin_with_bindings(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /twin/register-with-bindings — register twin with bindings (OHM-f7tl).
+
+        Body: {label, target_node_id, decision_node_id?, feed_node_ids?,
+               model_candidate_ids?, description?, endpoint_url?}
+        """
+        from ohm.queries import register_twin_with_bindings
+        from ohm.exceptions import ValidationError, NodeNotFoundError
+
+        label = body.get("label")
+        target_node_id = body.get("target_node_id")
+        if not label:
+            raise ValidationError("label is required")
+        if not target_node_id:
+            raise ValidationError("target_node_id is required")
+
+        try:
+            result = register_twin_with_bindings(
+                self.current_store.conn,
+                label=label,
+                target_node_id=target_node_id,
+                decision_node_id=body.get("decision_node_id"),
+                feed_node_ids=body.get("feed_node_ids"),
+                model_candidate_ids=body.get("model_candidate_ids"),
+                created_by=agent,
+                description=body.get("description"),
+                endpoint_url=body.get("endpoint_url"),
+            )
+            self._json_response(201, {"ok": True, "data": result})
+        except NodeNotFoundError as e:
+            self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
+
+    def _post_add_twin_bindings(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /twin/{id}/add-bindings — add/remove feed bindings (OHM-f7tl).
+
+        Body: {feed_node_ids?, feed_node_ids_remove?}
+        """
+        from ohm.queries import add_twin_bindings
+        from ohm.exceptions import ValidationError, NodeNotFoundError
+
+        parts = path.strip("/").split("/")
+        twin_id = parts[1] if len(parts) >= 2 else None
+        if not twin_id:
+            raise ValidationError("twin_id is required in path")
+
+        try:
+            result = add_twin_bindings(
+                self.current_store.conn,
+                twin_id=twin_id,
+                feed_node_ids=body.get("feed_node_ids"),
+                feed_node_ids_remove=body.get("feed_node_ids_remove"),
+                created_by=agent,
+            )
+            self._json_response(200, {"ok": True, "data": result})
+        except NodeNotFoundError as e:
+            self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
+
+    def _post_attach_twin_models(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /twin/{id}/attach-models — attach/detach model candidates (OHM-f7tl).
+
+        Body: {model_candidate_ids?, model_candidate_ids_remove?}
+        """
+        from ohm.queries import attach_twin_models
+        from ohm.exceptions import ValidationError, NodeNotFoundError
+
+        parts = path.strip("/").split("/")
+        twin_id = parts[1] if len(parts) >= 2 else None
+        if not twin_id:
+            raise ValidationError("twin_id is required in path")
+
+        try:
+            result = attach_twin_models(
+                self.current_store.conn,
+                twin_id=twin_id,
+                model_candidate_ids=body.get("model_candidate_ids"),
+                model_candidate_ids_remove=body.get("model_candidate_ids_remove"),
+                created_by=agent,
+            )
+            self._json_response(200, {"ok": True, "data": result})
+        except NodeNotFoundError as e:
+            self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
+
     def _get_twin_predict(self, path: str, qs: dict) -> None:
         """GET /twin/{id}/predict — twin predictions as edge_overrides (OHM-josq)."""
         from ohm.queries import twin_predict
@@ -3624,6 +3713,25 @@ class GraphHandlerMixin:
             self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
 
     def _post_validate_action(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """Dispatch /twin/{id}/{validate-action|auto-promote|add-bindings|attach-models} to the right handler (OHM-josq, OHM-75tw, OHM-f7tl)."""
+        from ohm.exceptions import ValidationError
+
+        parts = path.strip("/").split("/")
+        if len(parts) < 3:
+            raise ValidationError("POST /twin/{id}/{validate-action|auto-promote|add-bindings|attach-models} required")
+        action = parts[2]
+        if action == "validate-action":
+            self._post_twin_validate_action(path, qs, body, agent)
+        elif action == "auto-promote":
+            self._post_auto_promote(path, qs, body, agent)
+        elif action == "add-bindings":
+            self._post_add_twin_bindings(path, qs, body, agent)
+        elif action == "attach-models":
+            self._post_attach_twin_models(path, qs, body, agent)
+        else:
+            raise ValidationError(f"unknown twin POST action: {action}")
+
+    def _post_twin_validate_action(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /twin/{id}/validate-action — validate action against twin constraints (OHM-josq).
 
         Body: {action_id}
@@ -3667,6 +3775,22 @@ class GraphHandlerMixin:
         except NodeNotFoundError as e:
             self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
 
+    def _get_twin_readiness(self, path: str, qs: dict) -> None:
+        """GET /twin/{id}/readiness — check twin readiness gates (OHM-f7tl)."""
+        from ohm.queries import get_twin_readiness
+        from ohm.exceptions import NodeNotFoundError, ValidationError
+
+        parts = path.strip("/").split("/")
+        twin_id = parts[1] if len(parts) >= 2 else None
+        if not twin_id:
+            raise ValidationError("twin_id is required in path")
+
+        try:
+            result = get_twin_readiness(self.current_store.read_conn, twin_id=twin_id)
+            self._json_response(200, {"ok": True, "data": result})
+        except NodeNotFoundError as e:
+            self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
+
     def _route_twin_get(self, path: str, qs: dict) -> None:
         """Dispatch /twin/{id}/{action} to the right handler (OHM-josq, OHM-bf45)."""
         from ohm.exceptions import ValidationError
@@ -3686,6 +3810,8 @@ class GraphHandlerMixin:
             self._get_detect_drift(path, qs)
         elif action == "ensemble":
             self._get_ensemble_predict(path, qs)
+        elif action == "readiness":
+            self._get_twin_readiness(path, qs)
         else:
             raise ValidationError(f"unknown twin action: {action}")
 
@@ -3899,10 +4025,15 @@ class GraphHandlerMixin:
                 self.current_store.conn,
                 model_candidate_id=model_candidate_id,
                 created_by=agent,
+                policy=body.get("policy", "accuracy"),
+                decision_node_id=body.get("decision_node_id"),
+                min_improvement=float(body.get("min_improvement", 0.0)),
             )
             self._json_response(200, {"ok": True, "data": result})
         except NodeNotFoundError as e:
             self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
+        except ValidationError as e:
+            self._json_response(422, {"ok": False, "error": "validation_error", "message": str(e)})
 
     def _get_compare_models(self, path: str, qs: dict) -> None:
         """GET /model/compare — compare model candidates for a twin (OHM-75tw).
@@ -3926,12 +4057,12 @@ class GraphHandlerMixin:
             self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
 
     def _route_model_post(self, path: str, qs: dict, body: dict, agent: str) -> None:
-        """Dispatch /model/{id}/{evaluate|promote|validate|retire} to the right handler (OHM-75tw, OHM-bf45)."""
+        """Dispatch /model/{id}/{evaluate|promote|validate|retire|promotion-policy} to the right handler (OHM-75tw, OHM-bf45)."""
         from ohm.exceptions import ValidationError
 
         parts = path.strip("/").split("/")
         if len(parts) < 3:
-            raise ValidationError("POST /model/{id}/{evaluate|promote|validate|retire} required")
+            raise ValidationError("POST /model/{id}/{evaluate|promote|validate|retire|promotion-policy} required")
         action = parts[2]
         if action == "evaluate":
             self._post_evaluate_model(path, qs, body, agent)
@@ -3941,6 +4072,8 @@ class GraphHandlerMixin:
             self._post_validate_model(path, qs, body, agent)
         elif action == "retire":
             self._post_auto_retire_model(path, qs, body, agent)
+        elif action == "promotion-policy":
+            self._post_set_promotion_policy(path, qs, body, agent)
         else:
             raise ValidationError(f"unknown model action: {action}")
 
@@ -4093,6 +4226,60 @@ class GraphHandlerMixin:
             self._json_response(200, {"ok": True, "data": result})
         except NodeNotFoundError as e:
             self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
+
+    def _post_set_promotion_policy(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /model/{id}/promotion-policy — set promotion policy on a model candidate (OHM-75tw)."""
+        from ohm.queries import set_promotion_policy
+        from ohm.exceptions import ValidationError, NodeNotFoundError
+
+        parts = path.strip("/").split("/")
+        model_candidate_id = parts[1] if len(parts) >= 2 else None
+        if not model_candidate_id:
+            raise ValidationError("model_candidate_id is required in path")
+
+        policy = body.get("policy")
+        if not policy:
+            raise ValidationError("policy is required")
+
+        try:
+            result = set_promotion_policy(
+                self.current_store.conn,
+                model_candidate_id=model_candidate_id,
+                policy=policy,
+                decision_node_id=body.get("decision_node_id"),
+                min_improvement=float(body.get("min_improvement", 0.0)),
+                created_by=agent,
+            )
+            self._json_response(200, {"ok": True, "data": result})
+        except NodeNotFoundError as e:
+            self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
+        except ValidationError as e:
+            self._json_response(422, {"ok": False, "error": "validation_error", "message": str(e)})
+
+    def _post_auto_promote(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /twin/{id}/auto-promote — auto-promote the best model for a twin (OHM-75tw)."""
+        from ohm.queries import auto_promote_best_model
+        from ohm.exceptions import ValidationError, NodeNotFoundError
+
+        parts = path.strip("/").split("/")
+        twin_id = parts[1] if len(parts) >= 2 else None
+        if not twin_id:
+            raise ValidationError("twin_id is required in path")
+
+        try:
+            result = auto_promote_best_model(
+                self.current_store.conn,
+                twin_id=twin_id,
+                decision_node_id=body.get("decision_node_id"),
+                policy=body.get("policy", "decision_value"),
+                min_improvement=float(body.get("min_improvement", 0.0)),
+                created_by=agent,
+            )
+            self._json_response(200, {"ok": True, "data": result})
+        except NodeNotFoundError as e:
+            self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
+        except ValidationError as e:
+            self._json_response(422, {"ok": False, "error": "validation_error", "message": str(e)})
 
     def _route_model_get(self, path: str, qs: dict) -> None:
         from ohm.exceptions import ValidationError
