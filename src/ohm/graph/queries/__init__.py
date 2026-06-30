@@ -8047,12 +8047,23 @@ def compute_confidence_with_decay(
     base_confidence: float,
     last_observed_at: datetime | str | None,
     half_life_days: float = 30.0,
-    floor: float = 0.1,
+    floor: float | None = 0.1,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Compute decayed confidence based on observation age (OHM-2x2u).
 
-    Decay model: confidence(t) = max(floor, base * 2^(-age_days / half_life))
+    Decay model: confidence(t) = base * 2^(-age_days / half_life), optionally
+    floored from below by ``floor`` (default 0.1). Pass ``floor=None`` to
+    disable the floor — useful when the input is an unbounded quality score
+    (e.g., model composite_score, which can be negative when error metrics
+    dominate) rather than a confidence in [0, 1]. When the floor is
+    disabled, ``is_stale`` is always False because there is no defined
+    staleness threshold.
+
+    Time source: by default we read ``now`` from DuckDB (CURRENT_TIMESTAMP)
+    so both timestamps share the same clock + timezone. The fallback to
+    ``datetime.now(timezone.utc)`` is only used when the caller passes
+    ``now`` explicitly or the DB read fails.
     """
     import math
     from datetime import datetime as _dt, timezone as _tz
@@ -8066,12 +8077,25 @@ def compute_confidence_with_decay(
         }
 
     if now is None:
-        now = _dt.now(_tz.utc)
+        # Read "now" from DuckDB so it shares the same timezone as
+        # CURRENT_TIMESTAMP used by create_node's default values. Without
+        # this, naive datetimes from the DB are interpreted as UTC while
+        # CURRENT_TIMESTAMP carries the session TZ (e.g. EDT), causing
+        # spurious ~4h "staleness" on fresh writes.
+        try:
+            now = conn.execute("SELECT CURRENT_TIMESTAMP").fetchone()[0]
+        except Exception:
+            now = _dt.now(_tz.utc)
 
     if isinstance(last_observed_at, str):
         last_observed_at = _dt.fromisoformat(last_observed_at.replace("Z", "+00:00"))
+    # If the timestamp is naive, attach the same tzinfo as `now` so the
+    # subtraction is TZ-correct. If `now` is also naive, treat both as UTC.
     if last_observed_at.tzinfo is None:
-        last_observed_at = last_observed_at.replace(tzinfo=_tz.utc)
+        ref_tz = now.tzinfo if now.tzinfo is not None else _tz.utc
+        last_observed_at = last_observed_at.replace(tzinfo=ref_tz)
+    if now.tzinfo is None and last_observed_at.tzinfo is not None:
+        now = now.replace(tzinfo=last_observed_at.tzinfo)
 
     age_seconds = max(0.0, (now - last_observed_at).total_seconds())
     age_days = age_seconds / 86400.0
@@ -8081,8 +8105,20 @@ def compute_confidence_with_decay(
     else:
         decay_factor = 2.0 ** (-age_days / half_life_days)
 
-    decayed = max(floor, base_confidence * decay_factor)
-    is_stale = decayed <= floor
+    raw = base_confidence * decay_factor
+    if floor is not None:
+        # Explicit clamp: when raw drops below floor, snap to floor exactly
+        # (avoids floating-point underflow like 4.4e-16 being treated as
+        # non-stale). is_stale is True iff raw was clamped (decayed == floor).
+        if raw < floor:
+            decayed = floor
+            is_stale = True
+        else:
+            decayed = raw
+            is_stale = False
+    else:
+        decayed = raw
+        is_stale = False
 
     return {
         "decayed_confidence": round(decayed, 6),
@@ -8307,22 +8343,54 @@ def query_loop_status(
                 pass
         upcoming_evaluations.append(entry)
 
-    # Stale feeds: nodes feeding decisions where latest observation is old
+    # Stale feeds: nodes feeding decisions, ranked by decayed confidence
+    # ascending (most-decayed-first = highest refresh priority). Each feed's
+    # latest observation is decayed by its age so a feed that has gone silent
+    # rises to the top of the actionable list.
+    #
+    # Subquery pattern: pick the latest non-deleted observation per feed node
+    # using a window-function-free approach (DuckDB supports it, but a
+    # correlated subquery is simpler and clearer here).
     stale_feed_rows = conn.execute(
-        """SELECT DISTINCT n.id AS feed_node_id, n.label,
-                  EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - COALESCE(o.created_at, n.created_at)))::DOUBLE AS age_seconds
+        """SELECT n.id AS feed_node_id, n.label,
+                  latest_o.value AS latest_value,
+                  latest_o.created_at AS latest_observed_at,
+                  EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - COALESCE(latest_o.created_at, n.created_at)))::DOUBLE AS age_seconds
            FROM ohm_nodes n
            JOIN ohm_edges e ON e.from_node = n.id AND e.edge_type = 'FEEDS' AND e.deleted_at IS NULL
-           LEFT JOIN ohm_observations o ON o.node_id = n.id AND o.deleted_at IS NULL
-           WHERE n.deleted_at IS NULL
-           ORDER BY age_seconds DESC
-           LIMIT 50""",
+           LEFT JOIN LATERAL (
+               SELECT o.value, o.created_at
+               FROM ohm_observations o
+               WHERE o.node_id = n.id AND o.deleted_at IS NULL
+               ORDER BY o.created_at DESC
+               LIMIT 1
+           ) latest_o ON true
+           WHERE n.deleted_at IS NULL""",
     ).fetchall()
 
-    stale_feeds = []
+    # Build the list with decayed confidence; sort by it ascending.
+    stale_feeds_intermediate = []
     for row in stale_feed_rows:
         feed_node_id = row[0]
-        age_seconds = row[2] if row[2] is not None else 0.0
+        latest_value = row[2]
+        latest_observed_at = row[3]
+        age_seconds = row[4] if row[4] is not None else 0.0
+
+        # Decay the latest observation's value by its age. When there is no
+        # observation, treat as fully decayed (0.0) so the feed ranks high.
+        if latest_value is None or latest_observed_at is None:
+            decayed_confidence: float = 0.0
+            decay_info = None
+        else:
+            decay_info = compute_confidence_with_decay(
+                conn,
+                base_confidence=float(latest_value),
+                last_observed_at=latest_observed_at,
+                half_life_days=half_life_days,
+                floor=0.0,  # no floor — feeds can decay to 0
+            )
+            decayed_confidence = decay_info["decayed_confidence"]
+
         feeding_decision_rows = conn.execute(
             """SELECT DISTINCT e.to_node
                FROM ohm_edges e
@@ -8331,12 +8399,21 @@ def query_loop_status(
             [feed_node_id],
         ).fetchall()
         feeding_ids = [r[0] for r in feeding_decision_rows]
-        stale_feeds.append({
+        stale_feeds_intermediate.append({
             "feed_node_id": feed_node_id,
             "label": row[1] or "",
+            "latest_value": float(latest_value) if latest_value is not None else None,
+            "decayed_confidence": round(decayed_confidence, 6),
             "age_seconds": round(age_seconds, 2),
             "feeding_decision_ids": feeding_ids,
+            "decay": decay_info,
         })
+
+    # Sort by decayed_confidence ASCENDING — most-decayed first.
+    stale_feeds = sorted(
+        stale_feeds_intermediate,
+        key=lambda f: f["decayed_confidence"],
+    )[:50]
 
     # Compromised gates: nodes with gate_status='compromised'
     compromised_rows = conn.execute(
@@ -9179,6 +9256,9 @@ def assemble_twin_for_decision(
     preferred_template_id: str | None = None,
     preferred_model_id: str | None = None,
     created_by: str,
+    apply_decay: bool = True,
+    half_life_days: float = 30.0,
+    decay_floor: float = 0.1,
 ) -> dict[str, Any]:
     """Assemble a decision-specific twin from templates + primitives (OHM-f7tl).
 
@@ -9196,8 +9276,10 @@ def assemble_twin_for_decision(
     Ranking:
     - Template relevance: keyword overlap between goal and template metadata
       (description, label, required_edges), normalized 0-1.
-    - Model score: latest model_evaluation.score for models tied to the
-      template's twin (if any); else 0.5 (neutral).
+    - Model score: latest model_evaluation.value (a probability in [0, 1])
+      decayed by observation age when apply_decay=True. Default 0.5 (neutral)
+      if no observation exists. A stale evaluation loses influence vs. a fresh
+      one — both raw and decayed scores are returned so callers can audit.
     """
     import json as _json
 
@@ -9285,17 +9367,39 @@ def assemble_twin_for_decision(
                     [twin_node["id"]],
                 ))
                 score = 0.5
+                decayed_score: float | None = None
+                decay_info: dict | None = None
                 if obs_rows:
                     val = obs_rows[0].get("value")
                     if val is not None:
                         score = float(val)
+                        if apply_decay:
+                            decay_info = compute_confidence_with_decay(
+                                conn,
+                                base_confidence=score,
+                                last_observed_at=obs_rows[0].get("created_at"),
+                                half_life_days=half_life_days,
+                                floor=decay_floor,
+                            )
+                            decayed_score = decay_info["decayed_confidence"]
+                if decayed_score is None:
+                    decayed_score = score
                 model_candidates.append({
                     "model_id": twin_node["id"],
                     "label": twin_node.get("label", ""),
                     "score": round(score, 4),
+                    "decayed_score": round(decayed_score, 4) if decayed_score is not None else None,
+                    "decay": decay_info,
                 })
 
-    model_candidates.sort(key=lambda c: c["score"], reverse=True)
+    # When apply_decay=True, rank by decayed_score (fresher observations win).
+    # When False, rank by raw score (backward-compat).
+    sort_key = (
+        (lambda c: c["decayed_score"] if c["decayed_score"] is not None else c["score"])
+        if apply_decay
+        else (lambda c: c["score"])
+    )
+    model_candidates.sort(key=sort_key, reverse=True)
 
     chosen_model_id = preferred_model_id
     if chosen_model_id:
@@ -9641,15 +9745,25 @@ def compare_models(
     conn: DuckDBPyConnection,
     *,
     twin_id: str,
+    apply_decay: bool = True,
+    half_life_days: float = 30.0,
+    decay_floor: float | None = None,
 ) -> dict[str, Any]:
     """Compare all model candidates competing for a twin (OHM-75tw).
 
     Returns a ranked list of model candidates with their latest evaluation
-    metrics and composite scores.
+    metrics and composite scores. When ``apply_decay`` is True (default),
+    each candidate's ``composite_score`` is decayed by the age of its latest
+    evaluation before ranking — a stale evaluation loses influence vs. a
+    fresh one. Both raw and decayed scores are returned so callers can audit.
 
     Args:
         conn: Database connection.
         twin_id: The twin whose competing models to compare.
+        apply_decay: When True (default), decay each candidate's composite
+            score by the age of its latest evaluation before sorting.
+        half_life_days: Confidence half-life used for decay (default 30).
+        decay_floor: Lower bound on decayed score (default 0.1).
 
     Returns:
         Dict with twin_id, candidates (ranked list), and recommendation.
@@ -9701,6 +9815,8 @@ def compare_models(
 
         latest_eval = None
         composite_score = None
+        decayed_composite_score = None
+        decay_info = None
         metrics = None
         dataset = None
         if eval_nodes:
@@ -9722,6 +9838,22 @@ def compare_models(
                 "composite_score": composite_score,
                 "dataset": dataset,
             }
+            if composite_score is not None and apply_decay:
+                # composite_score can be negative (error metrics weighted -1.0
+                # dominate). A 0.1 floor would collapse all candidates to the
+                # same value, so default to floor=None (decay is multiplicative
+                # only). Callers can pass decay_floor explicitly if their
+                # composite_score is always non-negative.
+                decay_info = compute_confidence_with_decay(
+                    conn,
+                    base_confidence=composite_score,
+                    last_observed_at=ev.get("created_at"),
+                    half_life_days=half_life_days,
+                    floor=decay_floor,
+                )
+                decayed_composite_score = decay_info["decayed_confidence"]
+            elif composite_score is not None:
+                decayed_composite_score = composite_score
 
         ranked.append({
             "model_candidate_id": c["id"],
@@ -9730,23 +9862,36 @@ def compare_models(
             "model_parameters": model_params,
             "latest_evaluation": latest_eval,
             "composite_score": composite_score,
+            "decayed_composite_score": decayed_composite_score,
+            "decay": decay_info,
         })
 
-    ranked.sort(key=lambda r: r["composite_score"] if r["composite_score"] is not None else float("-inf"), reverse=True)
+    sort_key = (
+        (lambda r: r["decayed_composite_score"] if r["decayed_composite_score"] is not None else float("-inf"))
+        if apply_decay
+        else (lambda r: r["composite_score"] if r["composite_score"] is not None else float("-inf"))
+    )
+    ranked.sort(key=sort_key, reverse=True)
 
     recommendation = None
-    if ranked and ranked[0]["composite_score"] is not None:
-        recommendation = {
-            "model_candidate_id": ranked[0]["model_candidate_id"],
-            "label": ranked[0]["label"],
-            "composite_score": ranked[0]["composite_score"],
-        }
+    if ranked:
+        top = ranked[0]
+        top_score = top["decayed_composite_score"] if apply_decay else top["composite_score"]
+        if top_score is not None:
+            recommendation = {
+                "model_candidate_id": top["model_candidate_id"],
+                "label": top["label"],
+                "composite_score": top["composite_score"],
+                "decayed_composite_score": top["decayed_composite_score"],
+            }
 
     return {
         "twin_id": twin_id,
         "twin_label": twin[1],
         "candidates": ranked,
         "recommendation": recommendation,
+        "apply_decay": apply_decay,
+        "half_life_days": half_life_days if apply_decay else None,
     }
 
 
@@ -9758,6 +9903,9 @@ def promote_model(
     policy: str = "accuracy",
     decision_node_id: str | None = None,
     min_improvement: float = 0.0,
+    apply_decay: bool = True,
+    half_life_days: float = 30.0,
+    decay_floor: float = 0.1,
 ) -> dict[str, Any]:
     """Promote a model candidate to active status for its twin (OHM-75tw).
 
@@ -9818,6 +9966,9 @@ def promote_model(
             model_id=model_candidate_id,
             decision_node_id=decision_node_id,
             utility_scale=1.0,
+            apply_decay=apply_decay,
+            half_life_days=half_life_days,
+            decay_floor=decay_floor,
         )
         candidate_decision_value = candidate_dv["decision_value_score"]
 
@@ -9843,6 +9994,9 @@ def promote_model(
                         model_id=ac["id"],
                         decision_node_id=decision_node_id,
                         utility_scale=1.0,
+                        apply_decay=apply_decay,
+                        half_life_days=half_life_days,
+                        decay_floor=decay_floor,
                     )
                     active_decision_value = active_dv["decision_value_score"]
                     break
@@ -10240,7 +10394,18 @@ def ensemble_predict(
     *,
     twin_id: str,
     observation_window: int = 50,
+    apply_decay: bool = True,
+    half_life_days: float = 30.0,
+    decay_floor: float | None = None,
 ) -> dict[str, Any]:
+    """Weighted prediction across competing model candidates for a twin (OHM-75tw).
+
+    Each candidate's weight is its latest ``composite_score`` (decayed by
+    observation age when ``apply_decay`` is True). Negative decayed scores
+    are clamped to 0 for weighting (a model with bad accuracy should not
+    get a positive vote). Both raw and decayed scores are returned in the
+    per-vote breakdown so callers can audit.
+    """
     import json as _json
 
     from ohm.validation import validate_identifier
@@ -10278,12 +10443,13 @@ def ensemble_predict(
                 pass
 
         eval_nodes = _rows_to_dicts(conn.execute(
-            """SELECT n.metadata FROM ohm_nodes n
+            """SELECT n.metadata, n.created_at FROM ohm_nodes n
                JOIN ohm_edges e ON e.from_node = ? AND e.to_node = n.id AND e.edge_type = 'EVALUATED_BY' AND e.deleted_at IS NULL
                WHERE n.type = 'model_evaluation' AND n.deleted_at IS NULL
                ORDER BY n.created_at DESC LIMIT 1""",
             [c["id"]],
         ))
+        decay_info = None
         if eval_nodes:
             ev_meta_raw = eval_nodes[0].get("metadata")
             if ev_meta_raw:
@@ -10293,27 +10459,44 @@ def ensemble_predict(
                 except (_json.JSONDecodeError, TypeError):
                     pass
 
-        weight = composite_score if composite_score is not None and composite_score > 0 else 0.0
+            if apply_decay and composite_score is not None:
+                decay_info = compute_confidence_with_decay(
+                    conn,
+                    base_confidence=composite_score,
+                    last_observed_at=eval_nodes[0].get("created_at"),
+                    half_life_days=half_life_days,
+                    floor=decay_floor,
+                )
+                decayed_score: float = decay_info["decayed_confidence"]
+            else:
+                decayed_score = float(composite_score) if composite_score is not None else 0.0
+        else:
+            decayed_score = 0.0
+
+        # Weight = max(0, decayed) — negative scores do not vote positively.
+        weight = decayed_score if decayed_score > 0 else 0.0
         votes.append({
             "model_id": c["id"],
             "label": c.get("label", ""),
             "gate_status": gate_status,
             "composite_score": composite_score,
+            "decayed_composite_score": round(decayed_score, 6),
             "weight": round(weight, 6),
+            "decay": decay_info,
         })
         total_weight += weight
 
     if total_weight > 0:
         for v in votes:
             v["normalized_weight"] = round(v["weight"] / total_weight, 6)
-            weighted_prediction += v["composite_score"] * v["normalized_weight"] if v["composite_score"] is not None else 0.0
+            weighted_prediction += (v["decayed_composite_score"] * v["normalized_weight"])
     else:
         for v in votes:
             v["normalized_weight"] = 0.0
 
     disagreement = 0.0
     if len(votes) >= 2 and total_weight > 0:
-        scores = [v["composite_score"] for v in votes if v["composite_score"] is not None]
+        scores = [v["decayed_composite_score"] for v in votes if v["composite_score"] is not None]
         if scores:
             mean_s = sum(scores) / len(scores)
             disagreement = sum((s - mean_s) ** 2 for s in scores) / len(scores)
@@ -10333,7 +10516,20 @@ def compute_decision_value(
     model_id: str,
     decision_node_id: str,
     utility_scale: float,
+    apply_decay: bool = True,
+    half_life_days: float = 30.0,
+    decay_floor: float = 0.1,
 ) -> dict[str, Any]:
+    """Compute a model's decision value for a given decision (OHM-75tw).
+
+    The decision value is a utility-weighted accuracy measure penalized by
+    model cost, latency, and overfitting risk. When ``apply_decay`` is True
+    (default), the model's accuracy is decayed by the age of its latest
+    evaluation before scoring — a stale evaluation loses influence. Both raw
+    and decayed accuracy are returned so callers can audit. ``decay_floor``
+    defaults to 0.1 because accuracy is in [0, 1] (different from
+    ``composite_score`` which can be negative).
+    """
     import json as _json
 
     from ohm.validation import validate_identifier
@@ -10360,9 +10556,10 @@ def compute_decision_value(
     latency = 0.0
     cost = 0.0
     overfitting_risk = 0.0
+    decay_info: dict | None = None
 
     eval_nodes = _rows_to_dicts(conn.execute(
-        """SELECT n.metadata FROM ohm_nodes n
+        """SELECT n.metadata, n.created_at FROM ohm_nodes n
            JOIN ohm_edges e ON e.from_node = ? AND e.to_node = n.id AND e.edge_type = 'EVALUATED_BY' AND e.deleted_at IS NULL
            WHERE n.type = 'model_evaluation' AND n.deleted_at IS NULL
            ORDER BY n.created_at DESC LIMIT 1""",
@@ -10381,6 +10578,20 @@ def compute_decision_value(
             except (_json.JSONDecodeError, TypeError):
                 pass
 
+        if apply_decay:
+            decay_info = compute_confidence_with_decay(
+                conn,
+                base_confidence=accuracy,
+                last_observed_at=eval_nodes[0].get("created_at"),
+                half_life_days=half_life_days,
+                floor=decay_floor,
+            )
+            decayed_accuracy: float = decay_info["decayed_confidence"]
+        else:
+            decayed_accuracy = accuracy
+    else:
+        decayed_accuracy = accuracy
+
     meta_raw = model[2]
     if meta_raw:
         try:
@@ -10392,17 +10603,19 @@ def compute_decision_value(
         except (_json.JSONDecodeError, TypeError):
             pass
 
-    decision_value_score = max(0.0, min(1.0, utility_scale * accuracy - latency * cost * overfitting_risk))
+    decision_value_score = max(0.0, min(1.0, utility_scale * decayed_accuracy - latency * cost * overfitting_risk))
 
     return {
         "model_id": model_id,
         "decision_node_id": decision_node_id,
         "utility_scale": utility_scale,
         "accuracy": accuracy,
+        "decayed_accuracy": round(decayed_accuracy, 6),
         "latency": latency,
         "cost": cost,
         "overfitting_risk": overfitting_risk,
         "decision_value_score": round(decision_value_score, 6),
+        "decay": decay_info,
     }
 
 

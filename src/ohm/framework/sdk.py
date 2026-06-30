@@ -2392,6 +2392,9 @@ class Graph:
         horizon: int = 7,
         preferred_template_id: str | None = None,
         preferred_model_id: str | None = None,
+        apply_decay: bool = True,
+        half_life_days: float = 30.0,
+        decay_floor: float = 0.1,
     ) -> dict[str, Any]:
         """Assemble a decision-specific twin from templates + primitives (OHM-f7tl).
 
@@ -2401,6 +2404,9 @@ class Graph:
             horizon: Planning horizon in days (default 7).
             preferred_template_id: Override template selection.
             preferred_model_id: Override model selection.
+            apply_decay: Decay model score by observation age (default True).
+            half_life_days: Confidence half-life in days (default 30).
+            decay_floor: Floor on decayed score (default 0.1).
 
         Returns:
             Dict with twin, template, model, ranking, reasoning.
@@ -2415,6 +2421,9 @@ class Graph:
             preferred_template_id=preferred_template_id,
             preferred_model_id=preferred_model_id,
             created_by=self.actor,
+            apply_decay=apply_decay,
+            half_life_days=half_life_days,
+            decay_floor=decay_floor,
         )
 
     def register_model_candidate(
@@ -2483,18 +2492,33 @@ class Graph:
     def compare_models(
         self,
         twin_id: str,
+        *,
+        apply_decay: bool = True,
+        half_life_days: float = 30.0,
+        decay_floor: float | None = None,
     ) -> dict[str, Any]:
         """Compare all model candidates competing for a twin (OHM-75tw).
 
         Args:
             twin_id: The twin whose competing models to compare.
+            apply_decay: Decay each candidate's composite_score by its
+                evaluation age before ranking (default True).
+            half_life_days: Confidence half-life in days (default 30).
+            decay_floor: Floor on decayed score (default None — see
+                ``compare_models`` docs for why composite_score is unbounded).
 
         Returns:
             Dict with twin_id, candidates (ranked list), and recommendation.
         """
         from ohm.queries import compare_models
 
-        return compare_models(self._conn, twin_id=twin_id)
+        return compare_models(
+            self._conn,
+            twin_id=twin_id,
+            apply_decay=apply_decay,
+            half_life_days=half_life_days,
+            decay_floor=decay_floor,
+        )
 
     def promote_model(
         self,
@@ -2503,6 +2527,9 @@ class Graph:
         policy: str = "accuracy",
         decision_node_id: str | None = None,
         min_improvement: float = 0.0,
+        apply_decay: bool = True,
+        half_life_days: float = 30.0,
+        decay_floor: float = 0.1,
     ) -> dict[str, Any]:
         """Promote a model candidate to active status for its twin (OHM-75tw).
 
@@ -2511,6 +2538,10 @@ class Graph:
             policy: Promotion policy — "accuracy" (default) or "decision_value".
             decision_node_id: Required when policy="decision_value".
             min_improvement: Minimum decision_value improvement over active model.
+            apply_decay: Decay evaluation accuracy by age (default True; only
+                used when policy="decision_value").
+            half_life_days: Confidence half-life in days (default 30).
+            decay_floor: Floor on decayed accuracy (default 0.1).
 
         Returns:
             The promoted model_candidate node record.
@@ -2524,6 +2555,9 @@ class Graph:
             policy=policy,
             decision_node_id=decision_node_id,
             min_improvement=min_improvement,
+            apply_decay=apply_decay,
+            half_life_days=half_life_days,
+            decay_floor=decay_floor,
         )
 
     def register_shadow_model(
@@ -2648,6 +2682,9 @@ class Graph:
         twin_id: str,
         *,
         observation_window: int = 50,
+        apply_decay: bool = True,
+        half_life_days: float = 30.0,
+        decay_floor: float | None = None,
     ) -> dict[str, Any]:
         from ohm.queries import ensemble_predict
 
@@ -2655,6 +2692,9 @@ class Graph:
             self._conn,
             twin_id=twin_id,
             observation_window=observation_window,
+            apply_decay=apply_decay,
+            half_life_days=half_life_days,
+            decay_floor=decay_floor,
         )
 
     def compute_decision_value(
@@ -2663,6 +2703,9 @@ class Graph:
         decision_node_id: str,
         *,
         utility_scale: float,
+        apply_decay: bool = True,
+        half_life_days: float = 30.0,
+        decay_floor: float = 0.1,
     ) -> dict[str, Any]:
         from ohm.queries import compute_decision_value
 
@@ -2671,6 +2714,9 @@ class Graph:
             model_id=model_id,
             decision_node_id=decision_node_id,
             utility_scale=utility_scale,
+            apply_decay=apply_decay,
+            half_life_days=half_life_days,
+            decay_floor=decay_floor,
         )
 
     def auto_retire_model(
