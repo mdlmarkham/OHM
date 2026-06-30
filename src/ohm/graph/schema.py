@@ -69,6 +69,8 @@ VALID_NODE_TYPES = frozenset(
         "scenario",  # A counterfactual scenario — "what if X were 0.3?"
         "action",  # A proposed or executed action — "increase supplier B reliability"
         "intervention",  # A node-level do-operator — "force node Y to state Z"
+        # ── Digital twin type (OHM-8dg4) ──
+        "twin",  # A digital twin of an external system — registered via snap-in contract
     }
 )
 
@@ -99,6 +101,7 @@ MUST_HAVE_EDGE_NODE_TYPES: frozenset[str] = frozenset(
         "scenario",  # Must link to the node it evaluates
         "action",  # Must link to the scenario that proposed it
         "intervention",  # Must link to the node it intervenes on
+        "twin",  # Must link to the node/system it models (OHM-8dg4)
         # Forward-compat (per OHM-tjzh spec)
         "synthesis",
         "observation",
@@ -118,9 +121,18 @@ VALID_VISIBILITIES = frozenset({"private", "team", "public", "vault"})
 # A gate_type of 'AND' means all incoming edges must hold for the node's
 # claim to be valid. 'OR' means any one suffices. NULL (the default) means
 # the node is not a gate. gate_status tracks whether the gate has been
-# converted (AND→OR) or compromised.
+# converted (AND->OR) or compromised.
 VALID_GATE_TYPES = frozenset({"AND", "OR"})
-VALID_GATE_STATUSES = frozenset({"intact", "converted", "compromised", "failed"})
+VALID_GATE_STATUSES = frozenset({
+    "intact",       # Gate is functioning as designed
+    "converted",    # AND-gate has been converted to OR-gate (strategic shift)
+    "compromised",  # One or more inputs have failed but gate hasn't fully collapsed
+    "failed",       # Gate has collapsed — all inputs lost
+    # OHM-8dg4 reconciliation: Metis design-note aliases
+    "open",         # Alias for 'intact' — gate is open and processing
+    "closed",       # Alias for 'converted' — gate has been deliberately closed
+    "stuck",        # Alias for 'compromised' — gate is stuck waiting for input
+})
 
 VALID_PROVENANCES = frozenset(
     {
