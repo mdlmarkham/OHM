@@ -48,6 +48,24 @@ draws from Go, the `$12/5hr` window depletes at the primary's rate alone — sub
 dispatch adds no Go cost. If a long session still exhausts the Go window, the primary
 is the only thing to throttle; sub-agents keep running on Synthetic.
 
+## Sub-agent output contract
+
+Every project sub-agent has a **mandatory verification protocol** that requires it to
+paste actual command output before reporting success. The primary agent treats any
+dispatch missing these elements as failed and re-does the work inline. The contract:
+
+| Agent | Must paste |
+|---|---|
+| `ohm-plumber` | `ls` of new files, `git diff --stat`, pytest tail of new test file, no-regression pytest summary, function `file:line` locations |
+| `ohm-test-writer` | `ls` of new test file, `git diff --stat`, pytest tail of new file, no-regression pytest summary, per-class test counts |
+| `ohm-researcher` | `rg` / `cat` / `ls` command output for every claim, file:line locations, "what does NOT exist" section |
+| `ohm-schemer` | `rg` for SCHEMA_VERSION + MIGRATIONS, `python -c` schema init check, `python -c` validator check, schema pytest tail |
+| `ohm-adr-writer` | `ls` of new ADR, `rg` for index entry, `head -10` of new ADR |
+
+The contract exists because sub-agents historically claimed "all tests pass" without
+running them or writing the test file. The verification protocol makes those claims
+verifiable.
+
 ## Changing the routing
 
 To switch an agent's model, either:
