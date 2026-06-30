@@ -9534,3 +9534,990 @@ def promote_model(
     _log_change(conn, "ohm_nodes", model_candidate_id, "PROMOTE_MODEL", created_by)
 
     return _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [model_candidate_id]))[0]
+
+
+# ── Operational Twin Models (OHM-bf45) ────────────────────────────────────────
+
+
+def register_shadow_model(
+    conn: DuckDBPyConnection,
+    *,
+    twin_id: str,
+    label: str,
+    source_model_id: str,
+    created_by: str,
+    model_parameters: dict[str, Any] | None = None,
+    description: str | None = None,
+    connects_to: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import NodeNotFoundError
+
+    twin_id = validate_identifier(twin_id, name="twin_id")
+    source_model_id = validate_identifier(source_model_id, name="source_model_id")
+
+    twin = conn.execute(
+        "SELECT 1 FROM ohm_nodes WHERE id = ? AND type = 'twin' AND deleted_at IS NULL",
+        [twin_id],
+    ).fetchone()
+    if not twin:
+        raise NodeNotFoundError(f"Twin not found: {twin_id}")
+
+    source = conn.execute(
+        "SELECT 1 FROM ohm_nodes WHERE id = ? AND type = 'model_candidate' AND deleted_at IS NULL",
+        [source_model_id],
+    ).fetchone()
+    if not source:
+        raise NodeNotFoundError(f"Source model not found: {source_model_id}")
+
+    metadata_dict: dict[str, Any] = {
+        "model_parameters": model_parameters or {},
+        "gate_status": "shadow",
+    }
+
+    shadow = create_node(
+        conn,
+        label=label,
+        node_type="model_candidate",
+        content=description,
+        created_by=created_by,
+        metadata=metadata_dict,
+        connects_to=[twin_id, source_model_id] + (list(connects_to) if connects_to else []),
+    )
+
+    create_edge(
+        conn,
+        from_node=shadow["id"],
+        to_node=twin_id,
+        edge_type="EVALUATES",
+        layer="L3",
+        created_by=created_by,
+    )
+
+    create_edge(
+        conn,
+        from_node=shadow["id"],
+        to_node=source_model_id,
+        edge_type="SHADOWS",
+        layer="L3",
+        created_by=created_by,
+    )
+
+    _log_change(conn, "ohm_nodes", shadow["id"], "REGISTER_SHADOW_MODEL", created_by)
+
+    return _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [shadow["id"]]))[0]
+
+
+def detect_drift(
+    conn: DuckDBPyConnection,
+    *,
+    twin_id: str,
+    window_size: int = 100,
+    residual_threshold: float = 0.15,
+    created_by: str | None = None,
+) -> dict[str, Any]:
+    import json as _json
+
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import NodeNotFoundError
+
+    twin_id = validate_identifier(twin_id, name="twin_id")
+
+    twin = conn.execute(
+        "SELECT id, label FROM ohm_nodes WHERE id = ? AND type = 'twin' AND deleted_at IS NULL",
+        [twin_id],
+    ).fetchone()
+    if not twin:
+        raise NodeNotFoundError(f"Twin not found: {twin_id}")
+
+    active_models = _rows_to_dicts(conn.execute(
+        """SELECT n.id, n.label, n.metadata FROM ohm_nodes n
+           JOIN ohm_edges e ON e.from_node = n.id AND e.to_node = ? AND e.edge_type = 'EVALUATES' AND e.deleted_at IS NULL
+           WHERE n.type = 'model_candidate' AND n.deleted_at IS NULL""",
+        [twin_id],
+    ))
+
+    observations = _rows_to_dicts(conn.execute(
+        """SELECT o.id, o.node_id, o.value, o.baseline, o.created_at
+           FROM ohm_observations o
+           WHERE o.node_id = ? AND o.deleted_at IS NULL
+           ORDER BY o.created_at DESC LIMIT ?""",
+        [twin_id, window_size],
+    ))
+
+    drift_score = 0.0
+    drift_type = "none"
+    drift_details: dict[str, Any] = {}
+
+    if observations and active_models:
+        values = [o["value"] for o in observations if o.get("value") is not None]
+        baselines = [o.get("baseline") for o in observations if o.get("baseline") is not None]
+
+        if values and baselines:
+            residuals = [abs(v - b) for v, b in zip(values, baselines)]
+            mae = sum(residuals) / len(residuals) if residuals else 0.0
+            drift_details["residual_mae"] = round(mae, 6)
+            if mae > residual_threshold:
+                drift_score = min(mae / (residual_threshold * 2), 1.0)
+                drift_type = "residual"
+
+        if drift_type == "none" and len(values) >= 10:
+            half = len(values) // 2
+            recent_mean = sum(values[:half]) / half if half > 0 else 0.0
+            older_mean = sum(values[half:]) / (len(values) - half) if (len(values) - half) > 0 else 0.0
+            if older_mean != 0:
+                feature_shift = abs(recent_mean - older_mean) / abs(older_mean)
+                drift_details["feature_shift"] = round(feature_shift, 6)
+                if feature_shift > 0.5:
+                    drift_score = min(feature_shift, 1.0)
+                    drift_type = "feature"
+
+        if drift_type == "none" and len(active_models) > 1:
+            scores = []
+            for m in active_models:
+                meta_raw = m.get("metadata")
+                if meta_raw:
+                    try:
+                        parsed = _json.loads(meta_raw) if isinstance(meta_raw, str) else meta_raw
+                        eval_nodes = _rows_to_dicts(conn.execute(
+                            """SELECT n.metadata FROM ohm_nodes n
+                               JOIN ohm_edges e ON e.from_node = ? AND e.to_node = n.id AND e.edge_type = 'EVALUATED_BY' AND e.deleted_at IS NULL
+                               WHERE n.type = 'model_evaluation' AND n.deleted_at IS NULL
+                               ORDER BY n.created_at DESC LIMIT 1""",
+                            [m["id"]],
+                        ))
+                        if eval_nodes:
+                            ev_meta_raw = eval_nodes[0].get("metadata")
+                            if ev_meta_raw:
+                                ev_parsed = _json.loads(ev_meta_raw) if isinstance(ev_meta_raw, str) else ev_meta_raw
+                                cs = ev_parsed.get("composite_score")
+                                if cs is not None:
+                                    scores.append(cs)
+                    except (_json.JSONDecodeError, TypeError):
+                        pass
+            if len(scores) >= 2:
+                score_variance = sum((s - sum(scores) / len(scores)) ** 2 for s in scores) / len(scores)
+                drift_details["ensemble_variance"] = round(score_variance, 6)
+                if score_variance > 0.1:
+                    drift_score = min(score_variance * 5, 1.0)
+                    drift_type = "ensemble_disagreement"
+
+    result: dict[str, Any] = {
+        "twin_id": twin_id,
+        "drift_score": round(drift_score, 6),
+        "drift_type": drift_type,
+        "drift_details": drift_details,
+        "observation_count": len(observations),
+        "active_model_count": len(active_models),
+    }
+
+    if drift_score > 0.0 and created_by:
+        event = create_node(
+            conn,
+            label=f"Drift detected on {twin_id}",
+            node_type="drift_event",
+            created_by=created_by,
+            metadata={
+                "drift_score": round(drift_score, 6),
+                "drift_type": drift_type,
+                "window_size": window_size,
+                "residual_threshold": residual_threshold,
+                "drift_details": drift_details,
+            },
+            connects_to=[twin_id],
+        )
+
+        create_edge(
+            conn,
+            from_node=twin_id,
+            to_node=event["id"],
+            edge_type="DRIFT_SIGNAL",
+            layer="L3",
+            created_by=created_by,
+        )
+
+        _log_change(conn, "ohm_nodes", event["id"], "DETECT_DRIFT", created_by)
+        result["drift_event_id"] = event["id"]
+
+    return result
+
+
+def run_walk_forward_validation(
+    conn: DuckDBPyConnection,
+    *,
+    model_id: str,
+    n_splits: int = 5,
+    min_train_size: int = 50,
+    created_by: str,
+) -> dict[str, Any]:
+    import json as _json
+
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import NodeNotFoundError
+
+    model_id = validate_identifier(model_id, name="model_id")
+
+    model = conn.execute(
+        "SELECT id, label, metadata FROM ohm_nodes WHERE id = ? AND type = 'model_candidate' AND deleted_at IS NULL",
+        [model_id],
+    ).fetchone()
+    if not model:
+        raise NodeNotFoundError(f"Model candidate not found: {model_id}")
+
+    twin_edges = _rows_to_dicts(conn.execute(
+        """SELECT e.to_node FROM ohm_edges e
+           WHERE e.from_node = ? AND e.edge_type = 'EVALUATES' AND e.deleted_at IS NULL
+           AND e.to_node IN (SELECT id FROM ohm_nodes WHERE type = 'twin' AND deleted_at IS NULL)""",
+        [model_id],
+    ))
+    twin_id = twin_edges[0]["to_node"] if twin_edges else None
+
+    observations = []
+    if twin_id:
+        observations = _rows_to_dicts(conn.execute(
+            """SELECT o.id, o.value, o.baseline, o.created_at
+               FROM ohm_observations o
+               WHERE o.node_id = ? AND o.deleted_at IS NULL
+               ORDER BY o.created_at ASC""",
+            [twin_id],
+        ))
+
+    total_obs = len(observations)
+    per_split_metrics: list[dict[str, Any]] = []
+    overfitting_detected = False
+
+    if total_obs >= min_train_size + n_splits:
+        split_size = max((total_obs - min_train_size) // n_splits, 1)
+        for i in range(n_splits):
+            train_end = min_train_size + i * split_size
+            test_start = train_end
+            test_end = min(train_end + split_size, total_obs)
+
+            train_obs = observations[:train_end]
+            test_obs = observations[test_start:test_end]
+
+            train_values = [o["value"] for o in train_obs if o.get("value") is not None]
+            test_values = [o["value"] for o in test_obs if o.get("value") is not None]
+            test_baselines = [o.get("baseline") for o in test_obs if o.get("baseline") is not None]
+
+            split_mae = 0.0
+            if test_values and test_baselines and len(test_values) == len(test_baselines):
+                residuals = [abs(v - b) for v, b in zip(test_values, test_baselines)]
+                split_mae = sum(residuals) / len(residuals)
+
+            per_split_metrics.append({
+                "split": i + 1,
+                "train_size": len(train_obs),
+                "test_size": len(test_obs),
+                "mae": round(split_mae, 6),
+            })
+
+    if len(per_split_metrics) >= 3:
+        early_mae = sum(s["mae"] for s in per_split_metrics[:len(per_split_metrics) // 2]) / max(len(per_split_metrics) // 2, 1)
+        late_mae = sum(s["mae"] for s in per_split_metrics[len(per_split_metrics) // 2:]) / max(len(per_split_metrics) - len(per_split_metrics) // 2, 1)
+        if early_mae > 0 and late_mae > early_mae * 1.5:
+            overfitting_detected = True
+
+    mean_mae = sum(s["mae"] for s in per_split_metrics) / len(per_split_metrics) if per_split_metrics else 0.0
+    std_mae = (sum((s["mae"] - mean_mae) ** 2 for s in per_split_metrics) / len(per_split_metrics)) ** 0.5 if per_split_metrics else 0.0
+
+    metadata_dict: dict[str, Any] = {
+        "model_id": model_id,
+        "n_splits": n_splits,
+        "min_train_size": min_train_size,
+        "per_split_metrics": per_split_metrics,
+        "mean_mae": round(mean_mae, 6),
+        "std_mae": round(std_mae, 6),
+        "overfitting_detected": overfitting_detected,
+        "total_observations": total_obs,
+    }
+
+    validation = create_node(
+        conn,
+        label=f"Walk-forward validation of {model_id}",
+        node_type="validation_run",
+        created_by=created_by,
+        metadata=metadata_dict,
+        connects_to=[model_id],
+    )
+
+    create_edge(
+        conn,
+        from_node=model_id,
+        to_node=validation["id"],
+        edge_type="EVALUATED_BY",
+        layer="L3",
+        created_by=created_by,
+    )
+
+    _log_change(conn, "ohm_nodes", validation["id"], "WALK_FORWARD_VALIDATION", created_by)
+
+    return {
+        "validation_id": validation["id"],
+        "model_id": model_id,
+        "n_splits": n_splits,
+        "per_split_metrics": per_split_metrics,
+        "mean_mae": round(mean_mae, 6),
+        "std_mae": round(std_mae, 6),
+        "overfitting_detected": overfitting_detected,
+        "total_observations": total_obs,
+    }
+
+
+def ensemble_predict(
+    conn: DuckDBPyConnection,
+    *,
+    twin_id: str,
+    observation_window: int = 50,
+) -> dict[str, Any]:
+    import json as _json
+
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import NodeNotFoundError
+
+    twin_id = validate_identifier(twin_id, name="twin_id")
+
+    twin = conn.execute(
+        "SELECT id, label FROM ohm_nodes WHERE id = ? AND type = 'twin' AND deleted_at IS NULL",
+        [twin_id],
+    ).fetchone()
+    if not twin:
+        raise NodeNotFoundError(f"Twin not found: {twin_id}")
+
+    candidates = _rows_to_dicts(conn.execute(
+        """SELECT n.id, n.label, n.metadata FROM ohm_nodes n
+           JOIN ohm_edges e ON e.from_node = n.id AND e.to_node = ? AND e.edge_type = 'EVALUATES' AND e.deleted_at IS NULL
+           WHERE n.type = 'model_candidate' AND n.deleted_at IS NULL""",
+        [twin_id],
+    ))
+
+    votes: list[dict[str, Any]] = []
+    total_weight = 0.0
+    weighted_prediction = 0.0
+
+    for c in candidates:
+        meta_raw = c.get("metadata")
+        gate_status = "candidate"
+        composite_score = None
+        if meta_raw:
+            try:
+                parsed = _json.loads(meta_raw) if isinstance(meta_raw, str) else meta_raw
+                gate_status = parsed.get("gate_status", "candidate")
+            except (_json.JSONDecodeError, TypeError):
+                pass
+
+        eval_nodes = _rows_to_dicts(conn.execute(
+            """SELECT n.metadata FROM ohm_nodes n
+               JOIN ohm_edges e ON e.from_node = ? AND e.to_node = n.id AND e.edge_type = 'EVALUATED_BY' AND e.deleted_at IS NULL
+               WHERE n.type = 'model_evaluation' AND n.deleted_at IS NULL
+               ORDER BY n.created_at DESC LIMIT 1""",
+            [c["id"]],
+        ))
+        if eval_nodes:
+            ev_meta_raw = eval_nodes[0].get("metadata")
+            if ev_meta_raw:
+                try:
+                    ev_parsed = _json.loads(ev_meta_raw) if isinstance(ev_meta_raw, str) else ev_meta_raw
+                    composite_score = ev_parsed.get("composite_score")
+                except (_json.JSONDecodeError, TypeError):
+                    pass
+
+        weight = composite_score if composite_score is not None and composite_score > 0 else 0.0
+        votes.append({
+            "model_id": c["id"],
+            "label": c.get("label", ""),
+            "gate_status": gate_status,
+            "composite_score": composite_score,
+            "weight": round(weight, 6),
+        })
+        total_weight += weight
+
+    if total_weight > 0:
+        for v in votes:
+            v["normalized_weight"] = round(v["weight"] / total_weight, 6)
+            weighted_prediction += v["composite_score"] * v["normalized_weight"] if v["composite_score"] is not None else 0.0
+    else:
+        for v in votes:
+            v["normalized_weight"] = 0.0
+
+    disagreement = 0.0
+    if len(votes) >= 2 and total_weight > 0:
+        scores = [v["composite_score"] for v in votes if v["composite_score"] is not None]
+        if scores:
+            mean_s = sum(scores) / len(scores)
+            disagreement = sum((s - mean_s) ** 2 for s in scores) / len(scores)
+
+    return {
+        "twin_id": twin_id,
+        "weighted_prediction": round(weighted_prediction, 6),
+        "votes": votes,
+        "disagreement": round(disagreement, 6),
+        "candidate_count": len(candidates),
+    }
+
+
+def compute_decision_value(
+    conn: DuckDBPyConnection,
+    *,
+    model_id: str,
+    decision_node_id: str,
+    utility_scale: float,
+) -> dict[str, Any]:
+    import json as _json
+
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import NodeNotFoundError
+
+    model_id = validate_identifier(model_id, name="model_id")
+    decision_node_id = validate_identifier(decision_node_id, name="decision_node_id")
+
+    model = conn.execute(
+        "SELECT id, label, metadata FROM ohm_nodes WHERE id = ? AND type = 'model_candidate' AND deleted_at IS NULL",
+        [model_id],
+    ).fetchone()
+    if not model:
+        raise NodeNotFoundError(f"Model candidate not found: {model_id}")
+
+    decision = conn.execute(
+        "SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+        [decision_node_id],
+    ).fetchone()
+    if not decision:
+        raise NodeNotFoundError(f"Decision node not found: {decision_node_id}")
+
+    accuracy = 0.5
+    latency = 0.0
+    cost = 0.0
+    overfitting_risk = 0.0
+
+    eval_nodes = _rows_to_dicts(conn.execute(
+        """SELECT n.metadata FROM ohm_nodes n
+           JOIN ohm_edges e ON e.from_node = ? AND e.to_node = n.id AND e.edge_type = 'EVALUATED_BY' AND e.deleted_at IS NULL
+           WHERE n.type = 'model_evaluation' AND n.deleted_at IS NULL
+           ORDER BY n.created_at DESC LIMIT 1""",
+        [model_id],
+    ))
+    if eval_nodes:
+        ev_meta_raw = eval_nodes[0].get("metadata")
+        if ev_meta_raw:
+            try:
+                ev_parsed = _json.loads(ev_meta_raw) if isinstance(ev_meta_raw, str) else ev_meta_raw
+                metrics = ev_parsed.get("metrics", {})
+                accuracy = metrics.get("accuracy", 0.5)
+                composite_score = ev_parsed.get("composite_score", 0.5)
+                if composite_score < 0.3:
+                    overfitting_risk = 0.5
+            except (_json.JSONDecodeError, TypeError):
+                pass
+
+    meta_raw = model[2]
+    if meta_raw:
+        try:
+            parsed = _json.loads(meta_raw) if isinstance(meta_raw, str) else meta_raw
+            params = parsed.get("model_parameters", {})
+            latency = params.get("latency", 0.0)
+            cost = params.get("cost", 0.0)
+            overfitting_risk = params.get("overfitting_risk", overfitting_risk)
+        except (_json.JSONDecodeError, TypeError):
+            pass
+
+    decision_value_score = max(0.0, min(1.0, utility_scale * accuracy - latency * cost * overfitting_risk))
+
+    return {
+        "model_id": model_id,
+        "decision_node_id": decision_node_id,
+        "utility_scale": utility_scale,
+        "accuracy": accuracy,
+        "latency": latency,
+        "cost": cost,
+        "overfitting_risk": overfitting_risk,
+        "decision_value_score": round(decision_value_score, 6),
+    }
+
+
+def auto_retire_model(
+    conn: DuckDBPyConnection,
+    *,
+    model_id: str,
+    reason: str,
+    created_by: str,
+) -> dict[str, Any]:
+    import json as _json
+
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import NodeNotFoundError
+
+    model_id = validate_identifier(model_id, name="model_id")
+
+    model_row = conn.execute(
+        "SELECT id, metadata FROM ohm_nodes WHERE id = ? AND type = 'model_candidate' AND deleted_at IS NULL",
+        [model_id],
+    ).fetchone()
+    if not model_row:
+        raise NodeNotFoundError(f"Model candidate not found: {model_id}")
+
+    current_meta_raw = model_row[1]
+    current_meta: dict[str, Any] = {}
+    if current_meta_raw:
+        try:
+            current_meta = _json.loads(current_meta_raw) if isinstance(current_meta_raw, str) else current_meta_raw
+        except (_json.JSONDecodeError, TypeError):
+            pass
+
+    current_meta["gate_status"] = "retired"
+    current_meta["retirement_reason"] = reason
+    current_meta["retired_by"] = created_by
+
+    conn.execute(
+        "UPDATE ohm_nodes SET metadata = ? WHERE id = ?",
+        [_json.dumps(current_meta), model_id],
+    )
+
+    _log_change(conn, "ohm_nodes", model_id, "AUTO_RETIRE_MODEL", created_by)
+
+    return _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [model_id]))[0]
+
+
+def set_freshness_threshold(
+    conn: DuckDBPyConnection,
+    *,
+    decision_id: str,
+    max_age_seconds: int,
+    created_by: str,
+    label: str | None = None,
+) -> dict[str, Any]:
+    import json as _json
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import NodeNotFoundError
+
+    decision_id = validate_identifier(decision_id, name="decision_id")
+
+    decision = conn.execute(
+        "SELECT 1 FROM ohm_nodes WHERE id = ? AND type = 'decision' AND deleted_at IS NULL",
+        [decision_id],
+    ).fetchone()
+    if not decision:
+        raise NodeNotFoundError(f"Decision node not found: {decision_id}")
+
+    if max_age_seconds < 1:
+        raise ValueError("max_age_seconds must be >= 1")
+
+    ft_label = label or f"Freshness threshold for {decision_id}"
+    metadata_dict = {"max_age_seconds": max_age_seconds}
+
+    ft_node = create_node(
+        conn,
+        label=ft_label,
+        node_type="freshness_threshold",
+        created_by=created_by,
+        metadata=metadata_dict,
+        connects_to=[decision_id],
+    )
+
+    create_edge(
+        conn,
+        from_node=ft_node["id"],
+        to_node=decision_id,
+        edge_type="GOVERNS_FRESHNESS",
+        layer="L3",
+        created_by=created_by,
+    )
+
+    return ft_node
+
+
+def get_freshness_status(
+    conn: DuckDBPyConnection,
+    *,
+    decision_id: str,
+) -> dict[str, Any]:
+    import json as _json
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import NodeNotFoundError
+
+    decision_id = validate_identifier(decision_id, name="decision_id")
+
+    decision = conn.execute(
+        "SELECT id, label, type FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+        [decision_id],
+    ).fetchone()
+    if not decision:
+        raise NodeNotFoundError(f"Decision node not found: {decision_id}")
+
+    thresholds = conn.execute(
+        """
+        SELECT n.id, n.label, n.metadata
+        FROM ohm_edges e
+        JOIN ohm_nodes n ON n.id = e.from_node AND n.deleted_at IS NULL
+        WHERE e.to_node = ?
+          AND e.edge_type = 'GOVERNS_FRESHNESS'
+          AND e.layer = 'L3'
+          AND e.deleted_at IS NULL
+        """,
+        [decision_id],
+    ).fetchall()
+
+    threshold_records = []
+    for row in thresholds:
+        meta_raw = row[2]
+        meta = {}
+        if meta_raw:
+            try:
+                meta = _json.loads(meta_raw) if isinstance(meta_raw, str) else meta_raw
+            except (_json.JSONDecodeError, TypeError):
+                pass
+        threshold_records.append({
+            "id": row[0],
+            "label": row[1],
+            "max_age_seconds": meta.get("max_age_seconds"),
+        })
+
+    latest_obs = conn.execute(
+        """
+        SELECT MAX(o.created_at)
+        FROM ohm_observations o
+        JOIN ohm_edges e ON e.to_node = o.node_id AND e.deleted_at IS NULL
+        WHERE e.from_node = ?
+          AND e.edge_type = 'DECISION_DEPENDS_ON'
+          AND e.layer = 'L3'
+          AND o.deleted_at IS NULL
+        """,
+        [decision_id],
+    ).fetchone()
+
+    latest_obs_time = latest_obs[0] if latest_obs and latest_obs[0] else None
+
+    now_result = conn.execute("SELECT CURRENT_TIMESTAMP").fetchone()
+    now_ts = now_result[0] if now_result else None
+
+    age_seconds = None
+    if latest_obs_time and now_ts:
+        try:
+            age_seconds = (now_ts - latest_obs_time).total_seconds()
+        except (AttributeError, TypeError):
+            age_seconds = None
+
+    max_age = None
+    if threshold_records:
+        max_age = min(t["max_age_seconds"] for t in threshold_records if t["max_age_seconds"] is not None)
+
+    freshness_pressure = None
+    if age_seconds is not None and max_age is not None and max_age > 0:
+        freshness_pressure = round(min(age_seconds / max_age, 1.0), 4)
+
+    return {
+        "decision_id": decision_id,
+        "thresholds": threshold_records,
+        "latest_observation_at": str(latest_obs_time) if latest_obs_time else None,
+        "age_seconds": round(age_seconds, 1) if age_seconds is not None else None,
+        "max_age_seconds": max_age,
+        "freshness_pressure": freshness_pressure,
+    }
+
+
+def compute_feed_investment(
+    conn: DuckDBPyConnection,
+    *,
+    decision_id: str,
+    created_by: str,
+    observation_cost: float = 0.5,
+    label: str | None = None,
+) -> dict[str, Any]:
+    import json as _json
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import NodeNotFoundError
+
+    decision_id = validate_identifier(decision_id, name="decision_id")
+
+    decision = conn.execute(
+        "SELECT id, label, type, utility_scale, confidence FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+        [decision_id],
+    ).fetchone()
+    if not decision:
+        raise NodeNotFoundError(f"Decision node not found: {decision_id}")
+
+    _did, _label, _type, utility_scale, decision_conf = decision
+    utility_scale = utility_scale if utility_scale is not None else 0.5
+    decision_conf = decision_conf if decision_conf is not None else 0.5
+
+    supporting_edges = conn.execute(
+        """
+        SELECT e.id, e.confidence
+        FROM ohm_edges e
+        WHERE e.from_node = ?
+          AND e.edge_type = 'DECISION_DEPENDS_ON'
+          AND e.layer = 'L3'
+          AND e.deleted_at IS NULL
+        """,
+        [decision_id],
+    ).fetchall()
+
+    current_confidence = decision_conf
+    if supporting_edges:
+        edge_confs = [row[1] for row in supporting_edges if row[1] is not None]
+        if edge_confs:
+            current_confidence = sum(edge_confs) / len(edge_confs)
+
+    expected_confidence_after = min(current_confidence + 0.15, 1.0)
+    voi = round(utility_scale * (current_confidence - expected_confidence_after), 4)
+    voi = abs(voi)
+
+    invest = voi > observation_cost
+
+    metadata_dict = {
+        "voi": voi,
+        "observation_cost": observation_cost,
+        "current_confidence": round(current_confidence, 4),
+        "expected_confidence_after": round(expected_confidence_after, 4),
+        "utility_scale": round(utility_scale, 4),
+        "recommendation": "invest" if invest else "defer",
+    }
+
+    fi_label = label or f"Feed investment analysis for {decision_id}"
+
+    fi_node = create_node(
+        conn,
+        label=fi_label,
+        node_type="feed_investment",
+        created_by=created_by,
+        metadata=metadata_dict,
+        connects_to=[decision_id],
+    )
+
+    create_edge(
+        conn,
+        from_node=fi_node["id"],
+        to_node=decision_id,
+        edge_type="INVESTS_IN",
+        layer="L3",
+        created_by=created_by,
+    )
+
+    return {
+        "id": fi_node["id"],
+        "decision_id": decision_id,
+        "voi": voi,
+        "observation_cost": observation_cost,
+        "current_confidence": round(current_confidence, 4),
+        "expected_confidence_after": round(expected_confidence_after, 4),
+        "utility_scale": round(utility_scale, 4),
+        "recommendation": "invest" if invest else "defer",
+    }
+
+
+def recommend_mode(
+    conn: DuckDBPyConnection,
+    *,
+    decision_id: str,
+) -> dict[str, Any]:
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import NodeNotFoundError
+
+    decision_id = validate_identifier(decision_id, name="decision_id")
+
+    decision = conn.execute(
+        "SELECT id, label, type, utility_scale, confidence FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+        [decision_id],
+    ).fetchone()
+    if not decision:
+        raise NodeNotFoundError(f"Decision node not found: {decision_id}")
+
+    _did, _label, _type, utility_scale, decision_conf = decision
+    utility_scale = utility_scale if utility_scale is not None else 0.5
+
+    freshness = get_freshness_status(conn, decision_id=decision_id)
+    freshness_pressure = freshness.get("freshness_pressure") or 0.0
+
+    urgency_edges = conn.execute(
+        """
+        SELECT e.urgency
+        FROM ohm_edges e
+        WHERE e.from_node = ?
+          AND e.deleted_at IS NULL
+          AND e.urgency IS NOT NULL
+        """,
+        [decision_id],
+    ).fetchall()
+
+    max_urgency = 0.0
+    for row in urgency_edges:
+        try:
+            u = float(row[0]) if row[0] else 0.0
+            max_urgency = max(max_urgency, u)
+        except (ValueError, TypeError):
+            pass
+
+    if max_urgency > 0.7 and freshness_pressure < 0.3:
+        mode = "real_time"
+    elif freshness_pressure > 0.5 or utility_scale > 0.8:
+        mode = "deliberative"
+    else:
+        mode = "hybrid"
+
+    return {
+        "decision_id": decision_id,
+        "mode": mode,
+        "urgency": round(max_urgency, 4),
+        "freshness_pressure": freshness_pressure,
+        "utility_scale": round(utility_scale, 4),
+        "reasoning": {
+            "real_time": "urgency>0.7 AND freshness_pressure<0.3",
+            "deliberative": "freshness_pressure>0.5 OR utility_scale>0.8",
+            "hybrid": "default when neither real_time nor deliberative conditions met",
+        }[mode],
+    }
+
+
+def record_mode_switch(
+    conn: DuckDBPyConnection,
+    *,
+    decision_id: str,
+    from_mode: str,
+    to_mode: str,
+    created_by: str,
+    reason: str | None = None,
+    label: str | None = None,
+) -> dict[str, Any]:
+    import json as _json
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import NodeNotFoundError, ValidationError
+
+    decision_id = validate_identifier(decision_id, name="decision_id")
+
+    valid_modes = {"real_time", "deliberative", "hybrid"}
+    if from_mode not in valid_modes:
+        raise ValidationError(f"Invalid from_mode: {from_mode}. Must be one of {sorted(valid_modes)}")
+    if to_mode not in valid_modes:
+        raise ValidationError(f"Invalid to_mode: {to_mode}. Must be one of {sorted(valid_modes)}")
+
+    decision = conn.execute(
+        "SELECT 1 FROM ohm_nodes WHERE id = ? AND type = 'decision' AND deleted_at IS NULL",
+        [decision_id],
+    ).fetchone()
+    if not decision:
+        raise NodeNotFoundError(f"Decision node not found: {decision_id}")
+
+    ms_label = label or f"Mode switch {from_mode}→{to_mode} for {decision_id}"
+    metadata_dict = {
+        "from_mode": from_mode,
+        "to_mode": to_mode,
+        "reason": reason,
+    }
+
+    ms_node = create_node(
+        conn,
+        label=ms_label,
+        node_type="mode_switch",
+        created_by=created_by,
+        metadata=metadata_dict,
+        connects_to=[decision_id],
+    )
+
+    create_edge(
+        conn,
+        from_node=ms_node["id"],
+        to_node=decision_id,
+        edge_type="TRANSITIONS_TO",
+        layer="L3",
+        created_by=created_by,
+    )
+
+    return ms_node
+
+
+def temporal_decision_summary(
+    conn: DuckDBPyConnection,
+    *,
+    decision_id: str,
+) -> dict[str, Any]:
+    import json as _json
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import NodeNotFoundError
+
+    decision_id = validate_identifier(decision_id, name="decision_id")
+
+    decision = conn.execute(
+        "SELECT id, label, type, utility_scale, confidence, current_best_action FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+        [decision_id],
+    ).fetchone()
+    if not decision:
+        raise NodeNotFoundError(f"Decision node not found: {decision_id}")
+
+    _did, label, _type, utility_scale, decision_conf, current_best_action = decision
+
+    freshness = get_freshness_status(conn, decision_id=decision_id)
+    mode = recommend_mode(conn, decision_id=decision_id)
+
+    feed_investments = conn.execute(
+        """
+        SELECT n.id, n.label, n.metadata
+        FROM ohm_edges e
+        JOIN ohm_nodes n ON n.id = e.from_node AND n.deleted_at IS NULL
+        WHERE e.to_node = ?
+          AND e.edge_type = 'INVESTS_IN'
+          AND e.layer = 'L3'
+          AND e.deleted_at IS NULL
+        ORDER BY n.created_at DESC
+        """,
+        [decision_id],
+    ).fetchall()
+
+    fi_records = []
+    for row in feed_investments:
+        meta_raw = row[2]
+        meta = {}
+        if meta_raw:
+            try:
+                meta = _json.loads(meta_raw) if isinstance(meta_raw, str) else meta_raw
+            except (_json.JSONDecodeError, TypeError):
+                pass
+        fi_records.append({
+            "id": row[0],
+            "label": row[1],
+            "voi": meta.get("voi"),
+            "recommendation": meta.get("recommendation"),
+        })
+
+    mode_switches = conn.execute(
+        """
+        SELECT n.id, n.label, n.metadata, n.created_at
+        FROM ohm_edges e
+        JOIN ohm_nodes n ON n.id = e.from_node AND n.deleted_at IS NULL
+        WHERE e.to_node = ?
+          AND e.edge_type = 'TRANSITIONS_TO'
+          AND e.layer = 'L3'
+          AND e.deleted_at IS NULL
+        ORDER BY n.created_at DESC
+        """,
+        [decision_id],
+    ).fetchall()
+
+    ms_records = []
+    for row in mode_switches:
+        meta_raw = row[2]
+        meta = {}
+        if meta_raw:
+            try:
+                meta = _json.loads(meta_raw) if isinstance(meta_raw, str) else meta_raw
+            except (_json.JSONDecodeError, TypeError):
+                pass
+        ms_records.append({
+            "id": row[0],
+            "label": row[1],
+            "from_mode": meta.get("from_mode"),
+            "to_mode": meta.get("to_mode"),
+            "reason": meta.get("reason"),
+            "created_at": str(row[3]) if row[3] else None,
+        })
+
+    return {
+        "decision_id": decision_id,
+        "label": label,
+        "utility_scale": utility_scale,
+        "confidence": decision_conf,
+        "current_best_action": current_best_action,
+        "freshness": freshness,
+        "mode": mode,
+        "feed_investments": fi_records,
+        "mode_switches": ms_records,
+    }

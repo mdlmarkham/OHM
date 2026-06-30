@@ -3668,12 +3668,12 @@ class GraphHandlerMixin:
             self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
 
     def _route_twin_get(self, path: str, qs: dict) -> None:
-        """Dispatch /twin/{id}/{action} to the right handler (OHM-josq)."""
+        """Dispatch /twin/{id}/{action} to the right handler (OHM-josq, OHM-bf45)."""
         from ohm.exceptions import ValidationError
 
         parts = path.strip("/").split("/")
         if len(parts) < 3:
-            raise ValidationError("GET /twin/{id}/{predict|constraints|explain} required")
+            raise ValidationError("GET /twin/{id}/{predict|constraints|explain|drift|ensemble} required")
         twin_id = parts[1]
         action = parts[2]
         if action == "predict":
@@ -3682,6 +3682,10 @@ class GraphHandlerMixin:
             self._get_twin_constraints(path, qs)
         elif action == "explain":
             self._get_twin_explain(path, qs)
+        elif action == "drift":
+            self._get_detect_drift(path, qs)
+        elif action == "ensemble":
+            self._get_ensemble_predict(path, qs)
         else:
             raise ValidationError(f"unknown twin action: {action}")
 
@@ -3922,16 +3926,321 @@ class GraphHandlerMixin:
             self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
 
     def _route_model_post(self, path: str, qs: dict, body: dict, agent: str) -> None:
-        """Dispatch /model/{id}/{evaluate|promote} to the right handler (OHM-75tw)."""
+        """Dispatch /model/{id}/{evaluate|promote|validate|retire} to the right handler (OHM-75tw, OHM-bf45)."""
         from ohm.exceptions import ValidationError
 
         parts = path.strip("/").split("/")
         if len(parts) < 3:
-            raise ValidationError("POST /model/{id}/{evaluate|promote} required")
+            raise ValidationError("POST /model/{id}/{evaluate|promote|validate|retire} required")
         action = parts[2]
         if action == "evaluate":
             self._post_evaluate_model(path, qs, body, agent)
         elif action == "promote":
             self._post_promote_model(path, qs, body, agent)
+        elif action == "validate":
+            self._post_validate_model(path, qs, body, agent)
+        elif action == "retire":
+            self._post_auto_retire_model(path, qs, body, agent)
         else:
             raise ValidationError(f"unknown model action: {action}")
+
+    def _post_register_shadow_model(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        from ohm.queries import register_shadow_model
+        from ohm.exceptions import ValidationError, NodeNotFoundError
+
+        twin_id = body.get("twin_id")
+        label = body.get("label")
+        source_model_id = body.get("source_model_id")
+        if not twin_id:
+            raise ValidationError("twin_id is required")
+        if not label:
+            raise ValidationError("label is required")
+        if not source_model_id:
+            raise ValidationError("source_model_id is required")
+
+        try:
+            result = register_shadow_model(
+                self.current_store.conn,
+                twin_id=twin_id,
+                label=label,
+                source_model_id=source_model_id,
+                created_by=agent,
+                model_parameters=body.get("model_parameters"),
+                description=body.get("description"),
+                connects_to=body.get("connects_to"),
+            )
+            self._json_response(201, {"ok": True, "data": result})
+        except NodeNotFoundError as e:
+            self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
+
+    def _get_detect_drift(self, path: str, qs: dict) -> None:
+        from ohm.queries import detect_drift
+        from ohm.exceptions import ValidationError, NodeNotFoundError
+
+        parts = path.strip("/").split("/")
+        twin_id = parts[1] if len(parts) >= 2 else None
+        if not twin_id:
+            raise ValidationError("twin_id is required in path")
+
+        window_size = int(qs.get("window_size", [100])[0])
+        residual_threshold = float(qs.get("residual_threshold", [0.15])[0])
+
+        try:
+            result = detect_drift(
+                self.current_store.read_conn,
+                twin_id=twin_id,
+                window_size=window_size,
+                residual_threshold=residual_threshold,
+            )
+            self._json_response(200, {"ok": True, "data": result})
+        except NodeNotFoundError as e:
+            self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
+
+    def _post_validate_model(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        from ohm.queries import run_walk_forward_validation
+        from ohm.exceptions import ValidationError, NodeNotFoundError
+
+        parts = path.strip("/").split("/")
+        model_id = parts[1] if len(parts) >= 2 else None
+        if not model_id:
+            raise ValidationError("model_id is required in path")
+
+        n_splits = int(body.get("n_splits", 5))
+        min_train_size = int(body.get("min_train_size", 50))
+
+        try:
+            result = run_walk_forward_validation(
+                self.current_store.conn,
+                model_id=model_id,
+                n_splits=n_splits,
+                min_train_size=min_train_size,
+                created_by=agent,
+            )
+            self._json_response(201, {"ok": True, "data": result})
+        except NodeNotFoundError as e:
+            self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
+
+    def _get_ensemble_predict(self, path: str, qs: dict) -> None:
+        from ohm.queries import ensemble_predict
+        from ohm.exceptions import ValidationError, NodeNotFoundError
+
+        parts = path.strip("/").split("/")
+        twin_id = parts[1] if len(parts) >= 2 else None
+        if not twin_id:
+            raise ValidationError("twin_id is required in path")
+
+        observation_window = int(qs.get("observation_window", [50])[0])
+
+        try:
+            result = ensemble_predict(
+                self.current_store.read_conn,
+                twin_id=twin_id,
+                observation_window=observation_window,
+            )
+            self._json_response(200, {"ok": True, "data": result})
+        except NodeNotFoundError as e:
+            self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
+
+    def _get_decision_value(self, path: str, qs: dict) -> None:
+        from ohm.queries import compute_decision_value
+        from ohm.exceptions import ValidationError, NodeNotFoundError
+
+        parts = path.strip("/").split("/")
+        model_id = parts[1] if len(parts) >= 2 else None
+        if not model_id:
+            raise ValidationError("model_id is required in path")
+
+        decision_node_id = qs.get("decision_node_id", [None])[0]
+        utility_scale_str = qs.get("utility_scale", [None])[0]
+        if not decision_node_id:
+            raise ValidationError("decision_node_id query parameter is required")
+        if not utility_scale_str:
+            raise ValidationError("utility_scale query parameter is required")
+
+        utility_scale = float(utility_scale_str)
+
+        try:
+            result = compute_decision_value(
+                self.current_store.read_conn,
+                model_id=model_id,
+                decision_node_id=decision_node_id,
+                utility_scale=utility_scale,
+            )
+            self._json_response(200, {"ok": True, "data": result})
+        except NodeNotFoundError as e:
+            self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
+
+    def _post_auto_retire_model(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        from ohm.queries import auto_retire_model
+        from ohm.exceptions import ValidationError, NodeNotFoundError
+
+        parts = path.strip("/").split("/")
+        model_id = parts[1] if len(parts) >= 2 else None
+        if not model_id:
+            raise ValidationError("model_id is required in path")
+
+        reason = body.get("reason")
+        if not reason:
+            raise ValidationError("reason is required")
+
+        try:
+            result = auto_retire_model(
+                self.current_store.conn,
+                model_id=model_id,
+                reason=reason,
+                created_by=agent,
+            )
+            self._json_response(200, {"ok": True, "data": result})
+        except NodeNotFoundError as e:
+            self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
+
+    def _route_model_get(self, path: str, qs: dict) -> None:
+        from ohm.exceptions import ValidationError
+
+        parts = path.strip("/").split("/")
+        if len(parts) < 3:
+            raise ValidationError("GET /model/{id}/{decision-value} required")
+        action = parts[2]
+        if action == "decision-value":
+            self._get_decision_value(path, qs)
+        else:
+            raise ValidationError(f"unknown model GET action: {action}")
+
+    def _post_set_freshness_threshold(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        from ohm.queries import set_freshness_threshold
+        from ohm.exceptions import ValidationError, NodeNotFoundError
+
+        decision_id = body.get("decision_id")
+        max_age_seconds = body.get("max_age_seconds")
+        if not decision_id:
+            raise ValidationError("decision_id is required")
+        if max_age_seconds is None:
+            raise ValidationError("max_age_seconds is required")
+
+        try:
+            max_age_seconds = int(max_age_seconds)
+        except (ValueError, TypeError):
+            raise ValidationError("max_age_seconds must be an integer")
+
+        try:
+            result = set_freshness_threshold(
+                self.current_store.conn,
+                decision_id=decision_id,
+                max_age_seconds=max_age_seconds,
+                created_by=agent,
+                label=body.get("label"),
+            )
+            self._json_response(201, {"ok": True, "data": result})
+        except NodeNotFoundError as e:
+            self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
+
+    def _post_compute_feed_investment(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        from ohm.queries import compute_feed_investment
+        from ohm.exceptions import ValidationError, NodeNotFoundError
+
+        decision_id = body.get("decision_id")
+        if not decision_id:
+            raise ValidationError("decision_id is required")
+
+        try:
+            observation_cost = float(body.get("observation_cost", 0.5))
+        except (ValueError, TypeError):
+            raise ValidationError("observation_cost must be a number")
+
+        try:
+            result = compute_feed_investment(
+                self.current_store.conn,
+                decision_id=decision_id,
+                created_by=agent,
+                observation_cost=observation_cost,
+                label=body.get("label"),
+            )
+            self._json_response(201, {"ok": True, "data": result})
+        except NodeNotFoundError as e:
+            self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
+
+    def _post_record_mode_switch(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        from ohm.queries import record_mode_switch
+        from ohm.exceptions import ValidationError, NodeNotFoundError
+
+        decision_id = body.get("decision_id")
+        from_mode = body.get("from_mode")
+        to_mode = body.get("to_mode")
+        if not decision_id:
+            raise ValidationError("decision_id is required")
+        if not from_mode:
+            raise ValidationError("from_mode is required")
+        if not to_mode:
+            raise ValidationError("to_mode is required")
+
+        try:
+            result = record_mode_switch(
+                self.current_store.conn,
+                decision_id=decision_id,
+                from_mode=from_mode,
+                to_mode=to_mode,
+                created_by=agent,
+                reason=body.get("reason"),
+                label=body.get("label"),
+            )
+            self._json_response(201, {"ok": True, "data": result})
+        except NodeNotFoundError as e:
+            self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
+        except ValidationError as e:
+            self._json_response(422, {"ok": False, "error": "validation", "message": str(e)})
+
+    def _route_temporal_get(self, path: str, qs: dict) -> None:
+        from ohm.exceptions import ValidationError
+
+        parts = path.strip("/").split("/")
+        if len(parts) < 3:
+            raise ValidationError("GET /temporal/{decision_id}/{action} required")
+        decision_id = parts[1]
+        action = parts[2]
+        if action == "freshness":
+            self._get_freshness_status(decision_id, qs)
+        elif action == "mode":
+            self._get_recommend_mode(decision_id, qs)
+        elif action == "summary":
+            self._get_temporal_summary(decision_id, qs)
+        else:
+            raise ValidationError(f"unknown temporal GET action: {action}")
+
+    def _get_freshness_status(self, decision_id: str, qs: dict) -> None:
+        from ohm.queries import get_freshness_status
+        from ohm.exceptions import NodeNotFoundError
+
+        try:
+            result = get_freshness_status(
+                self.current_store.conn,
+                decision_id=decision_id,
+            )
+            self._json_response(200, {"ok": True, "data": result})
+        except NodeNotFoundError as e:
+            self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
+
+    def _get_recommend_mode(self, decision_id: str, qs: dict) -> None:
+        from ohm.queries import recommend_mode
+        from ohm.exceptions import NodeNotFoundError
+
+        try:
+            result = recommend_mode(
+                self.current_store.conn,
+                decision_id=decision_id,
+            )
+            self._json_response(200, {"ok": True, "data": result})
+        except NodeNotFoundError as e:
+            self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
+
+    def _get_temporal_summary(self, decision_id: str, qs: dict) -> None:
+        from ohm.queries import temporal_decision_summary
+        from ohm.exceptions import NodeNotFoundError
+
+        try:
+            result = temporal_decision_summary(
+                self.current_store.conn,
+                decision_id=decision_id,
+            )
+            self._json_response(200, {"ok": True, "data": result})
+        except NodeNotFoundError as e:
+            self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})

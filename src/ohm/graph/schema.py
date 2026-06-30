@@ -76,6 +76,13 @@ VALID_NODE_TYPES = frozenset(
         # ── Model marketplace types (OHM-75tw) ──
         "model_candidate",  # A registered predictive model competing for a twin
         "model_evaluation",  # A single evaluation result for a model candidate
+        # ── Operational twin model types (OHM-bf45) ──
+        "drift_event",  # A detected drift incident (residual/feature/concept/ensemble)
+        "validation_run",  # A walk-forward / replay validation of a model
+        "ensemble_vote",  # A recorded ensemble decision across model candidates
+        "freshness_threshold",  # Per-decision freshness constraint (OHM-2x2u)
+        "feed_investment",  # VoI-driven observation investment plan (OHM-2x2u)
+        "mode_switch",  # Real-time/deliberative mode transition record (OHM-2x2u)
     }
 )
 
@@ -111,6 +118,10 @@ MUST_HAVE_EDGE_NODE_TYPES: frozenset[str] = frozenset(
         # Model marketplace types (OHM-75tw)
         "model_candidate",  # Must link to the twin it competes for
         "model_evaluation",  # Must link to the model_candidate it evaluates
+        # Operational twin model types (OHM-bf45)
+        "drift_event",  # Must link to the twin/model it signals
+        "validation_run",  # Must link to the model_candidate it validates
+        "ensemble_vote",  # Must link to the twin it votes on
         # Forward-compat (per OHM-tjzh spec)
         "synthesis",
         "observation",
@@ -231,6 +242,12 @@ LAYER_EDGE_TYPES: dict[str, frozenset[str]] = {
             # ── Model marketplace edges (OHM-75tw) ──
             "COMPETES_WITH",  # model_candidate → model_candidate (competition)
             "EVALUATED_BY",  # model_candidate → model_evaluation (evaluation result)
+            # ── Operational twin model edges (OHM-bf45) ──
+            "SHADOWS",  # shadow model → active model (divergence detection)
+            "DRIFT_SIGNAL",  # twin → drift_event (drift detected)
+            # ── Temporal decision layer (OHM-2x2u) ──
+            "GOVERNS_FRESHNESS",  # freshness_threshold → decision (freshness constraint)
+            "INVESTS_IN",  # feed_investment → decision (VoI-driven observation plan)
         }
     ),
     "L4": frozenset(

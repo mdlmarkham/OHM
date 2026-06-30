@@ -2348,6 +2348,187 @@ class Graph:
             created_by=self.actor,
         )
 
+    def register_shadow_model(
+        self,
+        twin_id: str,
+        label: str,
+        *,
+        source_model_id: str,
+        model_parameters: dict[str, Any] | None = None,
+        description: str | None = None,
+        connects_to: list[str] | None = None,
+    ) -> dict[str, Any]:
+        from ohm.queries import register_shadow_model
+
+        return register_shadow_model(
+            self._conn,
+            twin_id=twin_id,
+            label=label,
+            source_model_id=source_model_id,
+            created_by=self.actor,
+            model_parameters=model_parameters,
+            description=description,
+            connects_to=connects_to,
+        )
+
+    def detect_drift(
+        self,
+        twin_id: str,
+        *,
+        window_size: int = 100,
+        residual_threshold: float = 0.15,
+    ) -> dict[str, Any]:
+        from ohm.queries import detect_drift
+
+        return detect_drift(
+            self._conn,
+            twin_id=twin_id,
+            window_size=window_size,
+            residual_threshold=residual_threshold,
+            created_by=self.actor,
+        )
+
+    def run_walk_forward_validation(
+        self,
+        model_id: str,
+        *,
+        n_splits: int = 5,
+        min_train_size: int = 50,
+    ) -> dict[str, Any]:
+        from ohm.queries import run_walk_forward_validation
+
+        return run_walk_forward_validation(
+            self._conn,
+            model_id=model_id,
+            n_splits=n_splits,
+            min_train_size=min_train_size,
+            created_by=self.actor,
+        )
+
+    def ensemble_predict(
+        self,
+        twin_id: str,
+        *,
+        observation_window: int = 50,
+    ) -> dict[str, Any]:
+        from ohm.queries import ensemble_predict
+
+        return ensemble_predict(
+            self._conn,
+            twin_id=twin_id,
+            observation_window=observation_window,
+        )
+
+    def compute_decision_value(
+        self,
+        model_id: str,
+        decision_node_id: str,
+        *,
+        utility_scale: float,
+    ) -> dict[str, Any]:
+        from ohm.queries import compute_decision_value
+
+        return compute_decision_value(
+            self._conn,
+            model_id=model_id,
+            decision_node_id=decision_node_id,
+            utility_scale=utility_scale,
+        )
+
+    def auto_retire_model(
+        self,
+        model_id: str,
+        *,
+        reason: str,
+    ) -> dict[str, Any]:
+        from ohm.queries import auto_retire_model
+
+        return auto_retire_model(
+            self._conn,
+            model_id=model_id,
+            reason=reason,
+            created_by=self.actor,
+        )
+
+    def set_freshness_threshold(
+        self,
+        decision_id: str,
+        max_age_seconds: int,
+        *,
+        label: str | None = None,
+    ) -> dict[str, Any]:
+        from ohm.queries import set_freshness_threshold
+
+        return set_freshness_threshold(
+            self._conn,
+            decision_id=decision_id,
+            max_age_seconds=max_age_seconds,
+            created_by=self.actor,
+            label=label,
+        )
+
+    def get_freshness_status(
+        self,
+        decision_id: str,
+    ) -> dict[str, Any]:
+        from ohm.queries import get_freshness_status
+
+        return get_freshness_status(self._conn, decision_id=decision_id)
+
+    def compute_feed_investment(
+        self,
+        decision_id: str,
+        *,
+        observation_cost: float = 0.5,
+        label: str | None = None,
+    ) -> dict[str, Any]:
+        from ohm.queries import compute_feed_investment
+
+        return compute_feed_investment(
+            self._conn,
+            decision_id=decision_id,
+            created_by=self.actor,
+            observation_cost=observation_cost,
+            label=label,
+        )
+
+    def recommend_mode(
+        self,
+        decision_id: str,
+    ) -> dict[str, Any]:
+        from ohm.queries import recommend_mode
+
+        return recommend_mode(self._conn, decision_id=decision_id)
+
+    def record_mode_switch(
+        self,
+        decision_id: str,
+        from_mode: str,
+        to_mode: str,
+        *,
+        reason: str | None = None,
+        label: str | None = None,
+    ) -> dict[str, Any]:
+        from ohm.queries import record_mode_switch
+
+        return record_mode_switch(
+            self._conn,
+            decision_id=decision_id,
+            from_mode=from_mode,
+            to_mode=to_mode,
+            created_by=self.actor,
+            reason=reason,
+            label=label,
+        )
+
+    def temporal_decision_summary(
+        self,
+        decision_id: str,
+    ) -> dict[str, Any]:
+        from ohm.queries import temporal_decision_summary
+
+        return temporal_decision_summary(self._conn, decision_id=decision_id)
+
     def path(
         self,
         from_node: str,

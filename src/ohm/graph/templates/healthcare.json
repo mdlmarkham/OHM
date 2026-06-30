@@ -25,7 +25,17 @@
     "skill",
     "source",
     "topic",
-    "fragment"
+    "fragment",
+    "twin",
+    "twin_template",
+    "model_candidate",
+    "model_evaluation",
+    "drift_event",
+    "validation_run",
+    "ensemble_vote",
+    "freshness_threshold",
+    "feed_investment",
+    "mode_switch"
   ],
   "layer_edge_types": {
     "L0": [
@@ -80,7 +90,10 @@
       "TRANSITIONS_TO",
       "COMPETES_WITH",
       "EVALUATED_BY",
-    
+      "SHADOWS",
+      "DRIFT_SIGNAL",
+      "GOVERNS_FRESHNESS",
+      "INVESTS_IN",
       "BLOCKS",
       "DEPENDS_ON",
       "ENABLES",

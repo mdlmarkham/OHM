@@ -2373,8 +2373,15 @@ OhmHandler._POST_PREFIXES.append(("/twin-template/", "_post_instantiate_twin"))
 OhmHandler._GET_EXACT["/twin-templates"] = "_get_twin_templates"
 OhmHandler._GET_PREFIXES.append(("/twin-template/", "_route_twin_template_get"))
 OhmHandler._POST_EXACT["/model/register"] = "_post_register_model_candidate"
+OhmHandler._POST_EXACT["/model/shadow"] = "_post_register_shadow_model"
 OhmHandler._POST_PREFIXES.append(("/model/", "_route_model_post"))
+OhmHandler._GET_PREFIXES.append(("/model/", "_route_model_get"))
 OhmHandler._GET_EXACT["/model/compare"] = "_get_compare_models"
+
+OhmHandler._POST_EXACT["/temporal/freshness"] = "_post_set_freshness_threshold"
+OhmHandler._POST_EXACT["/temporal/feed-investment"] = "_post_compute_feed_investment"
+OhmHandler._POST_EXACT["/temporal/mode-switch"] = "_post_record_mode_switch"
+OhmHandler._GET_PREFIXES.append(("/temporal/", "_route_temporal_get"))
 
 
 def make_configured_handler(store: OhmStore):
