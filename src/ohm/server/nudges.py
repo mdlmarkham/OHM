@@ -12,7 +12,11 @@ ADR-023: Causal Nudge Architecture — steer agents toward Bayesian-tractable wr
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import duckdb
+    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger(__name__)
 
@@ -617,3 +621,207 @@ def _persist_nudge_log(store: Any, agent: str, action: str, target_id: str | Non
             )
     except Exception:
         logger.debug("nudge log persistence failed", exc_info=True)
+
+
+def accept_nudge(
+    conn: DuckDBPyConnection,
+    *,
+    nudge_id: str,
+    agent: str | None = None,
+    helpful: bool = True,
+    notes: str | None = None,
+) -> dict[str, Any]:
+    """Mark a nudge as accepted (or rejected) by the agent (OHM-jdfq tranche 3).
+
+    The agent that received a nudge can opt-in/opt-out to provide quality
+    feedback. Acceptance rate by nudge_type is the primary signal for
+    "is this nudge useful?" — high rejection rates mean we should retire
+    or refine the nudge.
+
+    Args:
+        conn: Database connection.
+        nudge_id: The ohm_nudge_log.id to accept.
+        agent: Optional agent name. When set, the agent must match the
+            nudge's recorded agent (prevents cross-agent acceptance
+            tampering). When None, the check is skipped.
+        helpful: True for accepted, False for rejected.
+        notes: Optional free-text reason.
+
+    Returns:
+        The updated nudge log row.
+
+    Raises:
+        ValueError: If nudge_id does not exist or agent doesn't match.
+    """
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import ValidationError
+
+    nudge_id = validate_identifier(nudge_id, name="nudge_id")
+
+    row = conn.execute(
+        "SELECT id, agent, accepted, accepted_at FROM ohm_nudge_log WHERE id = ?",
+        [nudge_id],
+    ).fetchone()
+    if not row:
+        raise ValidationError(f"Nudge {nudge_id} not found")
+    existing_id, existing_agent, existing_accepted, existing_accepted_at = row
+
+    if agent is not None and existing_agent != agent:
+        raise ValidationError(
+            f"Nudge {nudge_id} was issued to '{existing_agent}', not '{agent}'"
+        )
+
+    conn.execute(
+        """UPDATE ohm_nudge_log
+           SET accepted = ?, accepted_at = CURRENT_TIMESTAMP
+           WHERE id = ?""",
+        [bool(helpful), nudge_id],
+    )
+
+    result = conn.execute(
+        "SELECT * FROM ohm_nudge_log WHERE id = ?",
+        [nudge_id],
+    ).fetchone()
+    cols = [d[0] for d in conn.description]
+    return dict(zip(cols, result))
+
+
+def list_nudges(
+    conn: DuckDBPyConnection,
+    *,
+    agent: str | None = None,
+    nudge_type: str | None = None,
+    target_id: str | None = None,
+    accepted: bool | None = None,
+    since: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """List nudge log entries with optional filters (OHM-jdfq tranche 3).
+
+    Args:
+        conn: Database connection.
+        agent: Filter by agent who received the nudge.
+        nudge_type: Filter by nudge type (e.g. 'high_confidence_weak_source').
+        target_id: Filter by target node/edge ID.
+        accepted: True for accepted nudges, False for rejected, None for
+            un-responded (or any state when None).
+        since: ISO timestamp — only return nudges created after this time.
+        limit: Max rows to return (default 50).
+
+    Returns:
+        List of nudge log row dicts, newest first.
+    """
+    where: list[str] = []
+    params: list[Any] = []
+    if agent is not None:
+        where.append("agent = ?")
+        params.append(agent)
+    if nudge_type is not None:
+        where.append("nudge_type = ?")
+        params.append(nudge_type)
+    if target_id is not None:
+        where.append("target_id = ?")
+        params.append(target_id)
+    if accepted is not None:
+        where.append("accepted = ?")
+        params.append(bool(accepted))
+    if since is not None:
+        where.append("created_at >= ?")
+        params.append(since)
+
+    where_clause = (" WHERE " + " AND ".join(where)) if where else ""
+    rows = conn.execute(
+        f"SELECT * FROM ohm_nudge_log{where_clause} ORDER BY created_at DESC LIMIT ?",
+        [*params, limit],
+    ).fetchall()
+    cols = [d[0] for d in conn.description]
+    return [dict(zip(cols, row)) for row in rows]
+
+
+def nudge_acceptance_stats(
+    conn: DuckDBPyConnection,
+    *,
+    since: str | None = None,
+    agent: str | None = None,
+) -> dict[str, Any]:
+    """Aggregate nudge acceptance rates by nudge_type (OHM-jdfq tranche 3).
+
+    Returns:
+        Dict with:
+        - total: total nudges
+        - responded: nudges with accepted IS NOT NULL
+        - acceptance_rate: responded / total
+        - by_type: dict of nudge_type → {total, accepted, rejected, rate}
+        - by_agent: dict of agent → {total, accepted, rejected, rate}
+    """
+    where: list[str] = []
+    params: list[Any] = []
+    if since is not None:
+        where.append("created_at >= ?")
+        params.append(since)
+    if agent is not None:
+        where.append("agent = ?")
+        params.append(agent)
+    where_clause = (" WHERE " + " AND ".join(where)) if where else ""
+
+    totals = conn.execute(
+        f"SELECT COUNT(*), SUM(CASE WHEN accepted IS NOT NULL THEN 1 ELSE 0 END) "
+        f"FROM ohm_nudge_log{where_clause}",
+        params,
+    ).fetchone()
+    total_nudges = totals[0] or 0
+    responded = totals[1] or 0
+
+    by_type_rows = conn.execute(
+        f"""SELECT nudge_type,
+                  COUNT(*) AS total,
+                  SUM(CASE WHEN accepted = true THEN 1 ELSE 0 END) AS accepted_count,
+                  SUM(CASE WHEN accepted = false THEN 1 ELSE 0 END) AS rejected_count
+           FROM ohm_nudge_log{where_clause}
+           GROUP BY nudge_type
+           ORDER BY total DESC""",
+        params,
+    ).fetchall()
+    by_type = {}
+    for ntype, total, accepted_count, rejected_count in by_type_rows:
+        total = total or 0
+        accepted_count = accepted_count or 0
+        rejected_count = rejected_count or 0
+        responded_count = accepted_count + rejected_count
+        by_type[ntype] = {
+            "total": total,
+            "accepted": accepted_count,
+            "rejected": rejected_count,
+            "acceptance_rate": round(accepted_count / responded_count, 4) if responded_count > 0 else None,
+        }
+
+    by_agent_rows = conn.execute(
+        f"""SELECT agent,
+                  COUNT(*) AS total,
+                  SUM(CASE WHEN accepted = true THEN 1 ELSE 0 END) AS accepted_count,
+                  SUM(CASE WHEN accepted = false THEN 1 ELSE 0 END) AS rejected_count
+           FROM ohm_nudge_log{where_clause}
+           GROUP BY agent
+           ORDER BY total DESC""",
+        params,
+    ).fetchall()
+    by_agent = {}
+    for ag, total, accepted_count, rejected_count in by_agent_rows:
+        total = total or 0
+        accepted_count = accepted_count or 0
+        rejected_count = rejected_count or 0
+        responded_count = accepted_count + rejected_count
+        by_agent[ag] = {
+            "total": total,
+            "accepted": accepted_count,
+            "rejected": rejected_count,
+            "acceptance_rate": round(accepted_count / responded_count, 4) if responded_count > 0 else None,
+        }
+
+    return {
+        "total": total_nudges,
+        "responded": responded,
+        "acceptance_rate": round(responded / total_nudges, 4) if total_nudges > 0 else None,
+        "by_type": by_type,
+        "by_agent": by_agent,
+    }

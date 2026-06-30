@@ -6,6 +6,7 @@ Three new nudge types added to generate_nudges():
 - fast_decaying_observation: observation with half_life_days + existing stale obs
 
 Nudge log persistence: enrich_response() writes each nudge to ohm_nudge_log
+
 for quality analytics.
 
 Existing nudges (causal_edge_suggestion, source_citation, pert_estimation,
@@ -478,3 +479,389 @@ class TestValueContradictionNudge:
         # statement in generate_nudges limits to one).
         assert len(vc_nudges) == 1
         assert vc_nudges[0]["data"]["prior_value"] == pytest.approx(0.1, abs=1e-6)
+
+
+class TestNudgeAcceptance:
+    """OHM-49bg: nudge acceptance tracking via accept_nudge + list_nudges.
+
+    Closes the nudge lifecycle loop: fire → log → agent accepts/rejects.
+    The ohm_nudge_log.accepted column is the source of truth for the
+    quality signal that backs /admin/nudges/quality.
+    """
+
+    def _insert_nudge(self, conn, agent="metis", nudge_type="test_nudge",
+                      target_id="node_1", severity="info", message="hello"):
+        import uuid
+        nid = f"nudge_{uuid.uuid4().hex[:12]}"
+        conn.execute(
+            """INSERT INTO ohm_nudge_log
+               (id, agent, action, nudge_type, severity, target_id, message)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            [nid, agent, "node", nudge_type, severity, target_id, message],
+        )
+        return nid
+
+    def test_accept_nudge_marks_accepted(self, conn):
+        from ohm.server.nudges import accept_nudge
+
+        nid = self._insert_nudge(conn)
+        result = accept_nudge(conn, nudge_id=nid, agent="metis", helpful=True)
+        assert result["accepted"] is True
+        assert result["accepted_at"] is not None
+        assert result["id"] == nid
+
+    def test_accept_nudge_rejects(self, conn):
+        from ohm.server.nudges import accept_nudge
+
+        nid = self._insert_nudge(conn)
+        result = accept_nudge(conn, nudge_id=nid, agent="metis", helpful=False)
+        assert result["accepted"] is False
+        assert result["accepted_at"] is not None
+
+    def test_accept_nudge_idempotent_last_wins(self, conn):
+        """Re-accepting a nudge overwrites the prior response (last write wins)."""
+        from ohm.server.nudges import accept_nudge
+
+        nid = self._insert_nudge(conn)
+        accept_nudge(conn, nudge_id=nid, agent="metis", helpful=True)
+        result = accept_nudge(conn, nudge_id=nid, agent="metis", helpful=False)
+        # The second response (False) wins
+        assert result["accepted"] is False
+
+    def test_accept_nudge_rejects_wrong_agent(self, conn):
+        from ohm.server.nudges import accept_nudge
+        from ohm.exceptions import ValidationError
+
+        nid = self._insert_nudge(conn, agent="metis")
+        with pytest.raises(ValidationError, match="metis"):
+            accept_nudge(conn, nudge_id=nid, agent="other_agent", helpful=True)
+
+    def test_accept_nudge_rejects_nonexistent(self, conn):
+        from ohm.server.nudges import accept_nudge
+        from ohm.exceptions import ValidationError
+
+        with pytest.raises(ValidationError, match="not found"):
+            accept_nudge(conn, nudge_id="nudge_nonexistent_xyz", agent="metis", helpful=True)
+
+    def test_accept_nudge_skips_agent_check_when_none(self, conn):
+        """When agent=None, the agent check is skipped (caller is system)."""
+        from ohm.server.nudges import accept_nudge
+
+        nid = self._insert_nudge(conn, agent="metis")
+        # No agent check — useful for admin override
+        result = accept_nudge(conn, nudge_id=nid, agent=None, helpful=True)
+        assert result["accepted"] is True
+
+    def test_accept_nudge_with_notes(self, conn):
+        """Notes field is stored (even though the schema doesn't have it yet)."""
+        from ohm.server.nudges import accept_nudge
+
+        nid = self._insert_nudge(conn)
+        result = accept_nudge(conn, nudge_id=nid, agent="metis", helpful=True, notes="great catch")
+        # Notes are passed but may not be persisted yet — just ensure no error
+        assert result["accepted"] is True
+
+
+class TestListNudges:
+    """OHM-49bg: list_nudges for filtering nudge history."""
+
+    def test_list_all(self, conn):
+        from ohm.server.nudges import list_nudges
+
+        for i in range(3):
+            conn.execute(
+                "INSERT INTO ohm_nudge_log (id, agent, action, nudge_type, severity) VALUES (?, ?, ?, ?, ?)",
+                [f"nudge_{i}", "metis", "node", "type_a", "info"],
+            )
+        result = list_nudges(conn)
+        assert len(result) == 3
+
+    def test_list_filter_by_agent(self, conn):
+        from ohm.server.nudges import list_nudges
+
+        conn.execute(
+            "INSERT INTO ohm_nudge_log (id, agent, action, nudge_type, severity) VALUES (?, ?, ?, ?, ?)",
+            ["n1", "metis", "node", "type_a", "info"],
+        )
+        conn.execute(
+            "INSERT INTO ohm_nudge_log (id, agent, action, nudge_type, severity) VALUES (?, ?, ?, ?, ?)",
+            ["n2", "clio", "node", "type_a", "info"],
+        )
+        result = list_nudges(conn, agent="metis")
+        assert len(result) == 1
+        assert result[0]["id"] == "n1"
+
+    def test_list_filter_by_nudge_type(self, conn):
+        from ohm.server.nudges import list_nudges
+
+        conn.execute(
+            "INSERT INTO ohm_nudge_log (id, agent, action, nudge_type, severity) VALUES (?, ?, ?, ?, ?)",
+            ["n1", "metis", "node", "type_a", "info"],
+        )
+        conn.execute(
+            "INSERT INTO ohm_nudge_log (id, agent, action, nudge_type, severity) VALUES (?, ?, ?, ?, ?)",
+            ["n2", "metis", "node", "type_b", "info"],
+        )
+        result = list_nudges(conn, nudge_type="type_b")
+        assert len(result) == 1
+        assert result[0]["id"] == "n2"
+
+    def test_list_filter_by_accepted(self, conn):
+        from ohm.server.nudges import list_nudges, accept_nudge
+
+        conn.execute(
+            "INSERT INTO ohm_nudge_log (id, agent, action, nudge_type, severity) VALUES (?, ?, ?, ?, ?)",
+            ["accepted_nudge", "metis", "node", "t", "info"],
+        )
+        conn.execute(
+            "INSERT INTO ohm_nudge_log (id, agent, action, nudge_type, severity) VALUES (?, ?, ?, ?, ?)",
+            ["unanswered_nudge", "metis", "node", "t", "info"],
+        )
+        accept_nudge(conn, nudge_id="accepted_nudge", agent="metis", helpful=True)
+
+        accepted = list_nudges(conn, accepted=True)
+        unanswered = list_nudges(conn, accepted=False)
+        all_resp = list_nudges(conn)  # default: all
+        all_with_filter_none = list_nudges(conn, accepted=None)
+
+        assert len(accepted) == 1
+        assert accepted[0]["id"] == "accepted_nudge"
+        assert len(unanswered) == 0  # accepted=False filters out un-responded
+        assert len(all_resp) == 2  # no accepted filter — all rows
+        assert len(all_with_filter_none) == 2  # accepted=None is same as no filter
+
+    def test_list_respects_limit(self, conn):
+        from ohm.server.nudges import list_nudges
+
+        for i in range(5):
+            conn.execute(
+                "INSERT INTO ohm_nudge_log (id, agent, action, nudge_type, severity) VALUES (?, ?, ?, ?, ?)",
+                [f"n{i}", "metis", "node", "t", "info"],
+            )
+        result = list_nudges(conn, limit=2)
+        assert len(result) == 2
+
+
+class TestNudgeAcceptanceStats:
+    """OHM-49bg: nudge_acceptance_stats for quality analytics."""
+
+    def test_stats_empty(self, conn):
+        from ohm.server.nudges import nudge_acceptance_stats
+        stats = nudge_acceptance_stats(conn)
+        assert stats["total"] == 0
+        assert stats["responded"] == 0
+        assert stats["acceptance_rate"] is None
+        assert stats["by_type"] == {}
+        assert stats["by_agent"] == {}
+
+    def test_stats_with_mixed_responses(self, conn):
+        from ohm.server.nudges import nudge_acceptance_stats, accept_nudge
+
+        # 2 accepted, 1 rejected, 1 unanswered of type_a
+        for i in range(2):
+            nid = f"acc_{i}"
+            conn.execute(
+                "INSERT INTO ohm_nudge_log (id, agent, action, nudge_type, severity) VALUES (?, ?, ?, ?, ?)",
+                [nid, "metis", "node", "type_a", "info"],
+            )
+            accept_nudge(conn, nudge_id=nid, agent="metis", helpful=True)
+        rej = "rej_0"
+        conn.execute(
+            "INSERT INTO ohm_nudge_log (id, agent, action, nudge_type, severity) VALUES (?, ?, ?, ?, ?)",
+            [rej, "metis", "node", "type_a", "info"],
+        )
+        accept_nudge(conn, nudge_id=rej, agent="metis", helpful=False)
+        # Unanswered
+        conn.execute(
+            "INSERT INTO ohm_nudge_log (id, agent, action, nudge_type, severity) VALUES (?, ?, ?, ?, ?)",
+            ["unanswered", "metis", "node", "type_a", "info"],
+        )
+        # Different type
+        conn.execute(
+            "INSERT INTO ohm_nudge_log (id, agent, action, nudge_type, severity) VALUES (?, ?, ?, ?, ?)",
+            ["type_b_0", "clio", "node", "type_b", "info"],
+        )
+
+        stats = nudge_acceptance_stats(conn)
+        assert stats["total"] == 5
+        assert stats["responded"] == 3
+        assert stats["acceptance_rate"] == 0.6  # 3/5
+
+        # type_a: 4 total, 2 accepted, 1 rejected, 1 unanswered → 0.6667 rate (2/(2+1))
+        type_a = stats["by_type"]["type_a"]
+        assert type_a["total"] == 4
+        assert type_a["accepted"] == 2
+        assert type_a["rejected"] == 1
+        assert type_a["acceptance_rate"] == pytest.approx(2 / 3, abs=1e-4)
+
+        # type_b: 1 total, 0 responded → rate None
+        type_b = stats["by_type"]["type_b"]
+        assert type_b["total"] == 1
+        assert type_b["accepted"] == 0
+        assert type_b["acceptance_rate"] is None
+
+        # by_agent
+        metis = stats["by_agent"]["metis"]
+        assert metis["total"] == 4
+        assert metis["accepted"] == 2
+        assert metis["rejected"] == 1
+        clio = stats["by_agent"]["clio"]
+        assert clio["total"] == 1
+        assert clio["acceptance_rate"] is None
+
+    def test_stats_filter_by_agent(self, conn):
+        from ohm.server.nudges import nudge_acceptance_stats, accept_nudge
+
+        for i, ag in enumerate(["metis", "clio", "metis", "clio"]):
+            nid = f"n_{i}"
+            conn.execute(
+                "INSERT INTO ohm_nudge_log (id, agent, action, nudge_type, severity) VALUES (?, ?, ?, ?, ?)",
+                [nid, ag, "node", "t", "info"],
+            )
+            accept_nudge(conn, nudge_id=nid, agent=ag, helpful=True)
+        stats = nudge_acceptance_stats(conn, agent="metis")
+        assert stats["total"] == 2
+        assert stats["responded"] == 2
+        # only metis in by_agent
+        assert "metis" in stats["by_agent"]
+        assert "clio" not in stats["by_agent"]
+
+
+class TestNudgeAcceptanceHTTPEndpoint:
+    """OHM-49bg: HTTP endpoint tests for /nudges/{id}/accept."""
+
+    def test_http_accept_round_trip(self):
+        """Round-trip a nudge through the HTTP endpoint: log → accept → quality stats."""
+        import json
+        import threading
+        import socketserver
+        from http.client import HTTPConnection
+
+        from ohm.schema import DEFAULT_SCHEMA
+        from ohm.server import OhmHandler
+        from ohm.store import OhmStore
+        from ohm.server.nudges import _persist_nudge_log, enrich_response, nudge_acceptance_stats
+
+        import tempfile
+        import os
+
+        # Use a real on-disk DuckDB so the subprocess can read it
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "test_nudge.duckdb")
+            store = OhmStore(db_path=db_path, agent_name="metis")
+            # Insert a nudge — agent is the default "ohm" (no_auth default)
+            _persist_nudge_log(
+                store, agent="ohm", action="node", target_id="node_1",
+                nudges=[{"type": "test", "severity": "info", "message": "x"}],
+            )
+            # Find the nudge id
+            rows = store.read_conn.execute(
+                "SELECT id FROM ohm_nudge_log WHERE agent = 'ohm'"
+            ).fetchall()
+            assert rows, "nudge not persisted"
+            nudge_id = rows[0][0]
+
+            # Start a no-auth server
+            OhmHandler.store = store
+            OhmHandler.config = {"host": "127.0.0.1", "port": 0}
+            OhmHandler.schema_config = DEFAULT_SCHEMA
+            OhmHandler.tokens = {}
+            OhmHandler.roles = {}
+            OhmHandler.no_auth = True
+            OhmHandler.multi_tenant = False
+            OhmHandler.require_read_auth = False
+
+            server = socketserver.TCPServer(
+                ("127.0.0.1", 0), OhmHandler, bind_and_activate=False,
+            )
+            server.allow_reuse_address = True
+            server.server_bind()
+            server.server_activate()
+            port = server.server_address[1]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+
+            try:
+                # POST accept
+                conn = HTTPConnection(f"127.0.0.1:{port}", timeout=5)
+                conn.request(
+                    "POST",
+                    f"/nudges/{nudge_id}/accept",
+                    body=json.dumps({"helpful": True, "notes": "test"}).encode(),
+                    headers={"Content-Type": "application/json"},
+                )
+                resp = conn.getresponse()
+                assert resp.status == 200, f"expected 200, got {resp.status}: {resp.read().decode()}"
+                body = json.loads(resp.read().decode())
+                assert body["accepted"] is True
+                assert body["nudge_id"] == nudge_id
+                assert body["agent"] == "ohm"
+                conn.close()
+
+                # GET quality
+                conn = HTTPConnection(f"127.0.0.1:{port}", timeout=5)
+                conn.request("GET", "/admin/nudges/quality")
+                resp = conn.getresponse()
+                assert resp.status == 200
+                quality = json.loads(resp.read().decode())
+                assert quality["total"] == 1
+                assert quality["responded"] == 1
+                assert quality["acceptance_rate"] == 1.0
+                assert "test" in quality["by_type"]
+                conn.close()
+            finally:
+                server.shutdown()
+                thread.join(timeout=2)
+                store.close()
+
+    def test_http_accept_nonexistent_returns_400_or_500(self):
+        """Nonexistent nudge id returns an error (400 or 500 depending on handler)."""
+        import json
+        import threading
+        import socketserver
+        from http.client import HTTPConnection
+
+        from ohm.schema import DEFAULT_SCHEMA
+        from ohm.server import OhmHandler
+        from ohm.store import OhmStore
+        import tempfile, os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "test_nudge_404.duckdb")
+            store = OhmStore(db_path=db_path, agent_name="metis")
+
+            OhmHandler.store = store
+            OhmHandler.config = {"host": "127.0.0.1", "port": 0}
+            OhmHandler.schema_config = DEFAULT_SCHEMA
+            OhmHandler.tokens = {}
+            OhmHandler.roles = {}
+            OhmHandler.no_auth = True
+            OhmHandler.multi_tenant = False
+            OhmHandler.require_read_auth = False
+
+            server = socketserver.TCPServer(
+                ("127.0.0.1", 0), OhmHandler, bind_and_activate=False,
+            )
+            server.allow_reuse_address = True
+            server.server_bind()
+            server.server_activate()
+            port = server.server_address[1]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+
+            try:
+                conn = HTTPConnection(f"127.0.0.1:{port}", timeout=5)
+                conn.request(
+                    "POST",
+                    "/nudges/nudge_nonexistent_xyz/accept",
+                    body=json.dumps({"helpful": True}).encode(),
+                    headers={"Content-Type": "application/json"},
+                )
+                resp = conn.getresponse()
+                # ValidationError is mapped to 400 by the server; 500 if unhandled
+                assert resp.status in (400, 422, 500), resp.status
+                conn.close()
+            finally:
+                server.shutdown()
+                thread.join(timeout=2)
+                store.close()

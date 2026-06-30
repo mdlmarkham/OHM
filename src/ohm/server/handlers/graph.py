@@ -2016,6 +2016,64 @@ class GraphHandlerMixin:
         result = enrich_response(result, nudges, store=self.current_store, agent=agent, action="observation", target_id=node_id)
         self._json_response(201, result)
 
+    def _post_nudge_accept(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /nudges/{id}/accept — accept or reject a logged nudge (OHM-jdfq).
+
+        Body: {"helpful": bool, "notes": str?}
+
+        Updates ohm_nudge_log.accepted and accepted_at. The agent must match
+        the nudge's recorded agent (unless no agent was recorded, in which
+        case the check is skipped). Re-accepting overwrites the prior
+        response — last write wins.
+        """
+        from ohm.exceptions import ValidationError
+        from ohm.server.nudges import accept_nudge
+
+        # path is "/nudges/{id}/accept" → strip "/nudges/" and "/accept"
+        nudge_id = path[len("/nudges/"):]
+        if nudge_id.endswith("/accept"):
+            nudge_id = nudge_id[: -len("/accept")]
+        if not nudge_id:
+            raise ValidationError("Missing nudge id in path")
+
+        helpful = bool(body.get("helpful", True))
+        notes = body.get("notes")
+
+        result = accept_nudge(
+            self.current_store.conn,
+            nudge_id=nudge_id,
+            agent=agent,
+            helpful=helpful,
+            notes=notes,
+        )
+        self._json_response(200, {
+            "nudge_id": result["id"],
+            "nudge_type": result["nudge_type"],
+            "accepted": result["accepted"],
+            "accepted_at": str(result["accepted_at"]) if result["accepted_at"] else None,
+            "agent": result["agent"],
+            "target_id": result["target_id"],
+            "message": result["message"],
+        })
+
+    def _get_nudge_quality(self, path: str, qs: dict) -> None:
+        """GET /admin/nudges/quality — aggregate nudge acceptance stats.
+
+        Query params (optional): since (ISO timestamp), agent (filter).
+        Returns per-type and per-agent acceptance rates so operators can
+        see which nudges are actually helping.
+        """
+        from ohm.server.nudges import nudge_acceptance_stats
+
+        since = qs.get("since", [None])[0]
+        agent_filter = qs.get("agent", [None])[0]
+        stats = nudge_acceptance_stats(
+            self.current_store.conn,
+            since=since,
+            agent=agent_filter,
+        )
+        self._json_response(200, stats)
+
     def _post_observations(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /observations — bulk observation upload (OHM-0lf)."""
         from ohm.exceptions import ValidationError
