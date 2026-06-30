@@ -198,9 +198,14 @@ def query_path(
 
     Returns the ordered list of edges forming the path (from source to
     destination), or empty list if no path exists within *max_depth*.
-    """
-    from collections import deque
 
+    Iterative BFS: at each level, fetch only the outgoing edges from the
+    current frontier (one SQL query per level) instead of the entire edge
+    table. Avoids the O(N) edge load of the previous implementation while
+    preserving the correct BFS visited-set semantics that DuckDB recursive
+    CTEs cannot express (the CTE form explored all paths, blowing up
+    exponentially in dense graphs).
+    """
     from ohm.validation import validate_depth, validate_identifier, validate_layer
 
     from_node = validate_identifier(from_node, name="from_node")
@@ -210,36 +215,44 @@ def query_path(
     if from_node == to_node:
         return []
 
-    edge_query = "SELECT id, from_node, to_node, layer, edge_type, confidence FROM ohm_edges WHERE deleted_at IS NULL"
-    params: list = []
-    if layer:
-        layer = validate_layer(layer)
-        edge_query += " AND layer = ?"
-        params.append(layer)
-
-    all_edges = _rows_to_dicts(conn.execute(edge_query, params))
-
-    # Directed adjacency list: node → outgoing edges
-    adj: dict[str, list[dict[str, Any]]] = {}
-    for e in all_edges:
-        adj.setdefault(e["from_node"], []).append(e)
-
-    # BFS: find shortest directed path
-    queue: deque[tuple[str, list[dict[str, Any]]]] = deque([(from_node, [])])
     visited: set[str] = {from_node}
+    frontier: list[tuple[str, list[dict[str, Any]]]] = [(from_node, [])]
 
-    while queue:
-        current, path = queue.popleft()
-        if len(path) >= max_depth:
-            continue
-        for edge in adj.get(current, []):
-            nxt = edge["to_node"]
-            new_path = path + [edge]
-            if nxt == to_node:
-                return [dict(e, depth=i + 1) for i, e in enumerate(new_path)]
-            if nxt not in visited:
-                visited.add(nxt)
-                queue.append((nxt, new_path))
+    for _ in range(max_depth):
+        frontier_nodes = sorted({n for n, _ in frontier})
+        if not frontier_nodes:
+            return []
+        placeholders = ",".join(["?"] * len(frontier_nodes))
+        layer_clause = "AND layer = ?" if layer else ""
+        params: list = list(frontier_nodes)
+        if layer is not None:
+            layer = validate_layer(layer)
+            params.append(layer)
+        edges = _rows_to_dicts(conn.execute(
+            f"SELECT id, from_node, to_node, layer, edge_type, confidence "
+            f"FROM ohm_edges "
+            f"WHERE deleted_at IS NULL "
+            f"AND from_node IN ({placeholders}) "
+            f"{layer_clause}",
+            params,
+        ))
+
+        by_from: dict[str, list[dict[str, Any]]] = {}
+        for e in edges:
+            by_from.setdefault(e["from_node"], []).append(e)
+
+        next_frontier: list[tuple[str, list[dict[str, Any]]]] = []
+        for current, path in frontier:
+            for edge in by_from.get(current, []):
+                nxt = edge["to_node"]
+                if nxt == to_node:
+                    final_path = path + [edge]
+                    return [dict(e, depth=i + 1) for i, e in enumerate(final_path)]
+                if nxt not in visited:
+                    visited.add(nxt)
+                    next_frontier.append((nxt, path + [edge]))
+
+        frontier = next_frontier
 
     return []
 
