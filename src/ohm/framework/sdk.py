@@ -2014,6 +2014,208 @@ class Graph:
 
         return query_loop_status(self._conn, agent_name=self.actor)
 
+    def register_twin(
+        self,
+        label: str,
+        target_node_id: str,
+        *,
+        endpoint_url: str | None = None,
+        description: str | None = None,
+        connects_to: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Register an external domain twin (OHM-josq).
+
+        Args:
+            label: Human-readable twin name.
+            target_node_id: The node this twin models.
+            endpoint_url: Optional URL of the external twin service.
+            description: Optional description of what the twin models.
+            connects_to: Additional nodes to cross-link.
+
+        Returns:
+            The registered twin node record.
+        """
+        from ohm.queries import register_twin
+
+        return register_twin(
+            self._conn,
+            label=label,
+            target_node_id=target_node_id,
+            created_by=self.actor,
+            endpoint_url=endpoint_url,
+            description=description,
+            connects_to=connects_to,
+        )
+
+    def twin_predict(
+        self,
+        twin_id: str,
+        *,
+        inputs: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Get twin predictions as edge_overrides-compatible dict (OHM-josq).
+
+        Args:
+            twin_id: The twin node ID.
+            inputs: Optional input parameters for the twin.
+
+        Returns:
+            Dict with twin_id, edge_overrides, and nodes.
+        """
+        from ohm.queries import twin_predict
+
+        return twin_predict(self._conn, twin_id, inputs=inputs)
+
+    def twin_constraints(self, twin_id: str) -> dict[str, Any]:
+        """Get twin constraints (OHM-josq).
+
+        Args:
+            twin_id: The twin node ID.
+
+        Returns:
+            Dict with twin, evaluates_edges, and constraints.
+        """
+        from ohm.queries import twin_constraints
+
+        return twin_constraints(self._conn, twin_id)
+
+    def validate_action_against_twin(
+        self,
+        twin_id: str,
+        action_id: str,
+    ) -> dict[str, Any]:
+        """Validate an action against twin constraints (OHM-josq).
+
+        Args:
+            twin_id: The twin node ID.
+            action_id: The action node ID to validate.
+
+        Returns:
+            Dict with valid (bool) and violations (list).
+        """
+        from ohm.queries import validate_action_against_twin
+
+        return validate_action_against_twin(self._conn, twin_id=twin_id, action_id=action_id)
+
+    def explain_twin(self, twin_id: str) -> dict[str, Any]:
+        """Explain what the twin models (OHM-josq).
+
+        Args:
+            twin_id: The twin node ID.
+
+        Returns:
+            Dict with twin_id, label, target_node_id, target_label,
+            endpoint_url, constraint_count, edge_count, summary.
+        """
+        from ohm.queries import explain_twin
+
+        return explain_twin(self._conn, twin_id)
+
+    def create_twin_template(
+        self,
+        label: str,
+        target_node_id: str,
+        *,
+        constraint_schema: dict[str, Any] | None = None,
+        required_edges: list[str] | None = None,
+        description: str | None = None,
+        connects_to: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Create a twin template (OHM-hl61).
+
+        Args:
+            label: Human-readable template name.
+            target_node_id: The node this template models.
+            constraint_schema: Optional dict of constraints for instantiated twins.
+            required_edges: Optional list of edge types required on the target.
+            description: Optional description of what the template models.
+            connects_to: Additional nodes to cross-link.
+
+        Returns:
+            The created twin_template node record.
+        """
+        from ohm.queries import create_twin_template
+
+        return create_twin_template(
+            self._conn,
+            label=label,
+            target_node_id=target_node_id,
+            created_by=self.actor,
+            constraint_schema=constraint_schema,
+            required_edges=required_edges,
+            description=description,
+            connects_to=connects_to,
+        )
+
+    def list_twin_templates(
+        self,
+        *,
+        target_node_id: str | None = None,
+        created_by: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """List twin templates (OHM-hl61).
+
+        Args:
+            target_node_id: Optional filter — only templates evaluating this node.
+            created_by: Optional filter — only templates by this agent.
+            limit: Maximum number of templates to return.
+
+        Returns:
+            List of twin_template node records.
+        """
+        from ohm.queries import list_twin_templates
+
+        return list_twin_templates(
+            self._conn,
+            target_node_id=target_node_id,
+            created_by=created_by,
+            limit=limit,
+        )
+
+    def get_twin_template(self, template_id: str) -> dict[str, Any]:
+        """Get a twin template with its edges and metadata (OHM-hl61).
+
+        Args:
+            template_id: The twin_template node ID.
+
+        Returns:
+            Dict with template, evaluates_edges, constraint_schema, required_edges.
+        """
+        from ohm.queries import get_twin_template
+
+        return get_twin_template(self._conn, template_id)
+
+    def instantiate_twin_from_template(
+        self,
+        template_id: str,
+        target_node_id: str,
+        *,
+        label: str | None = None,
+        connects_to: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Instantiate a twin from a template (OHM-hl61).
+
+        Args:
+            template_id: The twin_template to instantiate.
+            target_node_id: The node the new twin will model.
+            label: Optional label for the twin.
+            connects_to: Additional nodes to cross-link.
+
+        Returns:
+            The instantiated twin node record.
+        """
+        from ohm.queries import instantiate_twin_from_template
+
+        return instantiate_twin_from_template(
+            self._conn,
+            template_id=template_id,
+            target_node_id=target_node_id,
+            created_by=self.actor,
+            label=label,
+            connects_to=connects_to,
+        )
+
     def path(
         self,
         from_node: str,

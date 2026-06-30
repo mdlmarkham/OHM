@@ -48,7 +48,8 @@
     "scenario",
     "action",
     "intervention",
-    "twin"
+    "twin",
+    "twin_template"
   ],
   "layer_edge_types": {
     "L0": [

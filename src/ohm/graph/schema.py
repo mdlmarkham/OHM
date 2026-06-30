@@ -71,6 +71,8 @@ VALID_NODE_TYPES = frozenset(
         "intervention",  # A node-level do-operator — "force node Y to state Z"
         # ── Digital twin type (OHM-8dg4) ──
         "twin",  # A digital twin of an external system — registered via snap-in contract
+        # ── Twin template type (OHM-hl61) ──
+        "twin_template",  # Reusable primitive for agents to assemble twins
     }
 )
 
@@ -102,6 +104,7 @@ MUST_HAVE_EDGE_NODE_TYPES: frozenset[str] = frozenset(
         "action",  # Must link to the scenario that proposed it
         "intervention",  # Must link to the node it intervenes on
         "twin",  # Must link to the node/system it models (OHM-8dg4)
+        "twin_template",  # Must link to the node/system it templates (OHM-hl61)
         # Forward-compat (per OHM-tjzh spec)
         "synthesis",
         "observation",
