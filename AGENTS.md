@@ -21,7 +21,11 @@ python -m ohm.cli graph schema
 
 ## Project Architecture
 
-OHM is a Python package under `src/ohm/` with a `src`-layout. The CLI is the primary interface — agents interact with the graph through `ohm` commands, not raw SQL.
+OHM is a Python package under `src/ohm/` with a `src`-layout. The package is
+organised by responsibility: graph substrate (DuckDB access + CTE queries),
+inference engines (Bayesian, Markov, PERT, causal, hyperdimensional), the
+HTTP daemon (`ohmd`), the agent SDK, document/ingestion pipelines, decision
+support, and integrations.
 
 ```
 src/ohm/
@@ -31,57 +35,156 @@ src/ohm/
 ├── db.py                # DuckDB connection lifecycle, schema init
 ├── validation.py        # Input validation (SQL injection prevention for CTE identifiers)
 ├── boundary.py          # Layer ownership enforcement (ADR-003)
+├── contract.py          # Wire-format contracts (request/response shapes)
+├── client.py            # Outbound HTTP client (connect to ohmd)
 ├── quack.py             # Quack protocol integration (concurrent multi-writer access)
 ├── store.py             # OhmStore ORM wrapper — used by ohmd ONLY
 ├── sdk.py               # Python SDK for agent programmatic access
-├── server.py            # ohmd HTTP daemon — uses OhmStore, not queries/
-├── cli/
-│   ├── __init__.py      # Full argparse command tree (serve, graph, state, snapshot, diff)
-│   └── __main__.py      # `python -m ohm.cli` entry point
+├── tenant.py            # Multi-tenancy helpers (ADR-015)
 ├── methods.py           # Substrate methods: aggregation, anomalies, Monte Carlo, etc.
-├── queries/
-│   └── __init__.py      # Parameterized CTE query functions (direct-connection API)
+├── bayesian.py          # Bayesian inference (delegates to inference/bayesian.py)
+├── causal_refutation.py # Causal refutation (delegates to inference/)
+├── markov.py            # Markov chain analysis (delegates to inference/)
+├── pert.py              # PERT/CPM scheduling (delegates to inference/)
+├── hd.py                # Hyperdimensional fingerprinting (delegates to inference/)
+├── game.py              # Game theory (delegates to inference/)
+├── patterns.py          # Pattern detection helpers
+├── evidence.py          # Evidence aggregation
+├── hooks.py / hooks_builtin.py  # Extension hooks
+├── ingest.py            # Top-level ingest entry point
+├── integrations.py      # Re-export of integrations/ package
+├── utils.py             # Shared utilities
+├── visualization.py     # Graph visualisation helpers
+├── semantic_roles.py    # Semantic role labelling
+├── marimo_pair.py       # Marimo notebook pair integration
+├── metis_bridge.py      # Métis (planning agent) integration
+├── graph_reader.py      # Read-only graph reader
+├── bos/                 # Business Operating System (ODPS data product catalog)
+├── cli/                 # Full argparse command tree (`ohm` entry point)
+│   ├── __init__.py
+│   └── __main__.py
+├── decision/            # Recommendation engine
+│   └── recommendation.py
+├── documents/           # Document store + extraction + ingestion
+│   ├── store.py
+│   ├── extract.py
+│   └── ingest.py
+├── framework/           # Agent-facing SDK + supporting libs (NEW canonical SDK home)
+│   ├── sdk.py           # Canonical Graph class for agents
+│   ├── client.py
+│   ├── validation.py
+│   ├── graph_reader.py
+│   ├── exceptions.py
+│   ├── ingest.py
+│   ├── integrations.py
+│   ├── semantic_roles.py
+│   ├── metis_bridge.py
+│   └── marimo_pair.py
+├── graph/               # Substrate: DuckDB queries, methods, embeddings, decay
+│   ├── db.py
+│   ├── queries/__init__.py  # ~12k lines — the canonical query module
+│   ├── methods.py
+│   ├── embeddings.py
+│   ├── decay.py
+│   ├── calibration.py
+│   ├── constraints.py
+│   ├── crypto.py
+│   └── quack.py
+├── inference/           # CPU-bound analytics engines (pure-Python + numpy/scipy)
+│   ├── bayesian.py
+│   ├── causal_refutation.py
+│   ├── discovery.py
+│   ├── evidence.py
+│   ├── game_theory.py
+│   ├── hd.py
+│   └── markov.py
+├── ingestion/           # Document tree ingestion pipeline
+│   ├── pipeline.py
+│   ├── document_tree.py
+│   ├── document_tree_ingest.py
+│   └── document_library_bridge.py
+├── integrations/        # External system integrations
+│   ├── __init__.py
+│   └── beads_sync.py
+├── mcp/                 # Model Context Protocol server
+│   └── server.py
+├── queries/             # Shim re-exporting ohm.graph.queries (backward compat)
+│   ├── __init__.py
+│   └── hypothesis_tree.py
+├── semantic_layer/      # Semantic auto-linking + actions
+│   ├── engine.py
+│   └── actions.py
+└── server/              # ohmd HTTP daemon
+    ├── server.py        # ~3k lines — stdlib HTTP server + handler mixins
+    ├── contract.py
+    ├── boundary.py
+    ├── ask_router.py
+    ├── suggestions.py
+    ├── nudges.py
+    ├── relational_tags.py
+    ├── visualization.py
+    └── handlers/        # Per-resource HTTP handlers
+        ├── graph.py, inference.py, decision.py, catalog.py,
+        ├── analysis.py, admin.py, ask.py, documents.py,
+        ├── infra.py, markov.py, tenant.py
 tests/
-├── conftest.py          # Fixtures: test_db, sample_graph_small/medium/large
-├── test_schema.py       # Schema validation + DDL execution tests
-├── test_exceptions.py   # Error type + exit code tests
-├── test_boundary.py     # Layer ownership enforcement tests
-├── test_queries.py      # CTE query correctness tests
-├── test_cli.py          # CLI argument parsing tests (23 commands)
-├── test_cli_integration.py  # End-to-end CLI tests against real DB
-├── test_ohm.py           # OhmStore integration tests
-├── test_integration.py   # Full workflow integration tests
-├── test_server.py        # HTTP daemon endpoint tests
-├── test_quack.py         # Quack protocol integration tests
-└── test_topo_cli.py      # TOPO CLI tests
+├── conftest.py          # Fixtures: test_db, sample_graph_*, OHM_DISABLE_* toggles
+├── test_hd.py           # Hyperdimensional fingerprinting (57 tests)
+├── test_queries.py      # CTE query correctness
+├── test_integration.py  # End-to-end workflow
+├── test_server.py       # HTTP daemon endpoint tests
+├── test_cli.py / test_cli_integration.py / test_topo_cli.py
+├── test_sdk.py / test_ohm.py
+├── test_*.py            # 100+ module-specific test files (see tests/)
+└── test_integrations.py # ⚠️ currently broken (pre-existing import error)
 ```
 
-**603+ tests passing** across all modules.
+**~2,480 tests collected** (excluding the pre-existing broken `test_integrations.py`).
+Run with: `python -m pytest tests/ --ignore=tests/test_integrations.py`.
+
 ```
 
 ### Module Boundaries
 
-Two codepaths exist for the same operations. This is intentional:
+Three codepaths exist for the same operations. This is intentional:
 
 | Module | Role | Used by | Direct dependency |
 |--------|------|---------|-----------------|
-| `queries/__init__.py` | Direct-connection API — functions take a DuckDBPyConnection | CLI, SDK, tests | `boundary.py`, `validation.py` |
-| `store.py` (OhmStore) | ORM wrapper — manages its own connection and schema init | `server.py` (ohmd) only | DuckDB directly |
-| `sdk.py` (Graph) | Agent-facing Python API — wraps `queries/` with context manager | Agents | `queries/`, `db.py` |
-| `server.py` (ohmd) | HTTP daemon — uses OhmStore | External HTTP clients | `store.py` |
+| `graph/queries/__init__.py` | **Canonical** direct-connection API — functions take a `DuckDBPyConnection` | CLI, SDK, tests | `boundary.py`, `validation.py` |
+| `queries/__init__.py` | Backward-compat shim re-exporting `graph.queries` | legacy imports | (shim) |
+| `store.py` (OhmStore) | ORM wrapper — manages its own connection and schema init | `server/server.py` (ohmd) only | DuckDB directly |
+| `framework/sdk.py` (Graph) | **Canonical** agent-facing Python API — context-manager Graph class | Agents | `graph/queries/`, `db.py` |
+| `sdk.py` (top-level) | Older agent SDK — kept for backward compat | legacy agents | `queries/`, `db.py` |
+| `server/server.py` (ohmd) | HTTP daemon — uses OhmStore | External HTTP clients | `store.py` |
 
 **When adding a new operation:**
-- If agents call it: add to `queries/` first, then wrap in `sdk.py`
-- If the daemon calls it: add to both `queries/` and `store.py` (or refactor server.py to use queries/)
-- **Never** add to `store.py` without also adding to `queries/`
+- If agents call it: add to `graph/queries/` first, then wrap in `framework/sdk.py`
+- If the daemon calls it: add to both `graph/queries/` and `store.py` (or refactor `server/` to use `graph/queries/`)
+- **Never** add to `store.py` without also adding to `graph/queries/`
 
-**Key design decisions** (see [docs/adr/](docs/adr/README.md)):
+**Key design decisions** (see [docs/adr/](docs/adr/README.md), 26 ADRs indexed):
 - **ADR-0001**: Architecture decisions compendium (DuckDB local cache, challenge edges, JSON arrays, timestamps, CLI-first, advisory schema)
+- **ADR-0002**: Quack protocol for concurrent access
+- **ADR-0003**: Agent-owned edges with challenge semantics
+- **ADR-0004**: Three-layer data architecture (per-agent cache, shared DuckLake, private scratch)
+- **ADR-0005**: Self-documenting CLI as agent interface
+- **ADR-0006**: Advisory schema with graduated enforcement
 - **ADR-0007**: Schema evolution and type governance for domain expansion
-- **ADR-008** (inline): Probability and Confidence as separate edge attributes (confidence = belief, probability = likelihood)
-- **ADR-009** (inline): NEGATES edge type for negative evidence (semantically distinct from CHALLENGED_BY)
-- **ADR-010** (inline): Urgency ≠ priority (urgency = time-sensitivity on edges, priority = importance on nodes)
-- **ADR-011** (inline): Observation type extensibility (domain-specific types without DDL migrations)
+- **ADR-0008**: Probability and Confidence as separate edge attributes (confidence = belief, probability = likelihood)
+- **ADR-0009**: NEGATES edge type for negative evidence (semantically distinct from CHALLENGED_BY)
+- **ADR-0010**: Urgency on edges and priority on nodes
+- **ADR-0011**: Observation type extensibility
+- **ADR-0012**: Per-agent local DuckDB cache
+- **ADR-0013**: Value of Information for knowledge graphs
+- **ADR-0015**: Multi-tenancy via single-process isolated DuckDB instances
+- **ADR-0018**: Cross-link requirement for derived-claim nodes (writing protocol enforced by `ohm-tjzh`)
+- **ADR-0028**: Source tier architecture and confidence ceilings
+- **ADR-0030**: Oppositional review pipeline
+- **ADR-0031**: Hyperdimensional fingerprinting prototype
+- **ADR-0032**: HD membership layer (persistent fingerprints in DuckDB)
+- **ADR-0035**: TELOS signing — cryptographic audit trail
+- **ADR-0037**: Per-agent read scopes and temporal pinning
+- **ADR-0039**: Bedrock knowledge store (write-through for managed embeddings)
 
 ## Conventions
 
@@ -293,11 +396,18 @@ with connect("/var/lib/ohm/ohm.duckdb", actor="metis") as g:
 ## Common Pitfalls
 
 1. **DuckDB doesn't support `REFERENCES` constraints.** Don't add foreign keys to DDL — enforce in application code
-2. **DuckDB `fetchall()` returns tuples, not dicts.** Always use `_rows_to_dicts()` from queries module
+2. **DuckDB `fetchall()` returns tuples, not dicts.** Use `_rows_to_dicts()` from `ohm.graph.queries` (benchmark confirmed this is faster than `result.df().to_dict('records')` without pyarrow; don't switch to the pandas bridge).
 3. **Recursive CTEs can't reference themselves in subqueries.** Keep CTE logic simple — avoid `NOT EXISTS (SELECT FROM cte)` patterns
 4. **`bd sync` works fine** — it exports issues to `.beads/issues.jsonl` and is git-tracked
 5. **Use `bd doctor`** to diagnose daemon issues; `bd list` and `bd show` for status
 6. **The `pyproject.toml` was converted from pixi format to PEP 621.** Don't revert to pixi-style `[package]`/`[dependencies]` sections
+7. **HD bit operations** (`ohm.inference.hd.majority_rule`) are byte-level — the Python loop is already byte-parallel and ~3.4× faster than bit-level iteration. Don't regress to per-bit loops.
+
+## Performance Hot Paths
+
+- **`ohm.inference.hd.majority_rule`** — 10000-bit hypervector bundling, called from `fingerprint_text`, `fingerprint_node`, `hd_similarity_search`. Already byte-level; do not regress.
+- **`ohm.graph.methods.monte_carlo_impact` / `ohm.graph.queries.monte_carlo_cascade`** — pure-Python stochastic BFS, called by `/monte-carlo/<id>` and `/cascade/<id>` HTTP endpoints. Real Rust candidate if Monte Carlo latency becomes user-visible.
+- **Most other "hot" loops** (Markov, Bayesian, PERT, Game theory, Granger) already delegate to numpy/scipy — Python just orchestrates.
 
 ## Writing Protocol — Cross-Link Required (OHM-tjzh / ADR-018)
 

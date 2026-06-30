@@ -72,20 +72,48 @@ def majority_rule(vectors: list[bytearray], *, dim: int = DEFAULT_DIM) -> bytear
     for v in vectors:
         if len(v) != n_bytes:
             raise HDError(f"vector length {len(v)} != expected {n_bytes}")
-    bit_counts = [0] * dim
-    for v in vectors:
-        for bit_idx in range(dim):
-            byte_idx = bit_idx // 8
-            bit_off = 7 - (bit_idx % 8)
-            if v[byte_idx] & (1 << bit_off):
-                bit_counts[bit_idx] += 1
     half = len(vectors) / 2.0
     result = bytearray(n_bytes)
-    for bit_idx in range(dim):
-        if bit_counts[bit_idx] > half:
-            byte_idx = bit_idx // 8
-            bit_off = 7 - (bit_idx % 8)
-            result[byte_idx] |= 1 << bit_off
+    last_byte_bits = dim - (n_bytes - 1) * 8
+    for b in range(n_bytes):
+        bits_in_byte = 8 if b < n_bytes - 1 else last_byte_bits
+        counts0 = 0
+        counts1 = 0
+        counts2 = 0
+        counts3 = 0
+        counts4 = 0
+        counts5 = 0
+        counts6 = 0
+        counts7 = 0
+        for v in vectors:
+            byte = v[b]
+            counts0 += (byte >> 7) & 1
+            counts1 += (byte >> 6) & 1
+            counts2 += (byte >> 5) & 1
+            counts3 += (byte >> 4) & 1
+            counts4 += (byte >> 3) & 1
+            counts5 += (byte >> 2) & 1
+            counts6 += (byte >> 1) & 1
+            if bits_in_byte == 8:
+                counts7 += byte & 1
+        result_byte = 0
+        if counts0 > half:
+            result_byte |= 1 << 7
+        if counts1 > half:
+            result_byte |= 1 << 6
+        if counts2 > half:
+            result_byte |= 1 << 5
+        if counts3 > half:
+            result_byte |= 1 << 4
+        if counts4 > half:
+            result_byte |= 1 << 3
+        if counts5 > half:
+            result_byte |= 1 << 2
+        if counts6 > half:
+            result_byte |= 1 << 1
+        if bits_in_byte == 8 and counts7 > half:
+            result_byte |= 1 << 0
+        result[b] = result_byte
     return result
 
 
