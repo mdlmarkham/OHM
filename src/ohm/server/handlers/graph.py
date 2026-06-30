@@ -14,6 +14,24 @@ from ohm.server import server as _server_module
 from ohm.server.nudges import generate_nudges, enrich_response
 
 
+def _resolve_type_field(body: dict, *aliases: str, default: str | None = None) -> str | None:
+    """Resolve a type-like field from an HTTP body, accepting multiple aliases.
+
+    Per OHM-0abu (live daemon review, 2026-06-30): the HTTP body uses the
+    generic key ``type`` for node/edge/observation types, which collides with
+    natural-language naming — clients reasonably send ``node_type``,
+    ``edge_type``, or ``obs_type`` instead. Accept all aliases for backward
+    compatibility. The first non-empty value in priority order wins; the
+    descriptive name (``node_type``/``edge_type``/``obs_type``) should be
+    listed first when called. Empty string is treated as missing.
+    """
+    for key in aliases:
+        value = body.get(key)
+        if value is not None and value != "":
+            return value
+    return default
+
+
 class GraphHandlerMixin:
     """Handler mixin for graph CRUD endpoints (OHM-hpxa).
 
@@ -1264,7 +1282,7 @@ class GraphHandlerMixin:
         """
         from ohm.schema import requires_cross_link
 
-        node_type = body.get("type", "concept")
+        node_type = _resolve_type_field(body, "node_type", "type", default="concept") or "concept"
         if not requires_cross_link(node_type):
             return None
 
@@ -1351,7 +1369,7 @@ class GraphHandlerMixin:
         # Inline _enforce_cross_link_requirement is no longer called here.
 
         # ADR-022: Validate layer promotion constraints on write
-        if body.get("layer") and body.get("type") == "fragment":
+        if body.get("layer") and _resolve_type_field(body, "node_type", "type") == "fragment":
             node_layer = body.get("layer", "L0")
             target_layer = body.get("promote_to_layer")
             if target_layer and node_layer != target_layer:
@@ -1384,7 +1402,7 @@ class GraphHandlerMixin:
         result = self.current_store.write_node(
             id=body["id"],
             label=body["label"],
-            type=body.get("type", "concept"),
+            type=_resolve_type_field(body, "node_type", "type", default="concept") or "concept",
             content=body.get("content"),
             confidence=body.get("confidence", 1.0),
             visibility=body.get("visibility", "team"),
@@ -1442,7 +1460,7 @@ class GraphHandlerMixin:
                     content=body.get("content"),
                     label=body.get("label"),
                     tags=body.get("tags"),
-                    node_type=body.get("type"),
+                    node_type=_resolve_type_field(body, "node_type", "type"),
                     has_edges=bool(body.get("connects_to")),
                     deadline=deadline,
                     use_store_conn=True,
@@ -1506,7 +1524,7 @@ class GraphHandlerMixin:
         node = find_or_create_node(
             self.current_store.conn,
             label=body["label"],
-            node_type=body.get("type", "concept"),
+            node_type=_resolve_type_field(body, "node_type", "type", default="concept") or "concept",
             content=body.get("content"),
             created_by=agent,
             visibility=body.get("visibility", "team"),
@@ -1733,7 +1751,7 @@ class GraphHandlerMixin:
         from ohm.graph.constraints import validate_edge_constraints
 
         edge_valid, edge_warnings, edge_errors = validate_edge_constraints(
-            edge_type=body.get("type", ""),
+            edge_type=_resolve_type_field(body, "edge_type", "type", default="") or "",
             layer=body.get("layer", "L3"),
             conn=self.current_store.conn,
             from_node=body.get("from"),
@@ -1794,7 +1812,7 @@ class GraphHandlerMixin:
         nudges = generate_nudges(
             action="edge",
             node_id=body.get("to") or body.get("from"),
-            edge_type=body.get("type"),
+            edge_type=_resolve_type_field(body, "edge_type", "type"),
             confidence=body.get("confidence"),
             provenance=body.get("provenance"),
             tags=None,
@@ -1813,7 +1831,7 @@ class GraphHandlerMixin:
                 conn=self.current_store.conn,
                 from_node=body["from"],
                 to_node=body["to"],
-                edge_type=body.get("type", ""),
+                edge_type=_resolve_type_field(body, "edge_type", "type", default="") or "",
             )
             if tag_result["tags_added"]:
                 result["relational_tags"] = tag_result
@@ -1829,7 +1847,7 @@ class GraphHandlerMixin:
                     store=self.current_store,
                     from_node=body["from"],
                     to_node=body["to"],
-                    edge_type=body.get("type", ""),
+                    edge_type=_resolve_type_field(body, "edge_type", "type", default="") or "",
                     layer=body.get("layer", "L3"),
                     deadline=deadline,
                     use_store_conn=True,
@@ -1918,7 +1936,7 @@ class GraphHandlerMixin:
         node_id = validate_identifier(node_id, name="node_id")
         if not self.current_store.get_node(node_id):
             raise NodeNotFoundError(f"Node not found: {node_id}")
-        obs_type = body.get("type", "measurement")
+        obs_type = _resolve_type_field(body, "obs_type", "type", default="measurement") or "measurement"
         if obs_type not in self.schema_config.observation_types:
             raise ValidationError(f"Invalid observation type '{obs_type}' — must be one of: {', '.join(sorted(self.schema_config.observation_types))}")
         scale = body.get("scale")
