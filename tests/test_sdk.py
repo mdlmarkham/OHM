@@ -347,6 +347,25 @@ class TestGraphRead:
         result = graph.confidence_report(since="2000-01-01T00:00:00")
         assert result["summary"]["new"] >= 1
 
+    # ── OHM-xagx: scenario SDK method ──
+
+    def test_scenario_baseline(self, graph):
+        a = graph.create_node(label="Supplier", node_type="concept")["id"]
+        b = graph.create_node(label="Factory", node_type="concept")["id"]
+        e = graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
+        result = graph.scenario(a, failure_probability=1.0)
+        assert "baseline" in result
+        assert "counterfactual" in result
+        assert "deltas" in result
+
+    def test_scenario_no_compare(self, graph):
+        a = graph.create_node(label="Source", node_type="concept")["id"]
+        b = graph.create_node(label="Target", node_type="concept")["id"]
+        graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
+        result = graph.scenario(a, compare=False)
+        assert "cascade" in result
+        assert "baseline" not in result
+
     def test_agent_state(self, graph):
         graph.set_focus("testing")
         results = graph.agent_state()
