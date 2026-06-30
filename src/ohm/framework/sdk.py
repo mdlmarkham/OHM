@@ -2216,6 +2216,138 @@ class Graph:
             connects_to=connects_to,
         )
 
+    def assemble_twin_for_decision(
+        self,
+        decision_node_id: str,
+        goal: str,
+        *,
+        horizon: int = 7,
+        preferred_template_id: str | None = None,
+        preferred_model_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Assemble a decision-specific twin from templates + primitives (OHM-f7tl).
+
+        Args:
+            decision_node_id: The decision node this twin will support.
+            goal: Natural-language goal describing what the twin should model.
+            horizon: Planning horizon in days (default 7).
+            preferred_template_id: Override template selection.
+            preferred_model_id: Override model selection.
+
+        Returns:
+            Dict with twin, template, model, ranking, reasoning.
+        """
+        from ohm.queries import assemble_twin_for_decision
+
+        return assemble_twin_for_decision(
+            self._conn,
+            decision_node_id=decision_node_id,
+            goal=goal,
+            horizon=horizon,
+            preferred_template_id=preferred_template_id,
+            preferred_model_id=preferred_model_id,
+            created_by=self.actor,
+        )
+
+    def register_model_candidate(
+        self,
+        label: str,
+        twin_id: str,
+        *,
+        model_parameters: dict[str, Any] | None = None,
+        description: str | None = None,
+        connects_to: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Register a model candidate competing for a twin (OHM-75tw).
+
+        Args:
+            label: Human-readable model name.
+            twin_id: The twin this model competes for.
+            model_parameters: Optional dict of model hyperparameters.
+            description: Optional description of the model.
+            connects_to: Additional nodes to cross-link.
+
+        Returns:
+            The registered model_candidate node record.
+        """
+        from ohm.queries import register_model_candidate
+
+        return register_model_candidate(
+            self._conn,
+            label=label,
+            twin_id=twin_id,
+            created_by=self.actor,
+            model_parameters=model_parameters,
+            description=description,
+            connects_to=connects_to,
+        )
+
+    def evaluate_model(
+        self,
+        model_candidate_id: str,
+        *,
+        metrics: dict[str, float],
+        dataset: str | None = None,
+        description: str | None = None,
+    ) -> dict[str, Any]:
+        """Evaluate a model candidate and store metrics (OHM-75tw).
+
+        Args:
+            model_candidate_id: The model candidate being evaluated.
+            metrics: Dict of metric name → score (e.g., {"mae": 0.12, "rmse": 0.18}).
+            dataset: Optional name of the evaluation dataset.
+            description: Optional description of the evaluation.
+
+        Returns:
+            The created model_evaluation node record.
+        """
+        from ohm.queries import evaluate_model
+
+        return evaluate_model(
+            self._conn,
+            model_candidate_id=model_candidate_id,
+            created_by=self.actor,
+            metrics=metrics,
+            dataset=dataset,
+            description=description,
+        )
+
+    def compare_models(
+        self,
+        twin_id: str,
+    ) -> dict[str, Any]:
+        """Compare all model candidates competing for a twin (OHM-75tw).
+
+        Args:
+            twin_id: The twin whose competing models to compare.
+
+        Returns:
+            Dict with twin_id, candidates (ranked list), and recommendation.
+        """
+        from ohm.queries import compare_models
+
+        return compare_models(self._conn, twin_id=twin_id)
+
+    def promote_model(
+        self,
+        model_candidate_id: str,
+    ) -> dict[str, Any]:
+        """Promote a model candidate to active status for its twin (OHM-75tw).
+
+        Args:
+            model_candidate_id: The model candidate to promote.
+
+        Returns:
+            The promoted model_candidate node record.
+        """
+        from ohm.queries import promote_model
+
+        return promote_model(
+            self._conn,
+            model_candidate_id=model_candidate_id,
+            created_by=self.actor,
+        )
+
     def path(
         self,
         from_node: str,

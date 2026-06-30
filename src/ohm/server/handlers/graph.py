@@ -3780,6 +3780,35 @@ class GraphHandlerMixin:
         except NodeNotFoundError as e:
             self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
 
+    def _post_assemble_twin(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /twin/assemble — assemble a decision-specific twin (OHM-f7tl).
+
+        Body: {decision_node_id, goal, horizon?, preferred_template_id?, preferred_model_id?}
+        """
+        from ohm.queries import assemble_twin_for_decision
+        from ohm.exceptions import ValidationError, NodeNotFoundError
+
+        decision_node_id = body.get("decision_node_id")
+        goal = body.get("goal")
+        if not decision_node_id:
+            raise ValidationError("decision_node_id is required")
+        if not goal:
+            raise ValidationError("goal is required")
+
+        try:
+            result = assemble_twin_for_decision(
+                self.current_store.conn,
+                decision_node_id=decision_node_id,
+                goal=goal,
+                horizon=body.get("horizon", 7),
+                preferred_template_id=body.get("preferred_template_id"),
+                preferred_model_id=body.get("preferred_model_id"),
+                created_by=agent,
+            )
+            self._json_response(201, {"ok": True, "data": result})
+        except NodeNotFoundError as e:
+            self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
+
     def _route_twin_template_get(self, path: str, qs: dict) -> None:
         """Dispatch /twin-template/{id}/{action} to the right handler (OHM-hl61)."""
         from ohm.exceptions import ValidationError
@@ -3791,3 +3820,118 @@ class GraphHandlerMixin:
         if len(parts) >= 3 and parts[2]:
             raise ValidationError(f"unknown twin-template action: {parts[2]}")
         self._get_twin_template(path, qs)
+
+    def _post_register_model_candidate(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /model/register — register a model candidate for a twin (OHM-75tw).
+
+        Body: {label, twin_id, model_parameters?, description?, connects_to?}
+        """
+        from ohm.queries import register_model_candidate
+        from ohm.exceptions import ValidationError, NodeNotFoundError
+
+        label = body.get("label")
+        twin_id = body.get("twin_id")
+        if not label:
+            raise ValidationError("label is required")
+        if not twin_id:
+            raise ValidationError("twin_id is required")
+
+        try:
+            result = register_model_candidate(
+                self.current_store.conn,
+                label=label,
+                twin_id=twin_id,
+                created_by=agent,
+                model_parameters=body.get("model_parameters"),
+                description=body.get("description"),
+                connects_to=body.get("connects_to"),
+            )
+            self._json_response(201, {"ok": True, "data": result})
+        except NodeNotFoundError as e:
+            self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
+
+    def _post_evaluate_model(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /model/{id}/evaluate — evaluate a model candidate (OHM-75tw).
+
+        Body: {metrics, dataset?, description?}
+        """
+        from ohm.queries import evaluate_model
+        from ohm.exceptions import ValidationError, NodeNotFoundError
+
+        parts = path.strip("/").split("/")
+        model_candidate_id = parts[1] if len(parts) >= 2 else None
+        if not model_candidate_id:
+            raise ValidationError("model_candidate_id is required in path")
+
+        metrics = body.get("metrics")
+        if not metrics:
+            raise ValidationError("metrics is required")
+
+        try:
+            result = evaluate_model(
+                self.current_store.conn,
+                model_candidate_id=model_candidate_id,
+                created_by=agent,
+                metrics=metrics,
+                dataset=body.get("dataset"),
+                description=body.get("description"),
+            )
+            self._json_response(201, {"ok": True, "data": result})
+        except NodeNotFoundError as e:
+            self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
+
+    def _post_promote_model(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /model/{id}/promote — promote a model candidate to active (OHM-75tw)."""
+        from ohm.queries import promote_model
+        from ohm.exceptions import ValidationError, NodeNotFoundError
+
+        parts = path.strip("/").split("/")
+        model_candidate_id = parts[1] if len(parts) >= 2 else None
+        if not model_candidate_id:
+            raise ValidationError("model_candidate_id is required in path")
+
+        try:
+            result = promote_model(
+                self.current_store.conn,
+                model_candidate_id=model_candidate_id,
+                created_by=agent,
+            )
+            self._json_response(200, {"ok": True, "data": result})
+        except NodeNotFoundError as e:
+            self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
+
+    def _get_compare_models(self, path: str, qs: dict) -> None:
+        """GET /model/compare — compare model candidates for a twin (OHM-75tw).
+
+        Query params: ?twin_id=
+        """
+        from ohm.queries import compare_models
+        from ohm.exceptions import ValidationError, NodeNotFoundError
+
+        twin_id = qs.get("twin_id", [None])[0]
+        if not twin_id:
+            raise ValidationError("twin_id query parameter is required")
+
+        try:
+            result = compare_models(
+                self.current_store.read_conn,
+                twin_id=twin_id,
+            )
+            self._json_response(200, {"ok": True, "data": result})
+        except NodeNotFoundError as e:
+            self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
+
+    def _route_model_post(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """Dispatch /model/{id}/{evaluate|promote} to the right handler (OHM-75tw)."""
+        from ohm.exceptions import ValidationError
+
+        parts = path.strip("/").split("/")
+        if len(parts) < 3:
+            raise ValidationError("POST /model/{id}/{evaluate|promote} required")
+        action = parts[2]
+        if action == "evaluate":
+            self._post_evaluate_model(path, qs, body, agent)
+        elif action == "promote":
+            self._post_promote_model(path, qs, body, agent)
+        else:
+            raise ValidationError(f"unknown model action: {action}")

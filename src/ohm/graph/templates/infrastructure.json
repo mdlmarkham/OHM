@@ -86,9 +86,10 @@
       "RELATED_TO",
       "SUPPORTS",
       "THREAT_CLUSTER",
-      "TRANSITIONS_TO"
-    ],
-    "L4": [
+      "TRANSITIONS_TO",
+      "COMPETES_WITH",
+      "EVALUATED_BY",
+    
       "BLOCKS",
       "DEPENDS_ON",
       "ENABLES",

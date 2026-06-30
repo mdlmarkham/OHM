@@ -99,9 +99,9 @@
       "REFINES",
       "RELATED_TO",
       "SUPPORTS",
-      "TRANSITIONS_TO"
-    ],
-    "L4": [
+      "TRANSITIONS_TO",
+      "COMPETES_WITH",
+      "EVALUATED_BY",
       "BLOCKS",
       "DEPENDS_ON",
       "ENABLES",

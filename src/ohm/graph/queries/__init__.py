@@ -8859,3 +8859,678 @@ def instantiate_twin_from_template(
     _log_change(conn, "ohm_nodes", twin["id"], "INSTANTIATE_TWIN", created_by)
 
     return _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [twin["id"]]))[0]
+
+
+# ── Twin Construction Engine (OHM-f7tl) ──────────────────────────────────────────
+
+
+def _jaccard_similarity(a: str, b: str) -> float:
+    tokens_a = set(a.lower().split())
+    tokens_b = set(b.lower().split())
+    if not tokens_a and not tokens_b:
+        return 1.0
+    if not tokens_a or not tokens_b:
+        return 0.0
+    intersection = tokens_a & tokens_b
+    union = tokens_a | tokens_b
+    return len(intersection) / len(union)
+
+
+def assemble_twin_for_decision(
+    conn: DuckDBPyConnection,
+    *,
+    decision_node_id: str,
+    goal: str,
+    horizon: int = 7,
+    preferred_template_id: str | None = None,
+    preferred_model_id: str | None = None,
+    created_by: str,
+) -> dict[str, Any]:
+    """Assemble a decision-specific twin from templates + primitives (OHM-f7tl).
+
+    Algorithm:
+    1. Resolve decision_node_id (the decision this twin will support).
+    2. Find candidate twin_templates relevant to the decision's domain
+       (match on goal keywords vs template.description / template.label).
+    3. If preferred_template_id provided, use it; else pick highest-ranked.
+    4. Find candidate models for that template's twin (from marketplace).
+    5. If preferred_model_id provided, use it; else pick highest-scoring.
+    6. Instantiate the twin from the chosen template.
+    7. Register the chosen model as a model_candidate linked to the new twin.
+    8. Return {twin, template, model, ranking, reasoning}.
+
+    Ranking:
+    - Template relevance: keyword overlap between goal and template metadata
+      (description, label, required_edges), normalized 0-1.
+    - Model score: latest model_evaluation.score for models tied to the
+      template's twin (if any); else 0.5 (neutral).
+    """
+    import json as _json
+
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import NodeNotFoundError
+
+    decision_node_id = validate_identifier(decision_node_id, name="decision_node_id")
+
+    decision = conn.execute(
+        "SELECT id, label, type FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+        [decision_node_id],
+    ).fetchone()
+    if not decision:
+        raise NodeNotFoundError(f"Decision node not found: {decision_node_id}")
+
+    decision_label = decision[1] or ""
+
+    template_rows = _rows_to_dicts(conn.execute(
+        """SELECT n.id, n.label, n.content, n.metadata, n.created_by
+           FROM ohm_nodes n
+           WHERE n.type = 'twin_template' AND n.deleted_at IS NULL
+           ORDER BY n.created_at DESC""",
+    ))
+
+    template_candidates: list[dict[str, Any]] = []
+    for t in template_rows:
+        desc = t.get("content") or ""
+        label = t.get("label") or ""
+        required_edges_raw = t.get("metadata")
+        required_edges_str = ""
+        if required_edges_raw:
+            try:
+                parsed = _json.loads(required_edges_raw) if isinstance(required_edges_raw, str) else required_edges_raw
+                required_edges_str = " ".join(parsed.get("required_edges", []))
+            except (_json.JSONDecodeError, TypeError):
+                pass
+        corpus = f"{label} {desc} {required_edges_str}"
+        relevance = _jaccard_similarity(goal, corpus)
+        boost = _jaccard_similarity(goal, f"{decision_label} {label}") * 0.25
+        score = min(relevance + boost, 1.0)
+        template_candidates.append({
+            "template_id": t["id"],
+            "label": label,
+            "relevance_score": round(score, 4),
+        })
+
+    template_candidates.sort(key=lambda c: c["relevance_score"], reverse=True)
+
+    chosen_template_id = preferred_template_id
+    if chosen_template_id:
+        chosen_template_id = validate_identifier(chosen_template_id, name="preferred_template_id")
+        template_exists = conn.execute(
+            "SELECT 1 FROM ohm_nodes WHERE id = ? AND type = 'twin_template' AND deleted_at IS NULL",
+            [chosen_template_id],
+        ).fetchone()
+        if not template_exists:
+            raise NodeNotFoundError(f"Preferred template not found: {chosen_template_id}")
+    elif template_candidates:
+        chosen_template_id = template_candidates[0]["template_id"]
+
+    model_candidates: list[dict[str, Any]] = []
+    if chosen_template_id:
+        template_eval_edges = _rows_to_dicts(conn.execute(
+            """SELECT e.to_node, n.label, n.metadata
+               FROM ohm_edges e
+               JOIN ohm_nodes n ON n.id = e.to_node AND n.deleted_at IS NULL
+               WHERE e.from_node = ? AND e.edge_type = 'EVALUATES' AND e.deleted_at IS NULL""",
+            [chosen_template_id],
+        ))
+        target_ids = [ee["to_node"] for ee in template_eval_edges]
+        for tid in target_ids:
+            twin_nodes = _rows_to_dicts(conn.execute(
+                """SELECT n.id, n.label, n.metadata
+                   FROM ohm_nodes n
+                   JOIN ohm_edges e ON e.from_node = n.id AND e.to_node = ? AND e.edge_type = 'EVALUATES' AND e.deleted_at IS NULL
+                   WHERE n.type = 'twin' AND n.deleted_at IS NULL""",
+                [tid],
+            ))
+            for twin_node in twin_nodes:
+                obs_rows = _rows_to_dicts(conn.execute(
+                    """SELECT o.value, o.created_at
+                       FROM ohm_observations o
+                       WHERE o.node_id = ? AND o.type = 'model_evaluation' AND o.deleted_at IS NULL
+                       ORDER BY o.created_at DESC LIMIT 1""",
+                    [twin_node["id"]],
+                ))
+                score = 0.5
+                if obs_rows:
+                    val = obs_rows[0].get("value")
+                    if val is not None:
+                        score = float(val)
+                model_candidates.append({
+                    "model_id": twin_node["id"],
+                    "label": twin_node.get("label", ""),
+                    "score": round(score, 4),
+                })
+
+    model_candidates.sort(key=lambda c: c["score"], reverse=True)
+
+    chosen_model_id = preferred_model_id
+    if chosen_model_id:
+        chosen_model_id = validate_identifier(chosen_model_id, name="preferred_model_id")
+        model_exists = conn.execute(
+            "SELECT 1 FROM ohm_nodes WHERE id = ? AND type = 'twin' AND deleted_at IS NULL",
+            [chosen_model_id],
+        ).fetchone()
+        if not model_exists:
+            raise NodeNotFoundError(f"Preferred model not found: {chosen_model_id}")
+    elif model_candidates:
+        chosen_model_id = model_candidates[0]["model_id"]
+
+    twin_result: dict[str, Any] | None = None
+    template_result: dict[str, Any] | None = None
+    model_result: dict[str, Any] | None = None
+
+    if chosen_template_id:
+        template_result = _rows_to_dicts(conn.execute(
+            "SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+            [chosen_template_id],
+        ))[0] if _rows_to_dicts(conn.execute(
+            "SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+            [chosen_template_id],
+        )) else None
+
+        twin_result = instantiate_twin_from_template(
+            conn,
+            template_id=chosen_template_id,
+            target_node_id=decision_node_id,
+            created_by=created_by,
+            label=f"Twin for {decision_label[:50]}",
+            connects_to=[decision_node_id],
+        )
+
+        create_edge(
+            conn,
+            from_node=twin_result["id"],
+            to_node=decision_node_id,
+            edge_type="DECISION_DEPENDS_ON",
+            layer="L3",
+            created_by=created_by,
+            confidence=0.7,
+        )
+
+        if chosen_model_id:
+            model_result = _rows_to_dicts(conn.execute(
+                "SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                [chosen_model_id],
+            ))[0] if _rows_to_dicts(conn.execute(
+                "SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                [chosen_model_id],
+            )) else None
+
+            create_edge(
+                conn,
+                from_node=twin_result["id"],
+                to_node=chosen_model_id,
+                edge_type="APPLIES_TO",
+                layer="L3",
+                created_by=created_by,
+                confidence=0.7,
+            )
+    else:
+        twin_result = create_node(
+            conn,
+            label=f"Ad-hoc twin for {decision_label[:50]}",
+            node_type="twin",
+            content=f"Ad-hoc twin assembled for decision '{decision_label}' with goal: {goal}",
+            created_by=created_by,
+            connects_to=[decision_node_id],
+        )
+
+        conn.execute(
+            "UPDATE ohm_nodes SET gate_type = 'ad_hoc' WHERE id = ?",
+            [twin_result["id"]],
+        )
+
+        twin_result = _rows_to_dicts(conn.execute(
+            "SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+            [twin_result["id"]],
+        ))[0]
+
+        create_edge(
+            conn,
+            from_node=twin_result["id"],
+            to_node=decision_node_id,
+            edge_type="EVALUATES",
+            layer="L3",
+            created_by=created_by,
+        )
+
+        create_edge(
+            conn,
+            from_node=twin_result["id"],
+            to_node=decision_node_id,
+            edge_type="DECISION_DEPENDS_ON",
+            layer="L3",
+            created_by=created_by,
+            confidence=0.5,
+        )
+
+    template_desc = ""
+    if chosen_template_id:
+        t_row = conn.execute(
+            "SELECT label FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+            [chosen_template_id],
+        ).fetchone()
+        if t_row:
+            template_desc = t_row[0]
+
+    model_desc = ""
+    if chosen_model_id:
+        m_row = conn.execute(
+            "SELECT label FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+            [chosen_model_id],
+        ).fetchone()
+        if m_row:
+            model_desc = m_row[0]
+
+    if chosen_template_id and chosen_model_id:
+        reasoning = f"Selected template '{template_desc}' (relevance {template_candidates[0]['relevance_score'] if template_candidates else 'N/A'}) and model '{model_desc}' (score {model_candidates[0]['score'] if model_candidates else 'N/A'}) for decision '{decision_label}' with goal: {goal}"
+    elif chosen_template_id:
+        reasoning = f"Selected template '{template_desc}' (relevance {template_candidates[0]['relevance_score'] if template_candidates else 'N/A'}) for decision '{decision_label}' with goal: {goal}. No model candidates available."
+    else:
+        reasoning = f"No templates available for decision '{decision_label}' with goal: {goal}. Created ad-hoc twin."
+
+    _log_change(conn, "ohm_nodes", twin_result["id"], "ASSEMBLE_TWIN", created_by)
+
+    return {
+        "twin": twin_result,
+        "template": template_result,
+        "model": model_result,
+        "ranking": {
+            "template_candidates": template_candidates,
+            "model_candidates": model_candidates,
+        },
+        "reasoning": reasoning,
+    }
+
+
+# ── Model Marketplace (OHM-75tw) ──────────────────────────────────────────────
+
+
+def register_model_candidate(
+    conn: DuckDBPyConnection,
+    *,
+    label: str,
+    twin_id: str,
+    created_by: str,
+    model_parameters: dict[str, Any] | None = None,
+    description: str | None = None,
+    connects_to: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Register a model candidate competing for a twin (OHM-75tw).
+
+    Creates a ``model_candidate`` node linked via EVALUATES L3 to the twin.
+    If other model_candidates already compete for the same twin, creates
+    COMPETES_WITH L3 edges between them.
+
+    Args:
+        conn: Database connection.
+        label: Human-readable model name.
+        twin_id: The twin this model competes for.
+        created_by: Agent registering the model.
+        model_parameters: Optional dict of model hyperparameters (stored in metadata).
+        description: Optional description of the model.
+        connects_to: Additional nodes to cross-link (ADR-018).
+
+    Returns:
+        The registered model_candidate node record.
+    """
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import NodeNotFoundError
+
+    twin_id = validate_identifier(twin_id, name="twin_id")
+
+    twin = conn.execute(
+        "SELECT 1 FROM ohm_nodes WHERE id = ? AND type = 'twin' AND deleted_at IS NULL",
+        [twin_id],
+    ).fetchone()
+    if not twin:
+        raise NodeNotFoundError(f"Twin not found: {twin_id}")
+
+    metadata_dict = None
+    if model_parameters is not None:
+        metadata_dict = {"model_parameters": model_parameters, "gate_status": "candidate"}
+
+    candidate = create_node(
+        conn,
+        label=label,
+        node_type="model_candidate",
+        content=description,
+        created_by=created_by,
+        metadata=metadata_dict,
+        connects_to=[twin_id] + (list(connects_to) if connects_to else []),
+    )
+
+    create_edge(
+        conn,
+        from_node=candidate["id"],
+        to_node=twin_id,
+        edge_type="EVALUATES",
+        layer="L3",
+        created_by=created_by,
+    )
+
+    if connects_to:
+        for node_id in connects_to:
+            nid = validate_identifier(node_id, name="connects_to entry")
+            existing = conn.execute(
+                "SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                [nid],
+            ).fetchone()
+            if existing and nid != twin_id:
+                create_edge(
+                    conn,
+                    from_node=candidate["id"],
+                    to_node=nid,
+                    edge_type="EVALUATES",
+                    layer="L3",
+                    created_by=created_by,
+                )
+
+    existing_candidates = _rows_to_dicts(conn.execute(
+        """SELECT n.id FROM ohm_nodes n
+           JOIN ohm_edges e ON e.from_node = n.id AND e.to_node = ? AND e.edge_type = 'EVALUATES' AND e.deleted_at IS NULL
+           WHERE n.type = 'model_candidate' AND n.id != ? AND n.deleted_at IS NULL""",
+        [twin_id, candidate["id"]],
+    ))
+    for ec in existing_candidates:
+        create_edge(
+            conn,
+            from_node=candidate["id"],
+            to_node=ec["id"],
+            edge_type="COMPETES_WITH",
+            layer="L3",
+            created_by=created_by,
+        )
+        create_edge(
+            conn,
+            from_node=ec["id"],
+            to_node=candidate["id"],
+            edge_type="COMPETES_WITH",
+            layer="L3",
+            created_by=created_by,
+        )
+
+    _log_change(conn, "ohm_nodes", candidate["id"], "REGISTER_MODEL_CANDIDATE", created_by)
+
+    return _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [candidate["id"]]))[0]
+
+
+def evaluate_model(
+    conn: DuckDBPyConnection,
+    *,
+    model_candidate_id: str,
+    created_by: str,
+    metrics: dict[str, float],
+    dataset: str | None = None,
+    description: str | None = None,
+) -> dict[str, Any]:
+    """Evaluate a model candidate and store metrics (OHM-75tw).
+
+    Creates a ``model_evaluation`` node linked via EVALUATED_BY L3 to the
+    model candidate. Metrics (MAE, RMSE, log_loss, accuracy, etc.) are
+    stored in the metadata column as JSON.
+
+    Args:
+        conn: Database connection.
+        model_candidate_id: The model candidate being evaluated.
+        created_by: Agent performing the evaluation.
+        metrics: Dict of metric name → score (e.g., {"mae": 0.12, "rmse": 0.18}).
+        dataset: Optional name of the evaluation dataset.
+        description: Optional description of the evaluation.
+
+    Returns:
+        The created model_evaluation node record.
+    """
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import NodeNotFoundError, ValidationError
+
+    model_candidate_id = validate_identifier(model_candidate_id, name="model_candidate_id")
+
+    candidate = conn.execute(
+        "SELECT 1 FROM ohm_nodes WHERE id = ? AND type = 'model_candidate' AND deleted_at IS NULL",
+        [model_candidate_id],
+    ).fetchone()
+    if not candidate:
+        raise NodeNotFoundError(f"Model candidate not found: {model_candidate_id}")
+
+    if not metrics:
+        raise ValidationError("metrics dict must not be empty")
+
+    composite_score = 0.0
+    weight_sum = 0.0
+    metric_weights = {"accuracy": 1.0, "rmse": -1.0, "mae": -1.0, "log_loss": -1.0}
+    for metric_name, value in metrics.items():
+        weight = metric_weights.get(metric_name, 0.5)
+        composite_score += weight * value
+        weight_sum += abs(weight)
+    if weight_sum > 0:
+        composite_score = composite_score / weight_sum
+    else:
+        composite_score = 0.5
+
+    metadata_dict: dict[str, Any] = {
+        "metrics": metrics,
+        "composite_score": round(composite_score, 6),
+    }
+    if dataset:
+        metadata_dict["dataset"] = dataset
+
+    eval_label = f"Evaluation of {model_candidate_id}"
+    if dataset:
+        eval_label = f"Evaluation on {dataset}"
+
+    evaluation = create_node(
+        conn,
+        label=eval_label,
+        node_type="model_evaluation",
+        content=description,
+        created_by=created_by,
+        metadata=metadata_dict,
+        connects_to=[model_candidate_id],
+    )
+
+    create_edge(
+        conn,
+        from_node=model_candidate_id,
+        to_node=evaluation["id"],
+        edge_type="EVALUATED_BY",
+        layer="L3",
+        created_by=created_by,
+    )
+
+    _log_change(conn, "ohm_nodes", evaluation["id"], "EVALUATE_MODEL", created_by)
+
+    return _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [evaluation["id"]]))[0]
+
+
+def compare_models(
+    conn: DuckDBPyConnection,
+    *,
+    twin_id: str,
+) -> dict[str, Any]:
+    """Compare all model candidates competing for a twin (OHM-75tw).
+
+    Returns a ranked list of model candidates with their latest evaluation
+    metrics and composite scores.
+
+    Args:
+        conn: Database connection.
+        twin_id: The twin whose competing models to compare.
+
+    Returns:
+        Dict with twin_id, candidates (ranked list), and recommendation.
+    """
+    import json as _json
+
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import NodeNotFoundError
+
+    twin_id = validate_identifier(twin_id, name="twin_id")
+
+    twin = conn.execute(
+        "SELECT id, label FROM ohm_nodes WHERE id = ? AND type = 'twin' AND deleted_at IS NULL",
+        [twin_id],
+    ).fetchone()
+    if not twin:
+        raise NodeNotFoundError(f"Twin not found: {twin_id}")
+
+    candidates = _rows_to_dicts(conn.execute(
+        """SELECT n.id, n.label, n.metadata, n.created_at
+           FROM ohm_nodes n
+           JOIN ohm_edges e ON e.from_node = n.id AND e.to_node = ? AND e.edge_type = 'EVALUATES' AND e.deleted_at IS NULL
+           WHERE n.type = 'model_candidate' AND n.deleted_at IS NULL
+           ORDER BY n.created_at DESC""",
+        [twin_id],
+    ))
+
+    ranked: list[dict[str, Any]] = []
+    for c in candidates:
+        meta_raw = c.get("metadata")
+        model_params = None
+        gate_status = "candidate"
+        if meta_raw:
+            try:
+                parsed = _json.loads(meta_raw) if isinstance(meta_raw, str) else meta_raw
+                model_params = parsed.get("model_parameters")
+                gate_status = parsed.get("gate_status", "candidate")
+            except (_json.JSONDecodeError, TypeError):
+                pass
+
+        eval_nodes = _rows_to_dicts(conn.execute(
+            """SELECT n.id, n.label, n.metadata, n.created_at
+               FROM ohm_nodes n
+               JOIN ohm_edges e ON e.from_node = ? AND e.to_node = n.id AND e.edge_type = 'EVALUATED_BY' AND e.deleted_at IS NULL
+               WHERE n.type = 'model_evaluation' AND n.deleted_at IS NULL
+               ORDER BY n.created_at DESC LIMIT 1""",
+            [c["id"]],
+        ))
+
+        latest_eval = None
+        composite_score = None
+        metrics = None
+        dataset = None
+        if eval_nodes:
+            ev = eval_nodes[0]
+            ev_meta_raw = ev.get("metadata")
+            if ev_meta_raw:
+                try:
+                    ev_parsed = _json.loads(ev_meta_raw) if isinstance(ev_meta_raw, str) else ev_meta_raw
+                    metrics = ev_parsed.get("metrics")
+                    composite_score = ev_parsed.get("composite_score")
+                    dataset = ev_parsed.get("dataset")
+                except (_json.JSONDecodeError, TypeError):
+                    pass
+            latest_eval = {
+                "evaluation_id": ev["id"],
+                "label": ev.get("label", ""),
+                "created_at": ev.get("created_at"),
+                "metrics": metrics,
+                "composite_score": composite_score,
+                "dataset": dataset,
+            }
+
+        ranked.append({
+            "model_candidate_id": c["id"],
+            "label": c.get("label", ""),
+            "gate_status": gate_status,
+            "model_parameters": model_params,
+            "latest_evaluation": latest_eval,
+            "composite_score": composite_score,
+        })
+
+    ranked.sort(key=lambda r: r["composite_score"] if r["composite_score"] is not None else float("-inf"), reverse=True)
+
+    recommendation = None
+    if ranked and ranked[0]["composite_score"] is not None:
+        recommendation = {
+            "model_candidate_id": ranked[0]["model_candidate_id"],
+            "label": ranked[0]["label"],
+            "composite_score": ranked[0]["composite_score"],
+        }
+
+    return {
+        "twin_id": twin_id,
+        "twin_label": twin[1],
+        "candidates": ranked,
+        "recommendation": recommendation,
+    }
+
+
+def promote_model(
+    conn: DuckDBPyConnection,
+    *,
+    model_candidate_id: str,
+    created_by: str,
+) -> dict[str, Any]:
+    """Promote a model candidate to active status for its twin (OHM-75tw).
+
+    Sets the promoted candidate's gate_status to 'active' and archives all
+    other competing candidates (gate_status → 'archived') for the same twin.
+
+    Args:
+        conn: Database connection.
+        model_candidate_id: The model candidate to promote.
+        created_by: Agent performing the promotion.
+
+    Returns:
+        The promoted model_candidate node record.
+    """
+    import json as _json
+
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import NodeNotFoundError
+
+    model_candidate_id = validate_identifier(model_candidate_id, name="model_candidate_id")
+
+    candidate_row = conn.execute(
+        "SELECT id, metadata FROM ohm_nodes WHERE id = ? AND type = 'model_candidate' AND deleted_at IS NULL",
+        [model_candidate_id],
+    ).fetchone()
+    if not candidate_row:
+        raise NodeNotFoundError(f"Model candidate not found: {model_candidate_id}")
+
+    twin_edges = _rows_to_dicts(conn.execute(
+        """SELECT e.to_node FROM ohm_edges e
+           WHERE e.from_node = ? AND e.edge_type = 'EVALUATES' AND e.deleted_at IS NULL
+           AND e.to_node IN (SELECT id FROM ohm_nodes WHERE type = 'twin' AND deleted_at IS NULL)""",
+        [model_candidate_id],
+    ))
+    twin_ids = [e["to_node"] for e in twin_edges]
+
+    for twin_id in twin_ids:
+        other_candidates = _rows_to_dicts(conn.execute(
+            """SELECT n.id, n.metadata FROM ohm_nodes n
+               JOIN ohm_edges e ON e.from_node = n.id AND e.to_node = ? AND e.edge_type = 'EVALUATES' AND e.deleted_at IS NULL
+               WHERE n.type = 'model_candidate' AND n.id != ? AND n.deleted_at IS NULL""",
+            [twin_id, model_candidate_id],
+        ))
+        for oc in other_candidates:
+            oc_meta_raw = oc.get("metadata")
+            oc_meta = {}
+            if oc_meta_raw:
+                try:
+                    oc_meta = _json.loads(oc_meta_raw) if isinstance(oc_meta_raw, str) else oc_meta_raw
+                except (_json.JSONDecodeError, TypeError):
+                    pass
+            oc_meta["gate_status"] = "archived"
+            conn.execute(
+                "UPDATE ohm_nodes SET metadata = ? WHERE id = ?",
+                [_json.dumps(oc_meta), oc["id"]],
+            )
+
+    current_meta_raw = candidate_row[1]
+    current_meta = {}
+    if current_meta_raw:
+        try:
+            current_meta = _json.loads(current_meta_raw) if isinstance(current_meta_raw, str) else current_meta_raw
+        except (_json.JSONDecodeError, TypeError):
+            pass
+    current_meta["gate_status"] = "active"
+    conn.execute(
+        "UPDATE ohm_nodes SET metadata = ? WHERE id = ?",
+        [_json.dumps(current_meta), model_candidate_id],
+    )
+
+    _log_change(conn, "ohm_nodes", model_candidate_id, "PROMOTE_MODEL", created_by)
+
+    return _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [model_candidate_id]))[0]

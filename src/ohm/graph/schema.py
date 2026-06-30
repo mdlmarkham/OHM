@@ -73,6 +73,9 @@ VALID_NODE_TYPES = frozenset(
         "twin",  # A digital twin of an external system — registered via snap-in contract
         # ── Twin template type (OHM-hl61) ──
         "twin_template",  # Reusable primitive for agents to assemble twins
+        # ── Model marketplace types (OHM-75tw) ──
+        "model_candidate",  # A registered predictive model competing for a twin
+        "model_evaluation",  # A single evaluation result for a model candidate
     }
 )
 
@@ -105,6 +108,9 @@ MUST_HAVE_EDGE_NODE_TYPES: frozenset[str] = frozenset(
         "intervention",  # Must link to the node it intervenes on
         "twin",  # Must link to the node/system it models (OHM-8dg4)
         "twin_template",  # Must link to the node/system it templates (OHM-hl61)
+        # Model marketplace types (OHM-75tw)
+        "model_candidate",  # Must link to the twin it competes for
+        "model_evaluation",  # Must link to the model_candidate it evaluates
         # Forward-compat (per OHM-tjzh spec)
         "synthesis",
         "observation",
@@ -222,6 +228,9 @@ LAYER_EDGE_TYPES: dict[str, frozenset[str]] = {
             "COUNTERFACTUAL_OF",  # scenario → original node (this scenario is a counterfactual of)
             "PROPOSES_ACTION",  # scenario → action (this scenario suggests this action)
             "EVALUATES",  # scenario → node (this scenario evaluates this node)
+            # ── Model marketplace edges (OHM-75tw) ──
+            "COMPETES_WITH",  # model_candidate → model_candidate (competition)
+            "EVALUATED_BY",  # model_candidate → model_evaluation (evaluation result)
         }
     ),
     "L4": frozenset(
