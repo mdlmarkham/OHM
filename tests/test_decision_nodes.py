@@ -33,7 +33,17 @@ class TestDecisionSchema:
             assert "DECISION_DEPENDS_ON" not in LAYER_EDGE_TYPES.get(layer, frozenset())
 
     def test_schema_version_bumped(self):
-        assert SCHEMA_VERSION == "0.37.0"
+        assert SCHEMA_VERSION == "0.38.0"
+
+    def test_migration_0_38_0_present(self):
+        from ohm.schema import MIGRATIONS
+        versions = [v for v, _, _ in MIGRATIONS]
+        assert "0.38.0" in versions
+
+    def test_migration_0_38_0_description(self):
+        from ohm.schema import MIGRATIONS
+        match = [m for m in MIGRATIONS if m[0] == "0.38.0"]
+        assert match and "gate" in match[0][1].lower()
 
     def test_migration_0_37_0_present(self):
         from ohm.schema import MIGRATIONS

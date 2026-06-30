@@ -114,6 +114,14 @@ EXEMPT_CROSS_LINK_NODE_TYPES: frozenset[str] = frozenset({"source", "concept", "
 
 VALID_VISIBILITIES = frozenset({"private", "team", "public", "vault"})
 
+# ── AND-gate governance (OHM-as17) ──────────────────────────────────────────
+# A gate_type of 'AND' means all incoming edges must hold for the node's
+# claim to be valid. 'OR' means any one suffices. NULL (the default) means
+# the node is not a gate. gate_status tracks whether the gate has been
+# converted (AND→OR) or compromised.
+VALID_GATE_TYPES = frozenset({"AND", "OR"})
+VALID_GATE_STATUSES = frozenset({"intact", "converted", "compromised", "failed"})
+
 VALID_PROVENANCES = frozenset(
     {
         "conversation",
@@ -777,6 +785,8 @@ DDL_STATEMENTS: list[str] = [
         success_criteria TEXT,          -- Task node: how to judge whether the claim held (OHM-f5iq)
         outcome          VARCHAR,       -- Task node: TRUE/FALSE/AMBIGUOUS recorded on close (OHM-f5iq)
         outcome_notes    TEXT,          -- Task node: free-text justification for the outcome (OHM-f5iq)
+        gate_type        VARCHAR,       -- AND-gate governance: 'AND', 'OR', or NULL (OHM-as17)
+        gate_status      VARCHAR,       -- AND-gate status: 'intact', 'converted', 'compromised' (OHM-as17)
         deleted_at    TIMESTAMP          -- Soft delete: NULL = active, set = deleted
     );
     """,
@@ -806,6 +816,7 @@ DDL_STATEMENTS: list[str] = [
         challenge_of    VARCHAR,
         challenge_type  VARCHAR,
         metadata        JSON,
+        constraint_expr TEXT,             -- AND-gate constraint expression (OHM-as17)
         deleted_at      TIMESTAMP          -- Soft delete: NULL = active, set = deleted
     );
     """,
@@ -1120,7 +1131,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.37.0"
+SCHEMA_VERSION = "0.38.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -1622,6 +1633,17 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             # This migration exists to bump the schema version so agents
             # can detect that the feedback-graph types are available.
             "SELECT 1;",
+        ],
+    ),
+    (
+        "0.38.0",
+        "OHM-as17: AND-gate governance — gate_type, gate_status on nodes, constraint_expr on edges",
+        [
+            "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS gate_type VARCHAR;",
+            "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS gate_status VARCHAR;",
+            "ALTER TABLE ohm_edges ADD COLUMN IF NOT EXISTS constraint_expr TEXT;",
+            "CREATE INDEX IF NOT EXISTS idx_nodes_gate_type ON ohm_nodes(gate_type) WHERE gate_type IS NOT NULL;",
+            "CREATE INDEX IF NOT EXISTS idx_nodes_gate_status ON ohm_nodes(gate_status) WHERE gate_status IS NOT NULL;",
         ],
     ),
 ]

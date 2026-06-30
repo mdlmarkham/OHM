@@ -11,6 +11,8 @@ from ohm.schema import (
     MUST_HAVE_EDGE_NODE_TYPES,
     SCHEMA_VERSION,
     MIGRATIONS,
+    VALID_GATE_TYPES,
+    VALID_GATE_STATUSES,
 )
 
 
@@ -73,8 +75,8 @@ class TestCrossLinkRequirement:
 class TestSchemaVersion:
     """Verify schema version bumped for the migration."""
 
-    def test_version_is_0370(self):
-        assert SCHEMA_VERSION == "0.37.0"
+    def test_version_is_0380(self):
+        assert SCHEMA_VERSION == "0.38.0"
 
     def test_migration_0370_exists(self):
         versions = [m[0] for m in MIGRATIONS]
@@ -145,3 +147,72 @@ class TestFeedbackGraphIntegration:
         edge = create_edge(test_db, from_node=intervention["id"], to_node=target["id"],
                           edge_type="INTERVENES_ON", layer="L4", created_by="metis")
         assert edge["edge_type"] == "INTERVENES_ON"
+
+
+# ── AND-gate governance (OHM-as17) ──────────────────────────────────────────
+
+
+class TestGateGovernance:
+    """Tests for gate_type, gate_status, and constraint_expr schema (OHM-as17)."""
+
+    def test_valid_gate_types(self):
+        assert "AND" in VALID_GATE_TYPES
+        assert "OR" in VALID_GATE_TYPES
+
+    def test_valid_gate_statuses(self):
+        assert "intact" in VALID_GATE_STATUSES
+        assert "converted" in VALID_GATE_STATUSES
+        assert "compromised" in VALID_GATE_STATUSES
+        assert "failed" in VALID_GATE_STATUSES
+
+    def test_schema_version_0380(self):
+        assert SCHEMA_VERSION == "0.38.0"
+
+    def test_migration_0380_exists(self):
+        versions = [m[0] for m in MIGRATIONS]
+        assert "0.38.0" in versions
+
+    def test_migration_0380_adds_columns(self):
+        migration = next(m for m in MIGRATIONS if m[0] == "0.38.0")
+        stmts = " ".join(migration[2])
+        assert "gate_type" in stmts
+        assert "gate_status" in stmts
+        assert "constraint_expr" in stmts
+
+    def test_gate_type_column_exists(self, test_db):
+        cols = test_db.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'ohm_nodes' AND column_name = 'gate_type'"
+        ).fetchall()
+        assert len(cols) == 1
+
+    def test_gate_status_column_exists(self, test_db):
+        cols = test_db.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'ohm_nodes' AND column_name = 'gate_status'"
+        ).fetchall()
+        assert len(cols) == 1
+
+    def test_constraint_expr_column_exists(self, test_db):
+        cols = test_db.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'ohm_edges' AND column_name = 'constraint_expr'"
+        ).fetchall()
+        assert len(cols) == 1
+
+    def test_node_with_gate_type(self, test_db):
+        from ohm.queries import create_node
+        n = create_node(test_db, label="AND-gate Node", node_type="concept", created_by="metis")
+        test_db.execute("UPDATE ohm_nodes SET gate_type = ?, gate_status = ? WHERE id = ?",
+                        ["AND", "intact", n["id"]])
+        row = test_db.execute("SELECT gate_type, gate_status FROM ohm_nodes WHERE id = ?", [n["id"]]).fetchone()
+        assert row[0] == "AND"
+        assert row[1] == "intact"
+
+    def test_edge_with_constraint_expr(self, test_db):
+        from ohm.queries import create_node, create_edge
+        a = create_node(test_db, label="A", node_type="concept", created_by="metis")
+        b = create_node(test_db, label="B", node_type="concept", created_by="metis")
+        e = create_edge(test_db, from_node=a["id"], to_node=b["id"],
+                        edge_type="CAUSES", layer="L3", created_by="metis")
+        test_db.execute("UPDATE ohm_edges SET constraint_expr = ? WHERE id = ?",
+                        ["A AND B AND C", e["id"]])
+        row = test_db.execute("SELECT constraint_expr FROM ohm_edges WHERE id = ?", [e["id"]]).fetchone()
+        assert row[0] == "A AND B AND C"
