@@ -49,7 +49,9 @@
     "action",
     "intervention",
     "twin",
-    "twin_template"
+    "twin_template",
+    "model_candidate",
+    "model_evaluation"
   ],
   "layer_edge_types": {
     "L0": [
@@ -113,9 +115,10 @@
       "SUPPORTS_EVIDENCE",
       "TESTS",
       "THREAT_CLUSTER",
-      "TRANSITIONS_TO"
-    ],
-    "L4": [
+      "TRANSITIONS_TO",
+      "COMPETES_WITH",
+      "EVALUATED_BY",
+    
       "BLOCKS",
       "DEPENDS_ON",
       "ENABLES",

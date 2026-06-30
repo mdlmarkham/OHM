@@ -80,7 +80,9 @@
       "REFINES",
       "RELATED_TO",
       "SUPPORTS",
-      "TRANSITIONS_TO"
+      "TRANSITIONS_TO",
+      "COMPETES_WITH",
+      "EVALUATED_BY"
     ],
     "L4": [
       "BLOCKS",

@@ -31,7 +31,9 @@
     "action",
     "intervention",
     "twin",
-    "twin_template"
+    "twin_template",
+    "model_candidate",
+    "model_evaluation"
   ],
   "layer_edge_types": {
     "L0": [
@@ -99,9 +101,10 @@
       "DECISION_DEPENDS_ON",
       "COUNTERFACTUAL_OF",
       "PROPOSES_ACTION",
-      "EVALUATES"
-    ],
-    "L4": [
+      "EVALUATES",
+      "COMPETES_WITH",
+      "EVALUATED_BY",
+    
       "BLOCKS",
       "DEPENDS_ON",
       "ENABLES",

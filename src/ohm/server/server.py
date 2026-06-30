@@ -2365,12 +2365,16 @@ OhmHandler._POST_EXACT["/propose-action"] = "_post_propose_action"
 OhmHandler._POST_EXACT["/execute-action"] = "_post_execute_action"
 OhmHandler._GET_EXACT["/loop-status"] = "_get_loop_status"
 OhmHandler._POST_EXACT["/twin/register"] = "_post_register_twin"
+OhmHandler._POST_EXACT["/twin/assemble"] = "_post_assemble_twin"
 OhmHandler._POST_PREFIXES.append(("/twin/", "_post_validate_action"))
 OhmHandler._GET_PREFIXES.append(("/twin/", "_route_twin_get"))
 OhmHandler._POST_EXACT["/twin-template"] = "_post_create_twin_template"
 OhmHandler._POST_PREFIXES.append(("/twin-template/", "_post_instantiate_twin"))
 OhmHandler._GET_EXACT["/twin-templates"] = "_get_twin_templates"
 OhmHandler._GET_PREFIXES.append(("/twin-template/", "_route_twin_template_get"))
+OhmHandler._POST_EXACT["/model/register"] = "_post_register_model_candidate"
+OhmHandler._POST_PREFIXES.append(("/model/", "_route_model_post"))
+OhmHandler._GET_EXACT["/model/compare"] = "_get_compare_models"
 
 
 def make_configured_handler(store: OhmStore):
