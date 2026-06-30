@@ -151,6 +151,8 @@ def generate_nudges(
     metadata: dict | None = None,
     obs_type: str | None = None,
     half_life_days: float | None = None,
+    value: float | None = None,
+    value_contradiction_threshold: float = 0.3,
 ) -> list[dict]:
     """Generate cognitive nudges based on what the agent just wrote.
 
@@ -173,6 +175,9 @@ def generate_nudges(
         metadata: Edge or node metadata dict (may contain 'mechanism' key)
         obs_type: Observation type (for decay-relevant types like 'measurement')
         half_life_days: Observation decay half-life (if set, indicates perishable data)
+        value: The numeric value of the new observation (for contradiction detection)
+        value_contradiction_threshold: Minimum |gap| between new and existing observation
+            values to fire the value_contradiction nudge (default 0.3)
 
     Returns:
         List of nudge dicts with "type", "message", and optional "data"
@@ -356,6 +361,70 @@ def generate_nudges(
                 )
         except Exception:
             pass  # Never fail the write for a nudge
+
+        # ── OHM-jdfq: Value-contradiction nudge (OHM-ag92) ──────────────────
+        # When a new observation's value disagrees with existing observations
+        # on the same node by more than the threshold, fire a nudge. This
+        # is more actionable than contradiction_alert (which only counts
+        # CHALLENGED_BY edges) — it tells the agent WHICH prior obs conflicts.
+        # Skip if a recent CHALLENGED_BY edge exists for the most recent
+        # prior observation (already addressed).
+        if value is not None:
+            try:
+                # Pull the most recent 3 prior observations on this node
+                prior_rows = store.conn.execute(
+                    """SELECT o.id, o.value, o.created_by, o.created_at, o.sigma
+                       FROM ohm_observations o
+                       WHERE o.node_id = ? AND o.deleted_at IS NULL
+                       ORDER BY o.created_at DESC LIMIT 3""",
+                    [node_id],
+                ).fetchall()
+                for prior_id, prior_value, prior_agent, prior_at, prior_sigma in prior_rows:
+                    if prior_value is None:
+                        continue
+                    gap = abs(value - float(prior_value))
+                    if gap < value_contradiction_threshold:
+                        continue
+                    # Check if there's a recent CHALLENGED_BY edge on this prior obs
+                    has_challenge = store.conn.execute(
+                        """SELECT COUNT(*) FROM ohm_edges
+                           WHERE (to_node = ? OR to_node = ?)
+                             AND edge_type = 'CHALLENGED_BY'
+                             AND deleted_at IS NULL
+                             AND created_at >= ?""",
+                        [node_id, prior_id, prior_at],
+                    ).fetchone()
+                    has_challenge_count = has_challenge[0] if has_challenge else 0
+                    if has_challenge_count > 0:
+                        # Already being addressed — don't double-nudge
+                        continue
+                    nudges.append(
+                        {
+                            "type": "value_contradiction",
+                            "message": (
+                                f"Your new observation value ({value:.4g}) differs from "
+                                f"{prior_agent}'s observation ({float(prior_value):.4g}) on the "
+                                f"same node by {gap:.4g}. Consider recording a reconciliation "
+                                f"or challenging the older claim if your evidence is stronger."
+                            ),
+                            "severity": "warning",
+                            "data": {
+                                "node_id": node_id,
+                                "new_value": value,
+                                "prior_value": float(prior_value),
+                                "prior_agent": prior_agent,
+                                "prior_observation_id": prior_id,
+                                "prior_at": str(prior_at) if prior_at else None,
+                                "gap": round(gap, 4),
+                                "threshold": value_contradiction_threshold,
+                            },
+                        }
+                    )
+                    # Only fire once per write — the most recent disagreement is
+                    # the most actionable.
+                    break
+            except Exception:
+                pass  # Never fail the write for a nudge
 
     # ── ADR-026: Semantic edge validation nudge ───────────────────────────
     # OrionBelt pattern: refuse wrong aggregates loudly.

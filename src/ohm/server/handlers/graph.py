@@ -2011,6 +2011,7 @@ class GraphHandlerMixin:
             store=self.current_store,
             obs_type=_resolve_type_field(body, "obs_type", "type", default="measurement") or "measurement",
             half_life_days=body.get("half_life_days"),
+            value=body.get("value"),
         )
         result = enrich_response(result, nudges, store=self.current_store, agent=agent, action="observation", target_id=node_id)
         self._json_response(201, result)

@@ -302,3 +302,179 @@ class TestBackwardCompat:
         nudges = [{"type": "test", "severity": "info", "message": "hi"}]
         result = enrich_response(response, nudges)
         assert result["nudges"] == nudges
+
+
+class TestValueContradictionNudge:
+    """OHM-ag92: value_contradiction nudge when new obs disagrees with prior obs.
+
+    The previous 'contradiction_alert' just counted CHALLENGED_BY edges.
+    This new nudge compares the new observation's numeric value against the
+    most recent prior observations on the same node and fires when the
+    difference exceeds the threshold.
+    """
+
+    def test_fires_when_new_value_far_from_prior(self, conn):
+        from ohm.queries import create_node, create_observation
+
+        node = create_node(conn, label="Sensor", node_type="concept", created_by="alice")
+        create_observation(
+            conn, node_id=node["id"], obs_type="measurement",
+            created_by="bob", value=0.8, source="bob",
+        )
+
+        class FakeStore:
+            pass
+
+        store = FakeStore()
+        store.conn = conn
+
+        nudges = generate_nudges(
+            action="observation", node_id=node["id"], store=store, value=0.1,
+        )
+        types = [n["type"] for n in nudges]
+        assert "value_contradiction" in types
+        n = next(n for n in nudges if n["type"] == "value_contradiction")
+        assert n["severity"] == "warning"
+        assert n["data"]["new_value"] == pytest.approx(0.1, abs=1e-6)
+        assert n["data"]["prior_value"] == pytest.approx(0.8, abs=1e-6)
+        assert n["data"]["gap"] == pytest.approx(0.7, abs=0.01)
+        assert n["data"]["prior_agent"] == "bob"
+
+    def test_does_not_fire_when_values_within_threshold(self, conn):
+        from ohm.queries import create_node, create_observation
+
+        node = create_node(conn, label="Sensor", node_type="concept", created_by="alice")
+        create_observation(
+            conn, node_id=node["id"], obs_type="measurement",
+            created_by="bob", value=0.8, source="bob",
+        )
+
+        class FakeStore:
+            pass
+
+        store = FakeStore()
+        store.conn = conn
+
+        nudges = generate_nudges(
+            action="observation", node_id=node["id"], store=store, value=0.85,
+            value_contradiction_threshold=0.3,
+        )
+        types = [n["type"] for n in nudges]
+        assert "value_contradiction" not in types
+
+    def test_does_not_fire_when_no_prior_observations(self, conn):
+        from ohm.queries import create_node
+
+        node = create_node(conn, label="Fresh", node_type="concept", created_by="alice")
+
+        class FakeStore:
+            pass
+
+        store = FakeStore()
+        store.conn = conn
+
+        nudges = generate_nudges(
+            action="observation", node_id=node["id"], store=store, value=0.5,
+        )
+        types = [n["type"] for n in nudges]
+        assert "value_contradiction" not in types
+
+    def test_does_not_fire_when_value_is_none(self, conn):
+        from ohm.queries import create_node
+
+        node = create_node(conn, label="Sensor", node_type="concept", created_by="alice")
+
+        class FakeStore:
+            pass
+
+        store = FakeStore()
+        store.conn = conn
+
+        nudges = generate_nudges(
+            action="observation", node_id=node["id"], store=store, value=None,
+        )
+        types = [n["type"] for n in nudges]
+        assert "value_contradiction" not in types
+
+    def test_suppressed_when_recent_challenge_exists(self, conn):
+        from ohm.queries import create_node, create_observation, create_edge
+
+        node = create_node(conn, label="Disputed", node_type="concept", created_by="alice")
+        prior = create_observation(
+            conn, node_id=node["id"], obs_type="measurement",
+            created_by="bob", value=0.8, source="bob",
+        )
+        # Create a CHALLENGED_BY edge from the prior obs (as if it was already challenged)
+        create_edge(
+            conn, from_node=node["id"], to_node=prior["id"],
+            layer="L3", edge_type="CHALLENGED_BY", created_by="alice", confidence=0.7,
+        )
+
+        class FakeStore:
+            pass
+
+        store = FakeStore()
+        store.conn = conn
+
+        nudges = generate_nudges(
+            action="observation", node_id=node["id"], store=store, value=0.1,
+        )
+        types = [n["type"] for n in nudges]
+        # Disagreement exists but a challenge has been recorded already
+        # (still fires contradiction_alert because count > 0, but NOT
+        # value_contradiction since it's been addressed)
+        assert "value_contradiction" not in types
+
+    def test_custom_threshold_respected(self, conn):
+        from ohm.queries import create_node, create_observation
+
+        node = create_node(conn, label="Sensor", node_type="concept", created_by="alice")
+        create_observation(
+            conn, node_id=node["id"], obs_type="measurement",
+            created_by="bob", value=0.8, source="bob",
+        )
+
+        class FakeStore:
+            pass
+
+        store = FakeStore()
+        store.conn = conn
+
+        # Tight threshold — small disagreement fires
+        nudges = generate_nudges(
+            action="observation", node_id=node["id"], store=store, value=0.78,
+            value_contradiction_threshold=0.01,
+        )
+        types = [n["type"] for n in nudges]
+        assert "value_contradiction" in types
+
+    def test_fires_only_once_per_write(self, conn):
+        """If multiple prior obs disagree, only the most recent one triggers."""
+        from ohm.queries import create_node, create_observation
+
+        node = create_node(conn, label="Multi", node_type="concept", created_by="alice")
+        # Create 2 prior obs with different values, both far from new value
+        create_observation(
+            conn, node_id=node["id"], obs_type="measurement",
+            created_by="bob", value=0.9, source="bob",
+        )
+        create_observation(
+            conn, node_id=node["id"], obs_type="measurement",
+            created_by="charlie", value=0.1, source="charlie",
+        )
+
+        class FakeStore:
+            pass
+
+        store = FakeStore()
+        store.conn = conn
+
+        nudges = generate_nudges(
+            action="observation", node_id=node["id"], store=store, value=0.5,
+        )
+        vc_nudges = [n for n in nudges if n["type"] == "value_contradiction"]
+        # The most recent prior is charlie (0.1), gap = 0.4 → fires.
+        # bob (0.9) is older — we should NOT iterate further (the break
+        # statement in generate_nudges limits to one).
+        assert len(vc_nudges) == 1
+        assert vc_nudges[0]["data"]["prior_value"] == pytest.approx(0.1, abs=1e-6)
