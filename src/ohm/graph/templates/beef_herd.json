@@ -38,7 +38,10 @@
     "treatment",
     "value",
     "water",
-    "weather"
+    "weather",
+    "scenario",
+    "action",
+    "intervention"
   ],
   "layer_edge_types": {
     "L0": [

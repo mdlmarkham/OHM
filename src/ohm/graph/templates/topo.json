@@ -44,7 +44,10 @@
     "transformer",
     "value",
     "valve",
-    "vessel"
+    "vessel",
+    "scenario",
+    "action",
+    "intervention"
   ],
   "layer_edge_types": {
     "L0": [

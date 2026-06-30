@@ -65,6 +65,10 @@ VALID_NODE_TYPES = frozenset(
         "fragment",  # L0 thinking fragments (OHM-a5rz.2)
         "hypothesis",  # Testable research claim (OHM-ss22)
         "experiment",  # Bounded evaluation with artifact + metrics (OHM-ss22)
+        # ── Feedback-graph types (OHM-iuoz) ──
+        "scenario",  # A counterfactual scenario — "what if X were 0.3?"
+        "action",  # A proposed or executed action — "increase supplier B reliability"
+        "intervention",  # A node-level do-operator — "force node Y to state Z"
     }
 )
 
@@ -91,6 +95,10 @@ MUST_HAVE_EDGE_NODE_TYPES: frozenset[str] = frozenset(
         "decision",
         "hypothesis",  # Dead-end claim unless linked to evidence (OHM-ss22)
         "experiment",  # Dead-end unless linked to a hypothesis or concept (OHM-ss22)
+        # Feedback-graph types (OHM-iuoz)
+        "scenario",  # Must link to the node it evaluates
+        "action",  # Must link to the scenario that proposed it
+        "intervention",  # Must link to the node it intervenes on
         # Forward-compat (per OHM-tjzh spec)
         "synthesis",
         "observation",
@@ -187,6 +195,10 @@ LAYER_EDGE_TYPES: dict[str, frozenset[str]] = {
             "CONTRADICTS_EVIDENCE",  # experiment → node/edge
             # ── Decision nodes (OHM-6mv.2 + OHM-decision) ──
             "DECISION_DEPENDS_ON",  # decision → hypothesis/concept
+            # ── Feedback-graph edges (OHM-iuoz) ──
+            "COUNTERFACTUAL_OF",  # scenario → original node (this scenario is a counterfactual of)
+            "PROPOSES_ACTION",  # scenario → action (this scenario suggests this action)
+            "EVALUATES",  # scenario → node (this scenario evaluates this node)
         }
     ),
     "L4": frozenset(
@@ -204,6 +216,11 @@ LAYER_EDGE_TYPES: dict[str, frozenset[str]] = {
             "TRIGGERS_INCIDENT",  # cybersecurity: finding triggers incident
             # ── Task management additions ──
             "BLOCKS",  # task blocks another task
+            # ── Feedback-graph edges (OHM-iuoz) ──
+            "PROPOSED_BY",  # action → scenario/agent (who proposed this action)
+            "EXECUTED_BY",  # action → agent (who executed this action)
+            "FEEDBACK_TO",  # action/observation → scenario (result feeds back to scenario)
+            "INTERVENES_ON",  # intervention → node (this intervention targets this node)
         }
     ),
 }
@@ -1103,7 +1120,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.36.0"
+SCHEMA_VERSION = "0.37.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -1594,6 +1611,17 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS success_criteria TEXT;",
             "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS outcome VARCHAR;",
             "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS outcome_notes TEXT;",
+        ],
+    ),
+    (
+        "0.37.0",
+        "OHM-iuoz: feedback-graph node and edge types for scenario/action/intervention",
+        [
+            # No DDL needed — node types and edge types are validated in
+            # application code via VALID_NODE_TYPES / LAYER_EDGE_TYPES.
+            # This migration exists to bump the schema version so agents
+            # can detect that the feedback-graph types are available.
+            "SELECT 1;",
         ],
     ),
 ]

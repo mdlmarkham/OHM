@@ -26,7 +26,10 @@
     "task",
     "technology",
     "topic",
-    "value"
+    "value",
+    "scenario",
+    "action",
+    "intervention"
   ],
   "layer_edge_types": {
     "L0": [
@@ -90,7 +93,11 @@
       "SUPPORTS_EVIDENCE",
       "TESTS",
       "THREAT_CLUSTER",
-      "TRANSITIONS_TO"
+      "TRANSITIONS_TO",
+      "DECISION_DEPENDS_ON",
+      "COUNTERFACTUAL_OF",
+      "PROPOSES_ACTION",
+      "EVALUATES"
     ],
     "L4": [
       "BLOCKS",
@@ -103,7 +110,11 @@
       "PREDICTS",
       "RISKS",
       "THREATENS",
-      "TRIGGERS_INCIDENT"
+      "TRIGGERS_INCIDENT",
+      "PROPOSED_BY",
+      "EXECUTED_BY",
+      "FEEDBACK_TO",
+      "INTERVENES_ON"
     ]
   },
   "layer_descriptions": {
