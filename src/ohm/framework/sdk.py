@@ -5061,6 +5061,125 @@ class Graph:
 
         return get_session_audit(self._conn, session_id=session_id)
 
+    def detect_verifiable_claims(
+        self,
+        *,
+        agent: str | None = None,
+        days_threshold: int = 14,
+        confidence_threshold: float = 0.85,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Detect verifiable dated claims past their expected date with no outcome.
+
+        Scans CAUSES, PREDICTS, EXPECTS, EXPECTS_FROM edges whose metadata
+        contains an 'expected_by' or 'window_end' date that is now past,
+        and for which no outcome has been recorded.
+
+        Args:
+            agent: If set, only scan edges created_by this agent.
+            days_threshold: Minimum age in days for edges (default 14).
+            confidence_threshold: Minimum confidence to flag (default 0.85).
+            limit: Maximum number of results (default 100).
+
+        Returns:
+            List of dicts with edge info, claim node info, and expected_by date.
+        """
+        from ohm.queries import detect_verifiable_claims as _detect
+
+        return _detect(
+            self._conn,
+            agent=agent,
+            days_threshold=days_threshold,
+            confidence_threshold=confidence_threshold,
+            limit=limit,
+        )
+
+    def create_verification_nudge(
+        self,
+        *,
+        edge_id: str,
+        confidence: float = 0.5,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a NUDGES_FOR_VERIFICATION edge prompting verification of a claim.
+
+        Creates a task node and links it to the claim node via a
+        NUDGES_FOR_VERIFICATION edge in L3. Idempotent: returns existing
+        nudge if one already exists for the edge.
+
+        Args:
+            edge_id: The edge whose claim needs verification.
+            confidence: Confidence for the nudge edge (default 0.5).
+            reason: Optional reason for the nudge.
+
+        Returns:
+            Dict with the created nudge task node and nudge edge.
+        """
+        from ohm.queries import create_verification_nudge as _create
+
+        return _create(
+            self._conn,
+            edge_id=edge_id,
+            created_by=self.actor,
+            confidence=confidence,
+            reason=reason,
+        )
+
+    def record_verification_outcome(
+        self,
+        *,
+        edge_id: str,
+        outcome: str,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        """Record a verification outcome for a verifiable claim edge.
+
+        Outcome mappings: "true" → confidence=1.0, "false" → 0.0,
+        "ambiguous" → 0.5, "deferred" → metadata only.
+
+        Also resolves any NUDGES_FOR_VERIFICATION edges linked to this edge.
+
+        Args:
+            edge_id: The edge being verified.
+            outcome: One of "true", "false", "ambiguous", "deferred".
+            reason: Optional context about the outcome.
+
+        Returns:
+            Dict with the outcome record and any nudge resolution info.
+        """
+        from ohm.queries import record_verification_outcome as _record
+
+        return _record(
+            self._conn,
+            edge_id=edge_id,
+            outcome=outcome,
+            recorded_by=self.actor,
+            reason=reason,
+        )
+
+    def list_pending_verifications(
+        self,
+        *,
+        agent: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """List pending NUDGES_FOR_VERIFICATION edges that haven't been resolved.
+
+        Args:
+            agent: If set, only list nudges created_by this agent.
+            limit: Maximum number of results (default 100).
+
+        Returns:
+            List of dicts with nudge edge and associated claim node info.
+        """
+        from ohm.queries import list_pending_verifications as _list
+
+        return _list(
+            self._conn,
+            agent=agent,
+            limit=limit,
+        )
+
     def close(self) -> None:
         """Close the database connection."""
         self._conn.close()
@@ -6053,6 +6172,66 @@ def connect_http(
         def contract(self) -> dict[str, Any]:
             """Return the current contract configuration."""
             return self._http_request("GET", "/contract")
+
+        def detect_verifiable_claims(
+            self,
+            *,
+            agent: str | None = None,
+            days_threshold: int = 14,
+            confidence_threshold: float = 0.85,
+            limit: int = 100,
+        ) -> list[dict[str, Any]]:
+            """Detect verifiable dated claims past their expected date with no outcome."""
+            import urllib.parse
+
+            params = [f"days_threshold={days_threshold}"]
+            params.append(f"confidence_threshold={confidence_threshold}")
+            params.append(f"limit={limit}")
+            if agent:
+                params.append(f"agent={urllib.parse.quote(agent)}")
+            path = "/verifications/detect?" + "&".join(params)
+            return self._http_request("GET", path)
+
+        def create_verification_nudge(
+            self,
+            *,
+            edge_id: str,
+            confidence: float = 0.5,
+            reason: str | None = None,
+        ) -> dict[str, Any]:
+            """Create a NUDGES_FOR_VERIFICATION edge prompting verification of a claim."""
+            body = {"edge_id": edge_id, "confidence": confidence}
+            if reason:
+                body["reason"] = reason
+            return self._http_request("POST", "/verifications/nudge", body)
+
+        def record_verification_outcome(
+            self,
+            *,
+            edge_id: str,
+            outcome: str,
+            reason: str | None = None,
+        ) -> dict[str, Any]:
+            """Record a verification outcome for a verifiable claim edge."""
+            body = {"edge_id": edge_id, "outcome": outcome}
+            if reason:
+                body["reason"] = reason
+            return self._http_request("POST", "/verifications/outcome", body)
+
+        def list_pending_verifications(
+            self,
+            *,
+            agent: str | None = None,
+            limit: int = 100,
+        ) -> list[dict[str, Any]]:
+            """List pending NUDGES_FOR_VERIFICATION edges that haven't been resolved."""
+            import urllib.parse
+
+            params = [f"limit={limit}"]
+            if agent:
+                params.append(f"agent={urllib.parse.quote(agent)}")
+            path = "/verifications/pending?" + "&".join(params)
+            return self._http_request("GET", path)
 
     graph = HttpGraph(conn, actor, base_url, resolved_token, tenant_id=tenant_id)
     graph.tenant_id = tenant_id

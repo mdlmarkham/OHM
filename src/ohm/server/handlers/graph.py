@@ -4581,3 +4581,63 @@ class GraphHandlerMixin:
             self._json_response(200, {"ok": True, "data": result})
         else:
             raise ValidationError(f"unknown twin design GET action: {action}")
+
+    def _get_detect_verifications(self, path: str, qs: dict) -> None:
+        agent = qs.get("agent", [None])[0]
+        days_threshold = int(qs.get("days_threshold", ["14"])[0])
+        confidence_threshold = float(qs.get("confidence_threshold", ["0.85"])[0])
+        limit = int(qs.get("limit", ["100"])[0])
+        from ohm.queries import detect_verifiable_claims
+        results = detect_verifiable_claims(
+            self.current_store.read_conn,
+            agent=agent,
+            days_threshold=days_threshold,
+            confidence_threshold=confidence_threshold,
+            limit=limit,
+        )
+        self._json_response(200, {"ok": True, "data": results})
+
+    def _post_create_nudge(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        edge_id = body.get("edge_id")
+        if not edge_id:
+            from ohm.exceptions import ValidationError
+            raise ValidationError("edge_id is required")
+        reason = body.get("reason")
+        confidence = float(body.get("confidence", 0.5))
+        from ohm.queries import create_verification_nudge
+        result = create_verification_nudge(
+            self.current_store.conn,
+            edge_id=edge_id,
+            created_by=agent,
+            confidence=confidence,
+            reason=reason,
+        )
+        self._json_response(201, {"ok": True, "data": result})
+
+    def _post_record_verification_outcome(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        edge_id = body.get("edge_id")
+        outcome = body.get("outcome")
+        if not edge_id or not outcome:
+            from ohm.exceptions import ValidationError
+            raise ValidationError("edge_id and outcome are required")
+        reason = body.get("reason")
+        from ohm.queries import record_verification_outcome
+        result = record_verification_outcome(
+            self.current_store.conn,
+            edge_id=edge_id,
+            outcome=outcome,
+            recorded_by=agent,
+            reason=reason,
+        )
+        self._json_response(201, {"ok": True, "data": result})
+
+    def _get_list_verifications(self, path: str, qs: dict) -> None:
+        agent = qs.get("agent", [None])[0]
+        limit = int(qs.get("limit", ["100"])[0])
+        from ohm.queries import list_pending_verifications
+        results = list_pending_verifications(
+            self.current_store.read_conn,
+            agent=agent,
+            limit=limit,
+        )
+        self._json_response(200, {"ok": True, "data": results})

@@ -2396,6 +2396,10 @@ OhmHandler._GET_EXACT["/model/compare"] = "_get_compare_models"
 OhmHandler._POST_EXACT["/temporal/freshness"] = "_post_set_freshness_threshold"
 OhmHandler._POST_EXACT["/temporal/feed-investment"] = "_post_compute_feed_investment"
 OhmHandler._POST_EXACT["/temporal/mode-switch"] = "_post_record_mode_switch"
+OhmHandler._GET_EXACT["/verifications/detect"] = "_get_detect_verifications"
+OhmHandler._POST_EXACT["/verifications/nudge"] = "_post_create_nudge"
+OhmHandler._POST_EXACT["/verifications/outcome"] = "_post_record_verification_outcome"
+OhmHandler._GET_EXACT["/verifications/pending"] = "_get_list_verifications"
 OhmHandler._GET_PREFIXES.append(("/temporal/", "_route_temporal_get"))
 
 

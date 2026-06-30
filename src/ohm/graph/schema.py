@@ -260,6 +260,7 @@ LAYER_EDGE_TYPES: dict[str, frozenset[str]] = {
             "DECLINES",  # user → proposal (user declines a proposal)
             "MODIFIES",  # user → proposal (user requests modifications)
             "INSTANTIATED_FROM",  # twin → session (twin was designed by this session)
+            "NUDGES_FOR_VERIFICATION",  # nudge task → claim node (prompt agent to verify)
         }
     ),
     "L4": frozenset(
