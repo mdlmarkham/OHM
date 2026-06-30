@@ -41,7 +41,8 @@
     "weather",
     "scenario",
     "action",
-    "intervention"
+    "intervention",
+    "twin"
   ],
   "layer_edge_types": {
     "L0": [
