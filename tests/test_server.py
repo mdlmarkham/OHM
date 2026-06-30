@@ -2593,3 +2593,38 @@ class TestConfidenceReportEndpoint:
         port, _ = test_server
         status, data = _request("GET", port, "/confidence-report")
         assert status == 400
+
+
+@pytest.mark.xdist_group("server")
+class TestScenarioEndpoint:
+    """Tests for POST /scenario — counterfactual scenario analysis (OHM-xagx)."""
+
+    def test_scenario_returns_comparison(self, test_server):
+        port, store = test_server
+        store.write_node("sc_a", "Supplier", "concept", agent_name="metis")
+        store.write_node("sc_b", "Factory", "concept", agent_name="metis")
+        store.write_edge("sc_a", "sc_b", "CAUSES", layer="L3", agent_name="metis")
+        edges = store.execute("SELECT id FROM ohm_edges WHERE from_node = 'sc_a' AND to_node = 'sc_b' AND deleted_at IS NULL")
+        edge_id = edges[0]["id"] if edges else None
+        body = {"node_id": "sc_a", "failure_probability": 1.0, "edge_overrides": {edge_id: 0.3}, "compare": True}
+        status, data = _request("POST", port, "/scenario", body=body)
+        assert status == 200, data
+        assert "baseline" in data
+        assert "counterfactual" in data
+        assert "deltas" in data
+
+    def test_scenario_no_compare_returns_cascade(self, test_server):
+        port, store = test_server
+        store.write_node("sc_c", "Source", "concept", agent_name="metis")
+        store.write_node("sc_d", "Target", "concept", agent_name="metis")
+        store.write_edge("sc_c", "sc_d", "CAUSES", layer="L3", agent_name="metis")
+        body = {"node_id": "sc_c", "compare": False}
+        status, data = _request("POST", port, "/scenario", body=body)
+        assert status == 200, data
+        assert "cascade" in data
+        assert "baseline" not in data
+
+    def test_scenario_missing_node_id_returns_400(self, test_server):
+        port, _ = test_server
+        status, data = _request("POST", port, "/scenario", body={})
+        assert status == 400

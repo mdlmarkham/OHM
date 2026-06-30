@@ -1122,6 +1122,66 @@ class GraphHandlerMixin:
         )
         self._json_response(200, result)
 
+    def _post_scenario(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /scenario — counterfactual scenario analysis (OHM-xagx).
+
+        Body:
+            {
+              "node_id": "supplier-1",
+              "failure_probability": 1.0,
+              "max_depth": 10,
+              "edge_overrides": {"edge-id-1": 0.3},
+              "node_interventions": {"node-id-2": 0.9},
+              "disabled_edges": ["edge-id-3"],
+              "disabled_nodes": ["node-id-4"],
+              "compare": true
+            }
+
+        When ``compare`` is true, runs both baseline and counterfactual
+        and returns the comparison (deltas + summary). When false, returns
+        only the counterfactual result.
+        """
+        from ohm.queries import query_counterfactual_cascade, query_compare_scenarios
+        from ohm.exceptions import ValidationError
+
+        node_id = body.get("node_id")
+        if not node_id:
+            raise ValidationError("node_id is required")
+
+        failure_probability = float(body.get("failure_probability", 1.0))
+        max_depth = int(body.get("max_depth", 10))
+        edge_overrides = body.get("edge_overrides")
+        node_interventions = body.get("node_interventions")
+        disabled_edges = set(body.get("disabled_edges", []))
+        disabled_nodes = set(body.get("disabled_nodes", []))
+        compare = body.get("compare", True)
+
+        if compare:
+            result = query_compare_scenarios(
+                self.current_store.read_conn,
+                node_id,
+                failure_probability=failure_probability,
+                max_depth=max_depth,
+                edge_overrides=edge_overrides,
+                node_interventions=node_interventions,
+                disabled_edges=disabled_edges,
+                disabled_nodes=disabled_nodes,
+            )
+        else:
+            cascade = query_counterfactual_cascade(
+                self.current_store.read_conn,
+                node_id,
+                failure_probability=failure_probability,
+                max_depth=max_depth,
+                edge_overrides=edge_overrides,
+                node_interventions=node_interventions,
+                disabled_edges=disabled_edges,
+                disabled_nodes=disabled_nodes,
+            )
+            result = {"node_id": node_id, "cascade": cascade}
+
+        self._json_response(200, result)
+
     def _enforce_cross_link_requirement(self, node_id: str, body: dict) -> dict | None:
         """Return a 422 response body if *body* describes a node that must link.
 

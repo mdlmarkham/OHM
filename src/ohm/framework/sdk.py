@@ -1883,6 +1883,64 @@ class Graph:
 
         return query_confidence_report(self._conn, agent_name=self.actor, since=since)
 
+    def scenario(
+        self,
+        node_id: str,
+        *,
+        failure_probability: float = 1.0,
+        max_depth: int = 10,
+        edge_overrides: dict[str, float] | None = None,
+        node_interventions: dict[str, float] | None = None,
+        disabled_edges: set[str] | None = None,
+        disabled_nodes: set[str] | None = None,
+        compare: bool = True,
+    ) -> dict[str, Any]:
+        """Counterfactual scenario analysis (OHM-xagx).
+
+        Runs a counterfactual cascade with edge overrides, node interventions,
+        and disabled edges/nodes — without modifying the live graph. When
+        ``compare=True`` (default), also runs the baseline and returns a
+        delta comparison.
+
+        Args:
+            node_id: Starting node for the cascade.
+            failure_probability: Initial failure probability (0.0-1.0).
+            max_depth: Maximum traversal depth.
+            edge_overrides: ``{edge_id: new_probability}`` to override.
+            node_interventions: ``{node_id: failure_prob}`` to force (do-operator).
+            disabled_edges: Edge IDs to remove for this scenario.
+            disabled_nodes: Node IDs to remove for this scenario.
+            compare: If True, run baseline + counterfactual + deltas.
+
+        Returns:
+            When compare=True: dict with baseline, counterfactual, deltas, summary.
+            When compare=False: dict with node_id and cascade (list of results).
+        """
+        from ohm.queries import query_counterfactual_cascade, query_compare_scenarios
+
+        if compare:
+            return query_compare_scenarios(
+                self._conn,
+                node_id,
+                failure_probability=failure_probability,
+                max_depth=max_depth,
+                edge_overrides=edge_overrides,
+                node_interventions=node_interventions,
+                disabled_edges=disabled_edges,
+                disabled_nodes=disabled_nodes,
+            )
+        cascade = query_counterfactual_cascade(
+            self._conn,
+            node_id,
+            failure_probability=failure_probability,
+            max_depth=max_depth,
+            edge_overrides=edge_overrides,
+            node_interventions=node_interventions,
+            disabled_edges=disabled_edges,
+            disabled_nodes=disabled_nodes,
+        )
+        return {"node_id": node_id, "cascade": cascade}
+
     def path(
         self,
         from_node: str,
