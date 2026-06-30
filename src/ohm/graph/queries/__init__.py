@@ -12034,11 +12034,18 @@ def auto_promote_best_model(
     ))
 
     if not candidates:
-        return {"promoted": None, "twin_id": twin_id, "ranking": []}
+        return {
+            "promoted": None,
+            "twin_id": twin_id,
+            "ranking": [],
+            "reason": "no_candidates",
+            "detail": "No model candidates compete for this twin.",
+        }
 
     ranked: list[dict[str, Any]] = []
     for c in candidates:
         score = None
+        scoring_error: str | None = None
         if policy == "decision_value" and decision_node_id is not None:
             try:
                 dv = compute_decision_value(
@@ -12048,8 +12055,8 @@ def auto_promote_best_model(
                     utility_scale=1.0,
                 )
                 score = dv["decision_value_score"]
-            except (NodeNotFoundError, ValueError):
-                pass
+            except (NodeNotFoundError, ValueError) as exc:
+                scoring_error = str(exc)
         else:
             eval_nodes = _rows_to_dicts(conn.execute(
                 """SELECT n.metadata FROM ohm_nodes n
@@ -12065,40 +12072,71 @@ def auto_promote_best_model(
                         ev_parsed = _json.loads(ev_meta_raw) if isinstance(ev_meta_raw, str) else ev_meta_raw
                         score = ev_parsed.get("composite_score")
                     except (_json.JSONDecodeError, TypeError):
-                        pass
+                        scoring_error = "failed to parse evaluation metadata"
 
         ranked.append({
             "model_candidate_id": c["id"],
             "label": c.get("label", ""),
             "score": score,
+            "scoring_error": scoring_error,
         })
 
-    if policy == "decision_value":
-        ranked.sort(key=lambda r: r["score"] if r["score"] is not None else float("-inf"), reverse=True)
-    else:
-        ranked.sort(key=lambda r: r["score"] if r["score"] is not None else float("-inf"), reverse=True)
+    # Both policy branches share the same sort key — higher score wins,
+    # candidates with no score sink to the bottom. Previously duplicated
+    # sort blocks masked the equivalence; now single sort handles both.
+    ranked.sort(key=lambda r: r["score"] if r["score"] is not None else float("-inf"), reverse=True)
 
     best = ranked[0] if ranked else None
-    promoted = None
 
-    if best and best["score"] is not None:
-        try:
-            promoted = promote_model(
-                conn,
-                model_candidate_id=best["model_candidate_id"],
-                created_by=created_by,
-                policy=policy,
-                decision_node_id=decision_node_id,
-                min_improvement=min_improvement,
-            )
-        except ValidationError:
-            pass
+    if not best or best["score"] is None:
+        # Either no candidates ranked, or the best candidate has no score
+        # (missing evaluation, scoring error). Surface the reason.
+        reason = "no_score"
+        if best and best.get("scoring_error"):
+            reason = "scoring_error"
+        return {
+            "promoted": None,
+            "twin_id": twin_id,
+            "ranking": ranked,
+            "reason": reason,
+            "detail": (
+                f"Best candidate '{best['label']}' has no scorable evaluation: "
+                f"{best.get('scoring_error', 'no evaluation found')}."
+                if best else "No candidates with scores."
+            ),
+            "best_candidate": best,
+        }
 
-    return {
-        "promoted": promoted,
-        "twin_id": twin_id,
-        "ranking": ranked,
-    }
+    try:
+        promoted = promote_model(
+            conn,
+            model_candidate_id=best["model_candidate_id"],
+            created_by=created_by,
+            policy=policy,
+            decision_node_id=decision_node_id,
+            min_improvement=min_improvement,
+        )
+        return {
+            "promoted": promoted,
+            "twin_id": twin_id,
+            "ranking": ranked,
+            "reason": "promoted",
+            "detail": f"Promoted '{best['label']}' with score {best['score']:.4f}.",
+            "best_candidate": best,
+        }
+    except ValidationError as exc:
+        # Promotion blocked — most commonly the best candidate did not
+        # beat the active one by min_improvement. Surface this so the
+        # caller can decide whether to lower the threshold, replace the
+        # active model manually, or accept the status quo.
+        return {
+            "promoted": None,
+            "twin_id": twin_id,
+            "ranking": ranked,
+            "reason": "below_min_improvement" if "min_improvement" in str(exc) else "promotion_blocked",
+            "detail": str(exc),
+            "best_candidate": best,
+        }
 
 
 def register_twin_with_bindings(

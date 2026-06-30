@@ -424,3 +424,92 @@ class TestPromoteModelSDK:
                 policy="decision_value",
             )
             assert result["promoted"] is not None
+
+
+class TestAutoPromoteReasonField:
+    """OHM-341t: auto_promote_best_model surfaces a reason field for every
+    outcome. Previously, a failed min_improvement was indistinguishable from
+    no-candidates — both returned `{"promoted": None, "ranking": []}`.
+    Now each branch returns a structured `reason` and `detail`."""
+
+    def test_no_candidates_reason(self, test_db):
+        twin_id = _make_twin(test_db)
+        result = auto_promote_best_model(
+            test_db, twin_id=twin_id, policy="decision_value", created_by="tester",
+        )
+        assert result["promoted"] is None
+        assert result["reason"] == "no_candidates"
+        assert "no model candidates" in result["detail"].lower()
+        assert result["ranking"] == []
+
+    def test_below_min_improvement_reason(self, test_db):
+        twin_id = _make_twin(test_db)
+        decision_id = _make_decision_node(test_db)
+        c1 = register_model_candidate(
+            test_db, label="Active", twin_id=twin_id, created_by="tester",
+            model_parameters={"latency": 0.01, "cost": 0.01},
+        )
+        evaluate_model(
+            test_db, model_candidate_id=c1["id"], created_by="tester",
+            metrics={"accuracy": 0.9},
+        )
+        promote_model(
+            test_db, model_candidate_id=c1["id"], created_by="tester",
+            policy="decision_value", decision_node_id=decision_id,
+        )
+        c2 = register_model_candidate(
+            test_db, label="SlightlyBetter", twin_id=twin_id, created_by="tester",
+            model_parameters={"latency": 0.01, "cost": 0.01},
+        )
+        evaluate_model(
+            test_db, model_candidate_id=c2["id"], created_by="tester",
+            metrics={"accuracy": 0.91},
+        )
+        result = auto_promote_best_model(
+            test_db, twin_id=twin_id, decision_node_id=decision_id,
+            policy="decision_value", min_improvement=1.0, created_by="tester",
+        )
+        assert result["promoted"] is None
+        assert result["reason"] == "below_min_improvement"
+        # Detail carries the original promote_model ValidationError message
+        assert "min_improvement" in result["detail"]
+        # Ranking should still include both candidates for caller inspection
+        assert len(result["ranking"]) == 2
+        assert result["best_candidate"]["label"] == "SlightlyBetter"
+
+    def test_promoted_reason(self, test_db):
+        twin_id = _make_twin(test_db)
+        decision_id = _make_decision_node(test_db)
+        c1 = register_model_candidate(
+            test_db, label="Winner", twin_id=twin_id, created_by="tester",
+            model_parameters={"latency": 0.01, "cost": 0.01},
+        )
+        evaluate_model(
+            test_db, model_candidate_id=c1["id"], created_by="tester",
+            metrics={"accuracy": 0.9},
+        )
+        result = auto_promote_best_model(
+            test_db, twin_id=twin_id, decision_node_id=decision_id,
+            policy="decision_value", created_by="tester",
+        )
+        assert result["promoted"] is not None
+        assert result["reason"] == "promoted"
+        assert "winner" in result["detail"].lower()
+        assert "0.9" in result["detail"]
+        assert result["best_candidate"]["label"] == "Winner"
+
+    def test_no_score_reason_when_no_evaluation(self, test_db):
+        """If the only candidate has no evaluation, reason is no_score."""
+        twin_id = _make_twin(test_db)
+        c1 = register_model_candidate(
+            test_db, label="Unscored", twin_id=twin_id, created_by="tester",
+        )
+        # No evaluate_model call — candidate has no composite_score
+        result = auto_promote_best_model(
+            test_db, twin_id=twin_id, policy="decision_value", created_by="tester",
+        )
+        assert result["promoted"] is None
+        assert result["reason"] == "no_score"
+        assert result["best_candidate"]["label"] == "Unscored"
+        # Detail explains why we couldn't score
+        assert "no scorable evaluation" in result["detail"].lower() or "no evaluation" in result["detail"].lower()
