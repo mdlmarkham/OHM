@@ -76,9 +76,55 @@ else
   log "Skipping pip install (--skip-install)"
 fi
 
-# 3. Restart ohmd via systemd
+# 3. Restart ohmd via systemd with OHM-k79z SIGKILL fallback.
+#
+# Background: ohmd's signal handler used to call server.shutdown()
+# synchronously from the main thread, deadlocking against serve_forever().
+# SIGTERM was silently ignored, so systemctl restart|stop|kill -s SIGTERM
+# all returned 0 but the PID never changed. The fix (server.py:shutdown_handler
+# now dispatches shutdown to a daemon thread) makes systemctl restart work,
+# but this script keeps a SIGKILL fallback for defense-in-depth: if the new
+# PID equals the pre-restart PID after the grace window, the daemon is stuck
+# again — escalate to SIGKILL and explicit start.
 log "Restarting $OHMD_SERVICE via systemctl"
+
+# Capture pre-restart PID for deadlock detection (bypasses `run` so the
+# "RUN:" log prefix doesn't leak digits into the PID via tr -dc '0-9').
+PRE_PID=""
+if [ "$DRY_RUN" -eq 1 ]; then
+  log "DRY-RUN: systemctl show -p MainPID --value $OHMD_SERVICE"
+else
+  PRE_PID=$(systemctl show -p MainPID --value "$OHMD_SERVICE" 2>/dev/null | tr -dc '0-9' || true)
+fi
+log "Pre-restart MainPID: ${PRE_PID:-(unknown)}"
+
 run "sudo systemctl restart $OHMD_SERVICE"
+
+# Wait briefly for systemd to swap the process, then verify the PID rotated.
+# If systemctl restart silently fails (e.g., still-stuck signal handler),
+# escalate to kill -s SIGKILL + systemctl start.
+sleep 2
+POST_PID=""
+if [ "$DRY_RUN" -eq 1 ]; then
+  log "DRY-RUN: systemctl show -p MainPID --value $OHMD_SERVICE"
+  POST_PID="dry-run-placeholder"
+else
+  POST_PID=$(systemctl show -p MainPID --value "$OHMD_SERVICE" 2>/dev/null | tr -dc '0-9' || true)
+fi
+
+if [ -n "$PRE_PID" ] && [ "$PRE_PID" == "$POST_PID" ] && [ -n "$POST_PID" ] && [ "$DRY_RUN" -eq 0 ]; then
+  log "WARN: PID unchanged after restart ($PRE_PID) — daemon likely stuck on"
+  log "      SIGTERM (OHM-k79z regression). Escalating to SIGKILL."
+  run "sudo systemctl kill -s SIGKILL $OHMD_SERVICE || true"
+  sleep 2
+  run "sudo systemctl start $OHMD_SERVICE"
+  sleep 2
+  POST_PID=$(systemctl show -p MainPID --value "$OHMD_SERVICE" 2>/dev/null | tr -dc '0-9' || true)
+  if [ "$PRE_PID" == "$POST_PID" ] && [ -n "$POST_PID" ]; then
+    fail "PID still unchanged ($POST_PID) after SIGKILL + start — systemd in unknown state" 3
+  fi
+fi
+log "Post-restart MainPID: ${POST_PID:-(unknown)}"
 
 # 4. Health check with bounded wait
 log "Waiting for ohmd to come up at $OHMD_HOST:$OHMD_PORT"

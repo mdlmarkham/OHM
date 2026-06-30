@@ -2664,7 +2664,22 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     else:
         print("Concurrent access: HTTP (single-writer)", file=sys.stderr)
 
-    # Graceful shutdown — CHECKPOINT before exit (OHM-8n9, OHM-xfqp)
+    # Graceful shutdown — CHECKPOINT before exit (OHM-8n9, OHM-xfqp).
+    #
+    # CRITICAL: server.shutdown() must be called from a thread OTHER than the
+    # one running server.serve_forever() — socketserver.BaseServer.shutdown()
+    # blocks on __is_shut_down.wait(), which is only set when serve_forever()
+    # exits its loop. Calling shutdown() from the same thread deadlocks
+    # (Python socketserver docs). Signal handlers always run on the main
+    # thread, which is also running serve_forever(), so we MUST dispatch
+    # shutdown() to a separate thread. The daemon thread sets __shutdown_request
+    # (stopping serve_forever's accept loop on its next iteration), then waits
+    # for __is_shut_down to be set. The main thread returns from this handler,
+    # serve_forever sees the flag, exits the loop, sets __is_shut_down, the
+    # daemon unblocks, the main thread falls through to store.close(), and
+    # the process exits cleanly. Without this hop, SIGTERM/SIGINT are silently
+    # ignored (OHM-k79z — systemctl restart|stop|kill all fail; PID never
+    # changes) because the signal handler never returns.
     def shutdown_handler(signum, frame):
         print("Shutting down...", file=sys.stderr)
         _sync_stop.set()
@@ -2683,7 +2698,9 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
                 OhmHandler.tenant_manager.shutdown()
             except Exception:
                 logger.exception("Shutdown: tenant_manager.shutdown failed")
-        server.shutdown()
+        # Dispatch shutdown() to a daemon thread so it does not deadlock
+        # against serve_forever() running on this (main) thread (OHM-k79z).
+        threading.Thread(target=server.shutdown, daemon=True, name="ohmd-shutdown").start()
 
     signal.signal(signal.SIGTERM, shutdown_handler)
     signal.signal(signal.SIGINT, shutdown_handler)
