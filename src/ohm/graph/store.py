@@ -1442,9 +1442,16 @@ class OhmStore:
 
         Boundary rule: cannot modify the original edge — only create a challenge.
         Enforces that only L3/L4 edges can be challenged (via enforce_challenge_boundary).
+        Enforces OHM-e0t1 lint: reason must be non-empty (ADR-018).
         """
         actor = agent_name or self.agent_name
         from ohm.boundary import enforce_challenge_boundary
+        from ohm.graph.challenges import require_challenge_reason
+
+        # OHM-e0t1: enforce non-empty reason at write time. Implements
+        # the require_reasoning: True constraint that was previously
+        # declared but not enforced.
+        reason = require_challenge_reason(reason)
 
         original = self.get_edge(edge_id)
         if not original:

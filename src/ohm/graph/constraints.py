@@ -271,6 +271,8 @@ def validate_edge_constraints(
     from_node: str | None = None,
     confidence: float | None = None,
     enforce: bool = False,
+    condition: str | None = None,
+    provenance: str | None = None,
 ) -> tuple[bool, list[str], list[str]]:
     constraints = EDGE_CONSTRAINTS.get(edge_type, {})
     if not constraints:
@@ -313,6 +315,25 @@ def validate_edge_constraints(
             errors.append(msg)
         else:
             warnings.append(msg)
+
+    # OHM-e0t1: require_reasoning was declared but never enforced.
+    # Now it is: the lint guard at write time (require_challenge_reason)
+    # handles the case for CHALLENGED_BY writes; this check covers the
+    # constraint when validate_edge_constraints is called with enforce=True
+    # for any edge type that declares require_reasoning. A reason is
+    # present if either condition or provenance is non-empty.
+    if constraints.get("require_reasoning"):
+        cond = (condition or "").strip()
+        prov = (provenance or "").strip()
+        if not cond and not prov:
+            msg = (
+                f"Edge type '{edge_type}' requires a reason (condition or "
+                f"provenance must be non-empty) — see ADR-018 / OHM-e0t1."
+            )
+            if enforce:
+                errors.append(msg)
+            else:
+                warnings.append(msg)
 
     valid = len(errors) == 0
     return valid, warnings, errors

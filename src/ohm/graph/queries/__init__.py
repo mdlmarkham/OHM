@@ -1983,14 +1983,20 @@ def create_challenge(
     """Create a CHALLENGED_BY edge referencing an existing edge.
 
     Enforces boundary rules: only L3/L4 edges can be challenged.
+    Enforces OHM-e0t1 lint: reason must be non-empty (ADR-018).
     """
     import uuid
 
     from ohm.boundary import enforce_challenge_boundary
+    from ohm.graph.challenges import require_challenge_reason
     from ohm.validation import validate_confidence, validate_identifier
 
     edge_id = validate_identifier(edge_id, name="edge_id")
     confidence = validate_confidence(confidence)
+    # OHM-e0t1: enforce non-empty reason at write time. This implements
+    # the require_reasoning: True constraint declared in
+    # EDGE_CONSTRAINTS['CHALLENGED_BY'] which was previously dead code.
+    reason = require_challenge_reason(reason)
     enforce_challenge_boundary(conn, created_by, edge_id)
 
     target = conn.execute(
