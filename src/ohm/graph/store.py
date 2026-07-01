@@ -1855,15 +1855,41 @@ class OhmStore:
 
         now = self._now()
 
+        # OHM-sdp1: capture cascaded row_ids BEFORE the UPDATEs so each
+        # cascade target gets its own ohm_change_feed row (operators need
+        # per-row attribution when a node delete cascades to N edges and
+        # M observations — the audit feed used to record only the node row,
+        # leaving edges/observations unattributed).
+        edge_ids_to_delete = [
+            r[0]
+            for r in self.conn.execute(
+                "SELECT id FROM ohm_edges "
+                "WHERE (from_node = ? OR to_node = ?) AND deleted_at IS NULL",
+                [node_id, node_id],
+            ).fetchall()
+        ]
+        obs_ids_to_delete = [
+            r[0]
+            for r in self.conn.execute(
+                "SELECT id FROM ohm_observations "
+                "WHERE node_id = ? AND deleted_at IS NULL",
+                [node_id],
+            ).fetchall()
+        ]
+
         # Soft-delete edges (mark as deleted)
         edges_from = self.conn.execute("UPDATE ohm_edges SET deleted_at = ?, updated_at = ?, updated_by = ? WHERE from_node = ? AND deleted_at IS NULL", [now, now, deleted_by, node_id]).fetchone()
         edges_to = self.conn.execute("UPDATE ohm_edges SET deleted_at = ?, updated_at = ?, updated_by = ? WHERE to_node = ? AND deleted_at IS NULL", [now, now, deleted_by, node_id]).fetchone()
         edges_deleted = (edges_from[0] if edges_from else 0) + (edges_to[0] if edges_to else 0)
+        for eid in edge_ids_to_delete:
+            self._log_change("ohm_edges", eid, "DELETE", None, agent_name=deleted_by)
 
         # Soft-delete observations
         obs_result = self.conn.execute("UPDATE ohm_observations SET deleted_at = ? WHERE node_id = ? AND deleted_at IS NULL", [now, node_id])
         obs_deleted = obs_result.fetchone()
         obs_count = obs_deleted[0] if obs_deleted else 0
+        for oid in obs_ids_to_delete:
+            self._log_change("ohm_observations", oid, "DELETE", None, agent_name=deleted_by)
 
         # Soft-delete the node
         self.conn.execute("UPDATE ohm_nodes SET deleted_at = ?, updated_at = ?, updated_by = ? WHERE id = ?", [now, now, deleted_by, node_id])
@@ -1993,8 +2019,22 @@ class OhmStore:
 
         now = self._now()
 
+        # OHM-sdp1: capture cascaded observation row_ids BEFORE the UPDATE
+        # so each gets its own ohm_change_feed entry. Mirrors the
+        # delete_node cascade audit fix.
+        obs_ids_to_delete = [
+            r[0]
+            for r in self.conn.execute(
+                "SELECT id FROM ohm_observations "
+                "WHERE edge_id = ? AND deleted_at IS NULL",
+                [edge_id],
+            ).fetchall()
+        ]
+
         # Soft-delete observations referencing this edge
         self.conn.execute("UPDATE ohm_observations SET deleted_at = ? WHERE edge_id = ? AND deleted_at IS NULL", [now, edge_id])
+        for oid in obs_ids_to_delete:
+            self._log_change("ohm_observations", oid, "DELETE", None, agent_name=deleted_by)
 
         # Soft-delete the edge
         self.conn.execute("UPDATE ohm_edges SET deleted_at = ?, updated_at = ?, updated_by = ? WHERE id = ?", [now, now, deleted_by, edge_id])

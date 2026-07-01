@@ -153,10 +153,14 @@ class TestCleanupScriptApply:
         assert summary["edges_removed"] == 2
 
     def test_apply_writes_audit_trail(self, seeded_db):
-        """The ``--deleted-by`` value must reach ``ohm_change_feed`` so the
-        operator can answer 'who deleted this node?' from the audit log.
-        Without this, the cleanup is anonymous — exactly the kind of gap
-        that breaks accountability in production."""
+        """The ``--deleted-by`` value must reach ``ohm_change_feed`` for
+        BOTH the node and the cascaded edges / observations (OHM-sdp1).
+
+        Prior to the fix, only the node row was logged — the cascaded
+        edges/observations were silently tombstoned with no audit
+        attribution, breaking operator forensics. Now each cascaded row
+        gets its own feed entry tagged with the same agent_name.
+        """
         _run_script(
             "--db-path", str(seeded_db), "--deleted-by", "ops_audit_test"
         )
@@ -167,21 +171,30 @@ class TestCleanupScriptApply:
                 "SELECT table_name, row_id, operation, agent_name "
                 "FROM ohm_change_feed "
                 "WHERE operation = 'DELETE' AND agent_name = 'ops_audit_test' "
-                "ORDER BY row_id"
+                "ORDER BY table_name, row_id"
             ).fetchall()
         finally:
             conn.close()
 
-        deleted_ids = {r[1] for r in rows}
-        # The 3 test nodes are logged. NOTE: the cascade to edges does
-        # NOT write to ohm_change_feed today — only the node row does.
-        # See ``scripts/cleanup_test_artifacts.py`` issue tracker for
-        # the audit-gap followup (cascade should log edge deletes).
-        assert deleted_ids == {
+        # Index by table so we can assert per-table coverage.
+        by_table: dict[str, set[str]] = {}
+        for table_name, row_id, op, agent in rows:
+            assert op == "DELETE"
+            assert agent == "ops_audit_test"
+            by_table.setdefault(table_name, set()).add(row_id)
+
+        # The 3 deleted nodes — the original audit guarantee.
+        assert by_table.get("ohm_nodes", set()) == {
             "metis_test_000", "metis_test_001", "metis_test_002",
-        }, f"Audit feed missing node rows: {deleted_ids}"
-        # And every row carries our agent name.
-        assert all(r[3] == "ops_audit_test" for r in rows)
+        }, f"Missing node rows: {by_table.get('ohm_nodes')}"
+        # The 2 cascaded edges — the OHM-sdp1 fix.
+        assert by_table.get("ohm_edges", set()) == {"edge_1", "edge_2"}, (
+            f"Missing cascaded edge audit rows (OHM-sdp1 regression): "
+            f"{by_table.get('ohm_edges')}"
+        )
+        # No observations were seeded, so the observations feed must
+        # be empty (or absent).
+        assert by_table.get("ohm_observations", set()) == set()
 
     def test_apply_cascades_to_edges(self, seeded_db):
         """Edges touching a deleted node (both endpoints in the test set,

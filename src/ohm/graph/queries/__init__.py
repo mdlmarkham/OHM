@@ -2294,14 +2294,39 @@ def delete_node(
     # index issues with OR conditions (OHM-cpi)
     # Note: conn.execute() for UPDATE returns the connection itself; call
     # fetchone() to get the row count of affected rows.
+    # OHM-sdp1: capture the edge row_ids BEFORE the UPDATE so each cascaded
+    # edge can be logged to ohm_change_feed (operators need per-row
+    # attribution when a node delete cascades to N edges — the audit feed
+    # used to record only the node row, leaving edges unattributed).
+    edge_ids_to_delete = [
+        r[0]
+        for r in conn.execute(
+            "SELECT id FROM ohm_edges "
+            "WHERE (from_node = ? OR to_node = ?) AND deleted_at IS NULL",
+            [node_id, node_id],
+        ).fetchall()
+    ]
     edges_from = conn.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE from_node = ? AND deleted_at IS NULL", [node_id]).fetchone()
     edges_to = conn.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE to_node = ? AND deleted_at IS NULL", [node_id]).fetchone()
     edges_deleted = (edges_from[0] if edges_from else 0) + (edges_to[0] if edges_to else 0)
+    for eid in edge_ids_to_delete:
+        _log_change(conn, "ohm_edges", eid, "DELETE", deleted_by)
 
-    # Delete observations
+    # Delete observations. Same audit-trail fix (OHM-sdp1): capture
+    # observation row_ids before the UPDATE so each gets a feed entry.
+    obs_ids_to_delete = [
+        r[0]
+        for r in conn.execute(
+            "SELECT id FROM ohm_observations "
+            "WHERE node_id = ? AND deleted_at IS NULL",
+            [node_id],
+        ).fetchall()
+    ]
     obs_result = conn.execute("UPDATE ohm_observations SET deleted_at = CURRENT_TIMESTAMP WHERE node_id = ? AND deleted_at IS NULL", [node_id])
     obs_row = obs_result.fetchone()
     obs_count = obs_row[0] if obs_row else 0
+    for oid in obs_ids_to_delete:
+        _log_change(conn, "ohm_observations", oid, "DELETE", deleted_by)
 
     # Delete the node itself
     conn.execute("UPDATE ohm_nodes SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?", [node_id])
@@ -2339,8 +2364,21 @@ def delete_edge(
 
     edge[0].get("layer")
 
-    # Delete observations referencing this edge
+    # Delete observations referencing this edge.
+    # OHM-sdp1: capture observation row_ids BEFORE the UPDATE so each
+    # cascaded observation gets a feed entry (parity with the node-delete
+    # cascade audit fix).
+    obs_ids_to_delete = [
+        r[0]
+        for r in conn.execute(
+            "SELECT id FROM ohm_observations "
+            "WHERE edge_id = ? AND deleted_at IS NULL",
+            [edge_id],
+        ).fetchall()
+    ]
     obs_result = conn.execute("UPDATE ohm_observations SET deleted_at = CURRENT_TIMESTAMP WHERE edge_id = ? AND deleted_at IS NULL", [edge_id])
+    for oid in obs_ids_to_delete:
+        _log_change(conn, "ohm_observations", oid, "DELETE", deleted_by)
 
     # Delete the edge
     conn.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?", [edge_id])
