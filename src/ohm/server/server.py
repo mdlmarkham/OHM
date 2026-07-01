@@ -65,6 +65,14 @@ DEFAULT_CONFIG = {
         "data_path": "",  # Parquet data path (e.g., /var/lib/ohm/ohm_lake_data)
         "sync_interval_seconds": 60,  # How often to sync to DuckLake
     },
+    "beads_sync": {
+        # OHM-sbtz: background Beads->OHM task sync so agents
+        # see their assigned work via /tasks?assigned_to=...
+        # without an operator having to POST /admin/sync-beads.
+        "enabled": True,
+        "interval_seconds": 60,
+        "startup_sync": True,  # one-shot sync at server boot
+    },
     "bedrock": {
         "knowledge_base_id": "",  # OHM_BEDROCK_KB_ID env var
         "data_source_id": "",  # OHM_BEDROCK_DATA_SOURCE_ID env var
@@ -142,6 +150,52 @@ def _register_builtin_hooks(store: OhmStore) -> None:
                 [event, command, created_by],
             )
             logger.debug("Registered built-in hook: %s (%s)", command, event)
+
+
+def _do_beads_sync(
+    conn,
+    actor: str = "system",
+) -> dict[str, Any] | None:
+    """One-shot Beads→OHM task sync (OHM-sbtz).
+
+    Fetches issues via the ``bd`` CLI (with a .beads/issues.jsonl
+    fallback) and mirrors assigned ones into OHM task nodes so
+    ``GET /tasks?assigned_to=<agent>`` returns the right work
+    without the operator having to POST /admin/sync-beads every
+    time. Returns the sync report on success, None on failure
+    (already logged). Skipped silently if the beads integration
+    module is not importable.
+
+    Extracted from ``run_server`` to be unit-testable without
+    spinning up a full daemon.
+    """
+    try:
+        from ohm.integrations.beads_sync import (
+            fetch_beads_issues,
+            sync_beads_to_ohm_tasks,
+        )
+    except ImportError as exc:
+        logger.debug("Beads sync skipped — module not importable: %s", exc)
+        return None
+    try:
+        issues = fetch_beads_issues()
+    except Exception:
+        logger.exception("Beads sync: fetch_beads_issues failed")
+        return None
+    try:
+        report = sync_beads_to_ohm_tasks(conn, issues, actor=actor)
+        if report.get("created") or report.get("updated"):
+            logger.info(
+                "Beads sync: %d created, %d updated, %d skipped (of %d)",
+                report.get("created", 0),
+                report.get("updated", 0),
+                report.get("skipped", 0),
+                report.get("total", 0),
+            )
+        return report
+    except Exception:
+        logger.exception("Beads sync: sync_beads_to_ohm_tasks failed")
+        return None
 
 
 # ── Security Constants ─────────────────────────────────────
@@ -2656,6 +2710,37 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
                 semantic_layer_config.get("auto_actions_rate_limit_seconds", 86400),
             )
 
+    # OHM-sbtz: Background Beads->OHM task sync thread. Mirrors assigned
+    # Beads issues into OHM task nodes so /tasks?assigned_to=<agent>
+    # returns the right work without the operator having to POST
+    # /admin/sync-beads on every change. Configurable via
+    # beads_sync.{enabled, interval_seconds, startup_sync}. Default
+    # enabled at 60s interval with a one-shot startup sync so the
+    # first /tasks call after boot is populated.
+    beads_sync_config = config.get("beads_sync", DEFAULT_CONFIG["beads_sync"])
+    beads_sync_enabled = beads_sync_config.get("enabled", True)
+    beads_sync_interval = float(beads_sync_config.get("interval_seconds", 60))
+    beads_startup_sync = beads_sync_config.get("startup_sync", True)
+    _beads_sync_stop = threading.Event()
+    _beads_sync_thread: threading.Thread | None = None
+
+    def _beads_sync_loop():
+        while not _beads_sync_stop.wait(beads_sync_interval):
+            _do_beads_sync(store.conn, actor="system")
+
+    if beads_sync_enabled and beads_sync_interval > 0:
+        # One-shot startup sync so the first agent query after boot
+        # sees the assigned work without waiting a full interval.
+        if beads_startup_sync:
+            _do_beads_sync(store.conn, actor="system")
+        _beads_sync_thread = threading.Thread(target=_beads_sync_loop, daemon=True, name="beads-sync")
+        _beads_sync_thread.start()
+        logger.info(
+            "Beads sync enabled (interval=%ss, startup_sync=%s)",
+            beads_sync_interval,
+            beads_startup_sync,
+        )
+
     print(f"Schema: {schema_config.name}", file=sys.stderr)
     if OhmHandler.multi_tenant:
         print("Multi-tenancy: ENABLED", file=sys.stderr)
@@ -2687,6 +2772,7 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
         _sync_stop.set()
         _eviction_stop.set()
         _metric_actions_stop.set()
+        _beads_sync_stop.set()
         try:
             store.sync_heartbeat()
         except Exception:
