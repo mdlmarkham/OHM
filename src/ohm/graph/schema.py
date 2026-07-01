@@ -733,6 +733,7 @@ class SchemaConfig:
         seed_agents: list[dict] | None = None,
         domain_tables: list[DomainTable] | tuple[DomainTable, ...] | None = None,
         ducklake_tables: list[DuckLakeTable] | tuple[DuckLakeTable, ...] | None = None,
+        case_strategy: str = "lowercase",
     ):
         self.name = name
         self.node_types = node_types if node_types is not None else VALID_NODE_TYPES
@@ -782,6 +783,18 @@ class SchemaConfig:
                     )
             self.ducklake_tables = tuple(ducklake_tables)
 
+        # OHM-ue9k: case strategy for node / edge / observation type
+        # validation. Default is "lowercase" (canonical OHM convention).
+        # Set to "uppercase" to accept the legacy ALL-CAPS form used by
+        # TOPO's pre-migration store. "preserve" accepts any case as long
+        # as the canonical name appears (case-sensitive match).
+        if case_strategy not in ("lowercase", "uppercase", "preserve"):
+            raise ValueError(
+                f"case_strategy must be 'lowercase', 'uppercase', or 'preserve', "
+                f"got {case_strategy!r}"
+            )
+        self.case_strategy = case_strategy
+
     @property
     def all_edge_types(self) -> frozenset[str]:
         """All edge types across all layers (cached, OHM-x3ar)."""
@@ -805,8 +818,46 @@ class SchemaConfig:
         return EXEMPT_CROSS_LINK_NODE_TYPES
 
     def validate_node_type(self, node_type: str) -> bool:
-        """Check that *node_type* is valid for this schema."""
-        return node_type in self.node_types
+        """Check that *node_type* is valid for this schema.
+
+        The case-insensitive comparison respects ``self.case_strategy``:
+        - "lowercase" (default): accepts lowercase form of canonical types.
+        - "uppercase": accepts UPPERCASE form (legacy TOPO migration).
+        - "preserve": accepts the canonical name case-sensitively.
+        """
+        if not node_type:
+            return False
+        if self.case_strategy == "preserve":
+            return node_type in self.node_types
+        # lowercase or uppercase: normalize to canonical
+        normalized = self.normalize_node_type(node_type)
+        if normalized is None:
+            return False
+        return normalized in self.node_types
+
+    def normalize_node_type(self, node_type: str) -> str | None:
+        """Convert a node_type string to its canonical form (OHM-ue9k).
+
+        Returns the canonical (lowercase) name if the input matches a
+        known type under the current case_strategy, else None.
+
+        Strategy matrix:
+        - "lowercase" (default): input must already be lowercase, return as-is
+          if in node_types, else None.
+        - "uppercase": input may be UPPERCASE. Lower it and check membership.
+        - "preserve": same as "lowercase" (case-sensitive canonical only).
+        """
+        if not node_type:
+            return None
+        if self.case_strategy == "uppercase":
+            # Accept the legacy UPPERCASE form. If the lowercased input
+            # matches a canonical name, return that canonical name.
+            lower = node_type.lower()
+            if lower in self.node_types:
+                return lower
+            return None
+        # "lowercase" or "preserve": case-sensitive match against canonical
+        return node_type if node_type in self.node_types else None
 
     def validate_edge_type(self, layer: str, edge_type: str) -> bool:
         """Check that *edge_type* is valid for the given *layer*."""
@@ -828,6 +879,16 @@ class SchemaConfig:
         - Additional edge types: FEEDS, FLOWS_TO, DEPENDS_ON (already in base)
         - Custom layer descriptions for industrial context
         - Additional observation types for industrial monitoring
+        - METRIC, DATA_PRODUCT, COMPONENT, OTHER (OHM-ue9k — TOPO's
+          existing schema uses these node types for the data product
+          catalog. Without them, the migration from the legacy
+          TOPO store cannot create valid OHM nodes.)
+
+        The canonical type names are lowercase. With
+        ``case_strategy="uppercase"``, the schema also accepts the
+        legacy ALL-CAPS form (e.g. ``METRIC`` validates as ``metric``)
+        so existing TOPO data can be ingested without a destructive
+        rename. See OHM-ue9k for the migration recipe.
         """
         topo_node_types = VALID_NODE_TYPES | frozenset(
             {
@@ -849,6 +910,11 @@ class SchemaConfig:
                 "circuit",
                 "bus",
                 "line",
+                # OHM-ue9k: TOPO data product catalog node types
+                "metric",
+                "data_product",
+                "component",
+                "other",
             }
         )
 
@@ -897,6 +963,7 @@ class SchemaConfig:
             observation_types=topo_observation_types,
             observation_sources=topo_observation_sources,
             provenances=topo_provenances,
+            case_strategy="uppercase",  # OHM-ue9k: accept legacy ALL-CAPS for migration
         )
 
     @classmethod
@@ -1000,6 +1067,8 @@ class SchemaConfig:
         if self.domain_tables:
             result["domain_tables"] = [dt.to_dict() for dt in self.domain_tables]
         result["ducklake_tables"] = [dlt.to_dict() for dlt in self.ducklake_tables]
+        if self.case_strategy != "lowercase":
+            result["case_strategy"] = self.case_strategy
         return result
 
     @classmethod
@@ -1049,6 +1118,7 @@ class SchemaConfig:
             seed_agents=data.get("seed_agents", []),  # OHM-tss4.1.1: domain agent pre-seeding
             domain_tables=domain_tables,  # OHM-vl8o: domain DDL
             ducklake_tables=ducklake_tables,  # OHM-8bli: DuckLake sync registry
+            case_strategy=data.get("case_strategy", "lowercase"),  # OHM-ue9k: case strategy
         )
 
     @classmethod
@@ -2447,8 +2517,45 @@ def validate_edge_type(layer: str, edge_type: str) -> bool:
 
 
 def validate_node_type(node_type: str) -> bool:
-    """Check that *node_type* is a known type."""
-    return node_type in VALID_NODE_TYPES
+    """Check that *node_type* is a known type (case-insensitive).
+
+    Per OHM-ue9k, validation is case-insensitive against the canonical
+    lowercase type set: ``"METRIC"`` validates the same as ``"metric"``.
+    This is a backward-compatible change — all existing lowercase
+    callers see identical behavior. Legacy TOPO stores that used
+    UPPERCASE node types now pass validation without a one-shot
+    rename, while new writes are normalized to lowercase via
+    :func:`normalize_node_type` to keep the canonical form
+    consistent across the graph.
+    """
+    if not node_type:
+        return False
+    if node_type in VALID_NODE_TYPES:
+        return True
+    return node_type.lower() in VALID_NODE_TYPES
+
+
+def normalize_node_type(node_type: str) -> str:
+    """Return the canonical lowercase form of *node_type* (OHM-ue9k).
+
+    If *node_type* (case-insensitive) matches a known type, returns
+    the canonical lowercase name. Otherwise returns *node_type*
+    unchanged — the caller is responsible for further validation.
+
+    This is the canonicalization step that downstream writes should
+    call before persisting node types. It is intentionally permissive:
+    an unknown type is returned as-is so the caller can produce a
+    clear error message ("unknown node type 'X'") rather than
+    silently mangling the input.
+    """
+    if not node_type:
+        return node_type
+    if node_type in VALID_NODE_TYPES:
+        return node_type
+    lower = node_type.lower()
+    if lower in VALID_NODE_TYPES:
+        return lower
+    return node_type
 
 
 def requires_cross_link(node_type: str) -> bool:

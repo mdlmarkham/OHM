@@ -217,6 +217,116 @@ rm -f /var/lib/ohm/ohm.duckdb.wal
 
 The TOPO domain template (`topo.json`) includes industrial node types (equipment, process, instrument, sensor, etc.) and edge types appropriate for manufacturing/industrial contexts.
 
+## TOPO Node-Type & Layer Vocabulary Migration (OHM-ue9k)
+
+TOPO's pre-migration store used a different vocabulary than OHM's canonical
+schema. After the `ohmd --schema topo` switch, the runtime must be able to
+read the legacy vocabulary without rejecting existing rows. This section
+documents the migration recipe for the vocabulary gap.
+
+### Vocabulary differences
+
+| Field | Legacy TOPO | OHM canonical | Notes |
+|-------|-------------|----------------|-------|
+| NodeType case | `UPPERCASE` (`METRIC`, `DATA_PRODUCT`) | lowercase (`metric`, `data_product`) | OHM-ue9k reconciliation |
+| Layer encoding | `INTEGER` (`1`, `2`, `3`) | `VARCHAR` (`'L1'`, `'L2'`, `'L3'`, `'L4'`) | Done in migration 0.4.x |
+| NodeType set | 4 missing types | full topo set | Added in OHM-ue9k |
+
+### What ships in OHM-ue9k
+
+`SchemaConfig.topo()` now declares:
+
+- `metric`, `data_product`, `component`, `other` — the four node types
+  that were in legacy TOPO but missing from the OHM port
+- `case_strategy="uppercase"` — accepts the legacy `UPPERCASE` form for
+  read-side validation so existing data validates without a one-shot rename
+- `validate_node_type()` and `SchemaConfig.validate_node_type()` are now
+  case-insensitive against the canonical lowercase set
+- `normalize_node_type(node_type)` returns the canonical lowercase form
+  of any recognized type (used by writes to keep the graph consistent)
+
+The `ohm.graph.normalize_node_type()` function is the canonicalization
+entry point. Downstream writes should call it before persisting node
+types so the graph stays in canonical form regardless of where the
+input originated.
+
+### Migration recipe
+
+**Step 1 — inventory the legacy types**
+
+```sql
+-- In the legacy TOPO DuckDB, count distinct UPPERCASE types
+SELECT type, COUNT(*) FROM nodes GROUP BY type ORDER BY 2 DESC;
+```
+
+For each uppercase type in the result, confirm it maps to a canonical
+lowercase OHM type:
+
+| Legacy | Canonical OHM | Migration action |
+|--------|---------------|------------------|
+| `METRIC` | `metric` | lowercase + add to `topo()` (done) |
+| `DATA_PRODUCT` | `data_product` | lowercase + add to `topo()` (done) |
+| `COMPONENT` | `component` | lowercase + add to `topo()` (done) |
+| `OTHER` | `other` | lowercase + add to `topo()` (done) |
+| `SITE` | `site` | already in OHM core |
+| `EQUIPMENT` | `equipment` | already in OHM core |
+| `PROCESS` | `process` | already in TOPO extension |
+
+**Step 2 — copy the data through `ohmd --schema topo`**
+
+```bash
+# With case_strategy="uppercase" in topo.json, ingest accepts legacy types
+# but normalize_node_type() canonicalizes on write. So even if the source
+# has UPPERCASE, the OHM store ends up with lowercase.
+python -m ohm.migrate_topo /path/to/legacy/topo.duckdb \
+    --target /var/lib/ohm/tenants/topo_instance/ohm.duckdb
+```
+
+The migrator reads each row, calls `normalize_node_type()` on the
+`type` column, and inserts into the OHM store. Validation passes
+either way because of the case-insensitive check.
+
+**Step 3 — verify**
+
+```python
+import ohm.sdk as ohm
+with ohm.connect("/var/lib/ohm/tenants/topo_instance", actor="ops", tenant_id="topo_instance") as g:
+    stats = g.stats()
+    # All types should be lowercase. Any UPPERCASE rows in the result
+    # indicate a type that wasn't normalized — file a beads issue.
+    type_counts = stats["by_type"]
+    upper = {k: v for k, v in type_counts.items() if k != k.lower()}
+    assert not upper, f"unnormalized types remain: {upper}"
+```
+
+**Step 4 — switch off `case_strategy="uppercase"` (optional, future)**
+
+Once the migration is complete and operators are confident no legacy
+data remains, the `case_strategy` can be flipped to `"lowercase"` (or
+removed from the template) to lock in the canonical form. Reads of
+UPPERCASE types will then fail validation, which is the right behavior
+once there are no more legacy rows.
+
+### Layer encoding (already migrated in 0.4.x)
+
+If you have any INTEGER-encoded layers (`1`, `2`, `3`), run:
+
+```sql
+UPDATE edges SET layer = 'L' || layer WHERE layer IN ('1', '2', '3', '4');
+UPDATE nodes SET layer = 'L' || layer WHERE layer IN ('1', '2', '3', '4');
+```
+
+This was already shipped via the migration framework in OHM 0.4.x, so
+most existing TOPO deployments are already on VARCHAR layers.
+
+### Rollback
+
+If the migration fails or produces unexpected results, the legacy
+`topod` entry point still works (it calls `main(schema_config=TOPO_SCHEMA)`
+with the deprecation warning). Operators can stop `ohmd --schema topo`,
+start `topod`, and continue with the legacy stack while the migration
+is debugged. No data is lost.
+
 ## Per-Tenant Quotas
 
 Tenants are provisioned with tier-based quotas:

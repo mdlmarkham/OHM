@@ -8,4 +8,6 @@ from .schema import (
     DuckLakeTable,
     SchemaConfig,
     initialize_schema,
+    normalize_node_type,
+    validate_node_type,
 )
