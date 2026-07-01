@@ -57,6 +57,7 @@ Run from CI:
 
 from __future__ import annotations
 
+import contextlib
 import os
 import socket
 import subprocess
@@ -152,25 +153,30 @@ def _wait_for_health(base_url: str, deadline_s: float = 30.0) -> bool:
     return False
 
 
-# ── Test ──────────────────────────────────────────────────────────────────
+@contextlib.contextmanager
+def _spawn_ohmd(tmp_path, *, agent: str = "smoke_test", db_name: str = "smoke.duckdb"):
+    """Spawn ``ohm.server`` on a free port with a temp DuckDB.
 
+    Yields ``(base_url, env, proc, stderr_log)``. On exit: terminate,
+    wait, and close log file handles. Stderr is routed to a temp file
+    (NOT PIPE — see the Windows pipe-blocking note in the body).
 
-def test_ohmd_smoke_endpoint_matrix(tmp_path):
-    """Spawn the real ``ohm serve`` CLI, run an endpoint matrix.
+    Usage::
 
-    Mirrors the OHM-kg16 acceptance: 'GitHub Actions job that boots
-    ohmd + DuckDB + seed data and exercises the smoke-test endpoint
-    matrix.' The same file is invoked by .github/workflows/ohmd-smoke.yml.
+        with _spawn_ohmd(tmp_path) as (base_url, _env, proc, stderr_log):
+            _wait_for_healthy_or_fail(base_url, proc, stderr_log)
+            ...
     """
     port = _free_port()
-    db_path = str(tmp_path / "smoke.duckdb")
+    db_path = str(tmp_path / db_name)
     base_url = f"http://127.0.0.1:{port}"
 
     env = os.environ.copy()
-    # Disable auth so the smoke test doesn't need a token.
+    # Disable auth so the smoke tests don't need a token.
     env["OHM_NO_AUTH"] = "true"
-    # Pin the agent to a known name for /heartbeat assertions.
-    env.setdefault("OHM_ACTOR", "smoke_test")
+    # Pin the agent so /heartbeat + verification endpoints have a
+    # known author for the rows they create.
+    env.setdefault("OHM_ACTOR", agent)
 
     # Route the daemon's stdout/stderr to temp files rather than
     # subprocess.PIPE. On Windows the default pipe buffer is small,
@@ -179,17 +185,11 @@ def test_ohmd_smoke_endpoint_matrix(tmp_path):
     # never reads the pipe, the child blocks, all subsequent requests
     # time out. With files, the child writes don't block; on failure
     # we tail the log into the assertion message.
-    stdout_log = tmp_path / "daemon.stdout.log"
-    stderr_log = tmp_path / "daemon.stderr.log"
+    stdout_log = tmp_path / f"daemon.{db_name}.stdout.log"
+    stderr_log = tmp_path / f"daemon.{db_name}.stderr.log"
     stdout_fh = stdout_log.open("wb")
     stderr_fh = stderr_log.open("wb")
 
-    # Spawn ``ohm.server`` as a real subprocess. We pass the same
-    # args operators use in production: --db to scope the path,
-    # --port for the listen socket, --no-auth for the smoke test.
-    # (The ``ohm.cli serve start`` wrapper double-forks and writes
-    # a PID file, which complicates teardown; spawning ``ohm.server``
-    # directly gives us one process to manage.)
     proc = subprocess.Popen(
         [
             sys.executable,
@@ -209,21 +209,56 @@ def test_ohmd_smoke_endpoint_matrix(tmp_path):
         cwd=str(Path(__file__).resolve().parents[1]),
     )
     try:
-        # ── Boot phase: wait for /health ────────────────────────────
-        healthy = _wait_for_health(base_url, deadline_s=30.0)
-        if not healthy:
-            # Tail stderr for the failure message so the CI log
-            # shows the daemon's boot output.
+        yield base_url, env, proc, stderr_log
+    finally:
+        try:
+            proc.terminate()
             try:
-                proc.terminate()
-                proc.wait(timeout=5)
-            except Exception:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
                 proc.kill()
-            try:
-                err = stderr_log.read_bytes()[-4000:]
-            except Exception:
-                err = b"<could not read stderr log>"
-            pytest.fail(f"ohmd did not become healthy on {base_url} within 30s.\ndaemon stderr (tail):\n{err.decode(errors='replace')}")
+                proc.wait(timeout=5)
+        except Exception:
+            pass
+        try:
+            stdout_fh.close()
+        except Exception:
+            pass
+        try:
+            stderr_fh.close()
+        except Exception:
+            pass
+
+
+def _wait_for_healthy_or_fail(base_url: str, proc: subprocess.Popen, stderr_log: Path) -> None:
+    """Block until /health is 200 or pytest.fail with the daemon log tail."""
+    if _wait_for_health(base_url, deadline_s=30.0):
+        return
+    try:
+        proc.terminate()
+        proc.wait(timeout=5)
+    except Exception:
+        proc.kill()
+    try:
+        err = stderr_log.read_bytes()[-4000:]
+    except Exception:
+        err = b"<could not read stderr log>"
+    pytest.fail(f"ohmd did not become healthy on {base_url} within 30s.\ndaemon stderr (tail):\n{err.decode(errors='replace')}")
+
+
+# ── Test ──────────────────────────────────────────────────────────────────
+
+
+def test_ohmd_smoke_endpoint_matrix(tmp_path):
+    """Spawn the real ``ohm serve`` CLI, run an endpoint matrix.
+
+    Mirrors the OHM-kg16 acceptance: 'GitHub Actions job that boots
+    ohmd + DuckDB + seed data and exercises the smoke-test endpoint
+    matrix.' The same file is invoked by .github/workflows/ohmd-smoke.yml.
+    """
+    with _spawn_ohmd(tmp_path, db_name="smoke.duckdb") as (base_url, _env, proc, stderr_log):
+        # ── Boot phase: wait for /health ────────────────────────────
+        _wait_for_healthy_or_fail(base_url, proc, stderr_log)
 
         # ── Read endpoints ─────────────────────────────────────────
         status, body = _http_get(f"{base_url}/health")
@@ -347,24 +382,157 @@ def test_ohmd_smoke_endpoint_matrix(tmp_path):
         status, body = _http_get(f"{base_url}/admin/health")
         assert status == 200, f"GET /admin/health returned {status}: {body}"
 
-    finally:
-        # ── Teardown: stop the daemon ───────────────────────────────
-        try:
-            proc.terminate()
-            try:
-                proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait(timeout=5)
-        except Exception:
-            # Don't let teardown errors mask a test failure above.
-            pass
-        # Close log file handles.
-        try:
-            stdout_fh.close()
-        except Exception:
-            pass
-        try:
-            stderr_fh.close()
-        except Exception:
-            pass
+
+# ── Verification matrix (OHM-kg16 item 2) ────────────────────────────────
+
+
+def test_ohmd_smoke_verification_matrix(tmp_path):
+    """Second live-daemon integration test pass — verification endpoints.
+
+    OHM-kg16 item 2: exercise endpoints NOT covered in the original
+    2026-06-30 report that underpin the Industrial Agent Manifesto
+    (OHM-dp38) 15 principles:
+
+      - /heartbeat                       — verification_overdue field
+      - /verifications/detect            — detectable claims (ADR-018.4)
+      - /verifications/pending           — list pending verifications
+      - /verifications/nudge             — fire_verification_nudge
+                                            (creates CHALLENGED_BY)
+      - /verifications/outcome           — record_verification_outcome
+                                            (ADR-018.3 decay)
+      - /admin/verification-decay        — apply_verification_decay
+
+    Together with the endpoint matrix above this covers the full
+    verification loop end-to-end against a real daemon subprocess.
+    """
+    with _spawn_ohmd(tmp_path, agent="verification_smoke", db_name="verification.duckdb") as (
+        base_url,
+        _env,
+        proc,
+        stderr_log,
+    ):
+        _wait_for_healthy_or_fail(base_url, proc, stderr_log)
+
+        # ── Seed: one causal edge, no outcomes ────────────────────
+        # The verification matrix needs at least one claim to
+        # exercise the detection / nudge / outcome paths. We create
+        # a single source→target CAUSES edge with high confidence —
+        # a classic "consensus-only" scenario: the claim has no
+        # outcome-backed support, so /verifications/detect should
+        # surface it.
+        src_id = "verify_src"
+        dst_id = "verify_dst"
+        for node_id, label in ((src_id, "Verify source"), (dst_id, "Verify target")):
+            status, body = _http_post_json(
+                f"{base_url}/node",
+                {
+                    "id": node_id,
+                    "label": label,
+                    "type": "concept",
+                },
+            )
+            assert status in (200, 201), f"POST /node {node_id} returned {status}: {body}"
+
+        status, body = _http_post_json(
+            f"{base_url}/edge",
+            {
+                "from": src_id,
+                "to": dst_id,
+                "type": "CAUSES",
+                "layer": "L3",
+                "confidence": 0.9,
+            },
+        )
+        assert status in (200, 201), f"POST /edge returned {status}: {body}"
+        edge_id = body.get("id") if isinstance(body, dict) else None
+        assert edge_id, f"POST /edge response missing 'id': {body}"
+
+        # ── /heartbeat — verification_overdue field (ADR-018.3) ──
+        # The heartbeat returns verification_overdue_count and the
+        # list of edges overdue for verification. The query only
+        # surfaces edges past the 14-day grace period, so a fresh
+        # CAUSES edge yields count=0; we assert the FIELD exists
+        # with a sensible type, not the count itself.
+        status, body = _http_post_json(f"{base_url}/heartbeat", {})
+        assert status in (200, 201), f"POST /heartbeat returned {status}: {body}"
+        assert isinstance(body, dict)
+        # Body shape: {ok, data: {agent, focus, verification_overdue,
+        # verification_overdue_count, ...}}. Tolerate either flat
+        # or nested.
+        hb_data = body.get("data", body)
+        assert "verification_overdue_count" in hb_data, f"heartbeat response missing verification_overdue_count: {body}"
+        overdue_count = hb_data["verification_overdue_count"]
+        assert isinstance(overdue_count, int), f"verification_overdue_count is not an int: {overdue_count}"
+        assert "verification_overdue" in hb_data, f"heartbeat response missing verification_overdue: {body}"
+        assert isinstance(hb_data["verification_overdue"], list), f"verification_overdue should be a list: {hb_data.get('verification_overdue')!r}"
+
+        # ── /verifications/detect — list detectable claims ─────────
+        # No body; returns a list of claim candidates for verification.
+        # On a fresh graph with our single CAUSES edge, the detector
+        # should surface at least that edge (or return an empty list
+        # if the agent doesn't match — agent filter is optional).
+        status, body = _http_get(f"{base_url}/verifications/detect")
+        assert status == 200, f"GET /verifications/detect returned {status}: {body}"
+        assert isinstance(body, dict)
+        detect_data = body.get("data", body)
+        assert isinstance(detect_data, list), f"/verifications/detect data should be a list, got {type(detect_data).__name__}: {body}"
+        # The endpoint may filter by agent and return [], or surface
+        # the unverified CAUSES edge. Either is acceptable — the
+        # important thing is the endpoint doesn't 500.
+
+        # ── /verifications/pending — list pending verifications ───
+        status, body = _http_get(f"{base_url}/verifications/pending")
+        assert status == 200, f"GET /verifications/pending returned {status}: {body}"
+        assert isinstance(body, dict)
+        pending_data = body.get("data", body)
+        assert isinstance(pending_data, list), f"/verifications/pending data should be a list, got {type(pending_data).__name__}: {body}"
+
+        # ── /verifications/nudge — fire_verification_nudge (ADR-018.4)
+        # Creates a CHALLENGED_BY edge on the unverified CAUSES edge.
+        # The smoke test only checks the endpoint doesn't error; the
+        # consensus-only detection logic is covered by
+        # tests/test_consensus_verification.py at the unit level.
+        status, body = _http_post_json(
+            f"{base_url}/verifications/nudge",
+            {
+                "edge_id": edge_id,
+                "reason": "smoke test verification nudge",
+                "confidence": 0.5,
+            },
+        )
+        assert status in (200, 201), f"POST /verifications/nudge returned {status}: {body}"
+        assert isinstance(body, dict)
+
+        # ── /verifications/outcome — record outcome (ADR-018.3) ────
+        # Records a TRUE outcome on the unverified edge, which
+        # should stop it from decaying in the next /admin/verification-decay.
+        # The endpoint accepts a string label, not a Python bool:
+        # 'true' | 'false' | 'ambiguous' | 'deferred'.
+        status, body = _http_post_json(
+            f"{base_url}/verifications/outcome",
+            {
+                "edge_id": edge_id,
+                "outcome": "true",
+                "reason": "smoke test verified",
+            },
+        )
+        assert status in (200, 201), f"POST /verifications/outcome returned {status}: {body}"
+        assert isinstance(body, dict)
+
+        # ── /admin/verification-decay — ADR-018.3 apply decay ─────
+        # Default dry_run=True; should return 200 with the edges
+        # that would be affected. After the verification outcome
+        # above, our CAUSES edge is verified (365d half-life), so
+        # the affected set should be smaller than the overdue list.
+        status, body = _http_post_json(f"{base_url}/admin/verification-decay", {})
+        assert status in (200, 201), f"POST /admin/verification-decay returned {status}: {body}"
+        assert isinstance(body, dict)
+
+        # ── /admin/verification-scan — dry-run inspection ─────────
+        # Returns the list of edges that WOULD be affected by decay.
+        # Different from /verifications/detect (which surfaces
+        # claims to verify) — this surfaces claims past their grace
+        # period and decaying.
+        status, body = _http_get(f"{base_url}/admin/verification-scan")
+        assert status == 200, f"GET /admin/verification-scan returned {status}: {body}"
+        assert isinstance(body, dict)
