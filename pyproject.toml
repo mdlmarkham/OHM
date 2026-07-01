@@ -98,6 +98,7 @@ markers = [
     "slow: Tests that take >1s (excluded from fast CI runs)",
     "integration: HTTP server integration tests (excluded from fast CI runs)",
     "concurrent: Thread-safety tests (platform-sensitive, excluded from CI)",
+    "smoke: Live-daemon smoke tests (spawns ohm.server subprocess)",
     "xdist_group: xdist group for server test isolation",
 ]
 

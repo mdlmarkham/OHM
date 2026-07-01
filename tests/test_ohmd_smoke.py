@@ -2,7 +2,7 @@
 
 This is the test counterpart to the GitHub Actions workflow
 ``.github/workflows/ohmd-smoke.yml``. The workflow spawns the
-real ``ohm`` CLI as a subprocess and exercises a smoke-test
+real ``ohm.server`` as a subprocess and exercises a smoke-test
 endpoint matrix against it.
 
 Why a subprocess (and not the in-process test_server fixture):
@@ -11,35 +11,41 @@ Why a subprocess (and not the in-process test_server fixture):
 - exercises the actual deployment path operators use
 - runs against the production module path so any
   packaging/dependency mismatch shows up here first
-- uses no_auth=True so CI doesn't need token management
+- uses --no-auth so CI doesn't need token management
 
-Endpoint matrix (the smoke set the issue calls for):
+Endpoint matrix (the smoke set the kg16 issue calls for):
 
   Boot:
-    - GET  /health                       — returns 200 with status=ok
-    - GET  /status                       — returns 200 with version info
+    - GET  /health                       - returns 200 with status=ok
+    - GET  /status                       - returns 200 with version info
 
   Read:
-    - GET  /stats                        — returns 200 with node/edge counts
-    - GET  /neighborhood?id=<n>&depth=1  — returns 200 with neighbors
-    - GET  /ask?question=foo              — returns 200 (synthesis fallback)
+    - GET  /stats                        - returns 200 with node/edge counts
+    - GET  /layers                       - returns 200 with L0-L4 layer descriptions
+    - GET  /neighborhood/{id}?depth=1    - returns 200 with neighbors
 
   Write (a small graph for downstream assertions):
-    - POST /node                        — creates a node, returns 201
-    - POST /edge                        — creates an edge, returns 201
-    - POST /observe                     — creates an observation, returns 201
-    - POST /challenge                   — creates a CHALLENGED_BY edge
-    - POST /record-outcome              — records an outcome
-    - POST /heartbeat                   — returns agent state
+    - POST /node                         - creates a node, returns 201
+    - POST /edge                         - creates an edge, returns 201
+    - POST /observe/{id}                 - creates an observation, returns 201
+    - POST /challenge/{edge_id}          - creates a CHALLENGED_BY edge
+    - POST /outcome                      - records an outcome
+    - POST /heartbeat                    - returns agent state
 
   Maintenance:
-    - POST /admin/verification-decay    — applies decay
-    - GET  /nudges/quality              — returns aggregate stats
-    - GET  /admin/health                — returns admin health
+    - POST /admin/verification-decay     - applies decay
+    - GET  /admin/nudges/quality         - returns aggregate stats
+    - GET  /admin/health                 - returns admin health
 
-These are all the endpoints called out in the kg16 issue items 2
-("endpoints NOT exercised in the original 2026-06-30 report") and
-the surrounding Industrial Agent Manifesto (OHM-dp38) coverage.
+Note: /ask synthesis is covered by tests/test_ask_endpoint.py (the
+in-process test_server fixture is faster for that heavy endpoint).
+The smoke test prioritises fast, well-isolated endpoints that catch
+arg-parsing and dependency mismatches in CI.
+
+These endpoints cover the kg16 issue items 2 ("endpoints NOT exercised
+in the original 2026-06-30 report") — /heartbeat, /outcome, and
+/admin/verification-decay — plus the surrounding Industrial Agent
+Manifesto (OHM-dp38) coverage.
 
 Run from CLI:
     python -m pytest tests/test_ohmd_smoke.py -v
@@ -162,35 +168,55 @@ def test_ohmd_smoke_endpoint_matrix(tmp_path):
     # Pin the agent to a known name for /heartbeat assertions.
     env.setdefault("OHM_ACTOR", "smoke_test")
 
-    # Spawn ``ohm serve start`` as a real subprocess. We pass the
-    # same args operators use in production: --db to scope the path,
-    # --port for the listen socket, --quack off (we don't need Quack
-    # for a single-writer smoke test).
+    # Route the daemon's stdout/stderr to temp files rather than
+    # subprocess.PIPE. On Windows the default pipe buffer is small,
+    # so a daemon that logs ~15+ lines will block on write to stderr
+    # while the test process is busy making HTTP calls — the parent
+    # never reads the pipe, the child blocks, all subsequent requests
+    # time out. With files, the child writes don't block; on failure
+    # we tail the log into the assertion message.
+    stdout_log = tmp_path / "daemon.stdout.log"
+    stderr_log = tmp_path / "daemon.stderr.log"
+    stdout_fh = stdout_log.open("wb")
+    stderr_fh = stderr_log.open("wb")
+
+    # Spawn ``ohm.server`` as a real subprocess. We pass the same
+    # args operators use in production: --db to scope the path,
+    # --port for the listen socket, --no-auth for the smoke test.
+    # (The ``ohm.cli serve start`` wrapper double-forks and writes
+    # a PID file, which complicates teardown; spawning ``ohm.server``
+    # directly gives us one process to manage.)
     proc = subprocess.Popen(
         [
-            sys.executable, "-m", "ohm.cli", "serve", "start",
+            sys.executable, "-m", "ohm.server",
+            "--host", "127.0.0.1",
             "--port", str(port),
             "--db", db_path,
+            "--no-auth",
         ],
         env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=stdout_fh,
+        stderr=stderr_fh,
         cwd=str(Path(__file__).resolve().parents[1]),
     )
     try:
         # ── Boot phase: wait for /health ────────────────────────────
         healthy = _wait_for_health(base_url, deadline_s=30.0)
         if not healthy:
-            # Capture stderr for the failure message so the CI log
+            # Tail stderr for the failure message so the CI log
             # shows the daemon's boot output.
             try:
                 proc.terminate()
-                _, err = proc.communicate(timeout=5)
+                proc.wait(timeout=5)
             except Exception:
-                err = b"<could not capture stderr>"
+                proc.kill()
+            try:
+                err = stderr_log.read_bytes()[-4000:]
+            except Exception:
+                err = b"<could not read stderr log>"
             pytest.fail(
                 f"ohmd did not become healthy on {base_url} within 30s.\n"
-                f"daemon stderr:\n{err.decode(errors='replace')}"
+                f"daemon stderr (tail):\n{err.decode(errors='replace')}"
             )
 
         # ── Read endpoints ─────────────────────────────────────────
@@ -232,29 +258,34 @@ def test_ohmd_smoke_endpoint_matrix(tmp_path):
         )
         assert status in (200, 201), f"POST /node returned {status}: {body}"
 
-        # POST /edge
+        # POST /edge — body uses short keys `from`/`to`/`type`.
+        # The response includes the new edge's `id`, which the
+        # challenge endpoint below needs as a path parameter.
         status, body = _http_post_json(
             f"{base_url}/edge",
             {
-                "from_node": node_a_id,
-                "to_node": node_b_id,
+                "from": node_a_id,
+                "to": node_b_id,
+                "type": "CAUSES",
                 "layer": "L3",
-                "edge_type": "CAUSES",
                 "confidence": 0.7,
             },
         )
         assert status in (200, 201), f"POST /edge returned {status}: {body}"
+        edge_id = body.get("id") if isinstance(body, dict) else None
+        assert edge_id, f"POST /edge response missing 'id': {body}"
 
-        # POST /observe
+        # POST /observe/{node_id} — node id is in the path, not body.
         status, body = _http_post_json(
-            f"{base_url}/observe",
+            f"{base_url}/observe/{node_a_id}",
             {
-                "node_id": node_a_id,
                 "type": "measurement",
                 "value": 0.5,
             },
         )
-        assert status in (200, 201), f"POST /observe returned {status}: {body}"
+        assert status in (200, 201), (
+            f"POST /observe/{node_a_id} returned {status}: {body}"
+        )
 
         # POST /heartbeat (verifies the verification_overdue field per
         # the kg16 item 2 call-out).
@@ -262,17 +293,30 @@ def test_ohmd_smoke_endpoint_matrix(tmp_path):
         assert status in (200, 201), f"POST /heartbeat returned {status}: {body}"
         assert isinstance(body, dict)
 
-        # POST /record-outcome
+        # POST /challenge/{edge_id} — body uses `reason` + `confidence`.
         status, body = _http_post_json(
-            f"{base_url}/record-outcome",
+            f"{base_url}/challenge/{edge_id}",
             {
-                "claim_id": node_a_id,
+                "reason": "smoke test challenge",
+                "confidence": 0.3,
+            },
+        )
+        assert status in (200, 201), (
+            f"POST /challenge/{edge_id} returned {status}: {body}"
+        )
+
+        # POST /outcome — body requires source_agent, claim_node, outcome.
+        status, body = _http_post_json(
+            f"{base_url}/outcome",
+            {
+                "source_agent": "smoke_test",
+                "claim_node": node_a_id,
                 "outcome": True,
                 "notes": "smoke test outcome",
             },
         )
         assert status in (200, 201), (
-            f"POST /record-outcome returned {status}: {body}"
+            f"POST /outcome returned {status}: {body}"
         )
 
         # POST /admin/verification-decay — per kg16 item 2.
@@ -283,24 +327,30 @@ def test_ohmd_smoke_endpoint_matrix(tmp_path):
             f"POST /admin/verification-decay returned {status}: {body}"
         )
 
-        # GET /nudges/quality — per the OHM-49bg nudges acceptance.
-        status, body = _http_get(f"{base_url}/nudges/quality")
-        assert status == 200, f"GET /nudges/quality returned {status}: {body}"
+        # GET /admin/nudges/quality — per the OHM-49bg nudges acceptance.
+        status, body = _http_get(f"{base_url}/admin/nudges/quality")
+        assert status == 200, (
+            f"GET /admin/nudges/quality returned {status}: {body}"
+        )
 
-        # GET /neighborhood — basic graph traversal
+        # GET /neighborhood/{id} — node id in path, depth in query.
         status, body = _http_get(
-            f"{base_url}/neighborhood?id={node_a_id}&depth=1"
+            f"{base_url}/neighborhood/{node_a_id}?depth=1"
         )
         assert status == 200, (
-            f"GET /neighborhood returned {status}: {body}"
+            f"GET /neighborhood/{node_a_id} returned {status}: {body}"
         )
 
-        # GET /ask — synthesis endpoint (always returns 200)
-        status, body = _http_get(
-            f"{base_url}/ask?question=smoke%20test"
-        )
-        assert status == 200, f"GET /ask returned {status}: {body}"
-        assert isinstance(body, dict)
+        # GET /layers — L0-L4 layer descriptions. Tests a fresh read
+        # endpoint (the static SchemaConfig) without rebuilding the
+        # full schema guide payload that /schema returns. Both pull
+        # from the same in-memory schema_config, so /layers gives the
+        # same coverage with a much smaller response. The body is
+        # a dict-of-layer-strings, not a JSON object — the test
+        # accepts any non-empty payload.
+        status, body = _http_get(f"{base_url}/layers")
+        assert status == 200, f"GET /layers returned {status}: {body}"
+        assert body, f"GET /layers returned empty body"
 
         # GET /admin/health — admin health (mirrors /health for the
         # admin surface).
@@ -314,10 +364,19 @@ def test_ohmd_smoke_endpoint_matrix(tmp_path):
         try:
             proc.terminate()
             try:
-                proc.communicate(timeout=10)
+                proc.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 proc.kill()
-                proc.communicate(timeout=5)
+                proc.wait(timeout=5)
         except Exception:
             # Don't let teardown errors mask a test failure above.
+            pass
+        # Close log file handles.
+        try:
+            stdout_fh.close()
+        except Exception:
+            pass
+        try:
+            stderr_fh.close()
+        except Exception:
             pass

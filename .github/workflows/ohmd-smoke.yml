@@ -1,0 +1,107 @@
+name: ohmd smoke
+
+# Live-daemon smoke test for ohmd (OHM-kg16 item 3).
+#
+# Boots the real ``ohm.server`` as a subprocess on a free port with a
+# temp DuckDB file, then exercises the smoke-test endpoint matrix
+# defined in tests/test_ohmd_smoke.py. Catches CLI arg-parsing bugs,
+# packaging/dependency mismatches, and real deployment-path regressions
+# that the in-process test_server fixture cannot.
+#
+# Triggers:
+#   - push to main touching the smoke test, the workflow, or the server
+#   - pull_request against main
+#   - weekly schedule (Mondays 06:00 UTC) so silent regressions surface
+#   - manual dispatch for ad-hoc verification
+#
+# Runs on Linux (ubuntu-latest) because the live-deployment path is
+# Linux/systemd; Windows/macOS are covered by the in-process test suite.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tests/test_ohmd_smoke.py"
+      - ".github/workflows/ohmd-smoke.yml"
+      - "src/ohm/server/**"
+      - "src/ohm/cli/**"
+      - "src/ohm/store.py"
+      - "src/ohm/schema.py"
+      - "pyproject.toml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "tests/test_ohmd_smoke.py"
+      - ".github/workflows/ohmd-smoke.yml"
+      - "src/ohm/server/**"
+      - "src/ohm/cli/**"
+      - "src/ohm/store.py"
+      - "src/ohm/schema.py"
+      - "pyproject.toml"
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Hard job-level timeout: the smoke test's per-test deadline is 30s,
+# and the full matrix boots ~1 server per Python version. Allow 10
+# minutes to absorb pip install + boot jitter on cold runners.
+jobs:
+  smoke:
+    name: ohmd smoke (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ matrix.python-version }}-
+
+      - name: Install OHM (editable, dev extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Verify ohmd module is importable
+        run: |
+          python -c "import ohm.server; print('ohmd import OK', ohm.server.__file__)"
+
+      - name: Run live-daemon smoke test
+        env:
+          OHM_NO_AUTH: "true"
+          OHM_ACTOR: "ci_smoke"
+          # pytest-timeout fallback at the suite level (the test's own
+          # _wait_for_health has a 30s deadline; this is a belt-and-braces
+          # guard against a hung subprocess).
+          PYTEST_TIMEOUT: "300"
+        run: |
+          python -m pytest tests/test_ohmd_smoke.py -v \
+            --tb=short \
+            --timeout=300 \
+            --timeout-method=thread \
+            -m "smoke" 2>&1 | tee smoke-test-output.txt
+
+      - name: Upload smoke test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ohmd-smoke-logs-${{ matrix.python-version }}
+          path: smoke-test-output.txt
+          if-no-files-found: ignore
