@@ -555,6 +555,145 @@ class DomainTable:
         )
 
 
+@dataclass(frozen=True)
+class DuckLakeTable:
+    """Declarative definition of a table to mirror in DuckLake (OHM-8bli).
+
+    OHM's DuckLake sync was previously hardcoded to three tables
+    (ohm_nodes, ohm_edges, ohm_observations). Domain templates that
+    added their own tables via :class:`DomainTable` (e.g. TOPO's
+    topo_prospects) had those tables silently lost on crash/recovery
+    because the sync code didn't know about them.
+
+    ``DuckLakeTable`` is the sync-side registry entry: which table to
+    mirror, its primary key (for upsert/merge), its timestamp column
+    (for incremental sync detection), and a fallback chain when the
+    primary timestamp is NULL. Per-table DDL for the mirror (which
+    uses all-VARCHAR columns) is derived from the source table's
+    ``information_schema.columns`` at sync time.
+
+    Attributes:
+        name: Source table name (e.g. ``"ohm_nodes"``,
+            ``"topo_prospects"``).
+        primary_key: Column used for upsert/merge logic. Defaults to
+            ``"id"``. The mirror DDL does NOT declare a PK (mirrors
+            are append-only with VARCHAR columns); the primary key is
+            used in the WHERE clauses of the sync queries.
+        timestamp_col: Column for incremental sync detection (e.g.
+            ``"updated_at"``). Rows whose timestamp_col > last_sync
+            are pushed. Must exist on the source table; validated at
+            sync time.
+        timestamp_fallback: Column to use when timestamp_col is NULL
+            (typically ``"created_at"``). Required because most OHM
+            domain tables only have created_at, not updated_at.
+        has_deleted_at: Whether the table has a ``deleted_at`` column
+            used for soft-delete tracking. Affects how the sync code
+            filters active rows.
+        description: Human-readable description.
+    """
+
+    name: str
+    primary_key: str = "id"
+    timestamp_col: str = "updated_at"
+    timestamp_fallback: str = "created_at"
+    has_deleted_at: bool = True
+    description: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.name or not isinstance(self.name, str):
+            raise ValueError("DuckLakeTable.name must be a non-empty string")
+        if not (self.name[0].isalpha() or self.name[0] == "_") or not all(
+            c.isalnum() or c == "_" for c in self.name
+        ):
+            raise ValueError(f"DuckLakeTable.name='{self.name}' is not a valid SQL identifier")
+
+    def to_dict(self) -> dict:
+        """Serialize to a JSON-safe dict."""
+        d: dict = {"name": self.name, "primary_key": self.primary_key}
+        if self.timestamp_col != "updated_at":
+            d["timestamp_col"] = self.timestamp_col
+        if self.timestamp_fallback != "created_at":
+            d["timestamp_fallback"] = self.timestamp_fallback
+        if not self.has_deleted_at:
+            d["has_deleted_at"] = False
+        if self.description:
+            d["description"] = self.description
+        return d
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "DuckLakeTable":
+        """Inverse of :meth:`to_dict`."""
+        if "name" not in data:
+            raise ValueError("DuckLakeTable dict requires 'name'")
+        return cls(
+            name=data["name"],
+            primary_key=data.get("primary_key", "id"),
+            timestamp_col=data.get("timestamp_col", "updated_at"),
+            timestamp_fallback=data.get("timestamp_fallback", "created_at"),
+            has_deleted_at=bool(data.get("has_deleted_at", True)),
+            description=data.get("description", ""),
+        )
+
+    @classmethod
+    def from_domain_table(cls, dt: "DomainTable") -> "DuckLakeTable":
+        """Derive a DuckLakeTable entry from a :class:`DomainTable`.
+
+        Inspects the column list for ``updated_at``/``created_at`` to
+        pick the timestamp_col and fallback. The primary_key is taken
+        from ``DomainTable.primary_key`` (defaults to ``"id"``).
+        has_deleted_at is True if a ``deleted_at`` column is present.
+        """
+        col_names = {c[0] for c in dt.columns}
+        has_updated = "updated_at" in col_names
+        has_created = "created_at" in col_names
+        return cls(
+            name=dt.name,
+            primary_key=dt.primary_key or "id",
+            timestamp_col="updated_at" if has_updated else "created_at",
+            timestamp_fallback="created_at" if has_created else "created_at",
+            has_deleted_at="deleted_at" in col_names,
+            description=f"Derived from DomainTable '{dt.name}' (OHM-8bli)",
+        )
+
+
+# Default DuckLake tables — the three core OHM tables plus the change feed
+# (which is synced separately but lives in the registry for completeness).
+DEFAULT_DUCKLAKE_TABLES: tuple[DuckLakeTable, ...] = (
+    DuckLakeTable(
+        name="ohm_nodes",
+        primary_key="id",
+        timestamp_col="updated_at",
+        timestamp_fallback="created_at",
+        has_deleted_at=True,
+        description="Core OHM nodes",
+    ),
+    DuckLakeTable(
+        name="ohm_edges",
+        primary_key="id",
+        timestamp_col="updated_at",
+        timestamp_fallback="created_at",
+        has_deleted_at=True,
+        description="Core OHM edges",
+    ),
+    DuckLakeTable(
+        name="ohm_observations",
+        primary_key="id",
+        timestamp_col="created_at",  # No updated_at
+        timestamp_fallback="created_at",
+        has_deleted_at=True,
+        description="Core OHM observations (no updated_at)",
+    ),
+    DuckLakeTable(
+        name="ohm_change_feed",
+        primary_key="id",
+        timestamp_col="occurred_at",
+        timestamp_fallback="occurred_at",
+        has_deleted_at=False,
+        description="Append-only change feed",
+    ),
+)
+
+
 class SchemaConfig:
     """Configurable schema for domain-specific knowledge graphs.
 
@@ -593,6 +732,7 @@ class SchemaConfig:
         template_version: int = 0,
         seed_agents: list[dict] | None = None,
         domain_tables: list[DomainTable] | tuple[DomainTable, ...] | None = None,
+        ducklake_tables: list[DuckLakeTable] | tuple[DuckLakeTable, ...] | None = None,
     ):
         self.name = name
         self.node_types = node_types if node_types is not None else VALID_NODE_TYPES
@@ -619,6 +759,28 @@ class SchemaConfig:
                         f"got {type(dt).__name__}"
                     )
             self.domain_tables = tuple(sorted(domain_tables, key=lambda d: (d.ordering, d.name)))
+        # OHM-8bli: DuckLake sync table registry. Defaults to the four core
+        # tables (ohm_nodes, ohm_edges, ohm_observations, ohm_change_feed).
+        # Domain tables from self.domain_tables are NOT auto-merged here —
+        # callers must explicitly add them via ducklake_tables=[...].
+        # This makes the registry explicit: the source of truth is what
+        # the operator declares, not what's incidentally in the schema.
+        if ducklake_tables is None:
+            # Build the default: core tables + auto-derived from domain_tables.
+            derived = tuple(
+                DuckLakeTable.from_domain_table(dt) for dt in self.domain_tables
+            )
+            self.ducklake_tables: tuple[DuckLakeTable, ...] = (
+                DEFAULT_DUCKLAKE_TABLES + derived
+            )
+        else:
+            for dlt in ducklake_tables:
+                if not isinstance(dlt, DuckLakeTable):
+                    raise TypeError(
+                        f"SchemaConfig.ducklake_tables must contain DuckLakeTable "
+                        f"instances, got {type(dlt).__name__}"
+                    )
+            self.ducklake_tables = tuple(ducklake_tables)
 
     @property
     def all_edge_types(self) -> frozenset[str]:
@@ -837,6 +999,7 @@ class SchemaConfig:
             result["optional_integrations"] = self.optional_integrations
         if self.domain_tables:
             result["domain_tables"] = [dt.to_dict() for dt in self.domain_tables]
+        result["ducklake_tables"] = [dlt.to_dict() for dlt in self.ducklake_tables]
         return result
 
     @classmethod
@@ -867,6 +1030,10 @@ class SchemaConfig:
         if "domain_tables" in data:
             domain_tables = [DomainTable.from_dict(d) for d in data["domain_tables"]]
 
+        ducklake_tables = None
+        if "ducklake_tables" in data:
+            ducklake_tables = [DuckLakeTable.from_dict(d) for d in data["ducklake_tables"]]
+
         return cls(
             name=data["name"],
             node_types=frozenset(data["node_types"]),
@@ -881,6 +1048,7 @@ class SchemaConfig:
             template_version=int(data.get("template_version", 0)),
             seed_agents=data.get("seed_agents", []),  # OHM-tss4.1.1: domain agent pre-seeding
             domain_tables=domain_tables,  # OHM-vl8o: domain DDL
+            ducklake_tables=ducklake_tables,  # OHM-8bli: DuckLake sync registry
         )
 
     @classmethod

@@ -310,7 +310,10 @@ class OhmStore:
                     conn.execute(f"ATTACH IF NOT EXISTS '{ducklake_path}' AS {dl_catalog} (TYPE ducklake)")
                     logger.info("DuckLake attached for recovery")
 
-                    for table in ["ohm_nodes", "ohm_edges", "ohm_observations"]:
+                    # OHM-8bli: iterate the DuckLake registry (not a hardcoded list)
+                    # so domain tables (e.g. topo_prospects) get recovered too.
+                    for dlt in self.schema.ducklake_tables:
+                        table = dlt.name
                         try:
                             dl_cols = conn.execute(f"PRAGMA table_info('{dl_schema_prefix}.{table}')").fetchall()
                             dl_col_names = {r[1] for r in dl_cols}
@@ -339,8 +342,13 @@ class OhmStore:
                             select_str = ", ".join(select_parts)
                             insert_cols = ", ".join(common)
 
-                            conn.execute(f"INSERT INTO {table} ({insert_cols}, deleted_at) SELECT {select_str}, NULL::TIMESTAMP FROM {dl_schema_prefix}.{table}")
-                            count = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]  # type: ignore[index]
+                            # OHM-8bli: only add deleted_at for tables that have it
+                            if dlt.has_deleted_at:
+                                conn.execute(f"INSERT INTO {table} ({insert_cols}, deleted_at) SELECT {select_str}, NULL::TIMESTAMP FROM {dl_schema_prefix}.{table}")
+                                count = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]  # type: ignore[index]
+                            else:
+                                conn.execute(f"INSERT INTO {table} ({insert_cols}) SELECT {select_str} FROM {dl_schema_prefix}.{table}")
+                                count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]  # type: ignore[index]
                             logger.info("Recovered %d %s from DuckLake (%d columns)", count, table, len(common))
                         except Exception as e:
                             logger.warning("Failed to recover %s from DuckLake: %s", table, e)
@@ -408,7 +416,8 @@ class OhmStore:
             # Try DuckLake 0.3+ metadata schema first, then fall back to catalog-qualified names
             dl_schema_prefix = f"__ducklake_metadata_{dl_catalog}"
 
-            for table in ["ohm_nodes", "ohm_edges", "ohm_observations"]:
+            for dlt in self._ducklake_sync_tables():
+                table = dlt.name
                 try:
                     # Try metadata schema first (DuckLake 0.3+)
                     try:
@@ -465,8 +474,13 @@ class OhmStore:
                     select_str = ", ".join(select_parts)
                     insert_cols = ", ".join(common)
 
-                    self.conn.execute(f"INSERT INTO {table} ({insert_cols}, deleted_at) SELECT {select_str}, NULL::TIMESTAMP FROM {source_table}")
-                    count = self.conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]  # type: ignore[index]
+                    # OHM-8bli: only add deleted_at for tables that have it
+                    if dlt.has_deleted_at:
+                        self.conn.execute(f"INSERT INTO {table} ({insert_cols}, deleted_at) SELECT {select_str}, NULL::TIMESTAMP FROM {source_table}")
+                        count = self.conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]  # type: ignore[index]
+                    else:
+                        self.conn.execute(f"INSERT INTO {table} ({insert_cols}) SELECT {select_str} FROM {source_table}")
+                        count = self.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]  # type: ignore[index]
                     logger.info("Auto-restored %d %s from DuckLake (%d columns)", count, table, len(common))
                 except Exception as e:
                     logger.warning("Failed to auto-restore %s from DuckLake: %s", table, e)
@@ -2170,6 +2184,7 @@ class OhmStore:
             catalog_path=catalog_path,
             data_path=data_path,
             alias=alias,
+            schema=self.schema,  # OHM-8bli: pass schema for domain table mirrors
         )
 
     # ── DuckLake Sync ────────────────────────────────────────────────
@@ -2177,6 +2192,21 @@ class OhmStore:
     def _ducklake_table(self, table: str, alias: str) -> str:
         """Return a safely quoted table reference for DuckLake sync."""
         return f'"{alias}"."{table}"'
+
+    def _ducklake_sync_tables(self) -> tuple:
+        """Return the registry of tables to mirror in DuckLake (OHM-8bli).
+
+        Excludes the change feed (``ohm_change_feed``) which is synced
+        separately via ``_sync_change_feed()`` because it uses
+        ``occurred_at`` instead of ``updated_at``/``created_at`` and
+        has no ``deleted_at`` column. The returned tuple is in
+        declared registry order; each entry is a :class:`DuckLakeTable`
+        with the per-table pk/timestamp config.
+        """
+        return tuple(
+            dlt for dlt in self.schema.ducklake_tables
+            if dlt.name != "ohm_change_feed"
+        )
 
     # Minimum seconds between DuckLake syncs (avoid syncing on every write)
     _MIN_SYNC_INTERVAL_SECONDS: float = 30.0
@@ -2350,24 +2380,38 @@ class OhmStore:
         # Compare row counts
         # Note: DuckLake tables don't have deleted_at, so we use unfiltered counts
         # and compare against local active (non-deleted) counts.
-        tables = ["ohm_nodes", "ohm_edges", "ohm_observations"]
-        for table in tables:
+        # OHM-8bli: iterate the registry instead of a hardcoded 3-table list.
+        for dlt in self._ducklake_sync_tables():
+            table = dlt.name
             try:
-                local_count = self.conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]
+                # OHM-8bli: only filter on deleted_at for tables that have it
+                if dlt.has_deleted_at:
+                    local_count = self.conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]  # type: ignore[index]
+                else:
+                    local_count = self.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]  # type: ignore[index]
                 # DuckLake tables don't have deleted_at column — use unfiltered count
                 ducklake_count = self.conn.execute(f"SELECT COUNT(*) FROM {self._ducklake_table(table, alias)}").fetchone()[0]
                 health["local_counts"][table] = local_count
                 health["ducklake_counts"][table] = ducklake_count
 
                 # Detect orphans: rows in DuckLake not in local active rows
-                # DuckLake doesn't have deleted_at, so we compare against local active rows only
-                orphan_count = self.conn.execute(f"""
-                    SELECT COUNT(*) FROM {self._ducklake_table(table, alias)} dl
-                    WHERE NOT EXISTS (
-                        SELECT 1 FROM {table} l
-                        WHERE l.id = dl.id AND l.deleted_at IS NULL
-                    )
-                """).fetchone()[0]
+                # DuckLake doesn't have deleted_at, so we compare against local active rows only.
+                # OHM-8bli: handle tables that have no deleted_at column.
+                if dlt.has_deleted_at:
+                    orphan_count = self.conn.execute(f"""
+                        SELECT COUNT(*) FROM {self._ducklake_table(table, alias)} dl
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM {table} l
+                            WHERE l.id = dl.id AND l.deleted_at IS NULL
+                        )
+                    """).fetchone()[0]  # type: ignore[index]
+                else:
+                    orphan_count = self.conn.execute(f"""
+                        SELECT COUNT(*) FROM {self._ducklake_table(table, alias)} dl
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM {table} l WHERE l.id = dl.id
+                        )
+                    """).fetchone()[0]  # type: ignore[index]
                 health["orphan_counts"][table] = orphan_count
 
             except Exception as e:
@@ -2414,11 +2458,20 @@ class OhmStore:
         return health
 
     def _table_counts(self) -> dict[str, int]:
-        """Get row counts for all OHM tables (excluding soft-deleted)."""
+        """Get row counts for all mirrored tables (excluding soft-deleted).
+
+        OHM-8bli: iterates the DuckLake registry instead of a hardcoded
+        three-table list, so domain tables (e.g. topo_prospects) get
+        included in the health report.
+        """
         counts = {}
-        for table in ["ohm_nodes", "ohm_edges", "ohm_observations"]:
+        for dlt in self._ducklake_sync_tables():
+            table = dlt.name
             try:
-                counts[table] = self.conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]
+                if dlt.has_deleted_at:
+                    counts[table] = self.conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]  # type: ignore[index]
+                else:
+                    counts[table] = self.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]  # type: ignore[index]
             except Exception:
                 counts[table] = -1
         return counts
@@ -2461,16 +2514,13 @@ class OhmStore:
             result["verified"] = False
             return result
 
-        # Per-table configuration: which timestamp column to use for update detection
-        table_config = {
-            "ohm_nodes": {"pk": "id", "timestamp_col": "updated_at"},
-            "ohm_edges": {"pk": "id", "timestamp_col": "updated_at"},
-            "ohm_observations": {"pk": "id", "timestamp_col": "created_at"},  # No updated_at
-        }
-
-        for table, cfg in table_config.items():
-            pk = cfg["pk"]
-            ts_col = cfg["timestamp_col"]
+        # OHM-8bli: per-table config now comes from the DuckLakeTable
+        # registry on self.schema.ducklake_tables. Each entry carries its
+        # own primary_key, timestamp_col, and has_deleted_at flag.
+        for dlt in self._ducklake_sync_tables():
+            table = dlt.name
+            pk = dlt.primary_key
+            ts_col = dlt.timestamp_col
             mirror = self._ducklake_table(table, alias)
             try:
                 # Get column list for explicit INSERT
@@ -2479,11 +2529,17 @@ class OhmStore:
                 col_list = ", ".join(col_names)
 
                 # 1. Insert rows in DuckLake but not local
-                # DuckLake tables don't have deleted_at — all rows are active
-                missing_count = self.conn.execute(f"""
-                    SELECT COUNT(*) FROM {mirror} dl
-                    WHERE NOT EXISTS (SELECT 1 FROM {table} l WHERE l.id = dl.id AND l.deleted_at IS NULL)
-                """).fetchone()[0]
+                # OHM-8bli: only filter on deleted_at for tables that have it
+                if dlt.has_deleted_at:
+                    missing_count = self.conn.execute(f"""
+                        SELECT COUNT(*) FROM {mirror} dl
+                        WHERE NOT EXISTS (SELECT 1 FROM {table} l WHERE l.{pk} = dl.{pk} AND l.deleted_at IS NULL)
+                    """).fetchone()[0]  # type: ignore[index]
+                else:
+                    missing_count = self.conn.execute(f"""
+                        SELECT COUNT(*) FROM {mirror} dl
+                        WHERE NOT EXISTS (SELECT 1 FROM {table} l WHERE l.{pk} = dl.{pk})
+                    """).fetchone()[0]  # type: ignore[index]
 
                 if missing_count > 0:
                     self.conn.execute(f"""
@@ -2542,10 +2598,16 @@ class OhmStore:
                 result["verified"] = False
 
         # 4. Verify — check that counts match after repair
-        for table in table_config:
+        # OHM-8bli: iterate the registry, only filter on deleted_at where
+        # the table actually has that column.
+        for dlt in self._ducklake_sync_tables():
+            table = dlt.name
             try:
-                local_count = self.conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]
-                dl_count = self.conn.execute(f"SELECT COUNT(*) FROM {self._ducklake_table(table, alias)}").fetchone()[0]
+                if dlt.has_deleted_at:
+                    local_count = self.conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]  # type: ignore[index]
+                else:
+                    local_count = self.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]  # type: ignore[index]
+                dl_count = self.conn.execute(f"SELECT COUNT(*) FROM {self._ducklake_table(table, alias)}").fetchone()[0]  # type: ignore[index]
                 if local_count != dl_count:
                     result["verified"] = False
                     result["errors"].append(f"{table} count mismatch after repair: local={local_count}, ducklake={dl_count}")
@@ -2623,10 +2685,12 @@ class OhmStore:
         # Get last sync timestamp
         last_push = self._get_last_push_timestamp()
 
-        for table in ["ohm_nodes", "ohm_edges", "ohm_observations"]:
+        # OHM-8bli: iterate the DuckLake registry, not a hardcoded 3-table list
+        for dlt in self._ducklake_sync_tables():
+            table = dlt.name
             try:
                 # Check if mirror table has any data (for initial sync)
-                mirror_count = self.conn.execute(f"SELECT COUNT(*) FROM {self._ducklake_table(table, alias)}").fetchone()[0]
+                mirror_count = self.conn.execute(f"SELECT COUNT(*) FROM {self._ducklake_table(table, alias)}").fetchone()[0]  # type: ignore[index]
 
                 if mirror_count == 0:
                     # Initial sync: copy all rows
@@ -2907,12 +2971,16 @@ class OhmStore:
         """
         pulled = 0
 
-        for table in ["ohm_nodes", "ohm_edges", "ohm_observations"]:
+        # OHM-8bli: iterate the DuckLake registry instead of a hardcoded list
+        for dlt in self._ducklake_sync_tables():
+            table = dlt.name
+            pk = dlt.primary_key
             try:
                 mirror = self._ducklake_table(table, alias)
                 # Find rows in DuckLake that are not in local table
-                # (new rows from other agents)
-                new_rows = self.conn.execute(f"SELECT dl.id FROM {mirror} dl LEFT JOIN {table} l ON dl.id = l.id WHERE l.id IS NULL").fetchall()
+                # (new rows from other agents). OHM-8bli: use the
+                # registry's primary_key instead of hardcoded 'id'.
+                new_rows = self.conn.execute(f"SELECT dl.{pk} FROM {mirror} dl LEFT JOIN {table} l ON dl.{pk} = l.{pk} WHERE l.{pk} IS NULL").fetchall()
 
                 logger.info("DuckLake pull: %s has %d new rows in mirror", table, len(new_rows))
 

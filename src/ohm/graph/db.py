@@ -19,6 +19,8 @@ if TYPE_CHECKING:
     import duckdb
     from duckdb import DuckDBPyConnection
 
+    from ohm.graph.schema import SchemaConfig
+
 
 def _get_ducklake_path() -> str:
     """Return the DuckLake catalog path, env var first then config file fallback."""
@@ -472,6 +474,7 @@ def attach_ducklake(
     catalog_path: str,
     data_path: str | None = None,
     alias: str = "ohm_lake",
+    schema: "SchemaConfig | None" = None,
 ) -> bool:
     """Attach a DuckLake catalog to the connection.
 
@@ -482,6 +485,11 @@ def attach_ducklake(
     Args:
         conn: Active DuckDB connection with DuckLake extension loaded.
         catalog_path: Path to the DuckLake catalog file
+        data_path: Optional path for DuckLake data files
+        alias: Database alias for the attached catalog
+        schema: Optional SchemaConfig — when provided, mirror tables
+            are also created for domain tables in the schema (OHM-8bli).
+            Without this, only the four core OHM tables get mirrors.
             (e.g., '/var/lib/ohm/ohm_lake.ducklake').
             Uses the ducklake: protocol prefix automatically.
         data_path: Path for Parquet data files. If None, defaults to
@@ -526,20 +534,35 @@ def attach_ducklake(
         return False
 
     # Create mirror tables in DuckLake schema (no PKs — DuckLake constraint)
-    _create_ducklake_tables(conn, alias)
+    # OHM-8bli: pass schema so domain tables get mirrors too.
+    _create_ducklake_tables(conn, alias, schema=schema)
 
     return True
 
 
-def _create_ducklake_tables(conn: "DuckDBPyConnection", alias: str) -> None:
-    """Create OHM mirror tables in DuckLake schema.
+def _create_ducklake_tables(
+    conn: "DuckDBPyConnection",
+    alias: str,
+    schema: "SchemaConfig | None" = None,
+) -> None:
+    """Create OHM mirror tables in DuckLake schema (OHM-8bli).
 
     DuckLake does NOT support PRIMARY KEY or UNIQUE constraints.
     All columns use VARCHAR to avoid type-mismatch issues with
     Parquet serialization. Node/edge uniqueness is enforced in
     application code (ohmd upsert logic).
+
+    The four core OHM tables (ohm_nodes, ohm_edges, ohm_observations,
+    ohm_change_feed) use explicit VARCHAR DDL with hand-picked column
+    lists — these columns are part of the OHM core API and must not
+    change shape. Any additional tables from the DuckLake registry
+    (e.g. domain tables like topo_prospects from OHM-vl8o) get their
+    mirror DDL generated dynamically from information_schema.columns.
     """
-    mirror_tables = {
+    # Core OHM tables: explicit VARCHAR DDL. Do not regenerate from
+    # information_schema — the column set is the public API of the
+    # core schema and must stay stable across DuckLake versions.
+    core_mirror_ddl: dict[str, str] = {
         "ohm_nodes": """
             CREATE TABLE IF NOT EXISTS {alias}.ohm_nodes (
                 id                      VARCHAR,
@@ -626,8 +649,45 @@ def _create_ducklake_tables(conn: "DuckDBPyConnection", alias: str) -> None:
         """,
     }
 
-    for table_name, ddl in mirror_tables.items():
+    for table_name, ddl in core_mirror_ddl.items():
         try:
             conn.execute(ddl.format(alias=alias))
         except Exception as e:
             logger.debug("Skipping mirror table %s (may already exist): %s", table_name, e, exc_info=True)
+
+    # OHM-8bli: For domain tables in the registry, generate the mirror
+    # DDL dynamically from information_schema.columns. The result is
+    # all-VARCHAR (no PKs) to match the core table convention.
+    if schema is not None:
+        # Tables that already got explicit DDL above — skip.
+        core_names = set(core_mirror_ddl.keys())
+        try:
+            for dlt in schema.ducklake_tables:
+                if dlt.name in core_names:
+                    continue
+                try:
+                    cols = conn.execute(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_schema = 'main' AND table_name = ? "
+                        "ORDER BY ordinal_position",
+                        [dlt.name],
+                    ).fetchall()
+                except Exception:
+                    continue
+                if not cols:
+                    continue
+                col_lines = ", ".join(f"{c[0]} VARCHAR" for c in cols)
+                mirror_sql = (
+                    f"CREATE TABLE IF NOT EXISTS {alias}.{dlt.name} ({col_lines})"
+                )
+                try:
+                    conn.execute(mirror_sql)
+                except Exception as e:
+                    logger.debug(
+                        "Skipping mirror table %s (may already exist): %s",
+                        dlt.name, e, exc_info=True,
+                    )
+        except Exception as e:
+            # If schema.ducklake_tables is unavailable, skip the
+            # dynamic DDL — core tables still work.
+            logger.debug("DuckLake domain table DDL skipped: %s", e, exc_info=True)
