@@ -382,6 +382,7 @@ class TestDeleteHook:
 class TestHookInvocationLog:
     """Tests for ohm_hook_log audit trail (OHM-aznh.7)."""
 
+    @pytest.mark.skipif(not _can_fork(), reason="Environment cannot fork via /bin/sh")
     def test_shell_hook_creates_log_row(self, test_db):
         import sys
 
@@ -399,6 +400,7 @@ class TestHookInvocationLog:
         assert "logged" in row["stdout"]
         assert row["timed_out"] is False
 
+    @pytest.mark.skipif(not _can_fork(), reason="Environment cannot fork via /bin/sh")
     def test_failed_hook_creates_log_row(self, test_db):
         import sys
 
@@ -425,6 +427,7 @@ class TestHookInvocationLog:
         assert len(rows) == 1
         assert rows[0][0] is True
 
+    @pytest.mark.skipif(not _can_fork(), reason="Environment cannot fork via /bin/sh")
     def test_payload_logged(self, test_db):
         import sys
 
@@ -439,6 +442,7 @@ class TestHookInvocationLog:
         payload = json.loads(rows[0][0])
         assert payload["agent"] == "clio"
 
+    @pytest.mark.skipif(not _can_fork(), reason="Environment cannot fork via /bin/sh")
     def test_multiple_invocations_create_multiple_rows(self, test_db):
         import sys
 
