@@ -7,6 +7,7 @@ from .boundary import enforce_challenge_boundary, enforce_support_boundary, enfo
 from .contract import ContractConfig, lint_graph
 from .visualization import to_mermaid
 from . import server as _server_module
+from . import ask_router  # noqa: F401 — re-export submodule for test imports
 
 
 class _ServerPackage(types.ModuleType):
