@@ -48,7 +48,7 @@ class TestSchemaPrimitives:
         assert "experiment_result" in VALID_OBSERVATION_TYPES
 
     def test_schema_version_bumped(self):
-        assert SCHEMA_VERSION == "0.38.0"
+        assert SCHEMA_VERSION == "0.40.0"
 
     def test_migration_0_35_0_present(self):
         versions = [m[0] for m in MIGRATIONS]

@@ -801,7 +801,7 @@ def _handle_sync(args: argparse.Namespace) -> None:
                 print(f"DuckLake Sync Health: {status}")
                 if result.get("sync_degraded"):
                     print(f"  ⚠ Sync degraded: {result.get('errors', [])}")
-                for table in ["ohm_nodes", "ohm_edges", "ohm_observations"]:
+                for table in (dlt.name for dlt in store.schema.ducklake_tables if dlt.name != "ohm_change_feed"):
                     lc = result.get("local_counts", {}).get(table, "?")
                     dc = result.get("ducklake_counts", {}).get(table, "?")
                     oc = result.get("orphan_counts", {}).get(table, "?")
