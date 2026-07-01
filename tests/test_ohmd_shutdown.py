@@ -160,6 +160,7 @@ class TestShutdownHandlerThreadDispatch:
     not _POSIX or OHMD_BIN is None,
     reason="Requires POSIX SIGTERM and 'ohmd' on PATH (Linux production env)",
 )
+@pytest.mark.integration
 class TestSubprocessSIGTERM:
     """End-to-end: an ohmd subprocess should exit cleanly on SIGTERM in ≤10s."""
 
