@@ -2608,6 +2608,7 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
         )
     ducklake_sync_max_retries = config.get("ducklake", {}).get("sync_max_retries", config.get("sync_max_retries", 20))
     _sync_stop = threading.Event()
+    _sync_thread: threading.Thread | None = None  # OHM-inq1: declared so the shutdown join sees a defined name.
 
     def _ducklake_sync_loop():
         consecutive_sync_errors = 0
@@ -2642,6 +2643,7 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     eviction_interval = eviction_config.get("interval_seconds", 3600)
     eviction_ttl_days = eviction_config.get("ttl_days", 30)
     _eviction_stop = threading.Event()
+    _eviction_thread: threading.Thread | None = None  # OHM-inq1: declared so the shutdown join sees a defined name.
 
     def _eviction_loop():
         while not _eviction_stop.wait(eviction_interval):
@@ -2763,16 +2765,68 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     # (stopping serve_forever's accept loop on its next iteration), then waits
     # for __is_shut_down to be set. The main thread returns from this handler,
     # serve_forever sees the flag, exits the loop, sets __is_shut_down, the
-    # daemon unblocks, the main thread falls through to store.close(), and
-    # the process exits cleanly. Without this hop, SIGTERM/SIGINT are silently
-    # ignored (OHM-k79z — systemctl restart|stop|kill all fail; PID never
-    # changes) because the signal handler never returns.
+    # daemon unblocks, the main thread falls through to the post-serve_forever
+    # cleanup below, and the process exits cleanly. Without this hop,
+    # SIGTERM/SIGINT are silently ignored (OHM-k79z — systemctl restart|stop|
+    # kill all fail; PID never changes) because the signal handler never
+    # returns.
+    #
+    # CRITICAL: this handler must also be FAST and NON-BLOCKING (OHM-inq1).
+    # Earlier versions ran store.sync_heartbeat() and store.conn.execute(
+    # "CHECKPOINT") synchronously here. Both touch store.conn, which a
+    # background worker thread (ducklake-sync, fragment-eviction,
+    # semantic-metric-actions, beads-sync) may be holding in a long DuckDB
+    # query. Result: the main thread blocks inside the handler waiting for
+    # the connection, serve_forever() never re-enters its selector loop,
+    # __is_shut_down never gets set, the daemon-thread that called
+    # server.shutdown() waits indefinitely, and the process hangs.
+    # All real cleanup (worker joins, sync_heartbeat, CHECKPOINT,
+    # tenant_manager.shutdown, store.close) now runs AFTER serve_forever
+    # returns, with bounded join(timeout=...) waits so a stuck worker
+    # thread can't hang shutdown beyond _WORKER_THREAD_JOIN_TIMEOUT seconds.
     def shutdown_handler(signum, frame):
         print("Shutting down...", file=sys.stderr)
         _sync_stop.set()
         _eviction_stop.set()
         _metric_actions_stop.set()
         _beads_sync_stop.set()
+        # Dispatch shutdown() to a daemon thread so it does not deadlock
+        # against serve_forever() running on this (main) thread (OHM-k79z).
+        threading.Thread(target=server.shutdown, daemon=True, name="ohmd-shutdown").start()
+
+    signal.signal(signal.SIGTERM, shutdown_handler)
+    signal.signal(signal.SIGINT, shutdown_handler)
+    # Ignore SIGPIPE to prevent crashes on broken client connections
+    if hasattr(signal, "SIGPIPE"):
+        signal.signal(signal.SIGPIPE, signal.SIG_IGN)
+
+    # Worker-thread join budget after serve_forever exits (OHM-inq1). Each
+    # background loop body is bounded work and should respond to its stop
+    # event within a few seconds; capping the wait means a stuck thread
+    # can't hang shutdown indefinitely.
+    _WORKER_THREAD_JOIN_TIMEOUT = 5.0
+
+    def _join_worker(thread: threading.Thread | None, name: str) -> None:
+        if thread is None:
+            return
+        thread.join(timeout=_WORKER_THREAD_JOIN_TIMEOUT)
+        if thread.is_alive():
+            logger.warning(
+                "Worker thread %s did not exit within %.1fs of stop signal",
+                name,
+                _WORKER_THREAD_JOIN_TIMEOUT,
+            )
+
+    try:
+        server.serve_forever()
+    finally:
+        # Post-shutdown cleanup. Runs on the main thread after serve_forever
+        # returns (whether from a clean shutdown signal or from any exception).
+        # Bounded timeouts ensure we always make it to store.close().
+        _join_worker(_sync_thread, "ducklake-sync")
+        _join_worker(_eviction_thread, "fragment-eviction")
+        _join_worker(_metric_actions_thread, "semantic-metric-actions")
+        _join_worker(_beads_sync_thread, "beads-sync")
         try:
             store.sync_heartbeat()
         except Exception:
@@ -2786,18 +2840,10 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
                 OhmHandler.tenant_manager.shutdown()
             except Exception:
                 logger.exception("Shutdown: tenant_manager.shutdown failed")
-        # Dispatch shutdown() to a daemon thread so it does not deadlock
-        # against serve_forever() running on this (main) thread (OHM-k79z).
-        threading.Thread(target=server.shutdown, daemon=True, name="ohmd-shutdown").start()
-
-    signal.signal(signal.SIGTERM, shutdown_handler)
-    signal.signal(signal.SIGINT, shutdown_handler)
-    # Ignore SIGPIPE to prevent crashes on broken client connections
-    if hasattr(signal, "SIGPIPE"):
-        signal.signal(signal.SIGPIPE, signal.SIG_IGN)
-
-    server.serve_forever()
-    store.close()
+        try:
+            store.close()
+        except Exception:
+            logger.exception("Shutdown: store.close failed")
 
 
 def _prewarm_pgmpy() -> None:
