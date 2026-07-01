@@ -2526,72 +2526,129 @@ class OhmStore:
                 # Get column list for explicit INSERT
                 cols = self.conn.execute(f"DESCRIBE {table}").fetchall()
                 col_names = [c[0] for c in cols]
-                col_list = ", ".join(col_names)
+                # OHM-8bli: only insert columns that exist in BOTH the
+                # local table AND the DuckLake mirror (mirror columns are
+                # all-VARCHAR and may be a subset for domain tables).
+                mirror_col_rows = self.conn.execute(
+                    f"SELECT column_name FROM information_schema.columns "
+                    f"WHERE table_catalog = ? AND table_name = ? ORDER BY ordinal_position",
+                    [alias, table],
+                ).fetchall()
+                mirror_col_names = {r[0] for r in mirror_col_rows}
+                insert_cols = [c for c in col_names if c in mirror_col_names]
+                if not insert_cols:
+                    # No columns in common — nothing to insert. Skip.
+                    continue
+                col_list = ", ".join(insert_cols)
 
                 # 1. Insert rows in DuckLake but not local
                 # OHM-8bli: only filter on deleted_at for tables that have it
                 if dlt.has_deleted_at:
                     missing_count = self.conn.execute(f"""
                         SELECT COUNT(*) FROM {mirror} dl
-                        WHERE NOT EXISTS (SELECT 1 FROM {table} l WHERE l.{pk} = dl.{pk} AND l.deleted_at IS NULL)
+                        WHERE NOT EXISTS (SELECT 1 FROM {table} WHERE {pk} = dl.{pk} AND deleted_at IS NULL)
                     """).fetchone()[0]  # type: ignore[index]
                 else:
                     missing_count = self.conn.execute(f"""
                         SELECT COUNT(*) FROM {mirror} dl
-                        WHERE NOT EXISTS (SELECT 1 FROM {table} l WHERE l.{pk} = dl.{pk})
+                        WHERE NOT EXISTS (SELECT 1 FROM {table} WHERE {pk} = dl.{pk})
                     """).fetchone()[0]  # type: ignore[index]
 
                 if missing_count > 0:
+                    # OHM-8bli: cast VARCHAR mirror columns to the local
+                    # column type so the INSERT succeeds. Use a CAST
+                    # expression per column.
+                    local_type_rows = self.conn.execute(
+                        "SELECT column_name, data_type FROM information_schema.columns "
+                        "WHERE table_schema='main' AND table_name=?",
+                        [table],
+                    ).fetchall()
+                    local_type_map = {r[0]: r[1].upper() for r in local_type_rows}
+                    select_parts = []
+                    for c in insert_cols:
+                        ltype = local_type_map.get(c, "VARCHAR")
+                        if ltype in ("FLOAT", "DOUBLE", "REAL"):
+                            select_parts.append(f"CAST(dl.{c} AS DOUBLE) AS {c}")
+                        elif ltype in ("INTEGER", "BIGINT"):
+                            select_parts.append(f"CAST(dl.{c} AS BIGINT) AS {c}")
+                        elif ltype in ("TIMESTAMP", "TIMESTAMPTZ", "DATETIME"):
+                            select_parts.append(f"CAST(dl.{c} AS TIMESTAMP) AS {c}")
+                        elif ltype == "BOOLEAN":
+                            select_parts.append(f"CAST(dl.{c} AS BOOLEAN) AS {c}")
+                        else:
+                            select_parts.append(f"dl.{c} AS {c}")
+                    select_str = ", ".join(select_parts)
+                    # deleted_at needs a default if the table has it but
+                    # the mirror doesn't carry a value. Use NULL.
+                    final_cols = list(insert_cols)
+                    final_selects = list(select_parts)
+                    if dlt.has_deleted_at and "deleted_at" not in insert_cols:
+                        final_cols.append("deleted_at")
+                        final_selects.append("CAST(NULL AS TIMESTAMP) AS deleted_at")
+                    fc = ", ".join(final_cols)
+                    fs = ", ".join(final_selects)
                     self.conn.execute(f"""
-                        INSERT INTO {table} ({col_list})
-                        SELECT {col_list} FROM {mirror} dl
-                        WHERE NOT EXISTS (SELECT 1 FROM {table} l WHERE l.id = dl.id AND l.deleted_at IS NULL)
+                        INSERT INTO {table} ({fc})
+                        SELECT {fs} FROM {mirror} dl
+                        WHERE NOT EXISTS (SELECT 1 FROM {table} WHERE {pk} = dl.{pk}{" AND deleted_at IS NULL" if dlt.has_deleted_at else ""})
                     """)
                 result["inserted"] += missing_count
 
                 # 2. Update rows where DuckLake has newer timestamps
-                set_clause = ", ".join(f"{c} = dl.{c}" for c in col_names if c != pk)
-                updated_count = self.conn.execute(f"""
-                    SELECT COUNT(*) FROM {mirror} dl
-                    JOIN {table} l ON l.{pk} = dl.{pk}
-                    WHERE l.deleted_at IS NULL
-                    AND dl.{ts_col} > l.{ts_col}
-                """).fetchone()[0]
+                # OHM-8bli: only update if the table has BOTH a timestamp
+                # column AND a deleted_at column (the UPDATE gates on
+                # active rows). Cast VARCHAR to TIMESTAMP for the
+                # comparison.
+                if dlt.timestamp_col in col_names and dlt.has_deleted_at:
+                    set_clause = ", ".join(f"{c} = dl.{c}" for c in insert_cols if c != pk and c != "deleted_at")
+                    if set_clause:
+                        # Use TRY_CAST to avoid hard errors on bad data.
+                        updated_count = self.conn.execute(f"""
+                            SELECT COUNT(*) FROM {mirror} dl
+                            JOIN {table} ON {table}.{pk} = dl.{pk}
+                            WHERE {table}.deleted_at IS NULL
+                            AND TRY_CAST(dl.{ts_col} AS TIMESTAMP) >
+                                COALESCE({table}.{ts_col}, TRY_CAST(dl.{ts_col} AS TIMESTAMP))
+                        """).fetchone()[0]  # type: ignore[index]
 
-                if updated_count > 0:
-                    self.conn.execute(f"""
-                        UPDATE {table} l SET {set_clause}
-                        FROM {mirror} dl
-                        WHERE l.{pk} = dl.{pk}
-                        AND l.deleted_at IS NULL
-                        AND dl.{ts_col} > l.{ts_col}
-                    """)
-                result["updated"] += updated_count
+                        if updated_count > 0:
+                            self.conn.execute(f"""
+                                UPDATE {table} SET {set_clause}
+                                FROM {mirror} dl
+                                WHERE {table}.{pk} = dl.{pk}
+                                AND {table}.deleted_at IS NULL
+                                AND TRY_CAST(dl.{ts_col} AS TIMESTAMP) >
+                                    COALESCE({table}.{ts_col}, TRY_CAST(dl.{ts_col} AS TIMESTAMP))
+                            """)
+                        result["updated"] += updated_count
 
                 # 3. Soft-delete rows absent in DuckLake but still active locally
                 # (DuckLake is source of truth — rows not in mirror should be deleted locally)
-                soft_deleted_count = self.conn.execute(f"""
-                    SELECT COUNT(*) FROM {table} l
-                    WHERE l.deleted_at IS NULL
-                    AND NOT EXISTS (
-                        SELECT 1 FROM {mirror} dl
-                        WHERE dl.id = l.id
-                    )
-                """).fetchone()[0]
-
-                if soft_deleted_count > 0:
-                    from datetime import datetime, timezone
-
-                    now = datetime.now(timezone.utc).isoformat()
-                    self.conn.execute(f"""
-                        UPDATE {table} SET deleted_at = '{now}'
+                # OHM-8bli: respect dlt.has_deleted_at — only tables with
+                # deleted_at get the soft-delete treatment.
+                if dlt.has_deleted_at:
+                    soft_deleted_count = self.conn.execute(f"""
+                        SELECT COUNT(*) FROM {table}
                         WHERE deleted_at IS NULL
                         AND NOT EXISTS (
                             SELECT 1 FROM {mirror} dl
-                            WHERE dl.id = {table}.id
+                            WHERE dl.{pk} = {table}.{pk}
                         )
-                    """)
-                result["soft_deleted"] += soft_deleted_count
+                    """).fetchone()[0]  # type: ignore[index]
+
+                    if soft_deleted_count > 0:
+                        from datetime import datetime, timezone
+
+                        now = datetime.now(timezone.utc).isoformat()
+                        self.conn.execute(f"""
+                            UPDATE {table} SET deleted_at = ?
+                            WHERE deleted_at IS NULL
+                            AND NOT EXISTS (
+                                SELECT 1 FROM {mirror} dl
+                                WHERE dl.{pk} = {table}.{pk}
+                            )
+                        """, [now])
+                    result["soft_deleted"] += soft_deleted_count
 
             except Exception as e:
                 result["errors"].append(f"{table} repair error: {e}")
