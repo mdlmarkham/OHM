@@ -38,7 +38,7 @@ class TestProductionPlanTemplate:
 
     def test_instantiates(self, test_db):
         template = create_production_plan_template(test_db, created_by="tester")
-        target_id = template["id"]
+        template["id"]
         eval_edges = test_db.execute(
             """SELECT to_node FROM ohm_edges
                WHERE from_node = ? AND edge_type = 'EVALUATES' AND deleted_at IS NULL""",

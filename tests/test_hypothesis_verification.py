@@ -27,7 +27,7 @@ class TestVerificationScanHypotheses:
 
         # Create a hypothesis with no TESTS edges → unverified
         concept = create_node(test_db, label="Base Concept", node_type="concept", created_by="test")
-        hypothesis = create_node(
+        create_node(
             test_db,
             label="Unverified Hypothesis",
             node_type="hypothesis",
@@ -103,7 +103,7 @@ class TestVerificationScanHypotheses:
 
         # Create hypotheses in different states
         concept = create_node(test_db, label="C", node_type="concept", created_by="test")
-        h1 = create_node(test_db, label="Proposed", node_type="hypothesis", created_by="test", connects_to=[concept["id"]])
+        create_node(test_db, label="Proposed", node_type="hypothesis", created_by="test", connects_to=[concept["id"]])
         h2 = create_node(test_db, label="Verified", node_type="hypothesis", created_by="test", connects_to=[concept["id"]])
         test_db.execute("UPDATE ohm_nodes SET hypothesis_status = 'verified' WHERE id = ?", [h2["id"]])
         h3 = create_node(test_db, label="Pruned", node_type="hypothesis", created_by="test", connects_to=[concept["id"]])
@@ -193,7 +193,7 @@ class TestRecordOutcomeHypothesisIntegration:
         exp_con = create_node(test_db, label="ExpCon", node_type="experiment", created_by="test", connects_to=[hypothesis["id"]])
         create_edge(test_db, from_node=exp_con["id"], to_node=hypothesis["id"], layer="L3", edge_type="CONTRADICTS_EVIDENCE", created_by="test", confidence=0.8)
 
-        result = query_record_outcome(
+        query_record_outcome(
             test_db,
             source_agent="test-agent",
             claim_node=experiment["id"],

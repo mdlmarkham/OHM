@@ -92,7 +92,7 @@ Deep paragraph.
         md = "# H1\n\n## H2\n\n### H3\n\nparagraph"
         tree = parse_markdown_to_tree(md, source_id="src-levels")
         flat = tree.iter_flat()
-        levels = {n.id: n.level for n in flat}
+        {n.id: n.level for n in flat}
         root = tree.root
         assert root.level == 0
         # children of root should include h1 section

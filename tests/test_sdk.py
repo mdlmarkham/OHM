@@ -360,7 +360,7 @@ class TestGraphRead:
     def test_scenario_baseline(self, graph):
         a = graph.create_node(label="Supplier", node_type="concept")["id"]
         b = graph.create_node(label="Factory", node_type="concept")["id"]
-        e = graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
+        graph.create_edge(from_node=a, to_node=b, edge_type="CAUSES", layer="L3")
         result = graph.scenario(a, failure_probability=1.0)
         assert "baseline" in result
         assert "counterfactual" in result

@@ -9613,9 +9613,12 @@ def assemble_twin_for_decision(
             model_desc = m_row[0]
 
     if chosen_template_id and chosen_model_id:
-        reasoning = f"Selected template '{template_desc}' (relevance {template_candidates[0]['relevance_score'] if template_candidates else 'N/A'}) and model '{model_desc}' (score {model_candidates[0]['score'] if model_candidates else 'N/A'}) for decision '{decision_label}' with goal: {goal}"
+        tpl_score = template_candidates[0]["relevance_score"] if template_candidates else "N/A"
+        model_score = model_candidates[0]["score"] if model_candidates else "N/A"
+        reasoning = f"Selected template '{template_desc}' (relevance {tpl_score}) and model '{model_desc}' (score {model_score}) for decision '{decision_label}' with goal: {goal}"
     elif chosen_template_id:
-        reasoning = f"Selected template '{template_desc}' (relevance {template_candidates[0]['relevance_score'] if template_candidates else 'N/A'}) for decision '{decision_label}' with goal: {goal}. No model candidates available."
+        tpl_score = template_candidates[0]["relevance_score"] if template_candidates else "N/A"
+        reasoning = f"Selected template '{template_desc}' (relevance {tpl_score}) for decision '{decision_label}' with goal: {goal}. No model candidates available."
     else:
         reasoning = f"No templates available for decision '{decision_label}' with goal: {goal}. Created ad-hoc twin."
 
@@ -10305,7 +10308,7 @@ def detect_drift(
                 meta_raw = m.get("metadata")
                 if meta_raw:
                     try:
-                        parsed = _json.loads(meta_raw) if isinstance(meta_raw, str) else meta_raw
+                        _json.loads(meta_raw) if isinstance(meta_raw, str) else meta_raw
                         eval_nodes = _rows_to_dicts(
                             conn.execute(
                                 """SELECT n.metadata FROM ohm_nodes n
@@ -10429,7 +10432,7 @@ def run_walk_forward_validation(
             train_obs = observations[:train_end]
             test_obs = observations[test_start:test_end]
 
-            train_values = [o["value"] for o in train_obs if o.get("value") is not None]
+            [o["value"] for o in train_obs if o.get("value") is not None]
             test_values = [o["value"] for o in test_obs if o.get("value") is not None]
             test_baselines = [o.get("baseline") for o in test_obs if o.get("baseline") is not None]
 
@@ -11279,7 +11282,7 @@ def start_twin_design_session(
         raise ValidationError("goal is required")
 
     session_label = label or f"Twin design: {goal[:80]}"
-    session_id = generate_node_id(session_label, node_type="twin_design_session")
+    generate_node_id(session_label, node_type="twin_design_session")
 
     metadata: dict[str, Any] = {
         "session_state": "init",
@@ -11488,7 +11491,7 @@ def propose_twin_config(
     from ohm.graph.schema import generate_node_id
 
     proposal_label = f"Proposal for: {goal[:60]}"
-    proposal_id = generate_node_id(proposal_label, node_type="twin_design_proposal")
+    generate_node_id(proposal_label, node_type="twin_design_proposal")
 
     proposal_metadata: dict[str, Any] = {
         "decision_node_id": decision_node_id,

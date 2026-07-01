@@ -112,7 +112,7 @@ class TestCompareModelsDecay:
     def test_returns_both_raw_and_decayed_scores(self, conn):
         target = create_node(conn, label="Target", node_type="concept", created_by="t")
         twin = register_twin(conn, label="T", target_node_id=target["id"], created_by="t")
-        c = register_twin(conn, label="C", target_node_id=target["id"], created_by="t")["id"] if False else None
+        register_twin(conn, label="C", target_node_id=target["id"], created_by="t")["id"] if False else None
         cand = _register_candidate(conn, twin["id"], "M1", "t")
         evaluate_model(conn, model_candidate_id=cand["id"], created_by="t", metrics={"accuracy": 0.9})
         result = compare_models(conn, twin_id=twin["id"])

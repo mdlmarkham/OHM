@@ -139,7 +139,7 @@ class TestLoopStatusTemporal:
     def test_stale_feeds_detected(self, test_db):
         target = create_node(test_db, label="Feed", node_type="concept", created_by="tester")
         decision = create_node(test_db, label="D", node_type="decision", created_by="tester")
-        edge = create_edge(
+        create_edge(
             test_db,
             from_node=target["id"],
             to_node=decision["id"],

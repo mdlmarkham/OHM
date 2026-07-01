@@ -3897,7 +3897,7 @@ class GraphHandlerMixin:
         parts = path.strip("/").split("/")
         if len(parts) < 3:
             raise ValidationError("GET /twin/{id}/{predict|constraints|explain|drift|ensemble} required")
-        twin_id = parts[1]
+        parts[1]
         action = parts[2]
         if action == "predict":
             self._get_twin_predict(path, qs)
@@ -4045,7 +4045,7 @@ class GraphHandlerMixin:
         parts = path.strip("/").split("/")
         if len(parts) < 2:
             raise ValidationError("GET /twin-template/{id} required")
-        template_id = parts[1]
+        parts[1]
         if len(parts) >= 3 and parts[2]:
             raise ValidationError(f"unknown twin-template action: {parts[2]}")
         self._get_twin_template(path, qs)

@@ -347,7 +347,7 @@ class TestTaskContext:
 
     def test_expected_outcome_fallback_to_expected_claim(self, test_conn):
         task = create_node(test_conn, label="Task No Criteria", node_type="task", created_by="test")
-        conn_execute = test_conn.execute(
+        test_conn.execute(
             "UPDATE ohm_nodes SET task_status = ?, expected_claim = ?, success_criteria = NULL WHERE id = ?",
             ["open", "some_claim_id", task["id"]],
         )

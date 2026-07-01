@@ -2062,7 +2062,11 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
         "0.39.0",
         "OHM-jdfq: nudge log table for epistemic quality analytics",
         [
-            "CREATE TABLE IF NOT EXISTS ohm_nudge_log (id VARCHAR PRIMARY KEY, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, agent VARCHAR NOT NULL, action VARCHAR NOT NULL, nudge_type VARCHAR NOT NULL, severity VARCHAR DEFAULT 'info', target_id VARCHAR, message TEXT, accepted BOOLEAN DEFAULT NULL, accepted_at TIMESTAMP, metadata JSON);",
+            "CREATE TABLE IF NOT EXISTS ohm_nudge_log ("
+            "id VARCHAR PRIMARY KEY, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+            "agent VARCHAR NOT NULL, action VARCHAR NOT NULL, nudge_type VARCHAR NOT NULL, "
+            "severity VARCHAR DEFAULT 'info', target_id VARCHAR, message TEXT, "
+            "accepted BOOLEAN DEFAULT NULL, accepted_at TIMESTAMP, metadata JSON);",
             "CREATE INDEX IF NOT EXISTS idx_nudge_log_agent ON ohm_nudge_log(agent);",
             "CREATE INDEX IF NOT EXISTS idx_nudge_log_type ON ohm_nudge_log(nudge_type);",
             "CREATE INDEX IF NOT EXISTS idx_nudge_log_created ON ohm_nudge_log(created_at);",

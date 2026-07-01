@@ -125,7 +125,7 @@ def _choose_best_action(conn, decision_id: str, action_alternatives: list[str]) 
     ).fetchall()
 
     statuses = {status for (status,) in assumptions if status}
-    lowered = [a.lower() for a in action_alternatives]
+    [a.lower() for a in action_alternatives]
 
     if statuses == {"verified"}:
         for action in action_alternatives:

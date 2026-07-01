@@ -645,7 +645,7 @@ class TestAutoPromoteReasonField:
     def test_no_score_reason_when_no_evaluation(self, test_db):
         """If the only candidate has no evaluation, reason is no_score."""
         twin_id = _make_twin(test_db)
-        c1 = register_model_candidate(
+        register_model_candidate(
             test_db,
             label="Unscored",
             twin_id=twin_id,

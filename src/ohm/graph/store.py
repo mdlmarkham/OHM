@@ -2542,7 +2542,7 @@ class OhmStore:
                 if not insert_cols:
                     # No columns in common — nothing to insert. Skip.
                     continue
-                col_list = ", ".join(insert_cols)
+                ", ".join(insert_cols)
 
                 # 1. Insert rows in DuckLake but not local
                 # OHM-8bli: only filter on deleted_at for tables that have it
@@ -2579,7 +2579,7 @@ class OhmStore:
                             select_parts.append(f"CAST(dl.{c} AS BOOLEAN) AS {c}")
                         else:
                             select_parts.append(f"dl.{c} AS {c}")
-                    select_str = ", ".join(select_parts)
+                    ", ".join(select_parts)
                     # deleted_at needs a default if the table has it but
                     # the mirror doesn't carry a value. Use NULL.
                     final_cols = list(insert_cols)

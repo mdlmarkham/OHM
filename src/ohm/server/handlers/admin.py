@@ -144,13 +144,13 @@ class AdminHandlerMixin:
                     except TenantNotFoundError:
                         raise TenantNotFoundError("Tenant not found — provision this tenant before use")
                     with write_lock:
-                        cur = self.current_store.conn.execute(
+                        self.current_store.conn.execute(
                             f"""DELETE FROM ohm_hooks
                                 WHERE event NOT IN ({placeholders})""",
                             list(VALID_HOOK_EVENTS),
                         )
                 else:
-                    cur = self.current_store.conn.execute(
+                    self.current_store.conn.execute(
                         f"""DELETE FROM ohm_hooks
                             WHERE event NOT IN ({placeholders})""",
                         list(VALID_HOOK_EVENTS),

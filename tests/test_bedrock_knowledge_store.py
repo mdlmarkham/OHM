@@ -115,7 +115,7 @@ class TestBedrockKnowledgeStore:
 
                 with patch.object(store, "_sync_s3_reference") as mock_sync_s3:
                     document_id = f"doc-{uuid.uuid4().hex[:12]}"
-                    record = store.save(
+                    store.save(
                         document_id=document_id,
                         filename="ref.txt",
                         content_bytes=b"S3 ref content",
