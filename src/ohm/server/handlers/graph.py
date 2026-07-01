@@ -4446,7 +4446,7 @@ class GraphHandlerMixin:
             self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
 
     def _post_record_mode_switch(self, path: str, qs: dict, body: dict, agent: str) -> None:
-        from ohm.queries import record_mode_switch
+        from ohm.queries import get_current_mode, record_mode_switch
         from ohm.exceptions import ValidationError, NodeNotFoundError
 
         decision_id = body.get("decision_id")
@@ -4454,10 +4454,20 @@ class GraphHandlerMixin:
         to_mode = body.get("to_mode")
         if not decision_id:
             raise ValidationError("decision_id is required")
-        if not from_mode:
-            raise ValidationError("from_mode is required")
         if not to_mode:
             raise ValidationError("to_mode is required")
+
+        # from_mode is optional (OHM-kg16 item 5): if not provided,
+        # derive it from the most recent mode_switch node for this
+        # decision. The caller can always override by passing it
+        # explicitly.
+        from_mode_source = "explicit"
+        if not from_mode:
+            current = get_current_mode(self.current_store.conn, decision_id=decision_id)
+            if current is None or not current.get("to_mode"):
+                raise ValidationError("from_mode is required for the first mode switch on a decision — no prior mode_switch node exists. Pass from_mode explicitly or call GET /temporal/{decision_id}/mode first.")
+            from_mode = current["to_mode"]
+            from_mode_source = "derived"
 
         try:
             result = record_mode_switch(
@@ -4469,7 +4479,14 @@ class GraphHandlerMixin:
                 reason=body.get("reason"),
                 label=body.get("label"),
             )
-            self._json_response(201, {"ok": True, "data": result})
+            self._json_response(
+                201,
+                {
+                    "ok": True,
+                    "data": result,
+                    "from_mode_source": from_mode_source,
+                },
+            )
         except NodeNotFoundError as e:
             self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
         except ValidationError as e:

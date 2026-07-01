@@ -11,6 +11,7 @@ from ohm.graph.queries import (
     compute_feed_investment,
     create_node,
     create_edge,
+    get_current_mode,
     get_freshness_status,
     recommend_mode,
     record_mode_switch,
@@ -242,6 +243,124 @@ class TestRecordModeSwitch:
                 to_mode="deliberative",
                 created_by="tester",
             )
+
+
+class TestGetCurrentMode:
+    """Tests for the get_current_mode helper.
+
+    Added in OHM-kg16 item 5: makes ``from_mode`` optional on
+    ``POST /temporal/mode-switch`` by deriving it from the most
+    recent prior mode_switch node for the decision.
+    """
+
+    def test_returns_none_when_no_prior_switch(self, test_db):
+        d = _make_decision(test_db)
+        result = get_current_mode(test_db, decision_id=d)
+        assert result is None
+
+    def test_returns_most_recent_switch_metadata(self, test_db):
+        d = _make_decision(test_db)
+        record_mode_switch(
+            test_db,
+            decision_id=d,
+            from_mode="real_time",
+            to_mode="deliberative",
+            created_by="tester",
+        )
+        result = get_current_mode(test_db, decision_id=d)
+        assert result is not None
+        assert result["to_mode"] == "deliberative"
+        assert result["from_mode"] == "real_time"
+        assert result["switch_id"]
+        assert result["created_by"] == "tester"
+        assert result["switched_at"]
+
+    def test_returns_most_recent_after_multiple_switches(self, test_db):
+        d = _make_decision(test_db)
+        # Two switches — second one wins.
+        record_mode_switch(
+            test_db,
+            decision_id=d,
+            from_mode="real_time",
+            to_mode="deliberative",
+            created_by="tester",
+        )
+        record_mode_switch(
+            test_db,
+            decision_id=d,
+            from_mode="deliberative",
+            to_mode="hybrid",
+            created_by="tester",
+        )
+        result = get_current_mode(test_db, decision_id=d)
+        assert result["to_mode"] == "hybrid"
+        assert result["from_mode"] == "deliberative"
+
+    def test_missing_decision_raises(self, test_db):
+        with pytest.raises(NodeNotFoundError):
+            get_current_mode(test_db, decision_id="nonexistent_decision_xyz")
+
+    def test_ignores_other_decisions_switches(self, test_db):
+        """The helper is per-decision; a switch for decision A must
+        not appear in get_current_mode for decision B even if both
+        share the same created_by."""
+        d_a = _make_decision(test_db, label="A")
+        d_b = _make_decision(test_db, label="B")
+        record_mode_switch(
+            test_db,
+            decision_id=d_a,
+            from_mode="real_time",
+            to_mode="deliberative",
+            created_by="tester",
+        )
+        assert get_current_mode(test_db, decision_id=d_b) is None
+        assert get_current_mode(test_db, decision_id=d_a)["to_mode"] == "deliberative"
+
+
+class TestRecordModeSwitchFromModeOptional:
+    """Test that record_mode_switch can accept a missing from_mode if
+    we look it up via get_current_mode first — mirrors the handler
+    behavior added in OHM-kg16 item 5.
+    """
+
+    def test_explicit_from_mode_still_works(self, test_db):
+        d = _make_decision(test_db)
+        ms = record_mode_switch(
+            test_db,
+            decision_id=d,
+            from_mode="real_time",
+            to_mode="deliberative",
+            created_by="tester",
+        )
+        assert ms["type"] == "mode_switch"
+
+    def test_derived_from_mode_via_get_current_mode(self, test_db):
+        """Simulate the handler's derivation path: skip from_mode
+        on the second switch, look it up from the first."""
+        d = _make_decision(test_db)
+        # First switch — explicit from_mode
+        record_mode_switch(
+            test_db,
+            decision_id=d,
+            from_mode="real_time",
+            to_mode="deliberative",
+            created_by="tester",
+        )
+        # Second switch — derive from_mode from the first's to_mode
+        current = get_current_mode(test_db, decision_id=d)
+        assert current is not None
+        ms = record_mode_switch(
+            test_db,
+            decision_id=d,
+            from_mode=current["to_mode"],  # "deliberative"
+            to_mode="hybrid",
+            created_by="tester",
+        )
+        assert ms["type"] == "mode_switch"
+        # Verify the chain
+        final = get_current_mode(test_db, decision_id=d)
+        assert final["to_mode"] == "hybrid"
+        assert final["from_mode"] == "deliberative"
 
 
 class TestTemporalDecisionSummary:

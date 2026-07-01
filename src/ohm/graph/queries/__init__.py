@@ -11132,6 +11132,70 @@ def record_mode_switch(
     return ms_node
 
 
+def get_current_mode(
+    conn: DuckDBPyConnection,
+    *,
+    decision_id: str,
+) -> dict[str, Any] | None:
+    """Return the most recent mode for a decision, if any.
+
+    Used by POST /temporal/mode-switch to make ``from_mode`` optional —
+    the handler derives it from the most recent prior mode_switch
+    node rather than requiring the caller to round-trip GET first.
+
+    Returns a dict with ``to_mode``, ``from_mode``, ``switch_id``,
+    ``switched_at`` and ``created_by`` for the most recent switch,
+    or ``None`` if the decision has no prior mode_switch.
+
+    The "current mode" is the to_mode of the most recent
+    TRANSITIONS_TO edge from a mode_switch node to this decision
+    (record_mode_switch stores from_mode + to_mode in the
+    mode_switch node's metadata JSON).
+    """
+    import json as _json
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import NodeNotFoundError
+
+    decision_id = validate_identifier(decision_id, name="decision_id")
+
+    decision = conn.execute(
+        "SELECT 1 FROM ohm_nodes WHERE id = ? AND type = 'decision' AND deleted_at IS NULL",
+        [decision_id],
+    ).fetchone()
+    if not decision:
+        raise NodeNotFoundError(f"Decision node not found: {decision_id}")
+
+    row = conn.execute(
+        """
+        SELECT ms.id, ms.metadata, ms.created_at, ms.created_by
+        FROM ohm_nodes ms
+        JOIN ohm_edges e
+          ON e.from_node = ms.id
+         AND e.to_node = ?
+         AND e.edge_type = 'TRANSITIONS_TO'
+         AND e.deleted_at IS NULL
+        WHERE ms.type = 'mode_switch'
+          AND ms.deleted_at IS NULL
+        ORDER BY ms.created_at DESC
+        LIMIT 1
+        """,
+        [decision_id],
+    ).fetchone()
+
+    if not row:
+        return None
+
+    ms_id, metadata_raw, switched_at, created_by = row
+    metadata = _json.loads(metadata_raw) if metadata_raw else {}
+    return {
+        "switch_id": ms_id,
+        "from_mode": metadata.get("from_mode"),
+        "to_mode": metadata.get("to_mode"),
+        "switched_at": str(switched_at) if switched_at else None,
+        "created_by": created_by,
+    }
+
+
 def temporal_decision_summary(
     conn: DuckDBPyConnection,
     *,
