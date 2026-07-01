@@ -42,13 +42,9 @@ def seeded_db(tmp_path):
     create_node(conn, label="Other agent", node_type="concept", created_by="clio")
 
     # Edge between the two test nodes — verifies cascade
-    rows = conn.execute(
-        "SELECT id FROM ohm_nodes WHERE label = 'Test A' AND deleted_at IS NULL"
-    ).fetchall()
+    rows = conn.execute("SELECT id FROM ohm_nodes WHERE label = 'Test A' AND deleted_at IS NULL").fetchall()
     test_a_id = rows[0][0]
-    rows = conn.execute(
-        "SELECT id FROM ohm_nodes WHERE label = 'Test B' AND deleted_at IS NULL"
-    ).fetchall()
+    rows = conn.execute("SELECT id FROM ohm_nodes WHERE label = 'Test B' AND deleted_at IS NULL").fetchall()
     test_b_id = rows[0][0]
     create_edge(
         conn,
@@ -87,9 +83,7 @@ def _edge_count(db_path: str) -> int:
 
     conn = duckdb.connect(db_path, read_only=True)
     try:
-        (count,) = conn.execute(
-            "SELECT COUNT(*) FROM ohm_edges WHERE deleted_at IS NULL"
-        ).fetchone()
+        (count,) = conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE deleted_at IS NULL").fetchone()
         return count
     finally:
         conn.close()
@@ -100,9 +94,7 @@ def _node_id_by_label(db_path: str, label: str) -> str:
 
     conn = duckdb.connect(db_path, read_only=True)
     try:
-        (nid,) = conn.execute(
-            "SELECT id FROM ohm_nodes WHERE label = ? AND deleted_at IS NULL", [label]
-        ).fetchone()
+        (nid,) = conn.execute("SELECT id FROM ohm_nodes WHERE label = ? AND deleted_at IS NULL", [label]).fetchone()
         return nid
     finally:
         conn.close()
@@ -132,11 +124,10 @@ class TestCleanupApply:
         assert _live_test_count(seeded_db) == 0
         # Production node preserved
         import duckdb
+
         conn = duckdb.connect(seeded_db, read_only=True)
         try:
-            (alive,) = conn.execute(
-                "SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL"
-            ).fetchone()
+            (alive,) = conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL").fetchone()
             assert alive == 2  # Real production claim + Other agent
         finally:
             conn.close()

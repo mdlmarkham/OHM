@@ -48,9 +48,7 @@ class TestRegisterModelCandidate:
 
     def test_creates_evaluates_edge_to_twin(self, test_db):
         twin_id = _make_twin(test_db)
-        cand = register_model_candidate(
-            test_db, label="M", twin_id=twin_id, created_by="tester"
-        )
+        cand = register_model_candidate(test_db, label="M", twin_id=twin_id, created_by="tester")
         edges = test_db.execute(
             """SELECT to_node FROM ohm_edges
                WHERE from_node = ? AND edge_type = 'EVALUATES' AND deleted_at IS NULL""",
@@ -60,12 +58,8 @@ class TestRegisterModelCandidate:
 
     def test_creates_competes_with_edges(self, test_db):
         twin_id = _make_twin(test_db)
-        c1 = register_model_candidate(
-            test_db, label="M1", twin_id=twin_id, created_by="tester"
-        )
-        c2 = register_model_candidate(
-            test_db, label="M2", twin_id=twin_id, created_by="tester"
-        )
+        c1 = register_model_candidate(test_db, label="M1", twin_id=twin_id, created_by="tester")
+        c2 = register_model_candidate(test_db, label="M2", twin_id=twin_id, created_by="tester")
         edges = test_db.execute(
             """SELECT from_node, to_node FROM ohm_edges
                WHERE edge_type = 'COMPETES_WITH' AND deleted_at IS NULL
@@ -87,9 +81,7 @@ class TestRegisterModelCandidate:
 class TestEvaluateModel:
     def test_creates_evaluation_node(self, test_db):
         twin_id = _make_twin(test_db)
-        cand = register_model_candidate(
-            test_db, label="M", twin_id=twin_id, created_by="tester"
-        )
+        cand = register_model_candidate(test_db, label="M", twin_id=twin_id, created_by="tester")
         ev = evaluate_model(
             test_db,
             model_candidate_id=cand["id"],
@@ -100,9 +92,7 @@ class TestEvaluateModel:
 
     def test_stores_metrics_in_metadata(self, test_db):
         twin_id = _make_twin(test_db)
-        cand = register_model_candidate(
-            test_db, label="M", twin_id=twin_id, created_by="tester"
-        )
+        cand = register_model_candidate(test_db, label="M", twin_id=twin_id, created_by="tester")
         ev = evaluate_model(
             test_db,
             model_candidate_id=cand["id"],
@@ -117,9 +107,7 @@ class TestEvaluateModel:
 
     def test_creates_evaluated_by_edge(self, test_db):
         twin_id = _make_twin(test_db)
-        cand = register_model_candidate(
-            test_db, label="M", twin_id=twin_id, created_by="tester"
-        )
+        cand = register_model_candidate(test_db, label="M", twin_id=twin_id, created_by="tester")
         ev = evaluate_model(
             test_db,
             model_candidate_id=cand["id"],
@@ -135,9 +123,7 @@ class TestEvaluateModel:
 
     def test_empty_metrics_raises(self, test_db):
         twin_id = _make_twin(test_db)
-        cand = register_model_candidate(
-            test_db, label="M", twin_id=twin_id, created_by="tester"
-        )
+        cand = register_model_candidate(test_db, label="M", twin_id=twin_id, created_by="tester")
         with pytest.raises(ValidationError):
             evaluate_model(
                 test_db,
@@ -159,12 +145,8 @@ class TestEvaluateModel:
 class TestCompareModels:
     def test_returns_ranked_candidates(self, test_db):
         twin_id = _make_twin(test_db)
-        c1 = register_model_candidate(
-            test_db, label="M1", twin_id=twin_id, created_by="tester"
-        )
-        c2 = register_model_candidate(
-            test_db, label="M2", twin_id=twin_id, created_by="tester"
-        )
+        c1 = register_model_candidate(test_db, label="M1", twin_id=twin_id, created_by="tester")
+        c2 = register_model_candidate(test_db, label="M2", twin_id=twin_id, created_by="tester")
         evaluate_model(
             test_db,
             model_candidate_id=c1["id"],
@@ -184,12 +166,8 @@ class TestCompareModels:
 
     def test_includes_recommendation(self, test_db):
         twin_id = _make_twin(test_db)
-        c1 = register_model_candidate(
-            test_db, label="Best", twin_id=twin_id, created_by="tester"
-        )
-        c2 = register_model_candidate(
-            test_db, label="Worse", twin_id=twin_id, created_by="tester"
-        )
+        c1 = register_model_candidate(test_db, label="Best", twin_id=twin_id, created_by="tester")
+        c2 = register_model_candidate(test_db, label="Worse", twin_id=twin_id, created_by="tester")
         evaluate_model(
             test_db,
             model_candidate_id=c1["id"],
@@ -219,12 +197,8 @@ class TestCompareModels:
 class TestPromoteModel:
     def test_sets_active_status(self, test_db):
         twin_id = _make_twin(test_db)
-        c1 = register_model_candidate(
-            test_db, label="C1", twin_id=twin_id, created_by="tester"
-        )
-        promoted = promote_model(
-            test_db, model_candidate_id=c1["id"], created_by="tester"
-        )
+        c1 = register_model_candidate(test_db, label="C1", twin_id=twin_id, created_by="tester")
+        promoted = promote_model(test_db, model_candidate_id=c1["id"], created_by="tester")
         meta = promoted.get("metadata") or {}
         if isinstance(meta, str):
             meta = json.loads(meta)
@@ -232,24 +206,16 @@ class TestPromoteModel:
 
     def test_archives_others(self, test_db):
         twin_id = _make_twin(test_db)
-        c1 = register_model_candidate(
-            test_db, label="C1", twin_id=twin_id, created_by="tester"
-        )
-        c2 = register_model_candidate(
-            test_db, label="C2", twin_id=twin_id, created_by="tester"
-        )
+        c1 = register_model_candidate(test_db, label="C1", twin_id=twin_id, created_by="tester")
+        c2 = register_model_candidate(test_db, label="C2", twin_id=twin_id, created_by="tester")
         promote_model(test_db, model_candidate_id=c1["id"], created_by="tester")
-        c2_row = test_db.execute(
-            "SELECT metadata FROM ohm_nodes WHERE id = ?", [c2["id"]]
-        ).fetchone()
+        c2_row = test_db.execute("SELECT metadata FROM ohm_nodes WHERE id = ?", [c2["id"]]).fetchone()
         meta = json.loads(c2_row[0]) if c2_row[0] else {}
         assert meta.get("gate_status") == "archived"
 
     def test_missing_candidate_raises(self, test_db):
         with pytest.raises(NodeNotFoundError):
-            promote_model(
-                test_db, model_candidate_id="nonexistent_candidate_xyz", created_by="tester"
-            )
+            promote_model(test_db, model_candidate_id="nonexistent_candidate_xyz", created_by="tester")
 
 
 class TestModelMarketplaceSDK:
@@ -258,13 +224,9 @@ class TestModelMarketplaceSDK:
 
         twin_id = _make_twin(test_db)
         with Graph(test_db, actor="sdk-tester") as g:
-            cand = g.register_model_candidate(
-                "SDK Model", twin_id=twin_id, model_parameters={"lr": 0.01}
-            )
+            cand = g.register_model_candidate("SDK Model", twin_id=twin_id, model_parameters={"lr": 0.01})
             assert cand["type"] == "model_candidate"
-            g.evaluate_model(
-                cand["id"], metrics={"mae": 0.05, "accuracy": 0.95}
-            )
+            g.evaluate_model(cand["id"], metrics={"mae": 0.05, "accuracy": 0.95})
             comparison = g.compare_models(twin_id)
             assert len(comparison["candidates"]) == 1
             promoted = g.promote_model(cand["id"])

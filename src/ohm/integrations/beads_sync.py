@@ -74,21 +74,16 @@ def _ensure_anchor_node(conn) -> None:
     if existing:
         return
     conn.execute(
-        "INSERT INTO ohm_nodes (id, label, type, content, created_by, confidence, visibility) "
-        "VALUES (?, ?, 'concept', 'System anchor for Beads-synced tasks. Auto-created by beads_sync.', 'system', 1.0, 'team')",
+        "INSERT INTO ohm_nodes (id, label, type, content, created_by, confidence, visibility) VALUES (?, ?, 'concept', 'System anchor for Beads-synced tasks. Auto-created by beads_sync.', 'system', 1.0, 'team')",
         [BEADS_BACKLOG_ANCHOR_ID, "Beads Backlog Anchor"],
     )
 
 
 def _find_task_by_beads_id(conn, beads_id: str) -> str | None:
     """Return the OHM task node id for a given Beads issue id, or None."""
-    rows = conn.execute(
-        "SELECT id FROM ohm_nodes WHERE type = 'task' AND deleted_at IS NULL"
-    ).fetchall()
+    rows = conn.execute("SELECT id FROM ohm_nodes WHERE type = 'task' AND deleted_at IS NULL").fetchall()
     for (node_id,) in rows:
-        meta_raw = conn.execute(
-            "SELECT metadata FROM ohm_nodes WHERE id = ?", [node_id]
-        ).fetchone()
+        meta_raw = conn.execute("SELECT metadata FROM ohm_nodes WHERE id = ?", [node_id]).fetchone()
         if not meta_raw or not meta_raw[0]:
             continue
         try:
@@ -168,10 +163,7 @@ def sync_beads_to_ohm_tasks(
             task_id = f"beads_{beads_id.lower().replace('-', '_')}"
             try:
                 conn.execute(
-                    "INSERT INTO ohm_nodes "
-                    "(id, label, type, content, created_by, confidence, visibility, "
-                    " task_status, assigned_to, priority, tags, metadata) "
-                    "VALUES (?, ?, 'task', ?, ?, 1.0, 'team', ?, ?, ?, ?, ?)",
+                    "INSERT INTO ohm_nodes (id, label, type, content, created_by, confidence, visibility,  task_status, assigned_to, priority, tags, metadata) VALUES (?, ?, 'task', ?, ?, 1.0, 'team', ?, ?, ?, ?, ?)",
                     [
                         task_id,
                         title,
@@ -186,9 +178,7 @@ def sync_beads_to_ohm_tasks(
                 )
                 # Cross-link to anchor (ADR-018).
                 conn.execute(
-                    "INSERT INTO ohm_edges "
-                    "(id, from_node, to_node, layer, edge_type, confidence, created_by) "
-                    "VALUES (?, ?, ?, 'L2', 'REFERENCES', 1.0, ?)",
+                    "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, confidence, created_by) VALUES (?, ?, ?, 'L2', 'REFERENCES', 1.0, ?)",
                     [f"beads_link_{task_id}", BEADS_BACKLOG_ANCHOR_ID, task_id, actor],
                 )
                 report["created"] += 1
@@ -209,10 +199,7 @@ def sync_beads_to_ohm_tasks(
 
             try:
                 conn.execute(
-                    "UPDATE ohm_nodes SET label = ?, content = ?, priority = ?, "
-                    "assigned_to = ?, tags = ?, metadata = ?, task_status = ?, "
-                    "updated_at = CURRENT_TIMESTAMP, updated_by = ? "
-                    "WHERE id = ?",
+                    "UPDATE ohm_nodes SET label = ?, content = ?, priority = ?, assigned_to = ?, tags = ?, metadata = ?, task_status = ?, updated_at = CURRENT_TIMESTAMP, updated_by = ? WHERE id = ?",
                     [
                         title,
                         description,

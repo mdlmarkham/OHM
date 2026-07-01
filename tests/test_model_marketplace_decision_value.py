@@ -35,16 +35,24 @@ class TestPromoteWithDecisionValuePolicy:
         twin_id = _make_twin(test_db)
         decision_id = _make_decision_node(test_db)
         c1 = register_model_candidate(
-            test_db, label="M1", twin_id=twin_id, created_by="tester",
+            test_db,
+            label="M1",
+            twin_id=twin_id,
+            created_by="tester",
             model_parameters={"latency": 0.1, "cost": 0.2},
         )
         evaluate_model(
-            test_db, model_candidate_id=c1["id"], created_by="tester",
+            test_db,
+            model_candidate_id=c1["id"],
+            created_by="tester",
             metrics={"accuracy": 0.9},
         )
         promoted = promote_model(
-            test_db, model_candidate_id=c1["id"], created_by="tester",
-            policy="decision_value", decision_node_id=decision_id,
+            test_db,
+            model_candidate_id=c1["id"],
+            created_by="tester",
+            policy="decision_value",
+            decision_node_id=decision_id,
         )
         assert "promotion_decision_value" in promoted
         assert promoted["promotion_policy"] == "decision_value"
@@ -52,11 +60,16 @@ class TestPromoteWithDecisionValuePolicy:
     def test_promote_decision_value_requires_decision_id(self, test_db):
         twin_id = _make_twin(test_db)
         c1 = register_model_candidate(
-            test_db, label="M1", twin_id=twin_id, created_by="tester",
+            test_db,
+            label="M1",
+            twin_id=twin_id,
+            created_by="tester",
         )
         with pytest.raises(ValidationError, match="decision_node_id is required"):
             promote_model(
-                test_db, model_candidate_id=c1["id"], created_by="tester",
+                test_db,
+                model_candidate_id=c1["id"],
+                created_by="tester",
                 policy="decision_value",
             )
 
@@ -64,29 +77,45 @@ class TestPromoteWithDecisionValuePolicy:
         twin_id = _make_twin(test_db)
         decision_id = _make_decision_node(test_db)
         c1 = register_model_candidate(
-            test_db, label="Active", twin_id=twin_id, created_by="tester",
+            test_db,
+            label="Active",
+            twin_id=twin_id,
+            created_by="tester",
             model_parameters={"latency": 0.01, "cost": 0.01},
         )
         evaluate_model(
-            test_db, model_candidate_id=c1["id"], created_by="tester",
+            test_db,
+            model_candidate_id=c1["id"],
+            created_by="tester",
             metrics={"accuracy": 0.95},
         )
         promote_model(
-            test_db, model_candidate_id=c1["id"], created_by="tester",
-            policy="decision_value", decision_node_id=decision_id,
+            test_db,
+            model_candidate_id=c1["id"],
+            created_by="tester",
+            policy="decision_value",
+            decision_node_id=decision_id,
         )
         c2 = register_model_candidate(
-            test_db, label="Worse", twin_id=twin_id, created_by="tester",
+            test_db,
+            label="Worse",
+            twin_id=twin_id,
+            created_by="tester",
             model_parameters={"latency": 0.5, "cost": 0.5},
         )
         evaluate_model(
-            test_db, model_candidate_id=c2["id"], created_by="tester",
+            test_db,
+            model_candidate_id=c2["id"],
+            created_by="tester",
             metrics={"accuracy": 0.3},
         )
         with pytest.raises(ValidationError, match="does not exceed"):
             promote_model(
-                test_db, model_candidate_id=c2["id"], created_by="tester",
-                policy="decision_value", decision_node_id=decision_id,
+                test_db,
+                model_candidate_id=c2["id"],
+                created_by="tester",
+                policy="decision_value",
+                decision_node_id=decision_id,
                 min_improvement=0.0,
             )
 
@@ -94,28 +123,44 @@ class TestPromoteWithDecisionValuePolicy:
         twin_id = _make_twin(test_db)
         decision_id = _make_decision_node(test_db)
         c1 = register_model_candidate(
-            test_db, label="Active", twin_id=twin_id, created_by="tester",
+            test_db,
+            label="Active",
+            twin_id=twin_id,
+            created_by="tester",
             model_parameters={"latency": 0.5, "cost": 0.5},
         )
         evaluate_model(
-            test_db, model_candidate_id=c1["id"], created_by="tester",
+            test_db,
+            model_candidate_id=c1["id"],
+            created_by="tester",
             metrics={"accuracy": 0.3},
         )
         promote_model(
-            test_db, model_candidate_id=c1["id"], created_by="tester",
-            policy="decision_value", decision_node_id=decision_id,
+            test_db,
+            model_candidate_id=c1["id"],
+            created_by="tester",
+            policy="decision_value",
+            decision_node_id=decision_id,
         )
         c2 = register_model_candidate(
-            test_db, label="Better", twin_id=twin_id, created_by="tester",
+            test_db,
+            label="Better",
+            twin_id=twin_id,
+            created_by="tester",
             model_parameters={"latency": 0.01, "cost": 0.01},
         )
         evaluate_model(
-            test_db, model_candidate_id=c2["id"], created_by="tester",
+            test_db,
+            model_candidate_id=c2["id"],
+            created_by="tester",
             metrics={"accuracy": 0.95},
         )
         promoted = promote_model(
-            test_db, model_candidate_id=c2["id"], created_by="tester",
-            policy="decision_value", decision_node_id=decision_id,
+            test_db,
+            model_candidate_id=c2["id"],
+            created_by="tester",
+            policy="decision_value",
+            decision_node_id=decision_id,
         )
         meta = promoted.get("metadata") or {}
         if isinstance(meta, str):
@@ -126,21 +171,31 @@ class TestPromoteWithDecisionValuePolicy:
     def test_promote_default_policy_remains_accuracy(self, test_db):
         twin_id = _make_twin(test_db)
         c1 = register_model_candidate(
-            test_db, label="C1", twin_id=twin_id, created_by="tester",
+            test_db,
+            label="C1",
+            twin_id=twin_id,
+            created_by="tester",
         )
         promoted = promote_model(
-            test_db, model_candidate_id=c1["id"], created_by="tester",
+            test_db,
+            model_candidate_id=c1["id"],
+            created_by="tester",
         )
         assert promoted["promotion_policy"] == "accuracy"
 
     def test_promote_invalid_policy_raises(self, test_db):
         twin_id = _make_twin(test_db)
         c1 = register_model_candidate(
-            test_db, label="C1", twin_id=twin_id, created_by="tester",
+            test_db,
+            label="C1",
+            twin_id=twin_id,
+            created_by="tester",
         )
         with pytest.raises(ValidationError, match="Invalid policy"):
             promote_model(
-                test_db, model_candidate_id=c1["id"], created_by="tester",
+                test_db,
+                model_candidate_id=c1["id"],
+                created_by="tester",
                 policy="invalid_policy",
             )
 
@@ -148,16 +203,24 @@ class TestPromoteWithDecisionValuePolicy:
         twin_id = _make_twin(test_db)
         decision_id = _make_decision_node(test_db)
         c1 = register_model_candidate(
-            test_db, label="First", twin_id=twin_id, created_by="tester",
+            test_db,
+            label="First",
+            twin_id=twin_id,
+            created_by="tester",
             model_parameters={"latency": 0.1, "cost": 0.1},
         )
         evaluate_model(
-            test_db, model_candidate_id=c1["id"], created_by="tester",
+            test_db,
+            model_candidate_id=c1["id"],
+            created_by="tester",
             metrics={"accuracy": 0.5},
         )
         promoted = promote_model(
-            test_db, model_candidate_id=c1["id"], created_by="tester",
-            policy="decision_value", decision_node_id=decision_id,
+            test_db,
+            model_candidate_id=c1["id"],
+            created_by="tester",
+            policy="decision_value",
+            decision_node_id=decision_id,
         )
         meta = promoted.get("metadata") or {}
         if isinstance(meta, str):
@@ -169,16 +232,24 @@ class TestPromoteWithDecisionValuePolicy:
         twin_id = _make_twin(test_db)
         decision_id = _make_decision_node(test_db)
         c1 = register_model_candidate(
-            test_db, label="C1", twin_id=twin_id, created_by="tester",
+            test_db,
+            label="C1",
+            twin_id=twin_id,
+            created_by="tester",
             model_parameters={"latency": 0.01, "cost": 0.01},
         )
         evaluate_model(
-            test_db, model_candidate_id=c1["id"], created_by="tester",
+            test_db,
+            model_candidate_id=c1["id"],
+            created_by="tester",
             metrics={"accuracy": 0.9},
         )
         promoted = promote_model(
-            test_db, model_candidate_id=c1["id"], created_by="tester",
-            policy="decision_value", decision_node_id=decision_id,
+            test_db,
+            model_candidate_id=c1["id"],
+            created_by="tester",
+            policy="decision_value",
+            decision_node_id=decision_id,
         )
         meta = promoted.get("metadata") or {}
         if isinstance(meta, str):
@@ -191,7 +262,10 @@ class TestSetPromotionPolicy:
     def test_set_promotion_policy_stores_in_metadata(self, test_db):
         twin_id = _make_twin(test_db)
         c1 = register_model_candidate(
-            test_db, label="C1", twin_id=twin_id, created_by="tester",
+            test_db,
+            label="C1",
+            twin_id=twin_id,
+            created_by="tester",
         )
         decision_id = _make_decision_node(test_db)
         result = set_promotion_policy(
@@ -212,7 +286,10 @@ class TestSetPromotionPolicy:
     def test_set_promotion_policy_accuracy(self, test_db):
         twin_id = _make_twin(test_db)
         c1 = register_model_candidate(
-            test_db, label="C1", twin_id=twin_id, created_by="tester",
+            test_db,
+            label="C1",
+            twin_id=twin_id,
+            created_by="tester",
         )
         result = set_promotion_policy(
             test_db,
@@ -228,7 +305,10 @@ class TestSetPromotionPolicy:
     def test_set_promotion_policy_invalid_raises(self, test_db):
         twin_id = _make_twin(test_db)
         c1 = register_model_candidate(
-            test_db, label="C1", twin_id=twin_id, created_by="tester",
+            test_db,
+            label="C1",
+            twin_id=twin_id,
+            created_by="tester",
         )
         with pytest.raises(ValidationError, match="Invalid policy"):
             set_promotion_policy(
@@ -241,7 +321,10 @@ class TestSetPromotionPolicy:
     def test_set_promotion_policy_decision_value_without_node_raises(self, test_db):
         twin_id = _make_twin(test_db)
         c1 = register_model_candidate(
-            test_db, label="C1", twin_id=twin_id, created_by="tester",
+            test_db,
+            label="C1",
+            twin_id=twin_id,
+            created_by="tester",
         )
         with pytest.raises(ValidationError, match="decision_node_id is required"):
             set_promotion_policy(
@@ -266,19 +349,29 @@ class TestAutoPromoteBestModel:
         twin_id = _make_twin(test_db)
         decision_id = _make_decision_node(test_db)
         c1 = register_model_candidate(
-            test_db, label="Low", twin_id=twin_id, created_by="tester",
+            test_db,
+            label="Low",
+            twin_id=twin_id,
+            created_by="tester",
             model_parameters={"latency": 0.5, "cost": 0.5},
         )
         evaluate_model(
-            test_db, model_candidate_id=c1["id"], created_by="tester",
+            test_db,
+            model_candidate_id=c1["id"],
+            created_by="tester",
             metrics={"accuracy": 0.3},
         )
         c2 = register_model_candidate(
-            test_db, label="High", twin_id=twin_id, created_by="tester",
+            test_db,
+            label="High",
+            twin_id=twin_id,
+            created_by="tester",
             model_parameters={"latency": 0.01, "cost": 0.01},
         )
         evaluate_model(
-            test_db, model_candidate_id=c2["id"], created_by="tester",
+            test_db,
+            model_candidate_id=c2["id"],
+            created_by="tester",
             metrics={"accuracy": 0.95},
         )
         result = auto_promote_best_model(
@@ -299,23 +392,36 @@ class TestAutoPromoteBestModel:
         twin_id = _make_twin(test_db)
         decision_id = _make_decision_node(test_db)
         c1 = register_model_candidate(
-            test_db, label="Active", twin_id=twin_id, created_by="tester",
+            test_db,
+            label="Active",
+            twin_id=twin_id,
+            created_by="tester",
             model_parameters={"latency": 0.01, "cost": 0.01},
         )
         evaluate_model(
-            test_db, model_candidate_id=c1["id"], created_by="tester",
+            test_db,
+            model_candidate_id=c1["id"],
+            created_by="tester",
             metrics={"accuracy": 0.9},
         )
         promote_model(
-            test_db, model_candidate_id=c1["id"], created_by="tester",
-            policy="decision_value", decision_node_id=decision_id,
+            test_db,
+            model_candidate_id=c1["id"],
+            created_by="tester",
+            policy="decision_value",
+            decision_node_id=decision_id,
         )
         c2 = register_model_candidate(
-            test_db, label="SlightlyBetter", twin_id=twin_id, created_by="tester",
+            test_db,
+            label="SlightlyBetter",
+            twin_id=twin_id,
+            created_by="tester",
             model_parameters={"latency": 0.01, "cost": 0.01},
         )
         evaluate_model(
-            test_db, model_candidate_id=c2["id"], created_by="tester",
+            test_db,
+            model_candidate_id=c2["id"],
+            created_by="tester",
             metrics={"accuracy": 0.91},
         )
         result = auto_promote_best_model(
@@ -351,17 +457,27 @@ class TestAutoPromoteBestModel:
     def test_auto_promote_accuracy_policy(self, test_db):
         twin_id = _make_twin(test_db)
         c1 = register_model_candidate(
-            test_db, label="Low", twin_id=twin_id, created_by="tester",
+            test_db,
+            label="Low",
+            twin_id=twin_id,
+            created_by="tester",
         )
         evaluate_model(
-            test_db, model_candidate_id=c1["id"], created_by="tester",
+            test_db,
+            model_candidate_id=c1["id"],
+            created_by="tester",
             metrics={"mae": 0.5, "rmse": 0.8},
         )
         c2 = register_model_candidate(
-            test_db, label="High", twin_id=twin_id, created_by="tester",
+            test_db,
+            label="High",
+            twin_id=twin_id,
+            created_by="tester",
         )
         evaluate_model(
-            test_db, model_candidate_id=c2["id"], created_by="tester",
+            test_db,
+            model_candidate_id=c2["id"],
+            created_by="tester",
             metrics={"mae": 0.01, "rmse": 0.02, "accuracy": 0.99},
         )
         result = auto_promote_best_model(
@@ -435,7 +551,10 @@ class TestAutoPromoteReasonField:
     def test_no_candidates_reason(self, test_db):
         twin_id = _make_twin(test_db)
         result = auto_promote_best_model(
-            test_db, twin_id=twin_id, policy="decision_value", created_by="tester",
+            test_db,
+            twin_id=twin_id,
+            policy="decision_value",
+            created_by="tester",
         )
         assert result["promoted"] is None
         assert result["reason"] == "no_candidates"
@@ -446,28 +565,45 @@ class TestAutoPromoteReasonField:
         twin_id = _make_twin(test_db)
         decision_id = _make_decision_node(test_db)
         c1 = register_model_candidate(
-            test_db, label="Active", twin_id=twin_id, created_by="tester",
+            test_db,
+            label="Active",
+            twin_id=twin_id,
+            created_by="tester",
             model_parameters={"latency": 0.01, "cost": 0.01},
         )
         evaluate_model(
-            test_db, model_candidate_id=c1["id"], created_by="tester",
+            test_db,
+            model_candidate_id=c1["id"],
+            created_by="tester",
             metrics={"accuracy": 0.9},
         )
         promote_model(
-            test_db, model_candidate_id=c1["id"], created_by="tester",
-            policy="decision_value", decision_node_id=decision_id,
+            test_db,
+            model_candidate_id=c1["id"],
+            created_by="tester",
+            policy="decision_value",
+            decision_node_id=decision_id,
         )
         c2 = register_model_candidate(
-            test_db, label="SlightlyBetter", twin_id=twin_id, created_by="tester",
+            test_db,
+            label="SlightlyBetter",
+            twin_id=twin_id,
+            created_by="tester",
             model_parameters={"latency": 0.01, "cost": 0.01},
         )
         evaluate_model(
-            test_db, model_candidate_id=c2["id"], created_by="tester",
+            test_db,
+            model_candidate_id=c2["id"],
+            created_by="tester",
             metrics={"accuracy": 0.91},
         )
         result = auto_promote_best_model(
-            test_db, twin_id=twin_id, decision_node_id=decision_id,
-            policy="decision_value", min_improvement=1.0, created_by="tester",
+            test_db,
+            twin_id=twin_id,
+            decision_node_id=decision_id,
+            policy="decision_value",
+            min_improvement=1.0,
+            created_by="tester",
         )
         assert result["promoted"] is None
         assert result["reason"] == "below_min_improvement"
@@ -481,16 +617,24 @@ class TestAutoPromoteReasonField:
         twin_id = _make_twin(test_db)
         decision_id = _make_decision_node(test_db)
         c1 = register_model_candidate(
-            test_db, label="Winner", twin_id=twin_id, created_by="tester",
+            test_db,
+            label="Winner",
+            twin_id=twin_id,
+            created_by="tester",
             model_parameters={"latency": 0.01, "cost": 0.01},
         )
         evaluate_model(
-            test_db, model_candidate_id=c1["id"], created_by="tester",
+            test_db,
+            model_candidate_id=c1["id"],
+            created_by="tester",
             metrics={"accuracy": 0.9},
         )
         result = auto_promote_best_model(
-            test_db, twin_id=twin_id, decision_node_id=decision_id,
-            policy="decision_value", created_by="tester",
+            test_db,
+            twin_id=twin_id,
+            decision_node_id=decision_id,
+            policy="decision_value",
+            created_by="tester",
         )
         assert result["promoted"] is not None
         assert result["reason"] == "promoted"
@@ -502,11 +646,17 @@ class TestAutoPromoteReasonField:
         """If the only candidate has no evaluation, reason is no_score."""
         twin_id = _make_twin(test_db)
         c1 = register_model_candidate(
-            test_db, label="Unscored", twin_id=twin_id, created_by="tester",
+            test_db,
+            label="Unscored",
+            twin_id=twin_id,
+            created_by="tester",
         )
         # No evaluate_model call — candidate has no composite_score
         result = auto_promote_best_model(
-            test_db, twin_id=twin_id, policy="decision_value", created_by="tester",
+            test_db,
+            twin_id=twin_id,
+            policy="decision_value",
+            created_by="tester",
         )
         assert result["promoted"] is None
         assert result["reason"] == "no_score"

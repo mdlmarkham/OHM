@@ -106,7 +106,9 @@ def _http_post_json(
     """Make a POST request with a JSON body."""
     data = _to_json_bytes(body)
     req = urllib.request.Request(
-        url, data=data, method="POST",
+        url,
+        data=data,
+        method="POST",
         headers={"Content-Type": "application/json"},
     )
     try:
@@ -123,6 +125,7 @@ def _http_post_json(
 def _safe_json(s: str):
     """Parse JSON, return {} on failure (smoke test tolerates non-JSON)."""
     import json
+
     try:
         return json.loads(s)
     except (ValueError, TypeError):
@@ -131,6 +134,7 @@ def _safe_json(s: str):
 
 def _to_json_bytes(obj) -> bytes:
     import json
+
     return json.dumps(obj).encode("utf-8")
 
 
@@ -188,10 +192,15 @@ def test_ohmd_smoke_endpoint_matrix(tmp_path):
     # directly gives us one process to manage.)
     proc = subprocess.Popen(
         [
-            sys.executable, "-m", "ohm.server",
-            "--host", "127.0.0.1",
-            "--port", str(port),
-            "--db", db_path,
+            sys.executable,
+            "-m",
+            "ohm.server",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+            "--db",
+            db_path,
             "--no-auth",
         ],
         env=env,
@@ -214,10 +223,7 @@ def test_ohmd_smoke_endpoint_matrix(tmp_path):
                 err = stderr_log.read_bytes()[-4000:]
             except Exception:
                 err = b"<could not read stderr log>"
-            pytest.fail(
-                f"ohmd did not become healthy on {base_url} within 30s.\n"
-                f"daemon stderr (tail):\n{err.decode(errors='replace')}"
-            )
+            pytest.fail(f"ohmd did not become healthy on {base_url} within 30s.\ndaemon stderr (tail):\n{err.decode(errors='replace')}")
 
         # ── Read endpoints ─────────────────────────────────────────
         status, body = _http_get(f"{base_url}/health")
@@ -283,9 +289,7 @@ def test_ohmd_smoke_endpoint_matrix(tmp_path):
                 "value": 0.5,
             },
         )
-        assert status in (200, 201), (
-            f"POST /observe/{node_a_id} returned {status}: {body}"
-        )
+        assert status in (200, 201), f"POST /observe/{node_a_id} returned {status}: {body}"
 
         # POST /heartbeat (verifies the verification_overdue field per
         # the kg16 item 2 call-out).
@@ -301,9 +305,7 @@ def test_ohmd_smoke_endpoint_matrix(tmp_path):
                 "confidence": 0.3,
             },
         )
-        assert status in (200, 201), (
-            f"POST /challenge/{edge_id} returned {status}: {body}"
-        )
+        assert status in (200, 201), f"POST /challenge/{edge_id} returned {status}: {body}"
 
         # POST /outcome — body requires source_agent, claim_node, outcome.
         status, body = _http_post_json(
@@ -315,31 +317,19 @@ def test_ohmd_smoke_endpoint_matrix(tmp_path):
                 "notes": "smoke test outcome",
             },
         )
-        assert status in (200, 201), (
-            f"POST /outcome returned {status}: {body}"
-        )
+        assert status in (200, 201), f"POST /outcome returned {status}: {body}"
 
         # POST /admin/verification-decay — per kg16 item 2.
-        status, body = _http_post_json(
-            f"{base_url}/admin/verification-decay", {}
-        )
-        assert status in (200, 201), (
-            f"POST /admin/verification-decay returned {status}: {body}"
-        )
+        status, body = _http_post_json(f"{base_url}/admin/verification-decay", {})
+        assert status in (200, 201), f"POST /admin/verification-decay returned {status}: {body}"
 
         # GET /admin/nudges/quality — per the OHM-49bg nudges acceptance.
         status, body = _http_get(f"{base_url}/admin/nudges/quality")
-        assert status == 200, (
-            f"GET /admin/nudges/quality returned {status}: {body}"
-        )
+        assert status == 200, f"GET /admin/nudges/quality returned {status}: {body}"
 
         # GET /neighborhood/{id} — node id in path, depth in query.
-        status, body = _http_get(
-            f"{base_url}/neighborhood/{node_a_id}?depth=1"
-        )
-        assert status == 200, (
-            f"GET /neighborhood/{node_a_id} returned {status}: {body}"
-        )
+        status, body = _http_get(f"{base_url}/neighborhood/{node_a_id}?depth=1")
+        assert status == 200, f"GET /neighborhood/{node_a_id} returned {status}: {body}"
 
         # GET /layers — L0-L4 layer descriptions. Tests a fresh read
         # endpoint (the static SchemaConfig) without rebuilding the
@@ -350,14 +340,12 @@ def test_ohmd_smoke_endpoint_matrix(tmp_path):
         # accepts any non-empty payload.
         status, body = _http_get(f"{base_url}/layers")
         assert status == 200, f"GET /layers returned {status}: {body}"
-        assert body, f"GET /layers returned empty body"
+        assert body, "GET /layers returned empty body"
 
         # GET /admin/health — admin health (mirrors /health for the
         # admin surface).
         status, body = _http_get(f"{base_url}/admin/health")
-        assert status == 200, (
-            f"GET /admin/health returned {status}: {body}"
-        )
+        assert status == 200, f"GET /admin/health returned {status}: {body}"
 
     finally:
         # ── Teardown: stop the daemon ───────────────────────────────

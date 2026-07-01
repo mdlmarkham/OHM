@@ -18,34 +18,26 @@ from ohm.graph.queries import (
 class TestComputeConfidenceWithDecay:
     def test_reduces_with_age(self, test_db):
         old_obs = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
-        result = compute_confidence_with_decay(
-            test_db, base_confidence=0.8, last_observed_at=old_obs, half_life_days=30.0
-        )
+        result = compute_confidence_with_decay(test_db, base_confidence=0.8, last_observed_at=old_obs, half_life_days=30.0)
         assert 0.3 < result["decayed_confidence"] < 0.5
         assert result["age_days"] > 29
         assert result["is_stale"] is False
 
     def test_floor_when_very_old(self, test_db):
         very_old = (datetime.now(timezone.utc) - timedelta(days=365 * 5)).isoformat()
-        result = compute_confidence_with_decay(
-            test_db, base_confidence=0.9, last_observed_at=very_old, half_life_days=30.0, floor=0.1
-        )
+        result = compute_confidence_with_decay(test_db, base_confidence=0.9, last_observed_at=very_old, half_life_days=30.0, floor=0.1)
         assert result["decayed_confidence"] == 0.1
         assert result["is_stale"] is True
 
     def test_no_observation_returns_base(self, test_db):
-        result = compute_confidence_with_decay(
-            test_db, base_confidence=0.7, last_observed_at=None
-        )
+        result = compute_confidence_with_decay(test_db, base_confidence=0.7, last_observed_at=None)
         assert result["decayed_confidence"] == 0.7
         assert result["age_days"] is None
         assert result["is_stale"] is False
 
     def test_half_life_zero_disables_decay(self, test_db):
         old_obs = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
-        result = compute_confidence_with_decay(
-            test_db, base_confidence=0.6, last_observed_at=old_obs, half_life_days=0.0
-        )
+        result = compute_confidence_with_decay(test_db, base_confidence=0.6, last_observed_at=old_obs, half_life_days=0.0)
         assert result["decayed_confidence"] == 0.6
 
     def test_accepts_string_isoformat(self, test_db):
@@ -73,9 +65,7 @@ class TestApplyDecayToEdges:
         )
         result = apply_decay_to_edges(test_db, half_life_days=30.0, dry_run=True)
         assert result["edges_examined"] >= 1
-        row = test_db.execute(
-            "SELECT confidence FROM ohm_edges WHERE id = ?", [edge["id"]]
-        ).fetchone()
+        row = test_db.execute("SELECT confidence FROM ohm_edges WHERE id = ?", [edge["id"]]).fetchone()
         assert row[0] == pytest.approx(0.9)
 
     def test_live_updates_confidence(self, test_db):
@@ -90,13 +80,12 @@ class TestApplyDecayToEdges:
             confidence=0.9,
         )
         apply_decay_to_edges(test_db, half_life_days=1.0, dry_run=False)
-        row = test_db.execute(
-            "SELECT confidence, metadata FROM ohm_edges WHERE id = ?", [edge["id"]]
-        ).fetchone()
+        row = test_db.execute("SELECT confidence, metadata FROM ohm_edges WHERE id = ?", [edge["id"]]).fetchone()
         assert row[0] < 0.9
         meta = row[1]
         if meta:
             import json
+
             parsed = json.loads(meta) if isinstance(meta, str) else meta
             assert parsed.get("confidence_original") == 0.9
 
@@ -149,9 +138,7 @@ class TestLoopStatusTemporal:
 
     def test_stale_feeds_detected(self, test_db):
         target = create_node(test_db, label="Feed", node_type="concept", created_by="tester")
-        decision = create_node(
-            test_db, label="D", node_type="decision", created_by="tester"
-        )
+        decision = create_node(test_db, label="D", node_type="decision", created_by="tester")
         edge = create_edge(
             test_db,
             from_node=target["id"],

@@ -66,19 +66,23 @@ class TestRunBridge:
         ohm_queue_dir = tmp_path / "ohm_queue"
         state_file = tmp_path / "state.json"
 
-        karakeep_queue.write_text(json.dumps([
-            {
-                "id": "bk-pdf-1",
-                "received": "2026-06-21T20:00:00Z",
-                "bookmark": {
-                    "id": "bk-pdf-1",
-                    "title": "Important PDF",
-                    "url": "https://example.com/report.pdf",
-                    "tags": ["economics"],
-                    "publisher": "Example",
-                },
-            }
-        ]))
+        karakeep_queue.write_text(
+            json.dumps(
+                [
+                    {
+                        "id": "bk-pdf-1",
+                        "received": "2026-06-21T20:00:00Z",
+                        "bookmark": {
+                            "id": "bk-pdf-1",
+                            "title": "Important PDF",
+                            "url": "https://example.com/report.pdf",
+                            "tags": ["economics"],
+                            "publisher": "Example",
+                        },
+                    }
+                ]
+            )
+        )
 
         queued = run_bridge(
             karakeep_queue=karakeep_queue,
@@ -103,16 +107,20 @@ class TestRunBridge:
         ohm_queue_dir = tmp_path / "ohm_queue"
         state_file = tmp_path / "state.json"
 
-        karakeep_queue.write_text(json.dumps([
-            {
-                "id": "bk-article-1",
-                "bookmark": {
-                    "id": "bk-article-1",
-                    "title": "News Article",
-                    "url": "https://example.com/article",
-                },
-            }
-        ]))
+        karakeep_queue.write_text(
+            json.dumps(
+                [
+                    {
+                        "id": "bk-article-1",
+                        "bookmark": {
+                            "id": "bk-article-1",
+                            "title": "News Article",
+                            "url": "https://example.com/article",
+                        },
+                    }
+                ]
+            )
+        )
 
         queued = run_bridge(
             karakeep_queue=karakeep_queue,
@@ -132,16 +140,20 @@ class TestRunBridge:
         state_file = tmp_path / "state.json"
         state_file.write_text(json.dumps({"processed_ids": ["bk-pdf-2"]}))
 
-        karakeep_queue.write_text(json.dumps([
-            {
-                "id": "bk-pdf-2",
-                "bookmark": {
-                    "id": "bk-pdf-2",
-                    "title": "Already Done",
-                    "url": "https://example.com/old.pdf",
-                },
-            }
-        ]))
+        karakeep_queue.write_text(
+            json.dumps(
+                [
+                    {
+                        "id": "bk-pdf-2",
+                        "bookmark": {
+                            "id": "bk-pdf-2",
+                            "title": "Already Done",
+                            "url": "https://example.com/old.pdf",
+                        },
+                    }
+                ]
+            )
+        )
 
         queued = run_bridge(
             karakeep_queue=karakeep_queue,
@@ -157,16 +169,20 @@ class TestRunBridge:
         ohm_queue_dir = tmp_path / "ohm_queue"
         state_file = tmp_path / "state.json"
 
-        karakeep_queue.write_text(json.dumps({
-            "bookmarks": [
+        karakeep_queue.write_text(
+            json.dumps(
                 {
-                    "id": "bk-pdf-3",
-                    "title": "Export PDF",
-                    "url": "https://example.com/export.pdf",
+                    "bookmarks": [
+                        {
+                            "id": "bk-pdf-3",
+                            "title": "Export PDF",
+                            "url": "https://example.com/export.pdf",
+                        }
+                    ],
+                    "lastSync": "2026-06-21T20:00:00Z",
                 }
-            ],
-            "lastSync": "2026-06-21T20:00:00Z",
-        }))
+            )
+        )
 
         queued = run_bridge(
             karakeep_queue=karakeep_queue,

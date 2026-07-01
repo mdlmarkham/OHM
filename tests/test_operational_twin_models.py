@@ -30,9 +30,7 @@ def _make_twin(test_db, label: str = "Twin") -> str:
 
 
 def _make_active_model(test_db, twin_id: str, label: str = "ActiveModel") -> dict:
-    cand = register_model_candidate(
-        test_db, label=label, twin_id=twin_id, created_by="tester"
-    )
+    cand = register_model_candidate(test_db, label=label, twin_id=twin_id, created_by="tester")
     promote_model(test_db, model_candidate_id=cand["id"], created_by="tester")
     return cand
 
@@ -185,9 +183,7 @@ class TestDetectDrift:
 class TestWalkForwardValidation:
     def test_creates_validation_run(self, test_db):
         twin_id = _make_twin(test_db)
-        model = register_model_candidate(
-            test_db, label="M", twin_id=twin_id, created_by="tester"
-        )
+        model = register_model_candidate(test_db, label="M", twin_id=twin_id, created_by="tester")
 
         for i in range(100):
             _insert_observation(
@@ -218,9 +214,7 @@ class TestWalkForwardValidation:
 
     def test_detects_overfitting(self, test_db):
         twin_id = _make_twin(test_db)
-        model = register_model_candidate(
-            test_db, label="M", twin_id=twin_id, created_by="tester"
-        )
+        model = register_model_candidate(test_db, label="M", twin_id=twin_id, created_by="tester")
 
         for i in range(200):
             baseline = 0.5
@@ -256,12 +250,8 @@ class TestWalkForwardValidation:
 class TestEnsemblePredict:
     def test_returns_weighted_votes(self, test_db):
         twin_id = _make_twin(test_db)
-        c1 = register_model_candidate(
-            test_db, label="M1", twin_id=twin_id, created_by="tester"
-        )
-        c2 = register_model_candidate(
-            test_db, label="M2", twin_id=twin_id, created_by="tester"
-        )
+        c1 = register_model_candidate(test_db, label="M1", twin_id=twin_id, created_by="tester")
+        c2 = register_model_candidate(test_db, label="M2", twin_id=twin_id, created_by="tester")
         evaluate_model(
             test_db,
             model_candidate_id=c1["id"],
@@ -297,18 +287,14 @@ class TestEnsemblePredict:
 class TestComputeDecisionValue:
     def test_computes_score(self, test_db):
         twin_id = _make_twin(test_db)
-        model = register_model_candidate(
-            test_db, label="M", twin_id=twin_id, created_by="tester"
-        )
+        model = register_model_candidate(test_db, label="M", twin_id=twin_id, created_by="tester")
         evaluate_model(
             test_db,
             model_candidate_id=model["id"],
             created_by="tester",
             metrics={"accuracy": 0.9, "mae": 0.05},
         )
-        decision = create_node(
-            test_db, label="Decision", node_type="decision", created_by="tester"
-        )
+        decision = create_node(test_db, label="Decision", node_type="decision", created_by="tester")
 
         result = compute_decision_value(
             test_db,
@@ -322,9 +308,7 @@ class TestComputeDecisionValue:
         assert result["decision_node_id"] == decision["id"]
 
     def test_missing_model_raises(self, test_db):
-        decision = create_node(
-            test_db, label="D", node_type="decision", created_by="tester"
-        )
+        decision = create_node(test_db, label="D", node_type="decision", created_by="tester")
         with pytest.raises(NodeNotFoundError):
             compute_decision_value(
                 test_db,
@@ -335,9 +319,7 @@ class TestComputeDecisionValue:
 
     def test_missing_decision_raises(self, test_db):
         twin_id = _make_twin(test_db)
-        model = register_model_candidate(
-            test_db, label="M", twin_id=twin_id, created_by="tester"
-        )
+        model = register_model_candidate(test_db, label="M", twin_id=twin_id, created_by="tester")
         with pytest.raises(NodeNotFoundError):
             compute_decision_value(
                 test_db,
@@ -350,9 +332,7 @@ class TestComputeDecisionValue:
 class TestAutoRetireModel:
     def test_sets_retired_status(self, test_db):
         twin_id = _make_twin(test_db)
-        model = register_model_candidate(
-            test_db, label="M", twin_id=twin_id, created_by="tester"
-        )
+        model = register_model_candidate(test_db, label="M", twin_id=twin_id, created_by="tester")
         result = auto_retire_model(
             test_db,
             model_id=model["id"],
@@ -403,9 +383,7 @@ class TestOperationalTwinModelsSDK:
         from ohm.framework.sdk import Graph
 
         twin_id = _make_twin(test_db)
-        model = register_model_candidate(
-            test_db, label="M", twin_id=twin_id, created_by="tester"
-        )
+        model = register_model_candidate(test_db, label="M", twin_id=twin_id, created_by="tester")
         with Graph(test_db, actor="sdk-tester") as g:
             result = g.run_walk_forward_validation(model["id"])
             assert "validation_id" in result
@@ -422,25 +400,17 @@ class TestOperationalTwinModelsSDK:
         from ohm.framework.sdk import Graph
 
         twin_id = _make_twin(test_db)
-        model = register_model_candidate(
-            test_db, label="M", twin_id=twin_id, created_by="tester"
-        )
-        decision = create_node(
-            test_db, label="D", node_type="decision", created_by="tester"
-        )
+        model = register_model_candidate(test_db, label="M", twin_id=twin_id, created_by="tester")
+        decision = create_node(test_db, label="D", node_type="decision", created_by="tester")
         with Graph(test_db, actor="sdk-tester") as g:
-            result = g.compute_decision_value(
-                model["id"], decision["id"], utility_scale=1.0
-            )
+            result = g.compute_decision_value(model["id"], decision["id"], utility_scale=1.0)
             assert "decision_value_score" in result
 
     def test_sdk_auto_retire(self, test_db):
         from ohm.framework.sdk import Graph
 
         twin_id = _make_twin(test_db)
-        model = register_model_candidate(
-            test_db, label="M", twin_id=twin_id, created_by="tester"
-        )
+        model = register_model_candidate(test_db, label="M", twin_id=twin_id, created_by="tester")
         with Graph(test_db, actor="sdk-tester") as g:
             result = g.auto_retire_model(model["id"], reason="drift exceeded")
             meta = result.get("metadata") or {}

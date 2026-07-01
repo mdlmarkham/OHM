@@ -64,18 +64,29 @@ class TestAgentOwnedEdges:
 
     def test_create_edge_stores_owner(self, conn):
         edge = create_edge(
-            conn, from_node="a", to_node="b", layer="L3",
-            edge_type="CAUSES", created_by="metis", confidence=0.8,
+            conn,
+            from_node="a",
+            to_node="b",
+            layer="L3",
+            edge_type="CAUSES",
+            created_by="metis",
+            confidence=0.8,
         )
         row = conn.execute(
-            "SELECT created_by FROM ohm_edges WHERE id = ?", [edge["id"]],
+            "SELECT created_by FROM ohm_edges WHERE id = ?",
+            [edge["id"]],
         ).fetchone()
         assert row[0] == "metis"
 
     def test_other_agent_cannot_overwrite(self, conn):
         edge = create_edge(
-            conn, from_node="a", to_node="b", layer="L3",
-            edge_type="CAUSES", created_by="metis", confidence=0.8,
+            conn,
+            from_node="a",
+            to_node="b",
+            layer="L3",
+            edge_type="CAUSES",
+            created_by="metis",
+            confidence=0.8,
         )
         with pytest.raises(Exception) as exc:
             check_can_update_edge("clio", "metis", edge["id"])
@@ -83,8 +94,13 @@ class TestAgentOwnedEdges:
 
     def test_owner_can_update_their_own_edge(self, conn):
         edge = create_edge(
-            conn, from_node="a", to_node="b", layer="L3",
-            edge_type="CAUSES", created_by="metis", confidence=0.8,
+            conn,
+            from_node="a",
+            to_node="b",
+            layer="L3",
+            edge_type="CAUSES",
+            created_by="metis",
+            confidence=0.8,
         )
         check_can_update_edge("metis", "metis", edge["id"])
 
@@ -101,34 +117,48 @@ class TestMandatoryCrossLink:
     def test_concept_node_can_exist_without_link(self, conn):
         """Source / concept / entity are exempt — they are foundational references."""
         node = create_node(
-            conn, label="Foundational concept", node_type="concept",
+            conn,
+            label="Foundational concept",
+            node_type="concept",
             created_by="metis",
         )
         assert node["id"]
 
     def test_pattern_with_valid_connects_to_succeeds(self, conn):
         anchor = create_node(
-            conn, label="Anchor claim", node_type="concept", created_by="metis",
+            conn,
+            label="Anchor claim",
+            node_type="concept",
+            created_by="metis",
         )
         node = create_node(
-            conn, label="Derived pattern", node_type="pattern",
-            created_by="metis", connects_to=[anchor["id"]],
+            conn,
+            label="Derived pattern",
+            node_type="pattern",
+            created_by="metis",
+            connects_to=[anchor["id"]],
         )
         assert node["id"]
 
     def test_pattern_with_nonexistent_connects_to_rejected(self, conn):
         with pytest.raises(ValueError) as exc:
             create_node(
-                conn, label="Orphan", node_type="pattern",
-                created_by="metis", connects_to=["nonexistent-id"],
+                conn,
+                label="Orphan",
+                node_type="pattern",
+                created_by="metis",
+                connects_to=["nonexistent-id"],
             )
         assert "unknown node id" in str(exc.value).lower()
 
     def test_pattern_with_empty_connects_to_rejected(self, conn):
         with pytest.raises(ValueError) as exc:
             create_node(
-                conn, label="Orphan", node_type="pattern",
-                created_by="metis", connects_to=[],
+                conn,
+                label="Orphan",
+                node_type="pattern",
+                created_by="metis",
+                connects_to=[],
             )
         assert "at least one" in str(exc.value).lower()
 
@@ -184,7 +214,10 @@ class TestAndGateGovernance:
 
     def test_node_accepts_gate_type_and_status(self, conn):
         node = create_node(
-            conn, label="Reactor R-101", node_type="concept", created_by="plant",
+            conn,
+            label="Reactor R-101",
+            node_type="concept",
+            created_by="plant",
         )
         conn.execute(
             "UPDATE ohm_nodes SET gate_type = ?, gate_status = ? WHERE id = ?",
@@ -200,15 +233,20 @@ class TestAndGateGovernance:
         a = create_node(conn, label="feed", node_type="concept", created_by="plant")
         b = create_node(conn, label="catalyst", node_type="concept", created_by="plant")
         edge = create_edge(
-            conn, from_node=a["id"], to_node=b["id"], layer="L3",
-            edge_type="CAUSES", created_by="plant",
+            conn,
+            from_node=a["id"],
+            to_node=b["id"],
+            layer="L3",
+            edge_type="CAUSES",
+            created_by="plant",
         )
         conn.execute(
             "UPDATE ohm_edges SET constraint_expr = ? WHERE id = ?",
             ["feed AND catalyst_flow", edge["id"]],
         )
         row = conn.execute(
-            "SELECT constraint_expr FROM ohm_edges WHERE id = ?", [edge["id"]],
+            "SELECT constraint_expr FROM ohm_edges WHERE id = ?",
+            [edge["id"]],
         ).fetchone()
         assert row[0] == "feed AND catalyst_flow"
 
@@ -218,12 +256,11 @@ class TestVerificationDecay:
 
     def test_heartbeat_endpoint_exists(self):
         from ohm.server.server import OhmHandler
+
         assert hasattr(OhmHandler, "_post_heartbeat")
 
     def test_decay_relevant_columns_present(self, conn):
-        cols = {r[0] for r in conn.execute(
-            "SELECT column_name FROM information_schema.columns WHERE table_name='ohm_nodes'"
-        ).fetchall()}
+        cols = {r[0] for r in conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='ohm_nodes'").fetchall()}
         assert "confidence" in cols
         assert "created_at" in cols
         assert "updated_at" in cols
@@ -247,16 +284,31 @@ class TestOppositionalReview:
         cause = create_node(conn, label="X causes Y", node_type="concept", created_by="a")
         effect = create_node(conn, label="Y", node_type="concept", created_by="a")
         cause_edge = create_edge(
-            conn, from_node=cause["id"], to_node=effect["id"], layer="L3",
-            edge_type="CAUSES", created_by="a", confidence=0.3, source_tier="raw",
+            conn,
+            from_node=cause["id"],
+            to_node=effect["id"],
+            layer="L3",
+            edge_type="CAUSES",
+            created_by="a",
+            confidence=0.3,
+            source_tier="raw",
         )
         for i in range(3):
             sup = create_node(
-                conn, label=f"supporter {i}", node_type="concept", created_by=f"s{i}",
+                conn,
+                label=f"supporter {i}",
+                node_type="concept",
+                created_by=f"s{i}",
             )
             create_edge(
-                conn, from_node=sup["id"], to_node=cause["id"], layer="L3",
-                edge_type="SUPPORTS", created_by=f"s{i}", confidence=0.3, source_tier="raw",
+                conn,
+                from_node=sup["id"],
+                to_node=cause["id"],
+                layer="L3",
+                edge_type="SUPPORTS",
+                created_by=f"s{i}",
+                confidence=0.3,
+                source_tier="raw",
             )
         detect_consensus_only_support(conn, edge_id=cause_edge["id"])
         result = find_homogeneous_causes(conn, min_support_count=2, homogeneity_threshold=0.8)
@@ -301,13 +353,23 @@ class TestSourceDiversity:
         cause = create_node(conn, label="diverse claim", node_type="concept", created_by="a")
         for i, author in enumerate(["alice", "bob", "carol", "dave"]):
             sup = create_node(
-                conn, label=f"supporter {i}", node_type="concept", created_by=author,
-                source_author=author, source_institution=f"inst-{i}",
+                conn,
+                label=f"supporter {i}",
+                node_type="concept",
+                created_by=author,
+                source_author=author,
+                source_institution=f"inst-{i}",
                 data_origin="peer_reviewed",
             )
             create_edge(
-                conn, from_node=sup["id"], to_node=cause["id"], layer="L3",
-                edge_type="SUPPORTS", created_by=author, confidence=0.95, source_tier="verified",
+                conn,
+                from_node=sup["id"],
+                to_node=cause["id"],
+                layer="L3",
+                edge_type="SUPPORTS",
+                created_by=author,
+                confidence=0.95,
+                source_tier="verified",
             )
         result = source_diversity_score(conn, cause["id"])
         assert isinstance(result, dict)
@@ -319,17 +381,26 @@ class TestAutonomyLoopIntegrity:
     def test_full_loop_propose_execute_status(self, conn):
         anchor = create_node(conn, label="anchor", node_type="concept", created_by="plant")
         scenario = create_node(
-            conn, label="disruption scenario", node_type="scenario",
-            created_by="plant", connects_to=[anchor["id"]],
+            conn,
+            label="disruption scenario",
+            node_type="scenario",
+            created_by="plant",
+            connects_to=[anchor["id"]],
         )
         action = propose_action(
-            conn, scenario_id=scenario["id"], label="increase buffer",
-            created_by="plant", rationale="mitigate supply risk",
+            conn,
+            scenario_id=scenario["id"],
+            label="increase buffer",
+            created_by="plant",
+            rationale="mitigate supply risk",
         )
         assert action["task_status"] == "proposed"
         result = execute_action(
-            conn, action_id=action["id"], executed_by="plant",
-            outcome="TRUE", outcome_notes="buffer increased",
+            conn,
+            action_id=action["id"],
+            executed_by="plant",
+            outcome="TRUE",
+            outcome_notes="buffer increased",
         )
         assert result["task_status"] == "executed"
         status = query_loop_status(conn, agent_name="plant")
@@ -345,12 +416,19 @@ class TestTwinRegistration:
     def test_twin_with_evaluates_edge_is_valid(self, conn):
         system = create_node(conn, label="Reactor R-101", node_type="concept", created_by="plant")
         twin = create_node(
-            conn, label="Reactor Twin", node_type="twin",
-            created_by="plant", connects_to=[system["id"]],
+            conn,
+            label="Reactor Twin",
+            node_type="twin",
+            created_by="plant",
+            connects_to=[system["id"]],
         )
         create_edge(
-            conn, from_node=twin["id"], to_node=system["id"], layer="L3",
-            edge_type="EVALUATES", created_by="plant",
+            conn,
+            from_node=twin["id"],
+            to_node=system["id"],
+            layer="L3",
+            edge_type="EVALUATES",
+            created_by="plant",
         )
         edges = conn.execute(
             "SELECT edge_type FROM ohm_edges WHERE from_node = ? AND to_node = ?",
@@ -374,7 +452,8 @@ class TestReadScopes:
 
     def test_set_and_get_agent_read_scope(self, conn):
         set_agent_read_scope(
-            conn, agent_name="clio",
+            conn,
+            agent_name="clio",
             scope={"layer": ["L3"], "created_by": ["metis"]},
         )
         scope = get_agent_read_scope(conn, agent_name="clio")
@@ -398,15 +477,25 @@ class TestBoundaryRespect:
 
     def test_enforce_write_boundary_on_cross_agent_update(self, conn):
         edge = create_edge(
-            conn, from_node="a", to_node="b", layer="L3",
-            edge_type="CAUSES", created_by="metis", confidence=0.8,
+            conn,
+            from_node="a",
+            to_node="b",
+            layer="L3",
+            edge_type="CAUSES",
+            created_by="metis",
+            confidence=0.8,
         )
         with pytest.raises(Exception):
             enforce_write_boundary(conn, agent_name="clio", edge_id=edge["id"])
 
     def test_boundary_passes_for_owner(self, conn):
         edge = create_edge(
-            conn, from_node="a", to_node="b", layer="L3",
-            edge_type="CAUSES", created_by="metis", confidence=0.8,
+            conn,
+            from_node="a",
+            to_node="b",
+            layer="L3",
+            edge_type="CAUSES",
+            created_by="metis",
+            confidence=0.8,
         )
         enforce_write_boundary(conn, agent_name="metis", edge_id=edge["id"])

@@ -40,51 +40,94 @@ from tests.conftest import wait_for_port
 
 class TestResolveTypeField:
     def test_descriptive_name_wins(self):
-        assert _resolve_type_field(
-            {"node_type": "decision", "type": "concept"},
-            "node_type", "type", default="concept",
-        ) == "decision"
+        assert (
+            _resolve_type_field(
+                {"node_type": "decision", "type": "concept"},
+                "node_type",
+                "type",
+                default="concept",
+            )
+            == "decision"
+        )
 
     def test_legacy_type_falls_through(self):
-        assert _resolve_type_field(
-            {"type": "decision"},
-            "node_type", "type", default="concept",
-        ) == "decision"
+        assert (
+            _resolve_type_field(
+                {"type": "decision"},
+                "node_type",
+                "type",
+                default="concept",
+            )
+            == "decision"
+        )
 
     def test_missing_both_uses_default(self):
-        assert _resolve_type_field(
-            {}, "node_type", "type", default="concept",
-        ) == "concept"
+        assert (
+            _resolve_type_field(
+                {},
+                "node_type",
+                "type",
+                default="concept",
+            )
+            == "concept"
+        )
 
     def test_empty_body_returns_default(self):
-        assert _resolve_type_field(
-            {"node_type": None, "type": None},
-            "node_type", "type", default="concept",
-        ) == "concept"
+        assert (
+            _resolve_type_field(
+                {"node_type": None, "type": None},
+                "node_type",
+                "type",
+                default="concept",
+            )
+            == "concept"
+        )
 
     def test_descriptive_name_present_even_if_none(self):
         # node_type key present with None value: should fall through to 'type'
-        assert _resolve_type_field(
-            {"node_type": None, "type": "decision"},
-            "node_type", "type", default="concept",
-        ) == "decision"
+        assert (
+            _resolve_type_field(
+                {"node_type": None, "type": "decision"},
+                "node_type",
+                "type",
+                default="concept",
+            )
+            == "decision"
+        )
 
     def test_observation_aliases(self):
-        assert _resolve_type_field(
-            {"obs_type": "anomaly"}, "obs_type", "type", default="measurement",
-        ) == "anomaly"
+        assert (
+            _resolve_type_field(
+                {"obs_type": "anomaly"},
+                "obs_type",
+                "type",
+                default="measurement",
+            )
+            == "anomaly"
+        )
 
     def test_edge_aliases(self):
-        assert _resolve_type_field(
-            {"edge_type": "CAUSES"}, "edge_type", "type", default="",
-        ) == "CAUSES"
+        assert (
+            _resolve_type_field(
+                {"edge_type": "CAUSES"},
+                "edge_type",
+                "type",
+                default="",
+            )
+            == "CAUSES"
+        )
 
     def test_empty_string_falls_through(self):
         # Empty string treated as 'not provided' — fall through to next alias.
-        assert _resolve_type_field(
-            {"node_type": "", "type": "decision"},
-            "node_type", "type", default="concept",
-        ) == "decision"
+        assert (
+            _resolve_type_field(
+                {"node_type": "", "type": "decision"},
+                "node_type",
+                "type",
+                default="concept",
+            )
+            == "decision"
+        )
 
     def test_default_none_when_all_missing(self):
         assert _resolve_type_field({}, "node_type", "type") is None
@@ -154,18 +197,28 @@ class TestNodeTypeAlias:
         create a node with type='decision', not the default 'concept'."""
         port, store = http_server
         # First create an anchor so decision (a must-have-edge type) can cross-link.
-        _http("POST", port, "/node", {
-            "id": "anchor_for_decision",
-            "label": "Anchor",
-            "node_type": "concept",
-        })
-        status, data = _http("POST", port, "/node", {
-            "id": "decision_via_alias",
-            "label": "Decision via node_type alias",
-            "node_type": "decision",
-            "utility_scale": 0.5,
-            "connects_to": ["anchor_for_decision"],
-        })
+        _http(
+            "POST",
+            port,
+            "/node",
+            {
+                "id": "anchor_for_decision",
+                "label": "Anchor",
+                "node_type": "concept",
+            },
+        )
+        status, data = _http(
+            "POST",
+            port,
+            "/node",
+            {
+                "id": "decision_via_alias",
+                "label": "Decision via node_type alias",
+                "node_type": "decision",
+                "utility_scale": 0.5,
+                "connects_to": ["anchor_for_decision"],
+            },
+        )
         assert status in (200, 201), data
         # Verify the stored type is 'decision', not 'concept'
         row = store.read_conn.execute(
@@ -177,11 +230,16 @@ class TestNodeTypeAlias:
     def test_legacy_type_still_works(self, http_server):
         """Backward compat: clients sending 'type' keep working."""
         port, store = http_server
-        status, data = _http("POST", port, "/node", {
-            "id": "concept_legacy",
-            "label": "Concept via type",
-            "type": "concept",
-        })
+        status, data = _http(
+            "POST",
+            port,
+            "/node",
+            {
+                "id": "concept_legacy",
+                "label": "Concept via type",
+                "type": "concept",
+            },
+        )
         assert status in (200, 201), data
         row = store.read_conn.execute(
             "SELECT type FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
@@ -191,13 +249,18 @@ class TestNodeTypeAlias:
 
     def test_descriptive_wins_when_both_present(self, http_server):
         port, store = http_server
-        status, _ = _http("POST", port, "/node", {
-            "id": "node_with_both",
-            "label": "Both fields",
-            "type": "concept",
-            "node_type": "decision",
-            "connects_to": ["anchor_for_decision"],
-        })
+        status, _ = _http(
+            "POST",
+            port,
+            "/node",
+            {
+                "id": "node_with_both",
+                "label": "Both fields",
+                "type": "concept",
+                "node_type": "decision",
+                "connects_to": ["anchor_for_decision"],
+            },
+        )
         assert status in (200, 201)
         row = store.read_conn.execute(
             "SELECT type FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
@@ -207,10 +270,15 @@ class TestNodeTypeAlias:
 
     def test_default_when_neither_present(self, http_server):
         port, store = http_server
-        status, _ = _http("POST", port, "/node", {
-            "id": "node_default",
-            "label": "Default",
-        })
+        status, _ = _http(
+            "POST",
+            port,
+            "/node",
+            {
+                "id": "node_default",
+                "label": "Default",
+            },
+        )
         assert status in (200, 201)
         row = store.read_conn.execute(
             "SELECT type FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
@@ -221,10 +289,15 @@ class TestNodeTypeAlias:
     def test_find_or_create_accepts_node_type(self, http_server):
         """The find_or_create endpoint must also accept the alias."""
         port, store = http_server
-        status, data = _http("POST", port, "/node/find_or_create", {
-            "label": "Find or create via alias",
-            "node_type": "concept",
-        })
+        status, data = _http(
+            "POST",
+            port,
+            "/node/find_or_create",
+            {
+                "label": "Find or create via alias",
+                "node_type": "concept",
+            },
+        )
         assert status in (200, 201), data
         # find_or_create auto-generates id from label+type
         node_id = data["id"]
@@ -244,13 +317,18 @@ class TestEdgeTypeAlias:
         # Two anchor concepts first
         _http("POST", port, "/node", {"id": "src_for_edge", "label": "Src", "type": "concept"})
         _http("POST", port, "/node", {"id": "dst_for_edge", "label": "Dst", "type": "concept"})
-        status, data = _http("POST", port, "/edge", {
-            "from": "src_for_edge",
-            "to": "dst_for_edge",
-            "layer": "L3",
-            "edge_type": "CAUSES",
-            "created_by": "test",
-        })
+        status, data = _http(
+            "POST",
+            port,
+            "/edge",
+            {
+                "from": "src_for_edge",
+                "to": "dst_for_edge",
+                "layer": "L3",
+                "edge_type": "CAUSES",
+                "created_by": "test",
+            },
+        )
         assert status in (200, 201), data
         row = store.read_conn.execute(
             "SELECT edge_type FROM ohm_edges WHERE from_node = ? AND to_node = ? AND deleted_at IS NULL",
@@ -262,13 +340,18 @@ class TestEdgeTypeAlias:
         port, store = http_server
         _http("POST", port, "/node", {"id": "src2", "label": "Src2", "type": "concept"})
         _http("POST", port, "/node", {"id": "dst2", "label": "Dst2", "type": "concept"})
-        status, _ = _http("POST", port, "/edge", {
-            "from": "src2",
-            "to": "dst2",
-            "layer": "L3",
-            "type": "CAUSES",
-            "created_by": "test",
-        })
+        status, _ = _http(
+            "POST",
+            port,
+            "/edge",
+            {
+                "from": "src2",
+                "to": "dst2",
+                "layer": "L3",
+                "type": "CAUSES",
+                "created_by": "test",
+            },
+        )
         assert status in (200, 201)
         row = store.read_conn.execute(
             "SELECT edge_type FROM ohm_edges WHERE from_node = ? AND to_node = ? AND deleted_at IS NULL",
@@ -284,12 +367,17 @@ class TestObsTypeAlias:
     def test_obs_type_creates_anomaly_observation(self, http_server):
         port, store = http_server
         _http("POST", port, "/node", {"id": "obs_target", "label": "Target", "type": "concept"})
-        status, _ = _http("POST", port, "/observe/obs_target", {
-            "obs_type": "anomaly",
-            "value": 0.95,
-            "sigma": 0.05,
-            "created_by": "test",
-        })
+        status, _ = _http(
+            "POST",
+            port,
+            "/observe/obs_target",
+            {
+                "obs_type": "anomaly",
+                "value": 0.95,
+                "sigma": 0.05,
+                "created_by": "test",
+            },
+        )
         assert status in (200, 201)
         row = store.read_conn.execute(
             "SELECT type FROM ohm_observations WHERE node_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1",
@@ -300,12 +388,17 @@ class TestObsTypeAlias:
     def test_legacy_type_still_works(self, http_server):
         port, store = http_server
         _http("POST", port, "/node", {"id": "obs_target2", "label": "T2", "type": "concept"})
-        status, _ = _http("POST", port, "/observe/obs_target2", {
-            "type": "anomaly",
-            "value": 0.95,
-            "sigma": 0.05,
-            "created_by": "test",
-        })
+        status, _ = _http(
+            "POST",
+            port,
+            "/observe/obs_target2",
+            {
+                "type": "anomaly",
+                "value": 0.95,
+                "sigma": 0.05,
+                "created_by": "test",
+            },
+        )
         assert status in (200, 201)
         row = store.read_conn.execute(
             "SELECT type FROM ohm_observations WHERE node_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1",
@@ -316,10 +409,15 @@ class TestObsTypeAlias:
     def test_default_when_neither_present(self, http_server):
         port, store = http_server
         _http("POST", port, "/node", {"id": "obs_target3", "label": "T3", "type": "concept"})
-        status, _ = _http("POST", port, "/observe/obs_target3", {
-            "value": 0.5,
-            "created_by": "test",
-        })
+        status, _ = _http(
+            "POST",
+            port,
+            "/observe/obs_target3",
+            {
+                "value": 0.5,
+                "created_by": "test",
+            },
+        )
         assert status in (200, 201)
         row = store.read_conn.execute(
             "SELECT type FROM ohm_observations WHERE node_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1",

@@ -195,16 +195,21 @@ class TestGraphRead:
     def test_confidence_at_returns_dict(self, graph):
         """confidence_at() returns a dict with the full confidence packet."""
         from ohm.queries import create_observation
+
         n = graph.create_node(label="Test", node_type="concept")["id"]
         obs = create_observation(
-            graph._conn, node_id=n, obs_type="measurement",
-            created_by="test_agent", value=0.9, half_life_days=7.0, weibull_shape=1.0,
+            graph._conn,
+            node_id=n,
+            obs_type="measurement",
+            created_by="test_agent",
+            value=0.9,
+            half_life_days=7.0,
+            weibull_shape=1.0,
         )
         r = graph.confidence_at(obs["id"])
         assert isinstance(r, dict)
         assert r["observation_id"] == obs["id"]
-        for k in ("effective_confidence", "weibull_shape", "half_life_days",
-                   "decay_function", "decay_profile", "age_days", "evaluated_at"):
+        for k in ("effective_confidence", "weibull_shape", "half_life_days", "decay_function", "decay_profile", "age_days", "evaluated_at"):
             assert k in r
         assert r["weibull_shape"] == 1.0
         assert r["decay_function"] == "weibull"
@@ -212,6 +217,7 @@ class TestGraphRead:
     def test_confidence_at_missing_raises(self, graph):
         """confidence_at() raises NodeNotFoundError for a missing observation."""
         from ohm.exceptions import NodeNotFoundError
+
         with pytest.raises(NodeNotFoundError):
             graph.confidence_at("does-not-exist-1234")
 
@@ -260,8 +266,10 @@ class TestGraphRead:
     def test_narrative_agent_context(self, graph):
         a = graph.create_node(label="Source", node_type="concept")["id"]
         graph.create_edge(
-            from_node=a, to_node=graph.create_node(label="Target")["id"],
-            edge_type="SUPPORTS", layer="L3",
+            from_node=a,
+            to_node=graph.create_node(label="Target")["id"],
+            edge_type="SUPPORTS",
+            layer="L3",
         )
         result = graph.narrative(a)
         assert "agent_context" in result
@@ -271,6 +279,7 @@ class TestGraphRead:
 
     def test_lineage_returns_dict(self, graph):
         from ohm.queries import create_observation
+
         src = graph.create_node(label="Source Doc", node_type="source")["id"]
         obs = graph.create_node(label="Observation", node_type="concept")["id"]
         pat = graph.create_node(label="Pattern", node_type="pattern")["id"]
@@ -293,20 +302,19 @@ class TestGraphRead:
 
     def test_contradiction_summary_no_contradiction(self, graph):
         from ohm.queries import create_observation
+
         n = graph.create_node(label="Safe", node_type="concept")["id"]
-        create_observation(graph._conn, node_id=n, obs_type="measurement",
-                           created_by="test_agent", value=0.5, baseline=0.5)
+        create_observation(graph._conn, node_id=n, obs_type="measurement", created_by="test_agent", value=0.5, baseline=0.5)
         result = graph.contradiction_summary(n)
         assert isinstance(result, dict)
         assert result["has_contradiction"] is False
 
     def test_contradiction_summary_detects_conflict(self, graph):
         from ohm.queries import create_observation
+
         n = graph.create_node(label="Contested", node_type="concept")["id"]
-        create_observation(graph._conn, node_id=n, obs_type="measurement",
-                           created_by="test_agent", value=0.9, baseline=0.5)
-        create_observation(graph._conn, node_id=n, obs_type="measurement",
-                           created_by="other_agent", value=0.1, baseline=0.5)
+        create_observation(graph._conn, node_id=n, obs_type="measurement", created_by="test_agent", value=0.9, baseline=0.5)
+        create_observation(graph._conn, node_id=n, obs_type="measurement", created_by="other_agent", value=0.1, baseline=0.5)
         result = graph.contradiction_summary(n)
         assert result["has_contradiction"] is True
         assert len(result["sides"]) == 2
@@ -370,6 +378,7 @@ class TestGraphRead:
 
     def test_propose_action_sdk(self, graph):
         from ohm.queries import create_node
+
         target = create_node(graph._conn, label="T", node_type="concept", created_by="test_agent")
         scenario = create_node(graph._conn, label="S", node_type="scenario", created_by="test_agent", connects_to=[target["id"]])
         action = graph.propose_action(scenario_id=scenario["id"], label="Do X")
@@ -378,6 +387,7 @@ class TestGraphRead:
 
     def test_execute_action_sdk(self, graph):
         from ohm.queries import create_node
+
         target = create_node(graph._conn, label="T", node_type="concept", created_by="test_agent")
         scenario = create_node(graph._conn, label="S", node_type="scenario", created_by="test_agent", connects_to=[target["id"]])
         action = graph.propose_action(scenario_id=scenario["id"], label="Do X")

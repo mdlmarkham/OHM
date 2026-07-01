@@ -15,7 +15,6 @@ import logging
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    import duckdb
     from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger(__name__)
@@ -495,9 +494,7 @@ def generate_nudges(
             nudges.append(
                 {
                     "type": "high_confidence_weak_source",
-                    "message": f"Confidence is {confidence:.2f} but source_tier is '{source_tier}'. "
-                    f"Weak sources (raw, unverified) have confidence ceilings of 0.3-0.5. "
-                    f"Consider downgrading confidence or adding stronger evidence.",
+                    "message": f"Confidence is {confidence:.2f} but source_tier is '{source_tier}'. Weak sources (raw, unverified) have confidence ceilings of 0.3-0.5. Consider downgrading confidence or adding stronger evidence.",
                     "severity": "warning",
                     "data": {
                         "confidence": confidence,
@@ -511,16 +508,12 @@ def generate_nudges(
     # ADR-023: Causal edges feed the Bayesian network. A mechanism helps
     # other agents understand WHY the causation holds, not just THAT it does.
     if action == "edge" and edge_type and edge_type in CAUSAL_EDGE_TYPES:
-        has_mechanism = bool(condition and condition.strip()) or bool(
-            metadata and metadata.get("mechanism")
-        )
+        has_mechanism = bool(condition and condition.strip()) or bool(metadata and metadata.get("mechanism"))
         if not has_mechanism:
             nudges.append(
                 {
                     "type": "causal_edge_missing_mechanism",
-                    "message": f"You wrote {edge_type} but didn't specify a mediating mechanism. "
-                    f"What's the causal pathway? Add a 'condition' field or "
-                    f"metadata.mechanism to help other agents understand why this causation holds.",
+                    "message": f"You wrote {edge_type} but didn't specify a mediating mechanism. What's the causal pathway? Add a 'condition' field or metadata.mechanism to help other agents understand why this causation holds.",
                     "severity": "suggestion",
                     "data": {
                         "edge_type": edge_type,
@@ -562,9 +555,7 @@ def generate_nudges(
                 nudges.append(
                     {
                         "type": "fast_decaying_observation",
-                        "message": f"This node has {stale_count} observations that have decayed "
-                        f"below 0.2 confidence (half-life {half_life_days}d). "
-                        f"Refresh with new measurements to maintain signal quality.",
+                        "message": f"This node has {stale_count} observations that have decayed below 0.2 confidence (half-life {half_life_days}d). Refresh with new measurements to maintain signal quality.",
                         "severity": "hint",
                         "data": {
                             "stale_count": stale_count,
@@ -667,9 +658,7 @@ def accept_nudge(
     existing_id, existing_agent, existing_accepted, existing_accepted_at = row
 
     if agent is not None and existing_agent != agent:
-        raise ValidationError(
-            f"Nudge {nudge_id} was issued to '{existing_agent}', not '{agent}'"
-        )
+        raise ValidationError(f"Nudge {nudge_id} was issued to '{existing_agent}', not '{agent}'")
 
     conn.execute(
         """UPDATE ohm_nudge_log
@@ -765,8 +754,7 @@ def nudge_acceptance_stats(
     where_clause = (" WHERE " + " AND ".join(where)) if where else ""
 
     totals = conn.execute(
-        f"SELECT COUNT(*), SUM(CASE WHEN accepted IS NOT NULL THEN 1 ELSE 0 END) "
-        f"FROM ohm_nudge_log{where_clause}",
+        f"SELECT COUNT(*), SUM(CASE WHEN accepted IS NOT NULL THEN 1 ELSE 0 END) FROM ohm_nudge_log{where_clause}",
         params,
     ).fetchone()
     total_nudges = totals[0] or 0

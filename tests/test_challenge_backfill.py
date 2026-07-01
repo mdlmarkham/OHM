@@ -85,8 +85,15 @@ def _make_challenge(
             challenge_of, challenge_type, condition, provenance)
            VALUES (?, ?, ?, ?, 'CHALLENGED_BY', ?, ?, ?, 'CHALLENGED_BY', ?, ?)""",
         [
-            challenge_id, target_node_b, target_node_a, target_layer, created_by,
-            challenge_conf, target_id, condition, provenance,
+            challenge_id,
+            target_node_b,
+            target_node_a,
+            target_layer,
+            created_by,
+            challenge_conf,
+            target_id,
+            condition,
+            provenance,
         ],
     )
 
@@ -98,8 +105,7 @@ class TestFindNullReasonChallenges:
     def test_finds_challenges_with_both_null(self):
         conn = duckdb.connect(":memory:")
         initialize_schema(conn)
-        _make_challenge(conn, challenge_id="c1", target_id="e1",
-                        condition=None, provenance=None)
+        _make_challenge(conn, challenge_id="c1", target_id="e1", condition=None, provenance=None)
         nulls = find_null_reason_challenges(conn)
         assert len(nulls) == 1
         assert nulls[0]["challenge_id"] == "c1"
@@ -110,8 +116,7 @@ class TestFindNullReasonChallenges:
     def test_finds_challenges_with_empty_strings(self):
         conn = duckdb.connect(":memory:")
         initialize_schema(conn)
-        _make_challenge(conn, challenge_id="c1", target_id="e1",
-                        condition="", provenance="")
+        _make_challenge(conn, challenge_id="c1", target_id="e1", condition="", provenance="")
         nulls = find_null_reason_challenges(conn)
         assert len(nulls) == 1
         conn.close()
@@ -122,8 +127,7 @@ class TestFindNullReasonChallenges:
         # to provenance only when reason="" slips through).
         conn = duckdb.connect(":memory:")
         initialize_schema(conn)
-        _make_challenge(conn, challenge_id="c1", target_id="e1",
-                        condition="valid reason", provenance="")
+        _make_challenge(conn, challenge_id="c1", target_id="e1", condition="valid reason", provenance="")
         nulls = find_null_reason_challenges(conn)
         assert len(nulls) == 1  # provenance is empty → in scope
         conn.close()
@@ -131,8 +135,7 @@ class TestFindNullReasonChallenges:
     def test_ignores_challenges_with_both_columns_filled(self):
         conn = duckdb.connect(":memory:")
         initialize_schema(conn)
-        _make_challenge(conn, challenge_id="c1", target_id="e1",
-                        condition="real reason", provenance="real reason")
+        _make_challenge(conn, challenge_id="c1", target_id="e1", condition="real reason", provenance="real reason")
         nulls = find_null_reason_challenges(conn)
         assert len(nulls) == 0
         conn.close()
@@ -140,8 +143,7 @@ class TestFindNullReasonChallenges:
     def test_ignores_soft_deleted_challenges(self):
         conn = duckdb.connect(":memory:")
         initialize_schema(conn)
-        _make_challenge(conn, challenge_id="c1", target_id="e1",
-                        condition=None, provenance=None)
+        _make_challenge(conn, challenge_id="c1", target_id="e1", condition=None, provenance=None)
         conn.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE id = 'c1'")
         nulls = find_null_reason_challenges(conn)
         assert len(nulls) == 0
@@ -151,8 +153,7 @@ class TestFindNullReasonChallenges:
         conn = duckdb.connect(":memory:")
         initialize_schema(conn)
         for i in range(5):
-            _make_challenge(conn, challenge_id=f"c{i}", target_id=f"e{i}",
-                            condition=None, provenance=None)
+            _make_challenge(conn, challenge_id=f"c{i}", target_id=f"e{i}", condition=None, provenance=None)
         nulls = find_null_reason_challenges(conn)
         assert len(nulls) == 5
         conn.close()
@@ -236,18 +237,12 @@ class TestInferChallengeReason:
         'No challenges are modified without an explicit rationale')."""
         # Sweep a wide grid of inputs to make sure the fallback always
         # produces a non-empty reason.
-        for edge_type in ["CAUSES", "PREDICTS", "SUPPORTS", "REFINES",
-                          "REFERENCES", "CHALLENGED_BY", "OBSCURE"]:
+        for edge_type in ["CAUSES", "PREDICTS", "SUPPORTS", "REFINES", "REFERENCES", "CHALLENGED_BY", "OBSCURE"]:
             for tconf in [0.0, 0.1, 0.3, 0.5, 0.7, 0.9]:
                 for layer in ["L0", "L1", "L2", "L3", "L4"]:
                     for cconf in [0.0, 0.5, 0.9]:
-                        reason = infer_challenge_reason(
-                            (edge_type, tconf, layer, cconf)
-                        )
-                        assert reason and reason.strip(), (
-                            f"empty reason for type={edge_type} "
-                            f"tconf={tconf} layer={layer} cconf={cconf}"
-                        )
+                        reason = infer_challenge_reason((edge_type, tconf, layer, cconf))
+                        assert reason and reason.strip(), f"empty reason for type={edge_type} tconf={tconf} layer={layer} cconf={cconf}"
 
 
 # ── backfill_challenge_reasons (dry-run) ─────────────────────────────────
@@ -257,8 +252,7 @@ class TestBackfillDryRun:
     def test_dry_run_proposes_without_writing(self):
         conn = duckdb.connect(":memory:")
         initialize_schema(conn)
-        _make_challenge(conn, challenge_id="c1", target_id="e1",
-                        condition=None, provenance=None)
+        _make_challenge(conn, challenge_id="c1", target_id="e1", condition=None, provenance=None)
         result = backfill_challenge_reasons(conn, dry_run=True)
         assert result["scanned"] == 1
         assert result["backfilled"] == 0  # not applied
@@ -272,9 +266,7 @@ class TestBackfillDryRun:
     def test_dry_run_reports_proposed_reason(self):
         conn = duckdb.connect(":memory:")
         initialize_schema(conn)
-        _make_challenge(conn, challenge_id="c1", target_id="e1",
-                        target_type="CAUSES", target_conf=0.55,
-                        challenge_conf=0.50, condition=None, provenance=None)
+        _make_challenge(conn, challenge_id="c1", target_id="e1", target_type="CAUSES", target_conf=0.55, challenge_conf=0.50, condition=None, provenance=None)
         result = backfill_challenge_reasons(conn, dry_run=True)
         assert "weak CAUSES claim" in result["proposed"][0]["reason"]
         conn.close()
@@ -297,8 +289,7 @@ class TestBackfillApply:
     def test_apply_writes_to_both_columns(self):
         conn = duckdb.connect(":memory:")
         initialize_schema(conn)
-        _make_challenge(conn, challenge_id="c1", target_id="e1",
-                        condition=None, provenance=None)
+        _make_challenge(conn, challenge_id="c1", target_id="e1", condition=None, provenance=None)
         result = backfill_challenge_reasons(conn, dry_run=False)
         assert result["backfilled"] == 1
         assert result["errors"] == []
@@ -311,8 +302,7 @@ class TestBackfillApply:
     def test_idempotent_after_apply(self):
         conn = duckdb.connect(":memory:")
         initialize_schema(conn)
-        _make_challenge(conn, challenge_id="c1", target_id="e1",
-                        condition=None, provenance=None)
+        _make_challenge(conn, challenge_id="c1", target_id="e1", condition=None, provenance=None)
         first = backfill_challenge_reasons(conn, dry_run=False)
         assert first["backfilled"] == 1
         # Re-run: nothing to do.
@@ -326,16 +316,18 @@ class TestBackfillApply:
         initialize_schema(conn)
         for i in range(3):
             _make_challenge(
-                conn, challenge_id=f"c{i}", target_id=f"e{i}",
-                target_type="CAUSES", condition=None, provenance=None,
+                conn,
+                challenge_id=f"c{i}",
+                target_id=f"e{i}",
+                target_type="CAUSES",
+                condition=None,
+                provenance=None,
             )
         result = backfill_challenge_reasons(conn, dry_run=False)
         assert result["scanned"] == 3
         assert result["backfilled"] == 3
         # Verify all 3 have reasons.
-        rows = conn.execute(
-            "SELECT id, condition FROM ohm_edges WHERE id IN ('c0','c1','c2')"
-        ).fetchall()
+        rows = conn.execute("SELECT id, condition FROM ohm_edges WHERE id IN ('c0','c1','c2')").fetchall()
         for cid, cond in rows:
             assert cond and cond.strip(), f"{cid} has no reason"
         conn.close()
@@ -343,27 +335,19 @@ class TestBackfillApply:
     def test_writes_audit_trail_in_change_feed(self):
         conn = duckdb.connect(":memory:")
         initialize_schema(conn)
-        _make_challenge(conn, challenge_id="c1", target_id="e1",
-                        condition=None, provenance=None)
+        _make_challenge(conn, challenge_id="c1", target_id="e1", condition=None, provenance=None)
         backfill_challenge_reasons(conn, dry_run=False, agent="ohmd_test_agent")
-        rows = conn.execute(
-            "SELECT agent_name, operation FROM ohm_change_feed "
-            "WHERE row_id = 'c1' AND table_name = 'ohm_edges'"
-        ).fetchall()
+        rows = conn.execute("SELECT agent_name, operation FROM ohm_change_feed WHERE row_id = 'c1' AND table_name = 'ohm_edges'").fetchall()
         # At least one row tagged with our test agent.
-        assert any(r[0] == "ohmd_test_agent" and r[1] == "UPDATE" for r in rows), (
-            f"expected UPDATE from ohmd_test_agent in change feed, got {rows}"
-        )
+        assert any(r[0] == "ohmd_test_agent" and r[1] == "UPDATE" for r in rows), f"expected UPDATE from ohmd_test_agent in change feed, got {rows}"
         conn.close()
 
     def test_handles_mixed_valid_and_invalid_challenges(self):
         # One valid challenge (skipped), one null (backfilled).
         conn = duckdb.connect(":memory:")
         initialize_schema(conn)
-        _make_challenge(conn, challenge_id="c_valid", target_id="e1",
-                        condition="legit reason", provenance="legit reason")
-        _make_challenge(conn, challenge_id="c_null", target_id="e2",
-                        condition=None, provenance=None)
+        _make_challenge(conn, challenge_id="c_valid", target_id="e1", condition="legit reason", provenance="legit reason")
+        _make_challenge(conn, challenge_id="c_null", target_id="e2", condition=None, provenance=None)
         result = backfill_challenge_reasons(conn, dry_run=False)
         assert result["scanned"] == 1  # only the null one
         assert result["backfilled"] == 1
@@ -408,12 +392,8 @@ class TestCreateChallengeLintGuard:
         conn = duckdb.connect(":memory:")
         initialize_schema(conn)
         # Create target edge in L3 (challengeable layer).
-        conn.execute(
-            "INSERT INTO ohm_nodes (id, type, label, created_by) VALUES ('n1', 'concept', 'n1', 'tester')"
-        )
-        conn.execute(
-            "INSERT INTO ohm_nodes (id, type, label, created_by) VALUES ('n2', 'concept', 'n2', 'tester')"
-        )
+        conn.execute("INSERT INTO ohm_nodes (id, type, label, created_by) VALUES ('n1', 'concept', 'n1', 'tester')")
+        conn.execute("INSERT INTO ohm_nodes (id, type, label, created_by) VALUES ('n2', 'concept', 'n2', 'tester')")
         conn.execute(
             """INSERT INTO ohm_edges
                (id, from_node, to_node, layer, edge_type, created_by, confidence)
@@ -422,33 +402,39 @@ class TestCreateChallengeLintGuard:
 
         with pytest.raises(EmptyChallengeReasonError):
             create_challenge(
-                conn, edge_id="e1", reason="", created_by="tester", confidence=0.4,
+                conn,
+                edge_id="e1",
+                reason="",
+                created_by="tester",
+                confidence=0.4,
             )
 
         with pytest.raises(EmptyChallengeReasonError):
             create_challenge(
-                conn, edge_id="e1", reason="   ", created_by="tester", confidence=0.4,
+                conn,
+                edge_id="e1",
+                reason="   ",
+                created_by="tester",
+                confidence=0.4,
             )
         conn.close()
 
     def test_create_challenge_accepts_valid_reason(self):
         conn = duckdb.connect(":memory:")
         initialize_schema(conn)
-        conn.execute(
-            "INSERT INTO ohm_nodes (id, type, label, created_by) VALUES ('n1', 'concept', 'n1', 'tester')"
-        )
-        conn.execute(
-            "INSERT INTO ohm_nodes (id, type, label, created_by) VALUES ('n2', 'concept', 'n2', 'tester')"
-        )
+        conn.execute("INSERT INTO ohm_nodes (id, type, label, created_by) VALUES ('n1', 'concept', 'n1', 'tester')")
+        conn.execute("INSERT INTO ohm_nodes (id, type, label, created_by) VALUES ('n2', 'concept', 'n2', 'tester')")
         conn.execute(
             """INSERT INTO ohm_edges
                (id, from_node, to_node, layer, edge_type, created_by, confidence)
                VALUES ('e1', 'n1', 'n2', 'L3', 'CAUSES', 'tester', 0.6)"""
         )
         result = create_challenge(
-            conn, edge_id="e1",
+            conn,
+            edge_id="e1",
             reason="  the target edge has insufficient evidence  ",
-            created_by="tester", confidence=0.4,
+            created_by="tester",
+            confidence=0.4,
         )
         # The reason is stripped and persisted in the condition column.
         assert result["condition"].strip() == "the target edge has insufficient evidence"
@@ -495,7 +481,9 @@ class TestOhmStoreChallengeEdgeLintGuard:
             edge_id = edge["id"]
 
             result = store.challenge_edge(
-                edge_id, reason="  overconfident claim  ", confidence=0.4,
+                edge_id,
+                reason="  overconfident claim  ",
+                confidence=0.4,
             )
             # reason is stored in provenance (store layer convention).
             assert result is not None
@@ -514,8 +502,13 @@ class TestValidateEdgeConstraintsRequireReasoning:
         conn = duckdb.connect(":memory:")
         initialize_schema(conn)
         valid, _warnings, errors = validate_edge_constraints(
-            "CHALLENGED_BY", "L3", conn, condition="", provenance="",
-            confidence=0.5, enforce=True,
+            "CHALLENGED_BY",
+            "L3",
+            conn,
+            condition="",
+            provenance="",
+            confidence=0.5,
+            enforce=True,
         )
         assert not valid
         assert any("requires a reason" in e for e in errors)
@@ -527,8 +520,13 @@ class TestValidateEdgeConstraintsRequireReasoning:
         conn = duckdb.connect(":memory:")
         initialize_schema(conn)
         valid, _warnings, errors = validate_edge_constraints(
-            "CHALLENGED_BY", "L3", conn, condition=None, provenance="some reason",
-            confidence=0.5, enforce=True,
+            "CHALLENGED_BY",
+            "L3",
+            conn,
+            condition=None,
+            provenance="some reason",
+            confidence=0.5,
+            enforce=True,
         )
         assert valid  # at least one column has a reason
         assert not errors
@@ -540,8 +538,13 @@ class TestValidateEdgeConstraintsRequireReasoning:
         conn = duckdb.connect(":memory:")
         initialize_schema(conn)
         valid, _warnings, errors = validate_edge_constraints(
-            "CHALLENGED_BY", "L3", conn, condition="valid", provenance="",
-            confidence=0.5, enforce=True,
+            "CHALLENGED_BY",
+            "L3",
+            conn,
+            condition="valid",
+            provenance="",
+            confidence=0.5,
+            enforce=True,
         )
         assert valid
         conn.close()
@@ -552,8 +555,13 @@ class TestValidateEdgeConstraintsRequireReasoning:
         conn = duckdb.connect(":memory:")
         initialize_schema(conn)
         valid, warnings, errors = validate_edge_constraints(
-            "CHALLENGED_BY", "L3", conn, condition="", provenance="",
-            confidence=0.5, enforce=False,
+            "CHALLENGED_BY",
+            "L3",
+            conn,
+            condition="",
+            provenance="",
+            confidence=0.5,
+            enforce=False,
         )
         assert valid  # still valid
         assert any("requires a reason" in w for w in warnings)
@@ -572,19 +580,18 @@ class TestOperatorScript:
         db_path = str(tmp_path / "script_test.duckdb")
         conn = duckdb.connect(db_path)
         initialize_schema(conn)
-        _make_challenge(conn, challenge_id="c1", target_id="e1",
-                        condition=None, provenance=None)
+        _make_challenge(conn, challenge_id="c1", target_id="e1", condition=None, provenance=None)
         conn.close()
 
         result = subprocess.run(
-            [sys.executable, "scripts/backfill_challenge_reasons.py",
-             "--db-path", db_path, "--dry-run", "--format", "json"],
-            capture_output=True, text=True, cwd=Path(__file__).parent.parent,
+            [sys.executable, "scripts/backfill_challenge_reasons.py", "--db-path", db_path, "--dry-run", "--format", "json"],
+            capture_output=True,
+            text=True,
+            cwd=Path(__file__).parent.parent,
         )
-        assert result.returncode == 0, (
-            f"script failed: stdout={result.stdout!r} stderr={result.stderr!r}"
-        )
+        assert result.returncode == 0, f"script failed: stdout={result.stdout!r} stderr={result.stderr!r}"
         import json
+
         out = json.loads(result.stdout)
         assert out["scanned"] == 1
         assert out["backfilled"] == 0
@@ -592,9 +599,7 @@ class TestOperatorScript:
 
         # Verify the DB was NOT written (dry-run guarantee).
         conn = duckdb.connect(db_path, read_only=True)
-        row = conn.execute(
-            "SELECT condition, provenance FROM ohm_edges WHERE id='c1'"
-        ).fetchone()
+        row = conn.execute("SELECT condition, provenance FROM ohm_edges WHERE id='c1'").fetchone()
         assert row[0] is None and row[1] is None
         conn.close()
 
@@ -602,28 +607,25 @@ class TestOperatorScript:
         db_path = str(tmp_path / "apply_test.duckdb")
         conn = duckdb.connect(db_path)
         initialize_schema(conn)
-        _make_challenge(conn, challenge_id="c1", target_id="e1",
-                        target_type="CAUSES", condition=None, provenance=None)
+        _make_challenge(conn, challenge_id="c1", target_id="e1", target_type="CAUSES", condition=None, provenance=None)
         conn.close()
 
         result = subprocess.run(
-            [sys.executable, "scripts/backfill_challenge_reasons.py",
-             "--db-path", db_path, "--format", "json"],
-            capture_output=True, text=True, cwd=Path(__file__).parent.parent,
+            [sys.executable, "scripts/backfill_challenge_reasons.py", "--db-path", db_path, "--format", "json"],
+            capture_output=True,
+            text=True,
+            cwd=Path(__file__).parent.parent,
         )
-        assert result.returncode == 0, (
-            f"script failed: stdout={result.stdout!r} stderr={result.stderr!r}"
-        )
+        assert result.returncode == 0, f"script failed: stdout={result.stdout!r} stderr={result.stderr!r}"
         import json
+
         out = json.loads(result.stdout)
         assert out["scanned"] == 1
         assert out["backfilled"] == 1
 
         # Verify the DB WAS written.
         conn = duckdb.connect(db_path, read_only=True)
-        row = conn.execute(
-            "SELECT condition, provenance FROM ohm_edges WHERE id='c1'"
-        ).fetchone()
+        row = conn.execute("SELECT condition, provenance FROM ohm_edges WHERE id='c1'").fetchone()
         assert row[0] and row[0].strip()
         assert row[1] and row[1].strip()
         conn.close()

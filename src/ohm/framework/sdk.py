@@ -1475,9 +1475,7 @@ class Graph:
         from ohm.methods import detect_alias_duplicates, detect_semantic_duplicates
 
         alias_dups = detect_alias_duplicates(self._conn, limit=limit)
-        semantic_dups = detect_semantic_duplicates(
-            self._conn, similarity_threshold=threshold, limit=limit
-        )
+        semantic_dups = detect_semantic_duplicates(self._conn, similarity_threshold=threshold, limit=limit)
         alias_collisions = [d for d in alias_dups if d.get("kind") == "alias_collision"]
         hash_collisions = [d for d in alias_dups if d.get("kind") == "content_hash_collision"]
         return {
@@ -3151,6 +3149,7 @@ class Graph:
         ).fetchone()
         if row is None:
             from ohm.exceptions import NodeNotFoundError
+
             raise NodeNotFoundError(f"Observation {obs_id} not found")
         cols = [d[0] for d in self._conn.description]
         obs = dict(zip(cols, row))

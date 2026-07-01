@@ -86,9 +86,7 @@ class TestPipelineBasic:
     def test_pipeline_creates_correct_node_type(self, test_conn):
         item = _make_item()
         result = run_pipeline(test_conn, item, created_by="test_agent", skip_hooks=True)
-        row = test_conn.execute(
-            "SELECT type FROM ohm_nodes WHERE id = ?", [result.source_node_id]
-        ).fetchone()
+        row = test_conn.execute("SELECT type FROM ohm_nodes WHERE id = ?", [result.source_node_id]).fetchone()
         assert row[0] == "source"
 
     def test_pipeline_html_content(self, test_conn):

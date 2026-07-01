@@ -667,9 +667,7 @@ def _create_ducklake_tables(
                     continue
                 try:
                     cols = conn.execute(
-                        "SELECT column_name FROM information_schema.columns "
-                        "WHERE table_schema = 'main' AND table_name = ? "
-                        "ORDER BY ordinal_position",
+                        "SELECT column_name FROM information_schema.columns WHERE table_schema = 'main' AND table_name = ? ORDER BY ordinal_position",
                         [dlt.name],
                     ).fetchall()
                 except Exception:
@@ -677,15 +675,15 @@ def _create_ducklake_tables(
                 if not cols:
                     continue
                 col_lines = ", ".join(f"{c[0]} VARCHAR" for c in cols)
-                mirror_sql = (
-                    f"CREATE TABLE IF NOT EXISTS {alias}.{dlt.name} ({col_lines})"
-                )
+                mirror_sql = f"CREATE TABLE IF NOT EXISTS {alias}.{dlt.name} ({col_lines})"
                 try:
                     conn.execute(mirror_sql)
                 except Exception as e:
                     logger.debug(
                         "Skipping mirror table %s (may already exist): %s",
-                        dlt.name, e, exc_info=True,
+                        dlt.name,
+                        e,
+                        exc_info=True,
                     )
         except Exception as e:
             # If schema.ducklake_tables is unavailable, skip the

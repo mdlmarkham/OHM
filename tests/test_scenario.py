@@ -27,10 +27,8 @@ def _seed_chain(conn):
     a = create_node(conn, label="Supplier", node_type="concept", created_by="metis")
     b = create_node(conn, label="Factory", node_type="concept", created_by="metis")
     c = create_node(conn, label="Distributor", node_type="concept", created_by="metis")
-    e1 = create_edge(conn, from_node=a["id"], to_node=b["id"], edge_type="CAUSES",
-                     layer="L3", created_by="metis", probability=0.7)
-    e2 = create_edge(conn, from_node=b["id"], to_node=c["id"], edge_type="CAUSES",
-                     layer="L3", created_by="metis", probability=0.5)
+    e1 = create_edge(conn, from_node=a["id"], to_node=b["id"], edge_type="CAUSES", layer="L3", created_by="metis", probability=0.7)
+    e2 = create_edge(conn, from_node=b["id"], to_node=c["id"], edge_type="CAUSES", layer="L3", created_by="metis", probability=0.5)
     return {"a": a, "b": b, "c": c, "e1": e1, "e2": e2}
 
 
@@ -47,7 +45,8 @@ class TestCounterfactualCascade:
     def test_edge_override_changes_downstream(self, test_conn):
         nodes = _seed_chain(test_conn)
         cf = query_counterfactual_cascade(
-            test_conn, nodes["a"]["id"],
+            test_conn,
+            nodes["a"]["id"],
             failure_probability=1.0,
             edge_overrides={nodes["e1"]["id"]: 0.3},
         )
@@ -58,7 +57,8 @@ class TestCounterfactualCascade:
     def test_node_intervention_forces_state(self, test_conn):
         nodes = _seed_chain(test_conn)
         cf = query_counterfactual_cascade(
-            test_conn, nodes["a"]["id"],
+            test_conn,
+            nodes["a"]["id"],
             failure_probability=0.0,
             node_interventions={nodes["b"]["id"]: 0.9},
         )
@@ -72,7 +72,8 @@ class TestCounterfactualCascade:
     def test_disabled_edge_stops_propagation(self, test_conn):
         nodes = _seed_chain(test_conn)
         cf = query_counterfactual_cascade(
-            test_conn, nodes["a"]["id"],
+            test_conn,
+            nodes["a"]["id"],
             failure_probability=1.0,
             disabled_edges={nodes["e1"]["id"]},
         )
@@ -81,7 +82,8 @@ class TestCounterfactualCascade:
     def test_disabled_node_stops_propagation(self, test_conn):
         nodes = _seed_chain(test_conn)
         cf = query_counterfactual_cascade(
-            test_conn, nodes["a"]["id"],
+            test_conn,
+            nodes["a"]["id"],
             failure_probability=1.0,
             disabled_nodes={nodes["b"]["id"]},
         )
@@ -93,7 +95,8 @@ class TestCounterfactualCascade:
         nodes = _seed_chain(test_conn)
         # Run with overrides
         query_counterfactual_cascade(
-            test_conn, nodes["a"]["id"],
+            test_conn,
+            nodes["a"]["id"],
             failure_probability=1.0,
             edge_overrides={nodes["e1"]["id"]: 0.01},
         )
@@ -111,6 +114,7 @@ class TestCounterfactualCascade:
 
     def test_json_serializable(self, test_conn):
         import json
+
         nodes = _seed_chain(test_conn)
         result = query_counterfactual_cascade(test_conn, nodes["a"]["id"])
         serialized = json.dumps(result, default=str)
@@ -123,7 +127,8 @@ class TestCompareScenarios:
     def test_comparison_returns_baseline_and_counterfactual(self, test_conn):
         nodes = _seed_chain(test_conn)
         result = query_compare_scenarios(
-            test_conn, nodes["a"]["id"],
+            test_conn,
+            nodes["a"]["id"],
             failure_probability=1.0,
             edge_overrides={nodes["e1"]["id"]: 0.3},
         )
@@ -135,7 +140,8 @@ class TestCompareScenarios:
     def test_deltas_show_decreased_nodes(self, test_conn):
         nodes = _seed_chain(test_conn)
         result = query_compare_scenarios(
-            test_conn, nodes["a"]["id"],
+            test_conn,
+            nodes["a"]["id"],
             failure_probability=1.0,
             edge_overrides={nodes["e1"]["id"]: 0.3},
         )
@@ -145,7 +151,8 @@ class TestCompareScenarios:
     def test_deltas_show_removed_nodes_when_edge_disabled(self, test_conn):
         nodes = _seed_chain(test_conn)
         result = query_compare_scenarios(
-            test_conn, nodes["a"]["id"],
+            test_conn,
+            nodes["a"]["id"],
             failure_probability=1.0,
             disabled_edges={nodes["e1"]["id"]},
         )
@@ -154,7 +161,8 @@ class TestCompareScenarios:
     def test_no_changes_when_no_overrides(self, test_conn):
         nodes = _seed_chain(test_conn)
         result = query_compare_scenarios(
-            test_conn, nodes["a"]["id"],
+            test_conn,
+            nodes["a"]["id"],
             failure_probability=1.0,
         )
         assert result["summary"]["unchanged"] >= 1
@@ -163,9 +171,11 @@ class TestCompareScenarios:
 
     def test_json_serializable(self, test_conn):
         import json
+
         nodes = _seed_chain(test_conn)
         result = query_compare_scenarios(
-            test_conn, nodes["a"]["id"],
+            test_conn,
+            nodes["a"]["id"],
             edge_overrides={nodes["e1"]["id"]: 0.3},
         )
         serialized = json.dumps(result, default=str)

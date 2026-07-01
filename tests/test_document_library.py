@@ -73,11 +73,7 @@ startxref
 
 def _multipart_body(filename: str, content: bytes, boundary: str = "----ohm-test-boundary") -> tuple[bytes, str]:
     """Return ``(body_bytes, content_type)`` for a simple multipart upload."""
-    body = (
-        f"--{boundary}\r\n"
-        f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
-        f"Content-Type: application/octet-stream\r\n\r\n"
-    ).encode("latin-1")
+    body = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{filename}"\r\nContent-Type: application/octet-stream\r\n\r\n').encode("latin-1")
     body += content
     body += f"\r\n--{boundary}--\r\n".encode("latin-1")
     content_type = f"multipart/form-data; boundary={boundary}"

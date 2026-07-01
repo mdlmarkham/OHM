@@ -148,8 +148,6 @@ class TestConstructionEngineSDK:
 
         decision_id = _make_decision(test_db, label="SDK Decision")
         with Graph(test_db, actor="sdk-tester") as g:
-            result = g.assemble_twin_for_decision(
-                decision_id, "test goal"
-            )
+            result = g.assemble_twin_for_decision(decision_id, "test goal")
             assert result["twin"]["type"] == "twin"
             assert "reasoning" in result

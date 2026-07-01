@@ -93,12 +93,8 @@ class TestCreateTwinTemplate:
 class TestListTwinTemplates:
     def test_returns_all(self, test_db):
         target_id = _seed_target(test_db)
-        create_twin_template(
-            test_db, label="T1", target_node_id=target_id, created_by="tester"
-        )
-        create_twin_template(
-            test_db, label="T2", target_node_id=target_id, created_by="tester"
-        )
+        create_twin_template(test_db, label="T1", target_node_id=target_id, created_by="tester")
+        create_twin_template(test_db, label="T2", target_node_id=target_id, created_by="tester")
         templates = list_twin_templates(test_db)
         assert len(templates) >= 2
         labels = {t["label"] for t in templates}
@@ -166,9 +162,7 @@ class TestInstantiateTwinFromTemplate:
 
     def test_links_to_target(self, test_db):
         target_id = _seed_target(test_db)
-        template = create_twin_template(
-            test_db, label="T", target_node_id=target_id, created_by="tester"
-        )
+        template = create_twin_template(test_db, label="T", target_node_id=target_id, created_by="tester")
         twin = instantiate_twin_from_template(
             test_db,
             template_id=template["id"],
@@ -248,9 +242,7 @@ class TestInstantiateTwinFromTemplate:
 
     def test_missing_target_raises(self, test_db):
         target_id = _seed_target(test_db)
-        template = create_twin_template(
-            test_db, label="T", target_node_id=target_id, created_by="tester"
-        )
+        template = create_twin_template(test_db, label="T", target_node_id=target_id, created_by="tester")
         with pytest.raises(NodeNotFoundError):
             instantiate_twin_from_template(
                 test_db,
@@ -281,9 +273,7 @@ class TestTwinTemplateSDK:
 
         target_id = _seed_target(test_db)
         with Graph(test_db, actor="sdk-tester") as g:
-            template = g.create_twin_template(
-                "SDK Template", target_node_id=target_id
-            )
+            template = g.create_twin_template("SDK Template", target_node_id=target_id)
             twin = g.instantiate_twin_from_template(
                 template_id=template["id"],
                 label="My Twin",

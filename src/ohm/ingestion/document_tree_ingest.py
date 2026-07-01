@@ -7,11 +7,10 @@ semantic matching.
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from ohm.graph.queries import create_edge, create_node
-from ohm.ingestion.document_tree import DocumentNode, DocumentTree, keyword_overlap
+from ohm.ingestion.document_tree import DocumentTree, keyword_overlap
 
 
 def ingest_document_tree(

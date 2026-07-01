@@ -239,6 +239,7 @@ class TestCreateNodeAutoAlias:
         assert n1["id"] != n2["id"]
         # Both aliases should exist
         from ohm.queries import resolve_alias
+
         results = resolve_alias(test_db, alias_norm="unique_label")
         assert len(results) == 2
 

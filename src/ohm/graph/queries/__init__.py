@@ -228,14 +228,12 @@ def query_path(
         if layer is not None:
             layer = validate_layer(layer)
             params.append(layer)
-        edges = _rows_to_dicts(conn.execute(
-            f"SELECT id, from_node, to_node, layer, edge_type, confidence "
-            f"FROM ohm_edges "
-            f"WHERE deleted_at IS NULL "
-            f"AND from_node IN ({placeholders}) "
-            f"{layer_clause}",
-            params,
-        ))
+        edges = _rows_to_dicts(
+            conn.execute(
+                f"SELECT id, from_node, to_node, layer, edge_type, confidence FROM ohm_edges WHERE deleted_at IS NULL AND from_node IN ({placeholders}) {layer_clause}",
+                params,
+            )
+        )
 
         by_from: dict[str, list[dict[str, Any]]] = {}
         for e in edges:
@@ -594,6 +592,7 @@ def query_agent_changes(
         now = str(conn.execute("SELECT CURRENT_TIMESTAMP").fetchone()[0])
     except Exception:
         from datetime import datetime, timezone
+
         now = datetime.now(timezone.utc).isoformat()
 
     response: dict[str, Any] = {
@@ -621,8 +620,7 @@ def query_agent_changes(
     node_query_params = list(node_params)
     node_query_params.append(limit)
     nodes_rows = conn.execute(
-        f"SELECT id, label, type, created_by, confidence, created_at FROM ohm_nodes "
-        f"WHERE {' AND '.join(node_conditions)} ORDER BY created_at DESC LIMIT ?",
+        f"SELECT id, label, type, created_by, confidence, created_at FROM ohm_nodes WHERE {' AND '.join(node_conditions)} ORDER BY created_at DESC LIMIT ?",
         node_query_params,
     ).fetchall()
     response["nodes"] = [
@@ -648,8 +646,7 @@ def query_agent_changes(
     edge_query_params = list(edge_params)
     edge_query_params.append(limit)
     edges_rows = conn.execute(
-        f"SELECT id, from_node, to_node, edge_type, layer, confidence, created_by, created_at "
-        f"FROM ohm_edges WHERE {' AND '.join(edge_conditions)} ORDER BY created_at DESC LIMIT ?",
+        f"SELECT id, from_node, to_node, edge_type, layer, confidence, created_by, created_at FROM ohm_edges WHERE {' AND '.join(edge_conditions)} ORDER BY created_at DESC LIMIT ?",
         edge_query_params,
     ).fetchall()
     response["edges"] = [
@@ -848,10 +845,7 @@ def _agent_changes_scoped(
     task_conditions = ["type = 'task'", "deleted_at IS NULL"]
     task_params: list[Any] = []
     if since:
-        task_conditions.append(
-            "(updated_at > ?::TIMESTAMP OR assigned_to = ? "
-            "OR task_status IN ('in_progress','blocked','review','done','cancelled'))"
-        )
+        task_conditions.append("(updated_at > ?::TIMESTAMP OR assigned_to = ? OR task_status IN ('in_progress','blocked','review','done','cancelled'))")
         task_params.extend([since, agent])
     else:
         task_conditions.append("assigned_to = ?")
@@ -861,7 +855,7 @@ def _agent_changes_scoped(
         f"""
         SELECT id, label, task_status, assigned_to, created_by, created_at, updated_at
         FROM ohm_nodes
-        WHERE {' AND '.join(task_conditions)}
+        WHERE {" AND ".join(task_conditions)}
         ORDER BY COALESCE(updated_at, created_at) DESC
         LIMIT ?
         """,
@@ -1093,10 +1087,13 @@ def query_record_outcome(
             new_status = None
             if outcome:
                 # Positive outcome counts as supporting evidence.
-                support_count = 1 + conn.execute(
-                    "SELECT COUNT(*) FROM ohm_edges WHERE to_node = ? AND edge_type = 'SUPPORTS_EVIDENCE' AND deleted_at IS NULL",
-                    [hyp_id],
-                ).fetchone()[0]
+                support_count = (
+                    1
+                    + conn.execute(
+                        "SELECT COUNT(*) FROM ohm_edges WHERE to_node = ? AND edge_type = 'SUPPORTS_EVIDENCE' AND deleted_at IS NULL",
+                        [hyp_id],
+                    ).fetchone()[0]
+                )
                 contradict_count = conn.execute(
                     "SELECT COUNT(*) FROM ohm_edges WHERE to_node = ? AND edge_type = 'CONTRADICTS_EVIDENCE' AND deleted_at IS NULL",
                     [hyp_id],
@@ -1111,10 +1108,13 @@ def query_record_outcome(
                     "SELECT COUNT(*) FROM ohm_edges WHERE to_node = ? AND edge_type = 'SUPPORTS_EVIDENCE' AND deleted_at IS NULL",
                     [hyp_id],
                 ).fetchone()[0]
-                contradict_count = 1 + conn.execute(
-                    "SELECT COUNT(*) FROM ohm_edges WHERE to_node = ? AND edge_type = 'CONTRADICTS_EVIDENCE' AND deleted_at IS NULL",
-                    [hyp_id],
-                ).fetchone()[0]
+                contradict_count = (
+                    1
+                    + conn.execute(
+                        "SELECT COUNT(*) FROM ohm_edges WHERE to_node = ? AND edge_type = 'CONTRADICTS_EVIDENCE' AND deleted_at IS NULL",
+                        [hyp_id],
+                    ).fetchone()[0]
+                )
                 if contradict_count > support_count:
                     new_status = "pruned"
                 else:
@@ -1130,6 +1130,7 @@ def query_record_outcome(
                 # Re-evaluate any decision nodes linked to this hypothesis
                 try:
                     from ohm.decision import recompute_linked_decisions
+
                     decision_updates = recompute_linked_decisions(conn, hyp_id)
                     if decision_updates:
                         hypothesis_updates[-1]["decision_updates"] = decision_updates
@@ -1691,6 +1692,7 @@ def create_node(
     # same label can find this node via resolve_node_by_alias().
     try:
         from ohm.validation import normalize_alias
+
         norm = normalize_alias(label)
         if norm:
             existing_alias = conn.execute(
@@ -1699,6 +1701,7 @@ def create_node(
             ).fetchone()
             if not existing_alias:
                 import uuid as _uuid
+
                 conn.execute(
                     "INSERT INTO ohm_aliases (id, alias_norm, node_id) VALUES (?, ?, ?)",
                     [str(_uuid.uuid4()), norm, node_id],
@@ -1738,6 +1741,7 @@ def find_or_create_node(
     # 1. Try alias resolution first (OHM-z2gp)
     try:
         from ohm.queries import resolve_node_by_alias
+
         resolved = resolve_node_by_alias(conn, query=label)
         if resolved and resolved.get("type") == node_type:
             node = _rows_to_dicts(
@@ -1822,15 +1826,11 @@ def merge_nodes(
     if keep_id == merge_id:
         raise ValueError(f"keep_id equals merge_id ({keep_id!r}) — nothing to merge")
 
-    keep = conn.execute(
-        "SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [keep_id]
-    ).fetchone()
+    keep = conn.execute("SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [keep_id]).fetchone()
     if not keep:
         raise NodeNotFoundError(f"Keep node not found: {keep_id}")
 
-    merge = conn.execute(
-        "SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [merge_id]
-    ).fetchone()
+    merge = conn.execute("SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [merge_id]).fetchone()
     if not merge:
         raise NodeNotFoundError(f"Merge node not found: {merge_id}")
 
@@ -6720,6 +6720,7 @@ def query_neighborhood_narrative(
     ).fetchone()
     if not node_row:
         from ohm.exceptions import NodeNotFoundError
+
         raise NodeNotFoundError(f"Node not found: {node_id}")
 
     node_info = {
@@ -6752,8 +6753,7 @@ def query_neighborhood_narrative(
     agent_edges: list[dict[str, Any]] = []
 
     for row in edges:
-        eid, from_node, to_node, edge_type, layer, conf, created_by, created_at, \
-            from_label, from_type, to_label, to_type = row
+        eid, from_node, to_node, edge_type, layer, conf, created_by, created_at, from_label, from_type, to_label, to_type = row
 
         # Determine the "other" node (the one that's not the target)
         if from_node == node_id:
@@ -6783,13 +6783,15 @@ def query_neighborhood_narrative(
         why_it_matters.append(chain)
 
         if agent_name and created_by == agent_name:
-            agent_edges.append({
-                "edge_id": eid,
-                "other_node": {"id": other_id, "label": other_label, "type": other_type},
-                "edge_type": edge_type,
-                "confidence": conf,
-                "direction": direction,
-            })
+            agent_edges.append(
+                {
+                    "edge_id": eid,
+                    "other_node": {"id": other_id, "label": other_label, "type": other_type},
+                    "edge_type": edge_type,
+                    "confidence": conf,
+                    "direction": direction,
+                }
+            )
 
     # Fetch observations on this node and its immediate neighbors
     neighbor_ids = [node_id]
@@ -6914,8 +6916,13 @@ def query_claim_lineage(
 
     # Walk provenance edges (L2 + L3 evidence edges)
     provenance_types = (
-        "DERIVES_FROM", "REFERENCES", "INFLUENCES", "SUPPORTS",
-        "SUPPORTS_EVIDENCE", "CONTRADICTS_EVIDENCE", "TESTS",
+        "DERIVES_FROM",
+        "REFERENCES",
+        "INFLUENCES",
+        "SUPPORTS",
+        "SUPPORTS_EVIDENCE",
+        "CONTRADICTS_EVIDENCE",
+        "TESTS",
     )
     placeholders = ",".join(["?"] * len(provenance_types))
 
@@ -6987,23 +6994,23 @@ def query_claim_lineage(
             nid = row[1]
             if nid not in obs_map:
                 obs_map[nid] = []
-            obs_map[nid].append({
-                "obs_id": row[0],
-                "obs_type": row[2],
-                "value": row[3],
-                "baseline": row[4],
-                "created_by": row[5],
-                "created_at": str(row[6]) if row[6] else None,
-                "source": row[7],
-            })
+            obs_map[nid].append(
+                {
+                    "obs_id": row[0],
+                    "obs_type": row[2],
+                    "value": row[3],
+                    "baseline": row[4],
+                    "created_by": row[5],
+                    "created_at": str(row[6]) if row[6] else None,
+                    "source": row[7],
+                }
+            )
 
     # Build tree: each chain row is a parent→child relationship
     # from_node is the parent (closer to claim), node_id is the child (further)
     tree_nodes: dict[str, dict[str, Any]] = {}
 
-    def _get_tree_node(nid: str, label: str, ntype: str, depth: int,
-                       edge_type: str, edge_conf: float, conf_chain: float,
-                       created_by: str) -> dict[str, Any]:
+    def _get_tree_node(nid: str, label: str, ntype: str, depth: int, edge_type: str, edge_conf: float, conf_chain: float, created_by: str) -> dict[str, Any]:
         if nid not in tree_nodes:
             tree_nodes[nid] = {
                 "node_id": nid,
@@ -7024,36 +7031,44 @@ def query_claim_lineage(
     all_confidences: list[float] = []
 
     for row in chain_rows:
-        child_id, parent_id, edge_id, edge_type, conf_chain, depth, \
-            child_label, child_type, child_conf, child_created_by = row
+        child_id, parent_id, edge_id, edge_type, conf_chain, depth, child_label, child_type, child_conf, child_created_by = row
 
         if not child_id:
             continue
 
         child_node = _get_tree_node(
-            child_id, child_label or child_id, child_type or "unknown",
-            depth, edge_type, child_conf or 1.0, conf_chain,
+            child_id,
+            child_label or child_id,
+            child_type or "unknown",
+            depth,
+            edge_type,
+            child_conf or 1.0,
+            conf_chain,
             child_created_by or "unknown",
         )
 
         # Track source nodes (leaves)
         if child_type == "source":
-            sources.append({
-                "node_id": child_id,
-                "label": child_label,
-                "depth": depth,
-                "confidence_chain": conf_chain,
-            })
+            sources.append(
+                {
+                    "node_id": child_id,
+                    "label": child_label,
+                    "depth": depth,
+                    "confidence_chain": conf_chain,
+                }
+            )
 
         # Track gaps (nodes with no observations)
         if not obs_map.get(child_id):
-            gaps.append({
-                "node_id": child_id,
-                "label": child_label,
-                "type": child_type,
-                "depth": depth,
-                "edge_type": edge_type,
-            })
+            gaps.append(
+                {
+                    "node_id": child_id,
+                    "label": child_label,
+                    "type": child_type,
+                    "depth": depth,
+                    "edge_type": edge_type,
+                }
+            )
 
         all_confidences.append(conf_chain)
 
@@ -7156,15 +7171,20 @@ def query_contradiction_summary(
             "created_by": row[5],
             "created_at": str(row[6]) if row[6] else None,
             "source": row[7],
-            "effective_confidence": round(confidence_at({
-                "value": row[2],
-                "half_life_days": row[8],
-                "weibull_shape": row[9],
-                "valid_from": row[10],
-                "valid_to": row[11],
-                "type": row[1],
-                "created_at": str(row[6]) if row[6] else None,
-            }), 4),
+            "effective_confidence": round(
+                confidence_at(
+                    {
+                        "value": row[2],
+                        "half_life_days": row[8],
+                        "weibull_shape": row[9],
+                        "valid_from": row[10],
+                        "valid_to": row[11],
+                        "type": row[1],
+                        "created_at": str(row[6]) if row[6] else None,
+                    }
+                ),
+                4,
+            ),
         }
         if row[3] is not None and row[2] is not None:
             if row[2] > row[3]:
@@ -7182,35 +7202,39 @@ def query_contradiction_summary(
     if above:
         agents_above = list({o["created_by"] for o in above if o["created_by"]})
         avg_conf_above = sum(o["effective_confidence"] for o in above) / len(above)
-        sides.append({
-            "direction": "above_baseline",
-            "agents": agents_above,
-            "observations": above,
-            "effective_confidence": round(avg_conf_above, 4),
-            "observation_count": len(above),
-        })
+        sides.append(
+            {
+                "direction": "above_baseline",
+                "agents": agents_above,
+                "observations": above,
+                "effective_confidence": round(avg_conf_above, 4),
+                "observation_count": len(above),
+            }
+        )
 
     if below:
         agents_below = list({o["created_by"] for o in below if o["created_by"]})
         avg_conf_below = sum(o["effective_confidence"] for o in below) / len(below)
-        sides.append({
-            "direction": "below_baseline",
-            "agents": agents_below,
-            "observations": below,
-            "effective_confidence": round(avg_conf_below, 4),
-            "observation_count": len(below),
-        })
+        sides.append(
+            {
+                "direction": "below_baseline",
+                "agents": agents_below,
+                "observations": below,
+                "effective_confidence": round(avg_conf_below, 4),
+                "observation_count": len(below),
+            }
+        )
 
     if neutral and not above and not below:
-        sides.append({
-            "direction": "neutral",
-            "agents": list({o["created_by"] for o in neutral if o["created_by"]}),
-            "observations": neutral,
-            "effective_confidence": round(
-                sum(o["effective_confidence"] for o in neutral) / len(neutral), 4
-            ) if neutral else 0.0,
-            "observation_count": len(neutral),
-        })
+        sides.append(
+            {
+                "direction": "neutral",
+                "agents": list({o["created_by"] for o in neutral if o["created_by"]}),
+                "observations": neutral,
+                "effective_confidence": round(sum(o["effective_confidence"] for o in neutral) / len(neutral), 4) if neutral else 0.0,
+                "observation_count": len(neutral),
+            }
+        )
 
     # 2. Find CHALLENGED_BY edges targeting edges that touch this node
     challenge_rows = conn.execute(
@@ -7359,10 +7383,7 @@ def query_task_context(
                 WHERE id IN ({placeholders}) AND deleted_at IS NULL""",
             list(subgraph_node_ids),
         ).fetchall()
-        subgraph_nodes = [
-            {"id": r[0], "label": r[1], "type": r[2], "confidence": r[3], "created_by": r[4]}
-            for r in node_rows
-        ]
+        subgraph_nodes = [{"id": r[0], "label": r[1], "type": r[2], "confidence": r[3], "created_by": r[4]} for r in node_rows]
 
     # Rationale: trace back through DECISION_DEPENDS_ON, DERIVES_FROM,
     # REFERENCES, SUPPORTS edges to find the reasoning chain
@@ -7376,7 +7397,7 @@ def query_task_context(
            LEFT JOIN ohm_nodes nf ON nf.id = e.from_node AND nf.deleted_at IS NULL
            LEFT JOIN ohm_nodes nt ON nt.id = e.to_node AND nt.deleted_at IS NULL
            WHERE (e.from_node = ? OR e.to_node = ?)
-             AND e.edge_type IN ({','.join(['?'] * len(rationale_types))})
+             AND e.edge_type IN ({",".join(["?"] * len(rationale_types))})
              AND e.deleted_at IS NULL
            ORDER BY e.confidence DESC
            LIMIT 20""",
@@ -7543,7 +7564,7 @@ def query_confidence_report(
     outcome_map: dict[str, str] = {}
     if shifted_rows:
         outcome_rows = conn.execute(
-            f"""SELECT DISTINCT o.claim_node
+            """SELECT DISTINCT o.claim_node
                FROM ohm_outcomes o
                WHERE o.recorded_at > ?::TIMESTAMP""",
             [since_clean],
@@ -7555,26 +7576,27 @@ def query_confidence_report(
 
     shifted_beliefs = []
     for row in shifted_rows:
-        eid, from_node, to_node, edge_type, layer, current_conf, \
-            created_at, updated_at, updated_by, from_label, to_label = row
+        eid, from_node, to_node, edge_type, layer, current_conf, created_at, updated_at, updated_by, from_label, to_label = row
 
         # Delta: compare current to created_at confidence (approximate)
         # We don't store old confidence, so we note the updated_by and time
         reason = challenge_map.get(eid) or outcome_map.get(eid) or "confidence updated"
 
-        shifted_beliefs.append({
-            "edge_id": eid,
-            "from_node": from_node,
-            "from_label": from_label,
-            "to_node": to_node,
-            "to_label": to_label,
-            "edge_type": edge_type,
-            "layer": layer,
-            "current_confidence": current_conf,
-            "updated_at": str(updated_at) if updated_at else None,
-            "updated_by": updated_by,
-            "reason": reason,
-        })
+        shifted_beliefs.append(
+            {
+                "edge_id": eid,
+                "from_node": from_node,
+                "from_label": from_label,
+                "to_node": to_node,
+                "to_label": to_label,
+                "edge_type": edge_type,
+                "layer": layer,
+                "current_confidence": current_conf,
+                "updated_at": str(updated_at) if updated_at else None,
+                "updated_by": updated_by,
+                "reason": reason,
+            }
+        )
 
     # 2. New beliefs: edges the agent created since `since`
     new_rows = conn.execute(
@@ -7723,9 +7745,7 @@ def query_counterfactual_cascade(
     # BFS cascade with override support
     results: list[dict[str, Any]] = []
     visited: dict[str, float] = {}  # node_id → best failure_probability
-    queue: list[tuple[str, float, int, list[str], bool]] = [
-        (node_id, failure_probability, 0, [node_id], False)
-    ]
+    queue: list[tuple[str, float, int, list[str], bool]] = [(node_id, failure_probability, 0, [node_id], False)]
 
     while queue:
         current, current_prob, depth, path, intervened = queue.pop(0)
@@ -7746,15 +7766,17 @@ def query_counterfactual_cascade(
                 "SELECT label, type FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
                 [current],
             ).fetchone()
-            results.append({
-                "node_id": current,
-                "node_label": node_info[0] if node_info else current,
-                "node_type": node_info[1] if node_info else "unknown",
-                "failure_probability": round(current_prob, 6),
-                "depth": depth,
-                "path": path,
-                "intervened": intervened,
-            })
+            results.append(
+                {
+                    "node_id": current,
+                    "node_label": node_info[0] if node_info else current,
+                    "node_type": node_info[1] if node_info else "unknown",
+                    "failure_probability": round(current_prob, 6),
+                    "depth": depth,
+                    "path": path,
+                    "intervened": intervened,
+                }
+            )
 
         if depth >= max_depth:
             continue
@@ -7816,14 +7838,16 @@ def query_compare_scenarios(
     """
     # Run baseline
     baseline = query_counterfactual_cascade(
-        conn, node_id,
+        conn,
+        node_id,
         failure_probability=failure_probability,
         max_depth=max_depth,
     )
 
     # Run counterfactual
     counterfactual = query_counterfactual_cascade(
-        conn, node_id,
+        conn,
+        node_id,
         failure_probability=failure_probability,
         max_depth=max_depth,
         edge_overrides=edge_overrides,
@@ -7851,22 +7875,26 @@ def query_compare_scenarios(
 
         if b_prob is None and c_prob is not None:
             new_nodes += 1
-            deltas.append({
-                "node_id": nid,
-                "baseline_prob": None,
-                "counterfactual_prob": c_prob,
-                "delta": c_prob,
-                "direction": "new",
-            })
+            deltas.append(
+                {
+                    "node_id": nid,
+                    "baseline_prob": None,
+                    "counterfactual_prob": c_prob,
+                    "delta": c_prob,
+                    "direction": "new",
+                }
+            )
         elif b_prob is not None and c_prob is None:
             removed_nodes += 1
-            deltas.append({
-                "node_id": nid,
-                "baseline_prob": b_prob,
-                "counterfactual_prob": None,
-                "delta": -b_prob,
-                "direction": "removed",
-            })
+            deltas.append(
+                {
+                    "node_id": nid,
+                    "baseline_prob": b_prob,
+                    "counterfactual_prob": None,
+                    "delta": -b_prob,
+                    "direction": "removed",
+                }
+            )
         else:
             delta = (c_prob or 0.0) - (b_prob or 0.0)
             if abs(delta) < 0.001:
@@ -7878,13 +7906,15 @@ def query_compare_scenarios(
             else:
                 decreased += 1
                 direction = "decreased"
-            deltas.append({
-                "node_id": nid,
-                "baseline_prob": b_prob,
-                "counterfactual_prob": c_prob,
-                "delta": round(delta, 6),
-                "direction": direction,
-            })
+            deltas.append(
+                {
+                    "node_id": nid,
+                    "baseline_prob": b_prob,
+                    "counterfactual_prob": c_prob,
+                    "delta": round(delta, 6),
+                    "direction": direction,
+                }
+            )
 
     # Sort deltas by absolute delta descending
     deltas.sort(key=lambda d: abs(d["delta"]) if d["delta"] is not None else 0, reverse=True)
@@ -7894,15 +7924,15 @@ def query_compare_scenarios(
         "baseline": baseline,
         "counterfactual": counterfactual,
         "deltas": deltas,
-            "summary": {
-                "total_nodes": len(all_nodes),
-                "increased": increased,
-                "decreased": decreased,
-                "unchanged": unchanged,
-                "new": new_nodes,
-                "removed": removed_nodes,
-            },
-        }
+        "summary": {
+            "total_nodes": len(all_nodes),
+            "increased": increased,
+            "decreased": decreased,
+            "unchanged": unchanged,
+            "new": new_nodes,
+            "removed": removed_nodes,
+        },
+    }
 
 
 # ── Autonomy Loop: Proposed/Executed Actions (OHM-446a) ─────────────────────
@@ -8004,13 +8034,13 @@ def execute_action(
     ).fetchone()
     if not row:
         from ohm.exceptions import NodeNotFoundError
+
         raise NodeNotFoundError(f"Action not found: {action_id}")
 
     # Update the action status
     now_sql = "CURRENT_TIMESTAMP"
     conn.execute(
-        "UPDATE ohm_nodes SET task_status = 'executed', outcome = ?, outcome_notes = ?, updated_at = "
-        + now_sql + ", updated_by = ? WHERE id = ?",
+        "UPDATE ohm_nodes SET task_status = 'executed', outcome = ?, outcome_notes = ?, updated_at = " + now_sql + ", updated_by = ? WHERE id = ?",
         [outcome, outcome_notes, executed_by, action_id],
     )
 
@@ -8152,10 +8182,7 @@ def apply_decay_to_edges(
     import math
 
     defaults = {"L1": float("inf"), "L2": float("inf"), "L3": 90.0, "L4": 30.0}
-    when_clauses = " ".join(
-        f"WHEN '{k}' THEN {999999.0 if v == float('inf') or v <= 0 else float(v)}"
-        for k, v in defaults.items()
-    )
+    when_clauses = " ".join(f"WHEN '{k}' THEN {999999.0 if v == float('inf') or v <= 0 else float(v)}" for k, v in defaults.items())
     hl_case = f"CASE layer {when_clauses} ELSE 90.0 END"
 
     rows = conn.execute(
@@ -8269,7 +8296,7 @@ def query_loop_status(
         f"""SELECT id, label, task_status, outcome, outcome_notes,
                    created_by, created_at, updated_at
            FROM ohm_nodes
-           WHERE {' AND '.join(conditions)}
+           WHERE {" AND ".join(conditions)}
            ORDER BY COALESCE(updated_at, created_at) DESC
            LIMIT 100""",
         params,
@@ -8342,6 +8369,7 @@ def query_loop_status(
         }
         if row[2]:
             import json as _json
+
             try:
                 meta = _json.loads(row[2]) if isinstance(row[2], str) else row[2]
                 entry["freshness_pressure"] = meta.get("max_age_seconds")
@@ -8405,15 +8433,17 @@ def query_loop_status(
             [feed_node_id],
         ).fetchall()
         feeding_ids = [r[0] for r in feeding_decision_rows]
-        stale_feeds_intermediate.append({
-            "feed_node_id": feed_node_id,
-            "label": row[1] or "",
-            "latest_value": float(latest_value) if latest_value is not None else None,
-            "decayed_confidence": round(decayed_confidence, 6),
-            "age_seconds": round(age_seconds, 2),
-            "feeding_decision_ids": feeding_ids,
-            "decay": decay_info,
-        })
+        stale_feeds_intermediate.append(
+            {
+                "feed_node_id": feed_node_id,
+                "label": row[1] or "",
+                "latest_value": float(latest_value) if latest_value is not None else None,
+                "decayed_confidence": round(decayed_confidence, 6),
+                "age_seconds": round(age_seconds, 2),
+                "feeding_decision_ids": feeding_ids,
+                "decay": decay_info,
+            }
+        )
 
     # Sort by decayed_confidence ASCENDING — most-decayed first.
     stale_feeds = sorted(
@@ -8607,13 +8637,15 @@ def twin_predict(
     if not twin:
         raise NodeNotFoundError(f"Twin not found: {twin_id}")
 
-    eval_edges = _rows_to_dicts(conn.execute(
-        """SELECT e.to_node, e.probability, e.confidence, n.label AS target_label
+    eval_edges = _rows_to_dicts(
+        conn.execute(
+            """SELECT e.to_node, e.probability, e.confidence, n.label AS target_label
            FROM ohm_edges e
            JOIN ohm_nodes n ON n.id = e.to_node AND n.deleted_at IS NULL
            WHERE e.from_node = ? AND e.edge_type = 'EVALUATES' AND e.deleted_at IS NULL""",
-        [twin_id],
-    ))
+            [twin_id],
+        )
+    )
 
     edge_overrides: dict[str, float] = {}
     nodes: list[dict[str, Any]] = []
@@ -8622,11 +8654,13 @@ def twin_predict(
         if prob is None:
             prob = edge.get("confidence", 0.5)
         edge_overrides[edge["to_node"]] = prob
-        nodes.append({
-            "node_id": edge["to_node"],
-            "label": edge.get("target_label", ""),
-            "probability": prob,
-        })
+        nodes.append(
+            {
+                "node_id": edge["to_node"],
+                "label": edge.get("target_label", ""),
+                "probability": prob,
+            }
+        )
 
     return {
         "twin_id": twin_id,
@@ -8659,27 +8693,31 @@ def twin_constraints(
         "gate_status": twin_row[3],
     }
 
-    eval_edges = _rows_to_dicts(conn.execute(
-        """SELECT e.id, e.to_node, e.constraint_expr, e.edge_type, e.confidence, e.probability
+    eval_edges = _rows_to_dicts(
+        conn.execute(
+            """SELECT e.id, e.to_node, e.constraint_expr, e.edge_type, e.confidence, e.probability
            FROM ohm_edges e
            WHERE e.from_node = ? AND e.edge_type = 'EVALUATES' AND e.deleted_at IS NULL""",
-        [twin_id],
-    ))
+            [twin_id],
+        )
+    )
 
     target_ids = [e["to_node"] for e in eval_edges]
 
     constraints: list[dict[str, Any]] = []
     if target_ids:
         placeholders = ",".join(["?"] * len(target_ids))
-        constraint_edges = _rows_to_dicts(conn.execute(
-            f"""SELECT e.id, e.from_node, e.to_node, e.constraint_expr, e.edge_type,
+        constraint_edges = _rows_to_dicts(
+            conn.execute(
+                f"""SELECT e.id, e.from_node, e.to_node, e.constraint_expr, e.edge_type,
                        e.confidence, e.probability, e.layer
                 FROM ohm_edges e
                 WHERE (e.from_node IN ({placeholders}) OR e.to_node IN ({placeholders}))
                   AND e.constraint_expr IS NOT NULL
                   AND e.deleted_at IS NULL""",
-            target_ids + target_ids,
-        ))
+                target_ids + target_ids,
+            )
+        )
         constraints = constraint_edges
 
     return {
@@ -8725,38 +8763,44 @@ def validate_action_against_twin(
 
     action_confidence = action_row[2] if action_row[2] is not None else 0.5
 
-    action_edge_rows = _rows_to_dicts(conn.execute(
-        """SELECT e.id, e.to_node, e.edge_type, e.confidence, e.probability
+    action_edge_rows = _rows_to_dicts(
+        conn.execute(
+            """SELECT e.id, e.to_node, e.edge_type, e.confidence, e.probability
            FROM ohm_edges e
            WHERE e.from_node = ? AND e.deleted_at IS NULL""",
-        [action_id],
-    ))
+            [action_id],
+        )
+    )
     action_probability = None
     for ae in action_edge_rows:
         if ae.get("probability") is not None:
             action_probability = ae["probability"]
             break
 
-    twin_targets = _rows_to_dicts(conn.execute(
-        """SELECT e.to_node
+    twin_targets = _rows_to_dicts(
+        conn.execute(
+            """SELECT e.to_node
            FROM ohm_edges e
            WHERE e.from_node = ? AND e.edge_type = 'EVALUATES' AND e.deleted_at IS NULL""",
-        [twin_id],
-    ))
+            [twin_id],
+        )
+    )
     target_ids = [t["to_node"] for t in twin_targets]
 
     violations: list[dict[str, Any]] = []
 
     if target_ids:
         placeholders = ",".join(["?"] * len(target_ids))
-        constraint_edges = _rows_to_dicts(conn.execute(
-            f"""SELECT e.id, e.from_node, e.to_node, e.constraint_expr, e.confidence, e.probability
+        constraint_edges = _rows_to_dicts(
+            conn.execute(
+                f"""SELECT e.id, e.from_node, e.to_node, e.constraint_expr, e.confidence, e.probability
                 FROM ohm_edges e
                 WHERE (e.from_node IN ({placeholders}) OR e.to_node IN ({placeholders}))
                   AND e.constraint_expr IS NOT NULL
                   AND e.deleted_at IS NULL""",
-            target_ids + target_ids,
-        ))
+                target_ids + target_ids,
+            )
+        )
 
         for ce in constraint_edges:
             expr = ce.get("constraint_expr", "")
@@ -8771,33 +8815,39 @@ def validate_action_against_twin(
             probability_range = parsed.get("probability_range")
 
             if max_confidence is not None and action_confidence > float(max_confidence):
-                violations.append({
-                    "constraint_edge_id": ce["id"],
-                    "constraint_expr": expr,
-                    "violation_type": "max_confidence_exceeded",
-                    "action_confidence": action_confidence,
-                    "max_confidence": float(max_confidence),
-                })
+                violations.append(
+                    {
+                        "constraint_edge_id": ce["id"],
+                        "constraint_expr": expr,
+                        "violation_type": "max_confidence_exceeded",
+                        "action_confidence": action_confidence,
+                        "max_confidence": float(max_confidence),
+                    }
+                )
 
             if probability_range is not None and action_probability is not None:
                 p_min = probability_range.get("min")
                 p_max = probability_range.get("max")
                 if p_min is not None and action_probability < float(p_min):
-                    violations.append({
-                        "constraint_edge_id": ce["id"],
-                        "constraint_expr": expr,
-                        "violation_type": "probability_below_min",
-                        "action_probability": action_probability,
-                        "min_probability": float(p_min),
-                    })
+                    violations.append(
+                        {
+                            "constraint_edge_id": ce["id"],
+                            "constraint_expr": expr,
+                            "violation_type": "probability_below_min",
+                            "action_probability": action_probability,
+                            "min_probability": float(p_min),
+                        }
+                    )
                 if p_max is not None and action_probability > float(p_max):
-                    violations.append({
-                        "constraint_edge_id": ce["id"],
-                        "constraint_expr": expr,
-                        "violation_type": "probability_above_max",
-                        "action_probability": action_probability,
-                        "max_probability": float(p_max),
-                    })
+                    violations.append(
+                        {
+                            "constraint_edge_id": ce["id"],
+                            "constraint_expr": expr,
+                            "violation_type": "probability_above_max",
+                            "action_probability": action_probability,
+                            "max_probability": float(p_max),
+                        }
+                    )
 
     return {
         "valid": len(violations) == 0,
@@ -8822,13 +8872,15 @@ def explain_twin(
     if not twin_row:
         raise NodeNotFoundError(f"Twin not found: {twin_id}")
 
-    eval_edges = _rows_to_dicts(conn.execute(
-        """SELECT e.to_node, n.label AS target_label
+    eval_edges = _rows_to_dicts(
+        conn.execute(
+            """SELECT e.to_node, n.label AS target_label
            FROM ohm_edges e
            JOIN ohm_nodes n ON n.id = e.to_node AND n.deleted_at IS NULL
            WHERE e.from_node = ? AND e.edge_type = 'EVALUATES' AND e.deleted_at IS NULL""",
-        [twin_id],
-    ))
+            [twin_id],
+        )
+    )
 
     target_node_id = eval_edges[0]["to_node"] if eval_edges else None
     target_label = eval_edges[0].get("target_label", "") if eval_edges else ""
@@ -9006,13 +9058,15 @@ def list_twin_templates(
     params.append(limit)
 
     where = " AND ".join(conditions)
-    rows = _rows_to_dicts(conn.execute(
-        f"""SELECT n.* FROM ohm_nodes n
+    rows = _rows_to_dicts(
+        conn.execute(
+            f"""SELECT n.* FROM ohm_nodes n
             WHERE {where}
             ORDER BY n.created_at DESC
             LIMIT ?""",
-        params,
-    ))
+            params,
+        )
+    )
 
     return rows
 
@@ -9047,14 +9101,16 @@ def get_twin_template(
     columns = [desc[0] for desc in conn.execute("SELECT * FROM ohm_nodes WHERE id = ?", [template_id]).description]
     template = dict(zip(columns, template_row))
 
-    eval_edges = _rows_to_dicts(conn.execute(
-        """SELECT e.id, e.to_node, e.edge_type, e.confidence, e.probability,
+    eval_edges = _rows_to_dicts(
+        conn.execute(
+            """SELECT e.id, e.to_node, e.edge_type, e.confidence, e.probability,
                   n.label AS target_label, n.type AS target_type
            FROM ohm_edges e
            JOIN ohm_nodes n ON n.id = e.to_node AND n.deleted_at IS NULL
            WHERE e.from_node = ? AND e.edge_type = 'EVALUATES' AND e.deleted_at IS NULL""",
-        [template_id],
-    ))
+            [template_id],
+        )
+    )
 
     constraint_schema = None
     required_edges = None
@@ -9186,11 +9242,13 @@ def instantiate_twin_from_template(
             required = parsed.get("required_edges")
             if required and isinstance(required, list):
                 for edge_type in required:
-                    target_edges = _rows_to_dicts(conn.execute(
-                        """SELECT e.to_node FROM ohm_edges e
+                    target_edges = _rows_to_dicts(
+                        conn.execute(
+                            """SELECT e.to_node FROM ohm_edges e
                            WHERE e.from_node = ? AND e.edge_type = ? AND e.deleted_at IS NULL""",
-                        [target_node_id, edge_type],
-                    ))
+                            [target_node_id, edge_type],
+                        )
+                    )
                     for te in target_edges:
                         connected_node = te["to_node"]
                         already = conn.execute(
@@ -9208,11 +9266,13 @@ def instantiate_twin_from_template(
                                 layer="L3",
                                 created_by=created_by,
                             )
-                    target_edges_in = _rows_to_dicts(conn.execute(
-                        """SELECT e.from_node FROM ohm_edges e
+                    target_edges_in = _rows_to_dicts(
+                        conn.execute(
+                            """SELECT e.from_node FROM ohm_edges e
                            WHERE e.to_node = ? AND e.edge_type = ? AND e.deleted_at IS NULL""",
-                        [target_node_id, edge_type],
-                    ))
+                            [target_node_id, edge_type],
+                        )
+                    )
                     for te in target_edges_in:
                         connected_node = te["from_node"]
                         already = conn.execute(
@@ -9303,12 +9363,14 @@ def assemble_twin_for_decision(
 
     decision_label = decision[1] or ""
 
-    template_rows = _rows_to_dicts(conn.execute(
-        """SELECT n.id, n.label, n.content, n.metadata, n.created_by
+    template_rows = _rows_to_dicts(
+        conn.execute(
+            """SELECT n.id, n.label, n.content, n.metadata, n.created_by
            FROM ohm_nodes n
            WHERE n.type = 'twin_template' AND n.deleted_at IS NULL
            ORDER BY n.created_at DESC""",
-    ))
+        )
+    )
 
     template_candidates: list[dict[str, Any]] = []
     for t in template_rows:
@@ -9326,11 +9388,13 @@ def assemble_twin_for_decision(
         relevance = _jaccard_similarity(goal, corpus)
         boost = _jaccard_similarity(goal, f"{decision_label} {label}") * 0.25
         score = min(relevance + boost, 1.0)
-        template_candidates.append({
-            "template_id": t["id"],
-            "label": label,
-            "relevance_score": round(score, 4),
-        })
+        template_candidates.append(
+            {
+                "template_id": t["id"],
+                "label": label,
+                "relevance_score": round(score, 4),
+            }
+        )
 
     template_candidates.sort(key=lambda c: c["relevance_score"], reverse=True)
 
@@ -9348,30 +9412,36 @@ def assemble_twin_for_decision(
 
     model_candidates: list[dict[str, Any]] = []
     if chosen_template_id:
-        template_eval_edges = _rows_to_dicts(conn.execute(
-            """SELECT e.to_node, n.label, n.metadata
+        template_eval_edges = _rows_to_dicts(
+            conn.execute(
+                """SELECT e.to_node, n.label, n.metadata
                FROM ohm_edges e
                JOIN ohm_nodes n ON n.id = e.to_node AND n.deleted_at IS NULL
                WHERE e.from_node = ? AND e.edge_type = 'EVALUATES' AND e.deleted_at IS NULL""",
-            [chosen_template_id],
-        ))
+                [chosen_template_id],
+            )
+        )
         target_ids = [ee["to_node"] for ee in template_eval_edges]
         for tid in target_ids:
-            twin_nodes = _rows_to_dicts(conn.execute(
-                """SELECT n.id, n.label, n.metadata
+            twin_nodes = _rows_to_dicts(
+                conn.execute(
+                    """SELECT n.id, n.label, n.metadata
                    FROM ohm_nodes n
                    JOIN ohm_edges e ON e.from_node = n.id AND e.to_node = ? AND e.edge_type = 'EVALUATES' AND e.deleted_at IS NULL
                    WHERE n.type = 'twin' AND n.deleted_at IS NULL""",
-                [tid],
-            ))
+                    [tid],
+                )
+            )
             for twin_node in twin_nodes:
-                obs_rows = _rows_to_dicts(conn.execute(
-                    """SELECT o.value, o.created_at
+                obs_rows = _rows_to_dicts(
+                    conn.execute(
+                        """SELECT o.value, o.created_at
                        FROM ohm_observations o
                        WHERE o.node_id = ? AND o.type = 'model_evaluation' AND o.deleted_at IS NULL
                        ORDER BY o.created_at DESC LIMIT 1""",
-                    [twin_node["id"]],
-                ))
+                        [twin_node["id"]],
+                    )
+                )
                 score = 0.5
                 decayed_score: float | None = None
                 decay_info: dict | None = None
@@ -9390,21 +9460,19 @@ def assemble_twin_for_decision(
                             decayed_score = decay_info["decayed_confidence"]
                 if decayed_score is None:
                     decayed_score = score
-                model_candidates.append({
-                    "model_id": twin_node["id"],
-                    "label": twin_node.get("label", ""),
-                    "score": round(score, 4),
-                    "decayed_score": round(decayed_score, 4) if decayed_score is not None else None,
-                    "decay": decay_info,
-                })
+                model_candidates.append(
+                    {
+                        "model_id": twin_node["id"],
+                        "label": twin_node.get("label", ""),
+                        "score": round(score, 4),
+                        "decayed_score": round(decayed_score, 4) if decayed_score is not None else None,
+                        "decay": decay_info,
+                    }
+                )
 
     # When apply_decay=True, rank by decayed_score (fresher observations win).
     # When False, rank by raw score (backward-compat).
-    sort_key = (
-        (lambda c: c["decayed_score"] if c["decayed_score"] is not None else c["score"])
-        if apply_decay
-        else (lambda c: c["score"])
-    )
+    sort_key = (lambda c: c["decayed_score"] if c["decayed_score"] is not None else c["score"]) if apply_decay else (lambda c: c["score"])
     model_candidates.sort(key=sort_key, reverse=True)
 
     chosen_model_id = preferred_model_id
@@ -9424,13 +9492,21 @@ def assemble_twin_for_decision(
     model_result: dict[str, Any] | None = None
 
     if chosen_template_id:
-        template_result = _rows_to_dicts(conn.execute(
-            "SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
-            [chosen_template_id],
-        ))[0] if _rows_to_dicts(conn.execute(
-            "SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
-            [chosen_template_id],
-        )) else None
+        template_result = (
+            _rows_to_dicts(
+                conn.execute(
+                    "SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                    [chosen_template_id],
+                )
+            )[0]
+            if _rows_to_dicts(
+                conn.execute(
+                    "SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                    [chosen_template_id],
+                )
+            )
+            else None
+        )
 
         twin_result = instantiate_twin_from_template(
             conn,
@@ -9452,13 +9528,21 @@ def assemble_twin_for_decision(
         )
 
         if chosen_model_id:
-            model_result = _rows_to_dicts(conn.execute(
-                "SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
-                [chosen_model_id],
-            ))[0] if _rows_to_dicts(conn.execute(
-                "SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
-                [chosen_model_id],
-            )) else None
+            model_result = (
+                _rows_to_dicts(
+                    conn.execute(
+                        "SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                        [chosen_model_id],
+                    )
+                )[0]
+                if _rows_to_dicts(
+                    conn.execute(
+                        "SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                        [chosen_model_id],
+                    )
+                )
+                else None
+            )
 
             create_edge(
                 conn,
@@ -9484,10 +9568,12 @@ def assemble_twin_for_decision(
             [twin_result["id"]],
         )
 
-        twin_result = _rows_to_dicts(conn.execute(
-            "SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
-            [twin_result["id"]],
-        ))[0]
+        twin_result = _rows_to_dicts(
+            conn.execute(
+                "SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                [twin_result["id"]],
+            )
+        )[0]
 
         create_edge(
             conn,
@@ -9630,12 +9716,14 @@ def register_model_candidate(
                     created_by=created_by,
                 )
 
-    existing_candidates = _rows_to_dicts(conn.execute(
-        """SELECT n.id FROM ohm_nodes n
+    existing_candidates = _rows_to_dicts(
+        conn.execute(
+            """SELECT n.id FROM ohm_nodes n
            JOIN ohm_edges e ON e.from_node = n.id AND e.to_node = ? AND e.edge_type = 'EVALUATES' AND e.deleted_at IS NULL
            WHERE n.type = 'model_candidate' AND n.id != ? AND n.deleted_at IS NULL""",
-        [twin_id, candidate["id"]],
-    ))
+            [twin_id, candidate["id"]],
+        )
+    )
     for ec in existing_candidates:
         create_edge(
             conn,
@@ -9788,14 +9876,16 @@ def compare_models(
     if not twin:
         raise NodeNotFoundError(f"Twin not found: {twin_id}")
 
-    candidates = _rows_to_dicts(conn.execute(
-        """SELECT n.id, n.label, n.metadata, n.created_at
+    candidates = _rows_to_dicts(
+        conn.execute(
+            """SELECT n.id, n.label, n.metadata, n.created_at
            FROM ohm_nodes n
            JOIN ohm_edges e ON e.from_node = n.id AND e.to_node = ? AND e.edge_type = 'EVALUATES' AND e.deleted_at IS NULL
            WHERE n.type = 'model_candidate' AND n.deleted_at IS NULL
            ORDER BY n.created_at DESC""",
-        [twin_id],
-    ))
+            [twin_id],
+        )
+    )
 
     ranked: list[dict[str, Any]] = []
     for c in candidates:
@@ -9810,14 +9900,16 @@ def compare_models(
             except (_json.JSONDecodeError, TypeError):
                 pass
 
-        eval_nodes = _rows_to_dicts(conn.execute(
-            """SELECT n.id, n.label, n.metadata, n.created_at
+        eval_nodes = _rows_to_dicts(
+            conn.execute(
+                """SELECT n.id, n.label, n.metadata, n.created_at
                FROM ohm_nodes n
                JOIN ohm_edges e ON e.from_node = ? AND e.to_node = n.id AND e.edge_type = 'EVALUATED_BY' AND e.deleted_at IS NULL
                WHERE n.type = 'model_evaluation' AND n.deleted_at IS NULL
                ORDER BY n.created_at DESC LIMIT 1""",
-            [c["id"]],
-        ))
+                [c["id"]],
+            )
+        )
 
         latest_eval = None
         composite_score = None
@@ -9861,22 +9953,20 @@ def compare_models(
             elif composite_score is not None:
                 decayed_composite_score = composite_score
 
-        ranked.append({
-            "model_candidate_id": c["id"],
-            "label": c.get("label", ""),
-            "gate_status": gate_status,
-            "model_parameters": model_params,
-            "latest_evaluation": latest_eval,
-            "composite_score": composite_score,
-            "decayed_composite_score": decayed_composite_score,
-            "decay": decay_info,
-        })
+        ranked.append(
+            {
+                "model_candidate_id": c["id"],
+                "label": c.get("label", ""),
+                "gate_status": gate_status,
+                "model_parameters": model_params,
+                "latest_evaluation": latest_eval,
+                "composite_score": composite_score,
+                "decayed_composite_score": decayed_composite_score,
+                "decay": decay_info,
+            }
+        )
 
-    sort_key = (
-        (lambda r: r["decayed_composite_score"] if r["decayed_composite_score"] is not None else float("-inf"))
-        if apply_decay
-        else (lambda r: r["composite_score"] if r["composite_score"] is not None else float("-inf"))
-    )
+    sort_key = (lambda r: r["decayed_composite_score"] if r["decayed_composite_score"] is not None else float("-inf")) if apply_decay else (lambda r: r["composite_score"] if r["composite_score"] is not None else float("-inf"))
     ranked.sort(key=sort_key, reverse=True)
 
     recommendation = None
@@ -9954,12 +10044,14 @@ def promote_model(
     if not candidate_row:
         raise NodeNotFoundError(f"Model candidate not found: {model_candidate_id}")
 
-    twin_edges = _rows_to_dicts(conn.execute(
-        """SELECT e.to_node FROM ohm_edges e
+    twin_edges = _rows_to_dicts(
+        conn.execute(
+            """SELECT e.to_node FROM ohm_edges e
            WHERE e.from_node = ? AND e.edge_type = 'EVALUATES' AND e.deleted_at IS NULL
            AND e.to_node IN (SELECT id FROM ohm_nodes WHERE type = 'twin' AND deleted_at IS NULL)""",
-        [model_candidate_id],
-    ))
+            [model_candidate_id],
+        )
+    )
     twin_ids = [e["to_node"] for e in twin_edges]
 
     candidate_decision_value = None
@@ -9979,12 +10071,14 @@ def promote_model(
         candidate_decision_value = candidate_dv["decision_value_score"]
 
         for twin_id in twin_ids:
-            active_candidates = _rows_to_dicts(conn.execute(
-                """SELECT n.id, n.metadata FROM ohm_nodes n
+            active_candidates = _rows_to_dicts(
+                conn.execute(
+                    """SELECT n.id, n.metadata FROM ohm_nodes n
                    JOIN ohm_edges e ON e.from_node = n.id AND e.to_node = ? AND e.edge_type = 'EVALUATES' AND e.deleted_at IS NULL
                    WHERE n.type = 'model_candidate' AND n.id != ? AND n.deleted_at IS NULL""",
-                [twin_id, model_candidate_id],
-            ))
+                    [twin_id, model_candidate_id],
+                )
+            )
             for ac in active_candidates:
                 ac_meta_raw = ac.get("metadata")
                 ac_meta = {}
@@ -10011,19 +10105,17 @@ def promote_model(
 
         if active_model_id is not None and active_decision_value is not None:
             if candidate_decision_value < active_decision_value + min_improvement:
-                raise ValidationError(
-                    f"Candidate decision_value ({candidate_decision_value}) does not exceed "
-                    f"active model ({active_model_id}) decision_value ({active_decision_value}) "
-                    f"+ min_improvement ({min_improvement})"
-                )
+                raise ValidationError(f"Candidate decision_value ({candidate_decision_value}) does not exceed active model ({active_model_id}) decision_value ({active_decision_value}) + min_improvement ({min_improvement})")
 
     for twin_id in twin_ids:
-        other_candidates = _rows_to_dicts(conn.execute(
-            """SELECT n.id, n.metadata FROM ohm_nodes n
+        other_candidates = _rows_to_dicts(
+            conn.execute(
+                """SELECT n.id, n.metadata FROM ohm_nodes n
                JOIN ohm_edges e ON e.from_node = n.id AND e.to_node = ? AND e.edge_type = 'EVALUATES' AND e.deleted_at IS NULL
                WHERE n.type = 'model_candidate' AND n.id != ? AND n.deleted_at IS NULL""",
-            [twin_id, model_candidate_id],
-        ))
+                [twin_id, model_candidate_id],
+            )
+        )
         for oc in other_candidates:
             oc_meta_raw = oc.get("metadata")
             oc_meta = {}
@@ -10161,20 +10253,24 @@ def detect_drift(
     if not twin:
         raise NodeNotFoundError(f"Twin not found: {twin_id}")
 
-    active_models = _rows_to_dicts(conn.execute(
-        """SELECT n.id, n.label, n.metadata FROM ohm_nodes n
+    active_models = _rows_to_dicts(
+        conn.execute(
+            """SELECT n.id, n.label, n.metadata FROM ohm_nodes n
            JOIN ohm_edges e ON e.from_node = n.id AND e.to_node = ? AND e.edge_type = 'EVALUATES' AND e.deleted_at IS NULL
            WHERE n.type = 'model_candidate' AND n.deleted_at IS NULL""",
-        [twin_id],
-    ))
+            [twin_id],
+        )
+    )
 
-    observations = _rows_to_dicts(conn.execute(
-        """SELECT o.id, o.node_id, o.value, o.baseline, o.created_at
+    observations = _rows_to_dicts(
+        conn.execute(
+            """SELECT o.id, o.node_id, o.value, o.baseline, o.created_at
            FROM ohm_observations o
            WHERE o.node_id = ? AND o.deleted_at IS NULL
            ORDER BY o.created_at DESC LIMIT ?""",
-        [twin_id, window_size],
-    ))
+            [twin_id, window_size],
+        )
+    )
 
     drift_score = 0.0
     drift_type = "none"
@@ -10210,13 +10306,15 @@ def detect_drift(
                 if meta_raw:
                     try:
                         parsed = _json.loads(meta_raw) if isinstance(meta_raw, str) else meta_raw
-                        eval_nodes = _rows_to_dicts(conn.execute(
-                            """SELECT n.metadata FROM ohm_nodes n
+                        eval_nodes = _rows_to_dicts(
+                            conn.execute(
+                                """SELECT n.metadata FROM ohm_nodes n
                                JOIN ohm_edges e ON e.from_node = ? AND e.to_node = n.id AND e.edge_type = 'EVALUATED_BY' AND e.deleted_at IS NULL
                                WHERE n.type = 'model_evaluation' AND n.deleted_at IS NULL
                                ORDER BY n.created_at DESC LIMIT 1""",
-                            [m["id"]],
-                        ))
+                                [m["id"]],
+                            )
+                        )
                         if eval_nodes:
                             ev_meta_raw = eval_nodes[0].get("metadata")
                             if ev_meta_raw:
@@ -10295,23 +10393,27 @@ def run_walk_forward_validation(
     if not model:
         raise NodeNotFoundError(f"Model candidate not found: {model_id}")
 
-    twin_edges = _rows_to_dicts(conn.execute(
-        """SELECT e.to_node FROM ohm_edges e
+    twin_edges = _rows_to_dicts(
+        conn.execute(
+            """SELECT e.to_node FROM ohm_edges e
            WHERE e.from_node = ? AND e.edge_type = 'EVALUATES' AND e.deleted_at IS NULL
            AND e.to_node IN (SELECT id FROM ohm_nodes WHERE type = 'twin' AND deleted_at IS NULL)""",
-        [model_id],
-    ))
+            [model_id],
+        )
+    )
     twin_id = twin_edges[0]["to_node"] if twin_edges else None
 
     observations = []
     if twin_id:
-        observations = _rows_to_dicts(conn.execute(
-            """SELECT o.id, o.value, o.baseline, o.created_at
+        observations = _rows_to_dicts(
+            conn.execute(
+                """SELECT o.id, o.value, o.baseline, o.created_at
                FROM ohm_observations o
                WHERE o.node_id = ? AND o.deleted_at IS NULL
                ORDER BY o.created_at ASC""",
-            [twin_id],
-        ))
+                [twin_id],
+            )
+        )
 
     total_obs = len(observations)
     per_split_metrics: list[dict[str, Any]] = []
@@ -10336,16 +10438,18 @@ def run_walk_forward_validation(
                 residuals = [abs(v - b) for v, b in zip(test_values, test_baselines)]
                 split_mae = sum(residuals) / len(residuals)
 
-            per_split_metrics.append({
-                "split": i + 1,
-                "train_size": len(train_obs),
-                "test_size": len(test_obs),
-                "mae": round(split_mae, 6),
-            })
+            per_split_metrics.append(
+                {
+                    "split": i + 1,
+                    "train_size": len(train_obs),
+                    "test_size": len(test_obs),
+                    "mae": round(split_mae, 6),
+                }
+            )
 
     if len(per_split_metrics) >= 3:
-        early_mae = sum(s["mae"] for s in per_split_metrics[:len(per_split_metrics) // 2]) / max(len(per_split_metrics) // 2, 1)
-        late_mae = sum(s["mae"] for s in per_split_metrics[len(per_split_metrics) // 2:]) / max(len(per_split_metrics) - len(per_split_metrics) // 2, 1)
+        early_mae = sum(s["mae"] for s in per_split_metrics[: len(per_split_metrics) // 2]) / max(len(per_split_metrics) // 2, 1)
+        late_mae = sum(s["mae"] for s in per_split_metrics[len(per_split_metrics) // 2 :]) / max(len(per_split_metrics) - len(per_split_metrics) // 2, 1)
         if early_mae > 0 and late_mae > early_mae * 1.5:
             overfitting_detected = True
 
@@ -10426,12 +10530,14 @@ def ensemble_predict(
     if not twin:
         raise NodeNotFoundError(f"Twin not found: {twin_id}")
 
-    candidates = _rows_to_dicts(conn.execute(
-        """SELECT n.id, n.label, n.metadata FROM ohm_nodes n
+    candidates = _rows_to_dicts(
+        conn.execute(
+            """SELECT n.id, n.label, n.metadata FROM ohm_nodes n
            JOIN ohm_edges e ON e.from_node = n.id AND e.to_node = ? AND e.edge_type = 'EVALUATES' AND e.deleted_at IS NULL
            WHERE n.type = 'model_candidate' AND n.deleted_at IS NULL""",
-        [twin_id],
-    ))
+            [twin_id],
+        )
+    )
 
     votes: list[dict[str, Any]] = []
     total_weight = 0.0
@@ -10448,13 +10554,15 @@ def ensemble_predict(
             except (_json.JSONDecodeError, TypeError):
                 pass
 
-        eval_nodes = _rows_to_dicts(conn.execute(
-            """SELECT n.metadata, n.created_at FROM ohm_nodes n
+        eval_nodes = _rows_to_dicts(
+            conn.execute(
+                """SELECT n.metadata, n.created_at FROM ohm_nodes n
                JOIN ohm_edges e ON e.from_node = ? AND e.to_node = n.id AND e.edge_type = 'EVALUATED_BY' AND e.deleted_at IS NULL
                WHERE n.type = 'model_evaluation' AND n.deleted_at IS NULL
                ORDER BY n.created_at DESC LIMIT 1""",
-            [c["id"]],
-        ))
+                [c["id"]],
+            )
+        )
         decay_info = None
         if eval_nodes:
             ev_meta_raw = eval_nodes[0].get("metadata")
@@ -10481,21 +10589,23 @@ def ensemble_predict(
 
         # Weight = max(0, decayed) — negative scores do not vote positively.
         weight = decayed_score if decayed_score > 0 else 0.0
-        votes.append({
-            "model_id": c["id"],
-            "label": c.get("label", ""),
-            "gate_status": gate_status,
-            "composite_score": composite_score,
-            "decayed_composite_score": round(decayed_score, 6),
-            "weight": round(weight, 6),
-            "decay": decay_info,
-        })
+        votes.append(
+            {
+                "model_id": c["id"],
+                "label": c.get("label", ""),
+                "gate_status": gate_status,
+                "composite_score": composite_score,
+                "decayed_composite_score": round(decayed_score, 6),
+                "weight": round(weight, 6),
+                "decay": decay_info,
+            }
+        )
         total_weight += weight
 
     if total_weight > 0:
         for v in votes:
             v["normalized_weight"] = round(v["weight"] / total_weight, 6)
-            weighted_prediction += (v["decayed_composite_score"] * v["normalized_weight"])
+            weighted_prediction += v["decayed_composite_score"] * v["normalized_weight"]
     else:
         for v in votes:
             v["normalized_weight"] = 0.0
@@ -10564,13 +10674,15 @@ def compute_decision_value(
     overfitting_risk = 0.0
     decay_info: dict | None = None
 
-    eval_nodes = _rows_to_dicts(conn.execute(
-        """SELECT n.metadata, n.created_at FROM ohm_nodes n
+    eval_nodes = _rows_to_dicts(
+        conn.execute(
+            """SELECT n.metadata, n.created_at FROM ohm_nodes n
            JOIN ohm_edges e ON e.from_node = ? AND e.to_node = n.id AND e.edge_type = 'EVALUATED_BY' AND e.deleted_at IS NULL
            WHERE n.type = 'model_evaluation' AND n.deleted_at IS NULL
            ORDER BY n.created_at DESC LIMIT 1""",
-        [model_id],
-    ))
+            [model_id],
+        )
+    )
     if eval_nodes:
         ev_meta_raw = eval_nodes[0].get("metadata")
         if ev_meta_raw:
@@ -10756,11 +10868,13 @@ def get_freshness_status(
                 meta = _json.loads(meta_raw) if isinstance(meta_raw, str) else meta_raw
             except (_json.JSONDecodeError, TypeError):
                 pass
-        threshold_records.append({
-            "id": row[0],
-            "label": row[1],
-            "max_age_seconds": meta.get("max_age_seconds"),
-        })
+        threshold_records.append(
+            {
+                "id": row[0],
+                "label": row[1],
+                "max_age_seconds": meta.get("max_age_seconds"),
+            }
+        )
 
     latest_obs = conn.execute(
         """
@@ -11061,12 +11175,14 @@ def temporal_decision_summary(
                 meta = _json.loads(meta_raw) if isinstance(meta_raw, str) else meta_raw
             except (_json.JSONDecodeError, TypeError):
                 pass
-        fi_records.append({
-            "id": row[0],
-            "label": row[1],
-            "voi": meta.get("voi"),
-            "recommendation": meta.get("recommendation"),
-        })
+        fi_records.append(
+            {
+                "id": row[0],
+                "label": row[1],
+                "voi": meta.get("voi"),
+                "recommendation": meta.get("recommendation"),
+            }
+        )
 
     mode_switches = conn.execute(
         """
@@ -11091,14 +11207,16 @@ def temporal_decision_summary(
                 meta = _json.loads(meta_raw) if isinstance(meta_raw, str) else meta_raw
             except (_json.JSONDecodeError, TypeError):
                 pass
-        ms_records.append({
-            "id": row[0],
-            "label": row[1],
-            "from_mode": meta.get("from_mode"),
-            "to_mode": meta.get("to_mode"),
-            "reason": meta.get("reason"),
-            "created_at": str(row[3]) if row[3] else None,
-        })
+        ms_records.append(
+            {
+                "id": row[0],
+                "label": row[1],
+                "from_mode": meta.get("from_mode"),
+                "to_mode": meta.get("to_mode"),
+                "reason": meta.get("reason"),
+                "created_at": str(row[3]) if row[3] else None,
+            }
+        )
 
     return {
         "decision_id": decision_id,
@@ -11115,10 +11233,21 @@ def temporal_decision_summary(
 
 # ── Twin Design Session State Machine (OHM-konq) ────────────────────────────
 
-VALID_SESSION_STATES = frozenset({
-    "init", "discover", "observe", "propose", "approve",
-    "instantiate", "calibrate", "operate", "evolve", "completed", "abandoned",
-})
+VALID_SESSION_STATES = frozenset(
+    {
+        "init",
+        "discover",
+        "observe",
+        "propose",
+        "approve",
+        "instantiate",
+        "calibrate",
+        "operate",
+        "evolve",
+        "completed",
+        "abandoned",
+    }
+)
 
 SESSION_TRANSITIONS: dict[str, set[str]] = {
     "init": {"discover", "abandoned"},
@@ -11862,20 +11991,24 @@ def get_session_state(
     current_state = current_meta.get("session_state", "init")
     history = current_meta.get("transition_history", [])
 
-    proposal_edges = _rows_to_dicts(conn.execute(
-        """SELECT e.id, e.to_node, e.edge_type, e.metadata, e.created_at
+    proposal_edges = _rows_to_dicts(
+        conn.execute(
+            """SELECT e.id, e.to_node, e.edge_type, e.metadata, e.created_at
            FROM ohm_edges e
            WHERE e.from_node = ? AND e.edge_type = 'PROPOSES' AND e.deleted_at IS NULL
            ORDER BY e.created_at DESC""",
-        [session_id],
-    ))
+            [session_id],
+        )
+    )
 
     proposals = []
     for pe in proposal_edges:
-        proposal_node = _rows_to_dicts(conn.execute(
-            "SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
-            [pe["to_node"]],
-        ))
+        proposal_node = _rows_to_dicts(
+            conn.execute(
+                "SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                [pe["to_node"]],
+            )
+        )
         if proposal_node:
             proposals.append(proposal_node[0])
 
@@ -11912,37 +12045,45 @@ def get_session_audit(
     columns = [desc[0] for desc in conn.description]
     session = dict(zip(columns, row))
 
-    transitions = _rows_to_dicts(conn.execute(
-        """SELECT e.id, e.edge_type, e.metadata, e.created_at, e.created_by
+    transitions = _rows_to_dicts(
+        conn.execute(
+            """SELECT e.id, e.edge_type, e.metadata, e.created_at, e.created_by
            FROM ohm_edges e
            WHERE e.from_node = ? AND e.to_node = ? AND e.edge_type = 'TRANSITIONS_TO' AND e.deleted_at IS NULL
            ORDER BY e.created_at""",
-        [session_id, session_id],
-    ))
+            [session_id, session_id],
+        )
+    )
 
-    proposals = _rows_to_dicts(conn.execute(
-        """SELECT e.id, e.to_node, e.edge_type, e.metadata, e.created_at, e.created_by
+    proposals = _rows_to_dicts(
+        conn.execute(
+            """SELECT e.id, e.to_node, e.edge_type, e.metadata, e.created_at, e.created_by
            FROM ohm_edges e
            WHERE e.from_node = ? AND e.edge_type = 'PROPOSES' AND e.deleted_at IS NULL
            ORDER BY e.created_at""",
-        [session_id],
-    ))
+            [session_id],
+        )
+    )
 
-    approvals = _rows_to_dicts(conn.execute(
-        """SELECT e.id, e.to_node, e.edge_type, e.metadata, e.created_at, e.created_by
+    approvals = _rows_to_dicts(
+        conn.execute(
+            """SELECT e.id, e.to_node, e.edge_type, e.metadata, e.created_at, e.created_by
            FROM ohm_edges e
            WHERE e.from_node = ? AND e.edge_type IN ('APPROVES', 'DECLINES', 'MODIFIES') AND e.deleted_at IS NULL
            ORDER BY e.created_at""",
-        [session_id],
-    ))
+            [session_id],
+        )
+    )
 
-    instantiations = _rows_to_dicts(conn.execute(
-        """SELECT e.id, e.from_node, e.edge_type, e.metadata, e.created_at, e.created_by
+    instantiations = _rows_to_dicts(
+        conn.execute(
+            """SELECT e.id, e.from_node, e.edge_type, e.metadata, e.created_at, e.created_by
            FROM ohm_edges e
            WHERE e.to_node = ? AND e.edge_type = 'INSTANTIATED_FROM' AND e.deleted_at IS NULL
            ORDER BY e.created_at""",
-        [session_id],
-    ))
+            [session_id],
+        )
+    )
 
     return {
         "session": session,
@@ -12032,12 +12173,14 @@ def auto_promote_best_model(
     if not twin:
         raise NodeNotFoundError(f"Twin not found: {twin_id}")
 
-    candidates = _rows_to_dicts(conn.execute(
-        """SELECT n.id, n.label, n.metadata FROM ohm_nodes n
+    candidates = _rows_to_dicts(
+        conn.execute(
+            """SELECT n.id, n.label, n.metadata FROM ohm_nodes n
            JOIN ohm_edges e ON e.from_node = n.id AND e.to_node = ? AND e.edge_type = 'EVALUATES' AND e.deleted_at IS NULL
            WHERE n.type = 'model_candidate' AND n.deleted_at IS NULL""",
-        [twin_id],
-    ))
+            [twin_id],
+        )
+    )
 
     if not candidates:
         return {
@@ -12064,13 +12207,15 @@ def auto_promote_best_model(
             except (NodeNotFoundError, ValueError) as exc:
                 scoring_error = str(exc)
         else:
-            eval_nodes = _rows_to_dicts(conn.execute(
-                """SELECT n.metadata FROM ohm_nodes n
+            eval_nodes = _rows_to_dicts(
+                conn.execute(
+                    """SELECT n.metadata FROM ohm_nodes n
                    JOIN ohm_edges e ON e.from_node = ? AND e.to_node = n.id AND e.edge_type = 'EVALUATED_BY' AND e.deleted_at IS NULL
                    WHERE n.type = 'model_evaluation' AND n.deleted_at IS NULL
                    ORDER BY n.created_at DESC LIMIT 1""",
-                [c["id"]],
-            ))
+                    [c["id"]],
+                )
+            )
             if eval_nodes:
                 ev_meta_raw = eval_nodes[0].get("metadata")
                 if ev_meta_raw:
@@ -12080,12 +12225,14 @@ def auto_promote_best_model(
                     except (_json.JSONDecodeError, TypeError):
                         scoring_error = "failed to parse evaluation metadata"
 
-        ranked.append({
-            "model_candidate_id": c["id"],
-            "label": c.get("label", ""),
-            "score": score,
-            "scoring_error": scoring_error,
-        })
+        ranked.append(
+            {
+                "model_candidate_id": c["id"],
+                "label": c.get("label", ""),
+                "score": score,
+                "scoring_error": scoring_error,
+            }
+        )
 
     # Both policy branches share the same sort key — higher score wins,
     # candidates with no score sink to the bottom. Previously duplicated
@@ -12105,11 +12252,7 @@ def auto_promote_best_model(
             "twin_id": twin_id,
             "ranking": ranked,
             "reason": reason,
-            "detail": (
-                f"Best candidate '{best['label']}' has no scorable evaluation: "
-                f"{best.get('scoring_error', 'no evaluation found')}."
-                if best else "No candidates with scores."
-            ),
+            "detail": (f"Best candidate '{best['label']}' has no scorable evaluation: {best.get('scoring_error', 'no evaluation found')}." if best else "No candidates with scores."),
             "best_candidate": best,
         }
 
@@ -12330,13 +12473,15 @@ def add_twin_bindings(
                 _log_change(conn, "ohm_edges", edge[0], "SOFT_DELETE", created_by)
                 removed.append(fid)
 
-    current_feeds = _rows_to_dicts(conn.execute(
-        """SELECT e.from_node AS feed_id, n.label
+    current_feeds = _rows_to_dicts(
+        conn.execute(
+            """SELECT e.from_node AS feed_id, n.label
            FROM ohm_edges e
            JOIN ohm_nodes n ON n.id = e.from_node AND n.deleted_at IS NULL
            WHERE e.to_node = ? AND e.edge_type = 'FEEDS' AND e.deleted_at IS NULL""",
-        [twin_id],
-    ))
+            [twin_id],
+        )
+    )
 
     return {
         "twin_id": twin_id,
@@ -12407,13 +12552,15 @@ def attach_twin_models(
                 _log_change(conn, "ohm_edges", edge[0], "SOFT_DELETE", created_by)
                 removed.append(mid)
 
-    current_models = _rows_to_dicts(conn.execute(
-        """SELECT e.from_node AS model_id, n.label
+    current_models = _rows_to_dicts(
+        conn.execute(
+            """SELECT e.from_node AS model_id, n.label
            FROM ohm_edges e
            JOIN ohm_nodes n ON n.id = e.from_node AND n.deleted_at IS NULL
            WHERE e.to_node = ? AND e.edge_type = 'APPLIES_TO' AND e.deleted_at IS NULL""",
-        [twin_id],
-    ))
+            [twin_id],
+        )
+    )
 
     return {
         "twin_id": twin_id,
@@ -12440,29 +12587,37 @@ def get_twin_readiness(
     if not twin:
         raise NodeNotFoundError(f"Twin not found: {twin_id}")
 
-    target_bound = bool(conn.execute(
-        "SELECT 1 FROM ohm_edges WHERE from_node = ? AND edge_type = 'EVALUATES' AND deleted_at IS NULL",
-        [twin_id],
-    ).fetchone())
+    target_bound = bool(
+        conn.execute(
+            "SELECT 1 FROM ohm_edges WHERE from_node = ? AND edge_type = 'EVALUATES' AND deleted_at IS NULL",
+            [twin_id],
+        ).fetchone()
+    )
 
-    decision_bound = bool(conn.execute(
-        "SELECT 1 FROM ohm_edges WHERE from_node = ? AND edge_type = 'DECISION_DEPENDS_ON' AND deleted_at IS NULL",
-        [twin_id],
-    ).fetchone())
+    decision_bound = bool(
+        conn.execute(
+            "SELECT 1 FROM ohm_edges WHERE from_node = ? AND edge_type = 'DECISION_DEPENDS_ON' AND deleted_at IS NULL",
+            [twin_id],
+        ).fetchone()
+    )
 
-    feeds_present = bool(conn.execute(
-        "SELECT 1 FROM ohm_edges WHERE to_node = ? AND edge_type = 'FEEDS' AND deleted_at IS NULL",
-        [twin_id],
-    ).fetchone())
+    feeds_present = bool(
+        conn.execute(
+            "SELECT 1 FROM ohm_edges WHERE to_node = ? AND edge_type = 'FEEDS' AND deleted_at IS NULL",
+            [twin_id],
+        ).fetchone()
+    )
 
     feeds_fresh = False
     if feeds_present:
-        feed_edges = _rows_to_dicts(conn.execute(
-            """SELECT e.from_node AS feed_id
+        feed_edges = _rows_to_dicts(
+            conn.execute(
+                """SELECT e.from_node AS feed_id
                FROM ohm_edges e
                WHERE e.to_node = ? AND e.edge_type = 'FEEDS' AND e.deleted_at IS NULL""",
-            [twin_id],
-        ))
+                [twin_id],
+            )
+        )
         feed_ids = [fe["feed_id"] for fe in feed_edges]
         if feed_ids:
             placeholders = ",".join(["?"] * len(feed_ids))
@@ -12476,19 +12631,23 @@ def get_twin_readiness(
             ).fetchone()[0]
             feeds_fresh = fresh_count == len(feed_ids)
 
-    models_available = bool(conn.execute(
-        """SELECT 1 FROM ohm_edges e
+    models_available = bool(
+        conn.execute(
+            """SELECT 1 FROM ohm_edges e
            JOIN ohm_nodes n ON n.id = e.from_node AND n.deleted_at IS NULL
            WHERE e.to_node = ? AND e.edge_type = 'APPLIES_TO' AND e.deleted_at IS NULL
              AND (n.metadata IS NULL OR n.metadata NOT LIKE '%archived%')""",
-        [twin_id],
-    ).fetchone())
+            [twin_id],
+        ).fetchone()
+    )
 
-    models_evaluated = bool(conn.execute(
-        """SELECT 1 FROM ohm_edges e
+    models_evaluated = bool(
+        conn.execute(
+            """SELECT 1 FROM ohm_edges e
            WHERE e.to_node = ? AND e.edge_type = 'EVALUATED_BY' AND e.deleted_at IS NULL""",
-        [twin_id],
-    ).fetchone())
+            [twin_id],
+        ).fetchone()
+    )
 
     gates = {
         "target_bound": target_bound,
@@ -12581,12 +12740,12 @@ def detect_verifiable_claims(
     results = []
     now = datetime.now(timezone.utc)
     for row in rows:
-        d = dict(zip(
-            ["id", "from_node", "to_node", "edge_type", "confidence",
-             "created_by", "created_at", "metadata",
-             "from_label", "from_type", "to_label", "to_type"],
-            row,
-        ))
+        d = dict(
+            zip(
+                ["id", "from_node", "to_node", "edge_type", "confidence", "created_by", "created_at", "metadata", "from_label", "from_type", "to_label", "to_type"],
+                row,
+            )
+        )
         meta_raw = d.get("metadata")
         expected_by = None
         if meta_raw:
@@ -12663,12 +12822,14 @@ def create_verification_nudge(
     ).fetchone()
     if target is None:
         from ohm.exceptions import EdgeNotFoundError
+
         raise EdgeNotFoundError(f"Edge not found: {edge_id}")
 
     claim_node_id = target[1]
     claim_node = _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [claim_node_id]))
     if not claim_node:
         from ohm.exceptions import NodeNotFoundError
+
         raise NodeNotFoundError(f"Claim node not found: {claim_node_id}")
 
     nudge_task_id = str(uuid.uuid4())
@@ -12733,6 +12894,7 @@ def record_verification_outcome(
     edge_id = validate_identifier(edge_id, name="edge_id")
     if outcome not in ("true", "false", "ambiguous", "deferred"):
         from ohm.exceptions import ValidationError
+
         raise ValidationError(f"outcome must be one of 'true', 'false', 'ambiguous', 'deferred', got '{outcome}'")
 
     target = conn.execute(
@@ -12741,6 +12903,7 @@ def record_verification_outcome(
     ).fetchone()
     if target is None:
         from ohm.exceptions import EdgeNotFoundError
+
         raise EdgeNotFoundError(f"Edge not found: {edge_id}")
 
     claim_node = target[1]
@@ -12863,12 +13026,12 @@ def list_pending_verifications(
 
     results = []
     for row in rows:
-        d = dict(zip(
-            ["id", "from_node", "to_node", "edge_type", "confidence",
-             "created_by", "created_at", "metadata", "challenge_of",
-             "from_label", "from_type", "to_label", "to_type"],
-            row,
-        ))
+        d = dict(
+            zip(
+                ["id", "from_node", "to_node", "edge_type", "confidence", "created_by", "created_at", "metadata", "challenge_of", "from_label", "from_type", "to_label", "to_type"],
+                row,
+            )
+        )
         meta_raw = d.get("metadata")
         if meta_raw:
             try:

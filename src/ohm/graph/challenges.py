@@ -113,19 +113,10 @@ def infer_challenge_reason(target_row: tuple) -> str:
 
     # Fallback: type-specific tone with a quantified confidence gap
     if gap < _REBUTTAL_GAP_THRESHOLD:
-        return (
-            f"weak {target_type or 'unspecified'} claim at {target_layer}: "
-            f"confidence gap {gap:.2f} (target {target_conf:.2f}, challenge {challenge_conf:.2f})"
-        )
+        return f"weak {target_type or 'unspecified'} claim at {target_layer}: confidence gap {gap:.2f} (target {target_conf:.2f}, challenge {challenge_conf:.2f})"
     if target_conf >= 0.7:
-        return (
-            f"overclaim: {target_type or 'unspecified'} edge at {target_layer} "
-            f"carries {target_conf:.2f} but lacks sufficient evidence"
-        )
-    return (
-        f"legacy null-reason challenge (backfilled by OHM-e0t1): "
-        f"target {target_type or 'unspecified'} at {target_layer} confidence {target_conf:.2f}"
-    )
+        return f"overclaim: {target_type or 'unspecified'} edge at {target_layer} carries {target_conf:.2f} but lacks sufficient evidence"
+    return f"legacy null-reason challenge (backfilled by OHM-e0t1): target {target_type or 'unspecified'} at {target_layer} confidence {target_conf:.2f}"
 
 
 def find_null_reason_challenges(conn: "DuckDBPyConnection") -> list[dict]:
@@ -164,9 +155,14 @@ def find_null_reason_challenges(conn: "DuckDBPyConnection") -> list[dict]:
         """,
     ).fetchall()
     cols = [
-        "challenge_id", "target_edge_id", "target_edge_type",
-        "target_confidence", "target_layer", "challenge_confidence",
-        "created_by", "created_at",
+        "challenge_id",
+        "target_edge_id",
+        "target_edge_type",
+        "target_confidence",
+        "target_layer",
+        "challenge_confidence",
+        "created_by",
+        "created_at",
     ]
     return [dict(zip(cols, row)) for row in rows]
 
@@ -225,9 +221,7 @@ def backfill_challenge_reasons(
         try:
             reason = infer_challenge_reason(target_tuple)
         except Exception as e:  # pragma: no cover — defensive
-            result["errors"].append(
-                f"{row['challenge_id']}: inference failed: {e}"
-            )
+            result["errors"].append(f"{row['challenge_id']}: inference failed: {e}")
             continue
 
         if not reason or not reason.strip():
@@ -235,16 +229,16 @@ def backfill_challenge_reasons(
             # but per OHM-e0t1 acceptance: "No challenges are
             # modified without an explicit rationale." Skip with an
             # error rather than write an empty string.
-            result["errors"].append(
-                f"{row['challenge_id']}: inference produced empty reason (target {row['target_edge_id']})"
-            )
+            result["errors"].append(f"{row['challenge_id']}: inference produced empty reason (target {row['target_edge_id']})")
             continue
 
-        result["proposed"].append({
-            "challenge_id": row["challenge_id"],
-            "target_edge_id": row["target_edge_id"],
-            "reason": reason,
-        })
+        result["proposed"].append(
+            {
+                "challenge_id": row["challenge_id"],
+                "target_edge_id": row["target_edge_id"],
+                "reason": reason,
+            }
+        )
 
         if not dry_run:
             try:
@@ -255,14 +249,15 @@ def backfill_challenge_reasons(
                     [reason, reason, row["challenge_id"]],
                 )
                 _log_change(
-                    conn, "ohm_edges", row["challenge_id"],
-                    "UPDATE", agent,
+                    conn,
+                    "ohm_edges",
+                    row["challenge_id"],
+                    "UPDATE",
+                    agent,
                 )
                 result["backfilled"] += 1
             except Exception as e:
-                result["errors"].append(
-                    f"{row['challenge_id']}: update failed: {e}"
-                )
+                result["errors"].append(f"{row['challenge_id']}: update failed: {e}")
 
     return result
 
@@ -290,15 +285,8 @@ def require_challenge_reason(reason: str | None) -> str:
     acceptance criteria.
     """
     if reason is None:
-        raise EmptyChallengeReasonError(
-            "challenge_reason cannot be None — ADR-018 / OHM-e0t1 requires "
-            "explicit rationale for every challenge. Pass a non-empty string."
-        )
+        raise EmptyChallengeReasonError("challenge_reason cannot be None — ADR-018 / OHM-e0t1 requires explicit rationale for every challenge. Pass a non-empty string.")
     stripped = reason.strip()
     if not stripped:
-        raise EmptyChallengeReasonError(
-            "challenge_reason cannot be empty or whitespace-only — "
-            "ADR-018 / OHM-e0t1 requires explicit rationale. "
-            "Pass a non-empty string describing why this edge is challenged."
-        )
+        raise EmptyChallengeReasonError("challenge_reason cannot be empty or whitespace-only — ADR-018 / OHM-e0t1 requires explicit rationale. Pass a non-empty string describing why this edge is challenged.")
     return stripped

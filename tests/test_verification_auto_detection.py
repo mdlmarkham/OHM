@@ -206,9 +206,7 @@ class TestCreateVerificationNudge:
             created_by="agent1",
             confidence=0.9,
         )
-        result = create_verification_nudge(
-            test_db, edge_id=e["id"], created_by="system", reason="Past due"
-        )
+        result = create_verification_nudge(test_db, edge_id=e["id"], created_by="system", reason="Past due")
         assert result["nudge_node"]["type"] == "task"
         assert result["nudge_edge"]["edge_type"] == "NUDGES_FOR_VERIFICATION"
         assert result["nudge_edge"]["layer"] == "L3"
@@ -250,9 +248,7 @@ class TestRecordVerificationOutcome:
             created_by="agent1",
             confidence=0.9,
         )
-        result = record_verification_outcome(
-            test_db, edge_id=e["id"], outcome="true", recorded_by="verifier"
-        )
+        result = record_verification_outcome(test_db, edge_id=e["id"], outcome="true", recorded_by="verifier")
         assert result["outcome"] == "true"
         assert result["confidence"] == 1.0
         assert "outcome_record" in result
@@ -269,9 +265,7 @@ class TestRecordVerificationOutcome:
             created_by="agent1",
             confidence=0.9,
         )
-        result = record_verification_outcome(
-            test_db, edge_id=e["id"], outcome="false", recorded_by="verifier"
-        )
+        result = record_verification_outcome(test_db, edge_id=e["id"], outcome="false", recorded_by="verifier")
         assert result["outcome"] == "false"
         assert result["confidence"] == 0.0
 
@@ -287,9 +281,7 @@ class TestRecordVerificationOutcome:
             created_by="agent1",
             confidence=0.9,
         )
-        result = record_verification_outcome(
-            test_db, edge_id=e["id"], outcome="ambiguous", recorded_by="verifier"
-        )
+        result = record_verification_outcome(test_db, edge_id=e["id"], outcome="ambiguous", recorded_by="verifier")
         assert result["outcome"] == "ambiguous"
         assert result["confidence"] == 0.5
 
@@ -306,9 +298,7 @@ class TestRecordVerificationOutcome:
             confidence=0.9,
         )
         create_verification_nudge(test_db, edge_id=e["id"], created_by="system")
-        result = record_verification_outcome(
-            test_db, edge_id=e["id"], outcome="deferred", recorded_by="verifier"
-        )
+        result = record_verification_outcome(test_db, edge_id=e["id"], outcome="deferred", recorded_by="verifier")
         assert result["deferred"] is True
         assert len(result["nudges_resolved"]) == 1
 
@@ -327,9 +317,7 @@ class TestRecordVerificationOutcome:
         create_verification_nudge(test_db, edge_id=e["id"], created_by="system")
         pending_before = list_pending_verifications(test_db)
         assert len(pending_before) == 1
-        record_verification_outcome(
-            test_db, edge_id=e["id"], outcome="true", recorded_by="verifier"
-        )
+        record_verification_outcome(test_db, edge_id=e["id"], outcome="true", recorded_by="verifier")
         pending_after = list_pending_verifications(test_db)
         assert len(pending_after) == 0
 
@@ -348,17 +336,13 @@ class TestRecordVerificationOutcome:
         from ohm.exceptions import ValidationError
 
         with pytest.raises(ValidationError):
-            record_verification_outcome(
-                test_db, edge_id=e["id"], outcome="maybe", recorded_by="verifier"
-            )
+            record_verification_outcome(test_db, edge_id=e["id"], outcome="maybe", recorded_by="verifier")
 
     def test_raises_on_missing_edge(self, test_db):
         from ohm.exceptions import EdgeNotFoundError
 
         with pytest.raises(EdgeNotFoundError):
-            record_verification_outcome(
-                test_db, edge_id="nonexistent", outcome="true", recorded_by="verifier"
-            )
+            record_verification_outcome(test_db, edge_id="nonexistent", outcome="true", recorded_by="verifier")
 
 
 class TestListPendingVerifications:
@@ -392,9 +376,7 @@ class TestListPendingVerifications:
             confidence=0.9,
         )
         create_verification_nudge(test_db, edge_id=e["id"], created_by="system")
-        record_verification_outcome(
-            test_db, edge_id=e["id"], outcome="true", recorded_by="verifier"
-        )
+        record_verification_outcome(test_db, edge_id=e["id"], outcome="true", recorded_by="verifier")
         results = list_pending_verifications(test_db)
         assert len(results) == 0
 
@@ -508,9 +490,7 @@ class TestEndToEndWorkflow:
         assert nudge["nudge_edge"]["edge_type"] == "NUDGES_FOR_VERIFICATION"
         pending = g.list_pending_verifications()
         assert len(pending) == 1
-        result = g.record_verification_outcome(
-            edge_id=edge_id, outcome="false", reason="Disproved"
-        )
+        result = g.record_verification_outcome(edge_id=edge_id, outcome="false", reason="Disproved")
         assert result["outcome"] == "false"
         assert result["confidence"] == 0.0
         assert len(result["nudges_resolved"]) == 1
@@ -537,9 +517,7 @@ class TestEndToEndWorkflow:
         assert len(claims) == 1
         edge_id = claims[0]["id"]
         g.create_verification_nudge(edge_id=edge_id)
-        result = g.record_verification_outcome(
-            edge_id=edge_id, outcome="deferred", reason="Need more data"
-        )
+        result = g.record_verification_outcome(edge_id=edge_id, outcome="deferred", reason="Need more data")
         assert result["deferred"] is True
         pending = g.list_pending_verifications()
         assert len(pending) == 0

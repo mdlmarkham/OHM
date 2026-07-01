@@ -46,9 +46,7 @@ try:
 except Exception:
     DUCKLAKE_AVAILABLE = False
 duckdb_connection.close()
-_skip_no_ducklake = pytest.mark.skipif(
-    not DUCKLAKE_AVAILABLE, reason="ducklake extension not available"
-)
+_skip_no_ducklake = pytest.mark.skipif(not DUCKLAKE_AVAILABLE, reason="ducklake extension not available")
 
 
 # A minimal TOPO config with a single domain table for the pilot.
@@ -98,13 +96,9 @@ class TestTopoLibraryModePilot:
         initialize_schema(conn, cfg)
         # Core tables
         for t in ("ohm_nodes", "ohm_edges", "ohm_observations"):
-            assert conn.execute(
-                f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name='{t}'"
-            ).fetchone()[0] == 1
+            assert conn.execute(f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name='{t}'").fetchone()[0] == 1
         # Domain table from OHM-vl8o
-        assert conn.execute(
-            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name='topo_prospects'"
-        ).fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_name='topo_prospects'").fetchone()[0] == 1
         # DuckLake registry (OHM-8bli) includes the domain table
         names = {dlt.name for dlt in cfg.ducklake_tables}
         assert "topo_prospects" in names
@@ -153,27 +147,17 @@ class TestTopoLibraryModePilot:
         )
         store.conn.execute("CHECKPOINT")
         # Pre-crash row counts.
-        before_nodes = store.conn.execute(
-            "SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL"
-        ).fetchone()[0]
-        before_prospects = store.conn.execute(
-            "SELECT COUNT(*) FROM topo_prospects"
-        ).fetchone()[0]
+        before_nodes = store.conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL").fetchone()[0]
+        before_prospects = store.conn.execute("SELECT COUNT(*) FROM topo_prospects").fetchone()[0]
         assert before_nodes == 2
         assert before_prospects == 2
 
         # ── Phase 2: attach DuckLake and push to mirror ──────────────────
-        attached = store.attach_ducklake(
-            catalog_path=ducklake_path, data_path=data_path
-        )
+        attached = store.attach_ducklake(catalog_path=ducklake_path, data_path=data_path)
         assert attached, "DuckLake attach failed"
         # The mirror for topo_prospects should be auto-created from the
         # registry (OHM-8bli). Verify the catalog has the table.
-        mirror_cols = store.conn.execute(
-            "SELECT column_name, data_type FROM information_schema.columns "
-            "WHERE table_catalog='ohm_lake' AND table_name='topo_prospects' "
-            "ORDER BY ordinal_position"
-        ).fetchall()
+        mirror_cols = store.conn.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_catalog='ohm_lake' AND table_name='topo_prospects' ORDER BY ordinal_position").fetchall()
         # All VARCHAR (mirror convention).
         for col, dtype in mirror_cols:
             assert dtype == "VARCHAR", f"mirror column {col} expected VARCHAR, got {dtype}"
@@ -183,13 +167,9 @@ class TestTopoLibraryModePilot:
         pushed = store.sync_to_ducklake(alias="ohm_lake")
         assert pushed > 0
         # Verify the mirror has the data.
-        mirror_prospects_count = store.conn.execute(
-            "SELECT COUNT(*) FROM ohm_lake.topo_prospects"
-        ).fetchone()[0]
+        mirror_prospects_count = store.conn.execute("SELECT COUNT(*) FROM ohm_lake.topo_prospects").fetchone()[0]
         assert mirror_prospects_count == 2
-        mirror_nodes_count = store.conn.execute(
-            "SELECT COUNT(*) FROM ohm_lake.ohm_nodes"
-        ).fetchone()[0]
+        mirror_nodes_count = store.conn.execute("SELECT COUNT(*) FROM ohm_lake.ohm_nodes").fetchone()[0]
         assert mirror_nodes_count == 2
         store.close()
 
@@ -204,53 +184,33 @@ class TestTopoLibraryModePilot:
         assert not os.path.exists(local_path)
 
         # ── Phase 4: reopen on a fresh local DB with the same config ────
-        new_store = OhmStore(
-            db_path=local_path, schema=cfg, agent_name="pilot_recovery"
-        )
+        new_store = OhmStore(db_path=local_path, schema=cfg, agent_name="pilot_recovery")
         # Confirm the new store starts empty (no auto-restore yet —
         # repair_from_ducklake is the explicit recovery step).
-        empty_nodes = new_store.conn.execute(
-            "SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL"
-        ).fetchone()[0]
-        empty_prospects = new_store.conn.execute(
-            "SELECT COUNT(*) FROM topo_prospects"
-        ).fetchone()[0]
+        empty_nodes = new_store.conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL").fetchone()[0]
+        empty_prospects = new_store.conn.execute("SELECT COUNT(*) FROM topo_prospects").fetchone()[0]
         assert empty_nodes == 0
         assert empty_prospects == 0
 
         # Re-attach DuckLake (the catalog from Phase 2 is still on disk).
         new_store.ducklake_path = ducklake_path
         new_store.ducklake_data_path = data_path
-        attached = new_store.attach_ducklake(
-            catalog_path=ducklake_path, data_path=data_path
-        )
+        attached = new_store.attach_ducklake(catalog_path=ducklake_path, data_path=data_path)
         assert attached, "DuckLake re-attach on recovery failed"
 
         # ── Phase 5: run repair_from_ducklake() ─────────────────────────
         result = new_store.repair_from_ducklake(alias="ohm_lake")
         # Should report successful inserts from the mirror.
-        assert result["verified"], (
-            f"repair did not verify: errors={result.get('errors', [])}"
-        )
+        assert result["verified"], f"repair did not verify: errors={result.get('errors', [])}"
         assert result["inserted"] >= 4  # 2 nodes + 2 prospects
 
         # ── Phase 6: verify row counts match the pre-crash state ───────
-        recovered_nodes = new_store.conn.execute(
-            "SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL"
-        ).fetchone()[0]
-        recovered_prospects = new_store.conn.execute(
-            "SELECT COUNT(*) FROM topo_prospects"
-        ).fetchone()[0]
-        assert recovered_nodes == before_nodes, (
-            f"nodes mismatch: before={before_nodes}, after={recovered_nodes}"
-        )
-        assert recovered_prospects == before_prospects, (
-            f"prospects mismatch: before={before_prospects}, after={recovered_prospects}"
-        )
+        recovered_nodes = new_store.conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL").fetchone()[0]
+        recovered_prospects = new_store.conn.execute("SELECT COUNT(*) FROM topo_prospects").fetchone()[0]
+        assert recovered_nodes == before_nodes, f"nodes mismatch: before={before_nodes}, after={recovered_nodes}"
+        assert recovered_prospects == before_prospects, f"prospects mismatch: before={before_prospects}, after={recovered_prospects}"
         # Spot-check a domain-table row: the high-risk motor with RUL 30.5d.
-        p1 = new_store.conn.execute(
-            "SELECT equipment_id, rul_days, risk_class FROM topo_prospects WHERE id='p1'"
-        ).fetchone()
+        p1 = new_store.conn.execute("SELECT equipment_id, rul_days, risk_class FROM topo_prospects WHERE id='p1'").fetchone()
         assert p1 is not None
         assert p1[0] == "motor_01"
         assert p1[1] == 30.5
@@ -285,9 +245,7 @@ class TestTopoPilotScenarios:
             store.write_node("legacy_motor", "Legacy motor", "EQUIPMENT", confidence=0.7)
             # The store should canonicalize on write (or at least accept
             # without rejecting). The query path is case-insensitive.
-            row = store.conn.execute(
-                "SELECT type FROM ohm_nodes WHERE id='legacy_motor'"
-            ).fetchone()
+            row = store.conn.execute("SELECT type FROM ohm_nodes WHERE id='legacy_motor'").fetchone()
             assert row is not None
         finally:
             store.close()

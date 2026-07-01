@@ -54,8 +54,7 @@ class TestFeedbackGraphEdgeTypes:
         assert "INTERVENES_ON" in LAYER_EDGE_TYPES["L4"]
 
     def test_all_new_edges_in_all_edge_types(self):
-        for et in ("COUNTERFACTUAL_OF", "PROPOSES_ACTION", "EVALUATES",
-                   "PROPOSED_BY", "EXECUTED_BY", "FEEDBACK_TO", "INTERVENES_ON"):
+        for et in ("COUNTERFACTUAL_OF", "PROPOSES_ACTION", "EVALUATES", "PROPOSED_BY", "EXECUTED_BY", "FEEDBACK_TO", "INTERVENES_ON"):
             assert et in ALL_EDGE_TYPES
 
 
@@ -95,8 +94,11 @@ class TestFeedbackGraphIntegration:
 
         target = create_node(test_db, label="Target Concept", node_type="concept", created_by="metis")
         scenario = create_node(
-            test_db, label="What if reliability drops?", node_type="scenario",
-            created_by="metis", connects_to=[target["id"]],
+            test_db,
+            label="What if reliability drops?",
+            node_type="scenario",
+            created_by="metis",
+            connects_to=[target["id"]],
         )
         assert scenario["type"] == "scenario"
         assert scenario["id"]
@@ -106,8 +108,11 @@ class TestFeedbackGraphIntegration:
 
         scenario = create_node(test_db, label="Test Scenario", node_type="scenario", created_by="metis")
         action = create_node(
-            test_db, label="Increase buffer stock", node_type="action",
-            created_by="metis", connects_to=[scenario["id"]],
+            test_db,
+            label="Increase buffer stock",
+            node_type="action",
+            created_by="metis",
+            connects_to=[scenario["id"]],
         )
         assert action["type"] == "action"
 
@@ -116,8 +121,11 @@ class TestFeedbackGraphIntegration:
 
         target = create_node(test_db, label="Supplier", node_type="concept", created_by="metis")
         intervention = create_node(
-            test_db, label="Force supplier to 0.9", node_type="intervention",
-            created_by="metis", connects_to=[target["id"]],
+            test_db,
+            label="Force supplier to 0.9",
+            node_type="intervention",
+            created_by="metis",
+            connects_to=[target["id"]],
         )
         assert intervention["type"] == "intervention"
 
@@ -126,8 +134,7 @@ class TestFeedbackGraphIntegration:
 
         original = create_node(test_db, label="Original", node_type="concept", created_by="metis")
         scenario = create_node(test_db, label="CF Scenario", node_type="scenario", created_by="metis")
-        edge = create_edge(test_db, from_node=scenario["id"], to_node=original["id"],
-                           edge_type="COUNTERFACTUAL_OF", layer="L3", created_by="metis")
+        edge = create_edge(test_db, from_node=scenario["id"], to_node=original["id"], edge_type="COUNTERFACTUAL_OF", layer="L3", created_by="metis")
         assert edge["edge_type"] == "COUNTERFACTUAL_OF"
 
     def test_create_proposed_by_edge(self, test_db):
@@ -135,8 +142,7 @@ class TestFeedbackGraphIntegration:
 
         scenario = create_node(test_db, label="Scenario", node_type="scenario", created_by="metis")
         action = create_node(test_db, label="Action", node_type="action", created_by="metis")
-        edge = create_edge(test_db, from_node=action["id"], to_node=scenario["id"],
-                           edge_type="PROPOSED_BY", layer="L4", created_by="metis")
+        edge = create_edge(test_db, from_node=action["id"], to_node=scenario["id"], edge_type="PROPOSED_BY", layer="L4", created_by="metis")
         assert edge["edge_type"] == "PROPOSED_BY"
 
     def test_create_intervenes_on_edge(self, test_db):
@@ -144,8 +150,7 @@ class TestFeedbackGraphIntegration:
 
         target = create_node(test_db, label="Target", node_type="concept", created_by="metis")
         intervention = create_node(test_db, label="Force State", node_type="intervention", created_by="metis")
-        edge = create_edge(test_db, from_node=intervention["id"], to_node=target["id"],
-                          edge_type="INTERVENES_ON", layer="L4", created_by="metis")
+        edge = create_edge(test_db, from_node=intervention["id"], to_node=target["id"], edge_type="INTERVENES_ON", layer="L4", created_by="metis")
         assert edge["edge_type"] == "INTERVENES_ON"
 
 
@@ -180,40 +185,33 @@ class TestGateGovernance:
         assert "constraint_expr" in stmts
 
     def test_gate_type_column_exists(self, test_db):
-        cols = test_db.execute(
-            "SELECT column_name FROM information_schema.columns WHERE table_name = 'ohm_nodes' AND column_name = 'gate_type'"
-        ).fetchall()
+        cols = test_db.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'ohm_nodes' AND column_name = 'gate_type'").fetchall()
         assert len(cols) == 1
 
     def test_gate_status_column_exists(self, test_db):
-        cols = test_db.execute(
-            "SELECT column_name FROM information_schema.columns WHERE table_name = 'ohm_nodes' AND column_name = 'gate_status'"
-        ).fetchall()
+        cols = test_db.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'ohm_nodes' AND column_name = 'gate_status'").fetchall()
         assert len(cols) == 1
 
     def test_constraint_expr_column_exists(self, test_db):
-        cols = test_db.execute(
-            "SELECT column_name FROM information_schema.columns WHERE table_name = 'ohm_edges' AND column_name = 'constraint_expr'"
-        ).fetchall()
+        cols = test_db.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'ohm_edges' AND column_name = 'constraint_expr'").fetchall()
         assert len(cols) == 1
 
     def test_node_with_gate_type(self, test_db):
         from ohm.queries import create_node
+
         n = create_node(test_db, label="AND-gate Node", node_type="concept", created_by="metis")
-        test_db.execute("UPDATE ohm_nodes SET gate_type = ?, gate_status = ? WHERE id = ?",
-                        ["AND", "intact", n["id"]])
+        test_db.execute("UPDATE ohm_nodes SET gate_type = ?, gate_status = ? WHERE id = ?", ["AND", "intact", n["id"]])
         row = test_db.execute("SELECT gate_type, gate_status FROM ohm_nodes WHERE id = ?", [n["id"]]).fetchone()
         assert row[0] == "AND"
         assert row[1] == "intact"
 
     def test_edge_with_constraint_expr(self, test_db):
         from ohm.queries import create_node, create_edge
+
         a = create_node(test_db, label="A", node_type="concept", created_by="metis")
         b = create_node(test_db, label="B", node_type="concept", created_by="metis")
-        e = create_edge(test_db, from_node=a["id"], to_node=b["id"],
-                        edge_type="CAUSES", layer="L3", created_by="metis")
-        test_db.execute("UPDATE ohm_edges SET constraint_expr = ? WHERE id = ?",
-                        ["A AND B AND C", e["id"]])
+        e = create_edge(test_db, from_node=a["id"], to_node=b["id"], edge_type="CAUSES", layer="L3", created_by="metis")
+        test_db.execute("UPDATE ohm_edges SET constraint_expr = ? WHERE id = ?", ["A AND B AND C", e["id"]])
         row = test_db.execute("SELECT constraint_expr FROM ohm_edges WHERE id = ?", [e["id"]]).fetchone()
         assert row[0] == "A AND B AND C"
 
@@ -226,6 +224,7 @@ class TestProposeAction:
 
     def test_creates_action_node(self, test_db):
         from ohm.queries import create_node, propose_action
+
         target = create_node(test_db, label="Target", node_type="concept", created_by="metis")
         scenario = create_node(test_db, label="Scenario", node_type="scenario", created_by="metis", connects_to=[target["id"]])
         action = propose_action(test_db, scenario_id=scenario["id"], label="Do something", created_by="metis")
@@ -234,6 +233,7 @@ class TestProposeAction:
 
     def test_links_to_scenario(self, test_db):
         from ohm.queries import create_node, propose_action
+
         target = create_node(test_db, label="T", node_type="concept", created_by="metis")
         scenario = create_node(test_db, label="S", node_type="scenario", created_by="metis", connects_to=[target["id"]])
         action = propose_action(test_db, scenario_id=scenario["id"], label="A", created_by="metis")
@@ -250,6 +250,7 @@ class TestExecuteAction:
 
     def test_sets_status_to_executed(self, test_db):
         from ohm.queries import create_node, propose_action, execute_action
+
         target = create_node(test_db, label="T", node_type="concept", created_by="metis")
         scenario = create_node(test_db, label="S", node_type="scenario", created_by="metis", connects_to=[target["id"]])
         action = propose_action(test_db, scenario_id=scenario["id"], label="A", created_by="metis")
@@ -259,6 +260,7 @@ class TestExecuteAction:
 
     def test_creates_executed_by_edge(self, test_db):
         from ohm.queries import create_node, propose_action, execute_action
+
         target = create_node(test_db, label="T", node_type="concept", created_by="metis")
         scenario = create_node(test_db, label="S", node_type="scenario", created_by="metis", connects_to=[target["id"]])
         action = propose_action(test_db, scenario_id=scenario["id"], label="A", created_by="metis")
@@ -272,6 +274,7 @@ class TestExecuteAction:
     def test_missing_action_raises(self, test_db):
         from ohm.queries import execute_action
         from ohm.exceptions import NodeNotFoundError
+
         with pytest.raises(NodeNotFoundError):
             execute_action(test_db, action_id="does-not-exist", executed_by="metis")
 
@@ -281,12 +284,14 @@ class TestLoopStatus:
 
     def test_empty_loop_returns_empty(self, test_db):
         from ohm.queries import query_loop_status
+
         status = query_loop_status(test_db)
         assert status["summary"]["total"] == 0
         assert status["summary"]["proposed"] == 0
 
     def test_shows_proposed_actions(self, test_db):
         from ohm.queries import create_node, propose_action, query_loop_status
+
         target = create_node(test_db, label="T", node_type="concept", created_by="metis")
         scenario = create_node(test_db, label="S", node_type="scenario", created_by="metis", connects_to=[target["id"]])
         propose_action(test_db, scenario_id=scenario["id"], label="A", created_by="metis")
@@ -296,6 +301,7 @@ class TestLoopStatus:
 
     def test_shows_executed_actions_with_outcomes(self, test_db):
         from ohm.queries import create_node, propose_action, execute_action, query_loop_status
+
         target = create_node(test_db, label="T", node_type="concept", created_by="metis")
         scenario = create_node(test_db, label="S", node_type="scenario", created_by="metis", connects_to=[target["id"]])
         action = propose_action(test_db, scenario_id=scenario["id"], label="A", created_by="metis")
@@ -306,6 +312,7 @@ class TestLoopStatus:
 
     def test_shows_recent_scenarios(self, test_db):
         from ohm.queries import create_node, propose_action, query_loop_status
+
         target = create_node(test_db, label="T", node_type="concept", created_by="metis")
         scenario = create_node(test_db, label="My Scenario", node_type="scenario", created_by="metis", connects_to=[target["id"]])
         propose_action(test_db, scenario_id=scenario["id"], label="A", created_by="metis")

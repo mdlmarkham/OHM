@@ -92,6 +92,7 @@ class TestNeighborhoodNarrative:
 
     def test_missing_node_raises(self, test_conn):
         from ohm.exceptions import NodeNotFoundError
+
         with pytest.raises(NodeNotFoundError):
             query_neighborhood_narrative(test_conn, "does-not-exist-1234")
 
@@ -104,10 +105,14 @@ class TestNeighborhoodNarrative:
 
     def test_evidence_includes_observations(self, test_conn):
         from ohm.queries import create_observation
+
         nodes = _seed_graph(test_conn)
         create_observation(
-            test_conn, node_id=nodes["a"]["id"], obs_type="measurement",
-            created_by="metis", value=0.85,
+            test_conn,
+            node_id=nodes["a"]["id"],
+            obs_type="measurement",
+            created_by="metis",
+            value=0.85,
         )
         r = query_neighborhood_narrative(test_conn, nodes["a"]["id"])
         assert len(r["evidence"]) >= 1
@@ -117,6 +122,7 @@ class TestNeighborhoodNarrative:
         nodes = _seed_graph(test_conn)
         r = query_neighborhood_narrative(test_conn, nodes["a"]["id"])
         import json
+
         # Should be JSON-serializable for HTTP response
         serialized = json.dumps(r, default=str)
         assert "Hormuz" in serialized
@@ -189,6 +195,7 @@ class TestClaimLineage:
 
     def test_missing_node_raises(self, test_conn):
         from ohm.exceptions import NodeNotFoundError
+
         with pytest.raises(NodeNotFoundError):
             query_claim_lineage(test_conn, "does-not-exist-1234")
 
@@ -204,6 +211,7 @@ class TestClaimLineage:
         nodes = _seed_lineage_graph(test_conn)
         r = query_claim_lineage(test_conn, nodes["pattern"]["id"])
         import json
+
         serialized = json.dumps(r, default=str)
         assert "Demand Rationing" in serialized
 
@@ -216,18 +224,15 @@ class TestContradictionSummary:
 
     def test_no_contradiction_on_neutral_node(self, test_conn):
         n = create_node(test_conn, label="Neutral", node_type="concept", created_by="test")
-        create_observation(test_conn, node_id=n["id"], obs_type="measurement",
-                           created_by="test", value=0.5, baseline=0.5)
+        create_observation(test_conn, node_id=n["id"], obs_type="measurement", created_by="test", value=0.5, baseline=0.5)
         r = query_contradiction_summary(test_conn, n["id"])
         assert r["has_contradiction"] is False
         assert r["recommendation"] == "no_contradiction"
 
     def test_detects_opposite_observations(self, test_conn):
         n = create_node(test_conn, label="Price Index", node_type="concept", created_by="metis")
-        create_observation(test_conn, node_id=n["id"], obs_type="measurement",
-                           created_by="metis", value=0.9, baseline=0.5)
-        create_observation(test_conn, node_id=n["id"], obs_type="measurement",
-                           created_by="hephaestus", value=0.1, baseline=0.5)
+        create_observation(test_conn, node_id=n["id"], obs_type="measurement", created_by="metis", value=0.9, baseline=0.5)
+        create_observation(test_conn, node_id=n["id"], obs_type="measurement", created_by="hephaestus", value=0.1, baseline=0.5)
         r = query_contradiction_summary(test_conn, n["id"])
         assert r["has_contradiction"] is True
         assert len(r["sides"]) == 2
@@ -237,10 +242,8 @@ class TestContradictionSummary:
 
     def test_sides_have_agents_and_observations(self, test_conn):
         n = create_node(test_conn, label="Debated", node_type="concept", created_by="metis")
-        create_observation(test_conn, node_id=n["id"], obs_type="measurement",
-                           created_by="metis", value=0.9, baseline=0.5)
-        create_observation(test_conn, node_id=n["id"], obs_type="measurement",
-                           created_by="hephaestus", value=0.1, baseline=0.5)
+        create_observation(test_conn, node_id=n["id"], obs_type="measurement", created_by="metis", value=0.9, baseline=0.5)
+        create_observation(test_conn, node_id=n["id"], obs_type="measurement", created_by="hephaestus", value=0.1, baseline=0.5)
         r = query_contradiction_summary(test_conn, n["id"])
         for side in r["sides"]:
             assert len(side["agents"]) >= 1
@@ -250,21 +253,17 @@ class TestContradictionSummary:
 
     def test_recommendation_identifies_stronger_side(self, test_conn):
         n = create_node(test_conn, label="Contested", node_type="concept", created_by="metis")
-        create_observation(test_conn, node_id=n["id"], obs_type="measurement",
-                           created_by="metis", value=0.95, baseline=0.5)
-        create_observation(test_conn, node_id=n["id"], obs_type="measurement",
-                           created_by="hephaestus", value=0.05, baseline=0.5)
+        create_observation(test_conn, node_id=n["id"], obs_type="measurement", created_by="metis", value=0.95, baseline=0.5)
+        create_observation(test_conn, node_id=n["id"], obs_type="measurement", created_by="hephaestus", value=0.05, baseline=0.5)
         r = query_contradiction_summary(test_conn, n["id"])
         assert "stronger" in r["recommendation"].lower()
 
     def test_recommendation_unresolved_when_balanced(self, test_conn):
         # Use identical values on opposite sides of baseline to get balanced confidence
         n = create_node(test_conn, label="Balanced", node_type="concept", created_by="metis")
-        create_observation(test_conn, node_id=n["id"], obs_type="measurement",
-                           created_by="metis", value=0.5, baseline=0.5)
+        create_observation(test_conn, node_id=n["id"], obs_type="measurement", created_by="metis", value=0.5, baseline=0.5)
         # Two agents with the SAME value but both at baseline — neutral, no contradiction
-        create_observation(test_conn, node_id=n["id"], obs_type="measurement",
-                           created_by="hephaestus", value=0.5, baseline=0.5)
+        create_observation(test_conn, node_id=n["id"], obs_type="measurement", created_by="hephaestus", value=0.5, baseline=0.5)
         r = query_contradiction_summary(test_conn, n["id"])
         # Both observations are at baseline → no above/below split → no contradiction
         assert r["has_contradiction"] is False
@@ -278,6 +277,7 @@ class TestContradictionSummary:
 
     def test_missing_node_raises(self, test_conn):
         from ohm.exceptions import NodeNotFoundError
+
         with pytest.raises(NodeNotFoundError):
             query_contradiction_summary(test_conn, "does-not-exist-1234")
 
@@ -289,12 +289,11 @@ class TestContradictionSummary:
 
     def test_json_serializable(self, test_conn):
         n = create_node(test_conn, label="Serial", node_type="concept", created_by="metis")
-        create_observation(test_conn, node_id=n["id"], obs_type="measurement",
-                           created_by="metis", value=0.9, baseline=0.5)
-        create_observation(test_conn, node_id=n["id"], obs_type="measurement",
-                           created_by="hephaestus", value=0.1, baseline=0.5)
+        create_observation(test_conn, node_id=n["id"], obs_type="measurement", created_by="metis", value=0.9, baseline=0.5)
+        create_observation(test_conn, node_id=n["id"], obs_type="measurement", created_by="hephaestus", value=0.1, baseline=0.5)
         r = query_contradiction_summary(test_conn, n["id"])
         import json
+
         serialized = json.dumps(r, default=str)
         assert "Serial" in serialized
 
@@ -310,12 +309,10 @@ def _seed_task_graph(conn):
         ["open", "metis", "Claim holds for 30 days", "hormuz_claim", task["id"]],
     )
     decision = create_node(conn, label="Strategic Decision", node_type="decision", created_by="metis")
-    create_edge(conn, from_node=task["id"], to_node=decision["id"],
-                edge_type="DECISION_DEPENDS_ON", layer="L3", created_by="metis")
+    create_edge(conn, from_node=task["id"], to_node=decision["id"], edge_type="DECISION_DEPENDS_ON", layer="L3", created_by="metis")
     blocker = create_node(conn, label="Gather Data", node_type="task", created_by="hephaestus")
     conn.execute("UPDATE ohm_nodes SET task_status = ? WHERE id = ?", ["in_progress", blocker["id"]])
-    create_edge(conn, from_node=task["id"], to_node=blocker["id"],
-                edge_type="DEPENDS_ON", layer="L4", created_by="metis")
+    create_edge(conn, from_node=task["id"], to_node=blocker["id"], edge_type="DEPENDS_ON", layer="L4", created_by="metis")
     return {"task": task, "decision": decision, "blocker": blocker}
 
 
@@ -372,6 +369,7 @@ class TestTaskContext:
 
     def test_missing_task_raises(self, test_conn):
         from ohm.exceptions import NodeNotFoundError
+
         with pytest.raises(NodeNotFoundError):
             query_task_context(test_conn, "does-not-exist-1234")
 
@@ -387,6 +385,7 @@ class TestTaskContext:
         nodes = _seed_task_graph(test_conn)
         r = query_task_context(test_conn, nodes["task"]["id"])
         import json
+
         serialized = json.dumps(r, default=str)
         assert "Verify Hormuz" in serialized
 
@@ -412,16 +411,14 @@ class TestConfidenceReport:
     def test_new_beliefs_detected(self, test_conn):
         a = create_node(test_conn, label="A", node_type="concept", created_by="metis")
         b = create_node(test_conn, label="B", node_type="concept", created_by="metis")
-        create_edge(test_conn, from_node=a["id"], to_node=b["id"],
-                    edge_type="CAUSES", layer="L3", created_by="metis")
+        create_edge(test_conn, from_node=a["id"], to_node=b["id"], edge_type="CAUSES", layer="L3", created_by="metis")
         r = query_confidence_report(test_conn, agent_name="metis", since="2000-01-01T00:00:00")
         assert r["summary"]["new"] >= 1
 
     def test_shifted_beliefs_detected(self, test_conn):
         a = create_node(test_conn, label="A", node_type="concept", created_by="metis")
         b = create_node(test_conn, label="B", node_type="concept", created_by="metis")
-        e = create_edge(test_conn, from_node=a["id"], to_node=b["id"],
-                        edge_type="CAUSES", layer="L3", created_by="metis")
+        e = create_edge(test_conn, from_node=a["id"], to_node=b["id"], edge_type="CAUSES", layer="L3", created_by="metis")
         # Wait for updated_at to differ from created_at
         time.sleep(0.02)
         test_conn.execute(
@@ -437,8 +434,7 @@ class TestConfidenceReport:
     def test_stale_beliefs_detected(self, test_conn):
         a = create_node(test_conn, label="A", node_type="concept", created_by="metis")
         b = create_node(test_conn, label="B", node_type="concept", created_by="metis")
-        e = create_edge(test_conn, from_node=a["id"], to_node=b["id"],
-                        edge_type="CAUSES", layer="L3", created_by="metis")
+        e = create_edge(test_conn, from_node=a["id"], to_node=b["id"], edge_type="CAUSES", layer="L3", created_by="metis")
         test_conn.execute("UPDATE ohm_edges SET confidence = 0.05 WHERE id = ?", [e["id"]])
         r = query_confidence_report(test_conn, agent_name="metis", since="2000-01-01T00:00:00")
         assert r["summary"]["stale"] >= 1
@@ -452,9 +448,9 @@ class TestConfidenceReport:
     def test_json_serializable(self, test_conn):
         a = create_node(test_conn, label="A", node_type="concept", created_by="metis")
         b = create_node(test_conn, label="B", node_type="concept", created_by="metis")
-        create_edge(test_conn, from_node=a["id"], to_node=b["id"],
-                    edge_type="CAUSES", layer="L3", created_by="metis")
+        create_edge(test_conn, from_node=a["id"], to_node=b["id"], edge_type="CAUSES", layer="L3", created_by="metis")
         r = query_confidence_report(test_conn, agent_name="metis", since="2000-01-01T00:00:00")
         import json
+
         serialized = json.dumps(r, default=str)
         assert "metis" in serialized

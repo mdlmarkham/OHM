@@ -241,10 +241,7 @@ class TestInitializeSchemaWithDomainTables:
         cfg = SchemaConfig(name="t", domain_tables=[dt])
         conn = duckdb.connect(":memory:")
         initialize_schema(conn, cfg)
-        tables = conn.execute(
-            "SELECT table_name FROM information_schema.tables "
-            "WHERE table_name='topo_prospects'"
-        ).fetchall()
+        tables = conn.execute("SELECT table_name FROM information_schema.tables WHERE table_name='topo_prospects'").fetchall()
         assert tables
 
     def test_creates_indexes(self):
@@ -252,16 +249,12 @@ class TestInitializeSchemaWithDomainTables:
             name="topo_x",
             columns=(("id", "VARCHAR"), ("equipment_id", "VARCHAR")),
             primary_key="id",
-            indexes=(
-                ("idx_topo_x_eq", ("equipment_id",)),
-            ),
+            indexes=(("idx_topo_x_eq", ("equipment_id",)),),
         )
         cfg = SchemaConfig(name="t", domain_tables=[dt])
         conn = duckdb.connect(":memory:")
         initialize_schema(conn, cfg)
-        idx = conn.execute(
-            "SELECT index_name FROM duckdb_indexes() WHERE table_name='topo_x'"
-        ).fetchall()
+        idx = conn.execute("SELECT index_name FROM duckdb_indexes() WHERE table_name='topo_x'").fetchall()
         idx_names = {row[0] for row in idx}
         assert "idx_topo_x_eq" in idx_names
 
@@ -320,9 +313,7 @@ class TestInitializeSchemaWithDomainTables:
         cfg = SchemaConfig(name="t", domain_tables=[dt])
         conn = duckdb.connect(":memory:")
         initialize_schema(conn, cfg)
-        row = conn.execute(
-            "SELECT value FROM ohm_meta WHERE key='domain_tables:t:ordering'"
-        ).fetchone()
+        row = conn.execute("SELECT value FROM ohm_meta WHERE key='domain_tables:t:ordering'").fetchone()
         assert row is not None
         assert row[0] == "42"
 
@@ -330,24 +321,17 @@ class TestInitializeSchemaWithDomainTables:
         # Backward compat: no schema arg → DEFAULT_SCHEMA → no domain tables.
         conn = duckdb.connect(":memory:")
         initialize_schema(conn)
-        rows = conn.execute(
-            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name LIKE 'topo_%'"
-        ).fetchone()
+        rows = conn.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_name LIKE 'topo_%'").fetchone()
         assert rows[0] == 0
         # Core OHM tables still present.
-        rows = conn.execute(
-            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name='ohm_nodes'"
-        ).fetchone()
+        rows = conn.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_name='ohm_nodes'").fetchone()
         assert rows[0] == 1
 
     def test_topo_template_creates_topo_prospects(self):
         topo = SchemaConfig.from_json_file("topo.json")
         conn = duckdb.connect(":memory:")
         initialize_schema(conn, topo)
-        rows = conn.execute(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name='topo_prospects' ORDER BY ordinal_position"
-        ).fetchall()
+        rows = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='topo_prospects' ORDER BY ordinal_position").fetchall()
         cols = {row[0] for row in rows}
         assert {"id", "equipment_id", "site_id", "rul_days", "risk_class", "model_version"} <= cols
 
@@ -373,10 +357,7 @@ class TestInitializeSchemaWithDomainTables:
         conn = duckdb.connect(":memory:")
         initialize_schema(conn, cfg)
         # Both tables exist.
-        tables = {row[0] for row in conn.execute(
-            "SELECT table_name FROM information_schema.tables "
-            "WHERE table_name IN ('bad','good')"
-        ).fetchall()}
+        tables = {row[0] for row in conn.execute("SELECT table_name FROM information_schema.tables WHERE table_name IN ('bad','good')").fetchall()}
         assert tables == {"bad", "good"}
 
 
@@ -424,9 +405,7 @@ class TestOhmStoreSchemaPropagates:
         cfg = SchemaConfig(name="topo", domain_tables=[dt])
         store = OhmStore(db_path=":memory:", schema=cfg)
         # The store's init ran during __init__. Verify the table exists.
-        rows = store.conn.execute(
-            "SELECT table_name FROM information_schema.tables WHERE table_name='topo_p'"
-        ).fetchall()
+        rows = store.conn.execute("SELECT table_name FROM information_schema.tables WHERE table_name='topo_p'").fetchall()
         assert rows
         store.close()
 
@@ -434,9 +413,7 @@ class TestOhmStoreSchemaPropagates:
         from ohm.graph.store import OhmStore
 
         store = OhmStore(db_path=":memory:")  # default schema
-        rows = store.conn.execute(
-            "SELECT table_name FROM information_schema.tables WHERE table_name LIKE 'topo_%'"
-        ).fetchall()
+        rows = store.conn.execute("SELECT table_name FROM information_schema.tables WHERE table_name LIKE 'topo_%'").fetchall()
         assert rows == []
         store.close()
 
@@ -462,10 +439,7 @@ class TestServerOhmStoreReceivesSchema:
         for line in text.splitlines():
             if "store = OhmStore" in line and "schema=schema_config" in line:
                 return
-        pytest.fail(
-            "Expected `store = OhmStore(db_path=..., schema=schema_config)` "
-            "in server.py — domain DDL will be silently skipped otherwise."
-        )
+        pytest.fail("Expected `store = OhmStore(db_path=..., schema=schema_config)` in server.py — domain DDL will be silently skipped otherwise.")
 
 
 # ── _create_domain_tables edge cases ───────────────────────────────────────
@@ -483,9 +457,7 @@ class TestCreateDomainTablesEdgeCases:
         conn = duckdb.connect(":memory:")
         initialize_schema(conn, cfg)
         # Just verify the table is there.
-        rows = conn.execute(
-            "SELECT table_name FROM information_schema.tables WHERE table_name='t'"
-        ).fetchall()
+        rows = conn.execute("SELECT table_name FROM information_schema.tables WHERE table_name='t'").fetchall()
         assert rows
 
     def test_multiple_tables_created_in_order(self):
@@ -496,10 +468,7 @@ class TestCreateDomainTablesEdgeCases:
         cfg = SchemaConfig(name="t", domain_tables=[dt3, dt1, dt2])
         conn = duckdb.connect(":memory:")
         initialize_schema(conn, cfg)
-        tables = {row[0] for row in conn.execute(
-            "SELECT table_name FROM information_schema.tables "
-            "WHERE table_name IN ('first','second','third')"
-        ).fetchall()}
+        tables = {row[0] for row in conn.execute("SELECT table_name FROM information_schema.tables WHERE table_name IN ('first','second','third')").fetchall()}
         assert tables == {"first", "second", "third"}
 
     def test_ohm_meta_skipped_for_redundant_writes(self):
@@ -511,7 +480,5 @@ class TestCreateDomainTablesEdgeCases:
         initialize_schema(conn, cfg)
         initialize_schema(conn, cfg)  # second run must not error on key collision
         # Verify the meta row exists exactly once.
-        rows = conn.execute(
-            "SELECT COUNT(*) FROM ohm_meta WHERE key='domain_tables:t:ordering'"
-        ).fetchone()
+        rows = conn.execute("SELECT COUNT(*) FROM ohm_meta WHERE key='domain_tables:t:ordering'").fetchone()
         assert rows[0] == 1

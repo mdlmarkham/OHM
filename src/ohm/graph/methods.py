@@ -1070,7 +1070,7 @@ def detect_semantic_duplicates(
     """
     try:
         rows = conn.execute(
-            f"""
+            """
             SELECT
                 a.id AS node_a, a.label AS label_a, a.type AS type_a,
                 b.id AS node_b, b.label AS label_b, b.type AS type_b,
@@ -1769,6 +1769,7 @@ def apply_verification_decay(
     # Recompute any linked decision nodes for pruned hypotheses
     if pruned_ids:
         from ohm.decision import recompute_linked_decisions
+
         for hyp_id in pruned_ids:
             try:
                 recompute_linked_decisions(conn, hyp_id)

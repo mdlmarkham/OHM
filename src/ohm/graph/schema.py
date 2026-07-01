@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from types import MappingProxyType
 
 import uuid
@@ -150,16 +150,18 @@ VALID_VISIBILITIES = frozenset({"private", "team", "public", "vault"})
 # the node is not a gate. gate_status tracks whether the gate has been
 # converted (AND->OR) or compromised.
 VALID_GATE_TYPES = frozenset({"AND", "OR"})
-VALID_GATE_STATUSES = frozenset({
-    "intact",       # Gate is functioning as designed
-    "converted",    # AND-gate has been converted to OR-gate (strategic shift)
-    "compromised",  # One or more inputs have failed but gate hasn't fully collapsed
-    "failed",       # Gate has collapsed — all inputs lost
-    # OHM-8dg4 reconciliation: Metis design-note aliases
-    "open",         # Alias for 'intact' — gate is open and processing
-    "closed",       # Alias for 'converted' — gate has been deliberately closed
-    "stuck",        # Alias for 'compromised' — gate is stuck waiting for input
-})
+VALID_GATE_STATUSES = frozenset(
+    {
+        "intact",  # Gate is functioning as designed
+        "converted",  # AND-gate has been converted to OR-gate (strategic shift)
+        "compromised",  # One or more inputs have failed but gate hasn't fully collapsed
+        "failed",  # Gate has collapsed — all inputs lost
+        # OHM-8dg4 reconciliation: Metis design-note aliases
+        "open",  # Alias for 'intact' — gate is open and processing
+        "closed",  # Alias for 'converted' — gate has been deliberately closed
+        "stuck",  # Alias for 'compromised' — gate is stuck waiting for input
+    }
+)
 
 VALID_PROVENANCES = frozenset(
     {
@@ -495,32 +497,21 @@ class DomainTable:
         if not self.name or not isinstance(self.name, str):
             raise ValueError("DomainTable.name must be a non-empty string")
         if self.name.lower().startswith("ohm_"):
-            raise ValueError(
-                f"DomainTable.name='{self.name}' uses the reserved 'ohm_' prefix; "
-                "domain tables must not collide with the core OHM tables."
-            )
+            raise ValueError(f"DomainTable.name='{self.name}' uses the reserved 'ohm_' prefix; domain tables must not collide with the core OHM tables.")
         # Validate identifier characters (DuckDB: alphanumeric + underscore, must start with letter/_)
-        if not (self.name[0].isalpha() or self.name[0] == "_") or not all(
-            c.isalnum() or c == "_" for c in self.name
-        ):
+        if not (self.name[0].isalpha() or self.name[0] == "_") or not all(c.isalnum() or c == "_" for c in self.name):
             raise ValueError(f"DomainTable.name='{self.name}' is not a valid SQL identifier")
         if not self.columns:
             raise ValueError(f"DomainTable.name='{self.name}' must declare at least one column")
         col_names = {c[0] for c in self.columns}
         if self.primary_key is not None and self.primary_key not in col_names:
-            raise ValueError(
-                f"DomainTable.name='{self.name}' primary_key='{self.primary_key}' "
-                f"not found in columns {sorted(col_names)}"
-            )
+            raise ValueError(f"DomainTable.name='{self.name}' primary_key='{self.primary_key}' not found in columns {sorted(col_names)}")
         for idx_name, idx_cols in self.indexes:
             if not idx_name:
                 raise ValueError(f"DomainTable.name='{self.name}' has an index with empty name")
             for c in idx_cols:
                 if c not in col_names:
-                    raise ValueError(
-                        f"DomainTable.name='{self.name}' index '{idx_name}' "
-                        f"references missing column '{c}'"
-                    )
+                    raise ValueError(f"DomainTable.name='{self.name}' index '{idx_name}' references missing column '{c}'")
 
     def to_dict(self) -> dict:
         """Serialize to a JSON-safe dict (for to_dict/from_dict round-trip)."""
@@ -602,9 +593,7 @@ class DuckLakeTable:
     def __post_init__(self) -> None:
         if not self.name or not isinstance(self.name, str):
             raise ValueError("DuckLakeTable.name must be a non-empty string")
-        if not (self.name[0].isalpha() or self.name[0] == "_") or not all(
-            c.isalnum() or c == "_" for c in self.name
-        ):
+        if not (self.name[0].isalpha() or self.name[0] == "_") or not all(c.isalnum() or c == "_" for c in self.name):
             raise ValueError(f"DuckLakeTable.name='{self.name}' is not a valid SQL identifier")
 
     def to_dict(self) -> dict:
@@ -755,10 +744,7 @@ class SchemaConfig:
             # Normalize: validate types, sort by ordering, freeze as tuple.
             for dt in domain_tables:
                 if not isinstance(dt, DomainTable):
-                    raise TypeError(
-                        f"SchemaConfig.domain_tables must contain DomainTable instances, "
-                        f"got {type(dt).__name__}"
-                    )
+                    raise TypeError(f"SchemaConfig.domain_tables must contain DomainTable instances, got {type(dt).__name__}")
             self.domain_tables = tuple(sorted(domain_tables, key=lambda d: (d.ordering, d.name)))
         # OHM-8bli: DuckLake sync table registry. Defaults to the four core
         # tables (ohm_nodes, ohm_edges, ohm_observations, ohm_change_feed).
@@ -768,19 +754,12 @@ class SchemaConfig:
         # the operator declares, not what's incidentally in the schema.
         if ducklake_tables is None:
             # Build the default: core tables + auto-derived from domain_tables.
-            derived = tuple(
-                DuckLakeTable.from_domain_table(dt) for dt in self.domain_tables
-            )
-            self.ducklake_tables: tuple[DuckLakeTable, ...] = (
-                DEFAULT_DUCKLAKE_TABLES + derived
-            )
+            derived = tuple(DuckLakeTable.from_domain_table(dt) for dt in self.domain_tables)
+            self.ducklake_tables: tuple[DuckLakeTable, ...] = DEFAULT_DUCKLAKE_TABLES + derived
         else:
             for dlt in ducklake_tables:
                 if not isinstance(dlt, DuckLakeTable):
-                    raise TypeError(
-                        f"SchemaConfig.ducklake_tables must contain DuckLakeTable "
-                        f"instances, got {type(dlt).__name__}"
-                    )
+                    raise TypeError(f"SchemaConfig.ducklake_tables must contain DuckLakeTable instances, got {type(dlt).__name__}")
             self.ducklake_tables = tuple(ducklake_tables)
 
         # OHM-ue9k: case strategy for node / edge / observation type
@@ -789,10 +768,7 @@ class SchemaConfig:
         # TOPO's pre-migration store. "preserve" accepts any case as long
         # as the canonical name appears (case-sensitive match).
         if case_strategy not in ("lowercase", "uppercase", "preserve"):
-            raise ValueError(
-                f"case_strategy must be 'lowercase', 'uppercase', or 'preserve', "
-                f"got {case_strategy!r}"
-            )
+            raise ValueError(f"case_strategy must be 'lowercase', 'uppercase', or 'preserve', got {case_strategy!r}")
         self.case_strategy = case_strategy
 
     @property
@@ -2402,11 +2378,7 @@ def _create_domain_tables(conn: "DuckDBPyConnection", schema: "SchemaConfig | No
             col_lines.append(f"    {col_name} {col_type}")
         if dt.primary_key is not None:
             col_lines.append(f"    PRIMARY KEY ({dt.primary_key})")
-        create_sql = (
-            f"CREATE TABLE IF NOT EXISTS {dt.name} (\n"
-            + ",\n".join(col_lines)
-            + "\n);"
-        )
+        create_sql = f"CREATE TABLE IF NOT EXISTS {dt.name} (\n" + ",\n".join(col_lines) + "\n);"
         try:
             conn.execute(create_sql)
         except Exception as e:
@@ -2415,27 +2387,19 @@ def _create_domain_tables(conn: "DuckDBPyConnection", schema: "SchemaConfig | No
             if "already exists" in err:
                 pass  # Race with another process — fine, table is there.
             else:
-                raise RuntimeError(
-                    f"Failed to create domain table '{dt.name}' "
-                    f"(ordering={dt.ordering}): {e}"
-                ) from e
+                raise RuntimeError(f"Failed to create domain table '{dt.name}' (ordering={dt.ordering}): {e}") from e
 
         # Create indexes.
         for idx_name, idx_cols in dt.indexes:
             cols_csv = ", ".join(idx_cols)
             try:
-                conn.execute(
-                    f"CREATE INDEX IF NOT EXISTS {idx_name} "
-                    f"ON {dt.name}({cols_csv})"
-                )
+                conn.execute(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {dt.name}({cols_csv})")
             except Exception as e:
                 err = str(e).lower()
                 if "already exists" in err:
                     pass
                 else:
-                    raise RuntimeError(
-                        f"Failed to create index '{idx_name}' on '{dt.name}': {e}"
-                    ) from e
+                    raise RuntimeError(f"Failed to create index '{idx_name}' on '{dt.name}': {e}") from e
 
         # Seed initial data — only if the table is empty.
         if dt.initial_data:
@@ -2448,9 +2412,7 @@ def _create_domain_tables(conn: "DuckDBPyConnection", schema: "SchemaConfig | No
                 col_names = [c[0] for c in dt.columns]
                 placeholders = ", ".join(["?"] * len(col_names))
                 col_list = ", ".join(col_names)
-                insert_sql = (
-                    f"INSERT INTO {dt.name} ({col_list}) VALUES ({placeholders})"
-                )
+                insert_sql = f"INSERT INTO {dt.name} ({col_list}) VALUES ({placeholders})"
                 for row in dt.initial_data:
                     values = [row.get(c) for c in col_names]
                     try:
@@ -2459,17 +2421,16 @@ def _create_domain_tables(conn: "DuckDBPyConnection", schema: "SchemaConfig | No
                         # Seed failures should not be fatal (e.g. uniqueness
                         # violation on rerun with same key) — log and move on.
                         logger.warning(
-                            "Domain table seed insert failed for '%s' "
-                            "(row=%r): %s",
-                            dt.name, row, e,
+                            "Domain table seed insert failed for '%s' (row=%r): %s",
+                            dt.name,
+                            row,
+                            e,
                         )
 
         # Record the provisioning version in ohm_meta.
         try:
             meta_key = f"domain_tables:{dt.name}:ordering"
-            existing = conn.execute(
-                "SELECT value FROM ohm_meta WHERE key = ?", [meta_key]
-            ).fetchone()
+            existing = conn.execute("SELECT value FROM ohm_meta WHERE key = ?", [meta_key]).fetchone()
             if existing is None:
                 conn.execute(
                     "INSERT INTO ohm_meta (key, value) VALUES (?, ?)",
@@ -2478,12 +2439,14 @@ def _create_domain_tables(conn: "DuckDBPyConnection", schema: "SchemaConfig | No
         except Exception as e:
             logger.warning(
                 "Failed to record domain table version for '%s' in ohm_meta: %s",
-                dt.name, e,
+                dt.name,
+                e,
             )
 
     logger.info(
         "Created %d domain tables for schema '%s'",
-        len(schema.domain_tables), schema.name,
+        len(schema.domain_tables),
+        schema.name,
     )
 
 

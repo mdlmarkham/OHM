@@ -70,9 +70,7 @@ class TestShutdownHandlerThreadDispatch:
         class MockServer:
             def shutdown(self):
                 shutdown_called_from["thread"] = threading.current_thread().name
-                shutdown_called_from["is_main"] = (
-                    threading.current_thread() is threading.main_thread()
-                )
+                shutdown_called_from["is_main"] = threading.current_thread() is threading.main_thread()
 
         class MockStore:
             def sync_heartbeat(self):
@@ -107,9 +105,7 @@ class TestShutdownHandlerThreadDispatch:
             except Exception:
                 pass
             # The fix: dispatch to a daemon thread, NOT a synchronous call.
-            threading.Thread(
-                target=mock_server.shutdown, daemon=True, name="ohmd-shutdown"
-            ).start()
+            threading.Thread(target=mock_server.shutdown, daemon=True, name="ohmd-shutdown").start()
 
         shutdown_handler(signal.SIGTERM, None)
 
@@ -118,14 +114,9 @@ class TestShutdownHandlerThreadDispatch:
         while time.time() < deadline and "thread" not in shutdown_called_from:
             time.sleep(0.01)
 
-        assert "thread" in shutdown_called_from, (
-            "server.shutdown() was never invoked — daemon failed to start"
-        )
+        assert "thread" in shutdown_called_from, "server.shutdown() was never invoked — daemon failed to start"
         # The whole point of OHM-k79z: shutdown must NOT run on the main thread
-        assert shutdown_called_from["is_main"] is False, (
-            "server.shutdown() ran on the main thread — this is the "
-            "OHM-k79z deadlock. It must be dispatched to a separate thread."
-        )
+        assert shutdown_called_from["is_main"] is False, "server.shutdown() ran on the main thread — this is the OHM-k79z deadlock. It must be dispatched to a separate thread."
         assert shutdown_called_from["thread"] == "ohmd-shutdown"
         assert len(captured_threads) >= 1
 
@@ -139,11 +130,7 @@ class TestShutdownHandlerThreadDispatch:
         source = server_path.read_text(encoding="utf-8")
         tree = ast.parse(source)
 
-        handler_funcs = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "shutdown_handler"
-        ]
+        handler_funcs = [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "shutdown_handler"]
         assert handler_funcs, "shutdown_handler must be defined in server.py"
 
         # Walk the handler's body and ensure it contains a
@@ -166,11 +153,7 @@ class TestShutdownHandlerThreadDispatch:
                                     shutdown_attr = target.func.attr
                                 if shutdown_attr == "shutdown":
                                     contains_thread_call = True
-        assert contains_thread_call, (
-            "shutdown_handler must dispatch server.shutdown() via "
-            "threading.Thread(target=server.shutdown, ...).start() — "
-            "synchronous calls deadlock (OHM-k79z)."
-        )
+        assert contains_thread_call, "shutdown_handler must dispatch server.shutdown() via threading.Thread(target=server.shutdown, ...).start() — synchronous calls deadlock (OHM-k79z)."
 
 
 @pytest.mark.skipif(
@@ -191,9 +174,12 @@ class TestSubprocessSIGTERM:
         proc = subprocess.Popen(
             [
                 OHMD_BIN,  # type: ignore[list-item]
-                "--host", "127.0.0.1",
-                "--port", str(port),
-                "--db", db_path,
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+                "--db",
+                db_path,
                 "--no-auth",
             ],
             stdout=subprocess.PIPE,
@@ -208,9 +194,7 @@ class TestSubprocessSIGTERM:
                     stderr_data = proc.stderr.read() if proc.stderr else b""
                     pytest.fail(f"ohmd exited early: {stderr_data.decode(errors='replace')}")
                 try:
-                    with urllib.request.urlopen(
-                        f"http://127.0.0.1:{port}/health", timeout=1
-                    ) as r:
+                    with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1) as r:
                         if r.status == 200:
                             healthy = True
                             break
@@ -225,15 +209,10 @@ class TestSubprocessSIGTERM:
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait(timeout=5)
-                pytest.fail(
-                    "ohmd did NOT exit within 10s of SIGTERM — the "
-                    "OHM-k79z deadlock is still present."
-                )
+                pytest.fail("ohmd did NOT exit within 10s of SIGTERM — the OHM-k79z deadlock is still present.")
             # 0 = clean exit, -15 = terminated by SIGTERM (acceptable under
             # default signal handling); any other code indicates a real error.
-            assert rc in (0, -signal.SIGTERM), (
-                f"ohmd exited with unexpected code {rc} after SIGTERM"
-            )
+            assert rc in (0, -signal.SIGTERM), f"ohmd exited with unexpected code {rc} after SIGTERM"
         finally:
             if proc.poll() is None:
                 proc.kill()

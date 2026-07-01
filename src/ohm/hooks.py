@@ -41,17 +41,24 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-VALID_HOOK_EVENTS = frozenset({
-    # Graph write hooks (OHM-aznh)
-    "pre_ingest", "post_ingest",
-    # Query hooks (OHM-aznh)
-    "pre_query", "post_query",
-    # Ingestion pipeline stage hooks (OHM-tjkx)
-    "pre_fetch", "post_fetch",
-    "pre_parse", "post_parse",
-    "pre_commit", "post_commit",
-    "on_error",
-})
+VALID_HOOK_EVENTS = frozenset(
+    {
+        # Graph write hooks (OHM-aznh)
+        "pre_ingest",
+        "post_ingest",
+        # Query hooks (OHM-aznh)
+        "pre_query",
+        "post_query",
+        # Ingestion pipeline stage hooks (OHM-tjkx)
+        "pre_fetch",
+        "post_fetch",
+        "pre_parse",
+        "post_parse",
+        "pre_commit",
+        "post_commit",
+        "on_error",
+    }
+)
 
 # Ingestion pipeline stages in order (OHM-tjkx).
 # Each stage has a pre_<stage> and post_<stage> hook event.

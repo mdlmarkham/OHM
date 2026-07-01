@@ -9,10 +9,8 @@ Dispatch by content type:
 from __future__ import annotations
 
 import mimetypes
-import os
 from io import BytesIO
 from pathlib import Path
-from typing import Any
 
 
 def extract_text(content_bytes: bytes, content_type: str | None = None, *, filename: str | None = None) -> str:
@@ -100,10 +98,7 @@ def _extract_pdf(content_bytes: bytes) -> str:
     except Exception as e:
         exceptions.append(f"pdfplumber: {e}")
 
-    raise UnsupportedDocumentError(
-        "No PDF extraction backend available. Install pypdf or pdfplumber. "
-        f"Errors: {'; '.join(exceptions) if exceptions else 'none'}"
-    )
+    raise UnsupportedDocumentError(f"No PDF extraction backend available. Install pypdf or pdfplumber. Errors: {'; '.join(exceptions) if exceptions else 'none'}")
 
 
 def _guess_extension(content_type: str | None) -> str | None:

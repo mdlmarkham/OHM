@@ -55,9 +55,7 @@ class TestSetFreshnessThreshold:
 
     def test_creates_governs_freshness_edge(self, test_db):
         d = _make_decision(test_db)
-        ft = set_freshness_threshold(
-            test_db, decision_id=d, max_age_seconds=300, created_by="tester"
-        )
+        ft = set_freshness_threshold(test_db, decision_id=d, max_age_seconds=300, created_by="tester")
         edges = test_db.execute(
             """SELECT to_node FROM ohm_edges
                WHERE from_node = ? AND edge_type = 'GOVERNS_FRESHNESS' AND deleted_at IS NULL""",
@@ -67,9 +65,7 @@ class TestSetFreshnessThreshold:
 
     def test_stores_max_age_in_metadata(self, test_db):
         d = _make_decision(test_db)
-        ft = set_freshness_threshold(
-            test_db, decision_id=d, max_age_seconds=600, created_by="tester"
-        )
+        ft = set_freshness_threshold(test_db, decision_id=d, max_age_seconds=600, created_by="tester")
         meta = ft.get("metadata") or {}
         if isinstance(meta, str):
             meta = json.loads(meta)
@@ -78,9 +74,7 @@ class TestSetFreshnessThreshold:
     def test_invalid_max_age_raises(self, test_db):
         d = _make_decision(test_db)
         with pytest.raises(ValueError):
-            set_freshness_threshold(
-                test_db, decision_id=d, max_age_seconds=0, created_by="tester"
-            )
+            set_freshness_threshold(test_db, decision_id=d, max_age_seconds=0, created_by="tester")
 
     def test_missing_decision_raises(self, test_db):
         with pytest.raises(NodeNotFoundError):
@@ -95,9 +89,7 @@ class TestSetFreshnessThreshold:
 class TestGetFreshnessStatus:
     def test_returns_status_dict(self, test_db):
         d = _make_decision(test_db)
-        set_freshness_threshold(
-            test_db, decision_id=d, max_age_seconds=300, created_by="tester"
-        )
+        set_freshness_threshold(test_db, decision_id=d, max_age_seconds=300, created_by="tester")
         status = get_freshness_status(test_db, decision_id=d)
         assert status["decision_id"] == d
         assert status["max_age_seconds"] == 300
@@ -105,18 +97,12 @@ class TestGetFreshnessStatus:
 
     def test_missing_decision_raises(self, test_db):
         with pytest.raises(NodeNotFoundError):
-            get_freshness_status(
-                test_db, decision_id="nonexistent_decision_xyz"
-            )
+            get_freshness_status(test_db, decision_id="nonexistent_decision_xyz")
 
     def test_multiple_thresholds_takes_min(self, test_db):
         d = _make_decision(test_db)
-        set_freshness_threshold(
-            test_db, decision_id=d, max_age_seconds=600, created_by="tester"
-        )
-        set_freshness_threshold(
-            test_db, decision_id=d, max_age_seconds=120, created_by="tester"
-        )
+        set_freshness_threshold(test_db, decision_id=d, max_age_seconds=600, created_by="tester")
+        set_freshness_threshold(test_db, decision_id=d, max_age_seconds=120, created_by="tester")
         status = get_freshness_status(test_db, decision_id=d)
         assert status["max_age_seconds"] == 120
         assert len(status["thresholds"]) == 2
@@ -125,17 +111,13 @@ class TestGetFreshnessStatus:
 class TestComputeFeedInvestment:
     def test_creates_investment_node(self, test_db):
         d = _make_decision(test_db, utility_scale=0.8)
-        fi = compute_feed_investment(
-            test_db, decision_id=d, created_by="tester", observation_cost=0.5
-        )
+        fi = compute_feed_investment(test_db, decision_id=d, created_by="tester", observation_cost=0.5)
         assert "voi" in fi
         assert "recommendation" in fi
 
     def test_creates_invests_in_edge(self, test_db):
         d = _make_decision(test_db, utility_scale=0.7)
-        fi = compute_feed_investment(
-            test_db, decision_id=d, created_by="tester"
-        )
+        fi = compute_feed_investment(test_db, decision_id=d, created_by="tester")
         nodes = test_db.execute(
             """SELECT n.id FROM ohm_nodes n
                JOIN ohm_edges e ON e.from_node = n.id AND e.to_node = ?
@@ -146,16 +128,12 @@ class TestComputeFeedInvestment:
 
     def test_high_voi_recommends_invest(self, test_db):
         d = _make_decision(test_db, utility_scale=0.95, confidence=0.3)
-        fi = compute_feed_investment(
-            test_db, decision_id=d, created_by="tester", observation_cost=0.01
-        )
+        fi = compute_feed_investment(test_db, decision_id=d, created_by="tester", observation_cost=0.01)
         assert fi["recommendation"] == "invest"
 
     def test_low_voi_recommends_defer(self, test_db):
         d = _make_decision(test_db, utility_scale=0.1, confidence=0.3)
-        fi = compute_feed_investment(
-            test_db, decision_id=d, created_by="tester", observation_cost=1.0
-        )
+        fi = compute_feed_investment(test_db, decision_id=d, created_by="tester", observation_cost=1.0)
         assert fi["recommendation"] == "defer"
 
     def test_missing_decision_raises(self, test_db):
@@ -182,9 +160,7 @@ class TestRecommendMode:
 
     def test_high_urgency_with_fresh_data_triggers_real_time(self, test_db):
         d = _make_decision(test_db, utility_scale=0.3)
-        target = create_node(
-            test_db, label="Target", node_type="concept", created_by="tester"
-        )
+        target = create_node(test_db, label="Target", node_type="concept", created_by="tester")
         edge = create_edge(
             test_db,
             from_node=d,
@@ -197,9 +173,7 @@ class TestRecommendMode:
             "UPDATE ohm_edges SET urgency = ? WHERE id = ?",
             ["0.95", edge["id"]],
         )
-        set_freshness_threshold(
-            test_db, decision_id=d, max_age_seconds=99999, created_by="tester"
-        )
+        set_freshness_threshold(test_db, decision_id=d, max_age_seconds=99999, created_by="tester")
         result = recommend_mode(test_db, decision_id=d)
         assert result["mode"] == "real_time"
 
@@ -273,9 +247,7 @@ class TestRecordModeSwitch:
 class TestTemporalDecisionSummary:
     def test_returns_summary_dict(self, test_db):
         d = _make_decision(test_db)
-        set_freshness_threshold(
-            test_db, decision_id=d, max_age_seconds=300, created_by="tester"
-        )
+        set_freshness_threshold(test_db, decision_id=d, max_age_seconds=300, created_by="tester")
         compute_feed_investment(test_db, decision_id=d, created_by="tester")
         record_mode_switch(
             test_db,
@@ -293,9 +265,7 @@ class TestTemporalDecisionSummary:
 
     def test_missing_decision_raises(self, test_db):
         with pytest.raises(NodeNotFoundError):
-            temporal_decision_summary(
-                test_db, decision_id="nonexistent_decision_xyz"
-            )
+            temporal_decision_summary(test_db, decision_id="nonexistent_decision_xyz")
 
 
 class TestTemporalDecisionSDK:
@@ -330,9 +300,7 @@ class TestTemporalDecisionSDK:
 
         d = _make_decision(test_db)
         with Graph(test_db, actor="sdk-tester") as g:
-            ms = g.record_mode_switch(
-                d, from_mode="real_time", to_mode="hybrid", reason="test"
-            )
+            ms = g.record_mode_switch(d, from_mode="real_time", to_mode="hybrid", reason="test")
             assert ms["type"] == "mode_switch"
 
     def test_sdk_temporal_summary(self, test_db):

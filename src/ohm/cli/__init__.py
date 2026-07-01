@@ -2920,6 +2920,7 @@ def _handle_hooks(args: argparse.Namespace) -> None:
         try:
             from ohm.hooks import VALID_HOOK_EVENTS
             from ohm.schema import initialize_schema
+
             initialize_schema(conn)
 
             event_filter = args.event
@@ -2949,6 +2950,7 @@ def _handle_hooks(args: argparse.Namespace) -> None:
         try:
             from ohm.hooks import HookRunner, VALID_HOOK_EVENTS
             from ohm.schema import initialize_schema
+
             initialize_schema(conn)
 
             event = args.event
@@ -2966,22 +2968,27 @@ def _handle_hooks(args: argparse.Namespace) -> None:
 
             runner = HookRunner(conn)
             results = runner.run_hooks(event, payload)
-            print(_json.dumps({
-                "event": event,
-                "hooks_run": len(results),
-                "results": [
+            print(
+                _json.dumps(
                     {
-                        "hook_id": r.hook_id,
-                        "exit_code": r.exit_code,
-                        "success": r.success,
-                        "stdout": r.stdout[:500],
-                        "stderr": r.stderr[:500],
-                        "duration_ms": round(r.duration_ms, 2),
-                        "timed_out": r.timed_out,
-                    }
-                    for r in results
-                ],
-            }, indent=2))
+                        "event": event,
+                        "hooks_run": len(results),
+                        "results": [
+                            {
+                                "hook_id": r.hook_id,
+                                "exit_code": r.exit_code,
+                                "success": r.success,
+                                "stdout": r.stdout[:500],
+                                "stderr": r.stderr[:500],
+                                "duration_ms": round(r.duration_ms, 2),
+                                "timed_out": r.timed_out,
+                            }
+                            for r in results
+                        ],
+                    },
+                    indent=2,
+                )
+            )
         finally:
             conn.close()
     else:

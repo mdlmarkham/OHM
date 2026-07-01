@@ -3,6 +3,7 @@
 These templates compose the OHM twin-template catalog (OHM-hl61) with
 domain-specific shapes for industrial decision intelligence.
 """
+
 from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
@@ -66,11 +67,13 @@ def create_production_plan_template(
         created_by=created_by,
         description="Production plan twin: schedule feasibility and profit optimization. Models throughput, batch constraints, and changeover timing.",
         required_edges=["USES", "CONSUMES", "PRODUCES", "TRANSFERRED_TO"],
-        constraint_schema={"fields": [
-            {"field": "max_throughput_per_hour", "type": "number", "min": 0, "unit": "units/hour", "description": "Maximum production throughput per hour"},
-            {"field": "min_batch_size", "type": "number", "min": 1, "unit": "units", "description": "Minimum batch size for production runs"},
-            {"field": "changeover_time_minutes", "type": "number", "min": 0, "unit": "minutes", "description": "Time required to switch between product runs"},
-        ]},
+        constraint_schema={
+            "fields": [
+                {"field": "max_throughput_per_hour", "type": "number", "min": 0, "unit": "units/hour", "description": "Maximum production throughput per hour"},
+                {"field": "min_batch_size", "type": "number", "min": 1, "unit": "units", "description": "Minimum batch size for production runs"},
+                {"field": "changeover_time_minutes", "type": "number", "min": 0, "unit": "minutes", "description": "Time required to switch between product runs"},
+            ]
+        },
         connects_to=connects_to if connects_to else None,
     )
 
@@ -102,13 +105,15 @@ def create_inventory_position_template(
         created_by=created_by,
         description="Inventory position twin: stock levels and reorder timing. Models safety stock, reorder points, and lead time constraints.",
         required_edges=["CONSUMES", "TRANSFERRED_TO", "BELONGS_TO"],
-        constraint_schema={"fields": [
-            {"field": "min_stock_level", "type": "number", "min": 0, "unit": "units", "description": "Minimum allowable stock level"},
-            {"field": "max_stock_level", "type": "number", "min": 0, "unit": "units", "description": "Maximum allowable stock level"},
-            {"field": "lead_time_days", "type": "number", "min": 0, "unit": "days", "description": "Replenishment lead time in days"},
-            {"field": "safety_stock", "type": "number", "min": 0, "unit": "units", "description": "Safety stock buffer quantity"},
-            {"field": "reorder_point", "type": "number", "min": 0, "unit": "units", "description": "Stock level at which a reorder is triggered"},
-        ]},
+        constraint_schema={
+            "fields": [
+                {"field": "min_stock_level", "type": "number", "min": 0, "unit": "units", "description": "Minimum allowable stock level"},
+                {"field": "max_stock_level", "type": "number", "min": 0, "unit": "units", "description": "Maximum allowable stock level"},
+                {"field": "lead_time_days", "type": "number", "min": 0, "unit": "days", "description": "Replenishment lead time in days"},
+                {"field": "safety_stock", "type": "number", "min": 0, "unit": "units", "description": "Safety stock buffer quantity"},
+                {"field": "reorder_point", "type": "number", "min": 0, "unit": "units", "description": "Stock level at which a reorder is triggered"},
+            ]
+        },
         connects_to=connects_to if connects_to else None,
     )
 
@@ -140,11 +145,13 @@ def create_capacity_planning_template(
         created_by=created_by,
         description="Capacity planning twin: capacity vs. demand over planning horizon. Models utilization targets, ramp-up, and facility constraints.",
         required_edges=["CAPABLE_OF", "INFLUENCES", "LOCATED_IN"],
-        constraint_schema={"fields": [
-            {"field": "max_utilization_pct", "type": "number", "min": 0, "max": 100, "unit": "percent", "description": "Maximum allowable utilization percentage"},
-            {"field": "ramp_up_days", "type": "number", "min": 0, "unit": "days", "description": "Days required to ramp capacity to target"},
-            {"field": "utilization_target", "type": "number", "min": 0, "max": 100, "unit": "percent", "description": "Target utilization percentage"},
-        ]},
+        constraint_schema={
+            "fields": [
+                {"field": "max_utilization_pct", "type": "number", "min": 0, "max": 100, "unit": "percent", "description": "Maximum allowable utilization percentage"},
+                {"field": "ramp_up_days", "type": "number", "min": 0, "unit": "days", "description": "Days required to ramp capacity to target"},
+                {"field": "utilization_target", "type": "number", "min": 0, "max": 100, "unit": "percent", "description": "Target utilization percentage"},
+            ]
+        },
         connects_to=connects_to if connects_to else None,
     )
 
@@ -176,11 +183,13 @@ def create_supply_chain_network_template(
         created_by=created_by,
         description="Supply chain network twin: multi-echelon flow risk and cost. Models lead time, service level, and disruption tolerance across the network.",
         required_edges=["TRANSFERRED_TO", "PART_OF", "LOCATED_IN"],
-        constraint_schema={"fields": [
-            {"field": "max_lead_time_days", "type": "number", "min": 0, "unit": "days", "description": "Maximum acceptable end-to-end lead time"},
-            {"field": "min_service_level_pct", "type": "number", "min": 0, "max": 100, "unit": "percent", "description": "Minimum service level percentage"},
-            {"field": "disruption_tolerance", "type": "number", "min": 0, "max": 1, "unit": "ratio", "description": "Fraction of supply that can be disrupted without critical failure"},
-        ]},
+        constraint_schema={
+            "fields": [
+                {"field": "max_lead_time_days", "type": "number", "min": 0, "unit": "days", "description": "Maximum acceptable end-to-end lead time"},
+                {"field": "min_service_level_pct", "type": "number", "min": 0, "max": 100, "unit": "percent", "description": "Minimum service level percentage"},
+                {"field": "disruption_tolerance", "type": "number", "min": 0, "max": 1, "unit": "ratio", "description": "Fraction of supply that can be disrupted without critical failure"},
+            ]
+        },
         connects_to=connects_to if connects_to else None,
     )
 
@@ -212,11 +221,13 @@ def create_demand_forecast_template(
         created_by=created_by,
         description="Demand forecast twin: forecast accuracy and bias. Models MAPE targets, bias tolerance, and forecast horizon.",
         required_edges=["INFLUENCES", "USES", "PRODUCES"],
-        constraint_schema={"fields": [
-            {"field": "mape_target", "type": "number", "min": 0, "unit": "percent", "description": "Target mean absolute percentage error"},
-            {"field": "bias_tolerance_pct", "type": "number", "min": 0, "unit": "percent", "description": "Acceptable forecast bias percentage"},
-            {"field": "horizon_days", "type": "number", "min": 1, "unit": "days", "description": "Forecast horizon in days"},
-        ]},
+        constraint_schema={
+            "fields": [
+                {"field": "mape_target", "type": "number", "min": 0, "unit": "percent", "description": "Target mean absolute percentage error"},
+                {"field": "bias_tolerance_pct", "type": "number", "min": 0, "unit": "percent", "description": "Acceptable forecast bias percentage"},
+                {"field": "horizon_days", "type": "number", "min": 1, "unit": "days", "description": "Forecast horizon in days"},
+            ]
+        },
         connects_to=connects_to if connects_to else None,
     )
 
@@ -285,11 +296,13 @@ def create_network_of_processes_supply_chain_template(
         created_by=created_by,
         description="Hierarchical network-of-processes supply chain twin. Composes snap-in node twins for supplier, conversion, buffer, demand, and hub/cross-dock with flow edges between them.",
         required_edges=["TRANSFERRED_TO", "PART_OF", "LOCATED_IN", "FEEDS", "CONSUMES", "PRODUCES"],
-        constraint_schema={"fields": [
-            {"field": "node_types", "type": "list", "values": ["supplier", "conversion", "buffer", "demand", "hub"], "description": "Snap-in node twin types in the network"},
-            {"field": "edge_types", "type": "list", "values": ["source_to_conversion", "conversion_to_conversion", "conversion_to_buffer", "buffer_to_demand", "return_recycle"], "description": "Flow edge types between node twins"},
-            {"field": "max_lead_time_days", "type": "number", "min": 0, "unit": "days", "description": "Maximum acceptable end-to-end lead time across the network"},
-            {"field": "min_service_level_pct", "type": "number", "min": 0, "max": 100, "unit": "percent", "description": "Minimum service level across the network"},
-        ]},
+        constraint_schema={
+            "fields": [
+                {"field": "node_types", "type": "list", "values": ["supplier", "conversion", "buffer", "demand", "hub"], "description": "Snap-in node twin types in the network"},
+                {"field": "edge_types", "type": "list", "values": ["source_to_conversion", "conversion_to_conversion", "conversion_to_buffer", "buffer_to_demand", "return_recycle"], "description": "Flow edge types between node twins"},
+                {"field": "max_lead_time_days", "type": "number", "min": 0, "unit": "days", "description": "Maximum acceptable end-to-end lead time across the network"},
+                {"field": "min_service_level_pct", "type": "number", "min": 0, "max": 100, "unit": "percent", "description": "Minimum service level across the network"},
+            ]
+        },
         connects_to=connects_to if connects_to else None,
     )

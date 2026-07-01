@@ -3,6 +3,7 @@
 import time
 import threading
 from datetime import datetime, timedelta, timezone
+from typing import Any
 import logging
 
 logger = logging.getLogger(__name__)
@@ -137,10 +138,11 @@ class AdminHandlerMixin:
                 customer_id = self._customer_id
                 if customer_id and self.tenant_manager:
                     from ohm.tenant import TenantNotFoundError
+
                     try:
                         write_lock = self.tenant_manager.get_write_lock(customer_id)
                     except TenantNotFoundError:
-                        raise NodeNotFoundError("Tenant not found — provision this tenant before use")
+                        raise TenantNotFoundError("Tenant not found — provision this tenant before use")
                     with write_lock:
                         cur = self.current_store.conn.execute(
                             f"""DELETE FROM ohm_hooks
@@ -1094,26 +1096,27 @@ class AdminHandlerMixin:
         threshold = float(qs.get("threshold", [0.85])[0])
 
         alias_dups = detect_alias_duplicates(self.current_store.conn, limit=limit)
-        semantic_dups = detect_semantic_duplicates(
-            self.current_store.conn, similarity_threshold=threshold, limit=limit
-        )
+        semantic_dups = detect_semantic_duplicates(self.current_store.conn, similarity_threshold=threshold, limit=limit)
 
         # Split alias dups by kind
         alias_collisions = [d for d in alias_dups if d.get("kind") == "alias_collision"]
         hash_collisions = [d for d in alias_dups if d.get("kind") == "content_hash_collision"]
 
-        self._json_response(200, {
-            "alias_collisions": alias_collisions,
-            "content_hash_collisions": hash_collisions,
-            "semantic_duplicates": semantic_dups,
-            "summary": {
-                "total": len(alias_collisions) + len(hash_collisions) + len(semantic_dups),
-                "alias_collisions": len(alias_collisions),
-                "content_hash_collisions": len(hash_collisions),
-                "semantic_duplicates": len(semantic_dups),
-                "threshold": threshold,
+        self._json_response(
+            200,
+            {
+                "alias_collisions": alias_collisions,
+                "content_hash_collisions": hash_collisions,
+                "semantic_duplicates": semantic_dups,
+                "summary": {
+                    "total": len(alias_collisions) + len(hash_collisions) + len(semantic_dups),
+                    "alias_collisions": len(alias_collisions),
+                    "content_hash_collisions": len(hash_collisions),
+                    "semantic_duplicates": len(semantic_dups),
+                    "threshold": threshold,
+                },
             },
-        })
+        )
 
     def _post_admin_hooks_stage(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /admin/hooks/<stage> — run hooks for an ingestion stage (OHM-tjkx).
@@ -1128,31 +1131,32 @@ class AdminHandlerMixin:
         prefix = "/admin/hooks/"
         if not path.startswith(prefix):
             raise ValidationError("Invalid hook path")
-        event = path[len(prefix):]
+        event = path[len(prefix) :]
 
         if event not in VALID_HOOK_EVENTS:
-            raise ValidationError(
-                f"Invalid hook event: {event!r}. Must be one of: {', '.join(sorted(VALID_HOOK_EVENTS))}"
-            )
+            raise ValidationError(f"Invalid hook event: {event!r}. Must be one of: {', '.join(sorted(VALID_HOOK_EVENTS))}")
 
         runner = HookRunner(self.current_store.conn)
         results = runner.run_hooks(event, body or {})
-        self._json_response(200, {
-            "event": event,
-            "hooks_run": len(results),
-            "results": [
-                {
-                    "hook_id": r.hook_id,
-                    "exit_code": r.exit_code,
-                    "success": r.success,
-                    "stdout": r.stdout[:1000],
-                    "stderr": r.stderr[:1000],
-                    "duration_ms": round(r.duration_ms, 2),
-                    "timed_out": r.timed_out,
-                }
-                for r in results
-            ],
-        })
+        self._json_response(
+            200,
+            {
+                "event": event,
+                "hooks_run": len(results),
+                "results": [
+                    {
+                        "hook_id": r.hook_id,
+                        "exit_code": r.exit_code,
+                        "success": r.success,
+                        "stdout": r.stdout[:1000],
+                        "stderr": r.stderr[:1000],
+                        "duration_ms": round(r.duration_ms, 2),
+                        "timed_out": r.timed_out,
+                    }
+                    for r in results
+                ],
+            },
+        )
 
     def _post_admin_merge(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /admin/merge — merge duplicate nodes (OHM-g0kv.6).

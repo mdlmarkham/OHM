@@ -1123,11 +1123,7 @@ class AnalysisHandlerMixin:
             "ORDER BY n.confidence DESC NULLS LAST LIMIT 10",
             [agent],
         ).fetchall()
-        sparse = [
-            {"id": r[0], "label": r[1], "type": r[2], "confidence": r[3], "edges": r[4]}
-            for r in sparse_nodes
-            if r[4] is not None and r[4] <= 1
-        ]
+        sparse = [{"id": r[0], "label": r[1], "type": r[2], "confidence": r[3], "edges": r[4]} for r in sparse_nodes if r[4] is not None and r[4] <= 1]
 
         # 2. What did I miss?
         since = last_activity
@@ -1158,15 +1154,18 @@ class AnalysisHandlerMixin:
         ).fetchall()
 
         # 3. What should I do next?
-        agent_orphan_count = _scalar(
-            conn.execute(
-                "SELECT COUNT(*) FROM ohm_nodes n "
-                "WHERE n.created_by = ? AND n.deleted_at IS NULL AND n.type != 'fragment' "
-                "AND n.id NOT IN (SELECT from_node FROM ohm_edges WHERE deleted_at IS NULL) "
-                "AND n.id NOT IN (SELECT to_node FROM ohm_edges WHERE deleted_at IS NULL)",
-                [agent],
+        agent_orphan_count = (
+            _scalar(
+                conn.execute(
+                    "SELECT COUNT(*) FROM ohm_nodes n "
+                    "WHERE n.created_by = ? AND n.deleted_at IS NULL AND n.type != 'fragment' "
+                    "AND n.id NOT IN (SELECT from_node FROM ohm_edges WHERE deleted_at IS NULL) "
+                    "AND n.id NOT IN (SELECT to_node FROM ohm_edges WHERE deleted_at IS NULL)",
+                    [agent],
+                )
             )
-        ) or 0
+            or 0
+        )
 
         agent_orphan_list = conn.execute(
             "SELECT n.id, n.label, n.type, n.confidence FROM ohm_nodes n "
@@ -1189,9 +1188,7 @@ class AnalysisHandlerMixin:
                 continue
             # Check if agent has nodes in this island
             island_nodes = island.get("nodes", []) or []
-            agent_in_island = any(
-                isinstance(n, dict) and n.get("created_by") == agent for n in island_nodes
-            )
+            agent_in_island = any(isinstance(n, dict) and n.get("created_by") == agent for n in island_nodes)
             if agent_in_island:
                 agent_islands.append(
                     {
@@ -1213,18 +1210,24 @@ class AnalysisHandlerMixin:
             pass  # Tasks table may not exist
 
         # Connectivity nudge
-        total_agent_nodes = _scalar(
-            conn.execute(
-                "SELECT COUNT(*) FROM ohm_nodes WHERE created_by = ? AND deleted_at IS NULL AND type != 'fragment'",
-                [agent],
+        total_agent_nodes = (
+            _scalar(
+                conn.execute(
+                    "SELECT COUNT(*) FROM ohm_nodes WHERE created_by = ? AND deleted_at IS NULL AND type != 'fragment'",
+                    [agent],
+                )
             )
-        ) or 0
-        total_agent_edges = _scalar(
-            conn.execute(
-                "SELECT COUNT(*) FROM ohm_edges WHERE created_by = ? AND deleted_at IS NULL",
-                [agent],
+            or 0
+        )
+        total_agent_edges = (
+            _scalar(
+                conn.execute(
+                    "SELECT COUNT(*) FROM ohm_edges WHERE created_by = ? AND deleted_at IS NULL",
+                    [agent],
+                )
             )
-        ) or 0
+            or 0
+        )
         edges_per_node = total_agent_edges / max(total_agent_nodes, 1)
         connectivity = "good" if edges_per_node >= 1.5 else "sparse" if edges_per_node >= 0.5 else "disconnected"
         nudge = None

@@ -326,10 +326,7 @@ def validate_edge_constraints(
         cond = (condition or "").strip()
         prov = (provenance or "").strip()
         if not cond and not prov:
-            msg = (
-                f"Edge type '{edge_type}' requires a reason (condition or "
-                f"provenance must be non-empty) — see ADR-018 / OHM-e0t1."
-            )
+            msg = f"Edge type '{edge_type}' requires a reason (condition or provenance must be non-empty) — see ADR-018 / OHM-e0t1."
             if enforce:
                 errors.append(msg)
             else:

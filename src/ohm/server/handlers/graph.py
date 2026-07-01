@@ -940,7 +940,7 @@ class GraphHandlerMixin:
         prefix = "/observation/"
         if not path.startswith(prefix):
             raise ValidationError("Invalid observation path")
-        remainder = path[len(prefix):]
+        remainder = path[len(prefix) :]
 
         if "/" in remainder:
             obs_id, action = remainder.split("/", 1)
@@ -987,16 +987,19 @@ class GraphHandlerMixin:
                     anchor = anchor.replace(tzinfo=timezone.utc)
                 age_days = max(0.0, (t - anchor).total_seconds() / 86400.0)
 
-            self._json_response(200, {
-                "observation_id": obs_id,
-                "effective_confidence": round(eff, 6),
-                "weibull_shape": shape,
-                "half_life_days": hl,
-                "decay_function": fn,
-                "decay_profile": decay_profile(hl, shape),
-                "age_days": round(age_days, 4) if age_days is not None else None,
-                "evaluated_at": t.isoformat(),
-            })
+            self._json_response(
+                200,
+                {
+                    "observation_id": obs_id,
+                    "effective_confidence": round(eff, 6),
+                    "weibull_shape": shape,
+                    "half_life_days": hl,
+                    "decay_function": fn,
+                    "decay_profile": decay_profile(hl, shape),
+                    "age_days": round(age_days, 4) if age_days is not None else None,
+                    "evaluated_at": t.isoformat(),
+                },
+            )
             return
 
         if action:
@@ -1004,6 +1007,7 @@ class GraphHandlerMixin:
 
         # Enrich with effective_confidence + decay_profile for convenience
         from ohm.graph.decay import confidence_at as _ca, decay_profile as _dp
+
         obs["effective_confidence"] = round(_ca(obs), 6)
         obs["decay_profile"] = _dp(obs.get("half_life_days"), obs.get("weibull_shape"))
         self._json_response(200, obs)
@@ -1020,10 +1024,12 @@ class GraphHandlerMixin:
         prefix = "/narrative/"
         if not path.startswith(prefix):
             from ohm.exceptions import ValidationError
+
             raise ValidationError("Invalid narrative path")
-        node_id = path[len(prefix):]
+        node_id = path[len(prefix) :]
         if not node_id:
             from ohm.exceptions import ValidationError
+
             raise ValidationError("Missing node id")
 
         agent = qs.get("agent", [None])[0]
@@ -1054,10 +1060,12 @@ class GraphHandlerMixin:
         prefix = "/lineage/"
         if not path.startswith(prefix):
             from ohm.exceptions import ValidationError
+
             raise ValidationError("Invalid lineage path")
-        node_id = path[len(prefix):]
+        node_id = path[len(prefix) :]
         if not node_id:
             from ohm.exceptions import ValidationError
+
             raise ValidationError("Missing node id")
 
         max_depth = int(qs.get("depth", [10])[0])
@@ -1081,10 +1089,12 @@ class GraphHandlerMixin:
         prefix = "/contradiction/"
         if not path.startswith(prefix):
             from ohm.exceptions import ValidationError
+
             raise ValidationError("Invalid contradiction path")
-        node_id = path[len(prefix):]
+        node_id = path[len(prefix) :]
         if not node_id:
             from ohm.exceptions import ValidationError
+
             raise ValidationError("Missing node id")
 
         result = query_contradiction_summary(
@@ -1104,10 +1114,12 @@ class GraphHandlerMixin:
         prefix = "/task-context/"
         if not path.startswith(prefix):
             from ohm.exceptions import ValidationError
+
             raise ValidationError("Invalid task-context path")
-        task_id = path[len(prefix):]
+        task_id = path[len(prefix) :]
         if not task_id:
             from ohm.exceptions import ValidationError
+
             raise ValidationError("Missing task id")
 
         result = query_task_context(
@@ -1467,12 +1479,8 @@ class GraphHandlerMixin:
                     deadline=deadline,
                     use_store_conn=True,
                 )
-                nudge = _suggestions_module.generate_connectivity_nudge(
-                    self.current_store, agent, deadline=deadline
-                )
-                island = _suggestions_module.generate_island_nudge(
-                    self.current_store, agent, deadline=deadline
-                )
+                nudge = _suggestions_module.generate_connectivity_nudge(self.current_store, agent, deadline=deadline)
+                island = _suggestions_module.generate_island_nudge(self.current_store, agent, deadline=deadline)
                 result["suggestions"] = sugg
                 if nudge:
                     result["connectivity_warning"] = nudge["connectivity_warning"]
@@ -2030,7 +2038,7 @@ class GraphHandlerMixin:
         from ohm.server.nudges import accept_nudge
 
         # path is "/nudges/{id}/accept" → strip "/nudges/" and "/accept"
-        nudge_id = path[len("/nudges/"):]
+        nudge_id = path[len("/nudges/") :]
         if nudge_id.endswith("/accept"):
             nudge_id = nudge_id[: -len("/accept")]
         if not nudge_id:
@@ -2046,15 +2054,18 @@ class GraphHandlerMixin:
             helpful=helpful,
             notes=notes,
         )
-        self._json_response(200, {
-            "nudge_id": result["id"],
-            "nudge_type": result["nudge_type"],
-            "accepted": result["accepted"],
-            "accepted_at": str(result["accepted_at"]) if result["accepted_at"] else None,
-            "agent": result["agent"],
-            "target_id": result["target_id"],
-            "message": result["message"],
-        })
+        self._json_response(
+            200,
+            {
+                "nudge_id": result["id"],
+                "nudge_type": result["nudge_type"],
+                "accepted": result["accepted"],
+                "accepted_at": str(result["accepted_at"]) if result["accepted_at"] else None,
+                "agent": result["agent"],
+                "target_id": result["target_id"],
+                "message": result["message"],
+            },
+        )
 
     def _get_nudge_quality(self, path: str, qs: dict) -> None:
         """GET /admin/nudges/quality — aggregate nudge acceptance stats.
@@ -3772,6 +3783,7 @@ class GraphHandlerMixin:
         twin_id = parts[1] if len(parts) >= 2 else None
         if not twin_id:
             from ohm.exceptions import ValidationError
+
             raise ValidationError("twin_id is required in path")
 
         try:
@@ -3789,6 +3801,7 @@ class GraphHandlerMixin:
         twin_id = parts[1] if len(parts) >= 2 else None
         if not twin_id:
             from ohm.exceptions import ValidationError
+
             raise ValidationError("twin_id is required in path")
 
         try:
@@ -3852,6 +3865,7 @@ class GraphHandlerMixin:
         twin_id = parts[1] if len(parts) >= 2 else None
         if not twin_id:
             from ohm.exceptions import ValidationError
+
             raise ValidationError("twin_id is required in path")
 
         try:
@@ -4549,6 +4563,7 @@ class GraphHandlerMixin:
             if not to_state:
                 raise ValidationError("to_state is required")
             from ohm.queries import transition_session
+
             result = transition_session(
                 self.current_store.conn,
                 session_id=session_id,
@@ -4562,6 +4577,7 @@ class GraphHandlerMixin:
             if not observations:
                 raise ValidationError("observations is required")
             from ohm.queries import add_session_observation
+
             result = add_session_observation(
                 self.current_store.conn,
                 session_id=session_id,
@@ -4571,6 +4587,7 @@ class GraphHandlerMixin:
             self._json_response(200, {"ok": True, "data": result})
         elif action == "propose":
             from ohm.queries import propose_twin_config
+
             result = propose_twin_config(
                 self.current_store.conn,
                 session_id=session_id,
@@ -4589,6 +4606,7 @@ class GraphHandlerMixin:
             if not decision:
                 raise ValidationError("decision is required")
             from ohm.queries import review_proposal
+
             result = review_proposal(
                 self.current_store.conn,
                 session_id=session_id,
@@ -4603,6 +4621,7 @@ class GraphHandlerMixin:
             self._json_response(200, {"ok": True, "data": result})
         elif action == "instantiate":
             from ohm.queries import instantiate_from_session
+
             result = instantiate_from_session(
                 self.current_store.conn,
                 session_id=session_id,
@@ -4615,6 +4634,7 @@ class GraphHandlerMixin:
             if not observations or not actuals:
                 raise ValidationError("observations and actuals are required")
             from ohm.queries import record_calibration
+
             result = record_calibration(
                 self.current_store.conn,
                 session_id=session_id,
@@ -4629,6 +4649,7 @@ class GraphHandlerMixin:
             if not reason:
                 raise ValidationError("reason is required")
             from ohm.queries import evolve_session
+
             result = evolve_session(
                 self.current_store.conn,
                 session_id=session_id,
@@ -4652,6 +4673,7 @@ class GraphHandlerMixin:
 
         if action == "state":
             from ohm.queries import get_session_state
+
             result = get_session_state(
                 self.current_store.read_conn,
                 session_id=session_id,
@@ -4659,6 +4681,7 @@ class GraphHandlerMixin:
             self._json_response(200, {"ok": True, "data": result})
         elif action == "audit":
             from ohm.queries import get_session_audit
+
             result = get_session_audit(
                 self.current_store.read_conn,
                 session_id=session_id,
@@ -4673,6 +4696,7 @@ class GraphHandlerMixin:
         confidence_threshold = float(qs.get("confidence_threshold", ["0.85"])[0])
         limit = int(qs.get("limit", ["100"])[0])
         from ohm.queries import detect_verifiable_claims
+
         results = detect_verifiable_claims(
             self.current_store.read_conn,
             agent=agent,
@@ -4686,10 +4710,12 @@ class GraphHandlerMixin:
         edge_id = body.get("edge_id")
         if not edge_id:
             from ohm.exceptions import ValidationError
+
             raise ValidationError("edge_id is required")
         reason = body.get("reason")
         confidence = float(body.get("confidence", 0.5))
         from ohm.queries import create_verification_nudge
+
         result = create_verification_nudge(
             self.current_store.conn,
             edge_id=edge_id,
@@ -4704,9 +4730,11 @@ class GraphHandlerMixin:
         outcome = body.get("outcome")
         if not edge_id or not outcome:
             from ohm.exceptions import ValidationError
+
             raise ValidationError("edge_id and outcome are required")
         reason = body.get("reason")
         from ohm.queries import record_verification_outcome
+
         result = record_verification_outcome(
             self.current_store.conn,
             edge_id=edge_id,
@@ -4720,6 +4748,7 @@ class GraphHandlerMixin:
         agent = qs.get("agent", [None])[0]
         limit = int(qs.get("limit", ["100"])[0])
         from ohm.queries import list_pending_verifications
+
         results = list_pending_verifications(
             self.current_store.read_conn,
             agent=agent,

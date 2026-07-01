@@ -314,17 +314,27 @@ class TestTwinHTTP:
         from tests.conftest import _request
 
         port, store = test_server
-        status, data = _request("POST", port, "/node", {
-            "id": "http_target",
-            "label": "HTTP Target",
-            "type": "concept",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            {
+                "id": "http_target",
+                "label": "HTTP Target",
+                "type": "concept",
+            },
+        )
         assert status in (200, 201)
 
-        status, data = _request("POST", port, "/twin/register", {
-            "label": "HTTP Twin",
-            "target_node_id": "http_target",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/twin/register",
+            {
+                "label": "HTTP Twin",
+                "target_node_id": "http_target",
+            },
+        )
         assert status == 201
         assert data["ok"] is True
         assert data["data"]["type"] == "twin"
@@ -334,17 +344,27 @@ class TestTwinHTTP:
         from tests.conftest import _request
 
         port, store = test_server
-        status, data = _request("POST", port, "/node", {
-            "id": "explain_target",
-            "label": "Explain Target",
-            "type": "concept",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            {
+                "id": "explain_target",
+                "label": "Explain Target",
+                "type": "concept",
+            },
+        )
         assert status in (200, 201)
 
-        status, data = _request("POST", port, "/twin/register", {
-            "label": "Explain Twin",
-            "target_node_id": "explain_target",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/twin/register",
+            {
+                "label": "Explain Twin",
+                "target_node_id": "explain_target",
+            },
+        )
         assert status == 201
         twin_id = data["data"]["id"]
 
@@ -358,17 +378,27 @@ class TestTwinHTTP:
         from tests.conftest import _request
 
         port, store = test_server
-        status, data = _request("POST", port, "/node", {
-            "id": "constraints_target",
-            "label": "Constraints Target",
-            "type": "concept",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            {
+                "id": "constraints_target",
+                "label": "Constraints Target",
+                "type": "concept",
+            },
+        )
         assert status in (200, 201)
 
-        status, data = _request("POST", port, "/twin/register", {
-            "label": "Constraints Twin",
-            "target_node_id": "constraints_target",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/twin/register",
+            {
+                "label": "Constraints Twin",
+                "target_node_id": "constraints_target",
+            },
+        )
         assert status == 201
         twin_id = data["data"]["id"]
 
@@ -382,22 +412,37 @@ class TestTwinHTTP:
         from tests.conftest import _request
 
         port, store = test_server
-        status, data = _request("POST", port, "/node", {
-            "id": "validate_target",
-            "label": "Validate Target",
-            "type": "concept",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            {
+                "id": "validate_target",
+                "label": "Validate Target",
+                "type": "concept",
+            },
+        )
         assert status in (200, 201)
 
-        status, data = _request("POST", port, "/twin/register", {
-            "label": "Validate Twin",
-            "target_node_id": "validate_target",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            "/twin/register",
+            {
+                "label": "Validate Twin",
+                "target_node_id": "validate_target",
+            },
+        )
         assert status == 201
         twin_id = data["data"]["id"]
 
-        status, data = _request("POST", port, f"/twin/{twin_id}/validate-action", {
-            "action_id": "does-not-exist",
-        })
+        status, data = _request(
+            "POST",
+            port,
+            f"/twin/{twin_id}/validate-action",
+            {
+                "action_id": "does-not-exist",
+            },
+        )
         assert status == 404
         assert data["ok"] is False

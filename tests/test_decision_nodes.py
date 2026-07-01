@@ -37,31 +37,37 @@ class TestDecisionSchema:
 
     def test_migration_0_38_0_present(self):
         from ohm.schema import MIGRATIONS
+
         versions = [v for v, _, _ in MIGRATIONS]
         assert "0.38.0" in versions
 
     def test_migration_0_38_0_description(self):
         from ohm.schema import MIGRATIONS
+
         match = [m for m in MIGRATIONS if m[0] == "0.38.0"]
         assert match and "gate" in match[0][1].lower()
 
     def test_migration_0_37_0_present(self):
         from ohm.schema import MIGRATIONS
+
         versions = [v for v, _, _ in MIGRATIONS]
         assert "0.37.0" in versions
 
     def test_migration_0_37_0_description(self):
         from ohm.schema import MIGRATIONS
+
         match = [m for m in MIGRATIONS if m[0] == "0.37.0"]
         assert match and "feedback" in match[0][1].lower()
 
     def test_migration_0_36_0_present(self):
         from ohm.schema import MIGRATIONS
+
         versions = [v for v, _, _ in MIGRATIONS]
         assert "0.36.0" in versions
 
     def test_migration_0_36_0_description(self):
         from ohm.schema import MIGRATIONS
+
         match = [m for m in MIGRATIONS if m[0] == "0.36.0"]
         assert match and "outcome" in match[0][1].lower()
 

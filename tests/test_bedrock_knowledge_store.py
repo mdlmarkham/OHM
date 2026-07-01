@@ -103,9 +103,7 @@ class TestBedrockKnowledgeStore:
             with patch("boto3.client") as mock_boto3_client:
                 mock_agent_client = MagicMock()
                 mock_bedrock_agent = MagicMock()
-                mock_boto3_client.side_effect = lambda service, **kw: (
-                    mock_bedrock_agent if service == "bedrock-agent" else MagicMock()
-                )
+                mock_boto3_client.side_effect = lambda service, **kw: mock_bedrock_agent if service == "bedrock-agent" else MagicMock()
 
                 store = BedrockKnowledgeStore(
                     inner_store=s3_store,
@@ -242,6 +240,7 @@ class TestBedrockConfiguration:
                 )
                 assert store._s3_reference_mode is True
 
+
 class TestBedrockMetadataAndRetrieval:
     def test_save_propagates_metadata_to_direct_upload(self, bedrock_store, mock_agent_client):
         document_id = f"doc-{uuid.uuid4().hex[:12]}"
@@ -306,9 +305,7 @@ class TestBedrockMetadataAndRetrieval:
         mock_agent_client.retrieve.assert_called_once_with(
             knowledgeBaseId="test-kb-id",
             retrievalQuery={"text": "agent systems", "type": "TEXT"},
-            retrievalConfiguration={
-                "vectorSearchConfiguration": {"numberOfResults": 3}
-            },
+            retrievalConfiguration={"vectorSearchConfiguration": {"numberOfResults": 3}},
         )
 
     def test_retrieve_with_filter(self, bedrock_store, mock_agent_client):

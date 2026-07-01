@@ -188,7 +188,10 @@ class TestAssembleTwinDecay:
         # Need a decision to assemble against
         decision = create_node(conn, label="Decision", node_type="decision", created_by="t", connects_to=[target["id"]])
         result = assemble_twin_for_decision(
-            conn, decision_node_id=decision["id"], goal="test goal", created_by="t",
+            conn,
+            decision_node_id=decision["id"],
+            goal="test goal",
+            created_by="t",
         )
         # At least one model_candidate in the ranking
         if result.get("model_candidates"):
@@ -207,7 +210,11 @@ class TestAssembleTwinDecay:
         _backdate_evaluations(conn, stale["id"], days_ago=90, half_life_days=30)
         decision = create_node(conn, label="Decision", node_type="decision", created_by="t", connects_to=[target["id"]])
         result = assemble_twin_for_decision(
-            conn, decision_node_id=decision["id"], goal="test", created_by="t", half_life_days=30.0,
+            conn,
+            decision_node_id=decision["id"],
+            goal="test",
+            created_by="t",
+            half_life_days=30.0,
         )
         cands = result.get("model_candidates", [])
         labels = [c["label"] for c in cands]
@@ -222,7 +229,11 @@ class TestAssembleTwinDecay:
         evaluate_model(conn, model_candidate_id=cand["id"], created_by="t", metrics={"accuracy": 0.9})
         decision = create_node(conn, label="Decision", node_type="decision", created_by="t", connects_to=[target["id"]])
         result = assemble_twin_for_decision(
-            conn, decision_node_id=decision["id"], goal="test", created_by="t", apply_decay=False,
+            conn,
+            decision_node_id=decision["id"],
+            goal="test",
+            created_by="t",
+            apply_decay=False,
         )
         cands = result.get("model_candidates", [])
         for mc in cands:
@@ -244,7 +255,10 @@ class TestComputeDecisionValueDecay:
         evaluate_model(conn, model_candidate_id=cand["id"], created_by="t", metrics={"accuracy": 0.9})
         decision = create_node(conn, label="Decision", node_type="decision", created_by="t", connects_to=[target["id"]])
         result = compute_decision_value(
-            conn, model_id=cand["id"], decision_node_id=decision["id"], utility_scale=1.0,
+            conn,
+            model_id=cand["id"],
+            decision_node_id=decision["id"],
+            utility_scale=1.0,
         )
         assert "accuracy" in result
         assert "decayed_accuracy" in result
@@ -260,7 +274,10 @@ class TestComputeDecisionValueDecay:
         _backdate_evaluations(conn, cand["id"], days_ago=180, half_life_days=30)
         decision = create_node(conn, label="Decision", node_type="decision", created_by="t", connects_to=[target["id"]])
         result = compute_decision_value(
-            conn, model_id=cand["id"], decision_node_id=decision["id"], utility_scale=1.0,
+            conn,
+            model_id=cand["id"],
+            decision_node_id=decision["id"],
+            utility_scale=1.0,
             half_life_days=30.0,
         )
         # 180 days at 30-day half-life → decay factor 2^(-6) = 0.015625
@@ -276,7 +293,10 @@ class TestComputeDecisionValueDecay:
         _backdate_evaluations(conn, cand["id"], days_ago=180, half_life_days=30)
         decision = create_node(conn, label="Decision", node_type="decision", created_by="t", connects_to=[target["id"]])
         result = compute_decision_value(
-            conn, model_id=cand["id"], decision_node_id=decision["id"], utility_scale=1.0,
+            conn,
+            model_id=cand["id"],
+            decision_node_id=decision["id"],
+            utility_scale=1.0,
             apply_decay=False,
         )
         # Without decay, decayed == raw regardless of age
@@ -291,9 +311,13 @@ class TestComputeDecisionValueDecay:
         decision = create_node(conn, label="Decision", node_type="decision", created_by="t", connects_to=[target["id"]])
         # Should not raise
         promoted = promote_model(
-            conn, model_candidate_id=cand["id"], created_by="t",
-            policy="decision_value", decision_node_id=decision["id"],
-            apply_decay=True, half_life_days=30.0,
+            conn,
+            model_candidate_id=cand["id"],
+            created_by="t",
+            policy="decision_value",
+            decision_node_id=decision["id"],
+            apply_decay=True,
+            half_life_days=30.0,
         )
         assert promoted is not None
 
@@ -315,8 +339,12 @@ class TestStaleFeedsDecayRanking:
         # Both feed the decision
         for feed in (fresh, stale):
             create_edge(
-                conn, from_node=feed["id"], to_node=decision["id"],
-                layer="L2", edge_type="FEEDS", created_by="t",
+                conn,
+                from_node=feed["id"],
+                to_node=decision["id"],
+                layer="L2",
+                edge_type="FEEDS",
+                created_by="t",
             )
         # Same observation value, different ages
         observe(conn, node_id_or_label=fresh["id"], value=0.8, source="t")
@@ -334,8 +362,12 @@ class TestStaleFeedsDecayRanking:
         decision = create_node(conn, label="Decision", node_type="decision", created_by="t", connects_to=[target["id"]])
         feed = create_node(conn, label="Feed", node_type="concept", created_by="t")
         create_edge(
-            conn, from_node=feed["id"], to_node=decision["id"],
-            layer="L2", edge_type="FEEDS", created_by="t",
+            conn,
+            from_node=feed["id"],
+            to_node=decision["id"],
+            layer="L2",
+            edge_type="FEEDS",
+            created_by="t",
         )
         observe(conn, node_id_or_label=feed["id"], value=0.7, source="t")
         result = query_loop_status(conn)
@@ -352,8 +384,12 @@ class TestStaleFeedsDecayRanking:
         decision = create_node(conn, label="Decision", node_type="decision", created_by="t", connects_to=[target["id"]])
         feed = create_node(conn, label="NoObsFeed", node_type="concept", created_by="t")
         create_edge(
-            conn, from_node=feed["id"], to_node=decision["id"],
-            layer="L2", edge_type="FEEDS", created_by="t",
+            conn,
+            from_node=feed["id"],
+            to_node=decision["id"],
+            layer="L2",
+            edge_type="FEEDS",
+            created_by="t",
         )
         result = query_loop_status(conn)
         no_obs = [f for f in result["temporal"]["stale_feeds"] if f["label"] == "NoObsFeed"]
@@ -369,21 +405,26 @@ class TestStaleFeedsDecayRanking:
 
 def _register_candidate(conn, twin_id: str, label: str, created_by: str, parameters: dict | None = None):
     from ohm.queries import register_model_candidate
+
     return register_model_candidate(
-        conn, label=label, twin_id=twin_id, created_by=created_by, model_parameters=parameters,
+        conn,
+        label=label,
+        twin_id=twin_id,
+        created_by=created_by,
+        model_parameters=parameters,
     )
 
 
 def _backdate_evaluations(conn, model_id: str, days_ago: int, half_life_days: float):
     """Set the model_evaluation's created_at to N days ago, simulating staleness."""
     from ohm.queries import _rows_to_dicts  # type: ignore[attr-defined]
-    rows = _rows_to_dicts(conn.execute(
-        "SELECT id FROM ohm_nodes WHERE type = 'model_evaluation' "
-        "AND deleted_at IS NULL AND id IN ("
-        "  SELECT to_node FROM ohm_edges WHERE from_node = ? AND edge_type = 'EVALUATED_BY'"
-        ")",
-        [model_id],
-    ))
+
+    rows = _rows_to_dicts(
+        conn.execute(
+            "SELECT id FROM ohm_nodes WHERE type = 'model_evaluation' AND deleted_at IS NULL AND id IN (  SELECT to_node FROM ohm_edges WHERE from_node = ? AND edge_type = 'EVALUATED_BY')",
+            [model_id],
+        )
+    )
     target_iso = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
     for row in rows:
         conn.execute(
@@ -404,6 +445,10 @@ def _backdate_node(conn, node_id: str, days_ago: int):
 
 def observe(conn, *, node_id_or_label: str, value: float, source: str):
     return create_observation(
-        conn, node_id=node_id_or_label, obs_type="measurement",
-        created_by=source, value=value, source=source,
+        conn,
+        node_id=node_id_or_label,
+        obs_type="measurement",
+        created_by=source,
+        value=value,
+        source=source,
     )

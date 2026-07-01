@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 import shutil
-import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from pathlib import Path
@@ -182,9 +181,7 @@ class S3DocumentStore(DocumentStore):
 
         self.bucket = bucket or os.environ.get("OHM_S3_BUCKET") or os.environ.get("AWS_BUCKET_NAME")
         if not self.bucket:
-            raise RuntimeError(
-                "S3DocumentStore requires OHM_S3_BUCKET or AWS_BUCKET_NAME environment variable"
-            )
+            raise RuntimeError("S3DocumentStore requires OHM_S3_BUCKET or AWS_BUCKET_NAME environment variable")
 
         self.prefix = (prefix or os.environ.get("OHM_S3_PREFIX", "ohm/documents/")).rstrip("/") + "/"
         self.endpoint_url = endpoint_url or os.environ.get("AWS_ENDPOINT_URL") or os.environ.get("S3_ENDPOINT_URL")
@@ -352,26 +349,13 @@ class BedrockKnowledgeStore(DocumentStore):
 
         self.inner = inner_store or self._default_inner_store()
 
-        self.knowledge_base_id = (
-            knowledge_base_id
-            or os.environ.get("OHM_BEDROCK_KB_ID")
-        )
+        self.knowledge_base_id = knowledge_base_id or os.environ.get("OHM_BEDROCK_KB_ID")
         if not self.knowledge_base_id:
-            raise RuntimeError(
-                "BedrockKnowledgeStore requires OHM_BEDROCK_KB_ID environment variable"
-            )
+            raise RuntimeError("BedrockKnowledgeStore requires OHM_BEDROCK_KB_ID environment variable")
 
-        self.data_source_id = (
-            data_source_id
-            or os.environ.get("OHM_BEDROCK_DATA_SOURCE_ID")
-        )
+        self.data_source_id = data_source_id or os.environ.get("OHM_BEDROCK_DATA_SOURCE_ID")
 
-        self.region = (
-            region
-            or os.environ.get("OHM_BEDROCK_REGION")
-            or os.environ.get("AWS_REGION")
-            or os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
-        )
+        self.region = region or os.environ.get("OHM_BEDROCK_REGION") or os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
 
         self._s3_reference_mode = isinstance(self.inner, S3DocumentStore)
         self._logger = logging.getLogger(__name__)
@@ -405,17 +389,11 @@ class BedrockKnowledgeStore(DocumentStore):
         **kwargs: Any,
     ) -> dict[str, Any]:
         metadata = kwargs.pop("metadata", None) or {}
-        record = self.inner.save(
-            document_id, filename, content_bytes, content_type, **kwargs
-        )
+        record = self.inner.save(document_id, filename, content_bytes, content_type, **kwargs)
         try:
-            self._sync_to_bedrock(
-                document_id, filename, content_bytes, content_type, metadata=metadata
-            )
+            self._sync_to_bedrock(document_id, filename, content_bytes, content_type, metadata=metadata)
         except Exception as exc:
-            self._logger.warning(
-                "Bedrock KB sync failed for %s: %s", document_id, exc
-            )
+            self._logger.warning("Bedrock KB sync failed for %s: %s", document_id, exc)
             record["bedrock_sync_status"] = "failed"
             record["bedrock_sync_error"] = str(exc)
         else:
@@ -460,9 +438,7 @@ class BedrockKnowledgeStore(DocumentStore):
         if "provenance" in record:
             metadata["ohm_provenance"] = record["provenance"]
 
-        self._sync_to_bedrock(
-            document_id, filename, content_bytes, content_type, metadata=metadata
-        )
+        self._sync_to_bedrock(document_id, filename, content_bytes, content_type, metadata=metadata)
         return {"document_id": document_id, "bedrock_sync_status": "synced"}
 
     def retrieve(
@@ -512,9 +488,7 @@ class BedrockKnowledgeStore(DocumentStore):
             },
         }
         if filters:
-            body["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"][
-                "retrievalConfiguration"
-            ]["vectorSearchConfiguration"]["filter"] = filters
+            body["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"]["retrievalConfiguration"]["vectorSearchConfiguration"]["filter"] = filters
 
         response = self._agent_client.retrieve_and_generate(
             input={"text": query, "type": "TEXT"},
@@ -525,9 +499,7 @@ class BedrockKnowledgeStore(DocumentStore):
     def get_ingestion_status(self, ingestion_job_id: str) -> dict[str, Any]:
         """Return the status of an S3-reference ingestion job."""
         if not self.data_source_id:
-            raise RuntimeError(
-                "get_ingestion_status requires OHM_BEDROCK_DATA_SOURCE_ID"
-            )
+            raise RuntimeError("get_ingestion_status requires OHM_BEDROCK_DATA_SOURCE_ID")
         response = self._bedrock_agent_client.get_ingestion_job(
             knowledgeBaseId=self.knowledge_base_id,
             dataSourceId=self.data_source_id,
@@ -546,16 +518,12 @@ class BedrockKnowledgeStore(DocumentStore):
         if self._s3_reference_mode and self.data_source_id:
             self._sync_s3_reference(document_id)
         else:
-            self._sync_direct_upload(
-                document_id, filename, content_bytes, content_type, metadata=metadata
-            )
+            self._sync_direct_upload(document_id, filename, content_bytes, content_type, metadata=metadata)
 
     def _sync_s3_reference(self, document_id: str) -> dict[str, Any]:
         """Trigger an S3 data source ingestion job and return job metadata."""
         if not self.data_source_id:
-            raise RuntimeError(
-                "S3 reference mode requires OHM_BEDROCK_DATA_SOURCE_ID"
-            )
+            raise RuntimeError("S3 reference mode requires OHM_BEDROCK_DATA_SOURCE_ID")
         response = self._bedrock_agent_client.start_ingestion_job(
             knowledgeBaseId=self.knowledge_base_id,
             dataSourceId=self.data_source_id,
@@ -664,4 +632,3 @@ class BedrockKnowledgeStore(DocumentStore):
             "text/html": "html",
         }
         return mapping.get(content_type.lower().split(";")[0].strip())
-

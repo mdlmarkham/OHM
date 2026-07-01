@@ -6,16 +6,13 @@ Provides ``POST /documents/upload`` for ingesting files and URLs.
 from __future__ import annotations
 
 import email.policy
-import json
 import mimetypes
 import os
 import urllib.error
 import urllib.request
-import uuid
 from pathlib import Path
 from typing import Any
 
-from ohm.documents.extract import extract_text
 from ohm.documents.ingest import ingest_file
 from ohm.documents.store import BedrockKnowledgeStore, DocumentStore, LocalDocumentStore, S3DocumentStore
 from ohm.exceptions import NodeNotFoundError, ValidationError
@@ -53,9 +50,7 @@ class DocumentHandlerMixin:
             filename, content_bytes, detected_type = self._fetch_url_upload(body)
             tags = body.get("tags") if isinstance(body, dict) else None
         else:
-            raise ValidationError(
-                "Unsupported request: expected multipart/form-data file upload or JSON {'url': '...'}"
-            )
+            raise ValidationError("Unsupported request: expected multipart/form-data file upload or JSON {'url': '...'}")
 
         final_type = self._resolve_content_type(filename, detected_type, content_bytes)
         if not self._is_allowed_content_type(final_type, filename):
@@ -171,7 +166,7 @@ class DocumentHandlerMixin:
         prefix = "/documents/"
         if not path.startswith(prefix):
             return None
-        remainder = path[len(prefix):]
+        remainder = path[len(prefix) :]
         expected_suffix = f"/{suffix}"
         if not remainder.endswith(expected_suffix):
             return None
@@ -190,9 +185,7 @@ class DocumentHandlerMixin:
         if len(raw_body) > 50 * 1024 * 1024:
             raise ValidationError("Upload too large (max 50 MB)")
 
-        header_block = (
-            b"Content-Type: " + content_type.encode("latin-1") + b"\r\n\r\n"
-        )
+        header_block = b"Content-Type: " + content_type.encode("latin-1") + b"\r\n\r\n"
         msg = email.message_from_bytes(header_block + raw_body, policy=email.policy.HTTP)
         if not msg.is_multipart():
             raise ValidationError("Malformed multipart upload")
@@ -304,7 +297,7 @@ class DocumentHandlerMixin:
         if not path.startswith(prefix):
             raise ValidationError("Invalid document path")
 
-        remainder = path[len(prefix):]
+        remainder = path[len(prefix) :]
         if "/" in remainder:
             document_id, action = remainder.split("/", 1)
         else:
@@ -355,5 +348,3 @@ class DocumentHandlerMixin:
         self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
         self.end_headers()
         self.wfile.write(content_bytes)
-
-

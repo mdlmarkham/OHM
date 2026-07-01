@@ -61,20 +61,40 @@ def _seed_industrial_graph(conn):
 
     # Causal edges with probabilities
     e_feed_to_reactor = create_edge(
-        conn, from_node=feed_stock["id"], to_node=reactor["id"],
-        edge_type="CAUSES", layer="L3", created_by="plant_agent", probability=0.85,
+        conn,
+        from_node=feed_stock["id"],
+        to_node=reactor["id"],
+        edge_type="CAUSES",
+        layer="L3",
+        created_by="plant_agent",
+        probability=0.85,
     )
     e_reactor_to_yield = create_edge(
-        conn, from_node=reactor["id"], to_node=yield_node["id"],
-        edge_type="CAUSES", layer="L3", created_by="plant_agent", probability=0.9,
+        conn,
+        from_node=reactor["id"],
+        to_node=yield_node["id"],
+        edge_type="CAUSES",
+        layer="L3",
+        created_by="plant_agent",
+        probability=0.9,
     )
     e_yield_to_revenue = create_edge(
-        conn, from_node=yield_node["id"], to_node=revenue["id"],
-        edge_type="CAUSES", layer="L3", created_by="trading_agent", probability=0.95,
+        conn,
+        from_node=yield_node["id"],
+        to_node=revenue["id"],
+        edge_type="CAUSES",
+        layer="L3",
+        created_by="trading_agent",
+        probability=0.95,
     )
     e_price_to_revenue = create_edge(
-        conn, from_node=market_price["id"], to_node=revenue["id"],
-        edge_type="EXPECTED_LIKELIHOOD", layer="L3", created_by="trading_agent", probability=0.8,
+        conn,
+        from_node=market_price["id"],
+        to_node=revenue["id"],
+        edge_type="EXPECTED_LIKELIHOOD",
+        layer="L3",
+        created_by="trading_agent",
+        probability=0.8,
     )
 
     # AND-gate constraint: reactor requires BOTH feed stock and catalyst
@@ -85,13 +105,20 @@ def _seed_industrial_graph(conn):
 
     # Register a digital twin for the reactor
     twin = create_node(
-        conn, label="Reactor Digital Twin", node_type="twin",
-        created_by="plant_agent", connects_to=[reactor["id"]],
+        conn,
+        label="Reactor Digital Twin",
+        node_type="twin",
+        created_by="plant_agent",
+        connects_to=[reactor["id"]],
     )
     # Link twin to reactor via EVALUATES edge
     create_edge(
-        conn, from_node=twin["id"], to_node=reactor["id"],
-        edge_type="EVALUATES", layer="L3", created_by="plant_agent",
+        conn,
+        from_node=twin["id"],
+        to_node=reactor["id"],
+        edge_type="EVALUATES",
+        layer="L3",
+        created_by="plant_agent",
     )
 
     return {
@@ -145,7 +172,9 @@ class TestIndustrialProcessAcceptance:
         """Baseline cascade: feed (0.85) * reactor (0.9) * yield (0.95) = 0.727."""
         nodes = _seed_industrial_graph(industrial_conn)
         cascade = query_counterfactual_cascade(
-            industrial_conn, nodes["feed_stock"]["id"], failure_probability=1.0,
+            industrial_conn,
+            nodes["feed_stock"]["id"],
+            failure_probability=1.0,
         )
         labels = {r["node_label"]: r["failure_probability"] for r in cascade}
         assert labels["Chemical Reactor R-101"] == pytest.approx(0.85, abs=0.01)
@@ -156,16 +185,14 @@ class TestIndustrialProcessAcceptance:
         """What if feed stock reliability drops to 0.3? Revenue should decrease."""
         nodes = _seed_industrial_graph(industrial_conn)
         comparison = query_compare_scenarios(
-            industrial_conn, nodes["feed_stock"]["id"],
+            industrial_conn,
+            nodes["feed_stock"]["id"],
             failure_probability=1.0,
             edge_overrides={nodes["e_feed"]["id"]: 0.3},
         )
         assert comparison["summary"]["decreased"] >= 2
         # Find the revenue node in deltas by node_id
-        revenue_delta = [
-            d for d in comparison["deltas"]
-            if d["node_id"] == nodes["revenue"]["id"]
-        ]
+        revenue_delta = [d for d in comparison["deltas"] if d["node_id"] == nodes["revenue"]["id"]]
         assert len(revenue_delta) == 1
         assert revenue_delta[0]["direction"] == "decreased"
 
@@ -225,6 +252,7 @@ class TestIndustrialProcessAcceptance:
     def test_metis_gate_status_aliases(self, industrial_conn):
         """Metis design-note gate_status values (open/closed/stuck) are valid."""
         from ohm.schema import VALID_GATE_STATUSES
+
         assert "open" in VALID_GATE_STATUSES
         assert "closed" in VALID_GATE_STATUSES
         assert "stuck" in VALID_GATE_STATUSES

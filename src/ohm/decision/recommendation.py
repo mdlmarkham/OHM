@@ -3,6 +3,7 @@
 Links decision nodes to hypotheses via DECISION_DEPENDS_ON edges and
 re-evaluates the best action when supporting hypotheses change status.
 """
+
 from __future__ import annotations
 
 import json
@@ -26,6 +27,7 @@ def evaluate_decision(conn, decision_id: str) -> dict[str, Any]:
     ).fetchone()
     if not decision:
         from ohm.exceptions import NodeNotFoundError
+
         raise NodeNotFoundError(f"Decision node {decision_id} not found")
 
     _id, label, node_type, current_best_action, action_alternatives_json, utility_scale, decision_conf = decision
@@ -122,7 +124,7 @@ def _choose_best_action(conn, decision_id: str, action_alternatives: list[str]) 
         [decision_id],
     ).fetchall()
 
-    statuses = {status for status, in assumptions if status}
+    statuses = {status for (status,) in assumptions if status}
     lowered = [a.lower() for a in action_alternatives]
 
     if statuses == {"verified"}:
@@ -173,10 +175,13 @@ def recompute_linked_decisions(conn, hypothesis_id: str) -> list[dict[str, Any]]
                 [new_action, decision_id],
             )
             from ohm.queries import _log_change
+
             _log_change(conn, "ohm_nodes", decision_id, "UPDATE", "system")
-        updates.append({
-            "decision_id": decision_id,
-            "old_action": old_action,
-            "new_action": new_action,
-        })
+        updates.append(
+            {
+                "decision_id": decision_id,
+                "old_action": old_action,
+                "new_action": new_action,
+            }
+        )
     return updates

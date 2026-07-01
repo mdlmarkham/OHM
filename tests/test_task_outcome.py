@@ -34,9 +34,7 @@ class TestTaskOutcomeQuery:
 
     def test_close_task_with_true_outcome_records_outcome(self, test_db):
         self._seed_task_and_claim(test_db)
-        result = query_close_task_with_outcome(
-            test_db, task_id="task1", outcome="TRUE", recorded_by="recorder"
-        )
+        result = query_close_task_with_outcome(test_db, task_id="task1", outcome="TRUE", recorded_by="recorder")
         assert result["outcome"] == "TRUE"
         assert result["task"]["task_status"] == "done"
         assert result["task"]["outcome"] == "TRUE"
@@ -46,18 +44,14 @@ class TestTaskOutcomeQuery:
 
     def test_close_task_with_false_outcome(self, test_db):
         self._seed_task_and_claim(test_db)
-        result = query_close_task_with_outcome(
-            test_db, task_id="task1", outcome="FALSE", recorded_by="recorder"
-        )
+        result = query_close_task_with_outcome(test_db, task_id="task1", outcome="FALSE", recorded_by="recorder")
         assert result["outcome"] == "FALSE"
         rows = test_db.execute("SELECT outcome FROM ohm_outcomes").fetchall()
         assert rows == [(False,)]
 
     def test_close_task_ambiguous_no_outcome_record(self, test_db):
         self._seed_task_and_claim(test_db)
-        result = query_close_task_with_outcome(
-            test_db, task_id="task1", outcome="AMBIGUOUS", recorded_by="recorder", notes="Inconclusive"
-        )
+        result = query_close_task_with_outcome(test_db, task_id="task1", outcome="AMBIGUOUS", recorded_by="recorder", notes="Inconclusive")
         assert result["outcome"] == "AMBIGUOUS"
         assert result["task"]["outcome"] == "AMBIGUOUS"
         assert result["outcome_record"] is None
@@ -65,9 +59,7 @@ class TestTaskOutcomeQuery:
 
     def test_close_task_no_expected_claim_no_outcome(self, test_db):
         self._seed_task_and_claim(test_db, expected_claim=False)
-        result = query_close_task_with_outcome(
-            test_db, task_id="task1", outcome="TRUE", recorded_by="recorder"
-        )
+        result = query_close_task_with_outcome(test_db, task_id="task1", outcome="TRUE", recorded_by="recorder")
         assert result["outcome_record"] is None
 
     def test_close_task_with_explicit_claim_node_arg(self, test_db):
@@ -76,9 +68,7 @@ class TestTaskOutcomeQuery:
             "INSERT INTO ohm_nodes (id, label, type, created_by) VALUES (?, ?, ?, ?)",
             ["claim_x", "Claim X", "hypothesis", "metis"],
         )
-        result = query_close_task_with_outcome(
-            test_db, task_id="task1", outcome="TRUE", recorded_by="recorder", claim_node="claim_x"
-        )
+        result = query_close_task_with_outcome(test_db, task_id="task1", outcome="TRUE", recorded_by="recorder", claim_node="claim_x")
         assert result["outcome_record"] is not None
         rows = test_db.execute("SELECT claim_node FROM ohm_outcomes").fetchall()
         assert rows == [("claim_x",)]
@@ -102,16 +92,12 @@ class TestTaskOutcomeQuery:
 
     def test_outcome_case_insensitive(self, test_db):
         self._seed_task_and_claim(test_db)
-        result = query_close_task_with_outcome(
-            test_db, task_id="task1", outcome="true", recorded_by="r"
-        )
+        result = query_close_task_with_outcome(test_db, task_id="task1", outcome="true", recorded_by="r")
         assert result["outcome"] == "TRUE"
 
     def test_notes_stored_on_task(self, test_db):
         self._seed_task_and_claim(test_db)
-        result = query_close_task_with_outcome(
-            test_db, task_id="task1", outcome="TRUE", recorded_by="r", notes="Confirmed by experiment"
-        )
+        result = query_close_task_with_outcome(test_db, task_id="task1", outcome="TRUE", recorded_by="r", notes="Confirmed by experiment")
         assert result["task"]["outcome_notes"] == "Confirmed by experiment"
 
 
@@ -196,9 +182,7 @@ class TestTaskOutcomeHTTP:
         store.write_node("anchor3", "Anchor 3", "concept", agent_name="test")
         store.write_node("claim_x", "Claim X", "hypothesis", agent_name="metis")
         store.write_edge("anchor3", "claim_x", "REFERENCES", layer="L2", agent_name="test")
-        status, data = _request(
-            "POST", port, "/tasks/task1/outcome", body={"outcome": "TRUE", "claim_node": "claim_x"}
-        )
+        status, data = _request("POST", port, "/tasks/task1/outcome", body={"outcome": "TRUE", "claim_node": "claim_x"})
         assert status == 200, data
         assert data["outcome_record"] is not None
 
@@ -213,12 +197,8 @@ class TestTaskOutcomeHTTP:
         store.write_node("anchor4", "Anchor 4", "concept", agent_name="test")
         store.write_node("task_patch", "Patch Task", "task", agent_name="test")
         store.write_edge("anchor4", "task_patch", "REFERENCES", layer="L2", agent_name="test")
-        status, data = _request(
-            "PATCH", port, "/tasks/task_patch", body={"expected_claim": "some_claim_id"}
-        )
+        status, data = _request("PATCH", port, "/tasks/task_patch", body={"expected_claim": "some_claim_id"})
         assert status == 200, data
         # Verify via direct DB read
-        row = store.conn.execute(
-            "SELECT expected_claim FROM ohm_nodes WHERE id = ?", ["task_patch"]
-        ).fetchone()
+        row = store.conn.execute("SELECT expected_claim FROM ohm_nodes WHERE id = ?", ["task_patch"]).fetchone()
         assert row[0] == "some_claim_id"

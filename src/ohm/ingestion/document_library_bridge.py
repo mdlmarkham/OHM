@@ -27,8 +27,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-import mimetypes
-import os
 import time
 import uuid
 from datetime import datetime, timezone
@@ -61,9 +59,7 @@ def _read_queue_items(queue_dir: Path, stage: str) -> list[dict]:
 
 
 def _write_queue_item(queue_dir: Path, stage: str, item: dict) -> str:
-    item_id = item.get("id") or hashlib.md5(
-        json.dumps(item, sort_keys=True, default=str).encode()
-    ).hexdigest()[:16]
+    item_id = item.get("id") or hashlib.md5(json.dumps(item, sort_keys=True, default=str).encode()).hexdigest()[:16]
     item["id"] = item_id
     path = _queue_path(queue_dir, stage, item_id)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -94,7 +90,6 @@ def _api_post(
     timeout: int = 30,
 ) -> tuple[int, dict[str, Any] | str]:
     """POST helper supporting both JSON and raw byte payloads."""
-    import urllib.request
 
     max_retries = 3
     last_status = 0
@@ -153,15 +148,11 @@ def _fetch_url(url: str, timeout: int = 30) -> tuple[bytes, str | None]:
         return resp.read(), content_type
 
 
-def _build_multipart_body(
-    filename: str, content_bytes: bytes, boundary: str, content_type: str
-) -> bytes:
+def _build_multipart_body(filename: str, content_bytes: bytes, boundary: str, content_type: str) -> bytes:
     """Build a minimal multipart/form-data body for a file upload."""
     parts = []
     parts.append(f"--{boundary}\r\n".encode("latin-1"))
-    parts.append(
-        f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'.encode("latin-1")
-    )
+    parts.append(f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'.encode("latin-1"))
     parts.append(f"Content-Type: {content_type}\r\n\r\n".encode("latin-1"))
     parts.append(content_bytes)
     parts.append(f"\r\n--{boundary}--\r\n".encode("latin-1"))

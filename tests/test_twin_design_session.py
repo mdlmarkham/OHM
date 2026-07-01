@@ -33,26 +33,18 @@ def test_db():
 
 class TestSessionStateMachine:
     def test_valid_transitions(self, test_db):
-        session = start_twin_design_session(
-            test_db, goal="Test goal", created_by="test"
-        )
+        session = start_twin_design_session(test_db, goal="Test goal", created_by="test")
         sid = session["id"]
 
-        result = transition_session(
-            test_db, session_id=sid, to_state="discover", created_by="test"
-        )
+        result = transition_session(test_db, session_id=sid, to_state="discover", created_by="test")
         assert result["id"] == sid
 
     def test_invalid_transition_raises(self, test_db):
-        session = start_twin_design_session(
-            test_db, goal="Test goal", created_by="test"
-        )
+        session = start_twin_design_session(test_db, goal="Test goal", created_by="test")
         sid = session["id"]
 
         with pytest.raises(ValidationError, match="Invalid transition"):
-            transition_session(
-                test_db, session_id=sid, to_state="operate", created_by="test"
-            )
+            transition_session(test_db, session_id=sid, to_state="operate", created_by="test")
 
     def test_completed_is_terminal(self, test_db):
         for state in ("completed", "abandoned"):
@@ -73,9 +65,7 @@ class TestSessionStateMachine:
 
 class TestStartSession:
     def test_start_creates_session_in_init_state(self, test_db):
-        session = start_twin_design_session(
-            test_db, goal="Design a supply chain twin", created_by="test"
-        )
+        session = start_twin_design_session(test_db, goal="Design a supply chain twin", created_by="test")
         assert session["type"] == "twin_design_session"
         import json
 
@@ -102,16 +92,10 @@ class TestStartSession:
 
 class TestObserveFlow:
     def test_add_observations_stores_in_metadata(self, test_db):
-        session = start_twin_design_session(
-            test_db, goal="Test", created_by="test"
-        )
+        session = start_twin_design_session(test_db, goal="Test", created_by="test")
         sid = session["id"]
-        transition_session(
-            test_db, session_id=sid, to_state="discover", created_by="test"
-        )
-        transition_session(
-            test_db, session_id=sid, to_state="observe", created_by="test"
-        )
+        transition_session(test_db, session_id=sid, to_state="discover", created_by="test")
+        transition_session(test_db, session_id=sid, to_state="observe", created_by="test")
 
         result = add_session_observation(
             test_db,
@@ -126,9 +110,7 @@ class TestObserveFlow:
         assert meta["observations"][0]["supplier_reliability"] == 0.85
 
     def test_add_observations_requires_observe_state(self, test_db):
-        session = start_twin_design_session(
-            test_db, goal="Test", created_by="test"
-        )
+        session = start_twin_design_session(test_db, goal="Test", created_by="test")
         sid = session["id"]
 
         with pytest.raises(ValidationError, match="observe"):
@@ -142,16 +124,10 @@ class TestObserveFlow:
 
 class TestProposeFlow:
     def test_propose_creates_proposal_node(self, test_db):
-        session = start_twin_design_session(
-            test_db, goal="Test", created_by="test"
-        )
+        session = start_twin_design_session(test_db, goal="Test", created_by="test")
         sid = session["id"]
-        transition_session(
-            test_db, session_id=sid, to_state="discover", created_by="test"
-        )
-        transition_session(
-            test_db, session_id=sid, to_state="propose", created_by="test"
-        )
+        transition_session(test_db, session_id=sid, to_state="discover", created_by="test")
+        transition_session(test_db, session_id=sid, to_state="propose", created_by="test")
 
         result = propose_twin_config(
             test_db,
@@ -162,16 +138,10 @@ class TestProposeFlow:
         assert result["proposal"]["type"] == "twin_design_proposal"
 
     def test_propose_auto_transitions_to_approve(self, test_db):
-        session = start_twin_design_session(
-            test_db, goal="Test", created_by="test"
-        )
+        session = start_twin_design_session(test_db, goal="Test", created_by="test")
         sid = session["id"]
-        transition_session(
-            test_db, session_id=sid, to_state="discover", created_by="test"
-        )
-        transition_session(
-            test_db, session_id=sid, to_state="propose", created_by="test"
-        )
+        transition_session(test_db, session_id=sid, to_state="discover", created_by="test")
+        transition_session(test_db, session_id=sid, to_state="propose", created_by="test")
 
         result = propose_twin_config(
             test_db,
@@ -184,9 +154,7 @@ class TestProposeFlow:
         assert meta["session_state"] == "approve"
 
     def test_propose_requires_propose_state(self, test_db):
-        session = start_twin_design_session(
-            test_db, goal="Test", created_by="test"
-        )
+        session = start_twin_design_session(test_db, goal="Test", created_by="test")
         sid = session["id"]
 
         with pytest.raises(ValidationError, match="propose"):
@@ -199,19 +167,11 @@ class TestProposeFlow:
 
 class TestReviewFlow:
     def test_approve_creates_approves_edge(self, test_db):
-        session = start_twin_design_session(
-            test_db, goal="Test", created_by="test"
-        )
+        session = start_twin_design_session(test_db, goal="Test", created_by="test")
         sid = session["id"]
-        transition_session(
-            test_db, session_id=sid, to_state="discover", created_by="test"
-        )
-        transition_session(
-            test_db, session_id=sid, to_state="propose", created_by="test"
-        )
-        proposal_result = propose_twin_config(
-            test_db, session_id=sid, created_by="test"
-        )
+        transition_session(test_db, session_id=sid, to_state="discover", created_by="test")
+        transition_session(test_db, session_id=sid, to_state="propose", created_by="test")
+        proposal_result = propose_twin_config(test_db, session_id=sid, created_by="test")
         proposal_id = proposal_result["proposal"]["id"]
 
         result = review_proposal(
@@ -225,19 +185,11 @@ class TestReviewFlow:
         assert result["new_state"] == "instantiate"
 
     def test_decline_creates_declines_edge(self, test_db):
-        session = start_twin_design_session(
-            test_db, goal="Test", created_by="test"
-        )
+        session = start_twin_design_session(test_db, goal="Test", created_by="test")
         sid = session["id"]
-        transition_session(
-            test_db, session_id=sid, to_state="discover", created_by="test"
-        )
-        transition_session(
-            test_db, session_id=sid, to_state="propose", created_by="test"
-        )
-        proposal_result = propose_twin_config(
-            test_db, session_id=sid, created_by="test"
-        )
+        transition_session(test_db, session_id=sid, to_state="discover", created_by="test")
+        transition_session(test_db, session_id=sid, to_state="propose", created_by="test")
+        proposal_result = propose_twin_config(test_db, session_id=sid, created_by="test")
         proposal_id = proposal_result["proposal"]["id"]
 
         result = review_proposal(
@@ -250,19 +202,11 @@ class TestReviewFlow:
         assert result["new_state"] == "abandoned"
 
     def test_modify_reenters_propose_state(self, test_db):
-        session = start_twin_design_session(
-            test_db, goal="Test", created_by="test"
-        )
+        session = start_twin_design_session(test_db, goal="Test", created_by="test")
         sid = session["id"]
-        transition_session(
-            test_db, session_id=sid, to_state="discover", created_by="test"
-        )
-        transition_session(
-            test_db, session_id=sid, to_state="propose", created_by="test"
-        )
-        proposal_result = propose_twin_config(
-            test_db, session_id=sid, created_by="test"
-        )
+        transition_session(test_db, session_id=sid, to_state="discover", created_by="test")
+        transition_session(test_db, session_id=sid, to_state="propose", created_by="test")
+        proposal_result = propose_twin_config(test_db, session_id=sid, created_by="test")
         proposal_id = proposal_result["proposal"]["id"]
 
         result = review_proposal(
@@ -276,19 +220,11 @@ class TestReviewFlow:
         assert result["new_state"] == "propose"
 
     def test_modify_stores_modifications(self, test_db):
-        session = start_twin_design_session(
-            test_db, goal="Test", created_by="test"
-        )
+        session = start_twin_design_session(test_db, goal="Test", created_by="test")
         sid = session["id"]
-        transition_session(
-            test_db, session_id=sid, to_state="discover", created_by="test"
-        )
-        transition_session(
-            test_db, session_id=sid, to_state="propose", created_by="test"
-        )
-        proposal_result = propose_twin_config(
-            test_db, session_id=sid, created_by="test"
-        )
+        transition_session(test_db, session_id=sid, to_state="discover", created_by="test")
+        transition_session(test_db, session_id=sid, to_state="propose", created_by="test")
+        proposal_result = propose_twin_config(test_db, session_id=sid, created_by="test")
         proposal_id = proposal_result["proposal"]["id"]
 
         review_proposal(
@@ -308,15 +244,11 @@ class TestReviewFlow:
 
 class TestInstantiateFlow:
     def test_instantiate_requires_approve_state(self, test_db):
-        session = start_twin_design_session(
-            test_db, goal="Test", created_by="test"
-        )
+        session = start_twin_design_session(test_db, goal="Test", created_by="test")
         sid = session["id"]
 
         with pytest.raises(ValidationError, match="instantiate"):
-            instantiate_from_session(
-                test_db, session_id=sid, created_by="test"
-            )
+            instantiate_from_session(test_db, session_id=sid, created_by="test")
 
 
 class TestCalibrationFlow:
@@ -381,29 +313,19 @@ class TestEvolveFlow:
 
 class TestAuditChain:
     def test_audit_returns_full_history(self, test_db):
-        session = start_twin_design_session(
-            test_db, goal="Test", created_by="test"
-        )
+        session = start_twin_design_session(test_db, goal="Test", created_by="test")
         sid = session["id"]
-        transition_session(
-            test_db, session_id=sid, to_state="discover", created_by="test"
-        )
+        transition_session(test_db, session_id=sid, to_state="discover", created_by="test")
 
         audit = get_session_audit(test_db, session_id=sid)
         assert "transitions" in audit
         assert len(audit["transitions"]) >= 1
 
     def test_audit_provenance_complete(self, test_db):
-        session = start_twin_design_session(
-            test_db, goal="Test", created_by="test"
-        )
+        session = start_twin_design_session(test_db, goal="Test", created_by="test")
         sid = session["id"]
-        transition_session(
-            test_db, session_id=sid, to_state="discover", created_by="test"
-        )
-        transition_session(
-            test_db, session_id=sid, to_state="observe", created_by="test"
-        )
+        transition_session(test_db, session_id=sid, to_state="discover", created_by="test")
+        transition_session(test_db, session_id=sid, to_state="observe", created_by="test")
 
         audit = get_session_audit(test_db, session_id=sid)
         assert len(audit["transitions"]) == 2
@@ -411,9 +333,7 @@ class TestAuditChain:
 
 class TestGetSessionState:
     def test_get_session_state_returns_current(self, test_db):
-        session = start_twin_design_session(
-            test_db, goal="Test", created_by="test"
-        )
+        session = start_twin_design_session(test_db, goal="Test", created_by="test")
         sid = session["id"]
 
         state = get_session_state(test_db, session_id=sid)
@@ -443,9 +363,7 @@ class TestSessionSDK:
         proposal_result = g.propose_twin_config(sid)
         proposal_id = proposal_result["proposal"]["id"]
 
-        review_result = g.review_proposal(
-            sid, proposal_id, decision="modify", modifications={"threshold": 0.8}
-        )
+        review_result = g.review_proposal(sid, proposal_id, decision="modify", modifications={"threshold": 0.8})
         assert review_result["new_state"] == "propose"
 
         second_proposal = g.propose_twin_config(sid)
@@ -492,9 +410,7 @@ def _get_node(conn, node_id):
 
 
 def _create_session_to_calibrate(conn):
-    session = start_twin_design_session(
-        conn, goal="Test", created_by="test"
-    )
+    session = start_twin_design_session(conn, goal="Test", created_by="test")
     sid = session["id"]
     transition_session(conn, session_id=sid, to_state="discover", created_by="test")
     transition_session(conn, session_id=sid, to_state="observe", created_by="test")
@@ -507,9 +423,7 @@ def _create_session_to_calibrate(conn):
 
 
 def _create_session_to_operate(conn):
-    session = start_twin_design_session(
-        conn, goal="Test", created_by="test"
-    )
+    session = start_twin_design_session(conn, goal="Test", created_by="test")
     sid = session["id"]
     transition_session(conn, session_id=sid, to_state="discover", created_by="test")
     transition_session(conn, session_id=sid, to_state="observe", created_by="test")

@@ -34,6 +34,7 @@ SUGGESTION_TIMEOUT_S = 0.5
 # Minimum time we need to attempt an embedding call inside the budget.
 _MIN_EMBEDDING_TIME_S = 0.05
 
+
 # Feature toggle: set OHM_DISABLE_SUGGESTIONS=1 to skip post-write
 # suggestions entirely. Useful in test suites where the suggestion behavior
 # itself is not under test, because generating suggestions adds ~0.5s to

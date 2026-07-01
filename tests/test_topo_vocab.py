@@ -302,10 +302,7 @@ class TestBackwardCompatibility:
         # gets the same set of node types — only expanded by 4.
         topo = SchemaConfig.topo()
         # The original 17 industrial types still present:
-        for t in ("process", "instrument", "controller", "valve", "pump",
-                  "motor", "sensor", "pipeline", "vessel", "reactor",
-                  "heat_exchanger", "tank", "compressor", "generator",
-                  "transformer", "circuit", "bus", "line"):
+        for t in ("process", "instrument", "controller", "valve", "pump", "motor", "sensor", "pipeline", "vessel", "reactor", "heat_exchanger", "tank", "compressor", "generator", "transformer", "circuit", "bus", "line"):
             assert t in topo.node_types
 
     def test_validate_node_type_backward_compat_lowercase(self):

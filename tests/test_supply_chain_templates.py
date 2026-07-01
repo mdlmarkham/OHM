@@ -265,7 +265,10 @@ class TestConstructionEngineUsesSupplyChain:
 
         register_all_supply_chain_templates(test_db, created_by="tester")
         decision = create_node(
-            test_db, label="Optimize production schedule", node_type="decision", created_by="tester",
+            test_db,
+            label="Optimize production schedule",
+            node_type="decision",
+            created_by="tester",
             connects_to=[create_node(test_db, label="Anchor", node_type="concept", created_by="tester")["id"]],
         )
         result = assemble_twin_for_decision(
@@ -283,7 +286,10 @@ class TestConstructionEngineUsesSupplyChain:
 
         register_all_supply_chain_templates(test_db, created_by="tester")
         decision = create_node(
-            test_db, label="Manage inventory levels", node_type="decision", created_by="tester",
+            test_db,
+            label="Manage inventory levels",
+            node_type="decision",
+            created_by="tester",
             connects_to=[create_node(test_db, label="Anchor", node_type="concept", created_by="tester")["id"]],
         )
         result = assemble_twin_for_decision(
@@ -301,7 +307,10 @@ class TestConstructionEngineUsesSupplyChain:
 
         register_all_supply_chain_templates(test_db, created_by="tester")
         decision = create_node(
-            test_db, label="Optimize supply chain network", node_type="decision", created_by="tester",
+            test_db,
+            label="Optimize supply chain network",
+            node_type="decision",
+            created_by="tester",
             connects_to=[create_node(test_db, label="Anchor", node_type="concept", created_by="tester")["id"]],
         )
         result = assemble_twin_for_decision(

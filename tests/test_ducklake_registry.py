@@ -94,9 +94,7 @@ class TestDuckLakeTableSerialization:
         assert "has_deleted_at" not in d
 
     def test_to_dict_full(self):
-        dlt = DuckLakeTable(
-            name="t", primary_key="row_id", has_deleted_at=False, description="x"
-        )
+        dlt = DuckLakeTable(name="t", primary_key="row_id", has_deleted_at=False, description="x")
         d = dlt.to_dict()
         assert d["primary_key"] == "row_id"
         assert d["has_deleted_at"] is False
@@ -303,9 +301,13 @@ class TestOhmStoreDuckLakeRegistry:
     def test_table_counts_handles_no_deleted_at(self):
         # Domain table without deleted_at: should still get a count.
         dt = DomainTable(name="my_t", columns=(("id", "VARCHAR"),))
-        cfg = SchemaConfig(name="t", domain_tables=[dt], ducklake_tables=[
-            DuckLakeTable(name="my_t", has_deleted_at=False),
-        ])
+        cfg = SchemaConfig(
+            name="t",
+            domain_tables=[dt],
+            ducklake_tables=[
+                DuckLakeTable(name="my_t", has_deleted_at=False),
+            ],
+        )
         store = OhmStore(db_path=":memory:", schema=cfg)
         counts = store._table_counts()
         # Counts returns -1 if the query fails; should be 0 on success.
@@ -355,16 +357,11 @@ class TestCLIDuckLakeDisplay:
             if "for table in" in line and "local_counts" not in line and "sync_health" not in line:
                 if "store.schema.ducklake_tables" in line or "ducklake_tables" in line:
                     # Found a registry-driven loop.
-                    assert '"ohm_nodes"' not in line, (
-                        f"CLI health display still has hardcoded table list: {line!r}"
-                    )
+                    assert '"ohm_nodes"' not in line, f"CLI health display still has hardcoded table list: {line!r}"
                     return
         # If we got here, we didn't find any registry-driven loop in the
         # CLI sync health display.
-        pytest.fail(
-            "Expected `for table in (dlt.name for dlt in store.schema.ducklake_tables ...)` "
-            "in src/ohm/cli/__init__.py for sync health display."
-        )
+        pytest.fail("Expected `for table in (dlt.name for dlt in store.schema.ducklake_tables ...)` in src/ohm/cli/__init__.py for sync health display.")
 
 
 # ── _create_ducklake_tables generates VARCHAR DDL for domain tables ────────
@@ -401,11 +398,7 @@ class TestCreateDuckLakeTablesDynamic:
         _create_ducklake_tables(conn, "ohm_lake", schema=cfg)
         # The mirror table for topo_prospects should exist in the
         # ohm_lake catalog (default schema is "main" within that catalog).
-        mirror_cols = conn.execute(
-            "SELECT column_name, data_type FROM information_schema.columns "
-            "WHERE table_catalog='ohm_lake' AND table_name='topo_prospects' "
-            "ORDER BY ordinal_position"
-        ).fetchall()
+        mirror_cols = conn.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_catalog='ohm_lake' AND table_name='topo_prospects' ORDER BY ordinal_position").fetchall()
         col_types = {c[0]: c[1] for c in mirror_cols}
         # All columns VARCHAR.
         for c, t in col_types.items():
@@ -445,9 +438,7 @@ class TestIntegrationCrashRecovery:
         # Set up DuckLake mirror with core + domain table data.
         local_path = str(tmp_path / "local.duckdb")
         ducklake_path = str(tmp_path / "ducklake.duckdb")
-        dt = DomainTable(
-            name="topo_x", columns=(("id", "VARCHAR"), ("v", "FLOAT"))
-        )
+        dt = DomainTable(name="topo_x", columns=(("id", "VARCHAR"), ("v", "FLOAT")))
         cfg = SchemaConfig(name="t", domain_tables=[dt])
 
         # Write to DuckLake mirror.

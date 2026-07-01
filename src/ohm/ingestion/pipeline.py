@@ -19,7 +19,6 @@ CI mode: set ``BEADS_HOOKS=0`` or ``OHM_NO_HOOKS=1`` to bypass all hooks.
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from dataclasses import dataclass, field
@@ -116,14 +115,16 @@ def run_pipeline(
                 return result
 
         content_bytes, filename, content_type = _do_fetch(item)
-        result.stages.append({
-            "stage": "fetch",
-            "status": "ok",
-            "filename": filename,
-            "content_type": content_type,
-            "size": len(content_bytes),
-            "hooks_run": len(pre_results),
-        })
+        result.stages.append(
+            {
+                "stage": "fetch",
+                "status": "ok",
+                "filename": filename,
+                "content_type": content_type,
+                "size": len(content_bytes),
+                "hooks_run": len(pre_results),
+            }
+        )
 
         post_fetch_payload = {**fetch_payload, "filename": filename, "content_type": content_type, "size": len(content_bytes)}
         _run_hooks("post_fetch", post_fetch_payload)
@@ -143,13 +144,15 @@ def run_pipeline(
                 return result
 
         extracted_text, tree = _do_parse(content_bytes, content_type, filename)
-        result.stages.append({
-            "stage": "parse",
-            "status": "ok",
-            "text_length": len(extracted_text),
-            "tree_nodes": len(tree.flat) if tree else 0,
-            "hooks_run": len(pre_parse_results),
-        })
+        result.stages.append(
+            {
+                "stage": "parse",
+                "status": "ok",
+                "text_length": len(extracted_text),
+                "tree_nodes": len(tree.flat) if tree else 0,
+                "hooks_run": len(pre_parse_results),
+            }
+        )
 
         _run_hooks("post_parse", {**parse_payload, "text_length": len(extracted_text)})
 
@@ -171,12 +174,14 @@ def run_pipeline(
 
         source_node_id = _do_commit(conn, tree, extracted_text, commit_payload)
         result.source_node_id = source_node_id
-        result.stages.append({
-            "stage": "commit",
-            "status": "ok",
-            "source_node_id": source_node_id,
-            "hooks_run": len(pre_commit_results),
-        })
+        result.stages.append(
+            {
+                "stage": "commit",
+                "status": "ok",
+                "source_node_id": source_node_id,
+                "hooks_run": len(pre_commit_results),
+            }
+        )
 
         _run_hooks("post_commit", {**commit_payload, "source_node_id": source_node_id})
 
@@ -241,8 +246,7 @@ def _do_parse(content_bytes: bytes, content_type: str | None, filename: str) -> 
 
     ct_lower = (content_type or "").lower().split(";")[0].strip()
     tree = None
-    if ct_lower in ("text/html", "text/markdown", "text/x-markdown") or \
-       filename.endswith((".html", ".htm", ".md", ".markdown")):
+    if ct_lower in ("text/html", "text/markdown", "text/x-markdown") or filename.endswith((".html", ".htm", ".md", ".markdown")):
         try:
             tree = parse_document(extracted, content_type="html" if ct_lower == "text/html" else "markdown")
         except Exception:
@@ -281,6 +285,7 @@ def _do_commit(
     if tree is not None:
         try:
             from ohm.ingestion.document_tree_ingest import ingest_document_tree
+
             ingest_document_tree(
                 conn,
                 tree,

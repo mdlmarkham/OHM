@@ -483,9 +483,7 @@ class TestWeibullDecay:
         t = datetime.now(timezone.utc)
         obs_w = _obs(value=0.8, half_life_days=7.0, weibull_shape=1.0, created_at=created)
         obs_p1 = _obs(value=0.8, half_life_days=7.0, created_at=created)
-        assert confidence_at(obs_w, t=t) == pytest.approx(
-            confidence_at(obs_p1, t=t, use_weibull=False), abs=1e-10
-        )
+        assert confidence_at(obs_w, t=t) == pytest.approx(confidence_at(obs_p1, t=t, use_weibull=False), abs=1e-10)
 
     def test_fast_perishable_equivalence(self):
         """sentiment: κ=1.5, half_life=3 → Weibull path, Phase 1 has no direct
@@ -494,18 +492,14 @@ class TestWeibullDecay:
         obs_w = _obs(value=0.9, half_life_days=3.0, weibull_shape=1.5, created_at=now)
         obs_p1 = _obs(value=0.9, half_life_days=3.0, created_at=now)
         # At age=0 both return base_value
-        assert confidence_at(obs_w, t=now) == pytest.approx(
-            confidence_at(obs_p1, t=now, use_weibull=False), abs=1e-10
-        )
+        assert confidence_at(obs_w, t=now) == pytest.approx(confidence_at(obs_p1, t=now, use_weibull=False), abs=1e-10)
 
     def test_durable_equivalence_at_creation(self):
         """verification: κ=0.7, half_life=180 → at age=0, both paths return base."""
         now = datetime.now(timezone.utc)
         obs_w = _obs(value=0.8, half_life_days=180.0, weibull_shape=0.7, created_at=now)
         obs_p1 = _obs(value=0.8, half_life_days=180.0, created_at=now)
-        assert confidence_at(obs_w, t=now) == pytest.approx(
-            confidence_at(obs_p1, t=now, use_weibull=False), abs=1e-10
-        )
+        assert confidence_at(obs_w, t=now) == pytest.approx(confidence_at(obs_p1, t=now, use_weibull=False), abs=1e-10)
 
     def test_binary_equivalence(self):
         """outcome: κ=0 → binary. Phase 1 half_life=0 → also binary."""
@@ -513,9 +507,7 @@ class TestWeibullDecay:
         t = datetime.now(timezone.utc)
         obs_w = _obs(value=0.7, half_life_days=30.0, weibull_shape=0.0, created_at=created)
         obs_p1 = _obs(value=0.7, half_life_days=0.0, created_at=created)
-        assert confidence_at(obs_w, t=t) == pytest.approx(
-            confidence_at(obs_p1, t=t, use_weibull=False)
-        )
+        assert confidence_at(obs_w, t=t) == pytest.approx(confidence_at(obs_p1, t=t, use_weibull=False))
 
     def test_appreciating_equivalence(self):
         """pattern: κ=-1, half_life=-30 → both use the same linear formula."""
@@ -523,9 +515,7 @@ class TestWeibullDecay:
         t = datetime.now(timezone.utc)
         obs_w = _obs(value=0.5, half_life_days=-30.0, weibull_shape=-1.0, created_at=created)
         obs_p1 = _obs(value=0.5, half_life_days=-30.0, created_at=created)
-        assert confidence_at(obs_w, t=t) == pytest.approx(
-            confidence_at(obs_p1, t=t, use_weibull=False), abs=1e-10
-        )
+        assert confidence_at(obs_w, t=t) == pytest.approx(confidence_at(obs_p1, t=t, use_weibull=False), abs=1e-10)
 
     # ── Type defaults ──
 

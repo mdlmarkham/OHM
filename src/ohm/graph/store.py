@@ -2210,10 +2210,7 @@ class OhmStore:
         declared registry order; each entry is a :class:`DuckLakeTable`
         with the per-table pk/timestamp config.
         """
-        return tuple(
-            dlt for dlt in self.schema.ducklake_tables
-            if dlt.name != "ohm_change_feed"
-        )
+        return tuple(dlt for dlt in self.schema.ducklake_tables if dlt.name != "ohm_change_feed")
 
     # Minimum seconds between DuckLake syncs (avoid syncing on every write)
     _MIN_SYNC_INTERVAL_SECONDS: float = 30.0
@@ -2537,8 +2534,7 @@ class OhmStore:
                 # local table AND the DuckLake mirror (mirror columns are
                 # all-VARCHAR and may be a subset for domain tables).
                 mirror_col_rows = self.conn.execute(
-                    f"SELECT column_name FROM information_schema.columns "
-                    f"WHERE table_catalog = ? AND table_name = ? ORDER BY ordinal_position",
+                    "SELECT column_name FROM information_schema.columns WHERE table_catalog = ? AND table_name = ? ORDER BY ordinal_position",
                     [alias, table],
                 ).fetchall()
                 mirror_col_names = {r[0] for r in mirror_col_rows}
@@ -2566,8 +2562,7 @@ class OhmStore:
                     # column type so the INSERT succeeds. Use a CAST
                     # expression per column.
                     local_type_rows = self.conn.execute(
-                        "SELECT column_name, data_type FROM information_schema.columns "
-                        "WHERE table_schema='main' AND table_name=?",
+                        "SELECT column_name, data_type FROM information_schema.columns WHERE table_schema='main' AND table_name=?",
                         [table],
                     ).fetchall()
                     local_type_map = {r[0]: r[1].upper() for r in local_type_rows}
@@ -2647,14 +2642,17 @@ class OhmStore:
                         from datetime import datetime, timezone
 
                         now = datetime.now(timezone.utc).isoformat()
-                        self.conn.execute(f"""
+                        self.conn.execute(
+                            f"""
                             UPDATE {table} SET deleted_at = ?
                             WHERE deleted_at IS NULL
                             AND NOT EXISTS (
                                 SELECT 1 FROM {mirror} dl
                                 WHERE dl.{pk} = {table}.{pk}
                             )
-                        """, [now])
+                        """,
+                            [now],
+                        )
                     result["soft_deleted"] += soft_deleted_count
 
             except Exception as e:

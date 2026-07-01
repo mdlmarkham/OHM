@@ -64,7 +64,6 @@ class AskHandlerMixin:
         params = decision.get("payload", {}).get("params", {})
         actions = params.get("actions", False)
         # Reuse the existing GET /metrics/semantic handler, toggling actions.
-        from urllib.parse import parse_qs, urlencode
 
         sub_qs: dict[str, list[str]] = {}
         if actions:

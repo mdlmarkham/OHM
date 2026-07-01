@@ -67,8 +67,8 @@ DEFAULT_CONFIG = {
     },
     "bedrock": {
         "knowledge_base_id": "",  # OHM_BEDROCK_KB_ID env var
-        "data_source_id": "",     # OHM_BEDROCK_DATA_SOURCE_ID env var
-        "region": "us-east-1",    # AWS_REGION / OHM_BEDROCK_REGION
+        "data_source_id": "",  # OHM_BEDROCK_DATA_SOURCE_ID env var
+        "region": "us-east-1",  # AWS_REGION / OHM_BEDROCK_REGION
     },
 }
 
@@ -759,7 +759,9 @@ from ohm.server.handlers.markov import MarkovHandlerMixin
 from ohm.server.handlers.tenant import TenantHandlerMixin
 
 
-class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, AskHandlerMixin, CatalogHandlerMixin, DecisionHandlerMixin, DocumentHandlerMixin, GraphHandlerMixin, InfraHandlerMixin, InferenceHandlerMixin, MarkovHandlerMixin, TenantHandlerMixin, BaseHTTPRequestHandler):
+class OhmHandler(
+    AdminHandlerMixin, AnalysisHandlerMixin, AskHandlerMixin, CatalogHandlerMixin, DecisionHandlerMixin, DocumentHandlerMixin, GraphHandlerMixin, InfraHandlerMixin, InferenceHandlerMixin, MarkovHandlerMixin, TenantHandlerMixin, BaseHTTPRequestHandler
+):
     """HTTP request handler for OHM daemon."""
 
     store: Optional[OhmStore] = None  # single-tenant core store (always set)
@@ -842,14 +844,12 @@ class OhmHandler(AdminHandlerMixin, AnalysisHandlerMixin, AskHandlerMixin, Catal
         if not self.multi_tenant:
             if self.store is None:
                 import logging
+
                 logger = logging.getLogger("ohm.server")
-                logger.critical(
-                    f"current_store: self.store is None! handler={self}, "
-                    f"server={getattr(self, 'server', None)}"
-                )
+                logger.critical(f"current_store: self.store is None! handler={self}, server={getattr(self, 'server', None)}")
                 # Fallback: try to get store from server object
-                server = getattr(self, 'server', None)
-                if server is not None and hasattr(server, '_ohm_store') and server._ohm_store is not None:
+                server = getattr(self, "server", None)
+                if server is not None and hasattr(server, "_ohm_store") and server._ohm_store is not None:
                     logger.warning("current_store: falling back to server._ohm_store")
                     return server._ohm_store
             return self.store
@@ -2430,7 +2430,7 @@ def make_configured_handler(store: OhmStore):
             self.store = store
             super().__init__(*args, **kwargs)
             # Also store on the server for fallback access (safe after super).
-            if hasattr(self, 'server') and self.server is not None:
+            if hasattr(self, "server") and self.server is not None:
                 self.server._ohm_store = store
 
     _ConfiguredHandler.__name__ = "OhmHandler"

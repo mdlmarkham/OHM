@@ -38,7 +38,9 @@ class TestHighConfidenceWeakSourceNudge:
 
     def test_fires_on_high_conf_raw_tier(self):
         nudges = generate_nudges(
-            action="edge", confidence=0.9, source_tier="raw",
+            action="edge",
+            confidence=0.9,
+            source_tier="raw",
             edge_type="CAUSES",
         )
         types = [n["type"] for n in nudges]
@@ -49,14 +51,18 @@ class TestHighConfidenceWeakSourceNudge:
 
     def test_fires_on_high_conf_unverified_tier(self):
         nudges = generate_nudges(
-            action="node", confidence=0.85, source_tier="unverified",
+            action="node",
+            confidence=0.85,
+            source_tier="unverified",
         )
         types = [n["type"] for n in nudges]
         assert "high_confidence_weak_source" in types
 
     def test_does_not_fire_on_official_tier(self):
         nudges = generate_nudges(
-            action="edge", confidence=0.9, source_tier="official",
+            action="edge",
+            confidence=0.9,
+            source_tier="official",
             edge_type="SUPPORTS",
         )
         types = [n["type"] for n in nudges]
@@ -64,7 +70,9 @@ class TestHighConfidenceWeakSourceNudge:
 
     def test_does_not_fire_on_low_confidence(self):
         nudges = generate_nudges(
-            action="edge", confidence=0.5, source_tier="raw",
+            action="edge",
+            confidence=0.5,
+            source_tier="raw",
             edge_type="SUPPORTS",
         )
         types = [n["type"] for n in nudges]
@@ -72,7 +80,9 @@ class TestHighConfidenceWeakSourceNudge:
 
     def test_does_not_fire_without_source_tier(self):
         nudges = generate_nudges(
-            action="edge", confidence=0.9, edge_type="SUPPORTS",
+            action="edge",
+            confidence=0.9,
+            edge_type="SUPPORTS",
         )
         types = [n["type"] for n in nudges]
         assert "high_confidence_weak_source" not in types
@@ -83,21 +93,24 @@ class TestCausalEdgeMissingMechanismNudge:
 
     def test_fires_on_causes_without_condition(self):
         nudges = generate_nudges(
-            action="edge", edge_type="CAUSES",
+            action="edge",
+            edge_type="CAUSES",
         )
         types = [n["type"] for n in nudges]
         assert "causal_edge_missing_mechanism" in types
 
     def test_fires_on_influences_without_mechanism(self):
         nudges = generate_nudges(
-            action="edge", edge_type="INFLUENCES",
+            action="edge",
+            edge_type="INFLUENCES",
         )
         types = [n["type"] for n in nudges]
         assert "causal_edge_missing_mechanism" in types
 
     def test_does_not_fire_when_condition_set(self):
         nudges = generate_nudges(
-            action="edge", edge_type="CAUSES",
+            action="edge",
+            edge_type="CAUSES",
             condition="mediated by temperature increase",
         )
         types = [n["type"] for n in nudges]
@@ -105,7 +118,8 @@ class TestCausalEdgeMissingMechanismNudge:
 
     def test_does_not_fire_when_metadata_mechanism_set(self):
         nudges = generate_nudges(
-            action="edge", edge_type="CAUSES",
+            action="edge",
+            edge_type="CAUSES",
             metadata={"mechanism": "catalytic reaction at 350C"},
         )
         types = [n["type"] for n in nudges]
@@ -113,7 +127,8 @@ class TestCausalEdgeMissingMechanismNudge:
 
     def test_does_not_fire_on_non_causal_edge(self):
         nudges = generate_nudges(
-            action="edge", edge_type="SUPPORTS",
+            action="edge",
+            edge_type="SUPPORTS",
         )
         types = [n["type"] for n in nudges]
         assert "causal_edge_missing_mechanism" not in types
@@ -135,8 +150,12 @@ class TestFastDecayingObservationNudge:
         # Create old observations that have decayed
         old_ts = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
         create_observation(
-            conn, node_id=node["id"], obs_type="measurement",
-            created_by="t", value=0.8, source="t",
+            conn,
+            node_id=node["id"],
+            obs_type="measurement",
+            created_by="t",
+            value=0.8,
+            source="t",
         )
         # Backdate it
         conn.execute(
@@ -144,8 +163,12 @@ class TestFastDecayingObservationNudge:
             [old_ts, node["id"]],
         )
         create_observation(
-            conn, node_id=node["id"], obs_type="measurement",
-            created_by="t", value=0.7, source="t",
+            conn,
+            node_id=node["id"],
+            obs_type="measurement",
+            created_by="t",
+            value=0.7,
+            source="t",
         )
         conn.execute(
             "UPDATE ohm_observations SET created_at = ? WHERE node_id = ? AND created_at != ?",
@@ -191,8 +214,12 @@ class TestFastDecayingObservationNudge:
 
         node = create_node(conn, label="FreshSensor", node_type="concept", created_by="t")
         create_observation(
-            conn, node_id=node["id"], obs_type="measurement",
-            created_by="t", value=0.9, source="t",
+            conn,
+            node_id=node["id"],
+            obs_type="measurement",
+            created_by="t",
+            value=0.9,
+            source="t",
         )
 
         class FakeStore:
@@ -228,9 +255,7 @@ class TestNudgeLogPersistence:
         response = {"id": "node_1", "label": "test"}
         enrich_response(response, nudges, store=store, agent="metis", action="node", target_id="node_1")
 
-        rows = conn.execute(
-            "SELECT agent, action, nudge_type, severity, target_id, message FROM ohm_nudge_log ORDER BY nudge_type"
-        ).fetchall()
+        rows = conn.execute("SELECT agent, action, nudge_type, severity, target_id, message FROM ohm_nudge_log ORDER BY nudge_type").fetchall()
         assert len(rows) == 2
         assert rows[0][0] == "metis"
         assert rows[0][1] == "node"
@@ -267,14 +292,16 @@ class TestBackwardCompat:
 
     def test_causal_edge_suggestion_still_fires(self):
         nudges = generate_nudges(
-            action="edge", edge_type="SUPPORTS",
+            action="edge",
+            edge_type="SUPPORTS",
         )
         types = [n["type"] for n in nudges]
         assert "causal_edge_suggestion" in types
 
     def test_causal_edge_confirmed_still_fires(self):
         nudges = generate_nudges(
-            action="edge", edge_type="CAUSES",
+            action="edge",
+            edge_type="CAUSES",
             condition="mechanism specified",
         )
         types = [n["type"] for n in nudges]
@@ -290,7 +317,8 @@ class TestBackwardCompat:
 
     def test_pert_estimation_still_fires(self):
         nudges = generate_nudges(
-            action="edge", edge_type="CAUSES",
+            action="edge",
+            edge_type="CAUSES",
             confidence=0.7,
             condition="mechanism",
         )
@@ -319,8 +347,12 @@ class TestValueContradictionNudge:
 
         node = create_node(conn, label="Sensor", node_type="concept", created_by="alice")
         create_observation(
-            conn, node_id=node["id"], obs_type="measurement",
-            created_by="bob", value=0.8, source="bob",
+            conn,
+            node_id=node["id"],
+            obs_type="measurement",
+            created_by="bob",
+            value=0.8,
+            source="bob",
         )
 
         class FakeStore:
@@ -330,7 +362,10 @@ class TestValueContradictionNudge:
         store.conn = conn
 
         nudges = generate_nudges(
-            action="observation", node_id=node["id"], store=store, value=0.1,
+            action="observation",
+            node_id=node["id"],
+            store=store,
+            value=0.1,
         )
         types = [n["type"] for n in nudges]
         assert "value_contradiction" in types
@@ -346,8 +381,12 @@ class TestValueContradictionNudge:
 
         node = create_node(conn, label="Sensor", node_type="concept", created_by="alice")
         create_observation(
-            conn, node_id=node["id"], obs_type="measurement",
-            created_by="bob", value=0.8, source="bob",
+            conn,
+            node_id=node["id"],
+            obs_type="measurement",
+            created_by="bob",
+            value=0.8,
+            source="bob",
         )
 
         class FakeStore:
@@ -357,7 +396,10 @@ class TestValueContradictionNudge:
         store.conn = conn
 
         nudges = generate_nudges(
-            action="observation", node_id=node["id"], store=store, value=0.85,
+            action="observation",
+            node_id=node["id"],
+            store=store,
+            value=0.85,
             value_contradiction_threshold=0.3,
         )
         types = [n["type"] for n in nudges]
@@ -375,7 +417,10 @@ class TestValueContradictionNudge:
         store.conn = conn
 
         nudges = generate_nudges(
-            action="observation", node_id=node["id"], store=store, value=0.5,
+            action="observation",
+            node_id=node["id"],
+            store=store,
+            value=0.5,
         )
         types = [n["type"] for n in nudges]
         assert "value_contradiction" not in types
@@ -392,7 +437,10 @@ class TestValueContradictionNudge:
         store.conn = conn
 
         nudges = generate_nudges(
-            action="observation", node_id=node["id"], store=store, value=None,
+            action="observation",
+            node_id=node["id"],
+            store=store,
+            value=None,
         )
         types = [n["type"] for n in nudges]
         assert "value_contradiction" not in types
@@ -402,13 +450,22 @@ class TestValueContradictionNudge:
 
         node = create_node(conn, label="Disputed", node_type="concept", created_by="alice")
         prior = create_observation(
-            conn, node_id=node["id"], obs_type="measurement",
-            created_by="bob", value=0.8, source="bob",
+            conn,
+            node_id=node["id"],
+            obs_type="measurement",
+            created_by="bob",
+            value=0.8,
+            source="bob",
         )
         # Create a CHALLENGED_BY edge from the prior obs (as if it was already challenged)
         create_edge(
-            conn, from_node=node["id"], to_node=prior["id"],
-            layer="L3", edge_type="CHALLENGED_BY", created_by="alice", confidence=0.7,
+            conn,
+            from_node=node["id"],
+            to_node=prior["id"],
+            layer="L3",
+            edge_type="CHALLENGED_BY",
+            created_by="alice",
+            confidence=0.7,
         )
 
         class FakeStore:
@@ -418,7 +475,10 @@ class TestValueContradictionNudge:
         store.conn = conn
 
         nudges = generate_nudges(
-            action="observation", node_id=node["id"], store=store, value=0.1,
+            action="observation",
+            node_id=node["id"],
+            store=store,
+            value=0.1,
         )
         types = [n["type"] for n in nudges]
         # Disagreement exists but a challenge has been recorded already
@@ -431,8 +491,12 @@ class TestValueContradictionNudge:
 
         node = create_node(conn, label="Sensor", node_type="concept", created_by="alice")
         create_observation(
-            conn, node_id=node["id"], obs_type="measurement",
-            created_by="bob", value=0.8, source="bob",
+            conn,
+            node_id=node["id"],
+            obs_type="measurement",
+            created_by="bob",
+            value=0.8,
+            source="bob",
         )
 
         class FakeStore:
@@ -443,7 +507,10 @@ class TestValueContradictionNudge:
 
         # Tight threshold — small disagreement fires
         nudges = generate_nudges(
-            action="observation", node_id=node["id"], store=store, value=0.78,
+            action="observation",
+            node_id=node["id"],
+            store=store,
+            value=0.78,
             value_contradiction_threshold=0.01,
         )
         types = [n["type"] for n in nudges]
@@ -456,12 +523,20 @@ class TestValueContradictionNudge:
         node = create_node(conn, label="Multi", node_type="concept", created_by="alice")
         # Create 2 prior obs with different values, both far from new value
         create_observation(
-            conn, node_id=node["id"], obs_type="measurement",
-            created_by="bob", value=0.9, source="bob",
+            conn,
+            node_id=node["id"],
+            obs_type="measurement",
+            created_by="bob",
+            value=0.9,
+            source="bob",
         )
         create_observation(
-            conn, node_id=node["id"], obs_type="measurement",
-            created_by="charlie", value=0.1, source="charlie",
+            conn,
+            node_id=node["id"],
+            obs_type="measurement",
+            created_by="charlie",
+            value=0.1,
+            source="charlie",
         )
 
         class FakeStore:
@@ -471,7 +546,10 @@ class TestValueContradictionNudge:
         store.conn = conn
 
         nudges = generate_nudges(
-            action="observation", node_id=node["id"], store=store, value=0.5,
+            action="observation",
+            node_id=node["id"],
+            store=store,
+            value=0.5,
         )
         vc_nudges = [n for n in nudges if n["type"] == "value_contradiction"]
         # The most recent prior is charlie (0.1), gap = 0.4 → fires.
@@ -489,9 +567,9 @@ class TestNudgeAcceptance:
     quality signal that backs /admin/nudges/quality.
     """
 
-    def _insert_nudge(self, conn, agent="metis", nudge_type="test_nudge",
-                      target_id="node_1", severity="info", message="hello"):
+    def _insert_nudge(self, conn, agent="metis", nudge_type="test_nudge", target_id="node_1", severity="info", message="hello"):
         import uuid
+
         nid = f"nudge_{uuid.uuid4().hex[:12]}"
         conn.execute(
             """INSERT INTO ohm_nudge_log
@@ -647,6 +725,7 @@ class TestNudgeAcceptanceStats:
 
     def test_stats_empty(self, conn):
         from ohm.server.nudges import nudge_acceptance_stats
+
         stats = nudge_acceptance_stats(conn)
         assert stats["total"] == 0
         assert stats["responded"] == 0
@@ -732,7 +811,6 @@ class TestNudgeAcceptanceHTTPEndpoint:
 
     def test_http_accept_round_trip(self):
         """Round-trip a nudge through the HTTP endpoint: log → accept → quality stats."""
-        import json
         import threading
         import socketserver
         from http.client import HTTPConnection
@@ -751,13 +829,14 @@ class TestNudgeAcceptanceHTTPEndpoint:
             store = OhmStore(db_path=db_path, agent_name="metis")
             # Insert a nudge — agent is the default "ohm" (no_auth default)
             _persist_nudge_log(
-                store, agent="ohm", action="node", target_id="node_1",
+                store,
+                agent="ohm",
+                action="node",
+                target_id="node_1",
                 nudges=[{"type": "test", "severity": "info", "message": "x"}],
             )
             # Find the nudge id
-            rows = store.read_conn.execute(
-                "SELECT id FROM ohm_nudge_log WHERE agent = 'ohm'"
-            ).fetchall()
+            rows = store.read_conn.execute("SELECT id FROM ohm_nudge_log WHERE agent = 'ohm'").fetchall()
             assert rows, "nudge not persisted"
             nudge_id = rows[0][0]
 
@@ -772,7 +851,9 @@ class TestNudgeAcceptanceHTTPEndpoint:
             OhmHandler.require_read_auth = False
 
             server = socketserver.TCPServer(
-                ("127.0.0.1", 0), OhmHandler, bind_and_activate=False,
+                ("127.0.0.1", 0),
+                OhmHandler,
+                bind_and_activate=False,
             )
             server.allow_reuse_address = True
             server.server_bind()
@@ -816,7 +897,6 @@ class TestNudgeAcceptanceHTTPEndpoint:
 
     def test_http_accept_nonexistent_returns_400_or_500(self):
         """Nonexistent nudge id returns an error (400 or 500 depending on handler)."""
-        import json
         import threading
         import socketserver
         from http.client import HTTPConnection
@@ -824,7 +904,8 @@ class TestNudgeAcceptanceHTTPEndpoint:
         from ohm.schema import DEFAULT_SCHEMA
         from ohm.server import OhmHandler
         from ohm.store import OhmStore
-        import tempfile, os
+        import tempfile
+        import os
 
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "test_nudge_404.duckdb")
@@ -840,7 +921,9 @@ class TestNudgeAcceptanceHTTPEndpoint:
             OhmHandler.require_read_auth = False
 
             server = socketserver.TCPServer(
-                ("127.0.0.1", 0), OhmHandler, bind_and_activate=False,
+                ("127.0.0.1", 0),
+                OhmHandler,
+                bind_and_activate=False,
             )
             server.allow_reuse_address = True
             server.server_bind()

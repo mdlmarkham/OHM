@@ -36,9 +36,7 @@ def _make_model_candidate(test_db, twin_id: str, label: str = "Model") -> str:
 class TestRegisterTwinWithBindings:
     def test_creates_twin_with_target_only(self, test_db):
         target = _make_target(test_db)
-        result = register_twin_with_bindings(
-            test_db, label="Twin", target_node_id=target, created_by="tester"
-        )
+        result = register_twin_with_bindings(test_db, label="Twin", target_node_id=target, created_by="tester")
         assert result["twin"]["type"] == "twin"
         assert result["target_node_id"] == target
         assert result["decision_bound"] is False
@@ -68,9 +66,7 @@ class TestRegisterTwinWithBindings:
 
     def test_creates_evaluates_edge_to_target(self, test_db):
         target = _make_target(test_db)
-        result = register_twin_with_bindings(
-            test_db, label="T", target_node_id=target, created_by="tester"
-        )
+        result = register_twin_with_bindings(test_db, label="T", target_node_id=target, created_by="tester")
         edges = test_db.execute(
             """SELECT to_node FROM ohm_edges
                WHERE from_node = ? AND edge_type = 'EVALUATES' AND deleted_at IS NULL""",
@@ -176,13 +172,9 @@ class TestRegisterTwinWithBindings:
 class TestAddTwinBindings:
     def test_adds_feed(self, test_db):
         target = _make_target(test_db)
-        result = register_twin_with_bindings(
-            test_db, label="T", target_node_id=target, created_by="tester"
-        )
+        result = register_twin_with_bindings(test_db, label="T", target_node_id=target, created_by="tester")
         feed = _make_feed(test_db, "F1")
-        add_result = add_twin_bindings(
-            test_db, twin_id=result["twin"]["id"], feed_node_ids=[feed], created_by="tester"
-        )
+        add_result = add_twin_bindings(test_db, twin_id=result["twin"]["id"], feed_node_ids=[feed], created_by="tester")
         assert feed in add_result["added"]
 
     def test_removes_feed(self, test_db):
@@ -222,14 +214,10 @@ class TestAddTwinBindings:
 class TestAttachTwinModels:
     def test_attaches_model(self, test_db):
         target = _make_target(test_db)
-        result = register_twin_with_bindings(
-            test_db, label="T", target_node_id=target, created_by="tester"
-        )
+        result = register_twin_with_bindings(test_db, label="T", target_node_id=target, created_by="tester")
         twin0 = create_node(test_db, label="Stub", node_type="twin", created_by="tester")["id"]
         model = _make_model_candidate(test_db, twin0, "M1")
-        attach_result = attach_twin_models(
-            test_db, twin_id=result["twin"]["id"], model_candidate_ids=[model], created_by="tester"
-        )
+        attach_result = attach_twin_models(test_db, twin_id=result["twin"]["id"], model_candidate_ids=[model], created_by="tester")
         assert model in attach_result["added"]
 
     def test_detaches_model(self, test_db):
@@ -292,26 +280,20 @@ class TestGetTwinReadiness:
 
     def test_missing_decision(self, test_db):
         target = _make_target(test_db)
-        result = register_twin_with_bindings(
-            test_db, label="T", target_node_id=target, created_by="tester"
-        )
+        result = register_twin_with_bindings(test_db, label="T", target_node_id=target, created_by="tester")
         readiness = get_twin_readiness(test_db, twin_id=result["twin"]["id"])
         assert readiness["gates"]["decision_bound"] is False
         assert "decision_bound" in readiness["missing"]
 
     def test_no_models(self, test_db):
         target = _make_target(test_db)
-        result = register_twin_with_bindings(
-            test_db, label="T", target_node_id=target, created_by="tester"
-        )
+        result = register_twin_with_bindings(test_db, label="T", target_node_id=target, created_by="tester")
         readiness = get_twin_readiness(test_db, twin_id=result["twin"]["id"])
         assert readiness["gates"]["models_available"] is False
 
     def test_no_feeds(self, test_db):
         target = _make_target(test_db)
-        result = register_twin_with_bindings(
-            test_db, label="T", target_node_id=target, created_by="tester"
-        )
+        result = register_twin_with_bindings(test_db, label="T", target_node_id=target, created_by="tester")
         readiness = get_twin_readiness(test_db, twin_id=result["twin"]["id"])
         assert readiness["gates"]["feeds_present"] is False
 
