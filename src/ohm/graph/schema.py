@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass, field
 from types import MappingProxyType
 
 import uuid
@@ -447,6 +448,113 @@ LAYER_DESCRIPTIONS: dict[str, str] = {
 # ── Schema Configuration ────────────────────────────────────────────────────
 
 
+@dataclass(frozen=True)
+class DomainTable:
+    """Declarative definition of a domain-specific table (OHM-vl8o).
+
+    OHM's core DDL is fixed (ohm_nodes, ohm_edges, ohm_observations, …).
+    Domain templates (e.g. TOPO) need extra tables (topo_prospects,
+    topo_observations, topo_observation_assessments, …) created in the
+    same migration sequence as the base OHM tables, so they ride along
+    with `initialize_schema()` and OhmStore/ohmd without per-domain
+    bootstrap code.
+
+    Attributes:
+        name: SQL table name. Conventionally domain-prefixed
+            (e.g. ``topo_prospects``). Unprefixed names are allowed but
+            reserved names (``ohm_*``) are rejected at creation time.
+        columns: Ordered list of ``(column_name, sql_type)`` pairs.
+            ``sql_type`` is the raw DuckDB type (e.g. ``"VARCHAR"``,
+            ``"FLOAT"``, ``"TIMESTAMP DEFAULT CURRENT_TIMESTAMP"``).
+        primary_key: Column name to declare as ``PRIMARY KEY``. Omit
+            (``None``) to leave DuckDB's row-id as the implicit key.
+        indexes: List of ``(index_name, [column_name, ...])`` to create
+            after the table. Each becomes
+            ``CREATE INDEX IF NOT EXISTS <name> ON <table>(<cols>)``.
+        ordering: Migration ordering — lower values run first. Lets
+            domain A depend on domain B by ordering the table defs
+            appropriately. Defaults to 100 (mid-band) so domain tables
+            sit after the base OHM DDL (which has implicit ordering 0).
+        initial_data: Optional seed rows. Each entry is a dict mapping
+            column name to literal value; inserted via
+            ``INSERT INTO <table> (...) VALUES (...)`` on first creation
+            only (idempotent: skipped if the table already has rows).
+        description: Human-readable description for tooling/docs.
+    """
+
+    name: str
+    columns: tuple[tuple[str, str], ...]
+    primary_key: str | None = None
+    indexes: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    ordering: int = 100
+    initial_data: tuple[dict, ...] = ()
+    description: str = ""
+
+    def __post_init__(self) -> None:
+        # Normalize mutable defaults; frozen=True requires object.__setattr__.
+        if not self.name or not isinstance(self.name, str):
+            raise ValueError("DomainTable.name must be a non-empty string")
+        if self.name.lower().startswith("ohm_"):
+            raise ValueError(
+                f"DomainTable.name='{self.name}' uses the reserved 'ohm_' prefix; "
+                "domain tables must not collide with the core OHM tables."
+            )
+        # Validate identifier characters (DuckDB: alphanumeric + underscore, must start with letter/_)
+        if not (self.name[0].isalpha() or self.name[0] == "_") or not all(
+            c.isalnum() or c == "_" for c in self.name
+        ):
+            raise ValueError(f"DomainTable.name='{self.name}' is not a valid SQL identifier")
+        if not self.columns:
+            raise ValueError(f"DomainTable.name='{self.name}' must declare at least one column")
+        col_names = {c[0] for c in self.columns}
+        if self.primary_key is not None and self.primary_key not in col_names:
+            raise ValueError(
+                f"DomainTable.name='{self.name}' primary_key='{self.primary_key}' "
+                f"not found in columns {sorted(col_names)}"
+            )
+        for idx_name, idx_cols in self.indexes:
+            if not idx_name:
+                raise ValueError(f"DomainTable.name='{self.name}' has an index with empty name")
+            for c in idx_cols:
+                if c not in col_names:
+                    raise ValueError(
+                        f"DomainTable.name='{self.name}' index '{idx_name}' "
+                        f"references missing column '{c}'"
+                    )
+
+    def to_dict(self) -> dict:
+        """Serialize to a JSON-safe dict (for to_dict/from_dict round-trip)."""
+        d: dict = {
+            "name": self.name,
+            "columns": [[c, t] for c, t in self.columns],
+            "ordering": self.ordering,
+        }
+        if self.primary_key is not None:
+            d["primary_key"] = self.primary_key
+        if self.indexes:
+            d["indexes"] = [[n, list(cols)] for n, cols in self.indexes]
+        if self.initial_data:
+            d["initial_data"] = [dict(r) for r in self.initial_data]
+        if self.description:
+            d["description"] = self.description
+        return d
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "DomainTable":
+        """Inverse of :meth:`to_dict`."""
+        if "name" not in data or "columns" not in data:
+            raise ValueError("DomainTable dict requires 'name' and 'columns'")
+        return cls(
+            name=data["name"],
+            columns=tuple((c, t) for c, t in data["columns"]),
+            primary_key=data.get("primary_key"),
+            indexes=tuple((n, tuple(cols)) for n, cols in data.get("indexes", [])),
+            ordering=int(data.get("ordering", 100)),
+            initial_data=tuple(dict(r) for r in data.get("initial_data", [])),
+            description=data.get("description", ""),
+        )
+
+
 class SchemaConfig:
     """Configurable schema for domain-specific knowledge graphs.
 
@@ -484,6 +592,7 @@ class SchemaConfig:
         optional_integrations: dict | None = None,
         template_version: int = 0,
         seed_agents: list[dict] | None = None,
+        domain_tables: list[DomainTable] | tuple[DomainTable, ...] | None = None,
     ):
         self.name = name
         self.node_types = node_types if node_types is not None else VALID_NODE_TYPES
@@ -497,6 +606,19 @@ class SchemaConfig:
         self.optional_integrations = MappingProxyType(optional_integrations) if optional_integrations else MappingProxyType({})  # OHM-cyms: immutable
         self.template_version = template_version
         self.seed_agents = seed_agents if seed_agents is not None else []  # OHM-tss4.1.1: domain agent pre-seeding
+        # OHM-vl8o: domain-specific tables created alongside the base OHM schema.
+        # Stored as a tuple for immutability (frozen DomainTable + tuple container).
+        if domain_tables is None:
+            self.domain_tables: tuple[DomainTable, ...] = ()
+        else:
+            # Normalize: validate types, sort by ordering, freeze as tuple.
+            for dt in domain_tables:
+                if not isinstance(dt, DomainTable):
+                    raise TypeError(
+                        f"SchemaConfig.domain_tables must contain DomainTable instances, "
+                        f"got {type(dt).__name__}"
+                    )
+            self.domain_tables = tuple(sorted(domain_tables, key=lambda d: (d.ordering, d.name)))
 
     @property
     def all_edge_types(self) -> frozenset[str]:
@@ -713,6 +835,8 @@ class SchemaConfig:
             result["required_integrations"] = self.required_integrations
         if self.optional_integrations:
             result["optional_integrations"] = self.optional_integrations
+        if self.domain_tables:
+            result["domain_tables"] = [dt.to_dict() for dt in self.domain_tables]
         return result
 
     @classmethod
@@ -739,6 +863,10 @@ class SchemaConfig:
         if "layer_edge_types" in data:
             layer_edge_types = {layer: frozenset(types) for layer, types in data["layer_edge_types"].items()}
 
+        domain_tables = None
+        if "domain_tables" in data:
+            domain_tables = [DomainTable.from_dict(d) for d in data["domain_tables"]]
+
         return cls(
             name=data["name"],
             node_types=frozenset(data["node_types"]),
@@ -752,6 +880,7 @@ class SchemaConfig:
             optional_integrations=data.get("optional_integrations", {}),
             template_version=int(data.get("template_version", 0)),
             seed_agents=data.get("seed_agents", []),  # OHM-tss4.1.1: domain agent pre-seeding
+            domain_tables=domain_tables,  # OHM-vl8o: domain DDL
         )
 
     @classmethod
@@ -1200,7 +1329,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.39.0"
+SCHEMA_VERSION = "0.40.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -1725,6 +1854,16 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             "CREATE INDEX IF NOT EXISTS idx_nudge_log_created ON ohm_nudge_log(created_at);",
         ],
     ),
+    # OHM-vl8o: domain DDL hook. No new core OHM tables in this migration —
+    # domain tables are created by initialize_schema() from the SchemaConfig.
+    # The migration entry is a no-op that bumps the version so existing
+    # deployments can detect they are on a build that knows about the
+    # SchemaConfig.domain_tables field.
+    (
+        "0.40.0",
+        "OHM-vl8o: domain DDL hook (SchemaConfig.domain_tables) — version bump, no schema change",
+        [],
+    ),
 ]
 
 # ── Indexes ─────────────────────────────────────────────────────────────────
@@ -1773,7 +1912,8 @@ def initialize_schema(conn: "DuckDBPyConnection", schema: "SchemaConfig | None" 
 
     Args:
         conn: An active DuckDB connection.
-        schema: Optional SchemaConfig for domain agent seeding (OHM-tss4.1.1).
+        schema: Optional SchemaConfig for domain agent seeding (OHM-tss4.1.1)
+            and domain table DDL (OHM-vl8o).
     """
     # Safety: checkpoint before DDL to flush any prior WAL state (OHM-8n9).
     # Without this, stale WAL entries from a prior session could conflict
@@ -1795,6 +1935,11 @@ def initialize_schema(conn: "DuckDBPyConnection", schema: "SchemaConfig | None" 
     # Seed domain agents from schema config (OHM-tss4.1.1)
     if schema:
         _seed_domain_agents(conn, schema)
+    # OHM-vl8o: domain-specific tables (TOPO needs topo_prospects, etc.)
+    # Created after the base OHM DDL and migrations so domain tables can
+    # reference ohm_nodes / ohm_edges if needed.
+    if schema:
+        _create_domain_tables(conn, schema)
 
 
 def _ensure_meta_table(conn: "DuckDBPyConnection") -> None:
@@ -1984,6 +2129,124 @@ def _seed_domain_agents(conn: "DuckDBPyConnection", schema: "SchemaConfig | None
             )
 
     logger.info("Seeded %d domain agents for schema '%s'", len(schema.seed_agents), schema.name)
+
+
+def _create_domain_tables(conn: "DuckDBPyConnection", schema: "SchemaConfig | None") -> None:
+    """Create domain-specific tables from schema config (OHM-vl8o).
+
+    Iterates ``schema.domain_tables`` (a tuple of :class:`DomainTable` already
+    sorted by ``ordering``) and creates each one in declared order. Each
+    table is created with ``CREATE TABLE IF NOT EXISTS`` so the operation is
+    idempotent — re-running ``initialize_schema()`` is a no-op for tables
+    that already exist.
+
+    Per-table initial seed rows (``initial_data``) are inserted only on first
+    creation: if the table has zero rows after the CREATE, the seed rows
+    are inserted; otherwise they're skipped. This is the right model for
+    "create-if-missing, don't overwrite user data" — operators may add
+    rows between deployments and we must not clobber them.
+
+    Per-table migration version is tracked in ``ohm_meta`` under the key
+    ``domain_tables:<name>:ordering``. This lets later code reason about
+    which tables have been provisioned without re-running CREATE.
+
+    Args:
+        conn: Active DuckDB connection.
+        schema: SchemaConfig with optional ``domain_tables`` list.
+    """
+    if schema is None or not schema.domain_tables:
+        return
+
+    for dt in schema.domain_tables:
+        # Build CREATE TABLE statement.
+        col_lines = []
+        for col_name, col_type in dt.columns:
+            col_lines.append(f"    {col_name} {col_type}")
+        if dt.primary_key is not None:
+            col_lines.append(f"    PRIMARY KEY ({dt.primary_key})")
+        create_sql = (
+            f"CREATE TABLE IF NOT EXISTS {dt.name} (\n"
+            + ",\n".join(col_lines)
+            + "\n);"
+        )
+        try:
+            conn.execute(create_sql)
+        except Exception as e:
+            # Defensive: surface domain DDL errors with context.
+            err = str(e).lower()
+            if "already exists" in err:
+                pass  # Race with another process — fine, table is there.
+            else:
+                raise RuntimeError(
+                    f"Failed to create domain table '{dt.name}' "
+                    f"(ordering={dt.ordering}): {e}"
+                ) from e
+
+        # Create indexes.
+        for idx_name, idx_cols in dt.indexes:
+            cols_csv = ", ".join(idx_cols)
+            try:
+                conn.execute(
+                    f"CREATE INDEX IF NOT EXISTS {idx_name} "
+                    f"ON {dt.name}({cols_csv})"
+                )
+            except Exception as e:
+                err = str(e).lower()
+                if "already exists" in err:
+                    pass
+                else:
+                    raise RuntimeError(
+                        f"Failed to create index '{idx_name}' on '{dt.name}': {e}"
+                    ) from e
+
+        # Seed initial data — only if the table is empty.
+        if dt.initial_data:
+            try:
+                count = conn.execute(f"SELECT COUNT(*) FROM {dt.name}").fetchone()
+            except Exception:
+                count = None
+            if count is not None and count[0] == 0:
+                # Build parameterized INSERT.
+                col_names = [c[0] for c in dt.columns]
+                placeholders = ", ".join(["?"] * len(col_names))
+                col_list = ", ".join(col_names)
+                insert_sql = (
+                    f"INSERT INTO {dt.name} ({col_list}) VALUES ({placeholders})"
+                )
+                for row in dt.initial_data:
+                    values = [row.get(c) for c in col_names]
+                    try:
+                        conn.execute(insert_sql, values)
+                    except Exception as e:
+                        # Seed failures should not be fatal (e.g. uniqueness
+                        # violation on rerun with same key) — log and move on.
+                        logger.warning(
+                            "Domain table seed insert failed for '%s' "
+                            "(row=%r): %s",
+                            dt.name, row, e,
+                        )
+
+        # Record the provisioning version in ohm_meta.
+        try:
+            meta_key = f"domain_tables:{dt.name}:ordering"
+            existing = conn.execute(
+                "SELECT value FROM ohm_meta WHERE key = ?", [meta_key]
+            ).fetchone()
+            if existing is None:
+                conn.execute(
+                    "INSERT INTO ohm_meta (key, value) VALUES (?, ?)",
+                    [meta_key, str(dt.ordering)],
+                )
+        except Exception as e:
+            logger.warning(
+                "Failed to record domain table version for '%s' in ohm_meta: %s",
+                dt.name, e,
+            )
+
+    logger.info(
+        "Created %d domain tables for schema '%s'",
+        len(schema.domain_tables), schema.name,
+    )
 
 
 def get_schema_version(conn: "DuckDBPyConnection") -> str:

@@ -2891,7 +2891,11 @@ def main(schema_config: SchemaConfig | None = None):
         if data_path:
             os.environ["OHM_DUCKLAKE_DATA"] = data_path
 
-    store = OhmStore(db_path=config["db_path"], agent_name="ohmd")
+    # OHM-vl8o: pass schema to OhmStore so domain DDL (e.g. topo_prospects) is
+    # created during _init_schema(). Without this, the store uses DEFAULT_SCHEMA
+    # and any domain tables are silently skipped even when the daemon was
+    # started with `ohmd --schema topo`.
+    store = OhmStore(db_path=config["db_path"], agent_name="ohmd", schema=schema_config)
     print(f"OHM database: {config['db_path']}", file=sys.stderr)
     print(f"Status: {store.status()}", file=sys.stderr)
 

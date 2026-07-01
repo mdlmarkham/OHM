@@ -204,5 +204,30 @@
     "research",
     "simulation",
     "socrates-curriculum"
+  ],
+  "domain_tables": [
+    {
+      "name": "topo_prospects",
+      "ordering": 100,
+      "description": "TOPO predictive-maintenance prospects: ranked equipment with RUL and risk class.",
+      "columns": [
+        ["id", "VARCHAR"],
+        ["equipment_id", "VARCHAR"],
+        ["site_id", "VARCHAR"],
+        ["rul_days", "FLOAT"],
+        ["risk_class", "VARCHAR"],
+        ["model_version", "VARCHAR"],
+        ["created_by", "VARCHAR NOT NULL"],
+        ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+        ["updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+        ["metadata", "JSON"]
+      ],
+      "primary_key": "id",
+      "indexes": [
+        ["idx_topo_prospects_equipment", ["equipment_id"]],
+        ["idx_topo_prospects_site", ["site_id"]],
+        ["idx_topo_prospects_risk", ["risk_class"]]
+      ]
+    }
   ]
 }
