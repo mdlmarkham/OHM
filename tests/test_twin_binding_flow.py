@@ -302,6 +302,136 @@ class TestGetTwinReadiness:
             get_twin_readiness(test_db, twin_id="nonexistent_twin_xyz")
 
 
+class TestGetTwinReadinessThreshold:
+    """OHM-kg16 item 4: distinguish 'no threshold set' from
+    'threshold exceeded' on GET /twin/{id}/readiness.
+    """
+
+    def test_default_threshold_state_no_threshold_set(self, test_db):
+        """Without a caller override and with stale feeds, the
+        response should say threshold_state='no_threshold_set' and
+        threshold.source='default'."""
+        target = _make_target(test_db)
+        decision = _make_decision(test_db)
+        feed = _make_feed(test_db, "F")
+        # Add a stale observation (15 days old) so feeds_fresh fails.
+        test_db.execute(
+            "INSERT INTO ohm_observations (node_id, value, type, created_by, created_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP - INTERVAL '15 days')",
+            [feed, 0.5, "measurement", "tester"],
+        )
+        stub_twin = create_node(test_db, label="Stub", node_type="twin", created_by="tester")["id"]
+        model = _make_model_candidate(test_db, stub_twin)
+        result = register_twin_with_bindings(
+            test_db,
+            label="T",
+            target_node_id=target,
+            decision_node_id=decision,
+            feed_node_ids=[feed],
+            model_candidate_ids=[model],
+            created_by="tester",
+        )
+        readiness = get_twin_readiness(test_db, twin_id=result["twin"]["id"])
+        assert readiness["gates"]["feeds_fresh"] is False
+        assert readiness["threshold"]["days"] == 7
+        assert readiness["threshold"]["configured"] is False
+        assert readiness["threshold"]["source"] == "default"
+        assert readiness["threshold_state"] == "no_threshold_set"
+
+    def test_threshold_exceeded_when_caller_sets_strict_window(self, test_db):
+        """When the caller passes freshness_days=1 and feeds are
+        older, the response should say threshold_state='threshold_exceeded'
+        and threshold.source='configured'."""
+        target = _make_target(test_db)
+        decision = _make_decision(test_db)
+        feed = _make_feed(test_db, "F")
+        # 3-day-old observation: passes the 7d default but fails a
+        # strict 1d window.
+        test_db.execute(
+            "INSERT INTO ohm_observations (node_id, value, type, created_by, created_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP - INTERVAL '3 days')",
+            [feed, 0.5, "measurement", "tester"],
+        )
+        stub_twin = create_node(test_db, label="Stub", node_type="twin", created_by="tester")["id"]
+        model = _make_model_candidate(test_db, stub_twin)
+        result = register_twin_with_bindings(
+            test_db,
+            label="T",
+            target_node_id=target,
+            decision_node_id=decision,
+            feed_node_ids=[feed],
+            model_candidate_ids=[model],
+            created_by="tester",
+        )
+        # With the default 7d window, feeds_fresh is True.
+        readiness_default = get_twin_readiness(test_db, twin_id=result["twin"]["id"])
+        assert readiness_default["gates"]["feeds_fresh"] is True
+        assert readiness_default["threshold_state"] == "within_threshold"
+
+        # With a strict 1d window, the same feeds are stale.
+        readiness_strict = get_twin_readiness(
+            test_db,
+            twin_id=result["twin"]["id"],
+            freshness_days=1,
+        )
+        assert readiness_strict["gates"]["feeds_fresh"] is False
+        assert readiness_strict["threshold"]["days"] == 1
+        assert readiness_strict["threshold"]["configured"] is True
+        assert readiness_strict["threshold"]["source"] == "configured"
+        assert readiness_strict["threshold_state"] == "threshold_exceeded"
+
+    def test_within_threshold_when_caller_window_satisfied(self, test_db):
+        """With a generous caller-set window and fresh-enough feeds,
+        state should be 'within_threshold' even though the window
+        was caller-configured."""
+        target = _make_target(test_db)
+        decision = _make_decision(test_db)
+        feed = _make_feed(test_db, "F")
+        test_db.execute(
+            "INSERT INTO ohm_observations (node_id, value, type, created_by, created_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP - INTERVAL '3 days')",
+            [feed, 0.5, "measurement", "tester"],
+        )
+        stub_twin = create_node(test_db, label="Stub", node_type="twin", created_by="tester")["id"]
+        model = _make_model_candidate(test_db, stub_twin)
+        result = register_twin_with_bindings(
+            test_db,
+            label="T",
+            target_node_id=target,
+            decision_node_id=decision,
+            feed_node_ids=[feed],
+            model_candidate_ids=[model],
+            created_by="tester",
+        )
+        readiness = get_twin_readiness(
+            test_db,
+            twin_id=result["twin"]["id"],
+            freshness_days=30,
+        )
+        assert readiness["gates"]["feeds_fresh"] is True
+        assert readiness["threshold"]["configured"] is True
+        assert readiness["threshold_state"] == "within_threshold"
+
+    def test_no_feeds_means_within_threshold(self, test_db):
+        """When there are no feeds, the feeds_fresh gate is False
+        (no feeds to be fresh) but the threshold_state should not
+        say 'exceeded' — the question doesn't apply."""
+        target = _make_target(test_db)
+        result = register_twin_with_bindings(test_db, label="T", target_node_id=target, created_by="tester")
+        readiness = get_twin_readiness(test_db, twin_id=result["twin"]["id"])
+        assert readiness["gates"]["feeds_present"] is False
+        # feeds_fresh stays False, but threshold_state isn't 'exceeded'
+        # because there are no feeds to be stale.
+        assert readiness["threshold_state"] == "within_threshold"
+
+    def test_invalid_freshness_days_raises(self, test_db):
+        from ohm.exceptions import ValidationError
+
+        target = _make_target(test_db)
+        result = register_twin_with_bindings(test_db, label="T", target_node_id=target, created_by="tester")
+        with pytest.raises(ValidationError):
+            get_twin_readiness(test_db, twin_id=result["twin"]["id"], freshness_days=0)
+        with pytest.raises(ValidationError):
+            get_twin_readiness(test_db, twin_id=result["twin"]["id"], freshness_days=-1)
+
+
 class TestTwinBindingFlowSDK:
     def test_sdk_register_with_bindings(self, test_db):
         from ohm.framework.sdk import Graph

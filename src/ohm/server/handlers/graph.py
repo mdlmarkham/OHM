@@ -3875,7 +3875,13 @@ class GraphHandlerMixin:
             self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
 
     def _get_twin_readiness(self, path: str, qs: dict) -> None:
-        """GET /twin/{id}/readiness — check twin readiness gates (OHM-f7tl)."""
+        """GET /twin/{id}/readiness — check twin readiness gates (OHM-f7tl).
+
+        Optional query params:
+          - freshness_days (int): override the default 7-day feed
+            freshness window. When set, the response distinguishes
+            "no threshold set" from "threshold exceeded" (kg16 item 4).
+        """
         from ohm.queries import get_twin_readiness
         from ohm.exceptions import NodeNotFoundError, ValidationError
 
@@ -3884,8 +3890,20 @@ class GraphHandlerMixin:
         if not twin_id:
             raise ValidationError("twin_id is required in path")
 
+        freshness_days: int | None = None
+        raw_days = qs.get("freshness_days", [None])[0]
+        if raw_days is not None:
+            try:
+                freshness_days = int(raw_days)
+            except (TypeError, ValueError) as e:
+                raise ValidationError(f"freshness_days must be an integer, got {raw_days!r}") from e
+
         try:
-            result = get_twin_readiness(self.current_store.read_conn, twin_id=twin_id)
+            result = get_twin_readiness(
+                self.current_store.read_conn,
+                twin_id=twin_id,
+                freshness_days=freshness_days,
+            )
             self._json_response(200, {"ok": True, "data": result})
         except NodeNotFoundError as e:
             self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})

@@ -12641,11 +12641,42 @@ def get_twin_readiness(
     conn: DuckDBPyConnection,
     *,
     twin_id: str,
+    freshness_days: int | None = None,
 ) -> dict[str, Any]:
+    """Check whether a twin is ready to make decisions.
+
+    Args:
+        twin_id: ID of the twin node.
+        freshness_days: Max age (in days) for a feed to count as fresh.
+            Defaults to 7 days when not provided. The caller can pass
+            a stricter window (e.g. 1) to surface "threshold exceeded"
+            states in dashboards.
+
+    Returns a dict with:
+        - twin_id, gates, ready, missing, blocking (as before)
+        - threshold: {days, configured, source} so callers can tell
+          "no threshold set (default)" from "threshold set + exceeded".
+          Resolves the OHM-kg16 item 4 UX concern.
+
+    Threshold semantics (kg16 item 4):
+        - "no_threshold_set": no caller has asked for a specific
+          window; the default 7d is applied. If feeds_fresh is false
+          in this state, the caller is seeing the default
+          interpretation, not a user-set threshold.
+        - "threshold_exceeded": a caller passed freshness_days (or
+          a future persistent threshold is set), and feeds are
+          older than that window. The failing feeds_fresh gate is
+          binding the configured threshold, not the default.
+    """
     from ohm.validation import validate_identifier
-    from ohm.exceptions import NodeNotFoundError
+    from ohm.exceptions import NodeNotFoundError, ValidationError
 
     twin_id = validate_identifier(twin_id, name="twin_id")
+
+    threshold_configured = freshness_days is not None
+    effective_days = int(freshness_days) if threshold_configured else 7
+    if effective_days <= 0:
+        raise ValidationError(f"freshness_days must be a positive integer, got {freshness_days}")
 
     twin = conn.execute(
         "SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
@@ -12693,7 +12724,7 @@ def get_twin_readiness(
                     FROM ohm_observations o
                     WHERE o.node_id IN ({placeholders})
                       AND o.deleted_at IS NULL
-                      AND o.created_at > CURRENT_TIMESTAMP - INTERVAL '7 days'""",
+                      AND o.created_at > CURRENT_TIMESTAMP - INTERVAL '{effective_days} days'""",
                 feed_ids,
             ).fetchone()[0]
             feeds_fresh = fresh_count == len(feed_ids)
@@ -12730,12 +12761,29 @@ def get_twin_readiness(
     missing = [g for g, v in gates.items() if not v]
     blocking = [g for g in critical_gates if not gates[g]]
 
+    # Threshold state — the UX distinction called out in OHM-kg16
+    # item 4. Three states surface the relationship between the
+    # feeds_fresh gate and whether anyone asked for a specific
+    # window.
+    if not threshold_configured and feeds_present and not feeds_fresh:
+        threshold_state = "no_threshold_set"  # default 7d, no caller override
+    elif threshold_configured and feeds_present and not feeds_fresh:
+        threshold_state = "threshold_exceeded"  # caller-set window violated
+    else:
+        threshold_state = "within_threshold"  # feeds fresh or no feeds
+
     return {
         "twin_id": twin_id,
         "gates": gates,
         "ready": ready,
         "missing": missing,
         "blocking": blocking,
+        "threshold": {
+            "days": effective_days,
+            "configured": threshold_configured,
+            "source": "configured" if threshold_configured else "default",
+        },
+        "threshold_state": threshold_state,
     }
 
 
