@@ -387,6 +387,25 @@ class GraphHandlerMixin:
         except Exception as e:
             self._json_response(500, {"error": "deep_content_failed", "message": str(e)})
 
+    def _get_edge_suggest_type(self, path: str, qs: dict) -> None:
+        """GET /edge/suggest-type?from=<id>&to=<id> — suggest edge type for a pair (OHM-ezt5)."""
+        from ohm.exceptions import ValidationError
+
+        from_node_id = qs.get("from", [None])[0]
+        to_node_id = qs.get("to", [None])[0]
+        if not from_node_id:
+            raise ValidationError("?from=<node_id> is required")
+        if not to_node_id:
+            raise ValidationError("?to=<node_id> is required")
+        from ohm.queries import suggest_edge_type
+
+        result = suggest_edge_type(
+            self.current_store.read_conn,
+            from_node_id=from_node_id,
+            to_node_id=to_node_id,
+        )
+        self._json_response(200, {"ok": True, "data": result})
+
     def _get_edge(self, path: str, qs: dict) -> None:
         """GET /edge/<id> — fetch an edge."""
         edge_id = path[6:]

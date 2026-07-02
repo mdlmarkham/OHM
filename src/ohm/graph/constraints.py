@@ -45,19 +45,55 @@ EDGE_CONSTRAINTS: dict[str, dict[str, Any]] = {
         "min_layer": "L2",
         "require_references": True,
         "require_outcome": False,
+        "participates_in_inference": True,
     },
     "PREDICTS": {
         "min_layer": "L3",
         "require_references": True,
         "require_outcome": True,
+        "participates_in_inference": True,
+    },
+    "EXPECTS": {
+        "min_layer": "L3",
+        "require_references": False,
+        "require_outcome": False,
+        "participates_in_inference": True,
+    },
+    "CORRELATES_WITH": {
+        "min_layer": "L3",
+        "require_references": False,
+        "require_outcome": False,
+        "participates_in_inference": True,
     },
     "CHALLENGED_BY": {
         "require_confidence": True,
         "require_reasoning": True,
+        "participates_in_inference": False,
     },
     "SUPPORTS": {
         "min_layer": "L1",
         "require_references": False,
+        "participates_in_inference": False,
+    },
+    "REFINES": {
+        "min_layer": "L3",
+        "require_references": False,
+        "participates_in_inference": False,
+    },
+    "EXPLAINS": {
+        "min_layer": "L3",
+        "require_references": False,
+        "participates_in_inference": False,
+    },
+    "REFERENCES": {
+        "min_layer": "L2",
+        "require_references": False,
+        "participates_in_inference": False,
+    },
+    "RELATED_TO": {
+        "min_layer": "L3",
+        "require_references": False,
+        "participates_in_inference": False,
     },
 }
 

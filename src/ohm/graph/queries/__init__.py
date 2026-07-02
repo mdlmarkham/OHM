@@ -2010,6 +2010,116 @@ def create_edge(
     return _rows_to_dicts(conn.execute("SELECT * FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [edge_id]))[0]
 
 
+def suggest_edge_type(
+    conn: DuckDBPyConnection,
+    *,
+    from_node_id: str,
+    to_node_id: str,
+) -> dict[str, Any]:
+    """Suggest the most appropriate edge type for a from→to pair (OHM-ezt5).
+
+    Looks up the node types and applies heuristics to recommend an edge
+    type and layer. The key guardrail: pattern→case edges should use
+    REFINES or EXPLAINS, NOT CAUSES (a pattern doesn't cause a case;
+    it refines or explains it).
+
+    Returns dict with:
+        suggested_edge_type: The recommended edge type string
+        suggested_layer: The recommended layer
+        participates_in_inference: Whether this edge type flows through
+            Bayesian/cascade inference
+        from_type: The from_node's type
+        to_type: The to_node's type
+        reasoning: Human-readable explanation
+        alternatives: List of other valid edge types for this pair
+    """
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import NodeNotFoundError
+
+    from_node_id = validate_identifier(from_node_id, name="from_node_id")
+    to_node_id = validate_identifier(to_node_id, name="to_node_id")
+
+    from_row = conn.execute(
+        "SELECT id, type FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+        [from_node_id],
+    ).fetchone()
+    if not from_row:
+        raise NodeNotFoundError(f"From node not found: {from_node_id}")
+
+    to_row = conn.execute(
+        "SELECT id, type FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+        [to_node_id],
+    ).fetchone()
+    if not to_row:
+        raise NodeNotFoundError(f"To node not found: {to_node_id}")
+
+    from_type = from_row[1]
+    to_type = to_row[1]
+
+    # Type-based heuristics
+    PATTERN_TYPES = {"pattern", "idea", "synthesis", "interpretation"}
+    SOURCE_TYPES = {"source", "fragment"}
+    OBSERVATION_TYPES = {"observation", "metric"}
+    CAUSAL_TARGET_TYPES = {"concept", "event", "decision", "task", "action", "intervention"}
+    EVIDENCE_TYPES = {"experiment", "hypothesis"}
+
+    suggested_edge_type: str
+    suggested_layer: str
+    reasoning: str
+    alternatives: list[str]
+
+    if from_type in PATTERN_TYPES and to_type in {"case", "decision", "task", "action"}:
+        suggested_edge_type = "REFINES"
+        suggested_layer = "L3"
+        reasoning = f"Pattern→{to_type} should use REFINES, not CAUSES. A pattern refines a case, not causes it."
+        alternatives = ["EXPLAINS", "RELATED_TO"]
+    elif from_type in PATTERN_TYPES and to_type in CAUSAL_TARGET_TYPES:
+        suggested_edge_type = "EXPLAINS"
+        suggested_layer = "L3"
+        reasoning = f"Pattern→{to_type} should use EXPLAINS, not CAUSES. A pattern explains a concept, not causes it."
+        alternatives = ["REFINES", "RELATED_TO"]
+    elif from_type in SOURCE_TYPES and to_type in CAUSAL_TARGET_TYPES:
+        suggested_edge_type = "REFERENCES"
+        suggested_layer = "L2"
+        reasoning = f"Source→{to_type} should use REFERENCES, not CAUSES."
+        alternatives = ["SUPPORTS_EVIDENCE"]
+    elif from_type in OBSERVATION_TYPES and to_type in CAUSAL_TARGET_TYPES:
+        suggested_edge_type = "SUPPORTS_EVIDENCE"
+        suggested_layer = "L3"
+        reasoning = f"Observation→{to_type} should use SUPPORTS_EVIDENCE, not CAUSES."
+        alternatives = ["CORRELATES_WITH"]
+    elif from_type in EVIDENCE_TYPES and to_type == "hypothesis":
+        suggested_edge_type = "TESTS"
+        suggested_layer = "L3"
+        reasoning = "Experiment→hypothesis should use TESTS."
+        alternatives = ["SUPPORTS_EVIDENCE", "CONTRADICTS_EVIDENCE"]
+    elif from_type == "decision" and to_type in {"hypothesis", "concept"}:
+        suggested_edge_type = "DECISION_DEPENDS_ON"
+        suggested_layer = "L3"
+        reasoning = f"Decision→{to_type} should use DECISION_DEPENDS_ON."
+        alternatives = ["RELATED_TO"]
+    else:
+        suggested_edge_type = "RELATED_TO"
+        suggested_layer = "L3"
+        reasoning = f"Default for {from_type}→{to_type}: RELATED_TO. Use CAUSES only when there is a genuine causal mechanism."
+        alternatives = ["CAUSES", "CORRELATES_WITH", "EXPLAINS"]
+
+    from ohm.graph.constraints import EDGE_CONSTRAINTS
+
+    constraints = EDGE_CONSTRAINTS.get(suggested_edge_type, {})
+    participates = constraints.get("participates_in_inference", False)
+
+    return {
+        "suggested_edge_type": suggested_edge_type,
+        "suggested_layer": suggested_layer,
+        "participates_in_inference": participates,
+        "from_type": from_type,
+        "to_type": to_type,
+        "reasoning": reasoning,
+        "alternatives": alternatives,
+    }
+
+
 def create_challenge(
     conn: DuckDBPyConnection,
     *,
