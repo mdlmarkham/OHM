@@ -1393,7 +1393,8 @@ DDL_STATEMENTS: list[str] = [
         recorded_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         notes        TEXT,
         claimed_by   VARCHAR,
-        verified_by  VARCHAR
+        verified_by  VARCHAR,
+        domain       VARCHAR DEFAULT '*'
     );
     """,
     # ── Discovery Queue (OHM-od01.4) ────────────────────────────────────
@@ -1545,7 +1546,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.42.0"
+SCHEMA_VERSION = "0.43.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -2115,6 +2116,20 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
         [
             "ALTER TABLE ohm_edges ADD COLUMN IF NOT EXISTS corroboration_count INTEGER DEFAULT 0",
             "CREATE INDEX IF NOT EXISTS idx_edges_corroboration ON ohm_edges(corroboration_count);",
+        ],
+    ),
+    (
+        "0.43.0",
+        "OHM-avkj: add domain column to ohm_outcomes for domain-aware source reliability",
+        [
+            "ALTER TABLE ohm_outcomes ADD COLUMN IF NOT EXISTS domain VARCHAR DEFAULT '*'",
+            # Backfill domain from the claim node's provenance
+            "UPDATE ohm_outcomes SET domain = ("
+            "  SELECT n.provenance FROM ohm_nodes n "
+            "  WHERE n.id = ohm_outcomes.claim_node AND n.deleted_at IS NULL"
+            ") WHERE domain = '*' OR domain IS NULL",
+            "UPDATE ohm_outcomes SET domain = '*' WHERE domain IS NULL",
+            "CREATE INDEX IF NOT EXISTS idx_outcomes_domain ON ohm_outcomes(domain)",
         ],
     ),
 ]

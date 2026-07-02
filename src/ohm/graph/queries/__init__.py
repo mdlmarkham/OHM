@@ -1046,11 +1046,21 @@ def query_record_outcome(
     ).fetchone()
     claimed_by = claimed_by_row[0] if claimed_by_row else source_agent
 
+    # OHM-avkj: Auto-derive domain from the claim node's provenance.
+    # This enables domain-aware source reliability — an agent reliable
+    # about cattle health may be unreliable about stock prices.
+    # Falls back to '*' (unscoped) when the node has no provenance.
+    domain_row = conn.execute(
+        "SELECT provenance FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+        [claim_node],
+    ).fetchone()
+    domain = domain_row[0] if domain_row and domain_row[0] else "*"
+
     conn.execute(
         """INSERT INTO ohm_outcomes
-           (id, source_agent, claim_node, outcome, recorded_by, notes, claimed_by, verified_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        [outcome_id, source_agent, claim_node, outcome, recorded_by, notes, claimed_by, recorded_by],
+           (id, source_agent, claim_node, outcome, recorded_by, notes, claimed_by, verified_by, domain)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [outcome_id, source_agent, claim_node, outcome, recorded_by, notes, claimed_by, recorded_by, domain],
     )
     _log_change(conn, "ohm_outcomes", outcome_id, "INSERT", recorded_by)
 
@@ -1256,6 +1266,8 @@ def query_close_task_with_outcome(
 def query_source_reliability(
     conn: DuckDBPyConnection,
     source_agent: str,
+    *,
+    domain: str | None = None,
 ) -> dict[str, Any]:
     """Compute reliability metrics for a source agent.
 
@@ -1266,6 +1278,10 @@ def query_source_reliability(
     Args:
         conn: Database connection.
         source_agent: The agent to evaluate.
+        domain: Optional domain filter (OHM-avkj). When set, only
+            outcomes with matching ``domain`` (or ``'*'`` for unscoped)
+            are counted. When None, all domains are counted (backward
+            compat).
 
     Returns:
         Dict with source_agent, total_outcomes, accurate_count,
@@ -1276,14 +1292,22 @@ def query_source_reliability(
 
     source_agent = validate_identifier(source_agent, name="source_agent")
 
+    domain_clause = ""
+    params: list = [source_agent]
+    if domain is not None:
+        # Match the exact domain OR unscoped ('*') outcomes — unscoped
+        # outcomes apply to all domains.
+        domain_clause = " AND (domain = ? OR domain = '*')"
+        params.append(domain)
+
     result = conn.execute(
-        """SELECT
+        f"""SELECT
             COUNT(*) AS total,
             SUM(CASE WHEN outcome THEN 1 ELSE 0 END) AS accurate,
             SUM(CASE WHEN NOT outcome THEN 1 ELSE 0 END) AS false_positives
         FROM ohm_outcomes
-        WHERE COALESCE(claimed_by, source_agent) = ?""",
-        [source_agent],
+        WHERE COALESCE(claimed_by, source_agent) = ?{domain_clause}""",
+        params,
     ).fetchone()
 
     if result:

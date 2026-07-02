@@ -33,7 +33,7 @@ class TestDecisionSchema:
             assert "DECISION_DEPENDS_ON" not in LAYER_EDGE_TYPES.get(layer, frozenset())
 
     def test_schema_version_bumped(self):
-        assert SCHEMA_VERSION == "0.42.0"
+        assert SCHEMA_VERSION == "0.43.0"
 
     def test_migration_0_38_0_present(self):
         from ohm.schema import MIGRATIONS

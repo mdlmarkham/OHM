@@ -298,4 +298,4 @@ class TestSchemaMigration:
 
     def test_schema_version_is_042(self):
         from ohm.graph.schema import SCHEMA_VERSION
-        assert SCHEMA_VERSION == "0.42.0"
+        assert SCHEMA_VERSION == "0.43.0"
