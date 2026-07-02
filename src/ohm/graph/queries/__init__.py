@@ -2892,6 +2892,19 @@ def batch_create_nodes(
     Returns:
         List of created node records.
     """
+    # OHM-aadc: try the fast multi-row INSERT path first. Returns None
+    # if the fast path doesn't apply (connects_to, soft-deleted collisions,
+    # validation edge cases), in which case we fall back to the per-row
+    # path that gives clearer error messages.
+    try:
+        from ohm.graph.batch import fast_batch_create_nodes
+
+        fast = fast_batch_create_nodes(conn, nodes=nodes, created_by=created_by)
+        if fast is not None:
+            return fast
+    except Exception:
+        pass
+
     results = []
     for node_data in nodes:
         result = create_node(
@@ -2926,6 +2939,16 @@ def batch_create_edges(
     Returns:
         List of created edge records.
     """
+    # OHM-aadc: try the fast multi-row INSERT path first.
+    try:
+        from ohm.graph.batch import fast_batch_create_edges
+
+        fast = fast_batch_create_edges(conn, edges=edges, created_by=created_by)
+        if fast is not None:
+            return fast
+    except Exception:
+        pass
+
     results = []
     for edge_data in edges:
         result = create_edge(
