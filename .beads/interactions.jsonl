@@ -877,6 +877,7 @@
 <<<<<<< Updated upstream
 <<<<<<< Updated upstream
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 {"id":"int-ebbb9891","kind":"field_change","created_at":"2026-06-07T17:55:40.3415672Z","actor":"Matt Markham","issue_id":"OHM-ifr3","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-cd9fa736","kind":"field_change","created_at":"2026-06-07T19:17:21.6257067Z","actor":"Matt Markham","issue_id":"OHM-wdrg","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-1b68f26f","kind":"field_change","created_at":"2026-06-07T19:17:29.2548253Z","actor":"Matt Markham","issue_id":"OHM-wdrg.3","extra":{"field":"status","new_value":"closed","old_value":"in_progress"}}
@@ -1121,3 +1122,8 @@
 {"id":"int-f08d2fb1c943fe1c91637cd8a4373be5","kind":"field_change","created_at":"2026-07-02T18:07:51.6019265Z","actor":"Matt Markham","issue_id":"OHM-lqpk","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Epic effectively complete. 7/8 children closed. Only OHM-lqpk.4 (Rust PyO3) remains — requires separate Rust toolchain setup. Close epic as done; OHM-lqpk.4 continues standalone."}}
 {"id":"int-20aa661bf1ed04f1e07dfcb4fadc24f6","kind":"field_change","created_at":"2026-07-02T18:10:02.1858998Z","actor":"Matt Markham","issue_id":"OHM-twd2","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
 {"id":"int-0e25a524638e42a80e57ba260c166214","kind":"field_change","created_at":"2026-07-02T18:41:53.7830104Z","actor":"Matt Markham","issue_id":"OHM-twd2","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Shipped in commit 6752d27. Fixed all 3 P1 bugs: (1) INFLUENCES/BLOCKS/ENABLES no longer falsely claimed as Bayesian network causal types, (2) task_status validated against VALID_TASK_STATUSES in store.write_node, (3) sync_beads_to_ohm_tasks is idempotent — skips UPDATE when nothing changed. 21 new tests. Full suite: 3096 passed, 0 failed."}}
+=======
+{"id":"int-c0090a2a","kind":"field_change","created_at":"2026-06-07T17:27:23.8545413Z","actor":"Matt Markham","issue_id":"OHM-tr71.4","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
+{"id":"int-01b0c125","kind":"field_change","created_at":"2026-06-07T17:32:19.2304105Z","actor":"Matt Markham","issue_id":"OHM-tr71.4","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Island detection nudge implemented in write responses (POST /node) and heartbeat responses (POST /heartbeat). Uses find_islands() Union-Find with 5-minute per-agent cache. Wired alongside existing connectivity_warning under 300ms suggestion budget. Tests pass."}}
+{"id":"int-ea9269cd","kind":"field_change","created_at":"2026-06-07T17:38:09.1247459Z","actor":"Matt Markham","issue_id":"OHM-g0kv.6","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Merge operation already fully implemented: _post_admin_merge handler + merge_nodes() store method. Added 9 tests covering edge repointing, observation repointing, soft-delete, duplicate edge skipping, error cases, and response shape. All passing."}}
+>>>>>>> Stashed changes
