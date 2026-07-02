@@ -216,12 +216,12 @@ def community_prior(conn: "DuckDBPyConnection") -> float:
     """
     result = conn.execute(
         """
-        SELECT source_agent,
+        SELECT COALESCE(claimed_by, source_agent) AS source_agent,
                CASE WHEN COUNT(*) > 0
                     THEN CAST(SUM(CASE WHEN outcome = TRUE THEN 1 ELSE 0 END) AS DOUBLE) / COUNT(*)
                     ELSE NULL END AS p_accurate
         FROM ohm_outcomes
-        GROUP BY source_agent
+        GROUP BY COALESCE(claimed_by, source_agent)
         HAVING COUNT(*) >= 2
         """
     ).fetchall()
@@ -281,7 +281,7 @@ def effective_reliability(
             SUM(CASE WHEN outcome = TRUE THEN 1 ELSE 0 END) AS accurate,
             MAX(recorded_at) AS last_outcome_at
         FROM ohm_outcomes
-        WHERE source_agent = ?
+        WHERE COALESCE(claimed_by, source_agent) = ?
         """,
         [agent_id],
     ).fetchone()
@@ -337,7 +337,7 @@ def all_effective_reliabilities(
         t = datetime.now(timezone.utc)
 
     # Get all distinct agents
-    agents = conn.execute("SELECT DISTINCT source_agent FROM ohm_outcomes ORDER BY source_agent").fetchall()
+    agents = conn.execute("SELECT DISTINCT COALESCE(claimed_by, source_agent) FROM ohm_outcomes ORDER BY 1").fetchall()
 
     results = []
     for (agent_id,) in agents:

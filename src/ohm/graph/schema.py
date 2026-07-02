@@ -1391,7 +1391,9 @@ DDL_STATEMENTS: list[str] = [
         outcome      BOOLEAN NOT NULL,
         recorded_by  VARCHAR NOT NULL,
         recorded_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        notes        TEXT
+        notes        TEXT,
+        claimed_by   VARCHAR,
+        verified_by  VARCHAR
     );
     """,
     # ── Discovery Queue (OHM-od01.4) ────────────────────────────────────
@@ -1543,7 +1545,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.40.0"
+SCHEMA_VERSION = "0.41.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -2081,6 +2083,31 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
         "0.40.0",
         "OHM-vl8o: domain DDL hook (SchemaConfig.domain_tables) — version bump, no schema change",
         [],
+    ),
+    (
+        "0.41.0",
+        "OHM-yiui: add claimed_by and verified_by to ohm_outcomes so verification credit flows to the source, not the verifier",
+        [
+            "ALTER TABLE ohm_outcomes ADD COLUMN IF NOT EXISTS claimed_by VARCHAR",
+            "ALTER TABLE ohm_outcomes ADD COLUMN IF NOT EXISTS verified_by VARCHAR",
+            # Backfill verified_by from the existing recorded_by column.
+            "UPDATE ohm_outcomes SET verified_by = recorded_by WHERE verified_by IS NULL",
+            # Backfill claimed_by from the originating edge's created_by.
+            # The claim_node is the from_node of the edge that made the
+            # claim; we look up the oldest L3 edge with that from_node
+            # and credit its created_by. If no edge is found, fall back
+            # to the existing source_agent (which is usually the same
+            # agent but was caller-supplied and may be wrong).
+            "UPDATE ohm_outcomes SET claimed_by = ("
+            "  SELECT e.created_by FROM ohm_edges e "
+            "  WHERE e.from_node = ohm_outcomes.claim_node "
+            "    AND e.deleted_at IS NULL "
+            "  ORDER BY e.created_at ASC LIMIT 1"
+            ") WHERE claimed_by IS NULL",
+            "UPDATE ohm_outcomes SET claimed_by = source_agent WHERE claimed_by IS NULL",
+            "CREATE INDEX IF NOT EXISTS idx_outcomes_claimed_by ON ohm_outcomes(claimed_by)",
+            "CREATE INDEX IF NOT EXISTS idx_outcomes_verified_by ON ohm_outcomes(verified_by)",
+        ],
     ),
 ]
 

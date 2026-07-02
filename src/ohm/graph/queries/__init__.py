@@ -1032,11 +1032,25 @@ def query_record_outcome(
         raise NodeNotFoundError(f"claim_node not found: {claim_node}")
 
     outcome_id = str(uuid.uuid4())
+
+    # OHM-yiui: Auto-derive claimed_by from the originating edge's
+    # created_by. The claim_node is the from_node of the edge that made
+    # the claim; we look up the oldest L3 edge with that from_node and
+    # credit its created_by. Falls back to source_agent if no edge is
+    # found (preserving backward compatibility).
+    claimed_by_row = conn.execute(
+        """SELECT e.created_by FROM ohm_edges e
+           WHERE e.from_node = ? AND e.deleted_at IS NULL
+           ORDER BY e.created_at ASC LIMIT 1""",
+        [claim_node],
+    ).fetchone()
+    claimed_by = claimed_by_row[0] if claimed_by_row else source_agent
+
     conn.execute(
         """INSERT INTO ohm_outcomes
-           (id, source_agent, claim_node, outcome, recorded_by, notes)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        [outcome_id, source_agent, claim_node, outcome, recorded_by, notes],
+           (id, source_agent, claim_node, outcome, recorded_by, notes, claimed_by, verified_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        [outcome_id, source_agent, claim_node, outcome, recorded_by, notes, claimed_by, recorded_by],
     )
     _log_change(conn, "ohm_outcomes", outcome_id, "INSERT", recorded_by)
 
@@ -1268,7 +1282,7 @@ def query_source_reliability(
             SUM(CASE WHEN outcome THEN 1 ELSE 0 END) AS accurate,
             SUM(CASE WHEN NOT outcome THEN 1 ELSE 0 END) AS false_positives
         FROM ohm_outcomes
-        WHERE source_agent = ?""",
+        WHERE COALESCE(claimed_by, source_agent) = ?""",
         [source_agent],
     ).fetchone()
 

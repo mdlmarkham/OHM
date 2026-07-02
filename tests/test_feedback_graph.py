@@ -75,7 +75,7 @@ class TestSchemaVersion:
     """Verify schema version bumped for the migration."""
 
     def test_version_is_0380(self):
-        assert SCHEMA_VERSION == "0.40.0"
+        assert SCHEMA_VERSION == "0.41.0"
 
     def test_migration_0370_exists(self):
         versions = [m[0] for m in MIGRATIONS]
@@ -171,7 +171,7 @@ class TestGateGovernance:
         assert "failed" in VALID_GATE_STATUSES
 
     def test_schema_version_0380(self):
-        assert SCHEMA_VERSION == "0.40.0"
+        assert SCHEMA_VERSION == "0.41.0"
 
     def test_migration_0380_exists(self):
         versions = [m[0] for m in MIGRATIONS]
