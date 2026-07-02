@@ -245,7 +245,7 @@ class TestSchemaMigration:
 
     def test_schema_version_bumped_to_0_41_0(self):
         from ohm.graph.schema import SCHEMA_VERSION
-        assert SCHEMA_VERSION == "0.41.0"
+        assert SCHEMA_VERSION == "0.42.0"
 
     def test_backfill_from_edge_created_by(self):
         """Existing outcomes (pre-migration) should get claimed_by

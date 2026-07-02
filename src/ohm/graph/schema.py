@@ -1545,7 +1545,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.41.0"
+SCHEMA_VERSION = "0.42.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -2107,6 +2107,14 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             "UPDATE ohm_outcomes SET claimed_by = source_agent WHERE claimed_by IS NULL",
             "CREATE INDEX IF NOT EXISTS idx_outcomes_claimed_by ON ohm_outcomes(claimed_by)",
             "CREATE INDEX IF NOT EXISTS idx_outcomes_verified_by ON ohm_outcomes(verified_by)",
+        ],
+    ),
+    (
+        "0.42.0",
+        "OHM-m32a: add corroboration_count to ohm_edges for cross-graph corroboration tracking",
+        [
+            "ALTER TABLE ohm_edges ADD COLUMN IF NOT EXISTS corroboration_count INTEGER DEFAULT 0",
+            "CREATE INDEX IF NOT EXISTS idx_edges_corroboration ON ohm_edges(corroboration_count);",
         ],
     ),
 ]

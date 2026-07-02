@@ -366,7 +366,7 @@ class TestInitializeSchemaWithDomainTables:
 
 class TestMigrationForDomainDDL:
     def test_schema_version_040_bumped(self):
-        assert SCHEMA_VERSION == "0.41.0"
+        assert SCHEMA_VERSION == "0.42.0"
 
     def test_migration_0_40_0_present(self):
         from ohm.schema import MIGRATIONS
