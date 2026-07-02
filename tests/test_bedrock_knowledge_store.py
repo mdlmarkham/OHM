@@ -378,5 +378,6 @@ class TestBedrockDefaultInnerStoreAvoidsRecursion:
     def test_bedrock_document_store_env_defaults_to_local(self, monkeypatch, tmp_path, mock_agent_client):
         monkeypatch.setenv("OHM_DOCUMENT_STORE", "bedrock")
         monkeypatch.setenv("OHM_BEDROCK_KB_ID", "test-kb-id")
+        monkeypatch.setenv("OHM_DOCUMENT_PATH", str(tmp_path / "documents"))
         store = BedrockKnowledgeStore(knowledge_base_id="test-kb-id")
         assert isinstance(store.inner, LocalDocumentStore)
