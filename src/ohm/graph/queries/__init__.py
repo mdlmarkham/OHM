@@ -2120,6 +2120,162 @@ def suggest_edge_type(
     }
 
 
+def create_skill(
+    conn: DuckDBPyConnection,
+    *,
+    label: str,
+    trigger: str,
+    scope: str = "personal",
+    required_tools: list[str] | None = None,
+    boundaries: str | None = None,
+    output_format: str | None = None,
+    verification_evidence: list[str] | None = None,
+    connects_to: list[str] | None = None,
+    created_by: str,
+) -> dict[str, Any]:
+    """Create a portable skill node (OHM-461f).
+
+    Skill nodes represent reusable agent procedures with trigger,
+    scope, tools, boundaries, output, and verification evidence.
+    Maps to Nate Jones' Open Skills model.
+    """
+    metadata: dict[str, Any] = {
+        "trigger": trigger,
+        "scope": scope,
+        "required_tools": required_tools or [],
+        "boundaries": boundaries,
+        "output_format": output_format,
+        "verification_evidence": verification_evidence or [],
+    }
+    return create_node(
+        conn,
+        label=label,
+        node_type="skill",
+        content=trigger,
+        created_by=created_by,
+        metadata=metadata,
+        connects_to=connects_to,
+    )
+
+
+def create_runbook(
+    conn: DuckDBPyConnection,
+    *,
+    label: str,
+    skill_ids: list[str],
+    description: str | None = None,
+    connects_to: list[str] | None = None,
+    created_by: str,
+) -> dict[str, Any]:
+    """Create a runbook node with ordered DEPENDS_ON chain of skills (OHM-461f).
+
+    A runbook is an ordered sequence of skill nodes connected via
+    DEPENDS_ON edges. The order of skill_ids determines the chain.
+    """
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import ValidationError, NodeNotFoundError
+
+    if not skill_ids:
+        raise ValidationError("skill_ids is required (at least one skill)")
+
+    metadata: dict[str, Any] = {
+        "skill_ids": skill_ids,
+        "skill_count": len(skill_ids),
+        "description": description,
+    }
+
+    # Runbook must link to at least one skill node
+    anchor_ids = list(set(skill_ids + (connects_to or [])))
+
+    runbook = create_node(
+        conn,
+        label=label,
+        node_type="runbook",
+        content=description or label,
+        created_by=created_by,
+        metadata=metadata,
+        connects_to=anchor_ids,
+    )
+
+    # Create DEPENDS_ON chain: skill[0] → skill[1] → ... → skill[n]
+    for i, sid in enumerate(skill_ids):
+        sid = validate_identifier(sid, name="skill_id")
+        row = conn.execute(
+            "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [sid]
+        ).fetchone()
+        if not row:
+            raise NodeNotFoundError(f"Skill node not found: {sid}")
+        if i > 0:
+            create_edge(
+                conn,
+                from_node=skill_ids[i - 1],
+                to_node=sid,
+                edge_type="DEPENDS_ON",
+                layer="L4",
+                created_by=created_by,
+                metadata={"order": i},
+            )
+
+    # Link runbook to first skill
+    create_edge(
+        conn,
+        from_node=runbook["id"],
+        to_node=skill_ids[0],
+        edge_type="DEPENDS_ON",
+        layer="L4",
+        created_by=created_by,
+        metadata={"order": 0, "entry_point": True},
+    )
+
+    return runbook
+
+
+def get_runbook_steps(
+    conn: DuckDBPyConnection,
+    *,
+    runbook_id: str,
+) -> dict[str, Any]:
+    """Get the ordered skill chain for a runbook (OHM-461f)."""
+    from ohm.validation import validate_identifier
+    from ohm.exceptions import NodeNotFoundError
+
+    runbook_id = validate_identifier(runbook_id, name="runbook_id")
+
+    row = conn.execute(
+        "SELECT id, label, metadata FROM ohm_nodes WHERE id = ? AND type = 'runbook' AND deleted_at IS NULL",
+        [runbook_id],
+    ).fetchone()
+    if not row:
+        raise NodeNotFoundError(f"Runbook not found: {runbook_id}")
+
+    import json as _json
+
+    meta_raw = row[2]
+    meta: dict[str, Any] = {}
+    if meta_raw:
+        try:
+            meta = _json.loads(meta_raw) if isinstance(meta_raw, str) else meta_raw
+        except (_json.JSONDecodeError, TypeError):
+            pass
+
+    skill_ids = meta.get("skill_ids", [])
+
+    skills: list[dict[str, Any]] = []
+    for sid in skill_ids:
+        skill_row = _rows_to_dicts(
+            conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [sid])
+        )
+        if skill_row:
+            skills.append(skill_row[0])
+
+    return {
+        "runbook_id": runbook_id,
+        "label": row[1],
+        "skills": skills,
+        "skill_count": len(skills),
+    }
+
+
 def create_challenge(
     conn: DuckDBPyConnection,
     *,

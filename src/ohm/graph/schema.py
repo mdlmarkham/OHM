@@ -87,6 +87,8 @@ VALID_NODE_TYPES = frozenset(
         # ── Twin design session types (OHM-konq) ──
         "twin_design_session",  # A conversational twin design session
         "twin_design_proposal",  # A specific twin configuration proposal
+        # ── Open Skills portable skill contract (OHM-461f) ──
+        "runbook",  # Ordered DEPENDS_ON chain of skill nodes
     }
 )
 
@@ -129,6 +131,8 @@ MUST_HAVE_EDGE_NODE_TYPES: frozenset[str] = frozenset(
         # Twin design session types (OHM-konq)
         "twin_design_session",  # Must link to goal/context nodes
         "twin_design_proposal",  # Must link to the session that proposed it
+        # Open Skills (OHM-461f)
+        "runbook",  # Must link to at least one skill node it chains
         # Forward-compat (per OHM-tjzh spec)
         "synthesis",
         "observation",

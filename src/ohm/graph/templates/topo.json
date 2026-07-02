@@ -64,7 +64,8 @@
     "feed_investment",
     "mode_switch",
     "twin_design_session",
-    "twin_design_proposal"
+    "twin_design_proposal",
+    "runbook"
   ],
   "layer_edge_types": {
     "L0": [

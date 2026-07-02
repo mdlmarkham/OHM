@@ -5056,6 +5056,60 @@ class Graph:
             created_by=self.actor,
         )
 
+    def create_skill(
+        self,
+        label: str,
+        *,
+        trigger: str,
+        scope: str = "personal",
+        required_tools: list[str] | None = None,
+        boundaries: str | None = None,
+        output_format: str | None = None,
+        verification_evidence: list[str] | None = None,
+        connects_to: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Create a portable skill node (OHM-461f)."""
+        from ohm.queries import create_skill
+
+        return create_skill(
+            self._conn,
+            label=label,
+            trigger=trigger,
+            scope=scope,
+            required_tools=required_tools,
+            boundaries=boundaries,
+            output_format=output_format,
+            verification_evidence=verification_evidence,
+            connects_to=connects_to,
+            created_by=self.actor,
+        )
+
+    def create_runbook(
+        self,
+        label: str,
+        *,
+        skill_ids: list[str],
+        description: str | None = None,
+        connects_to: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Create a runbook with ordered DEPENDS_ON chain of skills (OHM-461f)."""
+        from ohm.queries import create_runbook
+
+        return create_runbook(
+            self._conn,
+            label=label,
+            skill_ids=skill_ids,
+            description=description,
+            connects_to=connects_to,
+            created_by=self.actor,
+        )
+
+    def get_runbook_steps(self, runbook_id: str) -> dict[str, Any]:
+        """Get the ordered skill chain for a runbook (OHM-461f)."""
+        from ohm.queries import get_runbook_steps
+
+        return get_runbook_steps(self._conn, runbook_id=runbook_id)
+
     def record_calibration(
         self,
         session_id: str,
