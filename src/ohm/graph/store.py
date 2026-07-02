@@ -508,23 +508,40 @@ class OhmStore:
 
         If DuckDB fails to open due to WAL replay errors, deletes the
         WAL file and retries. The WAL contains only uncommitted writes,
-        so this is safe — the main DB file is intact.
+        so this is safe -- the main DB file is intact.
 
         DuckDB raises InternalException (not IOException) for WAL
         replay failures (e.g., "Calling DatabaseManager::GetDefaultDatabase
         with no default database set"). Both exception types must be
         caught for reliable recovery.
+
+        OHM-lqpk.3: applies the same performance PRAGMAs (threads,
+        enable_object_cache, temp_directory) as ``ohm.graph.db.connect``
+        so the OhmStore path matches the canonical helper. Without this,
+        the daemon's main write connection would run on DuckDB's default
+        single-thread setting while one-off CLI calls benefited from the
+        tuned thread pool.
         """
+        from .db import _apply_pragmas
+
         try:
-            return duckdb.connect(db_path_str, read_only=readonly)
+            conn = duckdb.connect(db_path_str, read_only=readonly)
         except (duckdb.IOException, duckdb.InternalException) as e:
             error_msg = str(e)
             if "WAL" in error_msg or "wal" in error_msg.lower() or "replay" in error_msg.lower():
                 wal_path = db_path_str + ".wal"
                 if os.path.exists(wal_path):
                     os.remove(wal_path)
-                return duckdb.connect(db_path_str, read_only=readonly)
-            raise
+                conn = duckdb.connect(db_path_str, read_only=readonly)
+            else:
+                raise
+
+        if not readonly:
+            # Read-only connections don't benefit from threads>1 (a single
+            # query plan is serial), and PRAGMA threads on read-only can
+            # raise on some DuckDB versions. Only tune write connections.
+            _apply_pragmas(conn)
+        return conn
 
     def _start_quack(self) -> None:
         """Start Quack server if available. Sets self.quack_started on success."""

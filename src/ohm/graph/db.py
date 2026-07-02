@@ -96,6 +96,12 @@ def connect(db_path: str | pathlib.Path | None = None) -> "duckdb.DuckDBPyConnec
     # Load required extensions
     _load_extensions(conn)
 
+    # Apply performance PRAGMAs (threads, enable_object_cache,
+    # temp_directory) -- OHM-lqpk.3. Done before schema init so any
+    # query inside initialize_schema benefits from the larger worker
+    # pool.
+    _apply_pragmas(conn)
+
     # Initialize schema
     from ohm.schema import initialize_schema
 
@@ -107,6 +113,65 @@ def connect(db_path: str | pathlib.Path | None = None) -> "duckdb.DuckDBPyConnec
     _auto_restore_if_empty(conn, db_path_str)
 
     return conn
+
+
+def _apply_pragmas(conn: "duckdb.DuckDBPyConnection") -> None:
+    """Apply DuckDB performance PRAGMAs to a connection (OHM-lqpk.3).
+
+    Three knobs tuned for OHM's read-heavy analytical workload:
+
+    - ``PRAGMA threads = N`` -- the size of the parallel worker pool
+      DuckDB uses for query execution. Default: ``max(1, cpu_count // 2)``
+      (DuckDB's own default is the full core count, which over-saturates
+      shared production boxes). Override via ``OHM_DUCKDB_THREADS``.
+
+    - ``PRAGMA enable_object_cache = true`` -- caches parsed query plans
+      across ``execute()`` calls. Each OHM endpoint issues many similar
+      queries (filters by node id, layer, edge type); caching the parsed
+      plan shaves microseconds off every call. Negligible memory cost.
+
+    - ``PRAGMA temp_directory = '<path>'`` -- where DuckDB spills memory
+      when a single query exceeds ``memory_limit``. Only set when
+      ``OHM_DUCKDB_TEMP_DIR`` is configured; DuckDB's own default
+      (system temp) is fine for most deployments.
+
+    Errors are logged and swallowed: PRAGMA tuning is a perf optimisation,
+    not a correctness requirement. A container that can't write to the
+    configured temp dir still runs -- it just spills to the default.
+    """
+    try:
+        env_threads = os.environ.get("OHM_DUCKDB_THREADS")
+        if env_threads is not None:
+            try:
+                threads = max(1, int(env_threads))
+            except ValueError:
+                logger.warning(
+                    "OHM_DUCKDB_THREADS=%r is not an integer; using default",
+                    env_threads,
+                )
+                threads = max(1, (os.cpu_count() or 1) // 2)
+        else:
+            threads = max(1, (os.cpu_count() or 1) // 2)
+        conn.execute(f"PRAGMA threads = {threads}")
+    except Exception:
+        logger.debug("PRAGMA threads failed", exc_info=True)
+
+    try:
+        conn.execute("PRAGMA enable_object_cache = true")
+    except Exception:
+        logger.debug("PRAGMA enable_object_cache failed", exc_info=True)
+
+    temp_dir = os.environ.get("OHM_DUCKDB_TEMP_DIR")
+    if temp_dir:
+        try:
+            # PRAGMA temp_directory doesn't support parameterised args,
+            # so we sanitise via shlex.quote() before interpolation. The
+            # env var is operator-controlled, not user-supplied, but
+            # defence-in-depth matters when we shell out.
+            import shlex
+            conn.execute(f"PRAGMA temp_directory = {shlex.quote(temp_dir)}")
+        except Exception:
+            logger.debug("PRAGMA temp_directory failed", exc_info=True)
 
 
 def _load_extensions(conn: "duckdb.DuckDBPyConnection") -> None:
