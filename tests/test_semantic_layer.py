@@ -264,8 +264,8 @@ class TestSemanticLayerActions:
         assert "executed" not in result
 
     @pytest.mark.skipif(
-        __import__("sys").platform == "win32",
-        reason="bd subprocess not reliable on Windows",
+        __import__("shutil").which("bd") is None,
+        reason="bd CLI not available",
     )
     def test_run_metrics_and_actions_executes_actions(self, test_db, tmp_path):
         import subprocess
@@ -325,8 +325,8 @@ class TestSemanticLayerEndpoint:
         assert "executed" not in body
 
     @pytest.mark.skipif(
-        __import__("sys").platform == "win32",
-        reason="bd subprocess not reliable on Windows",
+        __import__("shutil").which("bd") is None,
+        reason="bd CLI not available",
     )
     def test_post_metrics_semantic_actions_creates_tasks(self, test_server, tmp_path):
         import subprocess
@@ -366,10 +366,11 @@ class TestSemanticLayerAutoActions:
     @pytest.fixture
     def beads_repo(self, tmp_path):
         import subprocess
+        import shutil
         import sys
 
         pytest.importorskip("beads")
-        if sys.platform == "win32":
+        if sys.platform == "win32" or shutil.which("bd") is None:
             pytest.skip("bd subprocess not reliable on Windows")
 
         repo = tmp_path / "auto_action_repo"
