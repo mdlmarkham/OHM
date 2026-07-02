@@ -265,6 +265,52 @@ class InfraHandlerMixin:
                 },
             )
 
+    def _get_perf(self, path: str, qs: dict) -> None:
+        """GET /perf — per-endpoint latency breakdown (OHM-lqpk.5).
+
+        Returns per-endpoint request count, p50, p95, p99, and max
+        latency for the last N requests (max 500 per endpoint).
+        Sorted by total time (count × mean) descending so the hottest
+        endpoints surface first.
+        """
+        from ohm.server import server as _server_module
+
+        with _server_module._metrics_lock:
+            endpoints_snapshot = dict(_server_module._endpoint_latencies)
+            counts_snapshot = dict(_server_module._endpoint_counts)
+
+        endpoints: list[dict] = []
+        for key, lats in endpoints_snapshot.items():
+            if not lats:
+                continue
+            sorted_lats = sorted(lats)
+            n = len(sorted_lats)
+            mean = sum(sorted_lats) / n
+            p50 = sorted_lats[n // 2]
+            p95 = sorted_lats[int(n * 0.95)] if n > 1 else sorted_lats[0]
+            p99 = sorted_lats[int(n * 0.99)] if n > 1 else sorted_lats[0]
+            total = counts_snapshot.get(key, n)
+            endpoints.append({
+                "endpoint": key,
+                "count": total,
+                "p50_ms": round(p50, 2),
+                "p95_ms": round(p95, 2),
+                "p99_ms": round(p99, 2),
+                "max_ms": round(sorted_lats[-1], 2),
+                "mean_ms": round(mean, 2),
+                "total_time_ms": round(total * mean, 2),
+            })
+
+        endpoints.sort(key=lambda e: e["total_time_ms"], reverse=True)
+
+        perf_log_enabled = _server_module._perf_log_file is not None
+        self._json_response(200, {
+            "endpoints": endpoints,
+            "endpoint_count": len(endpoints),
+            "perf_log_enabled": perf_log_enabled,
+            "perf_log_file": _server_module._perf_log_file,
+        })
+
     def _get_webhooks_dead_letter(self, path: str, qs: dict) -> None:
         """GET /webhooks/dead-letter — List failed webhook deliveries for manual retry."""
         auth = self._get_auth_token()

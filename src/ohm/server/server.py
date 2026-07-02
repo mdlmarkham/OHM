@@ -228,6 +228,39 @@ _metrics: dict[str, int] = {
 _metrics_lock = threading.Lock()
 _request_latencies: collections.deque = collections.deque(maxlen=1000)
 
+# OHM-lqpk.5: per-endpoint latency tracking
+_endpoint_latencies: dict[str, collections.deque] = {}
+_endpoint_counts: dict[str, int] = {}
+_perf_log_file: str | None = os.environ.get("OHM_PERF_LOG", None)
+if _perf_log_file == "":
+    _perf_log_file = None
+
+
+def _record_endpoint_latency(method: str, path: str, elapsed_ms: float, status: int) -> None:
+    """Record per-endpoint latency for perf analysis (OHM-lqpk.5).
+
+    Maintains a per-endpoint deque of the last 500 latencies and a
+    per-endpoint request count. When OHM_PERF_LOG is set to a file path,
+    writes a structured JSON line per request for offline analysis.
+    """
+    from urllib.parse import urlparse as _up
+
+    endpoint = _up(path).path.rstrip("/") or "/"
+    key = f"{method} {endpoint}"
+    with _metrics_lock:
+        if key not in _endpoint_latencies:
+            _endpoint_latencies[key] = collections.deque(maxlen=500)
+        _endpoint_latencies[key].append(elapsed_ms)
+        _endpoint_counts[key] = _endpoint_counts.get(key, 0) + 1
+    if _perf_log_file:
+        try:
+            import json as _json
+
+            with open(_perf_log_file, "a", encoding="utf-8") as f:
+                f.write(_json.dumps({"method": method, "path": endpoint, "ms": round(elapsed_ms, 2), "status": status, "ts": time.time()}) + "\n")
+        except OSError:
+            pass
+
 # ── Webhook Registry ──────────────────────────────────────
 
 # In-memory registry: {customer_id: {agent_name: {"url": str, "events": list[str]}}}
@@ -1588,6 +1621,7 @@ class OhmHandler(
                 elif code >= 500:
                     _metrics["errors_5xx"] += 1
                 _request_latencies.append(elapsed)
+            _record_endpoint_latency("GET", self.path, elapsed, code)
             self.log_message(
                 "GET %s → %s (%.1fms)",
                 self.path,
@@ -1638,6 +1672,7 @@ class OhmHandler(
                 elif code >= 500:
                     _metrics["errors_5xx"] += 1
                 _request_latencies.append(elapsed)
+            _record_endpoint_latency("POST", self.path, elapsed, code)
             self.log_message(
                 "POST %s → %s (%.1fms)",
                 self.path,
@@ -1687,6 +1722,7 @@ class OhmHandler(
                 elif code >= 500:
                     _metrics["errors_5xx"] += 1
                 _request_latencies.append(elapsed)
+            _record_endpoint_latency("DELETE", self.path, elapsed, code)
             self.log_message(
                 "DELETE %s → %s (%.1fms)",
                 self.path,
@@ -1736,8 +1772,8 @@ class OhmHandler(
                 elif code >= 500:
                     _metrics["errors_5xx"] += 1
                 _request_latencies.append(elapsed)
+            _record_endpoint_latency("PATCH", self.path, elapsed, code)
             self.log_message(
-                "PATCH %s → %s (%.1fms)",
                 self.path,
                 code,
                 elapsed,
@@ -2310,6 +2346,7 @@ OhmHandler._GET_EXACT = {
     "/health": "_get_infra_health",
     "/ready": "_get_infra_ready",
     "/metrics": "_get_infra_metrics",
+    "/perf": "_get_perf",
     "/stats": "_get_stats",
     "/status": "_get_status",
     "/schema": "_get_schema",
