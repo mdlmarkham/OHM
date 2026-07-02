@@ -321,6 +321,76 @@
         ["idx_topo_fup_status", ["status"]],
         ["idx_topo_fup_assignee", ["assigned_to"]]
       ]
+    },
+    {
+      "name": "topo_plans",
+      "ordering": 150,
+      "description": "TOPO maintenance plans: time-bounded groupings of events.",
+      "columns": [
+        ["id", "VARCHAR"],
+        ["node_id", "VARCHAR"],
+        ["plan_type", "VARCHAR"],
+        ["horizon_start", "TIMESTAMP"],
+        ["horizon_end", "TIMESTAMP"],
+        ["status", "VARCHAR DEFAULT 'active'"],
+        ["created_by", "VARCHAR NOT NULL"],
+        ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+        ["updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+        ["metadata", "JSON"]
+      ],
+      "primary_key": "id",
+      "indexes": [
+        ["idx_topo_plans_node", ["node_id"]],
+        ["idx_topo_plans_type", ["plan_type"]],
+        ["idx_topo_plans_horizon", ["horizon_start", "horizon_end"]],
+        ["idx_topo_plans_status", ["status"]]
+      ]
+    },
+    {
+      "name": "topo_events",
+      "ordering": 160,
+      "description": "TOPO temporal events: discrete occurrences within a plan.",
+      "columns": [
+        ["id", "VARCHAR"],
+        ["plan_id", "VARCHAR"],
+        ["node_id", "VARCHAR"],
+        ["event_type", "VARCHAR"],
+        ["start_time", "TIMESTAMP"],
+        ["end_time", "TIMESTAMP"],
+        ["severity", "VARCHAR"],
+        ["description", "TEXT"],
+        ["created_by", "VARCHAR NOT NULL"],
+        ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+        ["updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+        ["metadata", "JSON"]
+      ],
+      "primary_key": "id",
+      "indexes": [
+        ["idx_topo_events_plan", ["plan_id"]],
+        ["idx_topo_events_node", ["node_id"]],
+        ["idx_topo_events_type", ["event_type"]],
+        ["idx_topo_events_time", ["start_time", "end_time"]]
+      ]
+    },
+    {
+      "name": "topo_event_links",
+      "ordering": 170,
+      "description": "TOPO event links: directed relationships between events.",
+      "columns": [
+        ["id", "VARCHAR"],
+        ["from_event_id", "VARCHAR"],
+        ["to_event_id", "VARCHAR"],
+        ["link_type", "VARCHAR"],
+        ["created_by", "VARCHAR NOT NULL"],
+        ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+        ["metadata", "JSON"]
+      ],
+      "primary_key": "id",
+      "indexes": [
+        ["idx_topo_elinks_from", ["from_event_id"]],
+        ["idx_topo_elinks_to", ["to_event_id"]],
+        ["idx_topo_elinks_type", ["link_type"]]
+      ]
     }
   ]
 }
