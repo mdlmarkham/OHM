@@ -1032,11 +1032,35 @@ def query_record_outcome(
         raise NodeNotFoundError(f"claim_node not found: {claim_node}")
 
     outcome_id = str(uuid.uuid4())
+
+    # OHM-yiui: Auto-derive claimed_by from the originating edge's
+    # created_by. The claim_node is the from_node of the edge that made
+    # the claim; we look up the oldest L3 edge with that from_node and
+    # credit its created_by. Falls back to source_agent if no edge is
+    # found (preserving backward compatibility).
+    claimed_by_row = conn.execute(
+        """SELECT e.created_by FROM ohm_edges e
+           WHERE e.from_node = ? AND e.deleted_at IS NULL
+           ORDER BY e.created_at ASC LIMIT 1""",
+        [claim_node],
+    ).fetchone()
+    claimed_by = claimed_by_row[0] if claimed_by_row else source_agent
+
+    # OHM-avkj: Auto-derive domain from the claim node's provenance.
+    # This enables domain-aware source reliability — an agent reliable
+    # about cattle health may be unreliable about stock prices.
+    # Falls back to '*' (unscoped) when the node has no provenance.
+    domain_row = conn.execute(
+        "SELECT provenance FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+        [claim_node],
+    ).fetchone()
+    domain = domain_row[0] if domain_row and domain_row[0] else "*"
+
     conn.execute(
         """INSERT INTO ohm_outcomes
-           (id, source_agent, claim_node, outcome, recorded_by, notes)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        [outcome_id, source_agent, claim_node, outcome, recorded_by, notes],
+           (id, source_agent, claim_node, outcome, recorded_by, notes, claimed_by, verified_by, domain)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [outcome_id, source_agent, claim_node, outcome, recorded_by, notes, claimed_by, recorded_by, domain],
     )
     _log_change(conn, "ohm_outcomes", outcome_id, "INSERT", recorded_by)
 
@@ -1242,6 +1266,8 @@ def query_close_task_with_outcome(
 def query_source_reliability(
     conn: DuckDBPyConnection,
     source_agent: str,
+    *,
+    domain: str | None = None,
 ) -> dict[str, Any]:
     """Compute reliability metrics for a source agent.
 
@@ -1252,6 +1278,10 @@ def query_source_reliability(
     Args:
         conn: Database connection.
         source_agent: The agent to evaluate.
+        domain: Optional domain filter (OHM-avkj). When set, only
+            outcomes with matching ``domain`` (or ``'*'`` for unscoped)
+            are counted. When None, all domains are counted (backward
+            compat).
 
     Returns:
         Dict with source_agent, total_outcomes, accurate_count,
@@ -1262,14 +1292,22 @@ def query_source_reliability(
 
     source_agent = validate_identifier(source_agent, name="source_agent")
 
+    domain_clause = ""
+    params: list = [source_agent]
+    if domain is not None:
+        # Match the exact domain OR unscoped ('*') outcomes — unscoped
+        # outcomes apply to all domains.
+        domain_clause = " AND (domain = ? OR domain = '*')"
+        params.append(domain)
+
     result = conn.execute(
-        """SELECT
+        f"""SELECT
             COUNT(*) AS total,
             SUM(CASE WHEN outcome THEN 1 ELSE 0 END) AS accurate,
             SUM(CASE WHEN NOT outcome THEN 1 ELSE 0 END) AS false_positives
         FROM ohm_outcomes
-        WHERE source_agent = ?""",
-        [source_agent],
+        WHERE COALESCE(claimed_by, source_agent) = ?{domain_clause}""",
+        params,
     ).fetchone()
 
     if result:
@@ -2892,6 +2930,19 @@ def batch_create_nodes(
     Returns:
         List of created node records.
     """
+    # OHM-aadc: try the fast multi-row INSERT path first. Returns None
+    # if the fast path doesn't apply (connects_to, soft-deleted collisions,
+    # validation edge cases), in which case we fall back to the per-row
+    # path that gives clearer error messages.
+    try:
+        from ohm.graph.batch import fast_batch_create_nodes
+
+        fast = fast_batch_create_nodes(conn, nodes=nodes, created_by=created_by)
+        if fast is not None:
+            return fast
+    except Exception:
+        pass
+
     results = []
     for node_data in nodes:
         result = create_node(
@@ -2926,6 +2977,16 @@ def batch_create_edges(
     Returns:
         List of created edge records.
     """
+    # OHM-aadc: try the fast multi-row INSERT path first.
+    try:
+        from ohm.graph.batch import fast_batch_create_edges
+
+        fast = fast_batch_create_edges(conn, edges=edges, created_by=created_by)
+        if fast is not None:
+            return fast
+    except Exception:
+        pass
+
     results = []
     for edge_data in edges:
         result = create_edge(

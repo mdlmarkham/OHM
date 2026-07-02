@@ -424,6 +424,25 @@ class GraphHandlerMixin:
         depth = min(int(qs.get("depth", [3])[0]), 2)  # ADR-023: Cap depth at 2 to prevent OOM on large neighborhoods
         layer = qs.get("layer", [None])[0]
         created_by = qs.get("created_by", [None])[0]
+
+        # OHM-oqyc: enforce read scope on the root node
+        from ohm.server.boundary import enforce_read_scope
+
+        agent = getattr(self, "_current_agent", "ohm")
+        root_node = self.current_store.get_node(node_id)
+        if root_node:
+            enforce_read_scope(
+                self.current_store.conn,
+                agent,
+                node_id=node_id,
+                source_tier=root_node.get("source_tier"),
+                created_by=root_node.get("created_by"),
+            )
+        else:
+            from ohm.exceptions import NodeNotFoundError
+
+            raise NodeNotFoundError(f"Node {node_id} not found")
+
         from ohm.queries import query_neighborhood
 
         edges = query_neighborhood(self.current_store.conn, node_id, depth=depth, layer=layer)
@@ -743,6 +762,13 @@ class GraphHandlerMixin:
         if until:
             conditions.append("created_at <= ?::TIMESTAMP")
             params.append(until)
+        # OHM-oqyc: enforce read scope at SQL level
+        from ohm.server.boundary import apply_read_scope_filters
+
+        agent = getattr(self, "_current_agent", "ohm")
+        scope_conds, scope_params = apply_read_scope_filters(self.current_store.conn, agent)
+        conditions.extend(scope_conds)
+        params.extend(scope_params)
         params.append(limit)
         sql = "SELECT * FROM ohm_nodes WHERE " + " AND ".join(conditions) + " ORDER BY created_at DESC LIMIT ?"
         results = self.current_store.execute(sql, params)
@@ -869,6 +895,13 @@ class GraphHandlerMixin:
                 min_confidence=min_confidence,
                 include_l0=include_l0,
                 membership_weight=membership_weight,
+            )
+            # OHM-oqyc: post-filter results by read scope
+            from ohm.server.boundary import filter_results_by_read_scope
+
+            agent = getattr(self, "_current_agent", "ohm")
+            results = filter_results_by_read_scope(
+                self.current_store.conn, agent, results, id_field="node_id",
             )
             self._json_response(200, {"results": results, "count": len(results)})
         except ValueError as e:

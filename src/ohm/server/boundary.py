@@ -248,3 +248,113 @@ def set_agent_read_scope(conn, agent_name: str, scope: dict | None) -> dict:
             [agent_name, "balanced", scope_json],
         )
     return {"agent_name": agent_name, "read_scope": scope}
+
+
+def apply_read_scope_filters(
+    conn,
+    agent_name: str,
+    *,
+    table_alias: str = "",
+) -> tuple[list[str], list]:
+    """Build SQL WHERE-clause fragments for an agent's read scope (OHM-oqyc).
+
+    Returns ``(conditions, params)`` where ``conditions`` is a list of
+    SQL fragments (e.g. ``"created_by IN (?, ?)"``) and ``params`` is the
+    corresponding parameter list. Append these to any node/edge query to
+    enforce read scope at the SQL level.
+
+    For node queries, only ``created_by``, ``source_tier``, and ``node_id``
+    dimensions are applied (nodes have no ``layer`` field). For edge
+    queries, all four dimensions are applied.
+
+    Returns ``([], [])`` if the agent has no scope set (full access).
+
+    Args:
+        conn: Active DuckDB connection.
+        agent_name: The agent whose scope to apply.
+        table_alias: Optional table alias prefix (e.g. ``"n."`` for
+            ``ohm_nodes n``). Empty string means no prefix.
+    """
+    scope = get_agent_read_scope(conn, agent_name)
+    if scope is None:
+        return [], []
+
+    conditions: list[str] = []
+    params: list = []
+    prefix = table_alias
+
+    allowed_creators = scope.get("created_by")
+    if allowed_creators is not None:
+        placeholders = ", ".join("?" * len(allowed_creators))
+        conditions.append(f"{prefix}created_by IN ({placeholders})")
+        params.extend(allowed_creators)
+
+    allowed_tiers = scope.get("source_tier")
+    if allowed_tiers is not None:
+        placeholders = ", ".join("?" * len(allowed_tiers))
+        conditions.append(f"{prefix}source_tier IN ({placeholders})")
+        params.extend(allowed_tiers)
+
+    allowed_nodes = scope.get("node_id")
+    if allowed_nodes is not None:
+        placeholders = ", ".join("?" * len(allowed_nodes))
+        conditions.append(f"{prefix}id IN ({placeholders})")
+        params.extend(allowed_nodes)
+
+    return conditions, params
+
+
+def filter_results_by_read_scope(
+    conn,
+    agent_name: str,
+    results: list[dict],
+    *,
+    id_field: str = "id",
+    created_by_field: str = "created_by",
+    source_tier_field: str = "source_tier",
+    layer_field: str | None = None,
+) -> list[dict]:
+    """Post-filter a list of result dicts by an agent's read scope (OHM-oqyc).
+
+    Used for endpoints that return pre-computed results (e.g. semantic
+    search) where SQL-level filtering isn't practical. Returns only the
+    results the agent is permitted to see.
+
+    Args:
+        conn: Active DuckDB connection.
+        agent_name: The agent whose scope to enforce.
+        results: List of result dicts.
+        id_field: Dict key for the node/edge id (default ``"id"``).
+        created_by_field: Dict key for the creator (default ``"created_by"``).
+        source_tier_field: Dict key for source tier (default ``"source_tier"``).
+        layer_field: Optional dict key for layer (applies to edge results).
+
+    Returns:
+        Filtered list of results. If no scope is set, returns all results.
+    """
+    scope = get_agent_read_scope(conn, agent_name)
+    if scope is None:
+        return results
+
+    filtered: list[dict] = []
+    for r in results:
+        if layer_field and layer_field in r:
+            allowed_layers = scope.get("layer")
+            if allowed_layers is not None and r.get(layer_field) not in allowed_layers:
+                continue
+
+        allowed_creators = scope.get("created_by")
+        if allowed_creators is not None and r.get(created_by_field) not in allowed_creators:
+            continue
+
+        allowed_tiers = scope.get("source_tier")
+        if allowed_tiers is not None and r.get(source_tier_field) not in allowed_tiers:
+            continue
+
+        allowed_nodes = scope.get("node_id")
+        if allowed_nodes is not None and r.get(id_field) not in allowed_nodes:
+            continue
+
+        filtered.append(r)
+
+    return filtered

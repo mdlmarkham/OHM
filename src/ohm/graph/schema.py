@@ -932,6 +932,119 @@ class SchemaConfig:
             }
         )
 
+        topo_domain_tables: list[DomainTable] = [
+            DomainTable(
+                name="topo_prospects",
+                columns=(
+                    ("id", "VARCHAR"),
+                    ("equipment_id", "VARCHAR"),
+                    ("site_id", "VARCHAR"),
+                    ("rul_days", "FLOAT"),
+                    ("risk_class", "VARCHAR"),
+                    ("model_version", "VARCHAR"),
+                    ("created_by", "VARCHAR NOT NULL"),
+                    ("created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+                    ("updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+                    ("metadata", "JSON"),
+                ),
+                primary_key="id",
+                indexes=(
+                    ("idx_topo_prospects_equipment", ("equipment_id",)),
+                    ("idx_topo_prospects_site", ("site_id",)),
+                    ("idx_topo_prospects_risk", ("risk_class",)),
+                ),
+                ordering=100,
+                description="TOPO predictive-maintenance prospects: ranked equipment with RUL and risk class.",
+            ),
+            DomainTable(
+                name="topo_observations",
+                columns=(
+                    ("id", "VARCHAR"),
+                    ("node_id", "VARCHAR"),
+                    ("obs_type", "VARCHAR"),
+                    ("obs_value", "FLOAT"),
+                    ("obs_unit", "VARCHAR"),
+                    ("source", "VARCHAR"),
+                    ("observed_at", "TIMESTAMP"),
+                    ("created_by", "VARCHAR NOT NULL"),
+                    ("created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+                    ("updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+                    ("metadata", "JSON"),
+                ),
+                primary_key="id",
+                indexes=(
+                    ("idx_topo_obs_node", ("node_id",)),
+                    ("idx_topo_obs_type", ("obs_type",)),
+                    ("idx_topo_obs_time", ("observed_at",)),
+                ),
+                ordering=110,
+                description="TOPO observation records: sensor readings, anomalies, and measurements linked to OHM nodes.",
+            ),
+            DomainTable(
+                name="topo_observation_assessments",
+                columns=(
+                    ("id", "VARCHAR"),
+                    ("observation_id", "VARCHAR"),
+                    ("assessment_type", "VARCHAR"),
+                    ("assessment_value", "VARCHAR"),
+                    ("is_current", "BOOLEAN DEFAULT TRUE"),
+                    ("assessed_by", "VARCHAR NOT NULL"),
+                    ("assessed_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+                    ("notes", "TEXT"),
+                    ("metadata", "JSON"),
+                ),
+                primary_key="id",
+                indexes=(
+                    ("idx_topo_asmt_obs", ("observation_id",)),
+                    ("idx_topo_asmt_current", ("is_current",)),
+                ),
+                ordering=120,
+                description="Append-only assessment history for TOPO observations with is_current flags.",
+            ),
+            DomainTable(
+                name="topo_observation_annotations",
+                columns=(
+                    ("id", "VARCHAR"),
+                    ("observation_id", "VARCHAR"),
+                    ("annotation_type", "VARCHAR"),
+                    ("annotation_value", "TEXT"),
+                    ("annotated_by", "VARCHAR NOT NULL"),
+                    ("annotated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+                    ("metadata", "JSON"),
+                ),
+                primary_key="id",
+                indexes=(
+                    ("idx_topo_anno_obs", ("observation_id",)),
+                ),
+                ordering=130,
+                description="Annotations (comments, tags, context) on TOPO observations.",
+            ),
+            DomainTable(
+                name="topo_observation_followups",
+                columns=(
+                    ("id", "VARCHAR"),
+                    ("observation_id", "VARCHAR"),
+                    ("followup_type", "VARCHAR"),
+                    ("status", "VARCHAR DEFAULT 'open'"),
+                    ("assigned_to", "VARCHAR"),
+                    ("due_date", "TIMESTAMP"),
+                    ("closed_at", "TIMESTAMP"),
+                    ("created_by", "VARCHAR NOT NULL"),
+                    ("created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+                    ("updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+                    ("metadata", "JSON"),
+                ),
+                primary_key="id",
+                indexes=(
+                    ("idx_topo_fup_obs", ("observation_id",)),
+                    ("idx_topo_fup_status", ("status",)),
+                    ("idx_topo_fup_assignee", ("assigned_to",)),
+                ),
+                ordering=140,
+                description="Followup tracking for TOPO observations: actions, investigations, monitoring.",
+            ),
+        ]
+
         return cls(
             name="topo",
             node_types=topo_node_types,
@@ -940,6 +1053,7 @@ class SchemaConfig:
             observation_sources=topo_observation_sources,
             provenances=topo_provenances,
             case_strategy="uppercase",  # OHM-ue9k: accept legacy ALL-CAPS for migration
+            domain_tables=topo_domain_tables,
         )
 
     @classmethod
@@ -1391,7 +1505,10 @@ DDL_STATEMENTS: list[str] = [
         outcome      BOOLEAN NOT NULL,
         recorded_by  VARCHAR NOT NULL,
         recorded_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        notes        TEXT
+        notes        TEXT,
+        claimed_by   VARCHAR,
+        verified_by  VARCHAR,
+        domain       VARCHAR DEFAULT '*'
     );
     """,
     # ── Discovery Queue (OHM-od01.4) ────────────────────────────────────
@@ -1543,7 +1660,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.40.0"
+SCHEMA_VERSION = "0.43.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -2081,6 +2198,53 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
         "0.40.0",
         "OHM-vl8o: domain DDL hook (SchemaConfig.domain_tables) — version bump, no schema change",
         [],
+    ),
+    (
+        "0.41.0",
+        "OHM-yiui: add claimed_by and verified_by to ohm_outcomes so verification credit flows to the source, not the verifier",
+        [
+            "ALTER TABLE ohm_outcomes ADD COLUMN IF NOT EXISTS claimed_by VARCHAR",
+            "ALTER TABLE ohm_outcomes ADD COLUMN IF NOT EXISTS verified_by VARCHAR",
+            # Backfill verified_by from the existing recorded_by column.
+            "UPDATE ohm_outcomes SET verified_by = recorded_by WHERE verified_by IS NULL",
+            # Backfill claimed_by from the originating edge's created_by.
+            # The claim_node is the from_node of the edge that made the
+            # claim; we look up the oldest L3 edge with that from_node
+            # and credit its created_by. If no edge is found, fall back
+            # to the existing source_agent (which is usually the same
+            # agent but was caller-supplied and may be wrong).
+            "UPDATE ohm_outcomes SET claimed_by = ("
+            "  SELECT e.created_by FROM ohm_edges e "
+            "  WHERE e.from_node = ohm_outcomes.claim_node "
+            "    AND e.deleted_at IS NULL "
+            "  ORDER BY e.created_at ASC LIMIT 1"
+            ") WHERE claimed_by IS NULL",
+            "UPDATE ohm_outcomes SET claimed_by = source_agent WHERE claimed_by IS NULL",
+            "CREATE INDEX IF NOT EXISTS idx_outcomes_claimed_by ON ohm_outcomes(claimed_by)",
+            "CREATE INDEX IF NOT EXISTS idx_outcomes_verified_by ON ohm_outcomes(verified_by)",
+        ],
+    ),
+    (
+        "0.42.0",
+        "OHM-m32a: add corroboration_count to ohm_edges for cross-graph corroboration tracking",
+        [
+            "ALTER TABLE ohm_edges ADD COLUMN IF NOT EXISTS corroboration_count INTEGER DEFAULT 0",
+            "CREATE INDEX IF NOT EXISTS idx_edges_corroboration ON ohm_edges(corroboration_count);",
+        ],
+    ),
+    (
+        "0.43.0",
+        "OHM-avkj: add domain column to ohm_outcomes for domain-aware source reliability",
+        [
+            "ALTER TABLE ohm_outcomes ADD COLUMN IF NOT EXISTS domain VARCHAR DEFAULT '*'",
+            # Backfill domain from the claim node's provenance
+            "UPDATE ohm_outcomes SET domain = ("
+            "  SELECT n.provenance FROM ohm_nodes n "
+            "  WHERE n.id = ohm_outcomes.claim_node AND n.deleted_at IS NULL"
+            ") WHERE domain = '*' OR domain IS NULL",
+            "UPDATE ohm_outcomes SET domain = '*' WHERE domain IS NULL",
+            "CREATE INDEX IF NOT EXISTS idx_outcomes_domain ON ohm_outcomes(domain)",
+        ],
     ),
 ]
 

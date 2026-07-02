@@ -233,6 +233,93 @@
         ["idx_topo_prospects_site", ["site_id"]],
         ["idx_topo_prospects_risk", ["risk_class"]]
       ]
+    },
+    {
+      "name": "topo_observations",
+      "ordering": 110,
+      "description": "TOPO observation records: sensor readings, anomalies, and measurements linked to OHM nodes.",
+      "columns": [
+        ["id", "VARCHAR"],
+        ["node_id", "VARCHAR"],
+        ["obs_type", "VARCHAR"],
+        ["obs_value", "FLOAT"],
+        ["obs_unit", "VARCHAR"],
+        ["source", "VARCHAR"],
+        ["observed_at", "TIMESTAMP"],
+        ["created_by", "VARCHAR NOT NULL"],
+        ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+        ["updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+        ["metadata", "JSON"]
+      ],
+      "primary_key": "id",
+      "indexes": [
+        ["idx_topo_obs_node", ["node_id"]],
+        ["idx_topo_obs_type", ["obs_type"]],
+        ["idx_topo_obs_time", ["observed_at"]]
+      ]
+    },
+    {
+      "name": "topo_observation_assessments",
+      "ordering": 120,
+      "description": "Append-only assessment history for TOPO observations with is_current flags.",
+      "columns": [
+        ["id", "VARCHAR"],
+        ["observation_id", "VARCHAR"],
+        ["assessment_type", "VARCHAR"],
+        ["assessment_value", "VARCHAR"],
+        ["is_current", "BOOLEAN DEFAULT TRUE"],
+        ["assessed_by", "VARCHAR NOT NULL"],
+        ["assessed_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+        ["notes", "TEXT"],
+        ["metadata", "JSON"]
+      ],
+      "primary_key": "id",
+      "indexes": [
+        ["idx_topo_asmt_obs", ["observation_id"]],
+        ["idx_topo_asmt_current", ["is_current"]]
+      ]
+    },
+    {
+      "name": "topo_observation_annotations",
+      "ordering": 130,
+      "description": "Annotations (comments, tags, context) on TOPO observations.",
+      "columns": [
+        ["id", "VARCHAR"],
+        ["observation_id", "VARCHAR"],
+        ["annotation_type", "VARCHAR"],
+        ["annotation_value", "TEXT"],
+        ["annotated_by", "VARCHAR NOT NULL"],
+        ["annotated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+        ["metadata", "JSON"]
+      ],
+      "primary_key": "id",
+      "indexes": [
+        ["idx_topo_anno_obs", ["observation_id"]]
+      ]
+    },
+    {
+      "name": "topo_observation_followups",
+      "ordering": 140,
+      "description": "Followup tracking for TOPO observations: actions, investigations, monitoring.",
+      "columns": [
+        ["id", "VARCHAR"],
+        ["observation_id", "VARCHAR"],
+        ["followup_type", "VARCHAR"],
+        ["status", "VARCHAR DEFAULT 'open'"],
+        ["assigned_to", "VARCHAR"],
+        ["due_date", "TIMESTAMP"],
+        ["closed_at", "TIMESTAMP"],
+        ["created_by", "VARCHAR NOT NULL"],
+        ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+        ["updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+        ["metadata", "JSON"]
+      ],
+      "primary_key": "id",
+      "indexes": [
+        ["idx_topo_fup_obs", ["observation_id"]],
+        ["idx_topo_fup_status", ["status"]],
+        ["idx_topo_fup_assignee", ["assigned_to"]]
+      ]
     }
   ]
 }

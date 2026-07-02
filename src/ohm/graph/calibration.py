@@ -216,12 +216,12 @@ def community_prior(conn: "DuckDBPyConnection") -> float:
     """
     result = conn.execute(
         """
-        SELECT source_agent,
+        SELECT COALESCE(claimed_by, source_agent) AS source_agent,
                CASE WHEN COUNT(*) > 0
                     THEN CAST(SUM(CASE WHEN outcome = TRUE THEN 1 ELSE 0 END) AS DOUBLE) / COUNT(*)
                     ELSE NULL END AS p_accurate
         FROM ohm_outcomes
-        GROUP BY source_agent
+        GROUP BY COALESCE(claimed_by, source_agent)
         HAVING COUNT(*) >= 2
         """
     ).fetchall()
@@ -244,6 +244,8 @@ def effective_reliability(
     agent_id: str,
     t: datetime | None = None,
     decay_lambda: float = DEFAULT_AUTHORITY_DECAY_LAMBDA,
+    *,
+    domain: str | None = None,
 ) -> dict[str, Any]:
     """Compute effective reliability for a source agent with temporal decay.
 
@@ -265,6 +267,9 @@ def effective_reliability(
         agent_id: Source agent identifier (e.g., "agent-metis")
         t: Point in time to evaluate at. Defaults to now.
         decay_lambda: Decay rate (higher = faster decay toward prior)
+        domain: Optional domain filter (OHM-avkj). When set, only
+            outcomes with matching ``domain`` (or ``'*'`` for unscoped)
+            are counted.
 
     Returns:
         Dict with agent_id, p_accurate, effective_reliability,
@@ -273,17 +278,23 @@ def effective_reliability(
     if t is None:
         t = datetime.now(timezone.utc)
 
+    domain_clause = ""
+    params: list = [agent_id]
+    if domain is not None:
+        domain_clause = " AND (domain = ? OR domain = '*')"
+        params.append(domain)
+
     # Get agent's p_accurate and last outcome date
     agent_stats = conn.execute(
-        """
+        f"""
         SELECT
             COUNT(*) AS total_outcomes,
             SUM(CASE WHEN outcome = TRUE THEN 1 ELSE 0 END) AS accurate,
             MAX(recorded_at) AS last_outcome_at
         FROM ohm_outcomes
-        WHERE source_agent = ?
+        WHERE COALESCE(claimed_by, source_agent) = ?{domain_clause}
         """,
-        [agent_id],
+        params,
     ).fetchone()
 
     total, accurate, last_outcome_at = agent_stats
@@ -337,7 +348,7 @@ def all_effective_reliabilities(
         t = datetime.now(timezone.utc)
 
     # Get all distinct agents
-    agents = conn.execute("SELECT DISTINCT source_agent FROM ohm_outcomes ORDER BY source_agent").fetchall()
+    agents = conn.execute("SELECT DISTINCT COALESCE(claimed_by, source_agent) FROM ohm_outcomes ORDER BY 1").fetchall()
 
     results = []
     for (agent_id,) in agents:

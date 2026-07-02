@@ -1478,9 +1478,9 @@ class OhmStore:
         enforce_challenge_boundary(self.conn, actor, edge_id)
 
         return self.write_edge(
-            from_node=original["to_node"],
-            to_node=original["from_node"],
-            edge_type="CHALLENGED_BY",  # ADR-025: challenge_type is metadata, not edge_type
+            from_node=original["from_node"],
+            to_node=original["to_node"],
+            edge_type=challenge_type,  # OHM-7el6: use challenge_type as edge_type (was hardcoded to CHALLENGED_BY)
             layer=original["layer"],
             confidence=confidence,
             provenance=reason,
