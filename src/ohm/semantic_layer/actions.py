@@ -187,6 +187,15 @@ def create_beads_task(
         for label in labels:
             cmd.extend(["--label", label])
 
+    # On Windows, bd may be installed as a .CMD wrapper (e.g., via npm).
+    # subprocess.run with a list doesn't search PATHEXT, so resolve the
+    # full path via shutil.which to avoid FileNotFoundError.
+    import shutil as _shutil
+
+    bd_path = _shutil.which("bd")
+    if bd_path:
+        cmd[0] = bd_path
+
     result = subprocess.run(
         cmd,
         cwd=str(repo),

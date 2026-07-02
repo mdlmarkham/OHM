@@ -231,10 +231,12 @@ class TestSemanticLayerActions:
     )
     def test_create_beads_task_creates_issue(self, tmp_path):
         import subprocess
+        import shutil as _shutil
 
         repo = tmp_path / "test_repo"
         repo.mkdir()
-        subprocess.run(["bd", "init"], cwd=str(repo), check=True, capture_output=True)
+        bd = _shutil.which("bd") or "bd"
+        subprocess.run([bd, "init"], cwd=str(repo), check=True, capture_output=True)
 
         result = create_beads_task(
             repo_path=str(repo),
@@ -269,10 +271,12 @@ class TestSemanticLayerActions:
     )
     def test_run_metrics_and_actions_executes_actions(self, test_db, tmp_path):
         import subprocess
+        import shutil as _shutil
 
         repo = tmp_path / "action_repo"
         repo.mkdir()
-        subprocess.run(["bd", "init"], cwd=str(repo), check=True, capture_output=True)
+        bd = _shutil.which("bd") or "bd"
+        subprocess.run([bd, "init"], cwd=str(repo), check=True, capture_output=True)
 
         claim = create_node(test_db, label="Claim", node_type="concept", created_by="test_agent")
         query_record_outcome(
@@ -330,6 +334,7 @@ class TestSemanticLayerEndpoint:
     )
     def test_post_metrics_semantic_actions_creates_tasks(self, test_server, tmp_path):
         import subprocess
+        import shutil as _shutil
 
         port, store = test_server
         from tests.conftest import _request
@@ -346,7 +351,8 @@ class TestSemanticLayerEndpoint:
 
         repo = tmp_path / "post_repo"
         repo.mkdir()
-        subprocess.run(["bd", "init"], cwd=str(repo), check=True, capture_output=True)
+        bd = _shutil.which("bd") or "bd"
+        subprocess.run([bd, "init"], cwd=str(repo), check=True, capture_output=True)
 
         status, body = _request(
             "POST",
