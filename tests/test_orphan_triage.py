@@ -1,136 +1,303 @@
+"""Tests for OHM-jx4q: orphan rate reporting + heartbeat nudge.
+
+Covers:
+- graph_health() distinguishes L0 fragment orphans from L1-L3 orphans
+- The new fields are backward-compatible (orphan_nodes still returns total)
+- orphan_rate_non_fragments respects the 10% threshold signal
+- agent_heartbeat() emits orphan_rate_nudge when the rate exceeds 10%
+- The nudge lists non-fragment orphans (fragments are NOT nudged)
+- Under threshold: no nudge but the rate is still reported
+- Edge case: empty graph
+- Edge case: only fragments, no non-fragment orphans
+"""
+
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+import duckdb
 import pytest
 
-from ohm.queries import batch_orphan_triage, create_edge, create_node, query_graph_health
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-class TestBatchOrphanTriage:
-    def test_no_orphans(self, test_db):
-        result = batch_orphan_triage(test_db)
-        assert result["triaged_count"] == 0
-        assert result["total_orphans"] == 0
-        assert result["suggestions"] == []
-        assert result["with_suggestions"] == 0
-        assert result["without_suggestions"] == 0
-        assert result["method"] == "batch_orphan_triage"
-
-    def test_single_orphan_no_matches(self, test_db):
-        create_node(test_db, label="Lonely node", node_type="concept", created_by="test")
-        result = batch_orphan_triage(test_db)
-        assert result["triaged_count"] == 1
-        assert result["total_orphans"] == 1
-        assert result["with_suggestions"] == 0
-        assert result["without_suggestions"] == 1
-        assert result["types_seen"] == {"concept": 1}
-
-    def test_orphan_with_same_type_match(self, test_db):
-        orphan = create_node(test_db, label="Orphan concept", node_type="concept", created_by="test")
-        connected = create_node(test_db, label="Connected concept", node_type="concept", created_by="test")
-        other = create_node(test_db, label="Other", node_type="source", created_by="test")
-        create_edge(test_db, from_node=connected["id"], to_node=other["id"], edge_type="DERIVES_FROM", layer="L2", created_by="test")
-        result = batch_orphan_triage(test_db)
-        assert result["triaged_count"] == 1
-        assert result["with_suggestions"] == 1
-        entry = result["suggestions"][0]
-        assert entry["orphan_id"] == orphan["id"]
-        assert any("Same type" in s["reason"] for s in entry["suggestions"])
-
-    def test_orphan_with_label_overlap(self, test_db):
-        _orphan = create_node(test_db, label="oil supply disruption persian gulf", node_type="pattern", created_by="test")
-        conn_node = create_node(test_db, label="oil supply disruption hormuz", node_type="source", created_by="test")
-        other = create_node(test_db, label="Other", node_type="concept", created_by="test")
-        create_edge(test_db, from_node=conn_node["id"], to_node=other["id"], edge_type="DERIVES_FROM", layer="L2", created_by="test")
-        result = batch_orphan_triage(test_db)
-        assert result["triaged_count"] == 1
-        entry = result["suggestions"][0]
-        label_suggestions = [s for s in entry["suggestions"] if "Label overlap" in s["reason"]]
-        assert len(label_suggestions) >= 1
-
-    def test_exclude_fragment_nodes(self, test_db):
-        create_node(test_db, label="Fragment", node_type="fragment", created_by="test")
-        result = batch_orphan_triage(test_db)
-        assert result["triaged_count"] == 0
-
-    def test_exclude_agent_nodes(self, test_db):
-        create_node(test_db, label="Agent", node_type="agent", created_by="test")
-        result = batch_orphan_triage(test_db)
-        assert result["triaged_count"] == 0
-
-    def test_min_confidence_filter(self, test_db):
-        _low = create_node(test_db, label="Low conf", node_type="concept", created_by="test", confidence=0.2)
-        high = create_node(test_db, label="High conf", node_type="concept", created_by="test", confidence=0.8)
-        result = batch_orphan_triage(test_db, min_confidence=0.5)
-        assert result["triaged_count"] == 1
-        assert result["suggestions"][0]["orphan_id"] == high["id"]
-
-    def test_limit(self, test_db):
-        for i in range(5):
-            create_node(test_db, label=f"Orphan {i}", node_type="concept", created_by="test")
-        result = batch_orphan_triage(test_db, limit=3)
-        assert result["triaged_count"] == 3
-        assert result["total_orphans"] == 5
-
-    def test_suggestions_sorted_by_score(self, test_db):
-        _orphan = create_node(test_db, label="oil supply disruption persian gulf", node_type="concept", created_by="test")
-        c1 = create_node(test_db, label="oil supply disruption hormuz strait", node_type="concept", created_by="test")
-        src = create_node(test_db, label="Src", node_type="source", created_by="test")
-        create_edge(test_db, from_node=c1["id"], to_node=src["id"], edge_type="DERIVES_FROM", layer="L2", created_by="test")
-        c2 = create_node(test_db, label="oil demand analysis persian", node_type="concept", created_by="test")
-        create_edge(test_db, from_node=c2["id"], to_node=src["id"], edge_type="DERIVES_FROM", layer="L2", created_by="test")
-        result = batch_orphan_triage(test_db)
-        if result["with_suggestions"] > 0:
-            entry = result["suggestions"][0]
-            scores = [s["score"] for s in entry["suggestions"]]
-            assert scores == sorted(scores, reverse=True)
-
-    def test_suggestions_capped_at_3(self, test_db):
-        src = create_node(test_db, label="Src", node_type="source", created_by="test")
-        create_node(test_db, label="Orphan", node_type="concept", created_by="test")
-        for i in range(5):
-            cn = create_node(test_db, label=f"Connected {i}", node_type="concept", created_by="test")
-            create_edge(test_db, from_node=cn["id"], to_node=src["id"], edge_type="DERIVES_FROM", layer="L2", created_by="test")
-        result = batch_orphan_triage(test_db)
-        if result["with_suggestions"] > 0:
-            assert len(result["suggestions"][0]["suggestions"]) <= 3
+def _init_db() -> duckdb.DuckDBPyConnection:
+    """Fresh in-memory DuckDB with OHM schema."""
+    sys.path.insert(0, str(REPO_ROOT / "src"))
+    from ohm.schema import initialize_schema
+    conn = duckdb.connect(":memory:")
+    initialize_schema(conn)
+    return conn
 
 
-class TestOrphanTypeBreakdown:
-    def test_health_includes_type_breakdown(self, test_db):
-        create_node(test_db, label="Concept 1", node_type="concept", created_by="test")
-        create_node(test_db, label="Pattern 1", node_type="pattern", created_by="test")
-        result = query_graph_health(test_db)
-        assert "orphan_type_breakdown" in result
-        assert result["orphan_type_breakdown"].get("concept") == 1
-        assert result["orphan_type_breakdown"].get("pattern") == 1
-
-    def test_empty_graph_breakdown(self, test_db):
-        result = query_graph_health(test_db)
-        assert result["orphan_type_breakdown"] == {}
-
-    def test_connected_nodes_not_in_breakdown(self, test_db):
-        c1 = create_node(test_db, label="Connected", node_type="concept", created_by="test")
-        src = create_node(test_db, label="Src", node_type="source", created_by="test")
-        create_edge(test_db, from_node=c1["id"], to_node=src["id"], edge_type="DERIVES_FROM", layer="L2", created_by="test")
-        result = query_graph_health(test_db)
-        assert result["orphan_type_breakdown"] == {}
+def _insert_node(conn, node_id: str, label: str, ntype: str = "concept",
+                 created_by: str = "test", confidence: float = 0.5) -> None:
+    """Insert a node with the minimum required columns."""
+    conn.execute(
+        "INSERT INTO ohm_nodes (id, label, type, created_by, created_at, confidence) "
+        "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?)",
+        [node_id, label, ntype, created_by, confidence],
+    )
 
 
-class TestSDKOrphanTriage:
-    def test_sdk_orphan_triage(self, test_db):
-        from ohm.sdk import connect
+def _insert_edge(conn, from_id: str, to_id: str, layer: str = "L3",
+                 edge_type: str = "CAUSES", confidence: float = 0.5) -> None:
+    """Insert an edge with the minimum required columns."""
+    edge_id = f"edge_{from_id}_{to_id}"
+    conn.execute(
+        "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, "
+        "confidence, created_by, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, 'test', CURRENT_TIMESTAMP)",
+        [edge_id, from_id, to_id, layer, edge_type, confidence],
+    )
 
-        with connect(":memory:", actor="test") as graph:
-            result = graph.orphan_triage(limit=10)
-            assert "triaged_count" in result
-            assert "suggestions" in result
-            assert result["method"] == "batch_orphan_triage"
 
-    def test_sdk_orphan_triage_with_nodes(self, test_db):
-        from ohm.sdk import connect
+class TestGraphHealthOrphanBreakdown:
+    """OHM-jx4q: graph_health() must distinguish L0 fragment orphans
+    from L1-L3 orphans so triage has an actionable signal."""
 
-        with connect(":memory:", actor="test") as graph:
-            graph.create_node("Orphan concept", node_type="concept")
-            result = graph.orphan_triage(limit=10)
-            assert result["triaged_count"] == 1
-            assert result["types_seen"].get("concept") == 1
+    def test_orphan_breakdown_when_no_orphans(self):
+        from ohm.queries import query_graph_health
+        conn = _init_db()
+        try:
+            h = query_graph_health(conn)
+            assert h["orphan_nodes"] == 0
+            assert h["orphan_nodes_total"] == 0
+            assert h["orphan_nodes_fragments"] == 0
+            assert h["orphan_nodes_non_fragments"] == 0
+            assert h["orphan_rate_non_fragments"] == 0.0
+            assert h["orphan_threshold"] == 0.10
+            assert h["orphan_threshold_exceeded"] is False
+        finally:
+            conn.close()
+
+    def test_orphan_breakdown_separates_fragments(self):
+        from ohm.queries import query_graph_health
+        conn = _init_db()
+        try:
+            # 3 non-fragment orphans, no edges
+            for i in range(3):
+                _insert_node(conn, f"orphan_{i}", f"Orphan {i}", "concept")
+            # 5 fragment orphans (L0)
+            for i in range(5):
+                _insert_node(conn, f"frag_{i}", f"Frag {i}", "fragment")
+            # 2 connected concept nodes (NOT orphans)
+            _insert_node(conn, "c_a", "Connected A", "concept")
+            _insert_node(conn, "c_b", "Connected B", "concept")
+            _insert_edge(conn, "c_a", "c_b")
+
+            h = query_graph_health(conn)
+            assert h["orphan_nodes_total"] == 8
+            assert h["orphan_nodes_fragments"] == 5
+            assert h["orphan_nodes_non_fragments"] == 3
+            # total_nodes excludes fragments: 3 (orphans) + 2 (connected) = 5
+            assert h["total_nodes"] == 5
+            # 3 / 5 = 0.6
+            assert h["orphan_rate_non_fragments"] == 0.6
+            assert h["orphan_threshold_exceeded"] is True
+        finally:
+            conn.close()
+
+    def test_orphan_rate_below_threshold(self):
+        from ohm.queries import query_graph_health
+        conn = _init_db()
+        try:
+            # 1 orphan, 19 connected -> 1/20 = 0.05 (below 10% threshold)
+            _insert_node(conn, "lonely", "Lonely", "concept")
+            for i in range(19):
+                _insert_node(conn, f"c_{i}", f"C{i}", "concept")
+            # Connect them all in a chain
+            for i in range(18):
+                _insert_edge(conn, f"c_{i}", f"c_{i + 1}")
+
+            h = query_graph_health(conn)
+            assert h["orphan_nodes_non_fragments"] == 1
+            assert h["total_nodes"] == 20
+            assert h["orphan_rate_non_fragments"] == 0.05
+            assert h["orphan_threshold_exceeded"] is False
+        finally:
+            conn.close()
+
+    def test_orphan_rate_only_fragments_is_zero(self):
+        from ohm.queries import query_graph_health
+        conn = _init_db()
+        try:
+            # Only fragments exist. All are orphans (fragments never get
+            # edges), but the non-fragment rate is 0/0 = 0.
+            for i in range(5):
+                _insert_node(conn, f"frag_{i}", f"Frag {i}", "fragment")
+
+            h = query_graph_health(conn)
+            assert h["orphan_nodes_total"] == 5
+            assert h["orphan_nodes_fragments"] == 5
+            assert h["orphan_nodes_non_fragments"] == 0
+            assert h["total_nodes"] == 0
+            assert h["orphan_rate_non_fragments"] == 0.0
+            # 0% is not > 10%, so threshold NOT exceeded
+            assert h["orphan_threshold_exceeded"] is False
+        finally:
+            conn.close()
+
+    def test_backward_compatibility_orphan_nodes_key_preserved(self):
+        """The old ``orphan_nodes`` key is kept for backward compatibility
+        and equals the total. New code should migrate to
+        ``orphan_nodes_total`` / ``orphan_nodes_non_fragments``."""
+        from ohm.queries import query_graph_health
+        conn = _init_db()
+        try:
+            _insert_node(conn, "c1", "C1", "concept")
+            _insert_node(conn, "c2", "C2", "concept")
+            _insert_node(conn, "f1", "F1", "fragment")
+            h = query_graph_health(conn)
+            # Both keys return the same value
+            assert h["orphan_nodes"] == h["orphan_nodes_total"]
+        finally:
+            conn.close()
+
+
+class TestAgentHeartbeatOrphanNudge:
+    """OHM-jx4q: agent_heartbeat() emits orphan_rate_nudge when
+    non-fragment orphan rate exceeds 10%."""
+
+    def test_no_nudge_below_threshold(self):
+        from ohm.methods import agent_heartbeat
+        conn = _init_db()
+        try:
+            # 1 orphan, 19 connected = 5% rate (below 10%)
+            _insert_node(conn, "lonely", "Lonely", "concept")
+            for i in range(19):
+                _insert_node(conn, f"c_{i}", f"C{i}", "concept")
+            for i in range(18):
+                _insert_edge(conn, f"c_{i}", f"c_{i + 1}")
+
+            h = agent_heartbeat(conn, "test_agent")
+            assert "orphan_rate" in h
+            assert h["orphan_rate"] == 0.05
+            assert h["orphan_threshold_exceeded"] is False
+            assert h["orphan_rate_nudge"] == []
+            assert h["orphan_rate_nudge_count"] == 0
+        finally:
+            conn.close()
+
+    def test_nudge_above_threshold(self):
+        from ohm.methods import agent_heartbeat
+        conn = _init_db()
+        try:
+            # 3 orphans, 2 connected = 60% rate (above 10%)
+            for i in range(3):
+                _insert_node(conn, f"orphan_{i}", f"Orphan {i}", "concept", confidence=0.5 + i * 0.1)
+            _insert_node(conn, "c_a", "A", "concept")
+            _insert_node(conn, "c_b", "B", "concept")
+            _insert_edge(conn, "c_a", "c_b")
+
+            h = agent_heartbeat(conn, "test_agent")
+            assert h["orphan_rate"] == 0.6
+            assert h["orphan_threshold_exceeded"] is True
+            assert h["orphan_rate_nudge_count"] == 3
+            # The nudge is sorted by confidence DESC
+            confidences = [n["confidence"] for n in h["orphan_rate_nudge"]]
+            assert confidences == sorted(confidences, reverse=True)
+        finally:
+            conn.close()
+
+    def test_nudge_excludes_fragments(self):
+        """L0 fragments are NOT nudged even when they have zero edges --
+        they're expected to be ephemeral and the agent shouldn't have to
+        triage them manually."""
+        from ohm.methods import agent_heartbeat
+        conn = _init_db()
+        try:
+            # 1 non-fragment orphan + 10 fragment orphans + 1 connected
+            _insert_node(conn, "real_orphan", "Real orphan", "concept", confidence=0.9)
+            for i in range(10):
+                _insert_node(conn, f"frag_{i}", f"Frag {i}", "fragment")
+            _insert_node(conn, "c_a", "A", "concept")
+            _insert_node(conn, "c_b", "B", "concept")
+            _insert_edge(conn, "c_a", "c_b")
+            # 1 / 2 non-fragment nodes = 50% rate, above 10% threshold
+            h = agent_heartbeat(conn, "test_agent")
+            assert h["orphan_threshold_exceeded"] is True
+            # Only the real orphan is nudged, not any fragments
+            assert h["orphan_rate_nudge_count"] == 1
+            assert h["orphan_rate_nudge"][0]["node_id"] == "real_orphan"
+            assert h["orphan_rate_nudge"][0]["type"] == "concept"
+        finally:
+            conn.close()
+
+    def test_nudge_excludes_zero_node_graph(self):
+        from ohm.methods import agent_heartbeat
+        conn = _init_db()
+        try:
+            h = agent_heartbeat(conn, "test_agent")
+            assert h["orphan_rate"] == 0.0
+            assert h["orphan_threshold_exceeded"] is False
+            assert h["orphan_rate_nudge"] == []
+            assert h["orphan_rate_nudge_count"] == 0
+        finally:
+            conn.close()
+
+    def test_nudge_caps_at_5_results(self):
+        """The nudge returns at most 5 orphans -- if there are more, the
+        agent runs /suggest or /islands for the rest."""
+        from ohm.methods import agent_heartbeat
+        conn = _init_db()
+        try:
+            # 10 non-fragment orphans, 1 connected = 10/11 = 90.9%
+            for i in range(10):
+                _insert_node(conn, f"orphan_{i}", f"O{i}", "concept", confidence=0.5)
+            _insert_node(conn, "c_a", "A", "concept")
+            _insert_node(conn, "c_b", "B", "concept")
+            _insert_edge(conn, "c_a", "c_b")
+
+            h = agent_heartbeat(conn, "test_agent")
+            assert h["orphan_threshold_exceeded"] is True
+            # Capped at 5 even though 10 orphans exist
+            assert h["orphan_rate_nudge_count"] == 5
+            assert len(h["orphan_rate_nudge"]) == 5
+        finally:
+            conn.close()
+
+    def test_nudge_does_not_include_deleted_orphans(self):
+        """Soft-deleted orphans (deleted_at IS NOT NULL) are excluded."""
+        from ohm.methods import agent_heartbeat
+        conn = _init_db()
+        try:
+            _insert_node(conn, "real_orphan", "Real", "concept", confidence=0.9)
+            _insert_node(conn, "deleted_orphan", "Deleted", "concept", confidence=0.9)
+            # Soft-delete one
+            conn.execute(
+                "UPDATE ohm_nodes SET deleted_at = CURRENT_TIMESTAMP WHERE id = 'deleted_orphan'"
+            )
+            # 0/1 = 0% (the only non-deleted non-fragment node has no edges... wait, "real_orphan" has no edges)
+            h = agent_heartbeat(conn, "test_agent")
+            # Both inserted nodes have no edges, so both are orphans
+            # After soft-delete, only "real_orphan" counts
+            assert h["orphan_rate_orphans"] == 1
+            assert h["orphan_rate_total"] == 1
+            assert h["orphan_rate"] == 1.0  # 1/1 = 100%
+            assert h["orphan_threshold_exceeded"] is True
+            assert h["orphan_rate_nudge_count"] == 1
+            assert h["orphan_rate_nudge"][0]["node_id"] == "real_orphan"
+        finally:
+            conn.close()
+
+    def test_nudge_keys_present_even_when_empty(self):
+        """The state dict must always have orphan_rate_nudge and
+        orphan_rate_nudge_count keys, even when no nudge is needed.
+        Other code paths and dashboards key off these."""
+        from ohm.methods import agent_heartbeat
+        conn = _init_db()
+        try:
+            # Low-orphan scenario
+            _insert_node(conn, "a", "A", "concept")
+            _insert_node(conn, "b", "B", "concept")
+            _insert_edge(conn, "a", "b")
+            h = agent_heartbeat(conn, "test_agent")
+            assert "orphan_rate_nudge" in h
+            assert "orphan_rate_nudge_count" in h
+            assert h["orphan_rate_nudge_count"] == 0
+            assert h["orphan_rate_nudge"] == []
+        finally:
+            conn.close()

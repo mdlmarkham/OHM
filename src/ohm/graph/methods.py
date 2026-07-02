@@ -602,6 +602,76 @@ def agent_heartbeat(
         state["consensus_nudge"] = []
         state["consensus_nudge_count"] = 0
 
+    # OHM-jx4q: Orphan rate nudge. When the non-fragment orphan rate
+    # exceeds 10% (the acceptance threshold), surface the top 5
+    # non-fragment orphans to the agent. They are the highest-priority
+    # triage targets -- high confidence first, oldest first.
+    #
+    # Why per-agent: the agent just heartbeated, so they are the right
+    # person to nudge. The /suggest and /islands endpoints can then take
+    # over for the actual link work.
+    orphan_health = conn.execute("""
+        SELECT
+            n.id, n.label, n.type, n.confidence, n.created_at,
+            EXTRACT(DAY FROM CURRENT_TIMESTAMP - n.created_at) AS age_days
+        FROM ohm_nodes n
+        WHERE n.deleted_at IS NULL
+          AND n.type != 'fragment'
+          AND NOT EXISTS (
+              SELECT 1 FROM ohm_edges e
+              WHERE (e.from_node = n.id OR e.to_node = n.id)
+                AND e.deleted_at IS NULL
+          )
+        ORDER BY n.confidence DESC, n.created_at ASC
+        LIMIT 5
+    """).fetchall()
+
+    # Compute the non-fragment orphan rate for the state. This is the
+    # primary signal the agent uses to decide whether to act on the
+    # nudge.
+    rate_row = conn.execute("""
+        SELECT
+            SUM(CASE WHEN n.type != 'fragment'
+                      AND NOT EXISTS (
+                          SELECT 1 FROM ohm_edges e
+                          WHERE (e.from_node = n.id OR e.to_node = n.id)
+                            AND e.deleted_at IS NULL
+                      )
+                     THEN 1 ELSE 0 END) AS non_fragment_orphans,
+            SUM(CASE WHEN n.type != 'fragment' THEN 1 ELSE 0 END) AS non_fragment_total
+        FROM ohm_nodes n
+        WHERE n.deleted_at IS NULL
+    """).fetchone()
+    non_fragment_orphans_count = int(rate_row[0] or 0) if rate_row else 0
+    non_fragment_total_count = int(rate_row[1] or 0) if rate_row else 0
+    orphan_rate = (
+        round(non_fragment_orphans_count / non_fragment_total_count, 4)
+        if non_fragment_total_count > 0
+        else 0.0
+    )
+    state["orphan_rate"] = orphan_rate
+    state["orphan_rate_orphans"] = non_fragment_orphans_count
+    state["orphan_rate_total"] = non_fragment_total_count
+    state["orphan_threshold"] = 0.10
+    state["orphan_threshold_exceeded"] = orphan_rate > 0.10
+
+    if orphan_rate > 0.10 and orphan_health:
+        state["orphan_rate_nudge"] = [
+            {
+                "node_id": row[0],
+                "label": row[1],
+                "type": row[2],
+                "confidence": row[3],
+                "created_at": str(row[4]) if row[4] else None,
+                "age_days": round(float(row[5]), 1) if row[5] else 0.0,
+            }
+            for row in orphan_health
+        ]
+        state["orphan_rate_nudge_count"] = len(orphan_health)
+    else:
+        state["orphan_rate_nudge"] = []
+        state["orphan_rate_nudge_count"] = 0
+
     return state
 
 

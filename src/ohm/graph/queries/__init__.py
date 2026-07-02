@@ -2661,8 +2661,30 @@ def query_graph_health(
     """).fetchall()
     orphan_type_breakdown = {row[0]: row[1] for row in orphan_type_rows} if orphan_type_rows else {}
 
+    # OHM-jx4q: Distinguish L0 fragment orphans from L1-L3 orphans. Fragments
+    # are expected high-churn scratch nodes (type='fragment'); excluding them
+    # from the orphan rate gives a much more actionable signal for triage.
+    # A "real" orphan rate of >10% triggers the heartbeat nudge (see
+    # agent_heartbeat() in methods.py).
+    fragment_orphans = orphan_type_breakdown.get("fragment", 0)
+    non_fragment_orphans = max(0, orphans - fragment_orphans)
+    total_non_fragment_nodes = max(0, total_nodes)  # already excludes fragments
+    orphan_rate_non_fragments = (
+        round(non_fragment_orphans / total_non_fragment_nodes, 4)
+        if total_non_fragment_nodes > 0
+        else 0.0
+    )
+    orphan_threshold = 0.10  # OHM-jx4q acceptance: < 10% for non-fragments
+
     return {
         "orphan_nodes": orphans,
+        "orphan_nodes_total": orphans,
+        "orphan_nodes_fragments": fragment_orphans,
+        "orphan_nodes_non_fragments": non_fragment_orphans,
+        "orphan_rate_total": round(orphans / max(total_nodes, 1), 4),
+        "orphan_rate_non_fragments": orphan_rate_non_fragments,
+        "orphan_threshold": orphan_threshold,
+        "orphan_threshold_exceeded": orphan_rate_non_fragments > orphan_threshold,
         "orphan_type_breakdown": orphan_type_breakdown,
         "dead_end_count": dead_end_count,
         "low_confidence_unchallenged": low_conf,
