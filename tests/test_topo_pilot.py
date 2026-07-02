@@ -251,8 +251,17 @@ class TestTopoPilotScenarios:
             store.close()
 
     def test_pilot_with_no_domain_table(self, tmp_path):
-        """The topo config without a domain table still works."""
-        cfg = SchemaConfig.topo()  # no domain_tables
+        """A topo config with domain tables stripped still works for core OHM writes."""
+        full = SchemaConfig.topo()
+        cfg = SchemaConfig(
+            name=full.name,
+            node_types=full.node_types,
+            layer_descriptions=full.layer_descriptions,
+            observation_types=full.observation_types,
+            observation_sources=full.observation_sources,
+            provenances=full.provenances,
+            case_strategy=full.case_strategy,
+        )
         store = OhmStore(db_path=str(tmp_path / "core_only.duckdb"), schema=cfg)
         try:
             # Core OHM writes work as before.

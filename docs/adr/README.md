@@ -641,3 +641,26 @@ OHM's document library has `LocalDocumentStore` and `S3DocumentStore` backends. 
 - `boto3` imported lazily — zero overhead for non-AWS deployments
 - Fire-and-forget sync means eventual consistency between local store and KB
 - See [full ADR](0039-bedrock-knowledge-store.md)
+
+---
+
+## ADR-040: TOPO Observation Lifecycle — Domain DDL Tables (Option A)
+
+**Date:** 2026-07-02
+**Status:** Decided
+
+### Context
+
+TOPO's observation system uses a 5-table relational model (observations, assessments, annotations, followups, prospects) with append-only assessment history and `is_current` flags. OHM's core `ohm_observations` is flat. The domain DDL hook (OHM-vl8o / `SchemaConfig.domain_tables`) provides a first-class mechanism for domain-specific tables.
+
+### Decision
+
+Option A: declare the 4 TOPO observation lifecycle tables as `DomainTable` instances in `SchemaConfig.topo()` and `topo.json`, created by `_create_domain_tables()` during `initialize_schema()`. Preserves relational integrity, append-only semantics, and `is_current` flagging. No `SCHEMA_VERSION` bump — domain tables are per-config, not core schema.
+
+### Consequences
+
+- TOPO's relational observation model preserved as domain DDL tables
+- Tables created idempotently via `CREATE TABLE IF NOT EXISTS`
+- Application-layer integrity enforcement (consistent with OHM — no FK constraints in DuckDB)
+- `topo.json` template and `SchemaConfig.topo()` Python factory kept in sync
+- See [full ADR](0040-topo-observation-lifecycle.md)

@@ -932,6 +932,119 @@ class SchemaConfig:
             }
         )
 
+        topo_domain_tables: list[DomainTable] = [
+            DomainTable(
+                name="topo_prospects",
+                columns=(
+                    ("id", "VARCHAR"),
+                    ("equipment_id", "VARCHAR"),
+                    ("site_id", "VARCHAR"),
+                    ("rul_days", "FLOAT"),
+                    ("risk_class", "VARCHAR"),
+                    ("model_version", "VARCHAR"),
+                    ("created_by", "VARCHAR NOT NULL"),
+                    ("created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+                    ("updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+                    ("metadata", "JSON"),
+                ),
+                primary_key="id",
+                indexes=(
+                    ("idx_topo_prospects_equipment", ("equipment_id",)),
+                    ("idx_topo_prospects_site", ("site_id",)),
+                    ("idx_topo_prospects_risk", ("risk_class",)),
+                ),
+                ordering=100,
+                description="TOPO predictive-maintenance prospects: ranked equipment with RUL and risk class.",
+            ),
+            DomainTable(
+                name="topo_observations",
+                columns=(
+                    ("id", "VARCHAR"),
+                    ("node_id", "VARCHAR"),
+                    ("obs_type", "VARCHAR"),
+                    ("obs_value", "FLOAT"),
+                    ("obs_unit", "VARCHAR"),
+                    ("source", "VARCHAR"),
+                    ("observed_at", "TIMESTAMP"),
+                    ("created_by", "VARCHAR NOT NULL"),
+                    ("created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+                    ("updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+                    ("metadata", "JSON"),
+                ),
+                primary_key="id",
+                indexes=(
+                    ("idx_topo_obs_node", ("node_id",)),
+                    ("idx_topo_obs_type", ("obs_type",)),
+                    ("idx_topo_obs_time", ("observed_at",)),
+                ),
+                ordering=110,
+                description="TOPO observation records: sensor readings, anomalies, and measurements linked to OHM nodes.",
+            ),
+            DomainTable(
+                name="topo_observation_assessments",
+                columns=(
+                    ("id", "VARCHAR"),
+                    ("observation_id", "VARCHAR"),
+                    ("assessment_type", "VARCHAR"),
+                    ("assessment_value", "VARCHAR"),
+                    ("is_current", "BOOLEAN DEFAULT TRUE"),
+                    ("assessed_by", "VARCHAR NOT NULL"),
+                    ("assessed_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+                    ("notes", "TEXT"),
+                    ("metadata", "JSON"),
+                ),
+                primary_key="id",
+                indexes=(
+                    ("idx_topo_asmt_obs", ("observation_id",)),
+                    ("idx_topo_asmt_current", ("is_current",)),
+                ),
+                ordering=120,
+                description="Append-only assessment history for TOPO observations with is_current flags.",
+            ),
+            DomainTable(
+                name="topo_observation_annotations",
+                columns=(
+                    ("id", "VARCHAR"),
+                    ("observation_id", "VARCHAR"),
+                    ("annotation_type", "VARCHAR"),
+                    ("annotation_value", "TEXT"),
+                    ("annotated_by", "VARCHAR NOT NULL"),
+                    ("annotated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+                    ("metadata", "JSON"),
+                ),
+                primary_key="id",
+                indexes=(
+                    ("idx_topo_anno_obs", ("observation_id",)),
+                ),
+                ordering=130,
+                description="Annotations (comments, tags, context) on TOPO observations.",
+            ),
+            DomainTable(
+                name="topo_observation_followups",
+                columns=(
+                    ("id", "VARCHAR"),
+                    ("observation_id", "VARCHAR"),
+                    ("followup_type", "VARCHAR"),
+                    ("status", "VARCHAR DEFAULT 'open'"),
+                    ("assigned_to", "VARCHAR"),
+                    ("due_date", "TIMESTAMP"),
+                    ("closed_at", "TIMESTAMP"),
+                    ("created_by", "VARCHAR NOT NULL"),
+                    ("created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+                    ("updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+                    ("metadata", "JSON"),
+                ),
+                primary_key="id",
+                indexes=(
+                    ("idx_topo_fup_obs", ("observation_id",)),
+                    ("idx_topo_fup_status", ("status",)),
+                    ("idx_topo_fup_assignee", ("assigned_to",)),
+                ),
+                ordering=140,
+                description="Followup tracking for TOPO observations: actions, investigations, monitoring.",
+            ),
+        ]
+
         return cls(
             name="topo",
             node_types=topo_node_types,
@@ -940,6 +1053,7 @@ class SchemaConfig:
             observation_sources=topo_observation_sources,
             provenances=topo_provenances,
             case_strategy="uppercase",  # OHM-ue9k: accept legacy ALL-CAPS for migration
+            domain_tables=topo_domain_tables,
         )
 
     @classmethod
