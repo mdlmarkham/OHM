@@ -227,3 +227,77 @@ class TestSyncBeadsHTTP:
         assert status == 200
         assert data["skipped"] == 1
         assert data["created"] == 0
+
+
+class TestFetchBeadsIssuesAssigneeEnrichment:
+    """OHM-sbtz: fetch_beads_issues enriches bd list output with assignee from JSONL."""
+
+    def test_enriches_assignee_from_jsonl(self, tmp_path, monkeypatch):
+        import os
+
+        from ohm.integrations import beads_sync
+
+        # Create a fake JSONL with assignee
+        jsonl_path = tmp_path / ".beads" / "issues.jsonl"
+        jsonl_path.parent.mkdir(parents=True)
+        jsonl_path.write_text(
+            json.dumps({"_type": "issue", "id": "OHM-xxx", "assignee": "metis", "status": "open"})
+            + "\n"
+        )
+
+        # Mock bd list --json to return issues WITHOUT assignee
+        class MockResult:
+            returncode = 0
+            stdout = json.dumps([{"id": "OHM-xxx", "title": "Test", "status": "open"}])
+
+        def mock_run(*args, **kwargs):
+            return MockResult()
+
+        monkeypatch.setattr(beads_sync.subprocess, "run", mock_run)
+        monkeypatch.chdir(tmp_path)
+
+        issues = beads_sync.fetch_beads_issues()
+        assert len(issues) == 1
+        assert issues[0]["assignee"] == "metis"
+
+    def test_bd_list_unavailable_falls_back_to_jsonl(self, tmp_path, monkeypatch):
+        from ohm.integrations import beads_sync
+
+        jsonl_path = tmp_path / ".beads" / "issues.jsonl"
+        jsonl_path.parent.mkdir(parents=True)
+        jsonl_path.write_text(
+            json.dumps({"_type": "issue", "id": "OHM-yyy", "assignee": "clio", "status": "open"})
+            + "\n"
+        )
+
+        def mock_run(*args, **kwargs):
+            raise FileNotFoundError("bd not found")
+
+        monkeypatch.setattr(beads_sync.subprocess, "run", mock_run)
+        monkeypatch.chdir(tmp_path)
+
+        issues = beads_sync.fetch_beads_issues()
+        assert len(issues) == 1
+        assert issues[0]["assignee"] == "clio"
+
+    def test_jsonl_without_assignee_still_works(self, tmp_path, monkeypatch):
+        from ohm.integrations import beads_sync
+
+        jsonl_path = tmp_path / ".beads" / "issues.jsonl"
+        jsonl_path.parent.mkdir(parents=True)
+        jsonl_path.write_text(
+            json.dumps({"_type": "issue", "id": "OHM-noassignee", "status": "open"})
+            + "\n"
+        )
+
+        class MockResult:
+            returncode = 0
+            stdout = json.dumps([{"id": "OHM-noassignee", "title": "No Assignee", "status": "open"}])
+
+        monkeypatch.setattr(beads_sync.subprocess, "run", lambda *a, **k: MockResult())
+        monkeypatch.chdir(tmp_path)
+
+        issues = beads_sync.fetch_beads_issues()
+        assert len(issues) == 1
+        # No assignee in either source → field is None/absent, sync will skip
+        assert not issues[0].get("assignee")

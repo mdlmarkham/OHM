@@ -222,9 +222,18 @@ def sync_beads_to_ohm_tasks(
 def fetch_beads_issues() -> list[dict[str, Any]]:
     """Fetch open/in-progress issues from the ``bd`` CLI.
 
-    Falls back to reading ``.beads/issues.jsonl`` if ``bd`` is not
-    available on PATH.
+    Uses ``bd list --json`` for the issue list, then enriches each
+    issue with the ``assignee`` field from the JSONL export (OHM-sbtz
+    fix: ``bd list --json`` does not include ``assignee``, so the sync
+    was skipping every issue). The JSONL export is the canonical source
+    for assignee data.
+
+    Falls back to JSONL-only if ``bd`` is not available on PATH.
     """
+    issues: list[dict[str, Any]] = []
+    bd_issues: list[dict[str, Any]] | None = None
+
+    # Try bd list --json first for the canonical issue list.
     try:
         result = subprocess.run(
             ["bd", "list", "--json"],
@@ -233,14 +242,12 @@ def fetch_beads_issues() -> list[dict[str, Any]]:
             timeout=30,
         )
         if result.returncode == 0:
-            import json as _json
-
-            return _json.loads(result.stdout)
+            bd_issues = json.loads(result.stdout)
     except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
         logger.warning("bd CLI unavailable, falling back to JSONL: %s", exc)
 
-    # Fallback: read the JSONL export.
-    issues: list[dict[str, Any]] = []
+    # Load JSONL export for assignee enrichment.
+    jsonl_by_id: dict[str, dict[str, Any]] = {}
     try:
         with open(".beads/issues.jsonl", encoding="utf-8") as f:
             for line in f:
@@ -250,9 +257,24 @@ def fetch_beads_issues() -> list[dict[str, Any]]:
                 try:
                     issue = json.loads(line)
                     if issue.get("_type") == "issue":
-                        issues.append(issue)
+                        jsonl_by_id[issue["id"]] = issue
                 except json.JSONDecodeError:
                     continue
     except FileNotFoundError:
         logger.warning(".beads/issues.jsonl not found")
+
+    if bd_issues is not None:
+        # Enrich bd list output with assignee from JSONL.
+        for issue in bd_issues:
+            bid = issue.get("id")
+            if bid and bid in jsonl_by_id:
+                if "assignee" not in issue:
+                    issue["assignee"] = jsonl_by_id[bid].get("assignee")
+            issues.append(issue)
+    else:
+        # Fallback: JSONL-only.
+        for issue in jsonl_by_id.values():
+            if issue.get("status") in ("open", "in_progress", "blocked", "review"):
+                issues.append(issue)
+
     return issues
