@@ -205,6 +205,101 @@ def generate_nudges(
             }
         )
 
+    # ── OHM-tsxk: Pattern-to-case causal edge nudge ─────────────────────
+    # When a pattern/concept/idea node is linked to a decision/task/event/case
+    # with a CAUSES edge, warn that REFINES or EXPLAINS is more appropriate.
+    if (
+        action == "edge"
+        and edge_type == "CAUSES"
+        and from_node_id
+        and to_node_id
+        and store
+    ):
+        try:
+            from_row = store.conn.execute(
+                "SELECT type FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                [from_node_id],
+            ).fetchone()
+            to_row = store.conn.execute(
+                "SELECT type FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                [to_node_id],
+            ).fetchone()
+            if from_row and to_row:
+                from_type = from_row[0]
+                to_type = to_row[0]
+                PATTERN_TYPES = {"pattern", "idea", "synthesis", "interpretation", "concept"}
+                CASE_TYPES = {"decision", "task", "event", "action", "intervention"}
+                if from_type in PATTERN_TYPES and to_type in CASE_TYPES:
+                    nudges.append(
+                        {
+                            "type": "pattern_to_causal_warning",
+                            "message": (
+                                f"CAUSES edge from {from_type}→{to_type} may be mistyped. "
+                                f"A pattern refines or explains a {to_type}, it doesn't cause it. "
+                                f"Consider using REFINES or EXPLAINS instead. "
+                                f"Use GET /edge/suggest-type?from={from_node_id}&to={to_node_id} for guidance."
+                            ),
+                            "severity": "warning",
+                            "data": {
+                                "from_type": from_type,
+                                "to_type": to_type,
+                                "edge_type_used": "CAUSES",
+                                "suggested_types": ["REFINES", "EXPLAINS"],
+                            },
+                        }
+                    )
+                elif from_type in PATTERN_TYPES and to_type in {"concept", "source", "fragment"}:
+                    nudges.append(
+                        {
+                            "type": "pattern_to_causal_warning",
+                            "message": (
+                                f"CAUSES edge from {from_type}→{to_type} may be mistyped. "
+                                f"A pattern explains a {to_type}, it doesn't cause it. "
+                                f"Consider using EXPLAINS instead. "
+                                f"Use GET /edge/suggest-type?from={from_node_id}&to={to_node_id} for guidance."
+                            ),
+                            "severity": "warning",
+                            "data": {
+                                "from_type": from_type,
+                                "to_type": to_type,
+                                "edge_type_used": "CAUSES",
+                                "suggested_types": ["EXPLAINS", "RELATED_TO"],
+                            },
+                        }
+                    )
+        except Exception:
+            pass  # nudge is advisory; never block the write
+
+    # ── OHM-bm5r: Mechanism gate for causal edges ───────────────────────
+    # When a CAUSES/INFLUENCES/DEPENDS_ON edge is created without a condition
+    # (mediating mechanism), warn the agent to provide one.
+    if (
+        action == "edge"
+        and edge_type
+        and edge_type in CAUSAL_EDGE_TYPES
+        and not condition
+        and not (metadata and metadata.get("mechanism"))
+    ):
+        nudges.append(
+            {
+                "type": "mechanism_gate",
+                "message": (
+                    f"{edge_type} edge created without a stated mechanism. "
+                    f"Causal claims without a mediating pathway are not falsifiable — "
+                    f"they cannot be verified or refuted. Provide a 'condition' field "
+                    f"describing the causal pathway (e.g., 'via increased insulin resistance') "
+                    f"or set metadata.mechanism. This enables future verification and "
+                    f"prevents the edge from compounding into unearned certainty."
+                ),
+                "severity": "warning",
+                "data": {
+                    "edge_type": edge_type,
+                    "has_condition": False,
+                    "has_mechanism_metadata": False,
+                },
+            }
+        )
+
     if action == "edge" and edge_type and edge_type in CAUSAL_EDGE_TYPES:
         nudges.append(
             {
