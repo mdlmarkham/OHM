@@ -2071,17 +2071,17 @@ def suggest_edge_type(
     if from_type in PATTERN_TYPES and to_type in {"case", "decision", "task", "action"}:
         suggested_edge_type = "REFINES"
         suggested_layer = "L3"
-        reasoning = f"Pattern→{to_type} should use REFINES, not CAUSES. A pattern refines a case, not causes it."
+        reasoning = f"{from_type}→{to_type} should use REFINES, not CAUSES. A {from_type} refines a {to_type}, not causes it."
         alternatives = ["EXPLAINS", "RELATED_TO"]
     elif from_type in PATTERN_TYPES and to_type in CAUSAL_TARGET_TYPES:
         suggested_edge_type = "EXPLAINS"
         suggested_layer = "L3"
-        reasoning = f"Pattern→{to_type} should use EXPLAINS, not CAUSES. A pattern explains a concept, not causes it."
+        reasoning = f"{from_type}→{to_type} should use EXPLAINS, not CAUSES. A {from_type} explains a {to_type}, not causes it."
         alternatives = ["REFINES", "RELATED_TO"]
-    elif from_type in SOURCE_TYPES and to_type in CAUSAL_TARGET_TYPES:
+    elif from_type in SOURCE_TYPES and to_type in (CAUSAL_TARGET_TYPES | PATTERN_TYPES):
         suggested_edge_type = "REFERENCES"
         suggested_layer = "L2"
-        reasoning = f"Source→{to_type} should use REFERENCES, not CAUSES."
+        reasoning = f"Source→{to_type} should use L2 REFERENCES, not CAUSES. A source citing a {to_type} is evidence, not an agent interpretation."
         alternatives = ["SUPPORTS_EVIDENCE"]
     elif from_type in OBSERVATION_TYPES and to_type in CAUSAL_TARGET_TYPES:
         suggested_edge_type = "SUPPORTS_EVIDENCE"
@@ -2310,6 +2310,15 @@ def create_challenge(
     if target is None:
         raise ValueError(f"Edge not found: {edge_id}")
 
+    # OHM-mzyc.2: dedup — don't create a duplicate CHALLENGED_BY edge
+    # from the same agent for the same original edge.
+    existing = conn.execute(
+        "SELECT id FROM ohm_edges WHERE challenge_of = ? AND edge_type = 'CHALLENGED_BY' AND created_by = ? AND deleted_at IS NULL",
+        [edge_id, created_by],
+    ).fetchone()
+    if existing:
+        return _rows_to_dicts(conn.execute("SELECT * FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [existing[0]]))[0]
+
     challenge_id = str(uuid.uuid4())
     conn.execute(
         """INSERT INTO ohm_edges
@@ -2350,6 +2359,15 @@ def create_support(
     ).fetchone()
     if target is None:
         raise ValueError(f"Edge not found: {edge_id}")
+
+    # OHM-mzyc.2: dedup — don't create a duplicate SUPPORTS edge
+    # from the same agent for the same original edge.
+    existing = conn.execute(
+        "SELECT id FROM ohm_edges WHERE challenge_of = ? AND edge_type = 'SUPPORTS' AND created_by = ? AND deleted_at IS NULL",
+        [edge_id, created_by],
+    ).fetchone()
+    if existing:
+        return _rows_to_dicts(conn.execute("SELECT * FROM ohm_edges WHERE id = ? AND deleted_at IS NULL", [existing[0]]))[0]
 
     support_id = str(uuid.uuid4())
     conn.execute(
