@@ -226,8 +226,8 @@ class TestSemanticLayerActions:
     """Tests for the action executor."""
 
     @pytest.mark.skipif(
-        __import__("sys").platform == "win32",
-        reason="bd subprocess not reliable on Windows",
+        __import__("shutil").which("bd") is None,
+        reason="bd CLI not available",
     )
     def test_create_beads_task_creates_issue(self, tmp_path):
         import subprocess
