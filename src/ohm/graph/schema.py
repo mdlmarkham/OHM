@@ -2205,6 +2205,10 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
         [
             "ALTER TABLE ohm_outcomes ADD COLUMN IF NOT EXISTS claimed_by VARCHAR",
             "ALTER TABLE ohm_outcomes ADD COLUMN IF NOT EXISTS verified_by VARCHAR",
+            # Create indexes BEFORE running UPDATE backfills. DuckDB refuses
+            # to create an index when the transaction has outstanding UPDATEs.
+            "CREATE INDEX IF NOT EXISTS idx_outcomes_claimed_by ON ohm_outcomes(claimed_by)",
+            "CREATE INDEX IF NOT EXISTS idx_outcomes_verified_by ON ohm_outcomes(verified_by)",
             # Backfill verified_by from the existing recorded_by column.
             "UPDATE ohm_outcomes SET verified_by = recorded_by WHERE verified_by IS NULL",
             # Backfill claimed_by from the originating edge's created_by.
@@ -2220,8 +2224,6 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             "  ORDER BY e.created_at ASC LIMIT 1"
             ") WHERE claimed_by IS NULL",
             "UPDATE ohm_outcomes SET claimed_by = source_agent WHERE claimed_by IS NULL",
-            "CREATE INDEX IF NOT EXISTS idx_outcomes_claimed_by ON ohm_outcomes(claimed_by)",
-            "CREATE INDEX IF NOT EXISTS idx_outcomes_verified_by ON ohm_outcomes(verified_by)",
         ],
     ),
     (
@@ -2237,13 +2239,14 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
         "OHM-avkj: add domain column to ohm_outcomes for domain-aware source reliability",
         [
             "ALTER TABLE ohm_outcomes ADD COLUMN IF NOT EXISTS domain VARCHAR DEFAULT '*'",
+            # Create index BEFORE UPDATE backfills (DuckDB: no index creation with outstanding updates).
+            "CREATE INDEX IF NOT EXISTS idx_outcomes_domain ON ohm_outcomes(domain)",
             # Backfill domain from the claim node's provenance
             "UPDATE ohm_outcomes SET domain = ("
             "  SELECT n.provenance FROM ohm_nodes n "
             "  WHERE n.id = ohm_outcomes.claim_node AND n.deleted_at IS NULL"
             ") WHERE domain = '*' OR domain IS NULL",
             "UPDATE ohm_outcomes SET domain = '*' WHERE domain IS NULL",
-            "CREATE INDEX IF NOT EXISTS idx_outcomes_domain ON ohm_outcomes(domain)",
         ],
     ),
 ]
