@@ -165,11 +165,12 @@ def _apply_pragmas(conn: "duckdb.DuckDBPyConnection") -> None:
     if temp_dir:
         try:
             # PRAGMA temp_directory doesn't support parameterised args,
-            # so we sanitise via shlex.quote() before interpolation. The
-            # env var is operator-controlled, not user-supplied, but
-            # defence-in-depth matters when we shell out.
-            import shlex
-            conn.execute(f"PRAGMA temp_directory = {shlex.quote(temp_dir)}")
+            # so we escape single quotes in the path and wrap it in SQL
+            # string literal quotes before interpolation. The env var is
+            # operator-controlled, not user-supplied, but defence-in-depth
+            # matters when we interpolate.
+            safe_temp_dir = temp_dir.replace("'", "''")
+            conn.execute(f"PRAGMA temp_directory = '{safe_temp_dir}'")
         except Exception:
             logger.debug("PRAGMA temp_directory failed", exc_info=True)
 
