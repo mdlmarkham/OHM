@@ -644,11 +644,7 @@ def agent_heartbeat(
     """).fetchone()
     non_fragment_orphans_count = int(rate_row[0] or 0) if rate_row else 0
     non_fragment_total_count = int(rate_row[1] or 0) if rate_row else 0
-    orphan_rate = (
-        round(non_fragment_orphans_count / non_fragment_total_count, 4)
-        if non_fragment_total_count > 0
-        else 0.0
-    )
+    orphan_rate = round(non_fragment_orphans_count / non_fragment_total_count, 4) if non_fragment_total_count > 0 else 0.0
     state["orphan_rate"] = orphan_rate
     state["orphan_rate_orphans"] = non_fragment_orphans_count
     state["orphan_rate_total"] = non_fragment_total_count

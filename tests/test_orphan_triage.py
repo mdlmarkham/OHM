@@ -27,29 +27,25 @@ def _init_db() -> duckdb.DuckDBPyConnection:
     """Fresh in-memory DuckDB with OHM schema."""
     sys.path.insert(0, str(REPO_ROOT / "src"))
     from ohm.schema import initialize_schema
+
     conn = duckdb.connect(":memory:")
     initialize_schema(conn)
     return conn
 
 
-def _insert_node(conn, node_id: str, label: str, ntype: str = "concept",
-                 created_by: str = "test", confidence: float = 0.5) -> None:
+def _insert_node(conn, node_id: str, label: str, ntype: str = "concept", created_by: str = "test", confidence: float = 0.5) -> None:
     """Insert a node with the minimum required columns."""
     conn.execute(
-        "INSERT INTO ohm_nodes (id, label, type, created_by, created_at, confidence) "
-        "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?)",
+        "INSERT INTO ohm_nodes (id, label, type, created_by, created_at, confidence) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?)",
         [node_id, label, ntype, created_by, confidence],
     )
 
 
-def _insert_edge(conn, from_id: str, to_id: str, layer: str = "L3",
-                 edge_type: str = "CAUSES", confidence: float = 0.5) -> None:
+def _insert_edge(conn, from_id: str, to_id: str, layer: str = "L3", edge_type: str = "CAUSES", confidence: float = 0.5) -> None:
     """Insert an edge with the minimum required columns."""
     edge_id = f"edge_{from_id}_{to_id}"
     conn.execute(
-        "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, "
-        "confidence, created_by, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, 'test', CURRENT_TIMESTAMP)",
+        "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, confidence, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, 'test', CURRENT_TIMESTAMP)",
         [edge_id, from_id, to_id, layer, edge_type, confidence],
     )
 
@@ -60,6 +56,7 @@ class TestGraphHealthOrphanBreakdown:
 
     def test_orphan_breakdown_when_no_orphans(self):
         from ohm.queries import query_graph_health
+
         conn = _init_db()
         try:
             h = query_graph_health(conn)
@@ -75,6 +72,7 @@ class TestGraphHealthOrphanBreakdown:
 
     def test_orphan_breakdown_separates_fragments(self):
         from ohm.queries import query_graph_health
+
         conn = _init_db()
         try:
             # 3 non-fragment orphans, no edges
@@ -102,6 +100,7 @@ class TestGraphHealthOrphanBreakdown:
 
     def test_orphan_rate_below_threshold(self):
         from ohm.queries import query_graph_health
+
         conn = _init_db()
         try:
             # 1 orphan, 19 connected -> 1/20 = 0.05 (below 10% threshold)
@@ -122,6 +121,7 @@ class TestGraphHealthOrphanBreakdown:
 
     def test_orphan_rate_only_fragments_is_zero(self):
         from ohm.queries import query_graph_health
+
         conn = _init_db()
         try:
             # Only fragments exist. All are orphans (fragments never get
@@ -145,6 +145,7 @@ class TestGraphHealthOrphanBreakdown:
         and equals the total. New code should migrate to
         ``orphan_nodes_total`` / ``orphan_nodes_non_fragments``."""
         from ohm.queries import query_graph_health
+
         conn = _init_db()
         try:
             _insert_node(conn, "c1", "C1", "concept")
@@ -163,6 +164,7 @@ class TestAgentHeartbeatOrphanNudge:
 
     def test_no_nudge_below_threshold(self):
         from ohm.methods import agent_heartbeat
+
         conn = _init_db()
         try:
             # 1 orphan, 19 connected = 5% rate (below 10%)
@@ -183,6 +185,7 @@ class TestAgentHeartbeatOrphanNudge:
 
     def test_nudge_above_threshold(self):
         from ohm.methods import agent_heartbeat
+
         conn = _init_db()
         try:
             # 3 orphans, 2 connected = 60% rate (above 10%)
@@ -207,6 +210,7 @@ class TestAgentHeartbeatOrphanNudge:
         they're expected to be ephemeral and the agent shouldn't have to
         triage them manually."""
         from ohm.methods import agent_heartbeat
+
         conn = _init_db()
         try:
             # 1 non-fragment orphan + 10 fragment orphans + 1 connected
@@ -228,6 +232,7 @@ class TestAgentHeartbeatOrphanNudge:
 
     def test_nudge_excludes_zero_node_graph(self):
         from ohm.methods import agent_heartbeat
+
         conn = _init_db()
         try:
             h = agent_heartbeat(conn, "test_agent")
@@ -242,6 +247,7 @@ class TestAgentHeartbeatOrphanNudge:
         """The nudge returns at most 5 orphans -- if there are more, the
         agent runs /suggest or /islands for the rest."""
         from ohm.methods import agent_heartbeat
+
         conn = _init_db()
         try:
             # 10 non-fragment orphans, 1 connected = 10/11 = 90.9%
@@ -262,14 +268,13 @@ class TestAgentHeartbeatOrphanNudge:
     def test_nudge_does_not_include_deleted_orphans(self):
         """Soft-deleted orphans (deleted_at IS NOT NULL) are excluded."""
         from ohm.methods import agent_heartbeat
+
         conn = _init_db()
         try:
             _insert_node(conn, "real_orphan", "Real", "concept", confidence=0.9)
             _insert_node(conn, "deleted_orphan", "Deleted", "concept", confidence=0.9)
             # Soft-delete one
-            conn.execute(
-                "UPDATE ohm_nodes SET deleted_at = CURRENT_TIMESTAMP WHERE id = 'deleted_orphan'"
-            )
+            conn.execute("UPDATE ohm_nodes SET deleted_at = CURRENT_TIMESTAMP WHERE id = 'deleted_orphan'")
             # 0/1 = 0% (the only non-deleted non-fragment node has no edges... wait, "real_orphan" has no edges)
             h = agent_heartbeat(conn, "test_agent")
             # Both inserted nodes have no edges, so both are orphans
@@ -288,6 +293,7 @@ class TestAgentHeartbeatOrphanNudge:
         orphan_rate_nudge_count keys, even when no nudge is needed.
         Other code paths and dashboards key off these."""
         from ohm.methods import agent_heartbeat
+
         conn = _init_db()
         try:
             # Low-orphan scenario

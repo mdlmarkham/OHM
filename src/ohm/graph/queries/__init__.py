@@ -2669,11 +2669,7 @@ def query_graph_health(
     fragment_orphans = orphan_type_breakdown.get("fragment", 0)
     non_fragment_orphans = max(0, orphans - fragment_orphans)
     total_non_fragment_nodes = max(0, total_nodes)  # already excludes fragments
-    orphan_rate_non_fragments = (
-        round(non_fragment_orphans / total_non_fragment_nodes, 4)
-        if total_non_fragment_nodes > 0
-        else 0.0
-    )
+    orphan_rate_non_fragments = round(non_fragment_orphans / total_non_fragment_nodes, 4) if total_non_fragment_nodes > 0 else 0.0
     orphan_threshold = 0.10  # OHM-jx4q acceptance: < 10% for non-fragments
 
     return {
