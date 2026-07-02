@@ -132,6 +132,7 @@ class TestExtractGame:
         assert result["players"] == ["dec1", "dec2"]
         assert result["n_players"] == 2
 
+    @pytest.mark.adversarial
     def test_extract_game_blocks_edge_adversarial(self):
         nodes = [
             MockNode("target", "concept", utility_scale=0.8),
@@ -170,6 +171,7 @@ class TestExtractGame:
             assert len(pm[0]) == 2
             assert len(pm[0][0]) == 2
 
+    @pytest.mark.adversarial
     def test_extract_game_adversarial_payoff_structure(self):
         nodes = [
             MockNode("target", "concept", utility_scale=0.8),

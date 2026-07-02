@@ -69,6 +69,7 @@ class TestUGCPoisoningScenario:
 
         return cause, effect, causes_edge, sources
 
+    @pytest.mark.adversarial
     def test_source_diversity_low_for_homogeneous_support(self, test_db):
         """source_diversity_score is near 0 when all evidence shares author/institution/origin."""
         from ohm.graph.methods import source_diversity_score
@@ -82,6 +83,7 @@ class TestUGCPoisoningScenario:
         assert result["distinct_institutions"] == 1
         assert result["distinct_origins"] == 1
 
+    @pytest.mark.adversarial
     def test_consensus_only_detection_flags_poisoned_claim(self, test_db):
         """detect_consensus_only_support flags CAUSES edges with no outcome-backed support."""
         from ohm.queries import detect_consensus_only_support
@@ -93,6 +95,7 @@ class TestUGCPoisoningScenario:
         assert result["has_verified_outcome"] is False
         assert result["recommended_ceiling"] is not None
 
+    @pytest.mark.adversarial
     def test_oppositional_review_flags_homogeneous_support(self, test_db):
         """oppositional_review flags CAUSES edges backed by homogeneous UGC support."""
         from ohm.graph.methods import oppositional_review
@@ -102,6 +105,7 @@ class TestUGCPoisoningScenario:
         review = oppositional_review(test_db, target_node_id=cause["id"], auto_challenge=False)
         assert len(review["flagged_edges"]) >= 0
 
+    @pytest.mark.adversarial
     def test_telos_signing_traces_agent_provenance(self, test_db):
         """TELOS signing identifies which agent created the poisoned claim."""
         from ohm.graph.queries import sign_node_write, verify_node_write
@@ -178,6 +182,7 @@ class TestDiverseVerifiedScenario:
 
         return cause, effect, causes_edge, diverse_sources
 
+    @pytest.mark.adversarial
     def test_source_diversity_high_for_diverse_support(self, test_db):
         """source_diversity_score is high when evidence comes from diverse sources."""
         from ohm.graph.methods import source_diversity_score
@@ -190,6 +195,7 @@ class TestDiverseVerifiedScenario:
         assert result["distinct_authors"] >= 3
         assert result["distinct_institutions"] >= 3
 
+    @pytest.mark.adversarial
     def test_consensus_only_detection_passes_verified_claim(self, test_db):
         """detect_consensus_only_support does NOT flag edges with verified outcomes."""
         from ohm.queries import detect_consensus_only_support
@@ -200,6 +206,7 @@ class TestDiverseVerifiedScenario:
         assert result["has_verified_outcome"] is True
         assert result["is_consensus_only"] is False
 
+    @pytest.mark.adversarial
     def test_oppositional_review_does_not_flag_diverse_support(self, test_db):
         """oppositional_review does NOT flag diverse, multi-agent evidence."""
         from ohm.graph.methods import oppositional_review

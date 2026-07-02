@@ -228,6 +228,44 @@ def enforce_confidence_ceiling(
         raise ValueError(f"Confidence {confidence} exceeds ceiling {ceiling} for source_tier '{source_tier}'")
 
 
+def validate_task_status(value: str | None) -> str | None:
+    """Validate that *value* is a known task status (OHM-sbtz.2).
+
+    Valid statuses: open, in_progress, blocked, review, done, cancelled.
+    Returns the value unchanged if valid. Raises ValueError for unknown values.
+    None is accepted (for non-task nodes).
+    """
+    if value is None:
+        return None
+    _VALID_TASK_STATUSES = {"open", "in_progress", "blocked", "review", "done", "cancelled"}
+    if value not in _VALID_TASK_STATUSES:
+        raise ValueError(
+            f"Invalid task_status: '{value}' — must be one of: {sorted(_VALID_TASK_STATUSES)}"
+        )
+    return value
+
+
+def validate_assigned_to(value: str | None) -> str | None:
+    """Validate that *value* is a plausible agent name (OHM-sbtz.2).
+
+    Agent names must be non-empty alphanumeric strings (underscores and
+    hyphens allowed). This is a format check, not an existence check
+    against the agent registry (which may not be available at the store
+    layer).
+
+    Returns the value unchanged if valid. Raises ValueError for invalid values.
+    None is accepted (for unassigned tasks).
+    """
+    if value is None:
+        return None
+    if not value or not re.match(r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$", value):
+        raise ValueError(
+            f"Invalid assigned_to: '{value}' — must be a non-empty alphanumeric string "
+            "(underscores and hyphens allowed), starting with a letter, max 64 chars"
+        )
+    return value
+
+
 def validate_depth(value: int, *, max_depth: int = 20) -> int:
     """Validate that *value* is a reasonable traversal depth."""
     if not (1 <= value <= max_depth):

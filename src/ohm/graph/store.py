@@ -755,6 +755,8 @@ class OhmStore:
             validate_data_origin,
             validate_source_tier,
             enforce_confidence_ceiling,
+            validate_task_status,
+            validate_assigned_to,
         )
 
         confidence = validate_confidence(confidence)
@@ -762,14 +764,12 @@ class OhmStore:
         data_origin = validate_data_origin(data_origin)
         enforce_confidence_ceiling(confidence, source_tier)
 
-        # OHM-sbtz.2: validate task_status for task nodes
-        if type == "task" and task_status is not None:
-            from ohm.graph.schema import VALID_TASK_STATUSES
-
-            if task_status not in VALID_TASK_STATUSES:
-                raise ValueError(
-                    f"Invalid task_status: '{task_status}' — must be one of: {', '.join(sorted(VALID_TASK_STATUSES))}"
-                )
+        # OHM-sbtz.2: validate task-specific fields for task nodes
+        if type == "task":
+            if task_status is not None:
+                task_status = validate_task_status(task_status)
+            if assigned_to is not None:
+                assigned_to = validate_assigned_to(assigned_to)
 
         actor = agent_name or self.agent_name
         metadata_json = json.dumps(metadata) if metadata else None
@@ -1485,6 +1485,20 @@ class OhmStore:
 
         # Enforce boundary: only L3/L4 edges can be challenged
         enforce_challenge_boundary(self.conn, actor, edge_id)
+
+        # OHM-mzyc.2: dedup — check if this agent already challenged/supported this edge
+        existing = self.conn.execute(
+            """SELECT id, created_at FROM ohm_edges
+               WHERE challenge_of = ?
+                 AND edge_type = ?
+                 AND created_by = ?
+                 AND deleted_at IS NULL
+               ORDER BY created_at DESC LIMIT 1""",
+            [edge_id, challenge_type, actor],
+        ).fetchone()
+        if existing:
+            # Return the existing challenge/support edge instead of creating a duplicate
+            return self.get_edge(existing[0])
 
         return self.write_edge(
             from_node=original["from_node"],

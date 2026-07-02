@@ -294,6 +294,7 @@ class GraphHandlerMixin:
                 },
                 "L2": {
                     "REFERENCES": "X references Y (citation, link)",
+                    "INFLUENCES": "X influences Y (causal flow, feeds Bayesian inference)",
                     "SERVES": "X serves Y (service serves agent)",
                     "USES": "X uses Y (agent uses tool)",
                     "FEEDS": "X feeds Y (data flow)",

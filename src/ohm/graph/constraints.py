@@ -59,6 +59,12 @@ EDGE_CONSTRAINTS: dict[str, dict[str, Any]] = {
         "require_outcome": False,
         "participates_in_inference": True,
     },
+    "INFLUENCES": {
+        "min_layer": "L2",
+        "require_references": False,
+        "require_outcome": False,
+        "participates_in_inference": True,
+    },
     "CORRELATES_WITH": {
         "min_layer": "L3",
         "require_references": False,

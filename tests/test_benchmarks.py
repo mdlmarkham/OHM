@@ -127,6 +127,8 @@ class TestWriteBenchmarks:
     """Benchmark write operations."""
 
     @pytest.mark.benchmark(group="write")
+    @pytest.mark.benchmark(group="create")
+    @pytest.mark.performance
     def test_create_node(self, benchmark):
         """Node creation latency."""
         from ohm.queries import create_node
@@ -140,6 +142,7 @@ class TestWriteBenchmarks:
         conn.close()
 
     @pytest.mark.benchmark(group="write")
+    @pytest.mark.performance
     def test_create_edge(self, benchmark):
         """Edge creation latency."""
         from ohm.queries import create_edge, create_node

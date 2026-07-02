@@ -94,22 +94,20 @@ test-concurrent:
 		--durations=10 2>&1 | tee $(REPORTS_DIR)/concurrent-test.log
 	@echo ""
 
-# OHM-gitk: UGC-poisoning adversarial scenario (after test file is created)
+# OHM-gitk: UGC-poisoning adversarial scenario
+# Test file exists and is marked @pytest.mark.adversarial
+# Run via: make test-adversarial (uses -m adversarial marker)
 test-adversarial-scenario:
 	@echo "=== Running adversarial scenario: UGC-poisoning (OHM-gitk) ==="
 	@mkdir -p $(REPORTS_DIR)
-	if [ -f $(TESTS_DIR)/test_internalized_verification_scenario.py ]; then \
-		$(PYTEST) $(PYTEST_FLAGS) \
-			$(TESTS_DIR)/test_internalized_verification_scenario.py \
-			--timeout=$(TEST_TIMEOUT) \
-			-v 2>&1 | tee $(REPORTS_DIR)/adversarial-scenario.log; \
-	else \
-		echo "⚠  OHM-gitk test file not yet created. Run: make test-adversarial-scenario-create"; \
-	fi
+	$(PYTEST) $(PYTEST_FLAGS) \
+		$(TESTS_DIR)/test_internalized_verification_scenario.py \
+		--timeout=$(TEST_TIMEOUT) \
+		-v 2>&1 | tee $(REPORTS_DIR)/adversarial-scenario.log
 	@echo ""
 
 # Full suite: all test categories
-test-all: test-unit test-integration test-performance test-concurrent
+test-all: test-unit test-integration test-adversarial test-performance test-concurrent
 	@echo ""
 	@echo "═══════════════════════════════════════════"
 	@echo "  ✓ All test suites complete"
@@ -153,13 +151,6 @@ clean:
 
 # Create the adversarial scenario test file (placeholder for OHM-gitk)
 # Once Clio and Socrates complete their designs, this will be filled in.
-test-adversarial-scenario-create:
-	@echo "Creating adversarial scenario test skeleton..."
-	@touch $(TESTS_DIR)/test_internalized_verification_scenario.py
-	@echo "Created: $(TESTS_DIR)/test_internalized_verification_scenario.py"
-	@echo "Next: Implement UGC-poisoning scenario per OHM-gitk"
-	@echo "  See: https://arxiv.org/abs/2605.24245 (Cornell UGC poisoning)"
-
 # Help
 help:
 	@echo "OHM Agent Test Harness (OHM-9zae)"

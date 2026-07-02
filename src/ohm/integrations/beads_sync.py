@@ -80,19 +80,16 @@ def _ensure_anchor_node(conn) -> None:
 
 
 def _find_task_by_beads_id(conn, beads_id: str) -> str | None:
-    """Return the OHM task node id for a given Beads issue id, or None."""
-    rows = conn.execute("SELECT id FROM ohm_nodes WHERE type = 'task' AND deleted_at IS NULL").fetchall()
-    for (node_id,) in rows:
-        meta_raw = conn.execute("SELECT metadata FROM ohm_nodes WHERE id = ?", [node_id]).fetchone()
-        if not meta_raw or not meta_raw[0]:
-            continue
-        try:
-            meta = json.loads(meta_raw[0]) if isinstance(meta_raw[0], str) else meta_raw[0]
-        except (json.JSONDecodeError, TypeError):
-            continue
-        if isinstance(meta, dict) and meta.get("beads_id") == beads_id:
-            return node_id
-    return None
+    """Return the OHM task node id for a given Beads issue id, or None.
+
+    Uses a JSON extraction query instead of scanning all task nodes.
+    """
+    rows = conn.execute(
+        "SELECT id FROM ohm_nodes WHERE type = 'task' AND deleted_at IS NULL "
+        "AND (metadata->>'$.beads_id') = ?",
+        [beads_id],
+    ).fetchall()
+    return rows[0][0] if rows else None
 
 
 def sync_beads_to_ohm_tasks(
@@ -100,6 +97,7 @@ def sync_beads_to_ohm_tasks(
     issues: list[dict[str, Any]],
     *,
     actor: str = "system",
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     """Sync Beads issues into OHM task nodes.
 
@@ -110,10 +108,14 @@ def sync_beads_to_ohm_tasks(
        assigned_to, tags) — but **not** ``task_status`` if the OHM side
        has already advanced it past the Beads status.
 
+    Idempotent: if a task already exists and all Beads-owned fields match,
+    it is skipped (not counted as "updated").
+
     Args:
         conn: DuckDB connection (write).
         issues: List of Beads issue dicts (as returned by ``bd list --json``).
         actor: Agent name to attribute the writes to.
+        dry_run: If True, only report what would change without applying.
 
     Returns:
         Sync report dict::
@@ -159,6 +161,9 @@ def sync_beads_to_ohm_tasks(
         existing_task_id = _find_task_by_beads_id(conn, beads_id)
 
         if existing_task_id is None:
+            if dry_run:
+                report["created"] += 1
+                continue
             # Create a new task node.
             task_id = f"beads_{beads_id.lower().replace('-', '_')}"
             try:
@@ -219,6 +224,10 @@ def sync_beads_to_ohm_tasks(
             ):
                 # Nothing changed — skip the UPDATE (idempotency)
                 report["skipped"] += 1
+                continue
+
+            if dry_run:
+                report["updated"] += 1
                 continue
 
             try:

@@ -2083,6 +2083,11 @@ def suggest_edge_type(
         suggested_layer = "L2"
         reasoning = f"Source→{to_type} should use L2 REFERENCES, not CAUSES. A source citing a {to_type} is evidence, not an agent interpretation."
         alternatives = ["SUPPORTS_EVIDENCE"]
+    elif from_type in SOURCE_TYPES and to_type in {"pattern", "concept", "synthesis", "interpretation"}:
+        suggested_edge_type = "REFERENCES"
+        suggested_layer = "L2"
+        reasoning = f"Source→{to_type} should use REFERENCES (L2 citation edge), not L3 RELATED_TO. A source citing a pattern is a citation, not an agent interpretation."
+        alternatives = ["SUPPORTS_EVIDENCE"]
     elif from_type in OBSERVATION_TYPES and to_type in CAUSAL_TARGET_TYPES:
         suggested_edge_type = "SUPPORTS_EVIDENCE"
         suggested_layer = "L3"
@@ -2102,7 +2107,7 @@ def suggest_edge_type(
         suggested_edge_type = "RELATED_TO"
         suggested_layer = "L3"
         reasoning = f"Default for {from_type}→{to_type}: RELATED_TO. Use CAUSES only when there is a genuine causal mechanism."
-        alternatives = ["CAUSES", "CORRELATES_WITH", "EXPLAINS"]
+        alternatives = ["CAUSES", "INFLUENCES", "CORRELATES_WITH", "EXPLAINS"]
 
     from ohm.graph.constraints import EDGE_CONSTRAINTS
 

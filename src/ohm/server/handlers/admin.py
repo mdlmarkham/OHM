@@ -2302,9 +2302,10 @@ class AdminHandlerMixin:
                     issues are fetched from the ``bd`` CLI (or .beads/issues.jsonl
                     fallback).
             actor:  Agent name to attribute the writes to (default: "system").
+            dry_run: If true, return what would change without modifying (default: false).
 
         Returns:
-            Sync report: {created, updated, skipped, errors, total}.
+            Sync report: {created, updated, skipped, errors, total, dry_run}.
         """
         from ohm.integrations.beads_sync import fetch_beads_issues, sync_beads_to_ohm_tasks
 
@@ -2312,10 +2313,13 @@ class AdminHandlerMixin:
         if not issues:
             issues = fetch_beads_issues()
         sync_actor = body.get("actor", "system")
+        dry_run = body.get("dry_run", False)
 
         result = sync_beads_to_ohm_tasks(
             self.current_store.conn,
             issues,
             actor=sync_actor,
+            dry_run=dry_run,
         )
+        result["dry_run"] = dry_run
         self._json_response(200, result)
