@@ -664,3 +664,26 @@ Option A: declare the 4 TOPO observation lifecycle tables as `DomainTable` insta
 - Application-layer integrity enforcement (consistent with OHM — no FK constraints in DuckDB)
 - `topo.json` template and `SchemaConfig.topo()` Python factory kept in sync
 - See [full ADR](0040-topo-observation-lifecycle.md)
+
+---
+
+## ADR-041: Temporal Event Model — Intervals, Plans, and Horizons
+
+**Date:** 2026-07-02
+**Status:** Decided
+
+### Context
+
+TOPO needs to represent time-bounded events with bounded durations, horizons (`HISTORICAL`/`CURRENT`/`PLANNED`/`FORECAST`), event classes, operating states, and plan grouping. OHM's core `ohm_observations` is point-in-time and not a fit for intervals.
+
+### Decision
+
+Pilot the model as TOPO DomainTables (`topo_plans`, `topo_events`, `topo_event_links`) immediately, while designing generic `ohm_intervals` / `ohm_plans` primitives in parallel. Promote to core once semantics stabilize, with a documented migration path. Rejected Option C (extend `ohm_observations` with JSON) because it would lose queryability and the interval-vs-measurement distinction.
+
+### Consequences
+
+- TOPO unblocks immediately with schema-managed, DuckLake-mirrored temporal tables
+- Other OHM consumers are not forced to adopt immature temporal primitives
+- Core schema team can design `ohm_intervals` / `ohm_plans` with real field evidence
+- Future migration is acknowledged and planned, not deferred as technical debt
+- See [full ADR](ADR-041-temporal-event-model.md)
