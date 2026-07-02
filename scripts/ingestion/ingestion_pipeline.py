@@ -27,11 +27,9 @@ import argparse
 import hashlib
 import json
 import os
-import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 # Rate-limit retry helper
 RATE_LIMIT_DELAY = 0.15  # seconds between API calls
@@ -41,10 +39,11 @@ RATE_LIMIT_MAX_RETRIES = 3
 def _api_post(url, headers, json_data=None, *, json=None, timeout=10):
     """POST with rate-limit retry."""
     import requests as http_requests
+
     for attempt in range(RATE_LIMIT_MAX_RETRIES):
         time.sleep(RATE_LIMIT_DELAY)
         r = http_requests.post(url, headers=headers, json=json_data, timeout=timeout)
-        if r.status_code == 429 or (r.status_code == 400 and 'rate_limited' in r.text):
+        if r.status_code == 429 or (r.status_code == 400 and "rate_limited" in r.text):
             wait = 5 * (attempt + 1)
             print(f"    ~ Rate limited, retrying in {wait}s...")
             time.sleep(wait)
@@ -56,16 +55,19 @@ def _api_post(url, headers, json_data=None, *, json=None, timeout=10):
 def _api_get(url, headers, params=None, timeout=5):
     """GET with rate-limit retry."""
     import requests as http_requests
+
     for attempt in range(RATE_LIMIT_MAX_RETRIES):
         time.sleep(RATE_LIMIT_DELAY * 0.5)
         r = http_requests.get(url, headers=headers, params=params, timeout=timeout)
-        if r.status_code == 429 or (r.status_code == 400 and 'rate_limited' in r.text):
+        if r.status_code == 429 or (r.status_code == 400 and "rate_limited" in r.text):
             wait = 3 * (attempt + 1)
             print(f"    ~ Rate limited, retrying in {wait}s...")
             time.sleep(wait)
             continue
         return r
     return r
+
+
 from urllib.parse import urlparse
 
 # ── Configuration ────────────────────────────────────────────────────────────
@@ -100,12 +102,36 @@ SYNTHESIS_MODEL = os.environ.get("SYNTHESIS_MODEL", "ollama/glm-5:cloud")
 
 # Tracked domains for triage relevance check
 TRACKED_DOMAINS = [
-    "hormuz", "iran", "oil", "oil price", "brent", "WTI", "strait",
-    "warsh", "fed", "federal reserve", "rate hike", "interest rate", "PCE",
-    "abraham accords", "saudi", "israel", "lebanon", "hezbollah", "ceasefire",
-    "agent governance", "AI governance", "AI agent", "identity security",
-    "demand rationing", "transit", "shipping", "tanker",
-    "AND-gate", "OR-gate", "doom loop",
+    "hormuz",
+    "iran",
+    "oil",
+    "oil price",
+    "brent",
+    "WTI",
+    "strait",
+    "warsh",
+    "fed",
+    "federal reserve",
+    "rate hike",
+    "interest rate",
+    "PCE",
+    "abraham accords",
+    "saudi",
+    "israel",
+    "lebanon",
+    "hezbollah",
+    "ceasefire",
+    "agent governance",
+    "AI governance",
+    "AI agent",
+    "identity security",
+    "demand rationing",
+    "transit",
+    "shipping",
+    "tanker",
+    "AND-gate",
+    "OR-gate",
+    "doom loop",
 ]
 
 # ── Queue Management ────────────────────────────────────────────────────────
@@ -180,6 +206,7 @@ def _fetch_rss_feed(url: str, category: str = "general", trust: float = 0.5) -> 
 
     try:
         import urllib.request
+
         req = urllib.request.Request(url, headers={"User-Agent": "OHM-Ingestion/1.0"})
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = resp.read()
@@ -206,17 +233,19 @@ def _fetch_rss_feed(url: str, category: str = "general", trust: float = 0.5) -> 
         # Deduplicate by URL hash
         url_hash = hashlib.md5(link.encode()).hexdigest()[:16]
 
-        items.append({
-            "id": url_hash,
-            "title": title,
-            "url": link,
-            "description": description[:500],
-            "pub_date": pub_date,
-            "category": category,
-            "trust": trust,
-            "source_feed": url,
-            "ingested_at": datetime.now(timezone.utc).isoformat(),
-        })
+        items.append(
+            {
+                "id": url_hash,
+                "title": title,
+                "url": link,
+                "description": description[:500],
+                "pub_date": pub_date,
+                "category": category,
+                "trust": trust,
+                "source_feed": url,
+                "ingested_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
 
     return items
 
@@ -224,10 +253,12 @@ def _fetch_rss_feed(url: str, category: str = "general", trust: float = 0.5) -> 
 def _fetch_searxng(query: str, category: str = "search") -> list[dict]:
     """Fetch results from SearXNG instance."""
     from urllib.parse import quote_plus
+
     searxng_url = os.environ.get("SEARXNG_URL", "http://192.168.70.101:8083")
 
     try:
         import urllib.request
+
         url = f"{searxng_url}/search?q={quote_plus(query)}&format=json"
         req = urllib.request.Request(url, headers={"User-Agent": "OHM-Ingestion/1.0"})
         with urllib.request.urlopen(req, timeout=15) as resp:
@@ -243,17 +274,19 @@ def _fetch_searxng(query: str, category: str = "search") -> list[dict]:
         if not link or not title:
             continue
         url_hash = hashlib.md5(link.encode()).hexdigest()[:16]
-        items.append({
-            "id": url_hash,
-            "title": title,
-            "url": link,
-            "description": r.get("content", "")[:500],
-            "pub_date": "",
-            "category": category,
-            "trust": 0.4,  # SearXNG results vary in trust
-            "source_feed": f"searxng:{query}",
-            "ingested_at": datetime.now(timezone.utc).isoformat(),
-        })
+        items.append(
+            {
+                "id": url_hash,
+                "title": title,
+                "url": link,
+                "description": r.get("content", "")[:500],
+                "pub_date": "",
+                "category": category,
+                "trust": 0.4,  # SearXNG results vary in trust
+                "source_feed": f"searxng:{query}",
+                "ingested_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
 
     return items
 
@@ -304,11 +337,12 @@ def stage_fetch():
     content_deduped = 0
     if OHM_TOKEN:
         import requests as http_requests
+
         headers = {"Authorization": f"Bearer {OHM_TOKEN}"}
         for item in unique[:]:
             url = item.get("url", "")
             if url:
-                content_hash = hashlib.sha256(url.encode("utf-8")).hexdigest()
+                hashlib.sha256(url.encode("utf-8")).hexdigest()
                 try:
                     r = http_requests.get(
                         f"{OHM_URL}/resolve",
@@ -351,20 +385,11 @@ def _triage_with_model(item: dict) -> dict:
     Returns: {"relevant": bool, "novel": bool, "reasoning": str, "domain": str}
     Token cost: ~50 tokens per item.
     """
-    import requests as http_requests
 
     # Build a minimal prompt
     title = item.get("title", "")
     desc = item.get("description", "")[:200]
-    domains_str = ", ".join(TRACKED_DOMAINS[:15])
-
-    prompt = f"""Is this article relevant to any of these domains: {domains_str}?
-And does it likely contain NEW information (not just repeating known events)?
-
-Article: {title}
-Summary: {desc}
-
-Answer JSON only: {{"relevant": true/false, "novel": true/false, "domain": "matched_domain_or_none", "reasoning": "one sentence"}}"""
+    ", ".join(TRACKED_DOMAINS[:15])
 
     # Fallback to keyword matching when model is unavailable
     # For production, this would call the cheap model (GLM-5) via OpenClaw
@@ -414,22 +439,33 @@ def stage_triage():
             reason = result.get("reasoning", "?")[:50]
             print(f"    ✗ {item['title'][:50]}... [{reason}]")
 
-    print(f"\n  Triage: {passed} passed, {failed} filtered (token cost: ~{len(raw_items)*50} tokens)")
+    print(f"\n  Triage: {passed} passed, {failed} filtered (token cost: ~{len(raw_items) * 50} tokens)")
     return passed
 
 
 def _is_reference_page(title: str, url: str) -> bool:
     """Filter out encyclopedic/reference pages that aren't news or analysis."""
     ref_indicators = [
-        "wikipedia", "wikimedia", "chart - live", "price chart",
-        "price - chart - historical", "about - iea", "investing.com canada",
-        "spot prices for crude", "stock price, quote",
-        "- price - chart", "complete guide to", "what is ai governance",
-        "abraham accords - wikipedia", "abraham accords | peace",
-        "abraham accords - middle east", "abraham accords - united states",
+        "wikipedia",
+        "wikimedia",
+        "chart - live",
+        "price chart",
+        "price - chart - historical",
+        "about - iea",
+        "investing.com canada",
+        "spot prices for crude",
+        "stock price, quote",
+        "- price - chart",
+        "complete guide to",
+        "what is ai governance",
+        "abraham accords - wikipedia",
+        "abraham accords | peace",
+        "abraham accords - middle east",
+        "abraham accords - united states",
         "crude oil price, oil, energy",
         "eu artificial intelligence act | up-to-date",
-        "partnership on ai", "elham fakhro",
+        "partnership on ai",
+        "elham fakhro",
     ]
     combined = (title + " " + url).lower()
     return any(ind in combined for ind in ref_indicators)
@@ -532,6 +568,7 @@ def stage_source():
         # OHM-g0kv: Check if a similar node already exists via alias resolution
         if OHM_TOKEN:
             from ohm.validation import normalize_alias as _norm
+
             normalized_title = _norm(title)
             try:
                 r = _api_get(
@@ -610,7 +647,6 @@ def _create_reference_edges(item: dict, source_id: str, headers: dict):
     labels match keywords from the article. Create REFERENCES edges from
     those concept nodes to the new source node.
     """
-    import requests as http_requests
 
     title = item.get("title", "")
     description = item.get("description", "")
@@ -692,7 +728,7 @@ def stage_assess():
         url = item.get("url", "")
         trust = item.get("trust", 0.5)
         triage = item.get("triage", {})
-        matched_domain = triage.get("domain", "")
+        triage.get("domain", "")
 
         if not source_node_id:
             print(f"    - Skipping item without source_node_id: {title[:40]}...")
@@ -831,7 +867,7 @@ def stage_synthesize():
         domain = item.get("triage", {}).get("domain", "unknown")
         by_domain[domain].append(item)
 
-    print(f"  Assessed items by domain:")
+    print("  Assessed items by domain:")
     for domain, items in sorted(by_domain.items(), key=lambda x: -len(x[1])):
         print(f"    {domain}: {len(items)} items")
 
@@ -885,10 +921,7 @@ def stage_synthesize():
 
         # Create synthesis observation on the concept node
         titles = [it.get("title", "?")[:60] for it in items[:5]]
-        synthesis_notes = (
-            f"Cluster of {count} articles about '{keyword}': "
-            f"{'; '.join(titles)}"
-        )
+        synthesis_notes = f"Cluster of {count} articles about '{keyword}': {'; '.join(titles)}"
 
         # Average confidence from items
         confidences = [it.get("assessment", {}).get("confidence", 0.7) for it in items]
@@ -934,17 +967,16 @@ def stage_synthesize():
 
 def main():
     parser = argparse.ArgumentParser(description="OHM Staged Ingestion Pipeline")
-    parser.add_argument("--stage", choices=["fetch", "triage", "source", "document", "assess", "synthesize", "full", "queue-status", "drain-triage"],
-                        default="queue-status")
+    parser.add_argument("--stage", choices=["fetch", "triage", "source", "document", "assess", "synthesize", "full", "queue-status", "drain-triage"], default="queue-status")
     parser.add_argument("--ohm-url", default=OHM_URL)
     parser.add_argument("--ohm-token", default=OHM_TOKEN)
     args = parser.parse_args()
 
     # Update globals for downstream stages
     if args.ohm_url:
-        globals()['OHM_URL'] = args.ohm_url
+        globals()["OHM_URL"] = args.ohm_url
     if args.ohm_token:
-        globals()['OHM_TOKEN'] = args.ohm_token
+        globals()["OHM_TOKEN"] = args.ohm_token
 
     if args.stage == "queue-status":
         queue_status()

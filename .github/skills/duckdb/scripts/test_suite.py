@@ -35,10 +35,18 @@ _SKILL_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_SKILL_ROOT))
 
 from scripts.duckdb_helper import (
-    DuckDBConfig, DuckDBSession,
-    _dsn_escape, _require_identifier, _require_identifier_list,
-    _sql_str_escape, _validate_compression, _validate_memory_limit,
-    _validate_path, _validate_toon_name, df_to_toon, scalar_to_toon,
+    DuckDBConfig,
+    DuckDBSession,
+    _dsn_escape,
+    _require_identifier,
+    _require_identifier_list,
+    _sql_str_escape,
+    _validate_compression,
+    _validate_memory_limit,
+    _validate_path,
+    _validate_toon_name,
+    df_to_toon,
+    scalar_to_toon,
 )
 
 import pandas as pd
@@ -47,25 +55,25 @@ import pandas as pd
 # Test runner
 # ---------------------------------------------------------------------------
 
-_RESULTS: list[tuple[str, str, str | None]] = []   # (name, PASS|FAIL, detail)
+_RESULTS: list[tuple[str, str, str | None]] = []  # (name, PASS|FAIL, detail)
 
 
 def _test(name: str):
     """Decorator — marks a function as a test case."""
+
     def decorator(fn: Callable):
         fn._test_name = name
         fn._is_test = True
         return fn
+
     return decorator
 
 
 def _run_all(filter_str: str = "", verbose: bool = False) -> bool:
     import inspect
+
     module = sys.modules[__name__]
-    tests = [
-        obj for _, obj in inspect.getmembers(module, inspect.isfunction)
-        if getattr(obj, "_is_test", False)
-    ]
+    tests = [obj for _, obj in inspect.getmembers(module, inspect.isfunction) if getattr(obj, "_is_test", False)]
     if filter_str:
         tests = [t for t in tests if filter_str.lower() in t._test_name.lower()]
 
@@ -86,7 +94,7 @@ def _run_all(filter_str: str = "", verbose: bool = False) -> bool:
             failed += 1
 
     total = passed + failed
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  {passed}/{total} passed" + (f"  ({failed} FAILED)" if failed else "  — all OK"))
     return failed == 0
 
@@ -94,6 +102,7 @@ def _run_all(filter_str: str = "", verbose: bool = False) -> bool:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _mem_db(**kwargs) -> DuckDBSession:
     return DuckDBSession(":memory:", **kwargs)
@@ -110,6 +119,7 @@ def _disk_db() -> tuple[str, DuckDBSession]:
 # Security tests
 # ===========================================================================
 
+
 @_test("SEC: valid identifier accepted")
 def t_sec_valid_ident():
     assert _require_identifier("my_table") == "my_table"
@@ -119,22 +129,31 @@ def t_sec_valid_ident():
 
 @_test("SEC: space in identifier rejected")
 def t_sec_space():
-    try: _require_identifier("my table"); assert False, "should raise"
-    except ValueError: pass
+    try:
+        _require_identifier("my table")
+        assert False, "should raise"
+    except ValueError:
+        pass
 
 
 @_test("SEC: SQL injection in identifier rejected")
 def t_sec_sql_inject():
     for bad in ["'; DROP TABLE t;--", "1bad", "", "a-b", "a.b"]:
-        try: _require_identifier(bad); assert False, f"{bad!r} not rejected"
-        except ValueError: pass
+        try:
+            _require_identifier(bad)
+            assert False, f"{bad!r} not rejected"
+        except ValueError:
+            pass
 
 
 @_test("SEC: identifier list — validates each member")
 def t_sec_ident_list():
     assert _require_identifier_list(["a", "b", "C_3"]) == ["a", "b", "C_3"]
-    try: _require_identifier_list(["a", "bad col"]); assert False
-    except ValueError: pass
+    try:
+        _require_identifier_list(["a", "bad col"])
+        assert False
+    except ValueError:
+        pass
 
 
 @_test("SEC: DSN escape — single quote")
@@ -167,14 +186,20 @@ def t_sec_mem_valid():
 @_test("SEC: memory_limit injection rejected")
 def t_sec_mem_inject():
     for bad in ["'; DROP TABLE t;", "4", "", "4GB; extra"]:
-        try: _validate_memory_limit(bad); assert False, f"{bad!r} not rejected"
-        except ValueError: pass
+        try:
+            _validate_memory_limit(bad)
+            assert False, f"{bad!r} not rejected"
+        except ValueError:
+            pass
 
 
 @_test("SEC: path null-byte rejected")
 def t_sec_path_null():
-    try: _validate_path("/data/\x00bad"); assert False
-    except ValueError: pass
+    try:
+        _validate_path("/data/\x00bad")
+        assert False
+    except ValueError:
+        pass
 
 
 @_test("SEC: path clean accepted (local and S3)")
@@ -186,9 +211,12 @@ def t_sec_path_clean():
 @_test("SEC: compression allowlist")
 def t_sec_comp():
     for valid in ["zstd", "ZSTD", "snappy", "gzip", "none"]:
-        assert _validate_compression(valid) in {"zstd","snappy","gzip","none"}
-    try: _validate_compression("zstd; DROP TABLE t"); assert False
-    except ValueError: pass
+        assert _validate_compression(valid) in {"zstd", "snappy", "gzip", "none"}
+    try:
+        _validate_compression("zstd; DROP TABLE t")
+        assert False
+    except ValueError:
+        pass
 
 
 @_test("SEC: TOON name validation")
@@ -196,17 +224,21 @@ def t_sec_toon_name():
     _validate_toon_name("my_table")
     _validate_toon_name("tag-123")
     for bad in ["t[1]", "t:x", "t,y", "t{z}", ""]:
-        try: _validate_toon_name(bad); assert False, f"{bad!r} not rejected"
-        except ValueError: pass
+        try:
+            _validate_toon_name(bad)
+            assert False, f"{bad!r} not rejected"
+        except ValueError:
+            pass
 
 
 # ===========================================================================
 # TOON serialisation tests
 # ===========================================================================
 
+
 @_test("TOON: tabular multi-row output")
 def t_toon_tabular():
-    df = pd.DataFrame({"tag": ["A","B"], "val": [1.0, 2.0]})
+    df = pd.DataFrame({"tag": ["A", "B"], "val": [1.0, 2.0]})
     out = df_to_toon(df, "test")
     assert "test[2]{tag,val}:" in out
     assert "A,1.0" in out
@@ -261,6 +293,7 @@ def t_toon_scalar():
 # Session / config tests
 # ===========================================================================
 
+
 @_test("Session: context manager connect/close cycle")
 def t_session_ctx():
     with _mem_db() as db:
@@ -273,7 +306,7 @@ def t_session_pragma():
     cfg = DuckDBConfig(memory_limit="512MB", threads=2)
     with DuckDBSession(":memory:", config=cfg) as db:
         val = db.scalar("SELECT value FROM duckdb_settings() WHERE name='memory_limit'")
-        assert "512" in str(val) or "488" in str(val)   # DuckDB may report as MiB
+        assert "512" in str(val) or "488" in str(val)  # DuckDB may report as MiB
 
 
 @_test("Session: invalid memory_limit rejected at connect")
@@ -308,17 +341,14 @@ def t_session_schema_inject():
 # Cache / refresh_table tests
 # ===========================================================================
 
+
 @_test("Cache: refresh_table appends new rows only")
 def t_cache_refresh():
     with _mem_db() as db:
         db.execute("CREATE TABLE cache (ts TIMESTAMP, v INT)")
         db.execute("INSERT INTO cache VALUES ('2025-01-01', 1)")
         n = db.refresh_table(
-            source_query=(
-                "SELECT TIMESTAMP '2025-01-01' AS ts, 1 AS v "
-                "UNION ALL SELECT TIMESTAMP '2025-01-03', 3 "
-                "UNION ALL SELECT TIMESTAMP '2025-01-04', 4"
-            ),
+            source_query=("SELECT TIMESTAMP '2025-01-01' AS ts, 1 AS v UNION ALL SELECT TIMESTAMP '2025-01-03', 3 UNION ALL SELECT TIMESTAMP '2025-01-04', 4"),
             table="cache",
             watermark_col="ts",
         )
@@ -357,6 +387,7 @@ def t_cache_bad_ident():
 # Graph tests (DuckDB 1.3+ USING KEY)
 # ===========================================================================
 
+
 def _graph_db() -> DuckDBSession:
     db = DuckDBSession(":memory:").__enter__()
     db.execute("CREATE TEMP TABLE edges (src INT, dst INT, weight DOUBLE)")
@@ -392,8 +423,8 @@ def t_graph_dijkstra():
         # 1->2 = 1; 1->3=4 vs 1->2->? no shortcut to 3; 1->2->4=3
         assert dist[1] == 0.0
         assert dist[2] == 1.0
-        assert dist[3] == 3.0   # 1->2->3
-        assert dist[4] == 4.0   # 1->2->3->4
+        assert dist[3] == 3.0  # 1->2->3
+        assert dist[4] == 4.0  # 1->2->3->4
 
 
 @_test("Graph: Dijkstra path list correctness")
@@ -420,11 +451,11 @@ def t_graph_bad_ident():
 # Hierarchy tests
 # ===========================================================================
 
+
 def _tree_db() -> DuckDBSession:
     db = DuckDBSession(":memory:").__enter__()
     db.execute("CREATE TEMP TABLE tree (id INT PRIMARY KEY, parent_id INT, name VARCHAR)")
-    db.execute("INSERT INTO tree VALUES "
-               "(1,NULL,'root'),(2,1,'A'),(3,1,'B'),(4,2,'A1'),(5,2,'A2'),(6,3,'B1')")
+    db.execute("INSERT INTO tree VALUES (1,NULL,'root'),(2,1,'A'),(3,1,'B'),(4,2,'A1'),(5,2,'A2'),(6,3,'B1')")
     return db
 
 
@@ -466,6 +497,7 @@ def t_hier_bad_ident():
 # Vector store tests (no HNSW — brute-force scan)
 # ===========================================================================
 
+
 @_test("Vector: create_vector_table creates correct schema")
 def t_vec_create():
     with _mem_db() as db:
@@ -479,8 +511,11 @@ def t_vec_create():
 @_test("Vector: dim=0 rejected")
 def t_vec_bad_dim():
     with _mem_db() as db:
-        try: db.create_vector_table("e", dim=0); assert False
-        except ValueError: pass
+        try:
+            db.create_vector_table("e", dim=0)
+            assert False
+        except ValueError:
+            pass
 
 
 @_test("Vector: upsert and brute-force search")
@@ -490,21 +525,17 @@ def t_vec_search():
         db.create_vector_table("emb", dim=DIM, extra_cols={"content": "VARCHAR"})
         # Use distinct directions (all-same-value vectors have cosine dist 0 to each other)
         directions = [
-            [1,0,0,0,0,0,0,0],   # doc0: pure axis 0
-            [0,1,0,0,0,0,0,0],   # doc1: pure axis 1
-            [0,0,1,0,0,0,0,0],   # doc2: pure axis 2
-            [1,1,0,0,0,0,0,0],   # doc3: axes 0+1 (our target)
-            [0,0,0,1,0,0,0,0],   # doc4: pure axis 3
+            [1, 0, 0, 0, 0, 0, 0, 0],  # doc0: pure axis 0
+            [0, 1, 0, 0, 0, 0, 0, 0],  # doc1: pure axis 1
+            [0, 0, 1, 0, 0, 0, 0, 0],  # doc2: pure axis 2
+            [1, 1, 0, 0, 0, 0, 0, 0],  # doc3: axes 0+1 (our target)
+            [0, 0, 0, 1, 0, 0, 0, 0],  # doc4: pure axis 3
         ]
         for i, d in enumerate(directions):
-            db.execute(
-                f"INSERT INTO emb (id, embedding, content) VALUES (?, ?::FLOAT[{DIM}], ?)",
-                [f"doc{i}", [float(x) for x in d], f"content {i}"]
-            )
+            db.execute(f"INSERT INTO emb (id, embedding, content) VALUES (?, ?::FLOAT[{DIM}], ?)", [f"doc{i}", [float(x) for x in d], f"content {i}"])
         # Query similar to doc3 direction [1,1,0...0]
         q = [1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-        results = db.vector_search("emb", query_vector=q, top_k=1,
-                                   metric="cosine", return_cols=["id","content"])
+        results = db.vector_search("emb", query_vector=q, top_k=1, metric="cosine", return_cols=["id", "content"])
         top_id = results.iloc[0]["id"]
         assert top_id == "doc3", f"Expected doc3 (closest direction), got {top_id}"
 
@@ -512,21 +543,26 @@ def t_vec_search():
 @_test("Vector: search bad table name rejected")
 def t_vec_bad_table():
     with _mem_db() as db:
-        try: db.vector_search("bad-table", query_vector=[1.0, 2.0], top_k=3)
-        except ValueError: pass
+        try:
+            db.vector_search("bad-table", query_vector=[1.0, 2.0], top_k=3)
+        except ValueError:
+            pass
 
 
 # ===========================================================================
 # Write-back tests (Parquet only — no live Postgres/DuckLake in test env)
 # ===========================================================================
 
+
 @_test("Writeback: Parquet dry-run prints row count, no file created")
 def t_wb_parquet_dryrun():
     import scripts.duckdb_writeback as wb
+
     fd, db_path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
     try:
         import duckdb
+
         con = duckdb.connect(db_path)
         con.execute("CREATE TABLE t (a INT, b VARCHAR)")
         con.execute("INSERT INTO t VALUES (1,'x'),(2,'y'),(3,'z')")
@@ -535,9 +571,12 @@ def t_wb_parquet_dryrun():
         with tempfile.TemporaryDirectory() as td:
             out = td + "/out.parquet"
             wb.writeback_to_parquet(
-                duckdb_path=db_path, source_sql="SELECT * FROM t",
-                output_path=out, partition_by=None,
-                compression="zstd", dry_run=True,
+                duckdb_path=db_path,
+                source_sql="SELECT * FROM t",
+                output_path=out,
+                partition_by=None,
+                compression="zstd",
+                dry_run=True,
             )
             assert not Path(out).exists(), "File should NOT be created in dry-run"
     finally:
@@ -548,10 +587,12 @@ def t_wb_parquet_dryrun():
 @_test("Writeback: Parquet write actually creates file")
 def t_wb_parquet_write():
     import scripts.duckdb_writeback as wb
+
     fd, db_path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
     try:
         import duckdb
+
         con = duckdb.connect(db_path)
         con.execute("CREATE TABLE t (a INT)")
         con.execute("INSERT INTO t VALUES (1),(2),(3)")
@@ -560,9 +601,12 @@ def t_wb_parquet_write():
         with tempfile.TemporaryDirectory() as td:
             out = td + "/out.parquet"
             wb.writeback_to_parquet(
-                duckdb_path=db_path, source_sql="SELECT * FROM t",
-                output_path=out, partition_by=None,
-                compression="zstd", dry_run=False,
+                duckdb_path=db_path,
+                source_sql="SELECT * FROM t",
+                output_path=out,
+                partition_by=None,
+                compression="zstd",
+                dry_run=False,
             )
             assert Path(out).exists(), "File should be created"
             # Verify content
@@ -578,11 +622,15 @@ def t_wb_parquet_write():
 @_test("Writeback: bad compression rejected")
 def t_wb_bad_comp():
     import scripts.duckdb_writeback as wb
+
     try:
         wb.writeback_to_parquet(
-            duckdb_path=":memory:", source_sql="SELECT 1",
-            output_path="/tmp/x.parquet", partition_by=None,
-            compression="bad_codec", dry_run=True,
+            duckdb_path=":memory:",
+            source_sql="SELECT 1",
+            output_path="/tmp/x.parquet",
+            partition_by=None,
+            compression="bad_codec",
+            dry_run=True,
         )
         assert False
     except ValueError:
@@ -592,11 +640,15 @@ def t_wb_bad_comp():
 @_test("Writeback: null byte in output path rejected")
 def t_wb_null_path():
     import scripts.duckdb_writeback as wb
+
     try:
         wb.writeback_to_parquet(
-            duckdb_path=":memory:", source_sql="SELECT 1",
-            output_path="/tmp/out\x00.parquet", partition_by=None,
-            compression="zstd", dry_run=True,
+            duckdb_path=":memory:",
+            source_sql="SELECT 1",
+            output_path="/tmp/out\x00.parquet",
+            partition_by=None,
+            compression="zstd",
+            dry_run=True,
         )
         assert False
     except ValueError:
@@ -606,12 +658,18 @@ def t_wb_null_path():
 @_test("Writeback: DuckLake alias validated before extension load")
 def t_wb_ducklake_alias():
     import scripts.duckdb_writeback as wb
+
     try:
         wb.writeback_to_ducklake(
-            duckdb_path=":memory:", source_sql="SELECT 1 AS id",
-            dl_catalog="x.ducklake", dl_data_path="/tmp",
-            dl_schema="main", dl_table="t", dl_alias="bad alias",
-            conflict_key=None, dry_run=True,
+            duckdb_path=":memory:",
+            source_sql="SELECT 1 AS id",
+            dl_catalog="x.ducklake",
+            dl_data_path="/tmp",
+            dl_schema="main",
+            dl_table="t",
+            dl_alias="bad alias",
+            conflict_key=None,
+            dry_run=True,
         )
         assert False, "should raise ValueError for bad alias"
     except ValueError:
@@ -622,12 +680,12 @@ def t_wb_ducklake_alias():
 # DuckLake tests (alias/path validation only — extension may not be installed)
 # ===========================================================================
 
+
 @_test("DuckLake: alias validated before extension load")
 def t_dl_alias_validate():
     with _mem_db() as db:
         try:
-            db.attach_ducklake(catalog="x.ducklake", data_path="/tmp/lake",
-                               alias="bad alias")
+            db.attach_ducklake(catalog="x.ducklake", data_path="/tmp/lake", alias="bad alias")
             assert False
         except ValueError:
             pass
@@ -637,9 +695,7 @@ def t_dl_alias_validate():
 def t_dl_path_null():
     with _mem_db() as db:
         try:
-            db.attach_ducklake(catalog="x.ducklake",
-                               data_path="/tmp/\x00bad",
-                               alias="lake")
+            db.attach_ducklake(catalog="x.ducklake", data_path="/tmp/\x00bad", alias="lake")
             assert False
         except ValueError:
             pass
@@ -658,38 +714,47 @@ def t_dl_version_type():
     assert int(5) == 5
 
 
-
 # ===========================================================================
 # Quack validator tests (SEC-B, SEC-C, SEC-D, SEC-F)
 # ===========================================================================
 
+
 @_test("Quack: valid localhost URI accepted")
 def t_quack_uri_localhost():
     from scripts.duckdb_helper import _validate_quack_uri
-    for uri in ["quack:localhost", "quack://localhost", "quack:127.0.0.1",
-                "quack:myhost:9494", "quack:host.example.com:9000"]:
+
+    for uri in ["quack:localhost", "quack://localhost", "quack:127.0.0.1", "quack:myhost:9494", "quack:host.example.com:9000"]:
         assert _validate_quack_uri(uri) == uri
 
 
 @_test("Quack: URI with SQL injection chars rejected")
 def t_quack_uri_inject():
     from scripts.duckdb_helper import _validate_quack_uri
-    for bad in ["quack:host'; DROP TABLE t;--", "quack:h\x00ost", "", "quack:host\'evil"]:
-        try: _validate_quack_uri(bad); assert False, f"{bad!r} should be rejected"
-        except ValueError: pass
+
+    for bad in ["quack:host'; DROP TABLE t;--", "quack:h\x00ost", "", "quack:host'evil"]:
+        try:
+            _validate_quack_uri(bad)
+            assert False, f"{bad!r} should be rejected"
+        except ValueError:
+            pass
 
 
 @_test("Quack: URI with non-quack scheme rejected")
 def t_quack_uri_scheme():
     from scripts.duckdb_helper import _validate_quack_uri
+
     for bad in ["postgres:localhost", "http://host", "quac:host", "localhost"]:
-        try: _validate_quack_uri(bad); assert False, f"{bad!r} should be rejected"
-        except ValueError: pass
+        try:
+            _validate_quack_uri(bad)
+            assert False, f"{bad!r} should be rejected"
+        except ValueError:
+            pass
 
 
 @_test("Quack: valid token accepted")
 def t_quack_token_valid():
     from scripts.duckdb_helper import _validate_quack_token
+
     with _mem_db():  # just to load module
         pass
     # suppress short-token warning for this test
@@ -701,22 +766,34 @@ def t_quack_token_valid():
 @_test("Quack: empty token rejected")
 def t_quack_token_empty():
     from scripts.duckdb_helper import _validate_quack_token
-    try: _validate_quack_token(""); assert False
-    except ValueError: pass
+
+    try:
+        _validate_quack_token("")
+        assert False
+    except ValueError:
+        pass
 
 
 @_test("Quack: token shorter than 4 chars rejected")
 def t_quack_token_short():
     from scripts.duckdb_helper import _validate_quack_token
-    try: _validate_quack_token("abc"); assert False
-    except ValueError: pass
+
+    try:
+        _validate_quack_token("abc")
+        assert False
+    except ValueError:
+        pass
 
 
 @_test("Quack: single-quote in token rejected (SEC-B)")
 def t_quack_token_quote():
     from scripts.duckdb_helper import _validate_quack_token
-    try: _validate_quack_token("tok'en"); assert False
-    except ValueError: pass
+
+    try:
+        _validate_quack_token("tok'en")
+        assert False
+    except ValueError:
+        pass
 
 
 @_test("Quack: attach_quack validates alias and URI (SEC-B, SEC-C)")
@@ -742,8 +819,7 @@ def t_quack_serve_tls_guard():
     with _mem_db() as db:
         # allow_other_hostname=True without require_tls_confirm=False should raise
         try:
-            db.quack_serve("quack:0.0.0.0", allow_other_hostname=True,
-                           require_tls_confirm=True)
+            db.quack_serve("quack:0.0.0.0", allow_other_hostname=True, require_tls_confirm=True)
             assert False, "should raise without TLS confirmation"
         except ValueError as e:
             assert "TLS" in str(e) or "tls" in str(e).lower() or "reverse proxy" in str(e).lower()
@@ -754,24 +830,25 @@ def t_ducklake_catalog_escaped():
     # Verify the code path contains _sql_str_escape(catalog)
     import inspect
     from scripts.duckdb_helper import DuckDBSession
+
     src = inspect.getsource(DuckDBSession.attach_ducklake)
     assert "_sql_str_escape(catalog)" in src, "SEC-A: dl_catalog still not SQL-escaped"
+
 
 # ===========================================================================
 # Entry point
 # ===========================================================================
 
+
 def main():
     parser = argparse.ArgumentParser(description="DuckDB skill v2.0 test suite")
-    parser.add_argument("--verbose", "-v", action="store_true",
-                        help="Print PASS lines too")
-    parser.add_argument("--filter", "-f", default="",
-                        help="Run only tests whose name contains this string")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Print PASS lines too")
+    parser.add_argument("--filter", "-f", default="", help="Run only tests whose name contains this string")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.WARNING)
     print("DuckDB skill v3.0 — test suite")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     ok = _run_all(filter_str=args.filter, verbose=args.verbose)
     sys.exit(0 if ok else 1)

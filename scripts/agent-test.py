@@ -56,8 +56,11 @@ def run_pytest(
         os.makedirs(JUNIT_DIR, exist_ok=True)
 
     cmd = [
-        sys.executable, "-m", "pytest",
-        "--tb=short", "-q",
+        sys.executable,
+        "-m",
+        "pytest",
+        "--tb=short",
+        "-q",
     ]
 
     if marker:
@@ -106,6 +109,7 @@ def run_pytest(
     for line in result.stdout.split("\n"):
         if "passed" in line or "failed" in line:
             import re
+
             m = re.search(r"(\d+) passed", line)
             if m:
                 passed = int(m.group(1))
@@ -150,9 +154,7 @@ def print_summary(results: list[dict]):
     total_duration = 0.0
     for r in results:
         status = "✓" if r["failed"] == 0 and r["errors"] == 0 else "✗"
-        print(f"  {status} {r['label']:25s}  {r['passed']:4d} passed  "
-              f"{r['failed']:2d} failed  {r['skipped']:2d} skipped  "
-              f"{r['duration']:6.1f}s")
+        print(f"  {status} {r['label']:25s}  {r['passed']:4d} passed  {r['failed']:2d} failed  {r['skipped']:2d} skipped  {r['duration']:6.1f}s")
         total_passed += r["passed"]
         total_failed += r["failed"]
         total_skipped += r["skipped"]
@@ -160,9 +162,7 @@ def print_summary(results: list[dict]):
         total_duration += r["duration"]
 
     print("─" * 60)
-    print(f"  TOTAL{'':23s}  {total_passed:4d} passed  "
-          f"{total_failed:2d} failed  {total_skipped:2d} skipped  "
-          f"{total_duration:6.1f}s")
+    print(f"  TOTAL{'':23s}  {total_passed:4d} passed  {total_failed:2d} failed  {total_skipped:2d} skipped  {total_duration:6.1f}s")
     print("═" * 60)
     return total_failed + total_errors
 
@@ -212,11 +212,9 @@ def main():
 
     for label, marker, test_file in suites:
         if args.fast_junit or args.junit:
-            r = run_pytest(label, marker, test_file, timeout=args.timeout,
-                          workers=args.workers, junit=True, json_report=True)
+            r = run_pytest(label, marker, test_file, timeout=args.timeout, workers=args.workers, junit=True, json_report=True)
         else:
-            r = run_pytest(label, marker, test_file, timeout=args.timeout,
-                          workers=args.workers, junit=False, json_report=True)
+            r = run_pytest(label, marker, test_file, timeout=args.timeout, workers=args.workers, junit=False, json_report=True)
         results.append(r)
 
         if r["failed"] > 0 or r["errors"] > 0:

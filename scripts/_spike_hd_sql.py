@@ -53,9 +53,9 @@ Earlier v1-v7 scripts (in /tmp) are NOT archived -- they each
 explored a single approach that hit a DuckDB limitation. v8 is the
 only working one.
 """
+
 from __future__ import annotations
 
-import os
 import random
 import statistics
 import sys
@@ -87,8 +87,7 @@ def _seed_nodes_with_utinyint_list(conn, n: int, dim: int = 10000, seed: int = 4
         # 0..255 fits in UTINYINT
         fp_int_list = list(fp_bytes)
         conn.execute(
-            "INSERT INTO ohm_nodes (id, label, type, created_by, hd_fingerprint_u, created_at) "
-            "VALUES (?, ?, ?, 'spike', ?, CURRENT_TIMESTAMP)",
+            "INSERT INTO ohm_nodes (id, label, type, created_by, hd_fingerprint_u, created_at) VALUES (?, ?, ?, 'spike', ?, CURRENT_TIMESTAMP)",
             [nid, label, ntype, fp_int_list],
         )
 
@@ -99,9 +98,7 @@ def _setup_table(n: int) -> tuple[duckdb.DuckDBPyConnection, bytes]:
     conn.execute("ALTER TABLE ohm_nodes ADD COLUMN hd_fingerprint_u UTINYINT[]")
     _seed_nodes_with_utinyint_list(conn, n)
     # Get query bytes from first node
-    qrow = conn.execute(
-        "SELECT hd_fingerprint_u FROM ohm_nodes WHERE id = 'u_seed_000000'"
-    ).fetchone()
+    qrow = conn.execute("SELECT hd_fingerprint_u FROM ohm_nodes WHERE id = 'u_seed_000000'").fetchone()
     # Convert UTINYINT list back to bytes
     query_bytes = bytes(qrow[0])
     return conn, query_bytes
@@ -194,11 +191,8 @@ def main() -> None:
                 sql_times.append(t)
             py_med = statistics.median(py_times)
             sql_med = statistics.median(sql_times)
-            print(f"  Python loop   median: {py_med * 1000:8.2f} ms  "
-                  f"(runs: {[round(x * 1000, 2) for x in py_times]})")
-            print(f"  SQL De Morgan median: {sql_med * 1000:8.2f} ms  "
-                  f"(runs: {[round(x * 1000, 2) for x in sql_times]})  "
-                  f"speedup: {py_med / sql_med:.2f}x")
+            print(f"  Python loop   median: {py_med * 1000:8.2f} ms  (runs: {[round(x * 1000, 2) for x in py_times]})")
+            print(f"  SQL De Morgan median: {sql_med * 1000:8.2f} ms  (runs: {[round(x * 1000, 2) for x in sql_times]})  speedup: {py_med / sql_med:.2f}x")
 
             # Correctness
             _, py_top = benchmark_python(conn, query_bytes)

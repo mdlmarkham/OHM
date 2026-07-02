@@ -212,18 +212,9 @@ class TestShutdownHandlerIsMinimal:
                 continue
             func = node.func
             # Match: store.sync_heartbeat(...)
-            if (
-                isinstance(func, ast.Attribute)
-                and func.attr == "sync_heartbeat"
-                and isinstance(func.value, ast.Name)
-                and func.value.id == "store"
-            ):
+            if isinstance(func, ast.Attribute) and func.attr == "sync_heartbeat" and isinstance(func.value, ast.Name) and func.value.id == "store":
                 offenders.append(ast.dump(node))
-        assert not offenders, (
-            "shutdown_handler must not call store.sync_heartbeat() — "
-            "that work belongs AFTER serve_forever returns (OHM-inq1). "
-            f"Found: {offenders}"
-        )
+        assert not offenders, f"shutdown_handler must not call store.sync_heartbeat() — that work belongs AFTER serve_forever returns (OHM-inq1). Found: {offenders}"
 
     def test_handler_does_not_call_checkpoint(self):
         """``store.conn.execute(\"CHECKPOINT\")`` must not appear inside
@@ -246,11 +237,7 @@ class TestShutdownHandlerIsMinimal:
             for arg in node.args:
                 if isinstance(arg, ast.Constant) and isinstance(arg.value, str) and "CHECKPOINT" in arg.value.upper():
                     offenders.append(ast.dump(node))
-        assert not offenders, (
-            "shutdown_handler must not call store.conn.execute(\"CHECKPOINT\") — "
-            "that work belongs AFTER serve_forever returns (OHM-inq1). "
-            f"Found: {offenders}"
-        )
+        assert not offenders, f'shutdown_handler must not call store.conn.execute("CHECKPOINT") — that work belongs AFTER serve_forever returns (OHM-inq1). Found: {offenders}'
 
     def test_handler_sets_all_four_stop_events(self):
         """Regression guard: shutdown_handler must set all four worker stop
@@ -264,10 +251,7 @@ class TestShutdownHandlerIsMinimal:
                 if isinstance(node.func.value, ast.Name):
                     names_set.add(node.func.value.id)
         for required in ("_sync_stop", "_eviction_stop", "_metric_actions_stop", "_beads_sync_stop"):
-            assert required in names_set, (
-                f"shutdown_handler must set {required} so the corresponding "
-                f"worker thread sees the stop signal (OHM-inq1)."
-            )
+            assert required in names_set, f"shutdown_handler must set {required} so the corresponding worker thread sees the stop signal (OHM-inq1)."
 
     def test_minimal_handler_returns_despite_blocked_worker(self):
         """Behavioural proof of the fix shape: a handler mirroring the
@@ -320,10 +304,7 @@ class TestShutdownHandlerIsMinimal:
 
         # Handler must return almost immediately — must NOT wait for the
         # worker (which would never finish within the test window).
-        assert elapsed < 0.5, (
-            f"shutdown_handler took {elapsed:.3f}s — it must return "
-            f"promptly without waiting on worker threads (OHM-inq1)."
-        )
+        assert elapsed < 0.5, f"shutdown_handler took {elapsed:.3f}s — it must return promptly without waiting on worker threads (OHM-inq1)."
 
         # All four stop events must be set so the workers will exit on
         # their next iteration.
@@ -334,9 +315,7 @@ class TestShutdownHandlerIsMinimal:
 
         # server.shutdown() must be dispatched to a daemon thread (the
         # OHM-k79z hop), so the daemon-thread was invoked promptly.
-        assert shutdown_invoked.wait(timeout=1.0), (
-            "server.shutdown() was never invoked — OHM-k79z dispatch failed."
-        )
+        assert shutdown_invoked.wait(timeout=1.0), "server.shutdown() was never invoked — OHM-k79z dispatch failed."
 
         # Worker is daemon=True so it won't block test teardown.
 
@@ -370,11 +349,7 @@ class TestShutdownHandlerIsMinimal:
 
         # The bounded join must return in ~JOIN_TIMEOUT, not the 60s
         # the worker actually needs.
-        assert elapsed < JOIN_TIMEOUT + 0.5, (
-            f"join_worker took {elapsed:.3f}s; bounded join should "
-            f"return within ~{JOIN_TIMEOUT:.1f}s even when the worker "
-            f"is stuck (OHM-inq1)."
-        )
+        assert elapsed < JOIN_TIMEOUT + 0.5, f"join_worker took {elapsed:.3f}s; bounded join should return within ~{JOIN_TIMEOUT:.1f}s even when the worker is stuck (OHM-inq1)."
         # And the worker is still alive (proving the bounded join
         # returned without waiting for it to finish).
         assert t.is_alive()
@@ -406,17 +381,9 @@ class TestShutdownHandlerIsMinimal:
                 else:
                     bounded_joins += 1
 
-        assert not unbounded_joins, (
-            "run_server must not call thread.join() without a timeout "
-            "— a stuck worker thread would hang shutdown forever "
-            "(OHM-inq1). Offending calls: "
-            + "; ".join(unbounded_joins)
-        )
+        assert not unbounded_joins, "run_server must not call thread.join() without a timeout — a stuck worker thread would hang shutdown forever (OHM-inq1). Offending calls: " + "; ".join(unbounded_joins)
         # And we should have at least one bounded join (the worker cleanup).
-        assert bounded_joins >= 1, (
-            "run_server should call thread.join(timeout=...) at least "
-            "once for the worker cleanup (OHM-inq1)."
-        )
+        assert bounded_joins >= 1, "run_server should call thread.join(timeout=...) at least once for the worker cleanup (OHM-inq1)."
 
 
 @pytest.mark.skipif(

@@ -151,8 +151,7 @@ class TestPragmaObjectCache:
         conn = _make_conn()
         try:
             _apply_pragmas(conn)
-            assert _read_setting(conn, "enable_object_cache") is True or \
-                   _read_setting(conn, "enable_object_cache") == "true"
+            assert _read_setting(conn, "enable_object_cache") is True or _read_setting(conn, "enable_object_cache") == "true"
         finally:
             conn.close()
 
@@ -170,9 +169,7 @@ class TestPragmaTempDirectory:
             _apply_pragmas(conn)
             # DuckDB's temp_directory setting reflects the configured path.
             actual = _read_setting(conn, "temp_directory")
-            assert str(tmp_path) in str(actual), (
-                f"Expected temp_directory to contain {tmp_path}, got {actual}"
-            )
+            assert str(tmp_path) in str(actual), f"Expected temp_directory to contain {tmp_path}, got {actual}"
         finally:
             conn.close()
 
@@ -185,7 +182,7 @@ class TestPragmaTempDirectory:
 
         conn = _make_conn()
         try:
-            default_before = _read_setting(conn, "temp_directory")
+            _read_setting(conn, "temp_directory")
             _apply_pragmas(conn)
             default_after = _read_setting(conn, "temp_directory")
             # If the helper touched the setting, the value would differ.
@@ -273,9 +270,7 @@ class TestOhmStoreAppliesPragmas:
             if wal.exists():
                 wal.unlink()
 
-    def test_ohmstore_readonly_connection_is_not_thread_tuned(
-        self, monkeypatch, tmp_path
-    ):
+    def test_ohmstore_readonly_connection_is_not_thread_tuned(self, monkeypatch, tmp_path):
         """Read-only OhmStore connections are short-lived (one query
         path) and don't benefit from threads>1. The helper skips them
         to avoid PRAGMA-threads errors on locked-down DuckDB builds."""
@@ -288,10 +283,7 @@ class TestOhmStoreAppliesPragmas:
         db_path = tmp_path / "ro_test.duckdb"
         store = OhmStore(str(db_path))
         try:
-            store.conn.execute(
-                "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) "
-                "VALUES ('ro_seed', 'Seed', 'concept', 'seeder', CURRENT_TIMESTAMP)"
-            )
+            store.conn.execute("INSERT INTO ohm_nodes (id, label, type, created_by, created_at) VALUES ('ro_seed', 'Seed', 'concept', 'seeder', CURRENT_TIMESTAMP)")
             store.conn.execute("CHECKPOINT")
         finally:
             store.close()
@@ -305,10 +297,7 @@ class TestOhmStoreAppliesPragmas:
             # value (it depends on DuckDB version); we just assert it's
             # NOT 6 — proving the helper skipped.
             actual = int(_read_setting(ro_store.conn, "threads"))
-            assert actual != 6, (
-                f"Read-only connection should NOT have been thread-tuned "
-                f"to 6, but got {actual} (OHM-lqpk.3 helper skipped)"
-            )
+            assert actual != 6, f"Read-only connection should NOT have been thread-tuned to 6, but got {actual} (OHM-lqpk.3 helper skipped)"
         finally:
             ro_store.close()
             if db_path.exists():

@@ -1880,16 +1880,14 @@ class OhmStore:
         edge_ids_to_delete = [
             r[0]
             for r in self.conn.execute(
-                "SELECT id FROM ohm_edges "
-                "WHERE (from_node = ? OR to_node = ?) AND deleted_at IS NULL",
+                "SELECT id FROM ohm_edges WHERE (from_node = ? OR to_node = ?) AND deleted_at IS NULL",
                 [node_id, node_id],
             ).fetchall()
         ]
         obs_ids_to_delete = [
             r[0]
             for r in self.conn.execute(
-                "SELECT id FROM ohm_observations "
-                "WHERE node_id = ? AND deleted_at IS NULL",
+                "SELECT id FROM ohm_observations WHERE node_id = ? AND deleted_at IS NULL",
                 [node_id],
             ).fetchall()
         ]
@@ -2042,8 +2040,7 @@ class OhmStore:
         obs_ids_to_delete = [
             r[0]
             for r in self.conn.execute(
-                "SELECT id FROM ohm_observations "
-                "WHERE edge_id = ? AND deleted_at IS NULL",
+                "SELECT id FROM ohm_observations WHERE edge_id = ? AND deleted_at IS NULL",
                 [edge_id],
             ).fetchall()
         ]

@@ -112,10 +112,10 @@ class VectorStore:
             raise ValueError(f"Embedding dim {len(embedding)} ≠ expected {self.dim}")
 
         import json
+
         meta_str = json.dumps(metadata or {})
         self._db.execute(
-            f"INSERT OR REPLACE INTO {self.table} (id, embedding, content, metadata) "
-            f"VALUES (?, ?::FLOAT[{self.dim}], ?, ?::JSON)",
+            f"INSERT OR REPLACE INTO {self.table} (id, embedding, content, metadata) VALUES (?, ?::FLOAT[{self.dim}], ?, ?::JSON)",
             [id, embedding, content, meta_str],
         )
 
@@ -136,21 +136,19 @@ class VectorStore:
                 emb = emb.tolist()
             if len(emb) != self.dim:
                 raise ValueError(f"Row {r['id']!r}: dim {len(emb)} ≠ {self.dim}")
-            records.append({
-                "id": r["id"],
-                "embedding": emb,
-                "content": r.get("content", ""),
-                "metadata": json.dumps(r.get("metadata", {})),
-            })
+            records.append(
+                {
+                    "id": r["id"],
+                    "embedding": emb,
+                    "content": r.get("content", ""),
+                    "metadata": json.dumps(r.get("metadata", {})),
+                }
+            )
 
         df = pd.DataFrame(records)
         # Register as DuckDB relation then INSERT OR REPLACE
         self._db.con.register("__upsert_df", df)
-        self._db.execute(
-            f"INSERT OR REPLACE INTO {self.table} "
-            f"SELECT id, embedding::FLOAT[{self.dim}], content, metadata::JSON "
-            f"FROM __upsert_df"
-        )
+        self._db.execute(f"INSERT OR REPLACE INTO {self.table} SELECT id, embedding::FLOAT[{self.dim}], content, metadata::JSON FROM __upsert_df")
         self._db.con.unregister("__upsert_df")
         logger.info("Upserted %d rows into %s", len(records), self.table)
         return len(records)
@@ -295,18 +293,25 @@ class VectorStore:
     def stats(self) -> str:
         """Return TOON-formatted store statistics."""
         n = self.count()
-        idx_exists = self._db.scalar(
-            "SELECT COUNT(*) FROM duckdb_indexes() WHERE table_name = ? AND index_name = ?",
-            [self.table, f"{self.table}_hnsw"],
-        ) > 0
+        idx_exists = (
+            self._db.scalar(
+                "SELECT COUNT(*) FROM duckdb_indexes() WHERE table_name = ? AND index_name = ?",
+                [self.table, f"{self.table}_hnsw"],
+            )
+            > 0
+        )
         return df_to_toon(
-            pd.DataFrame([{
-                "table": self.table,
-                "dim": self.dim,
-                "metric": self.metric,
-                "rows": n,
-                "hnsw_index": "yes" if idx_exists else "no (call build_index())",
-            }]),
+            pd.DataFrame(
+                [
+                    {
+                        "table": self.table,
+                        "dim": self.dim,
+                        "metric": self.metric,
+                        "rows": n,
+                        "hnsw_index": "yes" if idx_exists else "no (call build_index())",
+                    }
+                ]
+            ),
             "vector_store_stats",
         )
 
@@ -317,6 +322,7 @@ class VectorStore:
 
 if __name__ == "__main__":
     import random
+
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
     DIM = 8
@@ -324,11 +330,7 @@ if __name__ == "__main__":
         print(f"Empty store: {vs.count()} rows")
 
         # Bulk upsert
-        rows = [
-            {"id": f"doc{i}", "embedding": [random.random() for _ in range(DIM)],
-             "content": f"Document {i} about topic {i%3}", "metadata": {"topic": i % 3}}
-            for i in range(50)
-        ]
+        rows = [{"id": f"doc{i}", "embedding": [random.random() for _ in range(DIM)], "content": f"Document {i} about topic {i % 3}", "metadata": {"topic": i % 3}} for i in range(50)]
         vs.upsert_batch(rows)
         vs.build_index()
         print(f"After upsert: {vs.count()} rows")

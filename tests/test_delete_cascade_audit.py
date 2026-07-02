@@ -42,26 +42,21 @@ def _seed_node_with_edge_and_obs(conn) -> tuple[str, str, str]:
     node_id = "cascade_src"
     edge_target = "cascade_dst"
     conn.execute(
-        "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) "
-        "VALUES (?, ?, 'concept', 'seeder', CURRENT_TIMESTAMP)",
+        "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) VALUES (?, ?, 'concept', 'seeder', CURRENT_TIMESTAMP)",
         [node_id, "Cascade source"],
     )
     conn.execute(
-        "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) "
-        "VALUES (?, ?, 'concept', 'seeder', CURRENT_TIMESTAMP)",
+        "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) VALUES (?, ?, 'concept', 'seeder', CURRENT_TIMESTAMP)",
         [edge_target, "Cascade target"],
     )
     edge_id = "edge_cascade_1"
     conn.execute(
-        "INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, "
-        "confidence, created_by, created_at) "
-        "VALUES (?, ?, ?, 'CAUSES', 'L3', 0.5, 'seeder', CURRENT_TIMESTAMP)",
+        "INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, confidence, created_by, created_at) VALUES (?, ?, ?, 'CAUSES', 'L3', 0.5, 'seeder', CURRENT_TIMESTAMP)",
         [edge_id, node_id, edge_target],
     )
     obs_id = "obs_cascade_1"
     conn.execute(
-        "INSERT INTO ohm_observations (id, node_id, type, value, created_by, created_at) "
-        "VALUES (?, ?, 'measurement', 0.5, 'seeder', CURRENT_TIMESTAMP)",
+        "INSERT INTO ohm_observations (id, node_id, type, value, created_by, created_at) VALUES (?, ?, 'measurement', 0.5, 'seeder', CURRENT_TIMESTAMP)",
         [obs_id, node_id],
     )
     return node_id, edge_id, obs_id
@@ -69,9 +64,7 @@ def _seed_node_with_edge_and_obs(conn) -> tuple[str, str, str]:
 
 def _feed_rows_for(conn, agent_name: str) -> list[tuple[str, str, str, str]]:
     return conn.execute(
-        "SELECT table_name, row_id, operation, agent_name "
-        "FROM ohm_change_feed "
-        "WHERE agent_name = ? ORDER BY table_name, row_id",
+        "SELECT table_name, row_id, operation, agent_name FROM ohm_change_feed WHERE agent_name = ? ORDER BY table_name, row_id",
         [agent_name],
     ).fetchall()
 
@@ -96,12 +89,8 @@ class TestDeleteNodeCascadeAudit:
                 assert agent == "test_agent"
                 by_table.setdefault(table_name, set()).add(row_id)
 
-            assert node_id in by_table.get("ohm_nodes", set()), (
-                "delete_node must log the primary node row"
-            )
-            assert edge_id in by_table.get("ohm_edges", set()), (
-                "delete_node must log the cascaded edge row (OHM-sdp1)"
-            )
+            assert node_id in by_table.get("ohm_nodes", set()), "delete_node must log the primary node row"
+            assert edge_id in by_table.get("ohm_edges", set()), "delete_node must log the cascaded edge row (OHM-sdp1)"
         finally:
             conn.close()
 
@@ -120,9 +109,7 @@ class TestDeleteNodeCascadeAudit:
             for table_name, row_id, op, agent in rows:
                 by_table.setdefault(table_name, set()).add(row_id)
 
-            assert obs_id in by_table.get("ohm_observations", set()), (
-                "delete_node must log the cascaded observation row (OHM-sdp1)"
-            )
+            assert obs_id in by_table.get("ohm_observations", set()), "delete_node must log the cascaded observation row (OHM-sdp1)"
         finally:
             conn.close()
 
@@ -133,10 +120,7 @@ class TestDeleteNodeCascadeAudit:
 
         conn = _init_db()
         try:
-            conn.execute(
-                "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) "
-                "VALUES ('lonely_node', 'Lonely', 'concept', 'seeder', CURRENT_TIMESTAMP)"
-            )
+            conn.execute("INSERT INTO ohm_nodes (id, label, type, created_by, created_at) VALUES ('lonely_node', 'Lonely', 'concept', 'seeder', CURRENT_TIMESTAMP)")
             delete_node(conn, node_id="lonely_node", deleted_by="test_agent")
             rows = _feed_rows_for(conn, "test_agent")
             assert rows == [
@@ -154,8 +138,7 @@ class TestDeleteNodeCascadeAudit:
         try:
             src_id = "fan_out_src"
             conn.execute(
-                "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) "
-                "VALUES (?, ?, 'concept', 'seeder', CURRENT_TIMESTAMP)",
+                "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) VALUES (?, ?, 'concept', 'seeder', CURRENT_TIMESTAMP)",
                 [src_id, "Fan-out source"],
             )
             # 3 target nodes + 3 edges from src -> target_i
@@ -163,16 +146,13 @@ class TestDeleteNodeCascadeAudit:
             for i in range(3):
                 tgt = f"target_{i}"
                 conn.execute(
-                    "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) "
-                    "VALUES (?, ?, 'concept', 'seeder', CURRENT_TIMESTAMP)",
+                    "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) VALUES (?, ?, 'concept', 'seeder', CURRENT_TIMESTAMP)",
                     [tgt, f"Target {i}"],
                 )
                 eid = f"edge_{i}"
                 edge_ids.append(eid)
                 conn.execute(
-                    "INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, "
-                    "confidence, created_by, created_at) "
-                    "VALUES (?, ?, ?, 'CAUSES', 'L3', 0.5, 'seeder', CURRENT_TIMESTAMP)",
+                    "INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, confidence, created_by, created_at) VALUES (?, ?, ?, 'CAUSES', 'L3', 0.5, 'seeder', CURRENT_TIMESTAMP)",
                     [eid, src_id, tgt],
                 )
             # 2 observations on src
@@ -181,9 +161,7 @@ class TestDeleteNodeCascadeAudit:
                 oid = f"obs_{i}"
                 obs_ids.append(oid)
                 conn.execute(
-                    "INSERT INTO ohm_observations (id, node_id, type, value, "
-                    "created_by, created_at) "
-                    "VALUES (?, ?, 'measurement', ?, 'seeder', CURRENT_TIMESTAMP)",
+                    "INSERT INTO ohm_observations (id, node_id, type, value, created_by, created_at) VALUES (?, ?, 'measurement', ?, 'seeder', CURRENT_TIMESTAMP)",
                     [oid, src_id, 0.1 * i],
                 )
 
@@ -196,14 +174,8 @@ class TestDeleteNodeCascadeAudit:
 
             # 1 node + 3 edges + 2 observations = 6 cascade + 1 node = 7 rows.
             assert by_table.get("ohm_nodes", set()) == {src_id}
-            assert by_table.get("ohm_edges", set()) == set(edge_ids), (
-                f"Expected all 3 cascaded edges in feed, got "
-                f"{by_table.get('ohm_edges')}"
-            )
-            assert by_table.get("ohm_observations", set()) == set(obs_ids), (
-                f"Expected both observations in feed, got "
-                f"{by_table.get('ohm_observations')}"
-            )
+            assert by_table.get("ohm_edges", set()) == set(edge_ids), f"Expected all 3 cascaded edges in feed, got {by_table.get('ohm_edges')}"
+            assert by_table.get("ohm_observations", set()) == set(obs_ids), f"Expected both observations in feed, got {by_table.get('ohm_observations')}"
         finally:
             conn.close()
 
@@ -222,15 +194,11 @@ class TestDeleteEdgeCascadeAudit:
             # not the edge. Add two observations WITH edge_id set so we
             # have multiple cascaded rows.
             conn.execute(
-                "INSERT INTO ohm_observations (id, node_id, edge_id, type, value, "
-                "created_by, created_at) "
-                "VALUES ('obs_edge_1', ?, ?, 'measurement', 0.7, 'seeder', CURRENT_TIMESTAMP)",
+                "INSERT INTO ohm_observations (id, node_id, edge_id, type, value, created_by, created_at) VALUES ('obs_edge_1', ?, ?, 'measurement', 0.7, 'seeder', CURRENT_TIMESTAMP)",
                 [node_id, edge_id],
             )
             conn.execute(
-                "INSERT INTO ohm_observations (id, node_id, edge_id, type, value, "
-                "created_by, created_at) "
-                "VALUES ('obs_edge_2', ?, ?, 'measurement', 0.3, 'seeder', CURRENT_TIMESTAMP)",
+                "INSERT INTO ohm_observations (id, node_id, edge_id, type, value, created_by, created_at) VALUES ('obs_edge_2', ?, ?, 'measurement', 0.3, 'seeder', CURRENT_TIMESTAMP)",
                 [node_id, edge_id],
             )
 
@@ -242,11 +210,9 @@ class TestDeleteEdgeCascadeAudit:
 
             assert by_table.get("ohm_edges", set()) == {edge_id}
             assert by_table.get("ohm_observations", set()) == {
-                "obs_edge_1", "obs_edge_2",
-            }, (
-                f"Expected both edge-referencing observations in feed "
-                f"(OHM-sdp1), got {by_table.get('ohm_observations')}"
-            )
+                "obs_edge_1",
+                "obs_edge_2",
+            }, f"Expected both edge-referencing observations in feed (OHM-sdp1), got {by_table.get('ohm_observations')}"
         finally:
             conn.close()
 
@@ -259,14 +225,11 @@ class TestDeleteEdgeCascadeAudit:
             tgt_id = "ed_no_obs_dst"
             for nid, label in ((node_id, "Src"), (tgt_id, "Dst")):
                 conn.execute(
-                    "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) "
-                    "VALUES (?, ?, 'concept', 'seeder', CURRENT_TIMESTAMP)",
+                    "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) VALUES (?, ?, 'concept', 'seeder', CURRENT_TIMESTAMP)",
                     [nid, label],
                 )
             conn.execute(
-                "INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, "
-                "confidence, created_by, created_at) "
-                "VALUES ('ed_no_obs', ?, ?, 'CAUSES', 'L3', 0.5, 'seeder', CURRENT_TIMESTAMP)",
+                "INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, confidence, created_by, created_at) VALUES ('ed_no_obs', ?, ?, 'CAUSES', 'L3', 0.5, 'seeder', CURRENT_TIMESTAMP)",
                 [node_id, tgt_id],
             )
             delete_edge(conn, edge_id="ed_no_obs", deleted_by="test_agent")
@@ -292,35 +255,25 @@ class TestStorePathSymmetry:
         store = OhmStore(":memory:")
         try:
             store.conn.execute(
-                "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) "
-                "VALUES (?, ?, 'concept', 'seeder', CURRENT_TIMESTAMP)",
+                "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) VALUES (?, ?, 'concept', 'seeder', CURRENT_TIMESTAMP)",
                 ["store_src", "Store cascade source"],
             )
             store.conn.execute(
-                "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) "
-                "VALUES (?, ?, 'concept', 'seeder', CURRENT_TIMESTAMP)",
+                "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) VALUES (?, ?, 'concept', 'seeder', CURRENT_TIMESTAMP)",
                 ["store_dst", "Store cascade target"],
             )
             store.conn.execute(
-                "INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, "
-                "confidence, created_by, created_at) "
-                "VALUES ('store_edge', ?, ?, 'CAUSES', 'L3', 0.5, 'seeder', CURRENT_TIMESTAMP)",
+                "INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, confidence, created_by, created_at) VALUES ('store_edge', ?, ?, 'CAUSES', 'L3', 0.5, 'seeder', CURRENT_TIMESTAMP)",
                 ["store_src", "store_dst"],
             )
             store.conn.execute(
-                "INSERT INTO ohm_observations (id, node_id, type, value, "
-                "created_by, created_at) "
-                "VALUES ('store_obs', ?, 'measurement', 0.5, 'seeder', CURRENT_TIMESTAMP)",
+                "INSERT INTO ohm_observations (id, node_id, type, value, created_by, created_at) VALUES ('store_obs', ?, 'measurement', 0.5, 'seeder', CURRENT_TIMESTAMP)",
                 ["store_src"],
             )
 
             store.delete_node("store_src", deleted_by="seeder")
 
-            rows = store.conn.execute(
-                "SELECT table_name, row_id, operation, agent_name "
-                "FROM ohm_change_feed "
-                "WHERE agent_name = 'seeder' ORDER BY table_name, row_id"
-            ).fetchall()
+            rows = store.conn.execute("SELECT table_name, row_id, operation, agent_name FROM ohm_change_feed WHERE agent_name = 'seeder' ORDER BY table_name, row_id").fetchall()
             by_table: dict[str, set[str]] = {}
             for table_name, row_id, op, agent in rows:
                 by_table.setdefault(table_name, set()).add(row_id)
@@ -328,13 +281,7 @@ class TestStorePathSymmetry:
             assert "store_src" in by_table.get("ohm_nodes", set())
             # OHM-sdp1: the cascaded edge from store_src to store_dst
             # must also appear in the feed via the OhmStore path.
-            assert "store_edge" in by_table.get("ohm_edges", set()), (
-                f"OhmStore cascade missing edge audit row (OHM-sdp1): "
-                f"{by_table.get('ohm_edges')}"
-            )
-            assert "store_obs" in by_table.get("ohm_observations", set()), (
-                f"OhmStore cascade missing observation audit row (OHM-sdp1): "
-                f"{by_table.get('ohm_observations')}"
-            )
+            assert "store_edge" in by_table.get("ohm_edges", set()), f"OhmStore cascade missing edge audit row (OHM-sdp1): {by_table.get('ohm_edges')}"
+            assert "store_obs" in by_table.get("ohm_observations", set()), f"OhmStore cascade missing observation audit row (OHM-sdp1): {by_table.get('ohm_observations')}"
         finally:
             store.close()

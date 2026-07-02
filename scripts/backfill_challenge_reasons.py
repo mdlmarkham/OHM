@@ -53,9 +53,7 @@ def _open_duckdb(db_path: str):
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Backfill null-reason CHALLENGED_BY edges (OHM-e0t1)."
-    )
+    parser = argparse.ArgumentParser(description="Backfill null-reason CHALLENGED_BY edges (OHM-e0t1).")
     parser.add_argument(
         "--db-path",
         default="/var/lib/ohm/ohm.duckdb",
@@ -87,9 +85,7 @@ def main(argv: list[str] | None = None) -> int:
         if not args.dry_run:
             initialize_schema(conn)
 
-        result = backfill_challenge_reasons(
-            conn, dry_run=args.dry_run, agent=args.agent
-        )
+        result = backfill_challenge_reasons(conn, dry_run=args.dry_run, agent=args.agent)
 
         if args.format == "json":
             print(json.dumps(result, indent=2, default=str))
@@ -104,16 +100,9 @@ def main(argv: list[str] | None = None) -> int:
                 print("")
                 print("Proposed updates:")
                 for p in result["proposed"][:25]:
-                    print(
-                        f"  {p['challenge_id'][:12]}.. "
-                        f"target={p['target_edge_id'][:12]}.. "
-                        f"reason={p['reason'][:60]}..."
-                    )
+                    print(f"  {p['challenge_id'][:12]}.. target={p['target_edge_id'][:12]}.. reason={p['reason'][:60]}...")
                 if len(result["proposed"]) > 25:
-                    print(
-                        f"  ... and {len(result['proposed']) - 25} more "
-                        "(use --format json to see all)"
-                    )
+                    print(f"  ... and {len(result['proposed']) - 25} more (use --format json to see all)")
             if result["errors"]:
                 print("")
                 print("Errors:")

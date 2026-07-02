@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -232,7 +231,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
-    print(f"Karakeep→OHM bridge starting")
+    print("Karakeep→OHM bridge starting")
     print(f"  Karakeep queue: {args.karakeep_queue}")
     print(f"  OHM queue dir:  {args.ohm_queue_dir}")
     print(f"  State file:     {args.state_file}")

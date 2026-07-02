@@ -18,7 +18,6 @@ Strategy:
   5. For agent-authored sources, create agent-type source nodes
 """
 
-import json
 import re
 import sys
 from collections import defaultdict
@@ -138,22 +137,22 @@ def parse_compound_source(source_str: str | None) -> list[str]:
         return []
 
     # Known compound patterns with dates
-    source_str = re.sub(r'_\d{4}_\d{2}_\d{2}$', '', source_str)  # Remove date suffix
-    source_str = re.sub(r'_may\d{4}$', '', source_str)  # Remove may2026 suffix
-    source_str = re.sub(r'-may-\d{4}$', '', source_str)  # Remove -may-2026 suffix
-    source_str = re.sub(r'-may\d{4}$', '', source_str)  # Remove -may2026 suffix
-    source_str = re.sub(r'_may\d{2}$', '', source_str)  # Remove _may24 suffix
-    source_str = re.sub(r'_apr\d{4}$', '', source_str)  # Remove _apr2026 suffix
-    source_str = re.sub(r'_day\d+$', '', source_str)  # Remove _day96 suffix
-    source_str = re.sub(r'_dec\d{4}$', '', source_str)  # Remove _dec2025 suffix
-    source_str = re.sub(r'_\d{8}$', '', source_str)  # Remove _20260524 suffix
+    source_str = re.sub(r"_\d{4}_\d{2}_\d{2}$", "", source_str)  # Remove date suffix
+    source_str = re.sub(r"_may\d{4}$", "", source_str)  # Remove may2026 suffix
+    source_str = re.sub(r"-may-\d{4}$", "", source_str)  # Remove -may-2026 suffix
+    source_str = re.sub(r"-may\d{4}$", "", source_str)  # Remove -may2026 suffix
+    source_str = re.sub(r"_may\d{2}$", "", source_str)  # Remove _may24 suffix
+    source_str = re.sub(r"_apr\d{4}$", "", source_str)  # Remove _apr2026 suffix
+    source_str = re.sub(r"_day\d+$", "", source_str)  # Remove _day96 suffix
+    source_str = re.sub(r"_dec\d{4}$", "", source_str)  # Remove _dec2025 suffix
+    source_str = re.sub(r"_\d{8}$", "", source_str)  # Remove _20260524 suffix
 
     # Handle hyphenated compounds
-    parts = re.split(r'[-_]', source_str)
+    parts = re.split(r"[-_]", source_str)
 
     # Try to match known canonical sources from the parts
     matched = []
-    remaining = list(parts)
+    list(parts)
 
     # Greedy matching — try longer names first
     for name in sorted(CANONICAL_SOURCES.keys(), key=len, reverse=True):
@@ -397,7 +396,7 @@ def main():
         print(f"  L3 edges: {l3}")
         print(f"  L3:L2 ratio: {ratio}")
         target = "✅" if l2 > 0 and l3 / l2 < 20 else "❌"
-        print(f"  Target (5:1 or better): {target} (currently {l3/max(l2,1):.1f}:1)")
+        print(f"  Target (5:1 or better): {target} (currently {l3 / max(l2, 1):.1f}:1)")
 
 
 if __name__ == "__main__":

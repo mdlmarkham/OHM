@@ -35,13 +35,13 @@ logger = logging.getLogger(__name__)
 # for brevity; refer to that version for rationale)
 # ---------------------------------------------------------------------------
 
-_IDENT_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
-_QUALIFIED_IDENT_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){0,3}$')
-_MEMORY_LIMIT_RE = re.compile(r'^\d+(\.\d+)?\s*(B|KB|MB|GB|TB)$', re.IGNORECASE)
-_TOON_NAME_RE = re.compile(r'^[A-Za-z0-9_\-]+$')
+_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_QUALIFIED_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){0,3}$")
+_MEMORY_LIMIT_RE = re.compile(r"^\d+(\.\d+)?\s*(B|KB|MB|GB|TB)$", re.IGNORECASE)
+_TOON_NAME_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
 _ALLOWED_COMPRESSIONS = frozenset(["zstd", "snappy", "gzip", "none"])
 # S3 URI prefix — allow s3://, gs://, az:// alongside local paths
-_S3_PREFIX_RE = re.compile(r'^(s3a?|gs|az|abfss?)://')
+_S3_PREFIX_RE = re.compile(r"^(s3a?|gs|az|abfss?)://")
 
 
 def _require_identifier(name: str, context: str = "") -> str:
@@ -80,15 +80,16 @@ def _validate_toon_name(name: str) -> str:
         raise ValueError(f"Invalid TOON name: {name!r}")
     return name
 
+
 # Quack URI pattern: quack:[//]host[:port]  — scheme + host + optional port
 # Only allow safe hostname chars: alphanumeric, hyphen, dot, brackets for IPv6, colon for port
 _QUACK_URI_RE = re.compile(
-    r'^quack:(//)?' # scheme with optional //
-    r'('
-    r'\[(?:[0-9a-fA-F:]+)\]'  # IPv6 bracket notation
-    r'|[a-zA-Z0-9.-]+'           # hostname or IPv4
-    r')'
-    r'(:\d{1,5})?$'            # optional port
+    r"^quack:(//)?"  # scheme with optional //
+    r"("
+    r"\[(?:[0-9a-fA-F:]+)\]"  # IPv6 bracket notation
+    r"|[a-zA-Z0-9.-]+"  # hostname or IPv4
+    r")"
+    r"(:\d{1,5})?$"  # optional port
 )
 
 # Token: printable ASCII, no single-quotes (which would break SQL string literal)
@@ -109,10 +110,7 @@ def _validate_quack_uri(uri: str) -> str:
     if "'" in uri or '"' in uri or ";" in uri or "\x00" in uri:
         raise ValueError(f"Unsafe Quack URI — contains SQL control characters: {uri!r}")
     if not _QUACK_URI_RE.match(uri):
-        raise ValueError(
-            f"Invalid Quack URI: {uri!r}. "
-            "Expected: quack:host, quack:host:port, quack://host:port"
-        )
+        raise ValueError(f"Invalid Quack URI: {uri!r}. Expected: quack:host, quack:host:port, quack://host:port")
     return uri
 
 
@@ -136,19 +134,12 @@ def _validate_quack_token(token: str, *, context: str = "") -> str:
     if len(token) < 4:
         raise ValueError(f"Quack token{ctx} must be at least 4 characters (DuckDB minimum)")
     if "'" in token:
-        raise ValueError(
-            f"Quack token{ctx} contains a single-quote which would break SQL string literals. "
-            "Use a token composed of alphanumeric and safe punctuation characters."
-        )
+        raise ValueError(f"Quack token{ctx} contains a single-quote which would break SQL string literals. Use a token composed of alphanumeric and safe punctuation characters.")
     if "\x00" in token:
         raise ValueError(f"Quack token{ctx} contains a null byte")
     if len(token) < _QUACK_TOKEN_MIN_WARN_LEN:
-        logger.warning(
-            "Quack token%s is only %d chars — recommend >= %d for production security",
-            ctx, len(token), _QUACK_TOKEN_MIN_WARN_LEN
-        )
+        logger.warning("Quack token%s is only %d chars — recommend >= %d for production security", ctx, len(token), _QUACK_TOKEN_MIN_WARN_LEN)
     return token
-
 
 
 def _dsn_escape(value: str) -> str:
@@ -164,6 +155,7 @@ def _sql_str_escape(value: str) -> str:
 # ---------------------------------------------------------------------------
 # TOON serialisation v3.0
 # ---------------------------------------------------------------------------
+
 
 def _toon_escape(value: Any) -> str:
     if value is None:
@@ -198,8 +190,7 @@ def df_to_toon(df: pd.DataFrame, table_name: str, max_rows: int = 500) -> str:
         return "\n".join(lines)
 
     header = f"{table_name}[{n}]{{{','.join(cols)}}}:"
-    rows = ["  " + ",".join(_toon_escape(row[c]) for c in cols)
-            for _, row in df.iterrows()]
+    rows = ["  " + ",".join(_toon_escape(row[c]) for c in cols) for _, row in df.iterrows()]
     lines = [header] + rows
     if truncated:
         lines.append(f"# WARNING: result truncated to {max_rows}/{total_rows} rows")
@@ -218,13 +209,29 @@ def scalar_to_toon(data: dict[str, Any], label: str) -> str:
 # Extension management
 # ---------------------------------------------------------------------------
 
-KNOWN_EXTENSIONS = frozenset({
-    "postgres", "iceberg", "delta", "httpfs", "sqlite",
-    "mysql", "spatial", "fts", "excel", "json",
-    "ducklake", "vss", "aws",          # v2.0 additions
-    "quack", "lance", "vortex",        # v3.0 — Quack client-server, Lance & Vortex formats
-    "unity_catalog", "avro", "encodings",  # v3.0 — Unity Catalog, Avro, extra encodings
-})
+KNOWN_EXTENSIONS = frozenset(
+    {
+        "postgres",
+        "iceberg",
+        "delta",
+        "httpfs",
+        "sqlite",
+        "mysql",
+        "spatial",
+        "fts",
+        "excel",
+        "json",
+        "ducklake",
+        "vss",
+        "aws",  # v2.0 additions
+        "quack",
+        "lance",
+        "vortex",  # v3.0 — Quack client-server, Lance & Vortex formats
+        "unity_catalog",
+        "avro",
+        "encodings",  # v3.0 — Unity Catalog, Avro, extra encodings
+    }
+)
 
 _REDACT_PREFIXES = ("SET S3_", "ATTACH ", "CREATE SECRET", "CREATE OR REPLACE SECRET")  # v3.0: ATTACH covers both ATTACH 'quack:...' and ATTACH 'ducklake:...' — both may carry tokens
 
@@ -254,6 +261,7 @@ def ensure_extension(con: duckdb.DuckDBPyConnection, ext: str, *, install: bool 
 # Retry decorator
 # ---------------------------------------------------------------------------
 
+
 def _with_retry(max_attempts: int = 3, delay: float = 1.0, backoff: float = 2.0):
     """
     Retry decorator for transient DuckDB / network errors.
@@ -261,6 +269,7 @@ def _with_retry(max_attempts: int = 3, delay: float = 1.0, backoff: float = 2.0)
     Catches duckdb.Error (but not ValueError/TypeError from validation),
     waits with exponential backoff, and re-raises after max_attempts.
     """
+
     def decorator(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
@@ -273,17 +282,24 @@ def _with_retry(max_attempts: int = 3, delay: float = 1.0, backoff: float = 2.0)
                         raise
                     logger.warning(
                         "%s failed (attempt %d/%d): %s — retrying in %.1fs",
-                        fn.__name__, attempt, max_attempts, exc, wait,
+                        fn.__name__,
+                        attempt,
+                        max_attempts,
+                        exc,
+                        wait,
                     )
                     time.sleep(wait)
                     wait *= backoff
+
         return wrapper
+
     return decorator
 
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class DuckDBConfig:
@@ -295,6 +311,7 @@ class DuckDBConfig:
 # ---------------------------------------------------------------------------
 # DuckDBSession
 # ---------------------------------------------------------------------------
+
 
 class DuckDBSession:
     """
@@ -378,17 +395,20 @@ class DuckDBSession:
     # ------------------------------------------------------------------
 
     def attach_postgres(
-        self, *, host: str, port: int = 5432, dbname: str,
-        user: str, password: str, alias: str = "pg", read_only: bool = True,
+        self,
+        *,
+        host: str,
+        port: int = 5432,
+        dbname: str,
+        user: str,
+        password: str,
+        alias: str = "pg",
+        read_only: bool = True,
     ) -> None:
         """Attach PostgreSQL. DSN values are libpq-escaped (SEC-7)."""
         self.load_extensions("postgres")
         _require_identifier(alias, "alias")
-        dsn = (
-            f"host='{_dsn_escape(host)}' port={int(port)} "
-            f"dbname='{_dsn_escape(dbname)}' user='{_dsn_escape(user)}' "
-            f"password='{_dsn_escape(password)}'"
-        )
+        dsn = f"host='{_dsn_escape(host)}' port={int(port)} dbname='{_dsn_escape(dbname)}' user='{_dsn_escape(user)}' password='{_dsn_escape(password)}'"
         ro = ", READ_ONLY" if read_only else ""
         self.con.execute(f"ATTACH '{dsn}' AS {alias} (TYPE postgres{ro});")
         logger.info("Postgres attached as %r (read_only=%s)", alias, read_only)
@@ -399,16 +419,18 @@ class DuckDBSession:
         self.execute(f"ATTACH '{_sql_str_escape(_validate_path(path))}' AS {alias} (TYPE sqlite);")
 
     def attach_mysql(
-        self, *, host: str, port: int = 3306, database: str,
-        user: str, password: str, alias: str = "mysql",
+        self,
+        *,
+        host: str,
+        port: int = 3306,
+        database: str,
+        user: str,
+        password: str,
+        alias: str = "mysql",
     ) -> None:
         self.load_extensions("mysql")
         _require_identifier(alias, "alias")
-        dsn = (
-            f"host='{_dsn_escape(host)}' port={int(port)} "
-            f"database='{_dsn_escape(database)}' user='{_dsn_escape(user)}' "
-            f"password='{_dsn_escape(password)}'"
-        )
+        dsn = f"host='{_dsn_escape(host)}' port={int(port)} database='{_dsn_escape(database)}' user='{_dsn_escape(user)}' password='{_dsn_escape(password)}'"
         self.con.execute(f"ATTACH '{dsn}' AS {alias} (TYPE mysql);")
 
     def attach_ducklake(
@@ -551,7 +573,7 @@ class DuckDBSession:
                 safe_col = _require_identifier(col_name, "extra_cols key")
                 # col_type is a SQL type string — not parameterisable, so we
                 # restrict to a safe subset via a basic regex check
-                if not re.match(r'^[A-Za-z0-9_\[\] ]+$', col_type):
+                if not re.match(r"^[A-Za-z0-9_\[\] ]+$", col_type):
                     raise ValueError(f"Unsafe column type: {col_type!r}")
                 cols.append(f"{safe_col} {col_type}")
         self.execute(f"CREATE TABLE IF NOT EXISTS {safe_table} ({', '.join(cols)});")
@@ -585,10 +607,7 @@ class DuckDBSession:
         if self.path != ":memory:":
             self.execute("SET hnsw_enable_experimental_persistence = true;")
 
-        self.execute(
-            f"CREATE INDEX IF NOT EXISTS {safe_idx} ON {safe_table} "
-            f"USING HNSW ({safe_col}) WITH (metric = '{metric}');"
-        )
+        self.execute(f"CREATE INDEX IF NOT EXISTS {safe_idx} ON {safe_table} USING HNSW ({safe_col}) WITH (metric = '{metric}');")
         logger.info("HNSW index built: %s on %s.%s (metric=%s)", safe_idx, safe_table, safe_col, metric)
 
     def vector_search(
@@ -814,29 +833,21 @@ class DuckDBSession:
         safe_table = _require_identifier(table, "table")
         safe_wcol = _require_identifier(watermark_col, "watermark_col")
 
-        exists = self.scalar(
-            "SELECT COUNT(*) FROM duckdb_tables() WHERE table_name = ?", [safe_table]
-        )
+        exists = self.scalar("SELECT COUNT(*) FROM duckdb_tables() WHERE table_name = ?", [safe_table])
         if not exists:
             if create_if_missing:
-                self.execute(
-                    f"CREATE TABLE {safe_table} AS "
-                    f"SELECT * FROM ({source_query}) src WHERE 1=0;"
-                )
+                self.execute(f"CREATE TABLE {safe_table} AS SELECT * FROM ({source_query}) src WHERE 1=0;")
             else:
                 raise ValueError(f"Table {safe_table!r} does not exist")
 
-        watermark = self.scalar(
-            f"SELECT COALESCE(MAX({safe_wcol}), '1970-01-01'::TIMESTAMP) FROM {safe_table}"
-        )
+        watermark = self.scalar(f"SELECT COALESCE(MAX({safe_wcol}), '1970-01-01'::TIMESTAMP) FROM {safe_table}")
         new_count = self.scalar(
             f"SELECT COUNT(*) FROM ({source_query}) src WHERE {safe_wcol} > ?::TIMESTAMP",
             [str(watermark)],
         )
         if new_count > 0:
             self.execute(
-                f"INSERT INTO {safe_table} "
-                f"SELECT * FROM ({source_query}) src WHERE {safe_wcol} > ?::TIMESTAMP",
+                f"INSERT INTO {safe_table} SELECT * FROM ({source_query}) src WHERE {safe_wcol} > ?::TIMESTAMP",
                 [str(watermark)],
             )
         logger.info("refresh_table %r: +%d rows (watermark=%s)", safe_table, new_count, watermark)
@@ -863,9 +874,7 @@ class DuckDBSession:
         safe_conflict = _require_identifier(conflict_key, "conflict_key") if conflict_key else None
 
         is_query = source_table_or_query.strip().upper().startswith("SELECT")
-        src = f"({source_table_or_query})" if is_query else _require_identifier(
-            source_table_or_query, "source_table"
-        )
+        src = f"({source_table_or_query})" if is_query else _require_identifier(source_table_or_query, "source_table")
         count = self.scalar(f"SELECT COUNT(*) FROM {src}")
         if dry_run:
             logger.info("[DRY RUN] Would write %d rows to %s.%s.%s", count, safe_alias, safe_schema, safe_table)
@@ -877,8 +886,7 @@ class DuckDBSession:
             all_cols = _require_identifier_list(list(col_df.columns), "source columns")
             upd = update_cols if update_cols else [c for c in all_cols if c != safe_conflict]
             update_clause = ", ".join(f"{c} = EXCLUDED.{c}" for c in _require_identifier_list(upd))
-            sql = (f"INSERT INTO {target} SELECT * FROM {src} "
-                   f"ON CONFLICT ({safe_conflict}) DO UPDATE SET {update_clause};")
+            sql = f"INSERT INTO {target} SELECT * FROM {src} ON CONFLICT ({safe_conflict}) DO UPDATE SET {update_clause};"
         else:
             sql = f"INSERT INTO {target} SELECT * FROM {src};"
         self.execute(sql)
@@ -899,22 +907,16 @@ class DuckDBSession:
         safe_parts = _require_identifier_list(partition_by or [], "partition_by")
 
         is_query = source_table_or_query.strip().upper().startswith("SELECT")
-        src = f"({source_table_or_query})" if is_query else _require_identifier(
-            source_table_or_query, "source_table"
-        )
+        src = f"({source_table_or_query})" if is_query else _require_identifier(source_table_or_query, "source_table")
         count = self.scalar(f"SELECT COUNT(*) FROM {src}")
         if dry_run:
             logger.info("[DRY RUN] Would write %d rows to %s", count, safe_path)
             return count
 
         part = f", PARTITION_BY ({', '.join(safe_parts)}), OVERWRITE_OR_IGNORE" if safe_parts else ""
-        self.execute(
-            f"COPY {src} TO '{_sql_str_escape(safe_path)}' "
-            f"(FORMAT parquet, COMPRESSION {safe_comp}{part});"
-        )
+        self.execute(f"COPY {src} TO '{_sql_str_escape(safe_path)}' (FORMAT parquet, COMPRESSION {safe_comp}{part});")
         logger.info("Wrote %d rows to Parquet: %s", count, safe_path)
         return count
-
 
     # ------------------------------------------------------------------
     # Quack client-server protocol (DuckDB v1.5.2+, beta — core_nightly)
@@ -959,11 +961,7 @@ class DuckDBSession:
 
         # External access guard BEFORE extension load (SEC-D)
         if allow_other_hostname and require_tls_confirm:
-            raise ValueError(
-                "allow_other_hostname=True opens external network access. "
-                "You MUST front this server with a TLS-terminating reverse proxy "
-                "in production. Set require_tls_confirm=False to confirm you have done so."
-            )
+            raise ValueError("allow_other_hostname=True opens external network access. You MUST front this server with a TLS-terminating reverse proxy in production. Set require_tls_confirm=False to confirm you have done so.")
 
         self.load_extensions("quack")
 
@@ -971,6 +969,7 @@ class DuckDBSession:
         tok: str | None = None
         if token_env:
             import os
+
             tok = os.environ.get(token_env)
             if not tok:
                 raise ValueError(f"Env var {token_env!r} is not set or empty")
@@ -1034,6 +1033,7 @@ class DuckDBSession:
 
         # Resolve and validate token
         import os
+
         tok: str | None = None
         if token_env:
             tok = os.environ.get(token_env)
@@ -1052,9 +1052,7 @@ class DuckDBSession:
         opts_str = (", " + ", ".join(opts)) if opts else ""
 
         # Not logged — prefix 'ATTACH ' is in _REDACT_PREFIXES
-        self.con.execute(
-            f"ATTACH '{_sql_str_escape(uri)}' AS {alias} (TYPE quack{opts_str});"
-        )
+        self.con.execute(f"ATTACH '{_sql_str_escape(uri)}' AS {alias} (TYPE quack{opts_str});")
         logger.info("Quack remote attached as %r (%s)", alias, uri)
 
     def quack_query(
@@ -1076,6 +1074,7 @@ class DuckDBSession:
         self.load_extensions("quack")
 
         import os
+
         tok: str | None = None
         if token_env:
             tok = os.environ.get(token_env)
@@ -1092,10 +1091,7 @@ class DuckDBSession:
 
         # quack_query is a table-returning function — use FROM syntax
         escaped_sql = sql.replace("'", "''")
-        result_sql = (
-            f"FROM quack_query('{_sql_str_escape(uri)}', "
-            f"'{escaped_sql}'{token_clause}{ssl_clause})"
-        )
+        result_sql = f"FROM quack_query('{_sql_str_escape(uri)}', '{escaped_sql}'{token_clause}{ssl_clause})"
         return self.query(result_sql)
 
     def quack_identify(
@@ -1116,8 +1112,7 @@ class DuckDBSession:
         """
         _require_identifier(alias, "alias")
         parts = []
-        for key, val in [("name", name), ("provider", provider),
-                         ("hostname", hostname), ("region", region), ("meta", meta)]:
+        for key, val in [("name", name), ("provider", provider), ("hostname", hostname), ("region", region), ("meta", meta)]:
             if val is not None:
                 parts.append(f"{key} := '{_sql_str_escape(val)}'")
         if parts:
@@ -1139,6 +1134,7 @@ class DuckDBSession:
         scope should be the full Quack URI, e.g. 'quack:srv.example.com'.
         """
         import os
+
         tok = os.environ.get(token_env)
         if not tok:
             raise ValueError(f"Env var {token_env!r} is not set or empty")
@@ -1146,11 +1142,7 @@ class DuckDBSession:
         _validate_quack_uri(scope)
         _require_identifier(secret_name, "secret_name")
         # CREATE SECRET — redacted from debug logs
-        self.con.execute(
-            f"CREATE OR REPLACE SECRET {secret_name} ("
-            f"TYPE quack, TOKEN '{_sql_str_escape(tok)}', SCOPE '{_sql_str_escape(scope)}'"
-            f");"
-        )
+        self.con.execute(f"CREATE OR REPLACE SECRET {secret_name} (TYPE quack, TOKEN '{_sql_str_escape(tok)}', SCOPE '{_sql_str_escape(scope)}');")
         logger.info("Quack secret created for scope: %s", scope)
 
     # ------------------------------------------------------------------
@@ -1180,6 +1172,7 @@ class DuckDBSession:
 
 if __name__ == "__main__":
     import sys
+
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     db_path = sys.argv[1] if len(sys.argv) > 1 else ":memory:"
     print(f"Connecting: {db_path}")
@@ -1208,7 +1201,7 @@ if __name__ == "__main__":
         db.execute("INSERT INTO tree VALUES (1,NULL,'root'),(2,1,'A'),(3,1,'B'),(4,2,'A1'),(5,2,'A2')")
         sub = db.subtree("tree", root_id=2)
         print("\n--- Subtree of node 2 ---")
-        print(db.to_toon(sub[["id","name","depth"]], "subtree"))
+        print(db.to_toon(sub[["id", "name", "depth"]], "subtree"))
 
         # Identifier validation
         print("\n--- Injection rejection ---")

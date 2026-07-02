@@ -50,31 +50,19 @@ def _seed_db(path: Path) -> None:
 
         for i in range(3):
             conn.execute(
-                "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) "
-                "VALUES (?, ?, 'concept', 'metis', CURRENT_TIMESTAMP)",
+                "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) VALUES (?, ?, 'concept', 'metis', CURRENT_TIMESTAMP)",
                 [f"metis_test_{i:03d}", f"Metis test {i}"],
             )
         for i in range(3):
             conn.execute(
-                "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) "
-                "VALUES (?, ?, 'concept', 'metis', CURRENT_TIMESTAMP)",
+                "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) VALUES (?, ?, 'concept', 'metis', CURRENT_TIMESTAMP)",
                 [f"real_node_{i}", f"Real node {i}"],
             )
         # Edge between two test nodes — must be cleaned up.
-        conn.execute(
-            "INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, "
-            "confidence, created_by, created_at) "
-            "VALUES ('edge_1', 'metis_test_000', 'metis_test_001', 'CAUSES', "
-            "'L3', 0.5, 'metis', CURRENT_TIMESTAMP)"
-        )
+        conn.execute("INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, confidence, created_by, created_at) VALUES ('edge_1', 'metis_test_000', 'metis_test_001', 'CAUSES', 'L3', 0.5, 'metis', CURRENT_TIMESTAMP)")
         # Edge from real_node to test_node — endpoint goes away, must
         # also be cleaned up by the cascade.
-        conn.execute(
-            "INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, "
-            "confidence, created_by, created_at) "
-            "VALUES ('edge_2', 'real_node_0', 'metis_test_002', 'CAUSES', "
-            "'L3', 0.5, 'metis', CURRENT_TIMESTAMP)"
-        )
+        conn.execute("INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, confidence, created_by, created_at) VALUES ('edge_2', 'real_node_0', 'metis_test_002', 'CAUSES', 'L3', 0.5, 'metis', CURRENT_TIMESTAMP)")
     finally:
         conn.close()
 
@@ -90,15 +78,11 @@ def _run_script(*args: str) -> subprocess.CompletedProcess:
 
 
 def _active_ids(conn, table: str) -> set[str]:
-    return {r[0] for r in conn.execute(
-        f"SELECT id FROM {table} WHERE deleted_at IS NULL ORDER BY id"
-    ).fetchall()}
+    return {r[0] for r in conn.execute(f"SELECT id FROM {table} WHERE deleted_at IS NULL ORDER BY id").fetchall()}
 
 
 def _deleted_ids(conn, table: str) -> set[str]:
-    return {r[0] for r in conn.execute(
-        f"SELECT id FROM {table} WHERE deleted_at IS NOT NULL ORDER BY id"
-    ).fetchall()}
+    return {r[0] for r in conn.execute(f"SELECT id FROM {table} WHERE deleted_at IS NOT NULL ORDER BY id").fetchall()}
 
 
 @pytest.fixture
@@ -127,8 +111,12 @@ class TestCleanupScriptDryRun:
         conn = duckdb.connect(str(seeded_db), read_only=True)
         try:
             assert _active_ids(conn, "ohm_nodes") == {
-                "metis_test_000", "metis_test_001", "metis_test_002",
-                "real_node_0", "real_node_1", "real_node_2",
+                "metis_test_000",
+                "metis_test_001",
+                "metis_test_002",
+                "real_node_0",
+                "real_node_1",
+                "real_node_2",
             }
             assert _active_ids(conn, "ohm_edges") == {"edge_1", "edge_2"}
         finally:
@@ -139,16 +127,16 @@ class TestCleanupScriptApply:
     """Real run soft-deletes matching nodes AND cascades to edges."""
 
     def test_apply_deletes_matching_nodes(self, seeded_db):
-        r = _run_script(
-            "--db-path", str(seeded_db), "--deleted-by", "test_cleanup"
-        )
+        r = _run_script("--db-path", str(seeded_db), "--deleted-by", "test_cleanup")
         assert r.returncode == 0, r.stderr
 
         # Parse the JSON summary printed at the end.
         summary_start = r.stdout.index("{")
         summary = json.loads(r.stdout[summary_start:])
         assert sorted(summary["deleted_nodes"]) == [
-            "metis_test_000", "metis_test_001", "metis_test_002",
+            "metis_test_000",
+            "metis_test_001",
+            "metis_test_002",
         ]
         assert summary["edges_removed"] == 2
 
@@ -161,18 +149,11 @@ class TestCleanupScriptApply:
         attribution, breaking operator forensics. Now each cascaded row
         gets its own feed entry tagged with the same agent_name.
         """
-        _run_script(
-            "--db-path", str(seeded_db), "--deleted-by", "ops_audit_test"
-        )
+        _run_script("--db-path", str(seeded_db), "--deleted-by", "ops_audit_test")
 
         conn = duckdb.connect(str(seeded_db), read_only=True)
         try:
-            rows = conn.execute(
-                "SELECT table_name, row_id, operation, agent_name "
-                "FROM ohm_change_feed "
-                "WHERE operation = 'DELETE' AND agent_name = 'ops_audit_test' "
-                "ORDER BY table_name, row_id"
-            ).fetchall()
+            rows = conn.execute("SELECT table_name, row_id, operation, agent_name FROM ohm_change_feed WHERE operation = 'DELETE' AND agent_name = 'ops_audit_test' ORDER BY table_name, row_id").fetchall()
         finally:
             conn.close()
 
@@ -185,13 +166,12 @@ class TestCleanupScriptApply:
 
         # The 3 deleted nodes — the original audit guarantee.
         assert by_table.get("ohm_nodes", set()) == {
-            "metis_test_000", "metis_test_001", "metis_test_002",
+            "metis_test_000",
+            "metis_test_001",
+            "metis_test_002",
         }, f"Missing node rows: {by_table.get('ohm_nodes')}"
         # The 2 cascaded edges — the OHM-sdp1 fix.
-        assert by_table.get("ohm_edges", set()) == {"edge_1", "edge_2"}, (
-            f"Missing cascaded edge audit rows (OHM-sdp1 regression): "
-            f"{by_table.get('ohm_edges')}"
-        )
+        assert by_table.get("ohm_edges", set()) == {"edge_1", "edge_2"}, f"Missing cascaded edge audit rows (OHM-sdp1 regression): {by_table.get('ohm_edges')}"
         # No observations were seeded, so the observations feed must
         # be empty (or absent).
         assert by_table.get("ohm_observations", set()) == set()
@@ -207,11 +187,15 @@ class TestCleanupScriptApply:
         try:
             # Real nodes survive.
             assert _active_ids(conn, "ohm_nodes") == {
-                "real_node_0", "real_node_1", "real_node_2",
+                "real_node_0",
+                "real_node_1",
+                "real_node_2",
             }
             # Test nodes are soft-deleted.
             assert _deleted_ids(conn, "ohm_nodes") == {
-                "metis_test_000", "metis_test_001", "metis_test_002",
+                "metis_test_000",
+                "metis_test_001",
+                "metis_test_002",
             }
             # Both edges cascade (edge_1 = test↔test, edge_2 = real→test).
             assert _deleted_ids(conn, "ohm_edges") == {"edge_1", "edge_2"}
@@ -236,8 +220,10 @@ class TestCleanupScriptExplicitIds:
         _seed_db(db_path)
         try:
             r = _run_script(
-                "--db-path", str(db_path),
-                "--ids", "metis_test_000,metis_test_001",
+                "--db-path",
+                str(db_path),
+                "--ids",
+                "metis_test_000,metis_test_001",
             )
             assert r.returncode == 0, r.stderr
             assert "metis_test_000" in r.stdout
@@ -260,19 +246,16 @@ class TestCleanupScriptExplicitIds:
         _seed_db(db_path)
         try:
             r = _run_script(
-                "--db-path", str(db_path),
-                "--ids", "metis_test_000,does_not_exist",
+                "--db-path",
+                str(db_path),
+                "--ids",
+                "metis_test_000,does_not_exist",
             )
-            assert r.returncode == 0, (
-                f"Script must exit 0 even when a named id is missing. "
-                f"STDERR: {r.stderr}"
-            )
+            assert r.returncode == 0, f"Script must exit 0 even when a named id is missing. STDERR: {r.stderr}"
             summary_start = r.stdout.index("{")
             summary = json.loads(r.stdout[summary_start:])
             assert "metis_test_000" in summary["deleted_nodes"]
-            assert any(
-                f["id"] == "does_not_exist" for f in summary.get("failed", [])
-            ), f"Expected 'does_not_exist' in failed list: {summary}"
+            assert any(f["id"] == "does_not_exist" for f in summary.get("failed", [])), f"Expected 'does_not_exist' in failed list: {summary}"
         finally:
             if db_path.exists():
                 db_path.unlink()
@@ -286,8 +269,10 @@ class TestCleanupScriptPattern:
         _seed_db(db_path)
         try:
             r = _run_script(
-                "--db-path", str(db_path),
-                "--pattern", "real_node_%",
+                "--db-path",
+                str(db_path),
+                "--pattern",
+                "real_node_%",
                 "--dry-run",
             )
             assert r.returncode == 0, r.stderr

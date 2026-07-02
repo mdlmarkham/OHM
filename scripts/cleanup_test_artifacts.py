@@ -113,7 +113,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  - {nid}")
 
         if args.dry_run:
-            print(f"\nDRY-RUN: no changes made. Re-run without --dry-run to apply.")
+            print("\nDRY-RUN: no changes made. Re-run without --dry-run to apply.")
             return 0
 
         results = {"deleted_nodes": [], "edges_removed": 0, "observations_removed": 0}
@@ -127,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  FAILED to delete {nid}: {e}", file=sys.stderr)
                 results.setdefault("failed", []).append({"id": nid, "error": str(e)})
 
-        print(f"\nCleanup summary:")
+        print("\nCleanup summary:")
         print(json.dumps(results, indent=2))
         return 0
     finally:
