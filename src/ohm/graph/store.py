@@ -762,6 +762,15 @@ class OhmStore:
         data_origin = validate_data_origin(data_origin)
         enforce_confidence_ceiling(confidence, source_tier)
 
+        # OHM-sbtz.2: validate task_status for task nodes
+        if type == "task" and task_status is not None:
+            from ohm.graph.schema import VALID_TASK_STATUSES
+
+            if task_status not in VALID_TASK_STATUSES:
+                raise ValueError(
+                    f"Invalid task_status: '{task_status}' — must be one of: {', '.join(sorted(VALID_TASK_STATUSES))}"
+                )
+
         actor = agent_name or self.agent_name
         metadata_json = json.dumps(metadata) if metadata else None
         tag_list = tags if tags else []

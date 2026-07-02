@@ -186,16 +186,40 @@ def sync_beads_to_ohm_tasks(
                 report["errors"].append(f"{beads_id}: {exc}")
         else:
             # Update fields that Beads owns.
+            # OHM-sbtz.1: check if anything actually changed before UPDATEing.
             # Don't regress task_status if OHM has advanced it.
-            current = conn.execute(
-                "SELECT task_status FROM ohm_nodes WHERE id = ?",
+            current_row = conn.execute(
+                "SELECT label, content, priority, assigned_to, tags, metadata, task_status FROM ohm_nodes WHERE id = ?",
                 [existing_task_id],
             ).fetchone()
-            current_status = current[0] if current else None
+            if not current_row:
+                report["skipped"] += 1
+                continue
+
+            current_status = current_row[6]
             status_precedence = ["open", "in_progress", "blocked", "review", "done", "cancelled"]
             current_idx = status_precedence.index(current_status) if current_status in status_precedence else 0
             new_idx = status_precedence.index(ohm_status) if ohm_status in status_precedence else 0
             final_status = ohm_status if new_idx >= current_idx else current_status
+
+            # Compare current vs new values to detect no-op (idempotency)
+            current_labels = current_row[4]
+            current_metadata = current_row[5]
+            labels_json = json.dumps(labels)
+            metadata_json = json.dumps(metadata)
+
+            if (
+                current_row[0] == title
+                and current_row[1] == description
+                and current_row[2] == ohm_priority
+                and current_row[3] == assignee
+                and current_labels == labels_json
+                and current_metadata == metadata_json
+                and current_status == final_status
+            ):
+                # Nothing changed — skip the UPDATE (idempotency)
+                report["skipped"] += 1
+                continue
 
             try:
                 conn.execute(
@@ -205,8 +229,8 @@ def sync_beads_to_ohm_tasks(
                         description,
                         ohm_priority,
                         assignee,
-                        json.dumps(labels),
-                        json.dumps(metadata),
+                        labels_json,
+                        metadata_json,
                         final_status,
                         actor,
                         existing_task_id,

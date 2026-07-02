@@ -20,7 +20,19 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Edge types that flow through the Bayesian network (causal direction)
-CAUSAL_EDGE_TYPES = {"CAUSES", "DEPENDS_ON", "BLOCKS", "ENABLES", "INFLUENCES", "THREATENS"}
+# OHM-mzyc.1: aligned with actual Bayesian network default edge_types
+# in src/ohm/inference/bayesian.py (CAUSES, DEPENDS_ON, THREATENS,
+# EXPECTED_LIKELIHOOD, NEGATES). INFLUENCES/BLOCKS/ENABLES are L2/L4
+# edges that are semantically causal but NOT used by the inference
+# engine by default — the nudge must not claim they feed the network.
+CAUSAL_EDGE_TYPES = {"CAUSES", "DEPENDS_ON", "THREATENS", "EXPECTED_LIKELIHOOD", "NEGATES"}
+
+# Edge types that are semantically causal and should have a mechanism.
+# This is broader than CAUSAL_EDGE_TYPES (which is only the Bayesian
+# network's default edge types) — it includes INFLUENCES, BLOCKS,
+# ENABLES which are causal in meaning even if not in the inference
+# engine by default (OHM-mzyc.1).
+SEMANTICALLY_CAUSAL_EDGE_TYPES = CAUSAL_EDGE_TYPES | {"INFLUENCES", "BLOCKS", "ENABLES"}
 
 # Edge types that do NOT flow through the Bayesian network
 NON_CAUSAL_EDGE_TYPES = {
@@ -49,6 +61,12 @@ NON_CAUSAL_EDGE_TYPES = {
     "EXPLAINS",
     "FEEDS",
     "COMPOUNDS",
+    # OHM-mzyc.1: these are semantically causal but NOT in the default
+    # Bayesian network edge_types. The nudge must not claim they feed
+    # /inference, /intervene, etc.
+    "INFLUENCES",
+    "BLOCKS",
+    "ENABLES",
 }
 
 # Node types that represent decision points for game theory
@@ -276,7 +294,7 @@ def generate_nudges(
     if (
         action == "edge"
         and edge_type
-        and edge_type in CAUSAL_EDGE_TYPES
+        and edge_type in SEMANTICALLY_CAUSAL_EDGE_TYPES
         and not condition
         and not (metadata and metadata.get("mechanism"))
     ):
@@ -300,7 +318,7 @@ def generate_nudges(
             }
         )
 
-    if action == "edge" and edge_type and edge_type in CAUSAL_EDGE_TYPES:
+    if action == "edge" and edge_type and edge_type in SEMANTICALLY_CAUSAL_EDGE_TYPES:
         nudges.append(
             {
                 "type": "causal_edge_confirmed",
@@ -602,7 +620,7 @@ def generate_nudges(
     # ── OHM-jdfq: Causal edge without mechanism nudge ─────────────────────
     # ADR-023: Causal edges feed the Bayesian network. A mechanism helps
     # other agents understand WHY the causation holds, not just THAT it does.
-    if action == "edge" and edge_type and edge_type in CAUSAL_EDGE_TYPES:
+    if action == "edge" and edge_type and edge_type in SEMANTICALLY_CAUSAL_EDGE_TYPES:
         has_mechanism = bool(condition and condition.strip()) or bool(metadata and metadata.get("mechanism"))
         if not has_mechanism:
             nudges.append(
