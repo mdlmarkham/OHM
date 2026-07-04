@@ -25,6 +25,8 @@ import pytest
 
 pytestmark = pytest.mark.integration
 
+_PY = sys.executable  # Use the actual Python interpreter, not `python3` (which may be a Windows Store stub)
+
 
 def _can_fork_sh():
     """Check if the current environment can fork child processes via /bin/sh.
@@ -136,14 +138,14 @@ class TestHookIntegration:
 
     def test_scenario1_pre_ingest_pass_node_succeeds(self, hook_server):
         port, _ = hook_server
-        _register_hook(port, "pre_ingest", 'python3 -c "pass"')
+        _register_hook(port, "pre_ingest", f'"{_PY}" -c "pass"')
         status, _ = _request("POST", port, "/node", body={"id": "s1", "label": "test", "type": "concept"})
         assert status == 201
         _cleanup_hooks(port)
 
     def test_scenario2_pre_ingest_fail_node_returns_422(self, hook_server):
         port, _ = hook_server
-        _register_hook(port, "pre_ingest", 'python3 -c "raise SystemExit(1)"')
+        _register_hook(port, "pre_ingest", f'"{_PY}" -c "raise SystemExit(1)"')
         status, data = _request("POST", port, "/node", body={"id": "s2", "label": "rejected", "type": "concept"})
         assert status == 422
         assert data["error"] == "hook_rejected"
@@ -154,7 +156,7 @@ class TestHookIntegration:
         port, _ = hook_server
         _request("POST", port, "/node", body={"id": "from3", "label": "from", "type": "concept"})
         _request("POST", port, "/node", body={"id": "to3", "label": "to", "type": "concept"})
-        _register_hook(port, "pre_ingest", 'python3 -c "raise SystemExit(1)"')
+        _register_hook(port, "pre_ingest", f'"{_PY}" -c "raise SystemExit(1)"')
         status, data = _request("POST", port, "/edge", body={"from": "from3", "to": "to3", "type": "SUPPORTS", "layer": "L3"})
         assert status == 422
         assert data["error"] == "hook_rejected"
@@ -163,7 +165,7 @@ class TestHookIntegration:
     @pytest.mark.skipif(not _can_fork_sh(), reason="Environment cannot fork via /bin/sh")
     def test_scenario4_post_ingest_stdout_decorates_response(self, hook_server):
         port, _ = hook_server
-        cmd = 'python3 -c "import sys,json; sys.stdout.write(json.dumps({chr(100)+chr(101)+chr(99)+chr(111)+chr(114)+chr(97)+chr(116)+chr(101)+chr(100): True}))"'
+        cmd = f'"{_PY}" -c "import sys,json; sys.stdout.write(json.dumps({chr(100) + chr(101) + chr(99) + chr(111) + chr(114) + chr(97) + chr(116) + chr(101) + chr(100): True}))"'
         _register_hook(port, "post_ingest", cmd)
         status, data = _request("POST", port, "/node", body={"id": "s4", "label": "decorated", "type": "concept"})
         assert status == 201
@@ -172,7 +174,7 @@ class TestHookIntegration:
 
     def test_scenario5_post_ingest_failure_still_succeeds(self, hook_server):
         port, _ = hook_server
-        _register_hook(port, "post_ingest", 'python3 -c "raise SystemExit(1)"')
+        _register_hook(port, "post_ingest", f'"{_PY}" -c "raise SystemExit(1)"')
         status, data = _request("POST", port, "/node", body={"id": "s5", "label": "still works", "type": "concept"})
         assert status == 201
         _cleanup_hooks(port)
@@ -208,14 +210,14 @@ class TestHookIntegration:
 
     def test_scenario8_multiple_pre_ingest_hooks_all_must_pass(self, hook_server):
         port, _ = hook_server
-        _register_hook(port, "pre_ingest", 'python3 -c "pass"')
-        _register_hook(port, "pre_ingest", 'python3 -c "pass"')
+        _register_hook(port, "pre_ingest", f'"{_PY}" -c "pass"')
+        _register_hook(port, "pre_ingest", f'"{_PY}" -c "pass"')
         status, _ = _request("POST", port, "/node", body={"id": "s8a", "label": "all pass", "type": "concept"})
         assert status == 201
         _cleanup_hooks(port)
 
-        _register_hook(port, "pre_ingest", 'python3 -c "pass"')
-        _register_hook(port, "pre_ingest", 'python3 -c "raise SystemExit(1)"')
+        _register_hook(port, "pre_ingest", f'"{_PY}" -c "pass"')
+        _register_hook(port, "pre_ingest", f'"{_PY}" -c "raise SystemExit(1)"')
         status, data = _request("POST", port, "/node", body={"id": "s8b", "label": "second fails", "type": "concept"})
         assert status == 422
         assert data["error"] == "hook_rejected"
