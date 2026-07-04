@@ -19,13 +19,22 @@ across six distinct endpoints to avoid any single model's rate limits.
 
 | Agent | Mode | Model | Purpose |
 |---|---|---|---|
-| `explore` (built-in override) | subagent | `synthetic/hf:Qwen/Qwen2.5-Coder-32B-Instruct` | Fast read-only codebase search. Small coder model = quick pattern/keyword hits. |
-| `general` (built-in override) | subagent | `synthetic/hf:Qwen/Qwen3-Coder-480B-A35B-Instruct` | General multi-step research/execution. Large coder for code-capable background work. |
-| `ohm-researcher` | subagent | `synthetic/hf:zai-org/GLM-5.1` | Deep codebase research and design exploration. Read-only; high-quality reasoning. |
-| `ohm-adr-writer` | subagent | `synthetic/hf:zai-org/GLM-5.1` | Writes ADR documents at `docs/adr/`. Quality prose. |
+| `explore` (built-in override) | subagent | `synthetic/hf:Qwen/Qwen3.6-27B` | Fast read-only codebase search. Coder model = quick pattern/keyword hits. |
+| `general` (built-in override) | subagent | `synthetic/hf:zai-org/GLM-5.2` | General multi-step research/execution. Capable model for code-capable background work. |
+| `ohm-researcher` | subagent | `synthetic/hf:zai-org/GLM-5.2` | Deep codebase research and design exploration. Read-only; high-quality reasoning. |
+| `ohm-adr-writer` | subagent | `synthetic/hf:zai-org/GLM-4.7-Flash` | Writes ADR documents at `docs/adr/`. Quality prose. |
 | `ohm-test-writer` | subagent | `synthetic/hf:deepseek-ai/DeepSeek-V3.2` | Writes pytest test suites. Bulk, pattern-following code generation. |
 | `ohm-plumber` | subagent | `synthetic/hf:MiniMaxAI/MiniMax-M3` | Wires features through queries → store → SDK → handler. Deep-context plumbing. |
 | `ohm-schemer` | subagent | `synthetic/hf:moonshotai/Kimi-K2.6` | Schema migrations, validators, `VALID_*` frozensets. Code-focused. |
+
+> **Routing audit (OHM-7jj2 followup):** Models are pinned to the Synthetic
+> provider. `ohm-researcher`, `ohm-adr-writer`, `ohm-plumber`, `explore`, and
+> `general` were repointed from stale model IDs (`GLM-5.1`, `Qwen2.5-Coder-32B`,
+> `Qwen3-Coder-480B`) that no longer exist on Synthetic to confirmed-available
+> models. `ohm-test-writer` (`DeepSeek-V3.2`) and `ohm-schemer` (`Kimi-K2.6`)
+> are unverified — dispatch once and confirm, or repoint to a confirmed model
+> (`GLM-5.2`, `GLM-4.7-Flash`, `MiniMax-M3`, `Qwen3.6-27B`, `Kimi-K2.7-Code`).
+> **Restart opencode after editing routing** — config loads once at startup.
 
 ## Built-in agents NOT overridden
 

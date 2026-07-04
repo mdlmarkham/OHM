@@ -3,10 +3,10 @@
   "lsp": true,
   "agent": {
     "explore": {
-      "model": "synthetic/hf:Qwen/Qwen2.5-Coder-32B-Instruct"
+      "model": "synthetic/hf:Qwen/Qwen3.6-27B"
     },
     "general": {
-      "model": "synthetic/hf:Qwen/Qwen3-Coder-480B-A35B-Instruct"
+      "model": "synthetic/hf:zai-org/GLM-5.2"
     }
   }
 }
