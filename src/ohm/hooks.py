@@ -243,7 +243,13 @@ def _rows_to_hook_records(result: Any) -> list[HookRecord]:
     """Convert DuckDB query result rows to HookRecord instances."""
     if not result:
         return []
-    columns = [desc[0] for desc in result.description]
+    try:
+        desc = result.description
+    except Exception:
+        desc = None
+    if desc is None:
+        return []
+    columns = [desc[0] for desc in desc]
     records = []
     for row in result.fetchall():
         d = dict(zip(columns, row))

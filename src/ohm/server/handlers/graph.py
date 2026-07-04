@@ -238,6 +238,9 @@ class GraphHandlerMixin:
                     "Framework fields."
                 ),
                 "challenge": "POST /challenge — Challenge an L3 interpretation. Required: edge_id. Optional: reason, confidence.",
+                "create_skill": "POST /skill — Create a portable skill node. Required: label, trigger. Optional: scope (default personal), required_tools, boundaries, output_format, verification_evidence, connects_to.",
+                "create_runbook": "POST /runbook — Create an ordered chain of skills. Required: label, skill_ids (list of existing skill node IDs). Optional: description.",
+                "get_runbook_steps": "GET /runbook/{id}/steps — Get ordered skills in a runbook. Returns skill_count and skills array.",
             },
             "reading": {
                 "search": "GET /search?q=QUERY — Text search (ILIKE). Returns tip for semantic search when empty. Filters: ?type=, ?created_by=, ?since=, ?until=, ?include_l0=true.",
@@ -276,6 +279,8 @@ class GraphHandlerMixin:
                 "release": "Software versions — deployed or available",
                 "technology": "Tools, frameworks, languages, protocols",
                 "task": "Action items with status, priority, assignment",
+                "skill": "Portable agent capability — trigger, scope, required_tools, boundaries, output_format, verification_evidence. Create via POST /skill.",
+                "runbook": "Ordered chain of skill nodes connected by DEPENDS_ON edges. Create via POST /runbook. Query steps via GET /runbook/{id}/steps.",
             },
             "edge_type_guide": {
                 "L0": {
@@ -2840,6 +2845,87 @@ class GraphHandlerMixin:
             customer_id=self._customer_id,
         )
         self._json_response(200, result)
+
+    def _post_skill(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /skill — Create a portable skill node (OHM-461f).
+
+        Body:
+            label (required): Human-readable skill name
+            trigger (required): When this skill activates
+            scope (optional): personal (default), project, or universal
+            required_tools (optional): List of tool names
+            boundaries (optional): Constraints on what the skill does
+            output_format (optional): Expected output format
+            verification_evidence (optional): List of evidence types
+            connects_to (optional): List of existing node IDs to link
+        """
+        from ohm.queries import create_skill
+        from ohm.exceptions import ValidationError
+
+        label = body.get("label")
+        trigger = body.get("trigger")
+        if not label or not trigger:
+            raise ValidationError("label and trigger are required")
+
+        skill = create_skill(
+            self.current_store.conn,
+            label=label,
+            trigger=trigger,
+            scope=body.get("scope", "personal"),
+            required_tools=body.get("required_tools", []),
+            boundaries=body.get("boundaries"),
+            output_format=body.get("output_format"),
+            verification_evidence=body.get("verification_evidence", []),
+            connects_to=body.get("connects_to", []),
+            created_by=agent,
+        )
+        self._json_response(201, skill)
+
+    def _post_runbook(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /runbook — Create an ordered chain of skills (OHM-461f).
+
+        Body:
+            label (required): Human-readable runbook name
+            skill_ids (required): Ordered list of existing skill node IDs
+            description (optional): Free-text description
+        """
+        from ohm.queries import create_runbook
+        from ohm.exceptions import ValidationError
+
+        label = body.get("label")
+        skill_ids = body.get("skill_ids", [])
+        if not label:
+            raise ValidationError("label is required")
+        if not skill_ids or not isinstance(skill_ids, list):
+            raise ValidationError("skill_ids must be a non-empty list")
+
+        runbook = create_runbook(
+            self.current_store.conn,
+            label=label,
+            skill_ids=skill_ids,
+            description=body.get("description"),
+            created_by=agent,
+        )
+        self._json_response(201, runbook)
+
+    def _get_runbook_steps(self, path: str, qs: dict) -> None:
+        """GET /runbook/{id}/steps — Get ordered skills in a runbook (OHM-461f)."""
+        from ohm.queries import get_runbook_steps
+        from ohm.exceptions import NodeNotFoundError, ValidationError
+
+        prefix = "/runbook/"
+        suffix = "/steps"
+        if not path.endswith(suffix):
+            raise ValidationError("Path must end with /steps")
+        runbook_id = path[len(prefix):-len(suffix)]
+        if not runbook_id:
+            raise ValidationError("runbook_id is required")
+
+        try:
+            result = get_runbook_steps(self.current_store.conn, runbook_id=runbook_id)
+            self._json_response(200, result)
+        except NodeNotFoundError as e:
+            self._json_response(404, {"error": "not_found", "message": str(e)})
 
     def _get_vault(self, path: str, qs: dict) -> None:
         """GET /vault — list vault contents for the authenticated agent (OHM-cuu0).

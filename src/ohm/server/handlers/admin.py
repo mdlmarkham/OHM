@@ -2005,23 +2005,32 @@ class AdminHandlerMixin:
         }
 
         # OHM-nnrw: embedding coverage and average manifold density
+        # NOTE: The LATERAL + ORDER BY array_cosine_distance query is O(n²) and
+        # hangs on large graphs (3500+ nodes). Replaced with a sampled approach
+        # that computes density on a random subset of 100 nodes, each comparing
+        # against 50 random peers. This gives a reasonable estimate without
+        # timing out the HTTP request.
         try:
             nodes_with_embedding = conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL AND embedding IS NOT NULL").fetchone()[0]
             raw_values["embedding_coverage"] = round(nodes_with_embedding / total_nodes, 4) if total_nodes > 0 else 0.0
 
+            # Sampled manifold density: pick 100 random nodes with embeddings,
+            # for each pick 50 random peers, compute avg cosine similarity.
             avg_density_row = conn.execute("""
                 SELECT AVG(density) FROM (
-                    SELECT 1 - AVG(
-                        array_cosine_distance(n.embedding, peer.embedding)
-                    ) AS density
-                    FROM ohm_nodes n,
+                    SELECT 1.0 - AVG(array_cosine_distance(n.embedding, peer.embedding)) AS density
+                    FROM (
+                        SELECT id, embedding FROM ohm_nodes
+                        WHERE deleted_at IS NULL AND embedding IS NOT NULL
+                        ORDER BY random()
+                        LIMIT 100
+                    ) n,
                     LATERAL (
                         SELECT embedding FROM ohm_nodes peer
                         WHERE peer.embedding IS NOT NULL AND peer.id != n.id
-                        ORDER BY array_cosine_distance(peer.embedding, n.embedding) ASC
-                        LIMIT 5
+                        ORDER BY random()
+                        LIMIT 50
                     ) peer
-                    WHERE n.deleted_at IS NULL AND n.embedding IS NOT NULL
                     GROUP BY n.id
                 )
             """).fetchone()

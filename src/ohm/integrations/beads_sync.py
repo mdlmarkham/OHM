@@ -74,7 +74,7 @@ def _ensure_anchor_node(conn) -> None:
     if existing:
         return
     conn.execute(
-        "INSERT INTO ohm_nodes (id, label, type, content, created_by, confidence, visibility) VALUES (?, ?, 'concept', 'System anchor for Beads-synced tasks. Auto-created by beads_sync.', 'system', 1.0, 'team')",
+        "INSERT OR IGNORE INTO ohm_nodes (id, label, type, content, created_by, confidence, visibility) VALUES (?, ?, 'concept', 'System anchor for Beads-synced tasks. Auto-created by beads_sync.', 'system', 1.0, 'team')",
         [BEADS_BACKLOG_ANCHOR_ID, "Beads Backlog Anchor"],
     )
 

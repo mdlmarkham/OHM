@@ -236,6 +236,34 @@ if _perf_log_file == "":
     _perf_log_file = None
 
 
+def _normalize_perf_path(path: str) -> str:
+    """Normalize a request path for perf logging by replacing UUIDs and IDs with placeholders.
+
+    Prevents cardinality explosion in /perf endpoint when paths contain literal
+    node/edge IDs (OHM-cbui).
+
+    Examples:
+        /node/abc-123-def → /node/{id}
+        /edge/uuid-here → /edge/{id}
+        /neighborhood/some-id → /neighborhood/{id}
+        /runbook/my-runbook/steps → /runbook/{id}/steps
+    """
+    import re as _re
+
+    # Replace UUIDs (standard hex UUID format with dashes)
+    path = _re.sub(r'/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', '/{id}', path, flags=_re.IGNORECASE)
+    # Replace short hex IDs with dashes (like abc-123-def-456)
+    path = _re.sub(r'/[a-z0-9]+(?:-[a-z0-9]+)+', '/{id}', path, flags=_re.IGNORECASE)
+    # Replace node_ prefix IDs
+    path = _re.sub(r'/node_[a-z0-9_]+', '/{id}', path, flags=_re.IGNORECASE)
+    # Replace edge_ prefix IDs
+    path = _re.sub(r'/edge_[a-z0-9_]+', '/{id}', path, flags=_re.IGNORECASE)
+    # Replace nudge_ prefix IDs
+    path = _re.sub(r'/nudge_[a-z0-9_]+', '/{id}', path, flags=_re.IGNORECASE)
+
+    return path
+
+
 def _record_endpoint_latency(method: str, path: str, elapsed_ms: float, status: int) -> None:
     """Record per-endpoint latency for perf analysis (OHM-lqpk.5).
 
@@ -246,6 +274,7 @@ def _record_endpoint_latency(method: str, path: str, elapsed_ms: float, status: 
     from urllib.parse import urlparse as _up
 
     endpoint = _up(path).path.rstrip("/") or "/"
+    endpoint = _normalize_perf_path(endpoint)
     key = f"{method} {endpoint}"
     with _metrics_lock:
         if key not in _endpoint_latencies:
@@ -2286,6 +2315,8 @@ OhmHandler._POST_EXACT = {
     "/outcome": "_post_outcome",
     "/data-products": "_post_data_product",
     "/agent/synthesis": "_post_synthesis",
+    "/skill": "_post_skill",
+    "/runbook": "_post_runbook",
     "/ask": "_post_ask",
     "/batch": "_post_batch",
     "/webhook": "_post_webhook",
@@ -2450,6 +2481,7 @@ OhmHandler._GET_PREFIXES = [
     ("/gap/", "_get_gap"),
     ("/trajectory/", "_get_trajectory"),
     ("/provenance/", "_get_provenance"),
+    ("/runbook/", "_get_runbook_steps"),
     ("/monte-carlo/", "_get_monte_carlo"),
     ("/calibration/", "_get_calibration"),
     ("/reliability/", "_get_reliability"),

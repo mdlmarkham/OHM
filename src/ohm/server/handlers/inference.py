@@ -28,7 +28,14 @@ class InferenceHandlerMixin:
             for pair in evidence_str.split(","):
                 if ":" in pair:
                     node_id, state = pair.split(":", 1)
-                    evidence[validate_identifier(node_id.strip(), name="evidence_node")] = int(state.strip())
+                    node_id = validate_identifier(node_id.strip(), name="evidence_node")
+                    state = state.strip()
+                    # Support float evidence values (probability-based, OHM-vatf.1)
+                    # e.g., ?evidence=node:0.7 means "70%% bad"
+                    try:
+                        evidence[node_id] = float(state)
+                    except ValueError:
+                        evidence[node_id] = int(state)
         layers_str = qs.get("layers", [""])[0]
         layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
         from ohm.bayesian import bayesian_inference
@@ -267,7 +274,13 @@ class InferenceHandlerMixin:
             for pair in evidence_str.split(","):
                 if ":" in pair:
                     node_id, state = pair.split(":", 1)
-                    evidence[validate_identifier(node_id.strip(), name="evidence_node")] = int(state.strip())
+                    node_id = validate_identifier(node_id.strip(), name="evidence_node")
+                    state = state.strip()
+                    # Support float evidence values (probability-based, OHM-vatf.1)
+                    try:
+                        evidence[node_id] = float(state)
+                    except ValueError:
+                        evidence[node_id] = int(state)
         leak_probability = float(qs.get("leak", ["0.15"])[0])
         layers_str = qs.get("layers", [""])[0]
         layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
