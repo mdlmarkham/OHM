@@ -37,7 +37,7 @@ ingestion = [
     "markdown>=3.6",
 ]
 markov = [
-    "numpy>=1.24",
+    "numpy>=2.4.6",
 ]
 science = [
     "ohm[bayesian,causal,markov]",
