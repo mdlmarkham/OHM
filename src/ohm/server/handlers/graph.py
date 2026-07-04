@@ -2920,7 +2920,7 @@ class GraphHandlerMixin:
         suffix = "/steps"
         if not path.endswith(suffix):
             raise ValidationError("Path must end with /steps")
-        runbook_id = path[len(prefix):-len(suffix)]
+        runbook_id = path[len(prefix) : -len(suffix)]
         if not runbook_id:
             raise ValidationError("runbook_id is required")
 

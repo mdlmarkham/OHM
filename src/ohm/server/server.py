@@ -251,15 +251,15 @@ def _normalize_perf_path(path: str) -> str:
     import re as _re
 
     # Replace UUIDs (standard hex UUID format with dashes)
-    path = _re.sub(r'/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', '/{id}', path, flags=_re.IGNORECASE)
+    path = _re.sub(r"/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", "/{id}", path, flags=_re.IGNORECASE)
     # Replace short hex IDs with dashes (like abc-123-def-456)
-    path = _re.sub(r'/[a-z0-9]+(?:-[a-z0-9]+)+', '/{id}', path, flags=_re.IGNORECASE)
+    path = _re.sub(r"/[a-z0-9]+(?:-[a-z0-9]+)+", "/{id}", path, flags=_re.IGNORECASE)
     # Replace node_ prefix IDs
-    path = _re.sub(r'/node_[a-z0-9_]+', '/{id}', path, flags=_re.IGNORECASE)
+    path = _re.sub(r"/node_[a-z0-9_]+", "/{id}", path, flags=_re.IGNORECASE)
     # Replace edge_ prefix IDs
-    path = _re.sub(r'/edge_[a-z0-9_]+', '/{id}', path, flags=_re.IGNORECASE)
+    path = _re.sub(r"/edge_[a-z0-9_]+", "/{id}", path, flags=_re.IGNORECASE)
     # Replace nudge_ prefix IDs
-    path = _re.sub(r'/nudge_[a-z0-9_]+', '/{id}', path, flags=_re.IGNORECASE)
+    path = _re.sub(r"/nudge_[a-z0-9_]+", "/{id}", path, flags=_re.IGNORECASE)
 
     return path
 

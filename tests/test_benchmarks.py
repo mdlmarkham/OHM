@@ -188,8 +188,7 @@ class TestSemanticSearchBenchmarks:
 
         def run():
             return conn.execute(
-                "SELECT id, label, array_cosine_distance(embedding, ?::FLOAT[768]) AS distance "
-                "FROM ohm_nodes WHERE embedding IS NOT NULL ORDER BY distance LIMIT 10",
+                "SELECT id, label, array_cosine_distance(embedding, ?::FLOAT[768]) AS distance FROM ohm_nodes WHERE embedding IS NOT NULL ORDER BY distance LIMIT 10",
                 [query_emb],
             ).fetchall()
 
@@ -217,8 +216,7 @@ class TestSemanticSearchBenchmarks:
 
         def run():
             return conn.execute(
-                "SELECT id, label, array_cosine_distance(embedding, ?::FLOAT[768]) AS distance "
-                "FROM ohm_nodes WHERE embedding IS NOT NULL ORDER BY distance LIMIT 10",
+                "SELECT id, label, array_cosine_distance(embedding, ?::FLOAT[768]) AS distance FROM ohm_nodes WHERE embedding IS NOT NULL ORDER BY distance LIMIT 10",
                 [query_emb],
             ).fetchall()
 
@@ -246,8 +244,7 @@ class TestSemanticSearchBenchmarks:
 
         def run():
             return conn.execute(
-                "SELECT id, label, array_cosine_distance(embedding, ?::FLOAT[768]) AS distance "
-                "FROM ohm_nodes WHERE embedding IS NOT NULL ORDER BY distance LIMIT 10",
+                "SELECT id, label, array_cosine_distance(embedding, ?::FLOAT[768]) AS distance FROM ohm_nodes WHERE embedding IS NOT NULL ORDER BY distance LIMIT 10",
                 [query_emb],
             ).fetchall()
 
@@ -328,9 +325,7 @@ class TestHDFingerprintBenchmarks:
             update_node_hd_fingerprint(conn, n["id"])
 
         def run():
-            return conn.execute(
-                "SELECT id, hd_fingerprint FROM ohm_nodes WHERE hd_fingerprint IS NOT NULL LIMIT 10"
-            ).fetchall()
+            return conn.execute("SELECT id, hd_fingerprint FROM ohm_nodes WHERE hd_fingerprint IS NOT NULL LIMIT 10").fetchall()
 
         result = benchmark(run)
         assert len(result) == 3
@@ -348,9 +343,7 @@ class TestHDFingerprintBenchmarks:
             update_node_hd_fingerprint(conn, n["id"])
 
         def run():
-            return conn.execute(
-                "SELECT id, hd_fingerprint FROM ohm_nodes WHERE hd_fingerprint IS NOT NULL LIMIT 100"
-            ).fetchall()
+            return conn.execute("SELECT id, hd_fingerprint FROM ohm_nodes WHERE hd_fingerprint IS NOT NULL LIMIT 100").fetchall()
 
         result = benchmark(run)
         assert len(result) == 100
