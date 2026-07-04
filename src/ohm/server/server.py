@@ -324,12 +324,43 @@ _PRIVATE_NETWORKS = [
 ]
 
 
+def _resolve_webhook_ips(host: str) -> list[str]:
+    """Resolve *host* and reject any private/loopback address (SSRF guard).
+
+    Returns the deduplicated list of resolved address strings (order
+    preserved). Raises ``ValidationError`` if the host is unresolvable or
+    resolves to *any* private/loopback address.
+
+    Called at both registration and delivery time so DNS rebinding — a
+    public address at registration that re-resolves to a private address
+    at delivery — is caught at the delivery boundary.
+    """
+    import socket
+
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except Exception:
+        raise ValidationError(f"Cannot resolve webhook host: {host!r}")
+    seen: list[str] = []
+    for info in infos:
+        addr = str(info[4][0])
+        if addr in seen:
+            continue
+        ip = ipaddress.ip_address(addr)
+        for net in _PRIVATE_NETWORKS:
+            if ip in net:
+                raise ValidationError(f"Webhook URL targets a private/loopback address ({addr}) — SSRF not allowed")
+        seen.append(addr)
+    if not seen:
+        raise ValidationError(f"Cannot resolve webhook host: {host!r}")
+    return seen
+
+
 def _validate_webhook_url(url: str) -> None:
     """Reject webhook URLs that could enable SSRF attacks.
 
     Raises ValidationError for non-http(s) schemes and private/loopback targets.
     """
-    import socket
     from urllib.parse import urlparse
 
     parsed = urlparse(url)
@@ -338,16 +369,7 @@ def _validate_webhook_url(url: str) -> None:
     host = parsed.hostname
     if not host:
         raise ValidationError("Webhook URL missing host")
-    try:
-        addr = socket.getaddrinfo(host, None)[0][4][0]
-        ip = ipaddress.ip_address(addr)
-        for net in _PRIVATE_NETWORKS:
-            if ip in net:
-                raise ValidationError(f"Webhook URL targets a private/loopback address ({addr}) — SSRF not allowed")
-    except ValidationError:
-        raise
-    except Exception:
-        raise ValidationError(f"Cannot resolve webhook host: {host!r}")
+    _resolve_webhook_ips(host)
 
 
 def _deliver_webhook(url: str, event: dict, timeout: float = 5.0) -> bool:
@@ -355,12 +377,43 @@ def _deliver_webhook(url: str, event: dict, timeout: float = 5.0) -> bool:
 
     Uses HTTP POST with JSON body. Returns True on success, False on failure.
     Failures are logged but not raised — webhooks are fire-and-forget.
-    """
-    import urllib.request
-    import urllib.error
 
-    body = json.dumps(event).encode("utf-8")
+    SSRF / DNS-rebinding: the host is resolved and validated again at
+    delivery time (not just at registration). For HTTP the connection is
+    pinned to a validated IP so a hostname that re-resolves to a private
+    address between validation and connect cannot reach it.
+    """
+    import http.client
+    from urllib.parse import urlparse
+
     try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False
+        host = parsed.hostname
+        if not host:
+            return False
+        ips = _resolve_webhook_ips(host)  # raises ValidationError on private/unresolvable
+        pinned_ip = ips[0]
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        request_path = parsed.path or "/"
+        if parsed.query:
+            request_path += "?" + parsed.query
+        body = json.dumps(event).encode("utf-8")
+        headers = {"Content-Type": "application/json", "Host": host}
+        if parsed.scheme == "http":
+            # Pin the TCP connection to the validated IP (full rebinding mitigation).
+            conn = http.client.HTTPConnection(pinned_ip, port, timeout=timeout)
+            try:
+                conn.request("POST", request_path, body=body, headers=headers)
+                resp = conn.getresponse()
+                return resp.status in (200, 201, 202, 204)
+            finally:
+                conn.close()
+        # HTTPS: re-validated above; TLS certificate verification against the
+        # original hostname provides additional rebinding protection.
+        import urllib.request
+
         req = urllib.request.Request(
             url,
             data=body,
@@ -418,6 +471,60 @@ def _verify_token(provided: str, token_hash: str) -> bool:
     Hashes the provided token first, then compares the hashes.
     """
     return secrets.compare_digest(_hash_token(provided), token_hash)
+
+
+# ── Auth rate limiting (M2) ───────────────────────────────────
+# Per-IP brute-force protection for authentication. A client that exceeds
+# _AUTH_FAIL_THRESHOLD failed attempts within _AUTH_FAIL_WINDOW_SEC is
+# locked out for _AUTH_LOCKOUT_SEC. Tunable via environment.
+_AUTH_FAIL_THRESHOLD = int(os.environ.get("OHM_AUTH_FAIL_THRESHOLD", "10"))
+_AUTH_FAIL_WINDOW_SEC = int(os.environ.get("OHM_AUTH_FAIL_WINDOW_SEC", "300"))
+_AUTH_LOCKOUT_SEC = int(os.environ.get("OHM_AUTH_LOCKOUT_SEC", "900"))
+
+_auth_failures: dict[str, collections.deque] = {}
+_auth_lockout: dict[str, float] = {}
+_auth_failures_lock = threading.Lock()
+
+
+def _check_auth_rate_limit(client_ip: str | None) -> None:
+    """Raise AuthenticationError if *client_ip* is currently locked out."""
+    if not client_ip:
+        return
+    now = time.monotonic()
+    with _auth_failures_lock:
+        until = _auth_lockout.get(client_ip)
+        if until is not None:
+            if now < until:
+                raise AuthenticationError(f"Too many failed authentication attempts from {client_ip} — try again later")
+            _auth_lockout.pop(client_ip, None)
+            _auth_failures.pop(client_ip, None)
+
+
+def _record_auth_failure(client_ip: str | None) -> None:
+    """Record a failed authentication attempt and lock out if threshold reached."""
+    if not client_ip:
+        return
+    now = time.monotonic()
+    with _auth_failures_lock:
+        failures = _auth_failures.get(client_ip)
+        if failures is None:
+            failures = collections.deque()
+            _auth_failures[client_ip] = failures
+        failures.append(now)
+        cutoff = now - _AUTH_FAIL_WINDOW_SEC
+        while failures and failures[0] < cutoff:
+            failures.popleft()
+        if len(failures) >= _AUTH_FAIL_THRESHOLD:
+            _auth_lockout[client_ip] = now + _AUTH_LOCKOUT_SEC
+
+
+def _clear_auth_failures(client_ip: str | None) -> None:
+    """Clear recorded auth failures for *client_ip* (called on successful auth)."""
+    if not client_ip:
+        return
+    with _auth_failures_lock:
+        _auth_failures.pop(client_ip, None)
+        _auth_lockout.pop(client_ip, None)
 
 
 def _lookup_role(roles: dict, agent: str, customer_id: str | None = None) -> str:
@@ -1047,12 +1154,28 @@ class OhmHandler(
         self._authenticated_agent = None
         self._resolved_customer_id = None
 
+        # Rate-limit brute-force auth attempts (M2). Skipped in no-auth dev
+        # mode and when the client address is unavailable (unit-test handlers).
+        if getattr(self, "no_auth", False):
+            client_ip = None
+        else:
+            try:
+                client_ip = self.client_address[0]
+            except (AttributeError, IndexError, TypeError):
+                client_ip = None
+            if client_ip:
+                _check_auth_rate_limit(client_ip)
+
+        token_provided = False
         auth = self.headers.get("Authorization", "")
         if auth.startswith("Bearer "):
             token = unquote(auth[7:])
+            token_provided = True
             for token_hash, agent_name in self.tokens.items():
                 if _verify_token(token, token_hash):
                     self._authenticated_agent = agent_name
+                    if client_ip:
+                        _clear_auth_failures(client_ip)
                     # Honor X-Ohm-Agent header if the authenticated agent has write access
                     ohm_agent = self.headers.get("X-Ohm-Agent")
                     if ohm_agent and _lookup_role(self.roles, agent_name, self._customer_id) != "read-only":
@@ -1061,6 +1184,8 @@ class OhmHandler(
             for token_hash, customer_id in self.customer_tokens.items():
                 if _verify_token(token, token_hash):
                     self._resolved_customer_id = customer_id
+                    if client_ip:
+                        _clear_auth_failures(client_ip)
                     return f"customer:{customer_id}"
 
         from urllib.parse import parse_qs, urlparse
@@ -1068,9 +1193,12 @@ class OhmHandler(
         qs = parse_qs(urlparse(self.path).query)
         if "token" in qs:
             token = qs["token"][0]
+            token_provided = True
             for token_hash, agent_name in self.tokens.items():
                 if _verify_token(token, token_hash):
                     self._authenticated_agent = agent_name
+                    if client_ip:
+                        _clear_auth_failures(client_ip)
                     # Honor X-Ohm-Agent header if the authenticated agent has write access
                     ohm_agent = self.headers.get("X-Ohm-Agent")
                     if ohm_agent and _lookup_role(self.roles, agent_name, self._customer_id) != "read-only":
@@ -1079,7 +1207,12 @@ class OhmHandler(
             for token_hash, customer_id in self.customer_tokens.items():
                 if _verify_token(token, token_hash):
                     self._resolved_customer_id = customer_id
+                    if client_ip:
+                        _clear_auth_failures(client_ip)
                     return f"customer:{customer_id}"
+
+        if token_provided and client_ip:
+            _record_auth_failure(client_ip)
         return None
 
     def _require_auth(self) -> str:

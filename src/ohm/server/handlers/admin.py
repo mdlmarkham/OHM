@@ -15,8 +15,23 @@ class AdminHandlerMixin:
     def _post_hooks(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /hooks — register a new hook.
 
+        Hook registration stores a command that the server later executes
+        (shell=False, sandboxed, attributed) — treat it as a privileged
+        operation. When auth is enabled and roles are configured, only the
+        ``admin`` role may register hooks. Dev mode (``no_auth``) and
+        unconfigured deployments fall through to the write-access gate that
+        ``_do_POST`` already enforces.
+
         Body: {event, command, timeout_ms?, enabled?}
         """
+        from ohm.exceptions import PermissionDeniedError
+
+        if not getattr(self, "no_auth", False) and getattr(self, "roles", None):
+            from ohm.server.server import _lookup_role
+
+            if _lookup_role(self.roles, agent, self._customer_id) != "admin":
+                raise PermissionDeniedError("Hook registration requires admin role")
+
         from ohm.queries import create_hook
         from ohm.exceptions import ValidationError
 

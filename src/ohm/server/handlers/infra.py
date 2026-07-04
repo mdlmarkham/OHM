@@ -6,6 +6,18 @@ import time
 class InfraHandlerMixin:
     """Handler mixin for infrastructure endpoints (OHM-shpq)."""
 
+    def _set_extra_cors_headers(self) -> None:
+        """Set CORS headers appropriate for OHM's agent-only access model.
+
+        OHM is consumed by agents over Bearer-token auth (curl, SDK, HTTP
+        clients) — not by browsers. By design we do NOT emit a permissive
+        ``Access-Control-Allow-Origin`` header, so cross-origin browser reads
+        are blocked by default. This no-op stub exists so callers that pre-flush
+        CORS headers (e.g. webhook outbox/dead-letter listing endpoints) do not
+        raise ``AttributeError``. If browser access is ever required, override
+        this method to emit an explicit, restricted origin policy.
+        """
+
     def _get_infra_root(self, path: str, qs: dict) -> None:
         """GET / — root discovery endpoint (no auth)."""
         self._json_response(

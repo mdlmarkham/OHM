@@ -443,5 +443,9 @@ def create_secret(
     if scope and ("'" in scope or ";" in scope or "--" in scope):
         raise ValueError(f"Quack secret scope contains invalid characters: {scope!r}")
 
-    scope_clause = f", SCOPE '{scope}'" if scope else ""
-    conn.execute(f"CREATE OR REPLACE SECRET (TYPE quack, TOKEN '{resolved_token}'{scope_clause})")
+    # Security: escape single quotes in token to prevent SQL injection
+    # via the CREATE SECRET f-string below.
+    safe_token = resolved_token.replace("'", "''")
+    safe_scope = scope.replace("'", "''") if scope else ""
+    scope_clause = f", SCOPE '{safe_scope}'" if safe_scope else ""
+    conn.execute(f"CREATE OR REPLACE SECRET (TYPE quack, TOKEN '{safe_token}'{scope_clause})")
