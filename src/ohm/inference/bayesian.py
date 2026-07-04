@@ -472,6 +472,56 @@ def build_bayesian_network(
 
     edges = list(seen_edges.values())
 
+    # ── Outcome-based probability adjustment (OHM-vatf.1) ──────────────────
+    # Query ohm_outcomes for falsified outcomes on claim nodes (from_node of
+    # edges). When an edge's from_node has been falsified (outcome=False),
+    # discount the edge probability by a factor proportional to the falsification
+    # rate. This makes the Bayesian posterior respond to falsified evidence.
+    #
+    # Discount factor: P(edge is valid) = 1 - falsification_rate
+    # where falsification_rate = false_outcomes / total_outcomes for that node.
+    #
+    # Only applied when there are >= 2 outcomes to avoid overreacting to a single
+    # falsification (which could be noise).
+    try:
+        outcome_rows = reader._conn.execute(
+            """
+            SELECT
+                claim_node,
+                COUNT(*) AS total_outcomes,
+                SUM(CASE WHEN outcome = FALSE THEN 1 ELSE 0 END) AS false_count
+            FROM ohm_outcomes
+            WHERE claim_node IN ({})
+            GROUP BY claim_node
+            """.format(
+                ",".join("?" for _ in node_ids)
+            ),
+            list(node_ids),
+        ).fetchall()
+        outcome_discounts: dict[str, float] = {}
+        for claim_node, total, false_count in outcome_rows:
+            # OHM-vatf.1: A single falsified outcome should reduce edge weight.
+            if false_count > 0:
+                falsification_rate = false_count / total
+                # Discount factor: 1 - falsification_rate, clamped to [0.1, 1.0]
+                # A 50% falsification rate → 0.5 discount (probability halved)
+                # A 100% falsification rate → 0.1 discount (floor, never zero)
+                discount = max(0.1, 1.0 - falsification_rate)
+                outcome_discounts[claim_node] = discount
+                logger.info(
+                    "Outcome discount for %s: %d/%d falsified → discount=%.3f",
+                    claim_node, false_count, total, discount,
+                )
+        if outcome_discounts:
+            for e in edges:
+                if e["from"] in outcome_discounts:
+                    e["probability"] *= outcome_discounts[e["from"]]
+                    e["confidence"] *= outcome_discounts[e["from"]]
+                    e["outcome_discount"] = outcome_discounts[e["from"]]
+    except Exception:
+        logger.debug("Outcome-based adjustment skipped (ohm_outcomes may not exist yet)")
+    # ── End outcome-based adjustment ────────────────────────────────────────
+
     # Scope to root_nodes if specified
     if root_nodes:
         included = set(root_nodes)
@@ -597,7 +647,10 @@ def build_bayesian_network(
         if safe not in parent_edges:
             root_safe_names.add(safe)
             # Get prior from probability-scaled observations with temporal decay
-            _obs = [o for o in reader.get_observations(node_id) if o.value is not None and o.scale in ("probability", "unknown")]
+            _obs = [o for o in reader.get_observations(node_id)
+                    if o.value is not None
+                    and o.scale in ("probability", "unknown")
+                    and o.type in ("measurement", "experiment_result")]
             # Filter to observation_window_days if specified
             if observation_window_days is not None and observation_window_days > 0:
                 cutoff = now - timedelta(days=observation_window_days)
@@ -891,9 +944,20 @@ def bayesian_inference(
     # that were excluded by cycle-breaking and are not in model.nodes()
     model_node_set = set(network["model"].nodes())
     safe_evidence = {}
+    prob_evidence_factors = []  # Virtual evidence for float-valued evidence (OHM-vatf.1)
     for node_id, state in evidence.items():
         safe = _safe_node_id(validate_identifier(node_id, name="evidence_node"))
-        if safe in model_node_set:
+        if safe not in model_node_set:
+            continue
+        # Support probability-based evidence: float in (0,1) representing p_bad
+        # e.g., evidence={"node": 0.7} means "70% bad"
+        # Convert to virtual evidence factor instead of hard evidence.
+        if isinstance(state, float) and 0.0 < state < 1.0:
+            p_bad = max(0.01, min(0.99, state))
+            p_good = 1.0 - p_bad
+            factor = TabularCPD(safe, 2, [[p_bad], [p_good]])
+            prob_evidence_factors.append(factor)
+        else:
             safe_evidence[safe] = int(state)
 
     safe_target = _safe_node_id(target)
@@ -909,9 +973,10 @@ def bayesian_inference(
 
     # Run Variable Elimination
     soft_factors = network.get("soft_evidence_factors", [])
+    all_virtual_evidence = soft_factors + prob_evidence_factors
     query_kwargs: dict[str, Any] = {"variables": [safe_target], "evidence": safe_evidence}
-    if soft_factors:
-        query_kwargs["virtual_evidence"] = soft_factors
+    if all_virtual_evidence:
+        query_kwargs["virtual_evidence"] = all_virtual_evidence
     try:
         # OHM-a689.3: Cache VE instance
         _ve_key = id(model)

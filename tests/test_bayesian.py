@@ -1978,3 +1978,123 @@ class TestVEReuse:
             build_bayesian_network(db, edge_types=["CAUSES"], layers=[f"L{i % 3}"])
 
         assert len(_bayesian_network_cache) <= _MAX_BAYESIAN_NETWORK_CACHE_SIZE
+
+
+class TestOutcomeBasedAdjustment:
+    """OHM-vatf.1: Bayesian inference must consume outcomes and probability observations."""
+
+    def test_outcome_discount_lowers_edge_probability(self, db):
+        """Falsified outcomes on a claim node should discount edge probability."""
+        a = create_sample_node(db, label="claim_source")
+        b = create_sample_node(db, label="target_node")
+        create_sample_edge(db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3", confidence=0.9, probability=0.8)
+
+        # Record falsified outcomes on the claim node
+        import uuid
+        for _ in range(3):
+            oid = str(uuid.uuid4())
+            db.execute(
+                "INSERT INTO ohm_outcomes (id, source_agent, claim_node, outcome, recorded_by) VALUES (?, ?, ?, ?, ?)",
+                [oid, "test_agent", a, False, "test_verifier"],
+            )
+        # One true outcome
+        oid = str(uuid.uuid4())
+        db.execute(
+            "INSERT INTO ohm_outcomes (id, source_agent, claim_node, outcome, recorded_by) VALUES (?, ?, ?, ?, ?)",
+            [oid, "test_agent", a, True, "test_verifier"],
+        )
+
+        # Build network — outcome discount should reduce edge probability
+        network = build_bayesian_network(db, edge_types=["CAUSES"])
+        assert network is not None
+
+        # Find the edge and check it has an outcome_discount
+        edge = next((e for e in network["edges"] if e["from"] == a), None)
+        assert edge is not None, "Edge should exist in network"
+        assert "outcome_discount" in edge, "Edge should have outcome_discount"
+        # 3/4 falsified → falsification_rate = 0.75 → discount = 0.25
+        assert edge["outcome_discount"] == 0.25, f"Expected discount 0.25, got {edge['outcome_discount']}"
+        # Original effective probability: 0.9 (conf) * 0.8 (prob) = 0.72
+        # After discount: 0.72 * 0.25 = 0.18
+        assert edge["probability"] == pytest.approx(0.18, abs=0.01), f"Expected probability 0.18, got {edge['probability']}"
+
+    def test_outcome_discount_minimum_floor(self, db):
+        """Discount should floor at 0.1 even with 100% falsification rate."""
+        a = create_sample_node(db, label="fully_falsified")
+        b = create_sample_node(db, label="target")
+        create_sample_edge(db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3", confidence=0.9, probability=0.8)
+
+        import uuid
+        for _ in range(5):
+            oid = str(uuid.uuid4())
+            db.execute(
+                "INSERT INTO ohm_outcomes (id, source_agent, claim_node, outcome, recorded_by) VALUES (?, ?, ?, ?, ?)",
+                [oid, "test_agent", a, False, "test_verifier"],
+            )
+
+        network = build_bayesian_network(db, edge_types=["CAUSES"])
+        assert network is not None
+        edge = next((e for e in network["edges"] if e["from"] == a), None)
+        assert edge is not None
+        # 5/5 falsified → discount = max(0.1, 1.0 - 1.0) = 0.1
+        assert edge["outcome_discount"] == 0.1, f"Expected floor 0.1, got {edge['outcome_discount']}"
+
+    def test_single_outcome_triggers_discount(self, db):
+        """OHM-vatf.1: A single falsified outcome should reduce edge weight."""
+        a = create_sample_node(db, label="single_outcome")
+        b = create_sample_node(db, label="target")
+        create_sample_edge(db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3", confidence=0.9, probability=0.8)
+
+        import uuid
+        oid = str(uuid.uuid4())
+        db.execute(
+            "INSERT INTO ohm_outcomes (id, source_agent, claim_node, outcome, recorded_by) VALUES (?, ?, ?, ?, ?)",
+            [oid, "test_agent", a, False, "test_verifier"],
+        )
+
+        network = build_bayesian_network(db, edge_types=["CAUSES"])
+        assert network is not None
+        edge = next((e for e in network["edges"] if e["from"] == a), None)
+        assert edge is not None
+        # Single falsified outcome → discount to floor 0.1
+        assert edge["outcome_discount"] == pytest.approx(0.1, abs=0.001), "Single false outcome should trigger max-floor discount"
+        assert edge["probability"] == pytest.approx(0.072, abs=0.01), f"Expected discounted probability 0.072, got {edge['probability']}"
+        assert edge["confidence"] == pytest.approx(0.09, abs=0.01), f"Expected discounted confidence 0.09, got {edge['confidence']}"
+
+    def test_zero_outcomes_no_discount(self, db):
+        """No falsified outcomes → no outcome discount applied."""
+        a = create_sample_node(db, label="no_outcome")
+        b = create_sample_node(db, label="target")
+        create_sample_edge(db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3", confidence=0.9, probability=0.8)
+
+        network = build_bayesian_network(db, edge_types=["CAUSES"])
+        assert network is not None
+        edge = next((e for e in network["edges"] if e["from"] == a), None)
+        assert edge is not None
+        assert "outcome_discount" not in edge, "No outcomes should mean no outcome_discount"
+        assert edge["probability"] == pytest.approx(0.72, abs=0.01), f"Expected probability 0.72, got {edge['probability']}"
+
+    def test_probability_evidence_shifts_posterior(self, db):
+        """Float evidence values should shift posterior via virtual evidence."""
+        a = create_sample_node(db, label="root_cause")
+        b = create_sample_node(db, label="effect_node")
+        create_sample_edge(db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3", confidence=0.9, probability=0.8)
+
+        # Hard evidence: root cause is "bad" (state 0)
+        result_hard = bayesian_inference(db, b, {a: 0})
+        assert result_hard["method"] == "bayesian_variable_elimination"
+        p_bad_hard = result_hard["posterior"][b]["bad"]
+
+        # Probability evidence: root cause is 70% bad
+        result_soft = bayesian_inference(db, b, {a: 0.7})
+        assert result_soft["method"] == "bayesian_variable_elimination"
+        p_bad_soft = result_soft["posterior"][b]["bad"]
+
+        # Soft evidence should produce a posterior between prior and hard evidence
+        # Hard evidence (100% bad) should give higher p_bad than soft (70% bad)
+        assert p_bad_soft < p_bad_hard, f"Soft evidence ({p_bad_soft}) should give lower p_bad than hard ({p_bad_hard})"
+
+        # Soft evidence should still be above the prior (no evidence)
+        result_prior = bayesian_inference(db, b, {})
+        p_bad_prior = result_prior["posterior"][b]["bad"]
+        assert p_bad_soft > p_bad_prior, f"Soft evidence ({p_bad_soft}) should give higher p_bad than prior ({p_bad_prior})"
