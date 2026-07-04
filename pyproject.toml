@@ -30,7 +30,7 @@ bayesian = [
     "networkx>=3.0",
 ]
 causal = [
-    "dowhy>=0.11",
+    "dowhy>=0.14",
 ]
 ingestion = [
     "beautifulsoup4>=4.12",
