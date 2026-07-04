@@ -32,6 +32,7 @@ def _init_db() -> duckdb.DuckDBPyConnection:
     """Fresh in-memory DuckDB with OHM schema (includes migration 0.41.0)."""
     sys.path.insert(0, str(REPO_ROOT / "src"))
     from ohm.schema import initialize_schema
+
     conn = duckdb.connect(":memory:")
     initialize_schema(conn)
     return conn
@@ -39,20 +40,17 @@ def _init_db() -> duckdb.DuckDBPyConnection:
 
 def _seed_node(conn, node_id: str, label: str = "Test", created_by: str = "seeder") -> None:
     conn.execute(
-        "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) "
-        "VALUES (?, ?, 'concept', ?, CURRENT_TIMESTAMP)",
+        "INSERT INTO ohm_nodes (id, label, type, created_by, created_at) VALUES (?, ?, 'concept', ?, CURRENT_TIMESTAMP)",
         [node_id, label, created_by],
     )
 
 
-def _seed_edge(conn, from_node: str, to_node: str, created_by: str = "claimer",
-               edge_type: str = "CAUSES", layer: str = "L3") -> str:
+def _seed_edge(conn, from_node: str, to_node: str, created_by: str = "claimer", edge_type: str = "CAUSES", layer: str = "L3") -> str:
     import uuid
+
     eid = str(uuid.uuid4())
     conn.execute(
-        "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, "
-        "confidence, created_by, created_at) "
-        "VALUES (?, ?, ?, ?, ?, 0.7, ?, CURRENT_TIMESTAMP)",
+        "INSERT INTO ohm_edges (id, from_node, to_node, layer, edge_type, confidence, created_by, created_at) VALUES (?, ?, ?, ?, ?, 0.7, ?, CURRENT_TIMESTAMP)",
         [eid, from_node, to_node, layer, edge_type, created_by],
     )
     return eid
@@ -65,6 +63,7 @@ class TestRecordOutcomeAutoPopulatesClaimedBy:
         """When an edge exists for the claim_node, claimed_by should be
         the edge's created_by, not the caller-supplied source_agent."""
         from ohm.queries import query_record_outcome
+
         conn = _init_db()
         try:
             _seed_node(conn, "claim_1", "Claim 1", created_by="seeder")
@@ -80,9 +79,7 @@ class TestRecordOutcomeAutoPopulatesClaimedBy:
                 outcome=True,
                 recorded_by="verifier_agent",
             )
-            assert result["claimed_by"] == "claimer_agent", (
-                f"Expected claimed_by='claimer_agent' (from edge), got '{result['claimed_by']}'"
-            )
+            assert result["claimed_by"] == "claimer_agent", f"Expected claimed_by='claimer_agent' (from edge), got '{result['claimed_by']}'"
             assert result["verified_by"] == "verifier_agent"
         finally:
             conn.close()
@@ -91,6 +88,7 @@ class TestRecordOutcomeAutoPopulatesClaimedBy:
         """When no edge exists for the claim_node, claimed_by falls back
         to the caller-supplied source_agent (backward compat)."""
         from ohm.queries import query_record_outcome
+
         conn = _init_db()
         try:
             _seed_node(conn, "orphan_claim", "Orphan", created_by="seeder")
@@ -103,10 +101,7 @@ class TestRecordOutcomeAutoPopulatesClaimedBy:
                 outcome=True,
                 recorded_by="recorder",
             )
-            assert result["claimed_by"] == "fallback_agent", (
-                f"Expected claimed_by='fallback_agent' (from source_agent), "
-                f"got '{result['claimed_by']}'"
-            )
+            assert result["claimed_by"] == "fallback_agent", f"Expected claimed_by='fallback_agent' (from source_agent), got '{result['claimed_by']}'"
             assert result["verified_by"] == "recorder"
         finally:
             conn.close()
@@ -114,6 +109,7 @@ class TestRecordOutcomeAutoPopulatesClaimedBy:
     def test_verified_by_always_equals_recorded_by(self):
         """verified_by must always match the recorded_by parameter."""
         from ohm.queries import query_record_outcome
+
         conn = _init_db()
         try:
             _seed_node(conn, "claim_2", "Claim 2", created_by="seeder")
@@ -135,6 +131,7 @@ class TestRecordOutcomeAutoPopulatesClaimedBy:
         """The key scenario: agent A makes a claim, agent B records the
         outcome. The credit (claimed_by) should go to A, not B."""
         from ohm.queries import query_record_outcome
+
         conn = _init_db()
         try:
             _seed_node(conn, "claim_a", "Claim A", created_by="seeder")
@@ -149,9 +146,7 @@ class TestRecordOutcomeAutoPopulatesClaimedBy:
                 outcome=True,
                 recorded_by="agent_b",
             )
-            assert result["claimed_by"] == "agent_a", (
-                "Credit should flow to agent_a (the claimer), not agent_b (the verifier)"
-            )
+            assert result["claimed_by"] == "agent_a", "Credit should flow to agent_a (the claimer), not agent_b (the verifier)"
             assert result["verified_by"] == "agent_b"
         finally:
             conn.close()
@@ -165,6 +160,7 @@ class TestSourceReliabilityUsesClaimedBy:
         """If agent A made claims and agent B verified them, the reliability
         for agent A should reflect those outcomes, not agent B's."""
         from ohm.queries import query_record_outcome, query_source_reliability
+
         conn = _init_db()
         try:
             _seed_node(conn, "c1", "C1", created_by="seeder")
@@ -173,23 +169,21 @@ class TestSourceReliabilityUsesClaimedBy:
 
             # Agent B verifies agent A's claim
             query_record_outcome(
-                conn, source_agent="agent_b", claim_node="c1",
-                outcome=True, recorded_by="agent_b",
+                conn,
+                source_agent="agent_b",
+                claim_node="c1",
+                outcome=True,
+                recorded_by="agent_b",
             )
 
             # Agent A's reliability should include this outcome
             rel_a = query_source_reliability(conn, "agent_a")
-            assert rel_a["total_outcomes"] >= 1, (
-                f"agent_a should have outcomes (via claimed_by), got {rel_a['total_outcomes']}"
-            )
+            assert rel_a["total_outcomes"] >= 1, f"agent_a should have outcomes (via claimed_by), got {rel_a['total_outcomes']}"
 
             # Agent B's reliability should NOT include this outcome
             # (B was the verifier, not the claimer)
             rel_b = query_source_reliability(conn, "agent_b")
-            assert rel_b["total_outcomes"] == 0, (
-                f"agent_b should have 0 outcomes (B is verifier, not claimer), "
-                f"got {rel_b['total_outcomes']}"
-            )
+            assert rel_b["total_outcomes"] == 0, f"agent_b should have 0 outcomes (B is verifier, not claimer), got {rel_b['total_outcomes']}"
         finally:
             conn.close()
 
@@ -201,6 +195,7 @@ class TestEffectiveReliabilityUsesClaimedBy:
     def test_effective_reliability_credits_claimer(self):
         from ohm.queries import query_record_outcome
         from ohm.graph.calibration import effective_reliability
+
         conn = _init_db()
         try:
             _seed_node(conn, "c1", "C1", created_by="seeder")
@@ -208,19 +203,18 @@ class TestEffectiveReliabilityUsesClaimedBy:
             _seed_edge(conn, "c1", "t1", created_by="agent_a")
 
             query_record_outcome(
-                conn, source_agent="agent_b", claim_node="c1",
-                outcome=True, recorded_by="agent_b",
+                conn,
+                source_agent="agent_b",
+                claim_node="c1",
+                outcome=True,
+                recorded_by="agent_b",
             )
 
             rel_a = effective_reliability(conn, "agent_a")
-            assert rel_a["p_accurate"] is not None, (
-                "agent_a should have p_accurate via claimed_by"
-            )
+            assert rel_a["p_accurate"] is not None, "agent_a should have p_accurate via claimed_by"
 
             rel_b = effective_reliability(conn, "agent_b")
-            assert rel_b["p_accurate"] is None, (
-                "agent_b should have no p_accurate (B is verifier)"
-            )
+            assert rel_b["p_accurate"] is None, "agent_b should have no p_accurate (B is verifier)"
         finally:
             conn.close()
 
@@ -232,11 +226,7 @@ class TestSchemaMigration:
         """A fresh DB (initialize_schema) should include the new columns."""
         conn = _init_db()
         try:
-            cols = conn.execute(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_name = 'ohm_outcomes' "
-                "ORDER BY column_name"
-            ).fetchall()
+            cols = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'ohm_outcomes' ORDER BY column_name").fetchall()
             col_names = {r[0] for r in cols}
             assert "claimed_by" in col_names
             assert "verified_by" in col_names
@@ -245,6 +235,7 @@ class TestSchemaMigration:
 
     def test_schema_version_bumped_to_0_41_0(self):
         from ohm.graph.schema import SCHEMA_VERSION
+
         assert SCHEMA_VERSION == "0.43.0"
 
     def test_backfill_from_edge_created_by(self):
@@ -259,34 +250,19 @@ class TestSchemaMigration:
 
             # Insert an outcome the old way (no claimed_by/verified_by)
             import uuid
+
             conn.execute(
-                "INSERT INTO ohm_outcomes (id, source_agent, claim_node, outcome, recorded_by, notes) "
-                "VALUES (?, 'old_verifier', 'old_claim', TRUE, 'old_verifier', 'manual')",
+                "INSERT INTO ohm_outcomes (id, source_agent, claim_node, outcome, recorded_by, notes) VALUES (?, 'old_verifier', 'old_claim', TRUE, 'old_verifier', 'manual')",
                 [str(uuid.uuid4())],
             )
 
             # Run the backfill (simulating what the migration does)
-            conn.execute(
-                "UPDATE ohm_outcomes SET claimed_by = ("
-                "  SELECT e.created_by FROM ohm_edges e "
-                "  WHERE e.from_node = ohm_outcomes.claim_node "
-                "    AND e.deleted_at IS NULL "
-                "  ORDER BY e.created_at ASC LIMIT 1"
-                ") WHERE claimed_by IS NULL"
-            )
-            conn.execute(
-                "UPDATE ohm_outcomes SET verified_by = recorded_by WHERE verified_by IS NULL"
-            )
-            conn.execute(
-                "UPDATE ohm_outcomes SET claimed_by = source_agent WHERE claimed_by IS NULL"
-            )
+            conn.execute("UPDATE ohm_outcomes SET claimed_by = (  SELECT e.created_by FROM ohm_edges e   WHERE e.from_node = ohm_outcomes.claim_node     AND e.deleted_at IS NULL   ORDER BY e.created_at ASC LIMIT 1) WHERE claimed_by IS NULL")
+            conn.execute("UPDATE ohm_outcomes SET verified_by = recorded_by WHERE verified_by IS NULL")
+            conn.execute("UPDATE ohm_outcomes SET claimed_by = source_agent WHERE claimed_by IS NULL")
 
-            row = conn.execute(
-                "SELECT claimed_by, verified_by FROM ohm_outcomes WHERE claim_node = 'old_claim'"
-            ).fetchone()
-            assert row[0] == "original_claimer", (
-                f"Expected claimed_by='original_claimer', got '{row[0]}'"
-            )
+            row = conn.execute("SELECT claimed_by, verified_by FROM ohm_outcomes WHERE claim_node = 'old_claim'").fetchone()
+            assert row[0] == "original_claimer", f"Expected claimed_by='original_claimer', got '{row[0]}'"
             assert row[1] == "old_verifier"
         finally:
             conn.close()
@@ -295,10 +271,7 @@ class TestSchemaMigration:
         """The migration creates an index on claimed_by for fast lookups."""
         conn = _init_db()
         try:
-            indexes = conn.execute(
-                "SELECT index_name FROM duckdb_indexes() "
-                "WHERE table_name = 'ohm_outcomes'"
-            ).fetchall()
+            indexes = conn.execute("SELECT index_name FROM duckdb_indexes() WHERE table_name = 'ohm_outcomes'").fetchall()
             index_names = {r[0] for r in indexes}
             assert "idx_outcomes_claimed_by" in index_names
         finally:

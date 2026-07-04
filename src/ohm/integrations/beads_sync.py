@@ -85,8 +85,7 @@ def _find_task_by_beads_id(conn, beads_id: str) -> str | None:
     Uses a JSON extraction query instead of scanning all task nodes.
     """
     rows = conn.execute(
-        "SELECT id FROM ohm_nodes WHERE type = 'task' AND deleted_at IS NULL "
-        "AND (metadata->>'$.beads_id') = ?",
+        "SELECT id FROM ohm_nodes WHERE type = 'task' AND deleted_at IS NULL AND (metadata->>'$.beads_id') = ?",
         [beads_id],
     ).fetchall()
     return rows[0][0] if rows else None
@@ -213,15 +212,7 @@ def sync_beads_to_ohm_tasks(
             labels_json = json.dumps(labels)
             metadata_json = json.dumps(metadata)
 
-            if (
-                current_row[0] == title
-                and current_row[1] == description
-                and current_row[2] == ohm_priority
-                and current_row[3] == assignee
-                and current_labels == labels_json
-                and current_metadata == metadata_json
-                and current_status == final_status
-            ):
+            if current_row[0] == title and current_row[1] == description and current_row[2] == ohm_priority and current_row[3] == assignee and current_labels == labels_json and current_metadata == metadata_json and current_status == final_status:
                 # Nothing changed — skip the UPDATE (idempotency)
                 report["skipped"] += 1
                 continue

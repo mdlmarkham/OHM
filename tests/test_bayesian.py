@@ -1991,6 +1991,7 @@ class TestOutcomeBasedAdjustment:
 
         # Record falsified outcomes on the claim node
         import uuid
+
         for _ in range(3):
             oid = str(uuid.uuid4())
             db.execute(
@@ -2025,6 +2026,7 @@ class TestOutcomeBasedAdjustment:
         create_sample_edge(db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3", confidence=0.9, probability=0.8)
 
         import uuid
+
         for _ in range(5):
             oid = str(uuid.uuid4())
             db.execute(
@@ -2046,6 +2048,7 @@ class TestOutcomeBasedAdjustment:
         create_sample_edge(db, from_node=a, to_node=b, edge_type="CAUSES", layer="L3", confidence=0.9, probability=0.8)
 
         import uuid
+
         oid = str(uuid.uuid4())
         db.execute(
             "INSERT INTO ohm_outcomes (id, source_agent, claim_node, outcome, recorded_by) VALUES (?, ?, ?, ?, ?)",

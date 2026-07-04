@@ -2205,9 +2205,7 @@ def create_runbook(
     # Create DEPENDS_ON chain: skill[0] → skill[1] → ... → skill[n]
     for i, sid in enumerate(skill_ids):
         sid = validate_identifier(sid, name="skill_id")
-        row = conn.execute(
-            "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [sid]
-        ).fetchone()
+        row = conn.execute("SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [sid]).fetchone()
         if not row:
             raise NodeNotFoundError(f"Skill node not found: {sid}")
         if i > 0:
@@ -2267,9 +2265,7 @@ def get_runbook_steps(
 
     skills: list[dict[str, Any]] = []
     for sid in skill_ids:
-        skill_row = _rows_to_dicts(
-            conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [sid])
-        )
+        skill_row = _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [sid]))
         if skill_row:
             skills.append(skill_row[0])
 

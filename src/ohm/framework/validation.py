@@ -254,9 +254,7 @@ def validate_task_status(value: str | None) -> str | None:
         return None
     _VALID_TASK_STATUSES = {"open", "in_progress", "blocked", "review", "done", "cancelled"}
     if value not in _VALID_TASK_STATUSES:
-        raise ValueError(
-            f"Invalid task_status: '{value}' — must be one of: {sorted(_VALID_TASK_STATUSES)}"
-        )
+        raise ValueError(f"Invalid task_status: '{value}' — must be one of: {sorted(_VALID_TASK_STATUSES)}")
     return value
 
 
@@ -274,10 +272,7 @@ def validate_assigned_to(value: str | None) -> str | None:
     if value is None:
         return None
     if not value or not re.match(r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$", value):
-        raise ValueError(
-            f"Invalid assigned_to: '{value}' — must be a non-empty alphanumeric string "
-            "(underscores and hyphens allowed), starting with a letter, max 64 chars"
-        )
+        raise ValueError(f"Invalid assigned_to: '{value}' — must be a non-empty alphanumeric string (underscores and hyphens allowed), starting with a letter, max 64 chars")
     return value
 
 

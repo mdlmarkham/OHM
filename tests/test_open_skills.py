@@ -113,16 +113,14 @@ class TestCreateRunbook:
         s1 = create_skill(test_db, label="S1", trigger="t", connects_to=[anchor["id"]], created_by="test")
         s2 = create_skill(test_db, label="S2", trigger="t", connects_to=[anchor["id"]], created_by="test")
 
-        runbook = create_runbook(
+        create_runbook(
             test_db,
             label="RB",
             skill_ids=[s1["id"], s2["id"]],
             created_by="test",
         )
 
-        edges = test_db.execute(
-            "SELECT from_node, to_node, edge_type FROM ohm_edges WHERE edge_type = 'DEPENDS_ON' AND deleted_at IS NULL"
-        ).fetchall()
+        edges = test_db.execute("SELECT from_node, to_node, edge_type FROM ohm_edges WHERE edge_type = 'DEPENDS_ON' AND deleted_at IS NULL").fetchall()
         assert len(edges) >= 2  # runbook→s1, s1→s2
 
     def test_runbook_empty_skill_ids_raises(self, test_db):
@@ -158,7 +156,7 @@ class TestGetRunbookSteps:
 
         runbook = create_runbook(
             test_db,
-            label="Pipeline",
+            label="Daily Brief Pipeline",
             skill_ids=[s1["id"], s2["id"], s3["id"]],
             created_by="test",
         )

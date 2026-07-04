@@ -226,13 +226,7 @@ def generate_nudges(
     # ── OHM-tsxk: Pattern-to-case causal edge nudge ─────────────────────
     # When a pattern/concept/idea node is linked to a decision/task/event/case
     # with a CAUSES edge, warn that REFINES or EXPLAINS is more appropriate.
-    if (
-        action == "edge"
-        and edge_type == "CAUSES"
-        and from_node_id
-        and to_node_id
-        and store
-    ):
+    if action == "edge" and edge_type == "CAUSES" and from_node_id and to_node_id and store:
         try:
             from_row = store.conn.execute(
                 "SELECT type FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
@@ -271,10 +265,7 @@ def generate_nudges(
                         {
                             "type": "pattern_to_causal_warning",
                             "message": (
-                                f"CAUSES edge from {from_type}→{to_type} may be mistyped. "
-                                f"A pattern explains a {to_type}, it doesn't cause it. "
-                                f"Consider using EXPLAINS instead. "
-                                f"Use GET /edge/suggest-type?from={from_node_id}&to={to_node_id} for guidance."
+                                f"CAUSES edge from {from_type}→{to_type} may be mistyped. A pattern explains a {to_type}, it doesn't cause it. Consider using EXPLAINS instead. Use GET /edge/suggest-type?from={from_node_id}&to={to_node_id} for guidance."
                             ),
                             "severity": "warning",
                             "data": {
@@ -291,13 +282,7 @@ def generate_nudges(
     # ── OHM-bm5r: Mechanism gate for causal edges ───────────────────────
     # When a CAUSES/INFLUENCES/DEPENDS_ON edge is created without a condition
     # (mediating mechanism), warn the agent to provide one.
-    if (
-        action == "edge"
-        and edge_type
-        and edge_type in SEMANTICALLY_CAUSAL_EDGE_TYPES
-        and not condition
-        and not (metadata and metadata.get("mechanism"))
-    ):
+    if action == "edge" and edge_type and edge_type in SEMANTICALLY_CAUSAL_EDGE_TYPES and not condition and not (metadata and metadata.get("mechanism")):
         nudges.append(
             {
                 "type": "mechanism_gate",

@@ -290,6 +290,7 @@ def _record_endpoint_latency(method: str, path: str, elapsed_ms: float, status: 
         except OSError:
             pass
 
+
 # ── Webhook Registry ──────────────────────────────────────
 
 # In-memory registry: {customer_id: {agent_name: {"url": str, "events": list[str]}}}

@@ -28,6 +28,7 @@ def _init_db() -> duckdb.DuckDBPyConnection:
     """Fresh in-memory DuckDB with OHM schema."""
     sys.path.insert(0, str(REPO_ROOT / "src"))
     from ohm.schema import initialize_schema
+
     conn = duckdb.connect(":memory:")
     initialize_schema(conn)
     return conn
@@ -38,6 +39,7 @@ class TestFastBatchCreateNodes:
 
     def test_creates_all_nodes(self):
         from ohm.graph.batch import fast_batch_create_nodes
+
         conn = _init_db()
         try:
             nodes = [
@@ -55,6 +57,7 @@ class TestFastBatchCreateNodes:
 
     def test_returns_in_input_order(self):
         from ohm.graph.batch import fast_batch_create_nodes
+
         conn = _init_db()
         try:
             nodes = [
@@ -71,6 +74,7 @@ class TestFastBatchCreateNodes:
     def test_populates_change_feed(self):
         """Each node creation must produce its own change-feed entry."""
         from ohm.graph.batch import fast_batch_create_nodes
+
         conn = _init_db()
         try:
             nodes = [
@@ -80,29 +84,23 @@ class TestFastBatchCreateNodes:
             result = fast_batch_create_nodes(conn, nodes=nodes, created_by="test")
             assert result is not None
             node_ids = {r["id"] for r in result}
-            feed_rows = conn.execute(
-                "SELECT row_id FROM ohm_change_feed "
-                "WHERE table_name = 'ohm_nodes' AND operation = 'INSERT'"
-            ).fetchall()
+            feed_rows = conn.execute("SELECT row_id FROM ohm_change_feed WHERE table_name = 'ohm_nodes' AND operation = 'INSERT'").fetchall()
             feed_ids = {r[0] for r in feed_rows}
-            assert node_ids.issubset(feed_ids), (
-                f"Expected all node ids in change feed, missing: {node_ids - feed_ids}"
-            )
+            assert node_ids.issubset(feed_ids), f"Expected all node ids in change feed, missing: {node_ids - feed_ids}"
         finally:
             conn.close()
 
     def test_registers_aliases(self):
         """OHM-z2gp: each new node gets an alias in ohm_aliases."""
         from ohm.graph.batch import fast_batch_create_nodes
+
         conn = _init_db()
         try:
             nodes = [{"label": "Alias Test", "node_type": "concept"}]
             result = fast_batch_create_nodes(conn, nodes=nodes, created_by="test")
             assert result is not None
             nid = result[0]["id"]
-            aliases = conn.execute(
-                "SELECT alias_norm FROM ohm_aliases WHERE node_id = ?", [nid]
-            ).fetchall()
+            aliases = conn.execute("SELECT alias_norm FROM ohm_aliases WHERE node_id = ?", [nid]).fetchall()
             assert len(aliases) >= 1
         finally:
             conn.close()
@@ -110,18 +108,21 @@ class TestFastBatchCreateNodes:
     def test_preserves_optional_fields(self):
         """Confidence, provenance, content, tags, metadata all flow through."""
         from ohm.graph.batch import fast_batch_create_nodes
+
         conn = _init_db()
         try:
-            nodes = [{
-                "label": "Rich Node",
-                "node_type": "concept",
-                "content": "Some content",
-                "confidence": 0.8,
-                "provenance": "test-prov",
-                "visibility": "team",
-                "tags": ["a", "b"],
-                "metadata": {"key": "value"},
-            }]
+            nodes = [
+                {
+                    "label": "Rich Node",
+                    "node_type": "concept",
+                    "content": "Some content",
+                    "confidence": 0.8,
+                    "provenance": "test-prov",
+                    "visibility": "team",
+                    "tags": ["a", "b"],
+                    "metadata": {"key": "value"},
+                }
+            ]
             result = fast_batch_create_nodes(conn, nodes=nodes, created_by="test")
             assert result is not None
             r = result[0]
@@ -134,12 +135,11 @@ class TestFastBatchCreateNodes:
     def test_falls_back_when_connects_to_set(self):
         """connects_to requires a bulk existence check; fast path returns None."""
         from ohm.graph.batch import fast_batch_create_nodes
+
         conn = _init_db()
         try:
             # Seed an anchor node first
-            anchor = fast_batch_create_nodes(
-                conn, nodes=[{"label": "Anchor", "node_type": "concept"}], created_by="test"
-            )
+            anchor = fast_batch_create_nodes(conn, nodes=[{"label": "Anchor", "node_type": "concept"}], created_by="test")
             assert anchor is not None
             anchor_id = anchor[0]["id"]
 
@@ -164,6 +164,7 @@ class TestFastBatchCreateNodes:
         """
         from ohm.graph.batch import fast_batch_create_nodes
         from ohm.queries import create_node, delete_node
+
         conn = _init_db()
         try:
             original = create_node(conn, label="Recycle Me", created_by="test")
@@ -175,11 +176,10 @@ class TestFastBatchCreateNodes:
             # the soft-deleted id.
             import ohm.graph.batch as batch_mod
 
-            original_gen = batch_mod.generate_node_id if hasattr(batch_mod, "generate_node_id") else None
-
             # The fast path imports generate_node_id lazily inside the
             # function, so we patch it at the source module.
             from ohm import schema as schema_mod
+
             original_fn = schema_mod.generate_node_id
 
             def pinned_gen(label, node_type):
@@ -188,12 +188,11 @@ class TestFastBatchCreateNodes:
             schema_mod.generate_node_id = pinned_gen
             try:
                 result = fast_batch_create_nodes(
-                    conn, nodes=[{"label": "Recycle Me", "node_type": "concept"}],
+                    conn,
+                    nodes=[{"label": "Recycle Me", "node_type": "concept"}],
                     created_by="test",
                 )
-                assert result is None, (
-                    "Fast path should fall back when soft-deleted collision detected"
-                )
+                assert result is None, "Fast path should fall back when soft-deleted collision detected"
             finally:
                 schema_mod.generate_node_id = original_fn
         finally:
@@ -202,17 +201,17 @@ class TestFastBatchCreateNodes:
     def test_falls_back_on_invalid_label(self):
         """Empty label fails validation; fast path returns None."""
         from ohm.graph.batch import fast_batch_create_nodes
+
         conn = _init_db()
         try:
-            result = fast_batch_create_nodes(
-                conn, nodes=[{"label": "", "node_type": "concept"}], created_by="test"
-            )
+            result = fast_batch_create_nodes(conn, nodes=[{"label": "", "node_type": "concept"}], created_by="test")
             assert result is None
         finally:
             conn.close()
 
     def test_empty_batch_returns_empty_list(self):
         from ohm.graph.batch import fast_batch_create_nodes
+
         conn = _init_db()
         try:
             result = fast_batch_create_nodes(conn, nodes=[], created_by="test")
@@ -226,6 +225,7 @@ class TestFastBatchCreateEdges:
 
     def test_creates_all_edges(self):
         from ohm.graph.batch import fast_batch_create_nodes, fast_batch_create_edges
+
         conn = _init_db()
         try:
             nodes = fast_batch_create_nodes(
@@ -256,11 +256,12 @@ class TestFastBatchCreateEdges:
 
     def test_populates_change_feed(self):
         from ohm.graph.batch import fast_batch_create_nodes, fast_batch_create_edges
+
         conn = _init_db()
         try:
             nodes = fast_batch_create_nodes(
-                conn, nodes=[{"label": "A", "node_type": "concept"},
-                             {"label": "B", "node_type": "concept"}],
+                conn,
+                nodes=[{"label": "A", "node_type": "concept"}, {"label": "B", "node_type": "concept"}],
                 created_by="test",
             )
             a, b = [n["id"] for n in nodes]
@@ -271,10 +272,7 @@ class TestFastBatchCreateEdges:
             )
             assert edges is not None
             edge_id = edges[0]["id"]
-            feed_rows = conn.execute(
-                "SELECT row_id FROM ohm_change_feed "
-                "WHERE table_name = 'ohm_edges' AND operation = 'INSERT'"
-            ).fetchall()
+            feed_rows = conn.execute("SELECT row_id FROM ohm_change_feed WHERE table_name = 'ohm_edges' AND operation = 'INSERT'").fetchall()
             feed_ids = {r[0] for r in feed_rows}
             assert edge_id in feed_ids
         finally:
@@ -282,11 +280,12 @@ class TestFastBatchCreateEdges:
 
     def test_falls_back_on_invalid_edge_type(self):
         from ohm.graph.batch import fast_batch_create_nodes, fast_batch_create_edges
+
         conn = _init_db()
         try:
             nodes = fast_batch_create_nodes(
-                conn, nodes=[{"label": "A", "node_type": "concept"},
-                             {"label": "B", "node_type": "concept"}],
+                conn,
+                nodes=[{"label": "A", "node_type": "concept"}, {"label": "B", "node_type": "concept"}],
                 created_by="test",
             )
             a, b = [n["id"] for n in nodes]
@@ -301,6 +300,7 @@ class TestFastBatchCreateEdges:
 
     def test_empty_batch_returns_empty_list(self):
         from ohm.graph.batch import fast_batch_create_edges
+
         conn = _init_db()
         try:
             result = fast_batch_create_edges(conn, edges=[], created_by="test")
@@ -318,6 +318,7 @@ class TestPublicAPIFallback:
         the public API should use the fast path. We verify by checking
         the result is correct and the change feed is populated."""
         from ohm.queries import batch_create_nodes
+
         conn = _init_db()
         try:
             nodes = [
@@ -327,10 +328,7 @@ class TestPublicAPIFallback:
             result = batch_create_nodes(conn, nodes=nodes, created_by="test")
             assert len(result) == 2
             # Change feed populated for both
-            feed = conn.execute(
-                "SELECT COUNT(*) FROM ohm_change_feed "
-                "WHERE table_name = 'ohm_nodes' AND operation = 'INSERT'"
-            ).fetchone()[0]
+            feed = conn.execute("SELECT COUNT(*) FROM ohm_change_feed WHERE table_name = 'ohm_nodes' AND operation = 'INSERT'").fetchone()[0]
             assert feed >= 2
         finally:
             conn.close()
@@ -339,6 +337,7 @@ class TestPublicAPIFallback:
         """When a node has connects_to, the fast path returns None and
         the slow path handles it. The end result must still be correct."""
         from ohm.queries import batch_create_nodes, create_node
+
         conn = _init_db()
         try:
             # Create an anchor node first
@@ -356,11 +355,12 @@ class TestPublicAPIFallback:
 
     def test_batch_create_edges_uses_fast_path(self):
         from ohm.queries import batch_create_nodes, batch_create_edges
+
         conn = _init_db()
         try:
             nodes = batch_create_nodes(
-                conn, nodes=[{"label": "A", "node_type": "concept"},
-                             {"label": "B", "node_type": "concept"}],
+                conn,
+                nodes=[{"label": "A", "node_type": "concept"}, {"label": "B", "node_type": "concept"}],
                 created_by="test",
             )
             a, b = nodes[0]["id"], nodes[1]["id"]
@@ -378,12 +378,12 @@ class TestPublicAPIFallback:
         """create_batch() delegates to batch_create_nodes/edges and must
         still work with the fast path active."""
         from ohm.queries import create_batch
+
         conn = _init_db()
         try:
             result = create_batch(
                 conn,
-                nodes=[{"label": "Batch A", "node_type": "concept"},
-                       {"label": "Batch B", "node_type": "concept"}],
+                nodes=[{"label": "Batch A", "node_type": "concept"}, {"label": "Batch B", "node_type": "concept"}],
                 edges=[],
                 created_by="test",
             )
@@ -400,18 +400,18 @@ class TestCorrectnessVsSlowPath:
         """The fast path uses the same generate_node_id as create_node,
         so the id format must match: ``<type>-<label_slug>_<suffix>``."""
         from ohm.graph.batch import fast_batch_create_nodes
+
         conn = _init_db()
         try:
             result = fast_batch_create_nodes(
-                conn, nodes=[{"label": "Test Label", "node_type": "concept"}],
+                conn,
+                nodes=[{"label": "Test Label", "node_type": "concept"}],
                 created_by="test",
             )
             assert result is not None
             nid = result[0]["id"]
             # Format: type-labelslug_5charsuffix
-            assert nid.startswith("concept-test_label_"), (
-                f"Unexpected id format: {nid!r}"
-            )
+            assert nid.startswith("concept-test_label_"), f"Unexpected id format: {nid!r}"
             # The 6-char suffix is random but present
             suffix = nid.rsplit("_", 1)[-1]
             assert len(suffix) == 6
@@ -427,19 +427,24 @@ class TestCorrectnessVsSlowPath:
         conn = _init_db()
         try:
             nodes = fast_batch_create_nodes(
-                conn, nodes=[{"label": "Src", "node_type": "concept"},
-                             {"label": "Dst", "node_type": "concept"}],
+                conn,
+                nodes=[{"label": "Src", "node_type": "concept"}, {"label": "Dst", "node_type": "concept"}],
                 created_by="test",
             )
             src, dst = nodes[0]["id"], nodes[1]["id"]
 
             fast = fast_batch_create_edges(
                 conn,
-                edges=[{
-                    "from_node": src, "to_node": dst,
-                    "edge_type": "CAUSES", "layer": "L3",
-                    "confidence": 0.7, "provenance": "test",
-                }],
+                edges=[
+                    {
+                        "from_node": src,
+                        "to_node": dst,
+                        "edge_type": "CAUSES",
+                        "layer": "L3",
+                        "confidence": 0.7,
+                        "provenance": "test",
+                    }
+                ],
                 created_by="test",
             )
             assert fast is not None

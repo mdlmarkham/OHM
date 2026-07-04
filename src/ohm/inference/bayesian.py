@@ -493,9 +493,7 @@ def build_bayesian_network(
             FROM ohm_outcomes
             WHERE claim_node IN ({})
             GROUP BY claim_node
-            """.format(
-                ",".join("?" for _ in node_ids)
-            ),
+            """.format(",".join("?" for _ in node_ids)),
             list(node_ids),
         ).fetchall()
         outcome_discounts: dict[str, float] = {}
@@ -510,7 +508,10 @@ def build_bayesian_network(
                 outcome_discounts[claim_node] = discount
                 logger.info(
                     "Outcome discount for %s: %d/%d falsified → discount=%.3f",
-                    claim_node, false_count, total, discount,
+                    claim_node,
+                    false_count,
+                    total,
+                    discount,
                 )
         if outcome_discounts:
             for e in edges:
@@ -647,10 +648,7 @@ def build_bayesian_network(
         if safe not in parent_edges:
             root_safe_names.add(safe)
             # Get prior from probability-scaled observations with temporal decay
-            _obs = [o for o in reader.get_observations(node_id)
-                    if o.value is not None
-                    and o.scale in ("probability", "unknown")
-                    and o.type in ("measurement", "experiment_result")]
+            _obs = [o for o in reader.get_observations(node_id) if o.value is not None and o.scale in ("probability", "unknown") and o.type in ("measurement", "experiment_result")]
             # Filter to observation_window_days if specified
             if observation_window_days is not None and observation_window_days > 0:
                 cutoff = now - timedelta(days=observation_window_days)

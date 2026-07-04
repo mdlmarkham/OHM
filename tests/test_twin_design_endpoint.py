@@ -254,7 +254,7 @@ class TestReviewEndpoint:
         port, _ = test_server
         _, data = _start(port)
         sid = data["data"]["id"]
-        pid = _advance_to_approve(port, sid)
+        _advance_to_approve(port, sid)
         status, data = _request("POST", port, f"/twin/design/{sid}/review", {"decision": "approve"})
         assert status in (400, 422)
         assert data.get("error")
@@ -274,7 +274,10 @@ class TestReviewEndpoint:
         sid = data["data"]["id"]
         pid = _advance_to_approve(port, sid)
         status, data = _review(
-            port, sid, pid, "approve",
+            port,
+            sid,
+            pid,
+            "approve",
             approved_aspects=["model_selection"],
             declined_aspects=["calibration_plan"],
             reason="looks good overall",

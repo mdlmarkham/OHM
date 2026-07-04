@@ -240,10 +240,7 @@ class TestFetchBeadsIssuesAssigneeEnrichment:
         # Create a fake JSONL with assignee
         jsonl_path = tmp_path / ".beads" / "issues.jsonl"
         jsonl_path.parent.mkdir(parents=True)
-        jsonl_path.write_text(
-            json.dumps({"_type": "issue", "id": "OHM-xxx", "assignee": "metis", "status": "open"})
-            + "\n"
-        )
+        jsonl_path.write_text(json.dumps({"_type": "issue", "id": "OHM-xxx", "assignee": "metis", "status": "open"}) + "\n")
 
         # Mock bd list --json to return issues WITHOUT assignee
         class MockResult:
@@ -265,10 +262,7 @@ class TestFetchBeadsIssuesAssigneeEnrichment:
 
         jsonl_path = tmp_path / ".beads" / "issues.jsonl"
         jsonl_path.parent.mkdir(parents=True)
-        jsonl_path.write_text(
-            json.dumps({"_type": "issue", "id": "OHM-yyy", "assignee": "clio", "status": "open"})
-            + "\n"
-        )
+        jsonl_path.write_text(json.dumps({"_type": "issue", "id": "OHM-yyy", "assignee": "clio", "status": "open"}) + "\n")
 
         def mock_run(*args, **kwargs):
             raise FileNotFoundError("bd not found")
@@ -285,10 +279,7 @@ class TestFetchBeadsIssuesAssigneeEnrichment:
 
         jsonl_path = tmp_path / ".beads" / "issues.jsonl"
         jsonl_path.parent.mkdir(parents=True)
-        jsonl_path.write_text(
-            json.dumps({"_type": "issue", "id": "OHM-noassignee", "status": "open"})
-            + "\n"
-        )
+        jsonl_path.write_text(json.dumps({"_type": "issue", "id": "OHM-noassignee", "status": "open"}) + "\n")
 
         class MockResult:
             returncode = 0

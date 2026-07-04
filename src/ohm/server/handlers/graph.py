@@ -926,7 +926,10 @@ class GraphHandlerMixin:
 
             agent = getattr(self, "_current_agent", "ohm")
             results = filter_results_by_read_scope(
-                self.current_store.conn, agent, results, id_field="node_id",
+                self.current_store.conn,
+                agent,
+                results,
+                id_field="node_id",
             )
             self._json_response(200, {"results": results, "count": len(results)})
         except ValueError as e:

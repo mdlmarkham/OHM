@@ -1017,9 +1017,7 @@ class SchemaConfig:
                     ("metadata", "JSON"),
                 ),
                 primary_key="id",
-                indexes=(
-                    ("idx_topo_anno_obs", ("observation_id",)),
-                ),
+                indexes=(("idx_topo_anno_obs", ("observation_id",)),),
                 ordering=130,
                 description="Annotations (comments, tags, context) on TOPO observations.",
             ),
@@ -2291,12 +2289,7 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             # and credit its created_by. If no edge is found, fall back
             # to the existing source_agent (which is usually the same
             # agent but was caller-supplied and may be wrong).
-            "UPDATE ohm_outcomes SET claimed_by = ("
-            "  SELECT e.created_by FROM ohm_edges e "
-            "  WHERE e.from_node = ohm_outcomes.claim_node "
-            "    AND e.deleted_at IS NULL "
-            "  ORDER BY e.created_at ASC LIMIT 1"
-            ") WHERE claimed_by IS NULL",
+            "UPDATE ohm_outcomes SET claimed_by = (  SELECT e.created_by FROM ohm_edges e   WHERE e.from_node = ohm_outcomes.claim_node     AND e.deleted_at IS NULL   ORDER BY e.created_at ASC LIMIT 1) WHERE claimed_by IS NULL",
             "UPDATE ohm_outcomes SET claimed_by = source_agent WHERE claimed_by IS NULL",
         ],
     ),
@@ -2316,10 +2309,7 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             # Create index BEFORE UPDATE backfills (DuckDB: no index creation with outstanding updates).
             "CREATE INDEX IF NOT EXISTS idx_outcomes_domain ON ohm_outcomes(domain)",
             # Backfill domain from the claim node's provenance
-            "UPDATE ohm_outcomes SET domain = ("
-            "  SELECT n.provenance FROM ohm_nodes n "
-            "  WHERE n.id = ohm_outcomes.claim_node AND n.deleted_at IS NULL"
-            ") WHERE domain = '*' OR domain IS NULL",
+            "UPDATE ohm_outcomes SET domain = (  SELECT n.provenance FROM ohm_nodes n   WHERE n.id = ohm_outcomes.claim_node AND n.deleted_at IS NULL) WHERE domain = '*' OR domain IS NULL",
             "UPDATE ohm_outcomes SET domain = '*' WHERE domain IS NULL",
         ],
     ),

@@ -128,27 +128,21 @@ class TestInitializeSchema:
     def test_plans_columns_in_db(self):
         conn = duckdb.connect(":memory:")
         initialize_schema(conn, TOPO_SCHEMA)
-        cols = conn.execute(
-            "SELECT column_name FROM information_schema.columns WHERE table_name='topo_plans' ORDER BY ordinal_position"
-        ).fetchall()
+        cols = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='topo_plans' ORDER BY ordinal_position").fetchall()
         col_names = {r[0] for r in cols}
         assert {"id", "node_id", "plan_type", "horizon_start", "horizon_end"} <= col_names
 
     def test_events_columns_in_db(self):
         conn = duckdb.connect(":memory:")
         initialize_schema(conn, TOPO_SCHEMA)
-        cols = conn.execute(
-            "SELECT column_name FROM information_schema.columns WHERE table_name='topo_events' ORDER BY ordinal_position"
-        ).fetchall()
+        cols = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='topo_events' ORDER BY ordinal_position").fetchall()
         col_names = {r[0] for r in cols}
         assert {"id", "plan_id", "event_type", "start_time", "end_time"} <= col_names
 
     def test_event_links_columns_in_db(self):
         conn = duckdb.connect(":memory:")
         initialize_schema(conn, TOPO_SCHEMA)
-        cols = conn.execute(
-            "SELECT column_name FROM information_schema.columns WHERE table_name='topo_event_links' ORDER BY ordinal_position"
-        ).fetchall()
+        cols = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='topo_event_links' ORDER BY ordinal_position").fetchall()
         col_names = {r[0] for r in cols}
         assert {"id", "from_event_id", "to_event_id", "link_type"} <= col_names
 
@@ -184,10 +178,7 @@ class TestCRUDOperations:
         initialize_schema(conn, TOPO_SCHEMA)
 
         # Create a plan: 4-day maintenance window
-        conn.execute(
-            "INSERT INTO topo_plans (id, node_id, plan_type, horizon_start, horizon_end, status, created_by) "
-            "VALUES ('plan_001', 'compressor_A', 'maintenance_window', '2026-07-01 00:00:00', '2026-07-05 00:00:00', 'active', 'topo_agent')"
-        )
+        conn.execute("INSERT INTO topo_plans (id, node_id, plan_type, horizon_start, horizon_end, status, created_by) VALUES ('plan_001', 'compressor_A', 'maintenance_window', '2026-07-01 00:00:00', '2026-07-05 00:00:00', 'active', 'topo_agent')")
 
         # Create events within the plan
         conn.execute(
@@ -200,10 +191,7 @@ class TestCRUDOperations:
         )
 
         # Link events: shutdown caused_by → restart follows
-        conn.execute(
-            "INSERT INTO topo_event_links (id, from_event_id, to_event_id, link_type, created_by) "
-            "VALUES ('link_001', 'evt_shutdown', 'evt_restart', 'followed_by', 'topo_agent')"
-        )
+        conn.execute("INSERT INTO topo_event_links (id, from_event_id, to_event_id, link_type, created_by) VALUES ('link_001', 'evt_shutdown', 'evt_restart', 'followed_by', 'topo_agent')")
 
         # Verify
         plans = conn.execute("SELECT id, plan_type, status FROM topo_plans").fetchall()
@@ -224,10 +212,7 @@ class TestCRUDOperations:
         conn = duckdb.connect(":memory:")
         initialize_schema(conn, TOPO_SCHEMA)
 
-        conn.execute(
-            "INSERT INTO topo_plans (id, node_id, plan_type, horizon_start, horizon_end, status, created_by) "
-            "VALUES ('plan_002', 'site_A', 'annual_outage', '2026-12-01 00:00:00', '2026-12-14 00:00:00', 'planned', 'topo_agent')"
-        )
+        conn.execute("INSERT INTO topo_plans (id, node_id, plan_type, horizon_start, horizon_end, status, created_by) VALUES ('plan_002', 'site_A', 'annual_outage', '2026-12-01 00:00:00', '2026-12-14 00:00:00', 'planned', 'topo_agent')")
 
         conn.execute(
             "INSERT INTO topo_events (id, plan_id, node_id, event_type, start_time, end_time, severity, description, created_by) "
@@ -240,10 +225,7 @@ class TestCRUDOperations:
     def test_preserves_user_data_on_rerun(self):
         conn = duckdb.connect(":memory:")
         initialize_schema(conn, TOPO_SCHEMA)
-        conn.execute(
-            "INSERT INTO topo_plans (id, node_id, plan_type, created_by) "
-            "VALUES ('p1', 'n1', 'test', 'agent')"
-        )
+        conn.execute("INSERT INTO topo_plans (id, node_id, plan_type, created_by) VALUES ('p1', 'n1', 'test', 'agent')")
         initialize_schema(conn, TOPO_SCHEMA)
         rows = conn.execute("SELECT id FROM topo_plans").fetchall()
         assert rows == [("p1",)]

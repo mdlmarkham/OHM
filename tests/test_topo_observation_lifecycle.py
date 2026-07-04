@@ -65,9 +65,17 @@ class TestTopoObservationsTable:
         dt = by_name["topo_observations"]
         cols = {c[0] for c in dt.columns}
         assert {
-            "id", "node_id", "obs_type", "obs_value", "obs_unit",
-            "source", "observed_at", "created_by", "created_at",
-            "updated_at", "metadata",
+            "id",
+            "node_id",
+            "obs_type",
+            "obs_value",
+            "obs_unit",
+            "source",
+            "observed_at",
+            "created_by",
+            "created_at",
+            "updated_at",
+            "metadata",
         } <= cols
 
     def test_primary_key(self):
@@ -86,8 +94,15 @@ class TestTopoObservationAssessmentsTable:
         dt = by_name["topo_observation_assessments"]
         cols = {c[0] for c in dt.columns}
         assert {
-            "id", "observation_id", "assessment_type", "assessment_value",
-            "is_current", "assessed_by", "assessed_at", "notes", "metadata",
+            "id",
+            "observation_id",
+            "assessment_type",
+            "assessment_value",
+            "is_current",
+            "assessed_by",
+            "assessed_at",
+            "notes",
+            "metadata",
         } <= cols
 
     def test_primary_key(self):
@@ -112,8 +127,13 @@ class TestTopoObservationAnnotationsTable:
         dt = by_name["topo_observation_annotations"]
         cols = {c[0] for c in dt.columns}
         assert {
-            "id", "observation_id", "annotation_type", "annotation_value",
-            "annotated_by", "annotated_at", "metadata",
+            "id",
+            "observation_id",
+            "annotation_type",
+            "annotation_value",
+            "annotated_by",
+            "annotated_at",
+            "metadata",
         } <= cols
 
     def test_primary_key(self):
@@ -132,9 +152,17 @@ class TestTopoObservationFollowupsTable:
         dt = by_name["topo_observation_followups"]
         cols = {c[0] for c in dt.columns}
         assert {
-            "id", "observation_id", "followup_type", "status",
-            "assigned_to", "due_date", "closed_at", "created_by",
-            "created_at", "updated_at", "metadata",
+            "id",
+            "observation_id",
+            "followup_type",
+            "status",
+            "assigned_to",
+            "due_date",
+            "closed_at",
+            "created_by",
+            "created_at",
+            "updated_at",
+            "metadata",
         } <= cols
 
     def test_primary_key(self):
@@ -161,27 +189,21 @@ class TestInitializeSchemaCreatesTOPOTables:
     def test_observations_columns_in_db(self):
         conn = duckdb.connect(":memory:")
         initialize_schema(conn, TOPO_SCHEMA)
-        cols = conn.execute(
-            "SELECT column_name FROM information_schema.columns WHERE table_name='topo_observations' ORDER BY ordinal_position"
-        ).fetchall()
+        cols = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='topo_observations' ORDER BY ordinal_position").fetchall()
         col_names = {r[0] for r in cols}
         assert {"id", "node_id", "obs_type", "obs_value", "observed_at"} <= col_names
 
     def test_assessments_columns_in_db(self):
         conn = duckdb.connect(":memory:")
         initialize_schema(conn, TOPO_SCHEMA)
-        cols = conn.execute(
-            "SELECT column_name FROM information_schema.columns WHERE table_name='topo_observation_assessments' ORDER BY ordinal_position"
-        ).fetchall()
+        cols = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='topo_observation_assessments' ORDER BY ordinal_position").fetchall()
         col_names = {r[0] for r in cols}
         assert {"id", "observation_id", "is_current", "assessed_by"} <= col_names
 
     def test_followups_columns_in_db(self):
         conn = duckdb.connect(":memory:")
         initialize_schema(conn, TOPO_SCHEMA)
-        cols = conn.execute(
-            "SELECT column_name FROM information_schema.columns WHERE table_name='topo_observation_followups' ORDER BY ordinal_position"
-        ).fetchall()
+        cols = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='topo_observation_followups' ORDER BY ordinal_position").fetchall()
         col_names = {r[0] for r in cols}
         assert {"id", "observation_id", "status", "assigned_to"} <= col_names
 
@@ -203,10 +225,7 @@ class TestInitializeSchemaCreatesTOPOTables:
     def test_preserves_user_data_on_rerun(self):
         conn = duckdb.connect(":memory:")
         initialize_schema(conn, TOPO_SCHEMA)
-        conn.execute(
-            "INSERT INTO topo_observations (id, node_id, obs_type, obs_value, created_by) "
-            "VALUES ('obs1', 'node1', 'vibration', 0.5, 'test_agent')"
-        )
+        conn.execute("INSERT INTO topo_observations (id, node_id, obs_type, obs_value, created_by) VALUES ('obs1', 'node1', 'vibration', 0.5, 'test_agent')")
         initialize_schema(conn, TOPO_SCHEMA)
         rows = conn.execute("SELECT id, node_id FROM topo_observations").fetchall()
         assert rows == [("obs1", "node1")]
@@ -224,9 +243,7 @@ class TestInitializeSchemaCreatesTOPOTables:
 
         conn = duckdb.connect(":memory:")
         initialize_schema(conn, DEFAULT_SCHEMA)
-        rows = conn.execute(
-            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name LIKE 'topo_%'"
-        ).fetchone()
+        rows = conn.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_name LIKE 'topo_%'").fetchone()
         assert rows[0] == 0
 
     def test_json_template_creates_all_tables(self):
@@ -247,68 +264,34 @@ class TestCRUdOperations:
     def test_insert_and_query_observation(self):
         conn = duckdb.connect(":memory:")
         initialize_schema(conn, TOPO_SCHEMA)
-        conn.execute(
-            "INSERT INTO topo_observations (id, node_id, obs_type, obs_value, source, created_by) "
-            "VALUES ('obs1', 'motor_01', 'vibration', 2.5, 'scada', 'agent_a')"
-        )
+        conn.execute("INSERT INTO topo_observations (id, node_id, obs_type, obs_value, source, created_by) VALUES ('obs1', 'motor_01', 'vibration', 2.5, 'scada', 'agent_a')")
         rows = conn.execute("SELECT id, node_id, obs_type, obs_value FROM topo_observations").fetchall()
         assert rows == [("obs1", "motor_01", "vibration", 2.5)]
 
     def test_insert_assessment_with_is_current(self):
         conn = duckdb.connect(":memory:")
         initialize_schema(conn, TOPO_SCHEMA)
-        conn.execute(
-            "INSERT INTO topo_observations (id, node_id, obs_type, created_by) "
-            "VALUES ('obs1', 'motor_01', 'vibration', 'agent_a')"
-        )
-        conn.execute(
-            "INSERT INTO topo_observation_assessments (id, observation_id, assessment_type, assessment_value, is_current, assessed_by) "
-            "VALUES ('asmt1', 'obs1', 'review', 'confirmed', TRUE, 'analyst_b')"
-        )
-        rows = conn.execute(
-            "SELECT observation_id, assessment_type, is_current FROM topo_observation_assessments"
-        ).fetchall()
+        conn.execute("INSERT INTO topo_observations (id, node_id, obs_type, created_by) VALUES ('obs1', 'motor_01', 'vibration', 'agent_a')")
+        conn.execute("INSERT INTO topo_observation_assessments (id, observation_id, assessment_type, assessment_value, is_current, assessed_by) VALUES ('asmt1', 'obs1', 'review', 'confirmed', TRUE, 'analyst_b')")
+        rows = conn.execute("SELECT observation_id, assessment_type, is_current FROM topo_observation_assessments").fetchall()
         assert rows == [("obs1", "review", True)]
 
     def test_insert_followup(self):
         conn = duckdb.connect(":memory:")
         initialize_schema(conn, TOPO_SCHEMA)
-        conn.execute(
-            "INSERT INTO topo_observations (id, node_id, obs_type, created_by) "
-            "VALUES ('obs1', 'motor_01', 'vibration', 'agent_a')"
-        )
-        conn.execute(
-            "INSERT INTO topo_observation_followups (id, observation_id, followup_type, status, assigned_to, created_by) "
-            "VALUES ('fup1', 'obs1', 'investigation', 'open', 'engineer_c', 'agent_a')"
-        )
-        rows = conn.execute(
-            "SELECT observation_id, followup_type, status, assigned_to FROM topo_observation_followups"
-        ).fetchall()
+        conn.execute("INSERT INTO topo_observations (id, node_id, obs_type, created_by) VALUES ('obs1', 'motor_01', 'vibration', 'agent_a')")
+        conn.execute("INSERT INTO topo_observation_followups (id, observation_id, followup_type, status, assigned_to, created_by) VALUES ('fup1', 'obs1', 'investigation', 'open', 'engineer_c', 'agent_a')")
+        rows = conn.execute("SELECT observation_id, followup_type, status, assigned_to FROM topo_observation_followups").fetchall()
         assert rows == [("obs1", "investigation", "open", "engineer_c")]
 
     def test_append_only_assessment_history(self):
         conn = duckdb.connect(":memory:")
         initialize_schema(conn, TOPO_SCHEMA)
-        conn.execute(
-            "INSERT INTO topo_observations (id, node_id, obs_type, created_by) "
-            "VALUES ('obs1', 'motor_01', 'vibration', 'agent_a')"
-        )
-        conn.execute(
-            "INSERT INTO topo_observation_assessments (id, observation_id, assessment_type, assessment_value, is_current, assessed_by) "
-            "VALUES ('asmt1', 'obs1', 'review', 'pending', TRUE, 'analyst_b')"
-        )
-        conn.execute(
-            "UPDATE topo_observation_assessments SET is_current = FALSE WHERE id = 'asmt1'"
-        )
-        conn.execute(
-            "INSERT INTO topo_observation_assessments (id, observation_id, assessment_type, assessment_value, is_current, assessed_by) "
-            "VALUES ('asmt2', 'obs1', 'review', 'confirmed', TRUE, 'analyst_b')"
-        )
-        current = conn.execute(
-            "SELECT assessment_value FROM topo_observation_assessments WHERE observation_id = 'obs1' AND is_current = TRUE"
-        ).fetchall()
+        conn.execute("INSERT INTO topo_observations (id, node_id, obs_type, created_by) VALUES ('obs1', 'motor_01', 'vibration', 'agent_a')")
+        conn.execute("INSERT INTO topo_observation_assessments (id, observation_id, assessment_type, assessment_value, is_current, assessed_by) VALUES ('asmt1', 'obs1', 'review', 'pending', TRUE, 'analyst_b')")
+        conn.execute("UPDATE topo_observation_assessments SET is_current = FALSE WHERE id = 'asmt1'")
+        conn.execute("INSERT INTO topo_observation_assessments (id, observation_id, assessment_type, assessment_value, is_current, assessed_by) VALUES ('asmt2', 'obs1', 'review', 'confirmed', TRUE, 'analyst_b')")
+        current = conn.execute("SELECT assessment_value FROM topo_observation_assessments WHERE observation_id = 'obs1' AND is_current = TRUE").fetchall()
         assert current == [("confirmed",)]
-        all_assessments = conn.execute(
-            "SELECT COUNT(*) FROM topo_observation_assessments WHERE observation_id = 'obs1'"
-        ).fetchone()
+        all_assessments = conn.execute("SELECT COUNT(*) FROM topo_observation_assessments WHERE observation_id = 'obs1'").fetchone()
         assert all_assessments[0] == 2

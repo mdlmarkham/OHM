@@ -302,26 +302,31 @@ class InfraHandlerMixin:
             p95 = sorted_lats[int(n * 0.95)] if n > 1 else sorted_lats[0]
             p99 = sorted_lats[int(n * 0.99)] if n > 1 else sorted_lats[0]
             total = counts_snapshot.get(key, n)
-            endpoints.append({
-                "endpoint": key,
-                "count": total,
-                "p50_ms": round(p50, 2),
-                "p95_ms": round(p95, 2),
-                "p99_ms": round(p99, 2),
-                "max_ms": round(sorted_lats[-1], 2),
-                "mean_ms": round(mean, 2),
-                "total_time_ms": round(total * mean, 2),
-            })
+            endpoints.append(
+                {
+                    "endpoint": key,
+                    "count": total,
+                    "p50_ms": round(p50, 2),
+                    "p95_ms": round(p95, 2),
+                    "p99_ms": round(p99, 2),
+                    "max_ms": round(sorted_lats[-1], 2),
+                    "mean_ms": round(mean, 2),
+                    "total_time_ms": round(total * mean, 2),
+                }
+            )
 
         endpoints.sort(key=lambda e: e["total_time_ms"], reverse=True)
 
         perf_log_enabled = _server_module._perf_log_file is not None
-        self._json_response(200, {
-            "endpoints": endpoints,
-            "endpoint_count": len(endpoints),
-            "perf_log_enabled": perf_log_enabled,
-            "perf_log_file": _server_module._perf_log_file,
-        })
+        self._json_response(
+            200,
+            {
+                "endpoints": endpoints,
+                "endpoint_count": len(endpoints),
+                "perf_log_enabled": perf_log_enabled,
+                "perf_log_file": _server_module._perf_log_file,
+            },
+        )
 
     def _get_webhooks_dead_letter(self, path: str, qs: dict) -> None:
         """GET /webhooks/dead-letter — List failed webhook deliveries for manual retry."""

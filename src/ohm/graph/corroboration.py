@@ -60,9 +60,7 @@ def compute_edge_corroboration(conn: "DuckDBPyConnection") -> dict[str, Any]:
 
     # Also reset to 0 for non-L3 edges (corroboration is only meaningful
     # for L3 knowledge claims).
-    conn.execute(
-        "UPDATE ohm_edges SET corroboration_count = 0 WHERE layer != 'L3' AND deleted_at IS NULL"
-    )
+    conn.execute("UPDATE ohm_edges SET corroboration_count = 0 WHERE layer != 'L3' AND deleted_at IS NULL")
 
     summary = conn.execute(
         """

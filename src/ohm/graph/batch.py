@@ -35,21 +35,50 @@ if TYPE_CHECKING:
 # with ohm.graph.queries.create_node. The order matters: it matches
 # the VALUES clause built below.
 _NODE_COLS = (
-    "id", "label", "type", "content", "created_by", "visibility", "provenance",
-    "confidence", "priority", "url",
-    "tags", "metadata",
-    "utility_scale", "utility_usd_per_day", "utility_currency",
-    "current_best_action", "action_alternatives",
+    "id",
+    "label",
+    "type",
+    "content",
+    "created_by",
+    "visibility",
+    "provenance",
+    "confidence",
+    "priority",
+    "url",
+    "tags",
+    "metadata",
+    "utility_scale",
+    "utility_usd_per_day",
+    "utility_currency",
+    "current_best_action",
+    "action_alternatives",
     "source_tier",
-    "source_author", "source_institution", "data_origin",
+    "source_author",
+    "source_institution",
+    "data_origin",
 )
 
 # Same for create_edge().
 _EDGE_COLS = (
-    "id", "from_node", "to_node", "layer", "edge_type", "created_by",
-    "confidence", "probability", "urgency", "condition", "provenance", "metadata",
-    "probability_p05", "probability_p50", "probability_p95",
-    "confidence_p05", "confidence_p50", "confidence_p95", "source_tier",
+    "id",
+    "from_node",
+    "to_node",
+    "layer",
+    "edge_type",
+    "created_by",
+    "confidence",
+    "probability",
+    "urgency",
+    "condition",
+    "provenance",
+    "metadata",
+    "probability_p05",
+    "probability_p50",
+    "probability_p95",
+    "confidence_p05",
+    "confidence_p50",
+    "confidence_p95",
+    "source_tier",
 )
 
 # Change-feed columns. Matches ohm.graph.queries._log_change.
@@ -92,7 +121,6 @@ def fast_batch_create_nodes(
     from ohm.validation import (
         validate_confidence,
         validate_data_origin,
-        validate_identifier,
         validate_source_tier,
         enforce_confidence_ceiling,
     )
@@ -135,37 +163,35 @@ def fast_batch_create_nodes(
             return None
 
         action_alternatives = nd.get("action_alternatives")
-        alternatives_json = (
-            json.dumps(action_alternatives)
-            if action_alternatives is not None
-            else None
-        )
+        alternatives_json = json.dumps(action_alternatives) if action_alternatives is not None else None
         tags_json = json.dumps(nd.get("tags")) if nd.get("tags") else None
         metadata_json = json.dumps(nd.get("metadata")) if nd.get("metadata") else None
 
         node_id = generate_node_id(label, node_type)
-        parsed.append({
-            "id": node_id,
-            "label": label,
-            "node_type": node_type,
-            "content": nd.get("content"),
-            "visibility": nd.get("visibility", "team"),
-            "provenance": nd.get("provenance"),
-            "confidence": confidence,
-            "priority": priority,
-            "url": url,
-            "tags_json": tags_json,
-            "metadata_json": metadata_json,
-            "utility_scale": utility_scale,
-            "utility_usd_per_day": nd.get("utility_usd_per_day"),
-            "utility_currency": nd.get("utility_currency"),
-            "current_best_action": nd.get("current_best_action"),
-            "alternatives_json": alternatives_json,
-            "source_tier": source_tier,
-            "source_author": nd.get("source_author"),
-            "source_institution": nd.get("source_institution"),
-            "data_origin": data_origin,
-        })
+        parsed.append(
+            {
+                "id": node_id,
+                "label": label,
+                "node_type": node_type,
+                "content": nd.get("content"),
+                "visibility": nd.get("visibility", "team"),
+                "provenance": nd.get("provenance"),
+                "confidence": confidence,
+                "priority": priority,
+                "url": url,
+                "tags_json": tags_json,
+                "metadata_json": metadata_json,
+                "utility_scale": utility_scale,
+                "utility_usd_per_day": nd.get("utility_usd_per_day"),
+                "utility_currency": nd.get("utility_currency"),
+                "current_best_action": nd.get("current_best_action"),
+                "alternatives_json": alternatives_json,
+                "source_tier": source_tier,
+                "source_author": nd.get("source_author"),
+                "source_institution": nd.get("source_institution"),
+                "data_origin": data_origin,
+            }
+        )
 
     # --- 2. Bulk check for soft-deleted collisions.
     all_ids = [p["id"] for p in parsed]
@@ -194,23 +220,36 @@ def fast_batch_create_nodes(
 
     rows_to_insert: list[tuple] = []
     for p in parsed:
-        rows_to_insert.append((
-            p["id"], p["label"], p["node_type"], p["content"], created_by,
-            p["visibility"], p["provenance"], p["confidence"], p["priority"], p["url"],
-            p["tags_json"], p["metadata_json"],
-            p["utility_scale"], p["utility_usd_per_day"], p["utility_currency"],
-            p["current_best_action"], p["alternatives_json"],
-            p["source_tier"],
-            p["source_author"], p["source_institution"], p["data_origin"],
-        ))
+        rows_to_insert.append(
+            (
+                p["id"],
+                p["label"],
+                p["node_type"],
+                p["content"],
+                created_by,
+                p["visibility"],
+                p["provenance"],
+                p["confidence"],
+                p["priority"],
+                p["url"],
+                p["tags_json"],
+                p["metadata_json"],
+                p["utility_scale"],
+                p["utility_usd_per_day"],
+                p["utility_currency"],
+                p["current_best_action"],
+                p["alternatives_json"],
+                p["source_tier"],
+                p["source_author"],
+                p["source_institution"],
+                p["data_origin"],
+            )
+        )
     conn.executemany(insert_sql, rows_to_insert)
 
     # --- 4. Single executemany INSERT into ohm_change_feed.
     empty_old = json.dumps({})
-    feed_sql = (
-        f"INSERT INTO ohm_change_feed ({','.join(_FEED_COLS)}) "
-        f"VALUES (" + ",".join(["?"] * len(_FEED_COLS)) + ")"
-    )
+    feed_sql = f"INSERT INTO ohm_change_feed ({','.join(_FEED_COLS)}) VALUES (" + ",".join(["?"] * len(_FEED_COLS)) + ")"
     feed_rows: list[tuple] = []
     for p in parsed:
         feed_rows.append(("ohm_nodes", p["id"], "INSERT", created_by, empty_old))
@@ -243,10 +282,7 @@ def fast_batch_create_nodes(
             }
             rows_to_register = [r for r in alias_rows if r[2] not in already]
             if rows_to_register:
-                alias_sql = (
-                    "INSERT INTO ohm_aliases (id, alias_norm, node_id) "
-                    "VALUES (?, ?, ?)"
-                )
+                alias_sql = "INSERT INTO ohm_aliases (id, alias_norm, node_id) VALUES (?, ?, ?)"
                 conn.executemany(alias_sql, rows_to_register)
     except Exception:
         # Alias registration is best-effort.
@@ -311,36 +347,42 @@ def fast_batch_create_edges(
             return None
         try:
             validate_pert_triple(
-                ed.get("probability_p05"), ed.get("probability_p50"), ed.get("probability_p95"),
+                ed.get("probability_p05"),
+                ed.get("probability_p50"),
+                ed.get("probability_p95"),
                 name=f"item {idx} probability PERT",
             )
             validate_pert_triple(
-                ed.get("confidence_p05"), ed.get("confidence_p50"), ed.get("confidence_p95"),
+                ed.get("confidence_p05"),
+                ed.get("confidence_p50"),
+                ed.get("confidence_p95"),
                 name=f"item {idx} confidence PERT",
             )
         except ValueError:
             return None
 
         metadata_json = json.dumps(ed.get("metadata")) if ed.get("metadata") else None
-        parsed.append({
-            "from_node": ed["from_node"],
-            "to_node": ed["to_node"],
-            "layer": layer,
-            "edge_type": edge_type,
-            "confidence": confidence,
-            "probability": ed.get("probability"),
-            "urgency": urgency,
-            "condition": ed.get("condition"),
-            "provenance": ed.get("provenance"),
-            "metadata_json": metadata_json,
-            "probability_p05": ed.get("probability_p05"),
-            "probability_p50": ed.get("probability_p50"),
-            "probability_p95": ed.get("probability_p95"),
-            "confidence_p05": ed.get("confidence_p05"),
-            "confidence_p50": ed.get("confidence_p50"),
-            "confidence_p95": ed.get("confidence_p95"),
-            "source_tier": source_tier,
-        })
+        parsed.append(
+            {
+                "from_node": ed["from_node"],
+                "to_node": ed["to_node"],
+                "layer": layer,
+                "edge_type": edge_type,
+                "confidence": confidence,
+                "probability": ed.get("probability"),
+                "urgency": urgency,
+                "condition": ed.get("condition"),
+                "provenance": ed.get("provenance"),
+                "metadata_json": metadata_json,
+                "probability_p05": ed.get("probability_p05"),
+                "probability_p50": ed.get("probability_p50"),
+                "probability_p95": ed.get("probability_p95"),
+                "confidence_p05": ed.get("confidence_p05"),
+                "confidence_p50": ed.get("confidence_p50"),
+                "confidence_p95": ed.get("confidence_p95"),
+                "source_tier": source_tier,
+            }
+        )
 
     edge_ids = [str(uuid.uuid4()) for _ in parsed]
 
@@ -350,21 +392,33 @@ def fast_batch_create_edges(
 
     rows_to_insert: list[tuple] = []
     for eid, p in zip(edge_ids, parsed):
-        rows_to_insert.append((
-            eid, p["from_node"], p["to_node"], p["layer"], p["edge_type"], created_by,
-            p["confidence"], p["probability"], p["urgency"], p["condition"],
-            p["provenance"], p["metadata_json"],
-            p["probability_p05"], p["probability_p50"], p["probability_p95"],
-            p["confidence_p05"], p["confidence_p50"], p["confidence_p95"],
-            p["source_tier"],
-        ))
+        rows_to_insert.append(
+            (
+                eid,
+                p["from_node"],
+                p["to_node"],
+                p["layer"],
+                p["edge_type"],
+                created_by,
+                p["confidence"],
+                p["probability"],
+                p["urgency"],
+                p["condition"],
+                p["provenance"],
+                p["metadata_json"],
+                p["probability_p05"],
+                p["probability_p50"],
+                p["probability_p95"],
+                p["confidence_p05"],
+                p["confidence_p50"],
+                p["confidence_p95"],
+                p["source_tier"],
+            )
+        )
     conn.executemany(insert_sql, rows_to_insert)
 
     empty_old = json.dumps({})
-    feed_sql = (
-        f"INSERT INTO ohm_change_feed ({','.join(_FEED_COLS)}) "
-        f"VALUES (" + ",".join(["?"] * len(_FEED_COLS)) + ")"
-    )
+    feed_sql = f"INSERT INTO ohm_change_feed ({','.join(_FEED_COLS)}) VALUES (" + ",".join(["?"] * len(_FEED_COLS)) + ")"
     feed_rows: list[tuple] = []
     for eid in edge_ids:
         feed_rows.append(("ohm_edges", eid, "INSERT", created_by, empty_old))
