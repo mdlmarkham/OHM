@@ -2275,6 +2275,10 @@ class OhmStore:
 
     def _ducklake_table(self, table: str, alias: str) -> str:
         """Return a safely quoted table reference for DuckLake sync."""
+        from ohm.validation import validate_table_name
+
+        validate_table_name(table)
+        validate_table_name(alias, name="alias")
         return f'"{alias}"."{table}"'
 
     def _ducklake_sync_tables(self) -> tuple:
@@ -2861,6 +2865,10 @@ class OhmStore:
         Returns:
             Number of rows inserted.
         """
+        from ohm.validation import validate_table_name
+
+        validate_table_name(table)
+        validate_table_name(alias, name="alias")
         # Get column lists using duckdb_columns() for DuckLake tables
         local_cols = self.conn.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table}' ORDER BY ordinal_position").fetchall()
         # Deduplicate while preserving order (information_schema may return duplicates)
@@ -2903,6 +2911,10 @@ class OhmStore:
         Returns:
             Number of rows synced.
         """
+        from ohm.validation import validate_table_name
+
+        validate_table_name(table)
+        validate_table_name(alias, name="alias")
         # Determine timestamp column
         ts_col = "updated_at" if table != "ohm_observations" else "created_at"
 

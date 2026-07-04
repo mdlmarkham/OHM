@@ -36,6 +36,21 @@ def validate_identifier(value: str, *, name: str = "value") -> str:
     return value
 
 
+def validate_table_name(value: str, *, name: str = "table") -> str:
+    """Validate that *value* is a safe bare SQL table name for interpolation.
+
+    Unlike :func:`validate_identifier`, this rejects dots, hyphens, and
+    other characters that could break out of a table-name context in an
+    f-string (e.g. ``foo.bar`` or ``sys.tables``). Only a bare SQL
+    identifier (``[A-Za-z_][A-Za-z0-9_]*``) is accepted.
+
+    Returns *value* unchanged if valid; raises ``ValueError`` otherwise.
+    """
+    if not value or not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", value):
+        raise ValueError(f"Invalid {name}: '{value}' — must be a bare SQL identifier (letters, digits, underscores; must start with a letter or underscore)")
+    return value
+
+
 def validate_customer_id(value: str) -> str:
     """Validate that *value* is a safe customer_id for filesystem path construction.
 

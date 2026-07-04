@@ -281,7 +281,7 @@ def _try_ducklake_recovery(db_path_str: str) -> bool:
         if not snapshots:
             return False
 
-        snapshot_id = snapshots[0]
+        snapshot_id = int(snapshots[0])  # Security: enforce integer type before SQL interpolation
 
         # Export nodes and edges from snapshot
         nodes = tmp_conn.execute(f"SELECT * FROM ohm_lake.ohm_nodes AT (VERSION => {snapshot_id})").fetchall()
@@ -425,7 +425,7 @@ def _auto_restore_if_empty(conn: "duckdb.DuckDBPyConnection", db_path_str: str) 
         if not snapshots:
             return
 
-        snapshot_id = snapshots[0]
+        snapshot_id = int(snapshots[0])  # Security: enforce integer type before SQL interpolation
 
         nodes = tmp_conn.execute(f"SELECT * FROM ohm_lake.ohm_nodes AT (VERSION => {snapshot_id}) WHERE deleted_at IS NULL").fetchall()
         node_cols = [d[0] for d in tmp_conn.description]
