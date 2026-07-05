@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyList};
 use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
 use rustc_hash::FxHashMap;
@@ -18,7 +18,7 @@ use rustc_hash::FxHashMap;
 #[pyfunction]
 fn monte_carlo_sim(
     py: Python<'_>,
-    adjacency: &PyDict,
+    adjacency: &Bound<'_, PyDict>,
     source: &str,
     trials: usize,
     depth: usize,
@@ -28,9 +28,7 @@ fn monte_carlo_sim(
     let mut adj: FxHashMap<String, Vec<(String, f64, f64)>> = FxHashMap::default();
     for (key, value) in adjacency.iter() {
         let from_node: String = key.extract()?;
-        let edges: Vec<(String, f64, f64)> = value
-            .extract()
-            .unwrap_or_default();
+        let edges: Vec<(String, f64, f64)> = value.extract().unwrap_or_default();
         adj.insert(from_node, edges);
     }
 
@@ -87,14 +85,14 @@ fn monte_carlo_sim(
         counts_dict.set_item(node, *count)?;
     }
 
-    let totals_list = pyo3::types::PyList::new(py, per_trial_totals.iter().map(|&v| v));
+    let totals_list = PyList::new(py, per_trial_totals.iter().map(|&v| v))?;
 
-    let tuple = (counts_dict, totals_list).into_py(py);
-    Ok(tuple)
+    let tuple = (counts_dict, totals_list).into_pyobject(py)?;
+    Ok(tuple.into())
 }
 
 #[pymodule]
-fn _mc_rust(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
+fn _mc_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(monte_carlo_sim, m)?)?;
     Ok(())
 }
