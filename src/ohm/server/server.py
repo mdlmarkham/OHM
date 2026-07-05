@@ -3246,6 +3246,7 @@ def main(schema_config: SchemaConfig | None = None):
             store.conn,
             catalog_path=ducklake_path,
             data_path=data_path or None,
+            schema=schema_config,
         )
         if attached:
             print(f"DuckLake attached: {ducklake_path}", file=sys.stderr)
