@@ -1,3 +1,7 @@
+# Rust extension build artifact (copied into src/ohm for src-PYTHONPATH deployments)
+src/ohm/_mc_rust.so
+src/ohm/_mc_rust*.so
+
 # Python
 __pycache__/
 *.py[cod]
