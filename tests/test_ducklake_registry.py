@@ -175,9 +175,20 @@ class TestDuckLakeTableFromDomainTable:
 
 
 class TestDefaultDuckLakeTables:
-    def test_has_four_core_entries(self):
+    def test_has_core_entries_plus_outcomes(self):
         names = {dlt.name for dlt in DEFAULT_DUCKLAKE_TABLES}
-        assert names == {"ohm_nodes", "ohm_edges", "ohm_observations", "ohm_change_feed"}
+        assert names == {
+            "ohm_nodes",
+            "ohm_edges",
+            "ohm_observations",
+            "ohm_change_feed",
+            "ohm_outcomes",
+        }
+
+    def test_outcomes_uses_recorded_at(self):
+        outcomes = next(dlt for dlt in DEFAULT_DUCKLAKE_TABLES if dlt.name == "ohm_outcomes")
+        assert outcomes.timestamp_col == "recorded_at"
+        assert outcomes.has_deleted_at is False
 
     def test_observations_uses_created_at(self):
         obs = next(dlt for dlt in DEFAULT_DUCKLAKE_TABLES if dlt.name == "ohm_observations")
@@ -193,9 +204,15 @@ class TestDefaultDuckLakeTables:
 
 
 class TestSchemaConfigDuckLakeTables:
-    def test_default_schema_has_only_core_entries(self):
+    def test_default_schema_has_core_entries_plus_outcomes(self):
         names = {dlt.name for dlt in DEFAULT_SCHEMA.ducklake_tables}
-        assert names == {"ohm_nodes", "ohm_edges", "ohm_observations", "ohm_change_feed"}
+        assert names == {
+            "ohm_nodes",
+            "ohm_edges",
+            "ohm_observations",
+            "ohm_change_feed",
+            "ohm_outcomes",
+        }
 
     def test_explicit_ducklake_tables_overrides_default(self):
         custom = [DuckLakeTable(name="my_table")]
