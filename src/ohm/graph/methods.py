@@ -895,38 +895,10 @@ def monte_carlo_impact(
         effective_prob = float(prob) if prob is not None else default_probability
         adj[from_node].append((to_node, float(conf or 0.7), effective_prob))
 
-    # Run simulations with two-stage sampling
-    impact_counts: dict[str, int] = {}
-    total_affected_per_sim = []
+    # Run simulations — delegate to Rust extension if available (OHM-lqpk.4)
+    from ohm.mc import monte_carlo_sim
 
-    for _ in range(simulations):
-        visited = set()
-        frontier = [node_id]
-        affected_this_sim = 0
-
-        for _ in range(depth):
-            next_frontier = []
-            for current in frontier:
-                if current in visited:
-                    continue
-                visited.add(current)
-                if current not in adj:
-                    continue
-                for target, conf, prob in adj[current]:
-                    if target in visited:
-                        continue
-                    # Stage 1: Does this edge exist? (confidence)
-                    if random.random() < conf:
-                        # Stage 2: Does the effect propagate? (probability)
-                        if random.random() < prob:
-                            next_frontier.append(target)
-                            impact_counts[target] = impact_counts.get(target, 0) + 1
-                            affected_this_sim += 1
-            frontier = next_frontier
-            if not frontier:
-                break
-
-        total_affected_per_sim.append(affected_this_sim)
+    impact_counts, total_affected_per_sim = monte_carlo_sim(adj, node_id, simulations, depth, seed)
 
     # Convert to probabilities
     node_labels = {}

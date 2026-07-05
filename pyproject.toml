@@ -55,6 +55,14 @@ dev = [
      "markdown>=3.6",
      "moto>=5.0",
  ]
+rust = [
+     "maturin>=1.4",
+ ]
+
+[tool.maturin]
+manifest-path = "rust/Cargo.toml"
+module-name = "ohm._mc_rust"
+python-source = "src"
 
 [tool.ruff]
 target-version = "py312"

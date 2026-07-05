@@ -3973,39 +3973,23 @@ def monte_carlo_cascade(
         all_nodes.add(from_node)
         all_nodes.add(to_node)
 
-    # Run trials with two-stage sampling
+    # Run trials — delegate to Rust extension if available (OHM-lqpk.4)
+    from ohm.mc import monte_carlo_sim
+
+    # Build the adjacency in the tuple format expected by mc.monte_carlo_sim
+    adj_tuples: dict[str, list[tuple[str, float, float]]] = {}
+    for from_node, edges in node_edges.items():
+        adj_tuples[from_node] = [(e["to_node"], e["confidence"], e["probability"]) for e in edges]
+
+    sim_counts, _ = monte_carlo_sim(adj_tuples, node_id, trials, max_depth, seed)
+
+    # monte_carlo_cascade counts ALL visited nodes (including source), while
+    # the sim function only counts targets that passed both sampling stages.
+    # The source is always visited (trials times); add it to the counts.
     activated_counts: dict[str, int] = {n: 0 for n in all_nodes}
-
-    for _ in range(trials):
-        # Track which nodes are activated in this trial
-        visited = set()
-        frontier = [node_id]
-
-        for _ in range(max_depth):
-            next_frontier = []
-            for current in frontier:
-                if current in visited:
-                    continue
-                visited.add(current)
-
-                # Count this node as activated
-                if current in activated_counts:
-                    activated_counts[current] += 1
-
-                # Two-stage sampling at each edge
-                if current in node_edges:
-                    for edge in node_edges[current]:
-                        target = edge["to_node"]
-                        if target in visited:
-                            continue
-                        # Stage 1: Does this edge exist? (confidence)
-                        if random.random() < edge["confidence"]:
-                            # Stage 2: Does the effect propagate? (probability)
-                            if random.random() < edge["probability"]:
-                                next_frontier.append(target)
-            frontier = next_frontier
-            if not frontier:
-                break
+    activated_counts[node_id] = trials
+    for nid, count in sim_counts.items():
+        activated_counts[nid] = activated_counts.get(nid, 0) + count
 
     # Compute distribution statistics
     results = []
