@@ -492,8 +492,27 @@ class OhmStore:
 
             self.conn.execute("CHECKPOINT")
             logger.info("DuckLake auto-restore completed")
+
+            # OHM-knxf guardrail: warn if ohm_outcomes is empty but the change
+            # feed has INSERT records for it (indicates data loss during recovery).
+            self._check_outcomes_guardrail()
         except Exception as e:
             logger.warning("DuckLake auto-restore failed: %s", e)
+
+    def _check_outcomes_guardrail(self):
+        """OHM-knxf: Warn if ohm_outcomes is empty but change feed has inserts."""
+        try:
+            outcome_count = self.conn.execute("SELECT COUNT(*) FROM ohm_outcomes").fetchone()[0]
+            if outcome_count > 0:
+                return
+            feed_count = self.conn.execute("SELECT COUNT(*) FROM ohm_change_feed WHERE table_name = 'ohm_outcomes' AND operation = 'INSERT'").fetchone()[0]
+            if feed_count > 0:
+                logger.warning(
+                    "ohm_outcomes is empty but ohm_change_feed has %d INSERT records — data may have been lost during recovery. Regenerate via: INSERT INTO ohm_outcomes SELECT * FROM (replay change feed). (OHM-knxf guardrail)",
+                    feed_count,
+                )
+        except Exception:
+            pass  # Tables may not exist yet
 
     def _init_schema(self):
         """Initialize the schema if not already present, including migrations."""

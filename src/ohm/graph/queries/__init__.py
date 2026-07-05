@@ -980,6 +980,47 @@ def query_threat_cluster(
 # ── Source Reliability ──────────────────────────────────────────────────────
 
 
+def restore_outcomes_from_change_feed(
+    conn: DuckDBPyConnection,
+) -> dict[str, Any]:
+    """Restore missing ohm_outcomes rows from ohm_change_feed (OHM-knxf).
+
+    If ohm_outcomes was emptied by a recovery/sync event, this function
+    identifies the lost outcome IDs from the change feed. The change feed
+    logs INSERT operations with row_id, so we can identify which outcomes
+    existed but the full row data is not stored in the feed. This function
+    checks if any of those IDs still exist in ohm_outcomes and reports the
+    gap.
+
+    Returns:
+        Dict with total_feed_records, existing_count, and missing_ids list.
+    """
+    feed_rows = conn.execute(
+        """SELECT row_id FROM ohm_change_feed
+           WHERE table_name = 'ohm_outcomes' AND operation = 'INSERT'
+           ORDER BY occurred_at ASC"""
+    ).fetchall()
+
+    if not feed_rows:
+        return {"total_feed_records": 0, "existing_count": 0, "missing_ids": []}
+
+    feed_ids = [r[0] for r in feed_rows]
+    existing_ids = set()
+    for batch_start in range(0, len(feed_ids), 500):
+        batch = feed_ids[batch_start : batch_start + 500]
+        placeholders = ",".join(["?"] * len(batch))
+        rows = conn.execute(f"SELECT id FROM ohm_outcomes WHERE id IN ({placeholders})", batch).fetchall()
+        existing_ids.update(r[0] for r in rows)
+
+    missing_ids = [fid for fid in feed_ids if fid not in existing_ids]
+
+    return {
+        "total_feed_records": len(feed_ids),
+        "existing_count": len(existing_ids),
+        "missing_ids": missing_ids,
+    }
+
+
 def query_record_outcome(
     conn: DuckDBPyConnection,
     *,

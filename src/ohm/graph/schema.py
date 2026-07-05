@@ -684,6 +684,14 @@ DEFAULT_DUCKLAKE_TABLES: tuple[DuckLakeTable, ...] = (
         has_deleted_at=False,
         description="Append-only change feed",
     ),
+    DuckLakeTable(
+        name="ohm_outcomes",
+        primary_key="id",
+        timestamp_col="recorded_at",
+        timestamp_fallback="recorded_at",
+        has_deleted_at=False,
+        description="Source reliability outcomes (OHM-knxf: was missing from DuckLake sync, causing data loss on recovery)",
+    ),
 )
 
 
