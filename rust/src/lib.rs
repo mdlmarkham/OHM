@@ -5,26 +5,16 @@ use rand::rngs::StdRng;
 use rustc_hash::FxHashMap;
 
 /// Monte Carlo simulation of failure propagation with two-stage sampling.
-///
-/// Args:
-///     adjacency: {node_id: [(target, confidence, probability), ...]}
-///     source: Starting node ID.
-///     trials: Number of Monte Carlo trials.
-///     depth: Maximum BFS depth per trial.
-///     seed: Optional random seed (u64).
-///
-/// Returns:
-///     (impact_counts: {node_id: count}, per_trial_totals: [int, ...])
 #[pyfunction]
-fn monte_carlo_sim(
-    py: Python<'_>,
-    adjacency: &Bound<'_, PyDict>,
+#[pyo3(name = "monte_carlo_sim")]
+fn monte_carlo_sim<'py>(
+    py: Python<'py>,
+    adjacency: &Bound<'py, PyDict>,
     source: &str,
     trials: usize,
     depth: usize,
     seed: Option<u64>,
-) -> PyResult<PyObject> {
-    // Convert the Python adjacency dict into a Rust HashMap for fast lookup.
+) -> PyResult<Bound<'py, PyAny>> {
     let mut adj: FxHashMap<String, Vec<(String, f64, f64)>> = FxHashMap::default();
     for (key, value) in adjacency.iter() {
         let from_node: String = key.extract()?;
@@ -58,9 +48,7 @@ fn monte_carlo_sim(
                         if *visited.get(target).unwrap_or(&false) {
                             continue;
                         }
-                        // Stage 1: Edge existence (confidence)
                         if rng.gen::<f64>() < *conf {
-                            // Stage 2: Effect propagation (probability)
                             if rng.gen::<f64>() < *prob {
                                 next_frontier.push(target.clone());
                                 *impact_counts.entry(target.clone()).or_insert(0) += 1;
@@ -79,7 +67,6 @@ fn monte_carlo_sim(
         per_trial_totals.push(affected_this_sim);
     }
 
-    // Build the return tuple: (dict[str, int], list[int])
     let counts_dict = PyDict::new(py);
     for (node, count) in &impact_counts {
         counts_dict.set_item(node, *count)?;
@@ -87,8 +74,7 @@ fn monte_carlo_sim(
 
     let totals_list = PyList::new(py, per_trial_totals.iter().map(|&v| v))?;
 
-    let tuple = (counts_dict, totals_list).into_pyobject(py)?;
-    Ok(tuple.into())
+    Ok((counts_dict, totals_list).into_pyobject(py)?.into_any())
 }
 
 #[pymodule]

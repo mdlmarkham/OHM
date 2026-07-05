@@ -49,3 +49,7 @@ venv/
 .claude/worktrees/
 .opencode/
 reports/
+
+# Rust build artifacts
+rust/target/
+*.pdb
