@@ -5746,6 +5746,64 @@ class Graph:
             created_by=self.actor,
         )
 
+    def register_rul_assessment(
+        self,
+        equipment_node_id: str,
+        *,
+        rul_days: float,
+        risk_class: str,
+        model_version: str | None = None,
+        site_id: str | None = None,
+        node_path: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Store a RUL assessment and link it via L4 PREDICTS edge (OHM-q4ku).
+
+        Args:
+            equipment_node_id: OHM node id for the equipment being assessed.
+            rul_days: Remaining useful life in days.
+            risk_class: Risk classification (critical/high/medium/low).
+            model_version: Optional model version string.
+            site_id: Optional site identifier.
+            node_path: Optional UNS address path (stored in metadata).
+            metadata: Optional extensible metadata.
+
+        Returns:
+            Dict with 'prospect' (the stored assessment) and 'edge_id' (or None).
+        """
+        from ohm.queries import register_rul_assessment as _register
+
+        return _register(
+            self._conn,
+            equipment_node_id=equipment_node_id,
+            rul_days=rul_days,
+            risk_class=risk_class,
+            model_version=model_version,
+            site_id=site_id,
+            node_path=node_path,
+            metadata=metadata,
+            created_by=self.actor,
+        )
+
+    def get_rul_assessments(
+        self,
+        *,
+        equipment_node_id: str | None = None,
+        risk_class: str | None = None,
+        site_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Fetch RUL assessments with optional filters (OHM-q4ku)."""
+        from ohm.queries import get_rul_assessments as _get
+
+        return _get(
+            self._conn,
+            equipment_node_id=equipment_node_id,
+            risk_class=risk_class,
+            site_id=site_id,
+            limit=limit,
+        )
+
     def propagate_observation(
         self,
         source_node_id: str,
