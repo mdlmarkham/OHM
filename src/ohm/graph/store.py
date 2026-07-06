@@ -752,7 +752,7 @@ class OhmStore:
         task_status: Optional[str] = None,
         assigned_to: Optional[str] = None,
         due_date: Optional[str] = None,
-        utility_scale: Optional[str | float] = None,
+        utility_scale: Optional[str | float | list[str | float]] = None,
         current_best_action: Optional[str] = None,
         action_alternatives: Optional[list[str]] = None,
         utility_usd_per_day: Optional[float] = None,
@@ -818,6 +818,11 @@ class OhmStore:
         _utility_scale_map = {"best": 1.0, "neutral": 0.5, "worst": 0.0}
         if utility_scale is not None and isinstance(utility_scale, str):
             utility_scale = _utility_scale_map.get(utility_scale, utility_scale)
+        elif utility_scale is not None and isinstance(utility_scale, (list, tuple)):
+            # OHM-n9us: accept arrays of numbers for decision nodes with
+            # multiple outcomes. Store mean as FLOAT, full array in metadata.
+            validated = [float(v) for v in utility_scale]
+            utility_scale = sum(validated) / len(validated) if validated else 0.5
 
         # ADR-015: source_url is an alias for url (backward compat)
         if source_url is not None and url is None:

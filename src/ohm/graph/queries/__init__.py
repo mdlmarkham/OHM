@@ -1598,7 +1598,7 @@ def create_node(
     source_url: str | None = None,
     tags: list[str] | None = None,
     metadata: dict | None = None,
-    utility_scale: str | float | None = None,
+    utility_scale: str | float | list[str | float] | None = None,
     utility_usd_per_day: float | None = None,
     utility_currency: str | None = None,
     current_best_action: str | None = None,
@@ -1655,10 +1655,28 @@ def create_node(
             if utility_scale not in _utility_scale_map:
                 raise ValueError(f"utility_scale must be one of best/neutral/worst, got {utility_scale}")
             utility_scale = _utility_scale_map[utility_scale]
-        elif not isinstance(utility_scale, (int, float)):
-            raise ValueError(f"utility_scale must be one of best/neutral/worst or a number, got {utility_scale}")
-        if isinstance(utility_scale, (int, float)) and not (0 <= utility_scale <= 1):
-            raise ValueError(f"utility_scale must be between 0 and 1, got {utility_scale}")
+        elif isinstance(utility_scale, (int, float)):
+            if not (0 <= utility_scale <= 1):
+                raise ValueError(f"utility_scale must be between 0 and 1, got {utility_scale}")
+        elif isinstance(utility_scale, (list, tuple)):
+            # OHM-n9us: accept arrays of numbers (e.g. [0.0, 0.5, 1.0])
+            # for decision nodes with multiple outcomes. Store the mean as
+            # the FLOAT utility_scale and the full array in metadata.
+            validated = []
+            for v in utility_scale:
+                if isinstance(v, str):
+                    v = _utility_scale_map.get(v, v)
+                if not isinstance(v, (int, float)):
+                    raise ValueError(f"utility_scale array elements must be numbers or best/neutral/worst, got {v}")
+                if not (0 <= v <= 1):
+                    raise ValueError(f"utility_scale array elements must be between 0 and 1, got {v}")
+                validated.append(float(v))
+            if metadata is None:
+                metadata = {}
+            metadata["utility_scale_array"] = validated
+            utility_scale = sum(validated) / len(validated) if validated else 0.5
+        else:
+            raise ValueError(f"utility_scale must be a number, best/neutral/worst, or a list of numbers, got {type(utility_scale).__name__}: {utility_scale}")
 
     # ADR-015: source_url is an alias for url (backward compat)
     if source_url is not None and url is None:

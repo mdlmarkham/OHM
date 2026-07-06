@@ -2503,6 +2503,11 @@ class GraphHandlerMixin:
         try:
             self.current_store.conn.execute("BEGIN TRANSACTION")
             for node in nodes:
+                # OHM-jw1x: run pre_ingest hooks for each node in the batch,
+                # same as the normal POST /node path (graph.py:1470).
+                hook_error = self._run_pre_ingest_hooks(agent, "node", node)
+                if hook_error is not None:
+                    raise ValidationError(f"Batch node {node.get('id', '?')} rejected by pre_ingest hook: {hook_error.get('message', hook_error)}")
                 self.current_store.write_node(
                     id=node["id"],
                     label=node["label"],
