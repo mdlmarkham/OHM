@@ -38,6 +38,11 @@ class AnalysisHandlerMixin:
 
         conf_thresh = float(qs.get("confidence", [0.5])[0])
         result = detect_contradictions(self.current_store.read_conn, confidence_threshold=conf_thresh)
+        if isinstance(result, list):
+            from ohm.server.boundary import filter_results_by_read_scope
+
+            agent = getattr(self, "_current_agent", "ohm")
+            result = filter_results_by_read_scope(self.current_store.conn, agent, result)
         self._json_response(200, result)
 
     def _get_anomalies(self, path: str, qs: dict) -> None:
@@ -48,6 +53,11 @@ class AnalysisHandlerMixin:
         layer = qs.get("layer", [None])[0]
         limit = int(qs.get("limit", [50])[0])
         result = detect_anomalies(self.current_store.read_conn, sigma_threshold=sigma, layer=layer, limit=limit)
+        if isinstance(result, list):
+            from ohm.server.boundary import filter_results_by_read_scope
+
+            agent = getattr(self, "_current_agent", "ohm")
+            result = filter_results_by_read_scope(self.current_store.conn, agent, result)
         self._json_response(200, result)
 
     def _get_aggregate(self, path: str, qs: dict) -> None:
@@ -80,6 +90,13 @@ class AnalysisHandlerMixin:
 
         threshold = float(qs.get("threshold", [0.1])[0])
         result = query_stale_edges(self.current_store.read_conn, stale_threshold=threshold)
+        if isinstance(result, list):
+            from ohm.server.boundary import filter_results_by_read_scope
+
+            agent = getattr(self, "_current_agent", "ohm")
+            result = filter_results_by_read_scope(
+                self.current_store.conn, agent, result, layer_field="layer"
+            )
         self._json_response(200, result)
 
     def _get_decay(self, path: str, qs: dict) -> None:
