@@ -5877,6 +5877,34 @@ class Graph:
             created_by=self.actor,
         )
 
+    def set_node_path(self, node_id: str, node_path: str) -> dict[str, Any]:
+        """Set the UNS hierarchical path on a node (OHM-ivlt).
+
+        Args:
+            node_id: The node to update.
+            node_path: UNS path string (e.g., 'pns.fm10.main_drive').
+
+        Returns:
+            The updated node record as a dict.
+        """
+        from ohm.queries import set_node_path as _set
+
+        return _set(self._conn, node_id=node_id, node_path=node_path, created_by=self.actor)
+
+    def get_nodes_by_path_prefix(self, path_prefix: str, *, limit: int = 100) -> list[dict[str, Any]]:
+        """Find nodes whose node_path starts with a prefix (OHM-ivlt).
+
+        Args:
+            path_prefix: Path prefix to match (e.g., 'pns.fm10').
+            limit: Maximum results.
+
+        Returns:
+            List of node dicts ordered by node_path.
+        """
+        from ohm.queries import get_nodes_by_path_prefix as _get
+
+        return _get(self._conn, path_prefix, limit=limit)
+
     def propagate_observation(
         self,
         source_node_id: str,

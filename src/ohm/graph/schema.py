@@ -1456,8 +1456,9 @@ DDL_STATEMENTS: list[str] = [
         success_criteria TEXT,          -- Task node: how to judge whether the claim held (OHM-f5iq)
         outcome          VARCHAR,       -- Task node: TRUE/FALSE/AMBIGUOUS recorded on close (OHM-f5iq)
         outcome_notes    TEXT,          -- Task node: free-text justification for the outcome (OHM-f5iq)
-        gate_type        VARCHAR,       -- AND-gate governance: 'AND', 'OR', or NULL (OHM-as17)
-        gate_status      VARCHAR,       -- AND-gate status: 'intact', 'converted', 'compromised' (OHM-as17)
+        gate_type        VARCHAR,         -- AND-gate governance: 'AND', 'OR', or NULL (OHM-as17)
+        gate_status      VARCHAR,         -- AND-gate status: 'intact', 'converted', 'compromised' (OHM-as17)
+        node_path        VARCHAR,         -- UNS hierarchical address (e.g., 'pns.fm10.main_drive') (OHM-ivlt)
         deleted_at    TIMESTAMP          -- Soft delete: NULL = active, set = deleted
     );
     """,
@@ -1820,7 +1821,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.43.0"
+SCHEMA_VERSION = "0.44.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -2401,9 +2402,15 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             "UPDATE ohm_outcomes SET domain = '*' WHERE domain IS NULL",
         ],
     ),
+    (
+        "0.44.0",
+        "OHM-ivlt: add node_path column to ohm_nodes for UNS hierarchical addressing",
+        [
+            "ALTER TABLE ohm_nodes ADD COLUMN IF NOT EXISTS node_path VARCHAR",
+            "CREATE INDEX IF NOT EXISTS idx_nodes_path ON ohm_nodes(node_path)",
+        ],
+    ),
 ]
-
-# ── Indexes ─────────────────────────────────────────────────────────────────
 
 INDEX_DDL: list[str] = [
     # Edge traversal indexes
