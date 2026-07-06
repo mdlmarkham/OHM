@@ -808,6 +808,10 @@ def _build_router() -> _RouteRegistry:
         "/markov/expected_steps",
         "/templates",
         "/queries",
+        "/plans",
+        "/reports",
+        "/runs",
+        "/rul",
     ):
         r.add("GET", _p)
 
@@ -829,6 +833,9 @@ def _build_router() -> _RouteRegistry:
         "/compound_confidence/",
         "/observation/",
         "/synthesis/",
+        "/timeline/",
+        "/report/",
+        "/run/",
     ):
         r.add("GET", _p)
 
@@ -2543,6 +2550,10 @@ OhmHandler._GET_EXACT = {
     "/schema": "_get_schema",
     "/templates": "_get_templates",
     "/queries": "_get_queries",
+    "/plans": "_get_plans",
+    "/reports": "_get_reports",
+    "/runs": "_get_runs",
+    "/rul": "_get_rul",
     "/layers": "_get_layers",
     "/agents": "_get_agents",
     "/nodes": "_get_nodes",
@@ -2654,6 +2665,9 @@ OhmHandler._GET_PREFIXES = [
     ("/lineage/", "_get_lineage"),
     ("/contradiction/", "_get_contradiction_summary"),
     ("/task-context/", "_get_task_context"),
+    ("/timeline/", "_get_timeline_rollup"),
+    ("/report/", "_get_report"),
+    ("/run/", "_get_run"),
 ]
 
 # Exact GET routes that aren't in the prefix list

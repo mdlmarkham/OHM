@@ -379,6 +379,119 @@ class GraphHandlerMixin:
             },
         )
 
+    def _get_plans(self, path: str, qs: dict) -> None:
+        """GET /plans — list TOPO plans with optional filters."""
+        from ohm.queries import list_plans
+
+        node_id = qs.get("node_id", [None])[0]
+        plan_type = qs.get("plan_type", [None])[0]
+        status = qs.get("status", [None])[0]
+        horizon = qs.get("horizon", [None])[0]
+        result = list_plans(
+            self.current_store.read_conn,
+            node_id=node_id,
+            plan_type=plan_type,
+            status=status,
+            horizon=horizon,
+        )
+        self._json_response(200, {"ok": True, "data": result, "count": len(result)})
+
+    def _get_reports(self, path: str, qs: dict) -> None:
+        """GET /reports — list TOPO reports with optional filters."""
+        from ohm.queries import list_reports
+
+        report_type = qs.get("type", [None])[0]
+        node_id = qs.get("node_id", [None])[0]
+        plan_id = qs.get("plan_id", [None])[0]
+        status = qs.get("status", [None])[0]
+        result = list_reports(
+            self.current_store.read_conn,
+            report_type=report_type,
+            node_id=node_id,
+            plan_id=plan_id,
+            status=status,
+        )
+        self._json_response(200, {"ok": True, "data": result, "count": len(result)})
+
+    def _get_runs(self, path: str, qs: dict) -> None:
+        """GET /runs — list TOPO runs with optional filters."""
+        from ohm.queries import list_runs
+
+        report_id = qs.get("report_id", [None])[0]
+        node_id = qs.get("node_id", [None])[0]
+        run_type = qs.get("type", [None])[0]
+        status = qs.get("status", [None])[0]
+        result = list_runs(
+            self.current_store.read_conn,
+            report_id=report_id,
+            node_id=node_id,
+            run_type=run_type,
+            status=status,
+        )
+        self._json_response(200, {"ok": True, "data": result, "count": len(result)})
+
+    def _get_rul(self, path: str, qs: dict) -> None:
+        """GET /rul — list RUL assessments with optional filters."""
+        from ohm.queries import get_rul_assessments
+
+        equipment_node_id = qs.get("equipment_id", [None])[0]
+        risk_class = qs.get("risk_class", [None])[0]
+        site_id = qs.get("site_id", [None])[0]
+        limit = int(qs.get("limit", [100])[0])
+        result = get_rul_assessments(
+            self.current_store.read_conn,
+            equipment_node_id=equipment_node_id,
+            risk_class=risk_class,
+            site_id=site_id,
+            limit=limit,
+        )
+        self._json_response(200, {"ok": True, "data": result, "count": len(result)})
+
+    def _get_timeline_rollup(self, path: str, qs: dict) -> None:
+        """GET /timeline/<ancestor_id> — roll up events from CONTAINS subtree."""
+        from ohm.queries import timeline_rollup
+
+        ancestor_id = path[10:]
+        horizon = qs.get("horizon", [None])[0]
+        start_after = qs.get("start_after", [None])[0]
+        end_before = qs.get("end_before", [None])[0]
+        event_class = qs.get("event_class", [None])[0]
+        plan_id = qs.get("plan_id", [None])[0]
+        include_plans = qs.get("include_plans", ["true"])[0].lower() != "false"
+        result = timeline_rollup(
+            self.current_store.read_conn,
+            ancestor_id,
+            horizon=horizon,
+            start_after=start_after,
+            end_before=end_before,
+            event_class=event_class,
+            plan_id=plan_id,
+            include_plans=include_plans,
+        )
+        self._json_response(200, {"ok": True, "data": result})
+
+    def _get_report(self, path: str, qs: dict) -> None:
+        """GET /report/<id> — fetch a single TOPO report."""
+        from ohm.queries import get_report
+
+        report_id = path[8:]
+        result = get_report(self.current_store.read_conn, report_id)
+        if result is None:
+            self._json_response(404, {"ok": False, "error": "Report not found"})
+        else:
+            self._json_response(200, {"ok": True, "data": result})
+
+    def _get_run(self, path: str, qs: dict) -> None:
+        """GET /run/<id> — fetch a single TOPO run."""
+        from ohm.queries import get_run
+
+        run_id = path[5:]
+        result = get_run(self.current_store.read_conn, run_id)
+        if result is None:
+            self._json_response(404, {"ok": False, "error": "Run not found"})
+        else:
+            self._json_response(200, {"ok": True, "data": result})
+
     def _get_node(self, path: str, qs: dict) -> None:
         """GET /node/<id> — fetch a node with effective_layer and constraint_status."""
         node_id = path[6:]
