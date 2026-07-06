@@ -5582,6 +5582,53 @@ class Graph:
             **kwargs,
         )
 
+    def timeline_rollup(
+        self,
+        ancestor_node_id: str,
+        *,
+        horizon: str | None = None,
+        start_after: str | None = None,
+        end_before: str | None = None,
+        event_class: str | None = None,
+        plan_id: str | None = None,
+        include_plans: bool = True,
+        max_depth: int = 10,
+    ) -> dict[str, Any]:
+        """Roll up TOPO temporal events from a subtree rooted at an ancestor.
+
+        Traverses L1 CONTAINS edges downward from *ancestor_node_id* to collect
+        all descendant nodes, then returns the matching topo_events (and, by
+        default, the plans that own them) filtered by horizon, date range,
+        event class, or plan.
+
+        Args:
+            ancestor_node_id: Root of the L1 CONTAINS subtree to roll up.
+            horizon: Optional horizon filter (HISTORICAL/CURRENT/PLANNED/FORECAST).
+            start_after: Optional ISO timestamp; only events starting at or after.
+            end_before: Optional ISO timestamp; only events ending at or before.
+            event_class: Optional event class filter (e.g. 'shutdown', 'outage').
+            plan_id: Optional plan filter; restricts events to one plan.
+            include_plans: If True (default), include matching topo_plans rows.
+            max_depth: Maximum L1 traversal depth (default 10).
+
+        Returns:
+            Dict with ``ancestor``, ``events`` (list ordered by start_ts), and
+            (when include_plans) ``plans`` (list of matching plan dicts).
+        """
+        from ohm.queries import timeline_rollup as _timeline_rollup
+
+        return _timeline_rollup(
+            self._conn,
+            ancestor_node_id,
+            horizon=horizon,
+            start_after=start_after,
+            end_before=end_before,
+            event_class=event_class,
+            plan_id=plan_id,
+            include_plans=include_plans,
+            max_depth=max_depth,
+        )
+
     def propagate_observation(
         self,
         source_node_id: str,

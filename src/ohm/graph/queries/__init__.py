@@ -14025,3 +14025,111 @@ def get_event_links(
         params.append(edge_type)
     query += " ORDER BY created_at ASC"
     return _rows_to_dicts(conn.execute(query, params))
+
+
+def timeline_rollup(
+    conn: DuckDBPyConnection,
+    ancestor_node_id: str,
+    *,
+    horizon: str | None = None,
+    start_after: str | None = None,
+    end_before: str | None = None,
+    event_class: str | None = None,
+    plan_id: str | None = None,
+    include_plans: bool = True,
+    max_depth: int = 10,
+) -> dict[str, Any]:
+    """Roll up TOPO temporal events from a subtree rooted at *ancestor_node_id*.
+
+    Traverses L1 ``CONTAINS`` edges downward from the ancestor to collect all
+    descendant node ids, then joins those nodes against ``topo_events`` with
+    optional horizon / date-range / event-class / plan filters.  When
+    *include_plans* is true, the matching plans are returned alongside the
+    events so callers can render a complete timeline (plan headers + child
+    events).
+
+    Args:
+        conn: Active DuckDB connection.
+        ancestor_node_id: Root of the L1 CONTAINS subtree to roll up.
+        horizon: Optional horizon filter (HISTORICAL/CURRENT/PLANNED/FORECAST).
+        start_after: Optional ISO timestamp; only events with start_ts >= this.
+        end_before: Optional ISO timestamp; only events with end_ts <= this.
+        event_class: Optional event_class filter (e.g. 'shutdown', 'outage').
+        plan_id: Optional plan_id filter; restricts events to one plan.
+        include_plans: If True (default), include matching topo_plans rows.
+        max_depth: Maximum L1 traversal depth (default 10).
+
+    Returns:
+        Dict with ``ancestor``, ``events`` (list ordered by start_ts), and
+        (when include_plans) ``plans`` (list of matching plan dicts).
+    """
+    from ohm.validation import validate_identifier, validate_depth
+
+    ancestor_node_id = validate_identifier(ancestor_node_id, name="ancestor_node_id")
+    max_depth = validate_depth(max_depth)
+
+    descendant_params: list[Any] = [ancestor_node_id, max_depth]
+    descendant_query = f"""
+        WITH RECURSIVE descendants AS (
+            SELECT ? AS node, 0 AS hop
+            UNION
+            SELECT DISTINCT e.to_node, d.hop + 1
+            FROM descendants d
+            JOIN ohm_edges e ON e.from_node = d.node
+            WHERE d.hop < ?
+              AND e.edge_type = 'CONTAINS'
+              AND e.layer = 'L1'
+              AND e.deleted_at IS NULL
+        )
+        SELECT node FROM descendants
+    """
+    descendant_rows = _rows_to_dicts(conn.execute(descendant_query, descendant_params))
+    descendant_ids = [r["node"] for r in descendant_rows]
+
+    if not descendant_ids:
+        return {"ancestor": ancestor_node_id, "events": [], "plans": []}
+
+    event_query = (
+        "SELECT e.*, n.label AS node_label "
+        "FROM topo_events e "
+        "LEFT JOIN ohm_nodes n ON n.id = e.node_id "
+        "WHERE e.node_id IN ("
+        + ",".join(["?"] * len(descendant_ids))
+        + ")"
+    )
+    event_params: list[Any] = list(descendant_ids)
+    if horizon is not None:
+        event_query += " AND e.horizon = ?"
+        event_params.append(horizon)
+    if event_class is not None:
+        event_query += " AND e.event_class = ?"
+        event_params.append(event_class)
+    if plan_id is not None:
+        event_query += " AND e.plan_id = ?"
+        event_params.append(plan_id)
+    if start_after is not None:
+        event_query += " AND e.start_ts >= ?"
+        event_params.append(start_after)
+    if end_before is not None:
+        event_query += " AND e.end_ts <= ?"
+        event_params.append(end_before)
+    event_query += " ORDER BY e.start_ts ASC"
+    events = _rows_to_dicts(conn.execute(event_query, event_params))
+
+    result: dict[str, Any] = {"ancestor": ancestor_node_id, "events": events}
+
+    if include_plans:
+        plan_ids = {e["plan_id"] for e in events if e.get("plan_id")}
+        if plan_id is not None:
+            plan_ids = {plan_id}
+        plans: list[dict[str, Any]] = []
+        if plan_ids:
+            plan_query = (
+                "SELECT * FROM topo_plans WHERE id IN ("
+                + ",".join(["?"] * len(plan_ids))
+                + ") ORDER BY start_ts NULLS LAST, created_at DESC"
+            )
+            plans = _rows_to_dicts(conn.execute(plan_query, list(plan_ids)))
+        result["plans"] = plans
+
+    return result
