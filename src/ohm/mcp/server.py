@@ -31,7 +31,7 @@ from mcp.types import (
 # Config — delegate to ohm.mcp.config (OHM-yzyk.1.2)
 # ---------------------------------------------------------------------------
 
-from ohm.mcp.config import config as _config, load_config_file as _load_config_file, is_tool_allowed as _is_tool_allowed, make_headers, WRITE_TOOLS as _WRITE_TOOLS
+from ohm.mcp.config import config as _config, load_config_file as _load_config_file, is_tool_allowed as _is_tool_allowed, make_headers, validate_domain_config as _validate_domain_config, WRITE_TOOLS as _WRITE_TOOLS
 
 # Backward-compat properties
 OHM_URL = _config["ohm_url"]
@@ -490,8 +490,30 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
 # ---------------------------------------------------------------------------
 
 
+async def _check_domain_config() -> None:
+    """Validate the configured domain_config against ohmd /schema (OHM-yzyk.1.3)."""
+    expected = _config.get("domain_config")
+    if not expected:
+        return
+    try:
+        schema = await _ohm_get("/schema")
+    except Exception as exc:
+        import logging
+        logging.warning("Could not fetch /schema for domain validation: %s", exc)
+        return
+    if not _validate_domain_config(expected, schema):
+        import sys
+        actual = schema.get("schema", "<unknown>")
+        print(
+            f"Domain config mismatch: sidecar expects '{expected}' but daemon reports '{actual}'",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
 async def main():
     """Run the OHM MCP server via stdio transport."""
+    await _check_domain_config()
     async with stdio_server() as (read_stream, write_stream):
         await mcp.run(read_stream, write_stream, mcp.create_initialization_options())
 

@@ -245,3 +245,50 @@ class TestDomainConfigValidation:
 
     def test_empty_expected_returns_true(self):
         assert validate_domain_config("", {"schema": "anything"}) is True
+
+
+# OHM-yzyk.1.3 — validate_domain_config wired into server startup
+
+@pytest.mark.anyio
+async def test_check_domain_config_mismatch_exits(tmp_path):
+    """If configured domain_config does not match daemon /schema, startup exits."""
+    import sys
+    from ohm.mcp.config import config as mcp_config
+    from ohm.mcp.server import _check_domain_config
+
+    # Simulate loaded config expecting devsecops.json but daemon reports topo
+    mcp_config["domain_config"] = "devsecops.json"
+
+    async def fake_ohm_get(path: str, params=None):
+        assert path == "/schema"
+        return {"schema": "topo"}
+
+    from ohm.mcp import server as server_mod
+    original_get = server_mod._ohm_get
+    server_mod._ohm_get = fake_ohm_get
+    try:
+        with pytest.raises(SystemExit) as exc_info:
+            await _check_domain_config()
+        assert exc_info.value.code == 1
+    finally:
+        server_mod._ohm_get = original_get
+
+
+@pytest.mark.anyio
+async def test_check_domain_config_match_passes(tmp_path):
+    """If configured domain_config matches daemon /schema, startup continues."""
+    from ohm.mcp.config import config as mcp_config
+    from ohm.mcp.server import _check_domain_config
+
+    mcp_config["domain_config"] = "devsecops.json"
+
+    async def fake_ohm_get(path: str, params=None):
+        return {"schema": "devsecops"}
+
+    from ohm.mcp import server as server_mod
+    original_get = server_mod._ohm_get
+    server_mod._ohm_get = fake_ohm_get
+    try:
+        await _check_domain_config()  # should not raise
+    finally:
+        server_mod._ohm_get = original_get
