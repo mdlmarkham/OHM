@@ -2,39 +2,32 @@
 
 This directory contains project-specific sub-agents for the OHM codebase. They are
 defined as markdown files (per [opencode agents docs](https://opencode.ai/docs/agents/))
-and routed onto **Synthetic** models so the OpenCode-Go budget is reserved for the
+and routed onto **Ollama Cloud** models so the OpenCode-Go budget is reserved for the
 primary agent.
 
 ## Provider strategy
 
 | Provider | Used by | Why |
 |---|---|---|
-| **Synthetic** (`synthetic/hf:*`) | All sub-agents | Quota-based, not per-token. Dispatching sub-agents is effectively free here, so the primary can delegate generously without burning the Go window. |
+| **Ollama Cloud** (`ollama-cloud/*:cloud`) | All sub-agents | Hosted inference, no local GPU required. Pro plan gives 3 concurrent cloud models with 50× more usage than Free. Sub-agent dispatch is cheap, so the primary can delegate generously without burning the Go window. |
 | **OpenCode Go** (`opencode-go/*`) | Primary agent only | Subscription with `$12/5hr`, `$30/week`, `$60/month` caps. Kept exclusively for the primary so session longevity is maximized. |
 
 ## Model routing
 
-All sub-agents run on Synthetic. Models are matched to each agent's task and spread
-across six distinct endpoints to avoid any single model's rate limits.
+All sub-agents run on Ollama Cloud. Models are matched to each agent's task.
 
 | Agent | Mode | Model | Purpose |
 |---|---|---|---|
-| `explore` (built-in override) | subagent | `synthetic/hf:Qwen/Qwen3.6-27B` | Fast read-only codebase search. Coder model = quick pattern/keyword hits. |
-| `general` (built-in override) | subagent | `synthetic/hf:zai-org/GLM-5.2` | General multi-step research/execution. Capable model for code-capable background work. |
-| `ohm-researcher` | subagent | `synthetic/hf:zai-org/GLM-5.2` | Deep codebase research and design exploration. Read-only; high-quality reasoning. |
-| `ohm-adr-writer` | subagent | `synthetic/hf:zai-org/GLM-4.7-Flash` | Writes ADR documents at `docs/adr/`. Quality prose. |
-| `ohm-test-writer` | subagent | `synthetic/hf:deepseek-ai/DeepSeek-V3.2` | Writes pytest test suites. Bulk, pattern-following code generation. |
-| `ohm-plumber` | subagent | `synthetic/hf:MiniMaxAI/MiniMax-M3` | Wires features through queries → store → SDK → handler. Deep-context plumbing. |
-| `ohm-schemer` | subagent | `synthetic/hf:moonshotai/Kimi-K2.6` | Schema migrations, validators, `VALID_*` frozensets. Code-focused. |
+| `ohm-researcher` | subagent | `ollama-cloud/glm-5.2:cloud` | Deep codebase research and design exploration. Read-only; high-quality reasoning with 1M context. |
+| `ohm-adr-writer` | subagent | `ollama-cloud/glm-4.7:cloud` | Writes ADR documents at `docs/adr/`. Quality prose, strong on tool-use. |
+| `ohm-test-writer` | subagent | `ollama-cloud/minimax-m3:cloud` | Writes pytest test suites. Bulk, pattern-following code generation with 1M context. |
+| `ohm-plumber` | subagent | `ollama-cloud/minimax-m3:cloud` | Wires features through queries → store → SDK → handler. Deep-context plumbing with multimodal. |
+| `ohm-schemer` | subagent | `ollama-cloud/kimi-k2.7-code:cloud` | Schema migrations, validators, `VALID_*` frozensets. Code-focused, ~30% fewer thinking tokens than K2.6. |
 
-> **Routing audit (OHM-7jj2 followup):** Models are pinned to the Synthetic
-> provider. `ohm-researcher`, `ohm-adr-writer`, `ohm-plumber`, `explore`, and
-> `general` were repointed from stale model IDs (`GLM-5.1`, `Qwen2.5-Coder-32B`,
-> `Qwen3-Coder-480B`) that no longer exist on Synthetic to confirmed-available
-> models. `ohm-test-writer` (`DeepSeek-V3.2`) and `ohm-schemer` (`Kimi-K2.6`)
-> are unverified — dispatch once and confirm, or repoint to a confirmed model
-> (`GLM-5.2`, `GLM-4.7-Flash`, `MiniMax-M3`, `Qwen3.6-27B`, `Kimi-K2.7-Code`).
-> **Restart opencode after editing routing** — config loads once at startup.
+> **Note:** `explore` and `general` built-in sub-agents inherit the primary agent's
+> model (OpenCode Go) by default, unless explicitly overridden in
+> `.opencode/opencode.json` under `agent.<name>.model`. No override is currently set
+> for them in this project.
 
 ## Built-in agents NOT overridden
 
@@ -55,7 +48,21 @@ Users can also invoke any subagent directly via `@ohm-researcher`, `@ohm-plumber
 Go usage can be tracked at <https://opencode.ai/auth>. Because **only the primary**
 draws from Go, the `$12/5hr` window depletes at the primary's rate alone — sub-agent
 dispatch adds no Go cost. If a long session still exhausts the Go window, the primary
-is the only thing to throttle; sub-agents keep running on Synthetic.
+is the only thing to throttle; sub-agents keep running on Ollama Cloud.
+
+Ollama Cloud usage is metered by GPU time, not tokens. Each cloud model has a usage
+level (1-4) shown on its library page. Pro plan gives 50× more cloud usage than Free;
+Max plan adds another 5×. Check the [Ollama Cloud pricing page](https://ollama.com/pricing)
+for the per-model usage levels and concurrency limits.
+
+## Setup
+
+Before using Ollama Cloud in OpenCode:
+
+1. Sign in at <https://ollama.com/> and create an API key under **Settings** > **Keys**.
+2. Run `/connect` in opencode TUI, search for **Ollama Cloud**, paste the API key.
+3. The first time you select a cloud model, opencode may need to pull the model
+   metadata locally — this is automatic on first use.
 
 ## Sub-agent output contract
 

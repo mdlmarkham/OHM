@@ -1,7 +1,7 @@
 ---
 description: Writes ADR documents for OHM at docs/adr/NNNN-*.md. Use when a design decision needs to be captured. Reads existing ADRs for style, follows the OHM ADR template (Context, Decision, Consequences, Alternatives). Updates docs/adr/README.md index.
 mode: subagent
-model: synthetic/hf:zai-org/GLM-4.7-Flash
+model: ollama-cloud/glm-4.7:cloud
 temperature: 0.2
 permission:
   edit: allow
