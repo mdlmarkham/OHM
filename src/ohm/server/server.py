@@ -764,7 +764,7 @@ def _build_router() -> _RouteRegistry:
     r = _RouteRegistry()
 
     # Infrastructure — no auth, always open
-    for _p in ("/", "/openapi.json", "/health", "/ready", "/metrics"):
+    for _p in ("/", "/openapi.json", "/health", "/ready", "/metrics", "/instance"):
         r.add("GET", _p)
     r.add("GET", "/events")
     r.add("GET", "/events/")
@@ -2542,6 +2542,7 @@ OhmHandler._GET_EXACT = {
     "": "_get_infra_root",
     "/openapi.json": "_get_infra_openapi",
     "/health": "_get_infra_health",
+    "/instance": "_get_instance",
     "/ready": "_get_infra_ready",
     "/metrics": "_get_infra_metrics",
     "/perf": "_get_perf",

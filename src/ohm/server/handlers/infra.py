@@ -1,6 +1,9 @@
 """Infrastructure handler mixin — root, health, readiness, metrics, and OpenAPI endpoints."""
 
+from __future__ import annotations
+
 import time
+from typing import Any
 
 
 class InfraHandlerMixin:
@@ -31,6 +34,7 @@ class InfraHandlerMixin:
                 "endpoints": {
                     "/": {"method": "GET", "description": "This discovery index (no auth required)"},
                     "/health": {"method": "GET", "description": "Health check (no auth required)"},
+                    "/instance": {"method": "GET", "description": "Instance metadata for discovery (OHM-yzyk.5)"},
                     "/ready": {"method": "GET", "description": "Readiness check (no auth required)"},
                     "/metrics": {"method": "GET", "description": "Prometheus-style metrics"},
                     "/stats": {"method": "GET", "description": "Graph statistics (nodes, edges, layers)"},
@@ -203,6 +207,86 @@ class InfraHandlerMixin:
             pass
         self._json_response(200, payload)
 
+    def _get_instance(self, path: str, qs: dict) -> None:
+        """GET /instance — instance metadata for discovery and monitoring (OHM-yzyk.5).
+
+        Returns structured metadata about this ohmd instance: identity,
+        version, multi-tenancy config, domain configs, listen URL, DuckLake
+        sync status, and runtime info. No auth required so discovery tools
+        can probe without credentials.
+        """
+        from ohm.server.server import _START_TIME
+        from ohm import __version__ as ohm_version
+        import socket
+
+        uptime = round(time.time() - _START_TIME, 1)
+        config = getattr(self, "config", {}) or {}
+        multi_tenant = getattr(self, "multi_tenant", False)
+
+        # Gather tenant info if multi-tenant
+        tenants: list[str] = []
+        domain_configs: dict[str, str] = {}
+        if multi_tenant:
+            try:
+                tenant_rows = self.current_store.execute(
+                    "SELECT customer_id, domain_config FROM ohm_tenants WHERE deleted_at IS NULL"
+                )
+                for row in tenant_rows:
+                    tenants.append(row.get("customer_id", row.get("id", "")))
+                    domain_configs[row.get("customer_id", row.get("id", ""))] = row.get("domain_config", "")
+            except Exception:
+                pass
+
+        # DuckLake sync status
+        ducklake_info: dict[str, Any] = {"enabled": False}
+        try:
+            dl_enabled = config.get("ducklake", {}).get("enabled", False)
+            if dl_enabled:
+                ducklake_info = {
+                    "enabled": True,
+                    "sync_url": config.get("ducklake", {}).get("url"),
+                    "last_sync_at": None,
+                    "lag_seconds": None,
+                }
+                # Try to get last sync time from agent_state or a sync table
+                try:
+                    sync_row = self.current_store.execute_one(
+                        "SELECT last_sync_at FROM ohm_sync_state WHERE id = 'ducklake' LIMIT 1"
+                    )
+                    if sync_row and sync_row.get("last_sync_at"):
+                        ducklake_info["last_sync_at"] = str(sync_row["last_sync_at"])
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Agent count (distinct created_by in recent edges)
+        agent_count = 0
+        try:
+            row = self.current_store.execute_one(
+                "SELECT COUNT(DISTINCT created_by) AS cnt FROM ohm_edges WHERE created_at > now() - INTERVAL '24 hours' AND deleted_at IS NULL"
+            )
+            agent_count = row.get("cnt", 0) if row else 0
+        except Exception:
+            pass
+
+        instance_id = config.get("instance_id", f"ohmd-{socket.gethostname()}")
+        listen_url = f"http://{config.get('host', '127.0.0.1')}:{config.get('port', 8710)}"
+
+        self._json_response(200, {
+            "instance_id": instance_id,
+            "version": ohm_version,
+            "purpose": config.get("purpose", ""),
+            "multi_tenant": multi_tenant,
+            "tenants": tenants,
+            "domain_configs": domain_configs,
+            "listen_url": listen_url,
+            "ducklake": ducklake_info,
+            "started_at": None,
+            "uptime_seconds": uptime,
+            "agent_count": agent_count,
+        })
+
     def _get_infra_ready(self, path: str, qs: dict) -> None:
         """GET /ready — readiness check (no auth)."""
         try:
@@ -264,6 +348,37 @@ class InfraHandlerMixin:
                 f"ohm_request_duration_ms_count {n}",
                 "",
             ]
+            # OHM-yzyk.5: graph and instance metrics
+            try:
+                stats = self.current_store.execute_one("SELECT COUNT(*) AS cnt FROM ohm_nodes WHERE deleted_at IS NULL")
+                node_count = stats.get("cnt", 0) if stats else 0
+                lines += [
+                    "# HELP ohm_nodes_total Total active nodes in the graph",
+                    "# TYPE ohm_nodes_total gauge",
+                    f"ohm_nodes_total {node_count}",
+                ]
+                stats = self.current_store.execute_one("SELECT COUNT(*) AS cnt FROM ohm_edges WHERE deleted_at IS NULL")
+                edge_count = stats.get("cnt", 0) if stats else 0
+                lines += [
+                    "# HELP ohm_edges_total Total active edges in the graph",
+                    "# TYPE ohm_edges_total gauge",
+                    f"ohm_edges_total {edge_count}",
+                ]
+                stats = self.current_store.execute_one("SELECT COUNT(*) AS cnt FROM ohm_observations WHERE deleted_at IS NULL")
+                obs_count = stats.get("cnt", 0) if stats else 0
+                lines += [
+                    "# HELP ohm_observations_total Total active observations",
+                    "# TYPE ohm_observations_total gauge",
+                    f"ohm_observations_total {obs_count}",
+                ]
+                lines += [
+                    "# HELP ohm_instance_uptime_seconds Seconds since daemon started",
+                    "# TYPE ohm_instance_uptime_seconds gauge",
+                    f"ohm_instance_uptime_seconds {uptime}",
+                    "",
+                ]
+            except Exception:
+                pass
             body_bytes = "\n".join(lines).encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
