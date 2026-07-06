@@ -1,4 +1,4 @@
-"""Tests for OHM-dm2b: TOPO temporal event domain tables (topo_plans, topo_events, topo_event_links)."""
+"""Tests for OHM-dm2b / OHM-dh9l.1: TOPO temporal event domain tables (topo_plans, topo_events, topo_event_links)."""
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ class TestTopoPlansTable:
         by_name = {dt.name: dt for dt in TOPO_SCHEMA.domain_tables}
         dt = by_name["topo_plans"]
         cols = {c[0] for c in dt.columns}
-        assert {"id", "node_id", "plan_type", "horizon_start", "horizon_end", "status"} <= cols
+        assert {"id", "node_id", "plan_type", "start_ts", "end_ts", "status", "label", "horizon"} <= cols
 
     def test_primary_key(self):
         by_name = {dt.name: dt for dt in TOPO_SCHEMA.domain_tables}
@@ -55,11 +55,11 @@ class TestTopoPlansTable:
     def test_indexes(self):
         by_name = {dt.name: dt for dt in TOPO_SCHEMA.domain_tables}
         idx_names = {i[0] for i in by_name["topo_plans"].indexes}
-        assert {"idx_topo_plans_node", "idx_topo_plans_type", "idx_topo_plans_horizon", "idx_topo_plans_status"} <= idx_names
+        assert {"idx_topo_plans_node", "idx_topo_plans_type", "idx_topo_plans_window", "idx_topo_plans_status", "idx_topo_plans_horizon"} <= idx_names
 
     def test_ordering(self):
         by_name = {dt.name: dt for dt in TOPO_SCHEMA.domain_tables}
-        assert by_name["topo_plans"].ordering == 150
+        assert by_name["topo_plans"].ordering == 200
 
 
 class TestTopoEventsTable:
@@ -67,7 +67,7 @@ class TestTopoEventsTable:
         by_name = {dt.name: dt for dt in TOPO_SCHEMA.domain_tables}
         dt = by_name["topo_events"]
         cols = {c[0] for c in dt.columns}
-        assert {"id", "plan_id", "node_id", "event_type", "start_time", "end_time", "severity"} <= cols
+        assert {"id", "plan_id", "node_id", "event_class", "start_ts", "end_ts", "operating_state", "node_path", "horizon"} <= cols
 
     def test_primary_key(self):
         by_name = {dt.name: dt for dt in TOPO_SCHEMA.domain_tables}
@@ -76,11 +76,11 @@ class TestTopoEventsTable:
     def test_indexes(self):
         by_name = {dt.name: dt for dt in TOPO_SCHEMA.domain_tables}
         idx_names = {i[0] for i in by_name["topo_events"].indexes}
-        assert {"idx_topo_events_plan", "idx_topo_events_node", "idx_topo_events_type", "idx_topo_events_time"} <= idx_names
+        assert {"idx_topo_events_plan", "idx_topo_events_node", "idx_topo_events_path_class", "idx_topo_events_path_window", "idx_topo_events_horizon", "idx_topo_events_state"} <= idx_names
 
     def test_ordering(self):
         by_name = {dt.name: dt for dt in TOPO_SCHEMA.domain_tables}
-        assert by_name["topo_events"].ordering == 160
+        assert by_name["topo_events"].ordering == 210
 
 
 class TestTopoEventLinksTable:
@@ -88,7 +88,7 @@ class TestTopoEventLinksTable:
         by_name = {dt.name: dt for dt in TOPO_SCHEMA.domain_tables}
         dt = by_name["topo_event_links"]
         cols = {c[0] for c in dt.columns}
-        assert {"id", "from_event_id", "to_event_id", "link_type"} <= cols
+        assert {"id", "from_event_id", "to_event_id", "edge_type", "layer", "confidence", "revision"} <= cols
 
     def test_primary_key(self):
         by_name = {dt.name: dt for dt in TOPO_SCHEMA.domain_tables}
@@ -97,11 +97,11 @@ class TestTopoEventLinksTable:
     def test_indexes(self):
         by_name = {dt.name: dt for dt in TOPO_SCHEMA.domain_tables}
         idx_names = {i[0] for i in by_name["topo_event_links"].indexes}
-        assert {"idx_topo_elinks_from", "idx_topo_elinks_to", "idx_topo_elinks_type"} <= idx_names
+        assert {"idx_topo_elinks_from", "idx_topo_elinks_to", "idx_topo_elinks_from_type", "idx_topo_elinks_to_type"} <= idx_names
 
     def test_ordering(self):
         by_name = {dt.name: dt for dt in TOPO_SCHEMA.domain_tables}
-        assert by_name["topo_event_links"].ordering == 170
+        assert by_name["topo_event_links"].ordering == 220
 
 
 class TestOrdering:
@@ -130,21 +130,21 @@ class TestInitializeSchema:
         initialize_schema(conn, TOPO_SCHEMA)
         cols = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='topo_plans' ORDER BY ordinal_position").fetchall()
         col_names = {r[0] for r in cols}
-        assert {"id", "node_id", "plan_type", "horizon_start", "horizon_end"} <= col_names
+        assert {"id", "node_id", "plan_type", "start_ts", "end_ts", "label", "horizon"} <= col_names
 
     def test_events_columns_in_db(self):
         conn = duckdb.connect(":memory:")
         initialize_schema(conn, TOPO_SCHEMA)
         cols = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='topo_events' ORDER BY ordinal_position").fetchall()
         col_names = {r[0] for r in cols}
-        assert {"id", "plan_id", "event_type", "start_time", "end_time"} <= col_names
+        assert {"id", "plan_id", "node_id", "event_class", "start_ts", "end_ts", "operating_state", "node_path", "horizon"} <= col_names
 
     def test_event_links_columns_in_db(self):
         conn = duckdb.connect(":memory:")
         initialize_schema(conn, TOPO_SCHEMA)
         cols = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='topo_event_links' ORDER BY ordinal_position").fetchall()
         col_names = {r[0] for r in cols}
-        assert {"id", "from_event_id", "to_event_id", "link_type"} <= col_names
+        assert {"id", "from_event_id", "to_event_id", "edge_type", "layer", "confidence", "revision"} <= col_names
 
     def test_indexes_created(self):
         conn = duckdb.connect(":memory:")
@@ -178,20 +178,20 @@ class TestCRUDOperations:
         initialize_schema(conn, TOPO_SCHEMA)
 
         # Create a plan: 4-day maintenance window
-        conn.execute("INSERT INTO topo_plans (id, node_id, plan_type, horizon_start, horizon_end, status, created_by) VALUES ('plan_001', 'compressor_A', 'maintenance_window', '2026-07-01 00:00:00', '2026-07-05 00:00:00', 'active', 'topo_agent')")
+        conn.execute("INSERT INTO topo_plans (id, node_id, plan_type, start_ts, end_ts, status, created_by) VALUES ('plan_001', 'compressor_A', 'maintenance_window', '2026-07-01 00:00:00', '2026-07-05 00:00:00', 'active', 'topo_agent')")
 
         # Create events within the plan
         conn.execute(
-            "INSERT INTO topo_events (id, plan_id, node_id, event_type, start_time, end_time, severity, description, created_by) "
+            "INSERT INTO topo_events (id, plan_id, node_id, event_class, start_ts, end_ts, operating_state, description, created_by) "
             "VALUES ('evt_shutdown', 'plan_001', 'compressor_A', 'shutdown', '2026-07-01 08:00:00', '2026-07-01 12:00:00', 'medium', 'Planned shutdown', 'topo_agent')"
         )
         conn.execute(
-            "INSERT INTO topo_events (id, plan_id, node_id, event_type, start_time, end_time, severity, description, created_by) "
+            "INSERT INTO topo_events (id, plan_id, node_id, event_class, start_ts, end_ts, operating_state, description, created_by) "
             "VALUES ('evt_restart', 'plan_001', 'compressor_A', 'restart', '2026-07-04 14:00:00', '2026-07-04 18:00:00', 'low', 'Restart after maintenance', 'topo_agent')"
         )
 
         # Link events: shutdown caused_by → restart follows
-        conn.execute("INSERT INTO topo_event_links (id, from_event_id, to_event_id, link_type, created_by) VALUES ('link_001', 'evt_shutdown', 'evt_restart', 'followed_by', 'topo_agent')")
+        conn.execute("INSERT INTO topo_event_links (id, from_event_id, to_event_id, edge_type, created_by) VALUES ('link_001', 'evt_shutdown', 'evt_restart', 'followed_by', 'topo_agent')")
 
         # Verify
         plans = conn.execute("SELECT id, plan_type, status FROM topo_plans").fetchall()
@@ -199,12 +199,12 @@ class TestCRUDOperations:
         assert plans[0][1] == "maintenance_window"
         assert plans[0][2] == "active"
 
-        events = conn.execute("SELECT id, event_type FROM topo_events WHERE plan_id = 'plan_001' ORDER BY start_time").fetchall()
+        events = conn.execute("SELECT id, event_class FROM topo_events WHERE plan_id = 'plan_001' ORDER BY start_ts").fetchall()
         assert len(events) == 2
         assert events[0][0] == "evt_shutdown"
         assert events[1][0] == "evt_restart"
 
-        links = conn.execute("SELECT from_event_id, to_event_id, link_type FROM topo_event_links").fetchall()
+        links = conn.execute("SELECT from_event_id, to_event_id, edge_type FROM topo_event_links").fetchall()
         assert len(links) == 1
         assert links[0] == ("evt_shutdown", "evt_restart", "followed_by")
 
@@ -212,10 +212,10 @@ class TestCRUDOperations:
         conn = duckdb.connect(":memory:")
         initialize_schema(conn, TOPO_SCHEMA)
 
-        conn.execute("INSERT INTO topo_plans (id, node_id, plan_type, horizon_start, horizon_end, status, created_by) VALUES ('plan_002', 'site_A', 'annual_outage', '2026-12-01 00:00:00', '2026-12-14 00:00:00', 'planned', 'topo_agent')")
+        conn.execute("INSERT INTO topo_plans (id, node_id, plan_type, start_ts, end_ts, status, created_by) VALUES ('plan_002', 'site_A', 'annual_outage', '2026-12-01 00:00:00', '2026-12-14 00:00:00', 'planned', 'topo_agent')")
 
         conn.execute(
-            "INSERT INTO topo_events (id, plan_id, node_id, event_type, start_time, end_time, severity, description, created_by) "
+            "INSERT INTO topo_events (id, plan_id, node_id, event_class, start_ts, end_ts, operating_state, description, created_by) "
             "VALUES ('evt_outage', 'plan_002', 'site_A', 'outage', '2026-12-02 00:00:00', '2026-12-10 00:00:00', 'high', 'Annual plant outage', 'topo_agent')"
         )
 

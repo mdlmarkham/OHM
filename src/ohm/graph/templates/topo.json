@@ -324,14 +324,16 @@
     },
     {
       "name": "topo_plans",
-      "ordering": 150,
-      "description": "TOPO maintenance plans: time-bounded groupings of events.",
+      "ordering": 200,
+      "description": "TOPO maintenance plans: time-bounded groupings of events (e.g., 4-day maintenance window, annual outage).",
       "columns": [
         ["id", "VARCHAR"],
         ["node_id", "VARCHAR"],
         ["plan_type", "VARCHAR"],
-        ["horizon_start", "TIMESTAMP"],
-        ["horizon_end", "TIMESTAMP"],
+        ["label", "VARCHAR"],
+        ["start_ts", "TIMESTAMP"],
+        ["end_ts", "TIMESTAMP"],
+        ["horizon", "VARCHAR"],
         ["status", "VARCHAR DEFAULT 'active'"],
         ["created_by", "VARCHAR NOT NULL"],
         ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
@@ -342,23 +344,35 @@
       "indexes": [
         ["idx_topo_plans_node", ["node_id"]],
         ["idx_topo_plans_type", ["plan_type"]],
-        ["idx_topo_plans_horizon", ["horizon_start", "horizon_end"]],
-        ["idx_topo_plans_status", ["status"]]
+        ["idx_topo_plans_window", ["start_ts", "end_ts"]],
+        ["idx_topo_plans_status", ["status"]],
+        ["idx_topo_plans_horizon", ["horizon"]]
       ]
     },
     {
       "name": "topo_events",
-      "ordering": 160,
-      "description": "TOPO temporal events: discrete occurrences within a plan.",
+      "ordering": 210,
+      "description": "TOPO temporal events: discrete occurrences within a plan (e.g., shutdown, restart, inspection, outage).",
       "columns": [
         ["id", "VARCHAR"],
         ["plan_id", "VARCHAR"],
         ["node_id", "VARCHAR"],
-        ["event_type", "VARCHAR"],
-        ["start_time", "TIMESTAMP"],
-        ["end_time", "TIMESTAMP"],
-        ["severity", "VARCHAR"],
+        ["node_path", "VARCHAR"],
+        ["event_class", "VARCHAR"],
+        ["title", "VARCHAR"],
+        ["start_ts", "TIMESTAMP"],
+        ["end_ts", "TIMESTAMP"],
+        ["horizon", "VARCHAR"],
+        ["operating_state", "VARCHAR"],
         ["description", "TEXT"],
+        ["source_refs", "JSON"],
+        ["l3_context", "JSON"],
+        ["flow_impact", "JSON"],
+        ["forecast_basis", "JSON"],
+        ["decision_metadata", "JSON"],
+        ["confidence", "DOUBLE"],
+        ["authority", "VARCHAR"],
+        ["revision", "INTEGER DEFAULT 1"],
         ["created_by", "VARCHAR NOT NULL"],
         ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
         ["updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
@@ -368,19 +382,24 @@
       "indexes": [
         ["idx_topo_events_plan", ["plan_id"]],
         ["idx_topo_events_node", ["node_id"]],
-        ["idx_topo_events_type", ["event_type"]],
-        ["idx_topo_events_time", ["start_time", "end_time"]]
+        ["idx_topo_events_path_class", ["node_path", "event_class", "start_ts"]],
+        ["idx_topo_events_path_window", ["node_path", "start_ts", "end_ts"]],
+        ["idx_topo_events_horizon", ["plan_id", "horizon", "event_class"]],
+        ["idx_topo_events_state", ["operating_state", "start_ts"]]
       ]
     },
     {
       "name": "topo_event_links",
-      "ordering": 170,
-      "description": "TOPO event links: directed relationships between events.",
+      "ordering": 220,
+      "description": "TOPO event links: directed relationships between events (e.g., caused_by, followed_by, overlaps).",
       "columns": [
         ["id", "VARCHAR"],
         ["from_event_id", "VARCHAR"],
         ["to_event_id", "VARCHAR"],
-        ["link_type", "VARCHAR"],
+        ["edge_type", "VARCHAR"],
+        ["layer", "VARCHAR DEFAULT 'L1'"],
+        ["confidence", "DOUBLE DEFAULT 1.0"],
+        ["revision", "INTEGER DEFAULT 1"],
         ["created_by", "VARCHAR NOT NULL"],
         ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
         ["metadata", "JSON"]
@@ -389,7 +408,8 @@
       "indexes": [
         ["idx_topo_elinks_from", ["from_event_id"]],
         ["idx_topo_elinks_to", ["to_event_id"]],
-        ["idx_topo_elinks_type", ["link_type"]]
+        ["idx_topo_elinks_from_type", ["from_event_id", "edge_type"]],
+        ["idx_topo_elinks_to_type", ["to_event_id", "edge_type"]]
       ]
     }
   ]
