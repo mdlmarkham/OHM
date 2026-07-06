@@ -445,6 +445,7 @@ See [ADR-006](docs/adr/0007-schema-evolution-and-type-governance.md) (graduated 
 - [Schema](docs/schema.md) — Node types, edge types, layers, confidence
 - [Deployment](docs/deployment.md) — Installation and configuration
 - [Local Agent Deployment](docs/deployment/local-copilot-ohm.md) — System-level `ohmd` + per-tenant MCP endpoints for Copilot, Cursor, Claude Code, and OpenCode
+- [Local Agent Deployment (Windows)](docs/deployment/windows-copilot-ohm.md) — Same topology, packaged for Windows (Task Scheduler, NSSM, WinSW)
 - [ADR Index](docs/adr/README.md) — Architecture Decision Records
 
 ## CLI
