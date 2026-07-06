@@ -224,3 +224,8 @@ ohmd:
 - Challenge edges handle disagreements without conflict
 
 See [ADR-012](adr/0012-per-agent-local-cache.md) for full details.
+
+
+## Local agents with MCP
+
+For small teams using GitHub Copilot, Cursor, Claude Code, or OpenCode locally, see [Deploying OHM for Local Agents: System Daemon + Per-Tenant MCP](local-copilot-ohm.md).

@@ -444,6 +444,7 @@ See [ADR-006](docs/adr/0007-schema-evolution-and-type-governance.md) (graduated 
 - [Edge Type Guide](docs/edge-type-guide.md) — All 30+ edge types across L1-L4
 - [Schema](docs/schema.md) — Node types, edge types, layers, confidence
 - [Deployment](docs/deployment.md) — Installation and configuration
+- [Local Agent Deployment](docs/deployment/local-copilot-ohm.md) — System-level `ohmd` + per-tenant MCP endpoints for Copilot, Cursor, Claude Code, and OpenCode
 - [ADR Index](docs/adr/README.md) — Architecture Decision Records
 
 ## CLI
