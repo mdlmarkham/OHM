@@ -28,13 +28,16 @@ from mcp.types import (
 )
 
 # ---------------------------------------------------------------------------
-# Config
+# Config — delegate to ohm.mcp.config (OHM-yzyk.1.2)
 # ---------------------------------------------------------------------------
 
-OHM_URL = os.environ.get("OHM_URL", "http://127.0.0.1:8710")
-OHM_TOKEN = os.environ.get("OHM_TOKEN", "")
-OHM_AGENT = os.environ.get("OHM_AGENT", "mcp")
-OHM_TENANT_ID = os.environ.get("OHM_TENANT_ID", "")
+from ohm.mcp.config import config as _config, load_config_file as _load_config_file, is_tool_allowed as _is_tool_allowed, make_headers, WRITE_TOOLS as _WRITE_TOOLS
+
+# Backward-compat properties
+OHM_URL = _config["ohm_url"]
+OHM_TOKEN = _config["token"]
+OHM_AGENT = _config["agent_id"]
+OHM_TENANT_ID = _config["tenant_id"]
 
 # Ensure stdout can handle Unicode (MCP stdio transport)
 import sys
@@ -50,32 +53,29 @@ if sys.stderr and hasattr(sys.stderr, "reconfigure"):
 
 
 def _headers() -> dict[str, str]:
-    h = {"Content-Type": "application/json"}
-    if OHM_TOKEN:
-        h["Authorization"] = f"Bearer {OHM_TOKEN}"
-    if OHM_TENANT_ID:
-        h["X-Tenant-ID"] = OHM_TENANT_ID
-    h["X-OHM-Agent"] = OHM_AGENT
-    return h
+    return make_headers()
+
+
+_ALL_TOOL_NAMES: list[str] = []
 
 
 async def _ohm_get(path: str, params: dict | None = None) -> dict | list:
     async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.get(f"{OHM_URL}{path}", headers=_headers(), params=params or {})
+        r = await client.get(f"{_config['ohm_url']}{path}", headers=_headers(), params=params or {})
         r.raise_for_status()
         return r.json()
 
 
 async def _ohm_post(path: str, body: dict) -> dict:
     async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.post(f"{OHM_URL}{path}", headers=_headers(), json=body)
+        r = await client.post(f"{_config['ohm_url']}{path}", headers=_headers(), json=body)
         r.raise_for_status()
         return r.json()
 
 
 async def _ohm_delete(path: str) -> dict:
     async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.delete(f"{OHM_URL}{path}", headers=_headers())
+        r = await client.delete(f"{_config['ohm_url']}{path}", headers=_headers())
         r.raise_for_status()
         return r.json()
 
@@ -303,11 +303,33 @@ async def list_tools() -> list[Tool]:
             inputSchema={"type": "object", "properties": {}, "required": []},
         ),
     ]
+    # OHM-yzyk.1.2: filter tools by allowed_tools and read_only
+    _ALL_TOOL_NAMES.clear()
+    _ALL_TOOL_NAMES.extend(t.name for t in all_tools)
+    return [t for t in all_tools if _is_tool_allowed(t.name)]
 
 
 @mcp.call_tool()
 async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
     try:
+        # OHM-yzyk.1.2: enforce allowed_tools and read_only before contacting OHM
+        if not _is_tool_allowed(name):
+            if _config["read_only"] and name in _WRITE_TOOLS:
+                return CallToolResult(
+                    content=[TextContent(type="text", text=json.dumps({
+                        "error": "tool_blocked",
+                        "message": f"Tool '{name}' is a write-tier tool and read_only is enabled.",
+                    }, indent=2))],
+                    isError=True,
+                )
+            return CallToolResult(
+                content=[TextContent(type="text", text=json.dumps({
+                    "error": "tool_not_allowed",
+                    "message": f"Tool '{name}' is not in the allowed_tools list for this MCP sidecar.",
+                }, indent=2))],
+                isError=True,
+            )
+
         if name == "ohm_stats":
             data = await _ohm_get("/stats")
             return CallToolResult(content=_text(data))
@@ -475,8 +497,20 @@ async def main():
 
 
 def cli_main():
-    """Synchronous entry point for the OHM MCP server."""
+    """Synchronous entry point for the OHM MCP server.
+
+    Supports --config <path> to load a JSON config file (OHM-yzyk.1.2).
+    Env vars continue to work as overrides/fallbacks for backward compatibility.
+    """
+    import argparse
     import asyncio
+
+    parser = argparse.ArgumentParser(description="OHM MCP Server")
+    parser.add_argument("--config", default=None, help="Path to JSON config file")
+    args = parser.parse_args()
+
+    if args.config:
+        _load_config_file(args.config)
 
     asyncio.run(main())
 
