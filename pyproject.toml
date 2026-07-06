@@ -101,9 +101,10 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--timeout=120 --timeout-method=thread -m 'not slow and not benchmark and not integration'"
+addopts = "--timeout=120 --timeout-method=thread -m 'not slow and not benchmark and not performance and not integration'"
 markers = [
     "benchmark: Performance benchmark tests (pytest-benchmark)",
+    "performance: Latency-gated performance tests (p95 thresholds, OHM-c1id)",
     "slow: Tests that take >1s (excluded from fast CI runs)",
     "integration: HTTP server integration tests (excluded from fast CI runs)",
     "concurrent: Thread-safety tests (platform-sensitive, excluded from CI)",
