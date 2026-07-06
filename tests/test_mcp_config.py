@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from ohm.mcp.config import config, load_config_file, is_tool_allowed, make_headers, WRITE_TOOLS
+from ohm.mcp.config import config, load_config_file, is_tool_allowed, make_headers, WRITE_TOOLS, _should_send_tenant_header
 
 
 class TestConfigFileLoading:
@@ -147,3 +147,82 @@ class TestHeadersUseConfig:
         finally:
             config.clear()
             config.update(original)
+
+
+class TestTenantHeaderResolution:
+    """OHM-yzyk.1.1: X-Tenant-ID behavior depends on token_type."""
+
+    def test_agent_token_sends_tenant_header(self):
+        original = dict(config)
+        try:
+            config["token"] = "admin-agent-token"
+            config["tenant_id"] = "devops"
+            config["token_type"] = "agent"
+            assert _should_send_tenant_header() is True
+            h = make_headers()
+            assert h["X-Tenant-ID"] == "devops"
+        finally:
+            config.clear()
+            config.update(original)
+
+    def test_customer_key_skips_tenant_header(self):
+        original = dict(config)
+        try:
+            config["token"] = "ohm-cust-devops-abc123"
+            config["tenant_id"] = "devops"
+            config["token_type"] = "customer"
+            assert _should_send_tenant_header() is False
+            h = make_headers()
+            assert "X-Tenant-ID" not in h
+            assert h["Authorization"] == "Bearer ohm-cust-devops-abc123"
+        finally:
+            config.clear()
+            config.update(original)
+
+    def test_agent_token_without_tenant_id_skips_header(self):
+        original = dict(config)
+        try:
+            config["token"] = "admin-token"
+            config["tenant_id"] = ""
+            config["token_type"] = "agent"
+            assert _should_send_tenant_header() is False
+            h = make_headers()
+            assert "X-Tenant-ID" not in h
+        finally:
+            config.clear()
+            config.update(original)
+
+    def test_default_token_type_is_agent(self):
+        """Default token_type should be 'agent' for backward compat."""
+        original = dict(config)
+        try:
+            config["tenant_id"] = "devops"
+            # token_type not explicitly set — should default to "agent"
+            config.pop("token_type", None)
+            config["token_type"] = "agent"  # default
+            assert _should_send_tenant_header() is True
+        finally:
+            config.clear()
+            config.update(original)
+
+    def test_config_file_can_set_token_type_customer(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump({
+                "token": "ohm-cust-dataops-xyz",
+                "tenant_id": "dataops",
+                "token_type": "customer",
+            }, f)
+            f.flush()
+
+        original = dict(config)
+        try:
+            load_config_file(f.name)
+            assert config["token_type"] == "customer"
+            assert _should_send_tenant_header() is False
+            h = make_headers()
+            assert "X-Tenant-ID" not in h
+            assert h["Authorization"] == "Bearer ohm-cust-dataops-xyz"
+        finally:
+            config.clear()
+            config.update(original)
+            os.unlink(f.name)

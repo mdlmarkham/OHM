@@ -3,6 +3,11 @@
 This module contains the config loading, tool filtering, and header
 construction logic for the OHM MCP server. It is kept separate from
 ``server.py`` so it can be tested without the ``mcp`` package installed.
+
+OHM-yzyk.1.1: token_type field controls whether X-Tenant-ID is sent.
+Customer API keys are already tenant-scoped (the key selects the tenant),
+so sending X-Tenant-ID is unnecessary and ignored after OHM-tss4.19.
+Admin agent tokens need X-Tenant-ID to select the tenant.
 """
 
 from __future__ import annotations
@@ -17,6 +22,7 @@ config: dict[str, Any] = {
     "token": os.environ.get("OHM_TOKEN", ""),
     "agent_id": os.environ.get("OHM_AGENT", "mcp"),
     "tenant_id": os.environ.get("OHM_TENANT_ID", ""),
+    "token_type": "agent",  # "agent" (sends X-Tenant-ID) or "customer" (key is tenant-scoped)
     "domain_config": None,
     "allowed_tools": ["*"],
     "read_only": False,
@@ -40,8 +46,9 @@ def load_config_file(path: str) -> None:
     """
     with open(path) as f:
         data = json.loads(f.read())
-    for key in ("ohm_url", "token", "agent_id", "tenant_id", "domain_config",
-                "allowed_tools", "read_only", "log_path", "temp_path", "transport"):
+    for key in ("ohm_url", "token", "agent_id", "tenant_id", "token_type",
+                "domain_config", "allowed_tools", "read_only", "log_path",
+                "temp_path", "transport"):
         if key in data:
             config[key] = data[key]
     # Env vars override config file for backward compat
@@ -65,12 +72,29 @@ def is_tool_allowed(tool_name: str) -> bool:
     return tool_name in allowed
 
 
+def _should_send_tenant_header() -> bool:
+    """Decide whether to send X-Tenant-ID (OHM-yzyk.1.1).
+
+    - Admin agent tokens (token_type="agent"): send X-Tenant-ID if tenant_id is set.
+    - Customer API keys (token_type="customer"): never send X-Tenant-ID.
+      The key itself is tenant-scoped; X-Tenant-ID is ignored after OHM-tss4.19.
+    """
+    if not config.get("tenant_id"):
+        return False
+    token_type = config.get("token_type", "agent")
+    return token_type == "agent"
+
+
 def make_headers() -> dict[str, str]:
-    """Build HTTP headers from current config."""
+    """Build HTTP headers from current config (OHM-yzyk.1.1).
+
+    X-Tenant-ID is only sent for admin agent tokens with a tenant_id set.
+    Customer API keys never send X-Tenant-ID — the key selects the tenant.
+    """
     h: dict[str, str] = {"Content-Type": "application/json"}
     if config["token"]:
         h["Authorization"] = f"Bearer {config['token']}"
-    if config["tenant_id"]:
+    if _should_send_tenant_header():
         h["X-Tenant-ID"] = config["tenant_id"]
     h["X-OHM-Agent"] = config["agent_id"]
     return h
