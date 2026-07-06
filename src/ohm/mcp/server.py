@@ -1,7 +1,7 @@
 """OHM MCP Server — expose OHM knowledge graph tools to OpenClaw agents.
 
 Provides tiered access to OHM via MCP tools:
-- Read tier: search, get_node, neighborhood, listen, stats, confidence
+- Read tier: search, get_node, neighborhood, listen, stats, confidence, domain_onboarding
 - Write tier: create_node, create_edge, observe, challenge, support
 - Admin tier: update_node, update_edge, delete (via upsert/delete endpoints)
 
@@ -9,6 +9,7 @@ Configuration via environment variables:
 - OHM_URL: OHM daemon URL (default: http://127.0.0.1:8710)
 - OHM_TOKEN: Agent authentication token
 - OHM_AGENT: Agent name (default: mcp)
+- OHM_TENANT_ID: Tenant ID for multi-tenant ohmd (sent as X-Tenant-ID header)
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ from mcp.types import (
 OHM_URL = os.environ.get("OHM_URL", "http://127.0.0.1:8710")
 OHM_TOKEN = os.environ.get("OHM_TOKEN", "")
 OHM_AGENT = os.environ.get("OHM_AGENT", "mcp")
+OHM_TENANT_ID = os.environ.get("OHM_TENANT_ID", "")
 
 # Ensure stdout can handle Unicode (MCP stdio transport)
 import sys
@@ -51,6 +53,9 @@ def _headers() -> dict[str, str]:
     h = {"Content-Type": "application/json"}
     if OHM_TOKEN:
         h["Authorization"] = f"Bearer {OHM_TOKEN}"
+    if OHM_TENANT_ID:
+        h["X-Tenant-ID"] = OHM_TENANT_ID
+    h["X-OHM-Agent"] = OHM_AGENT
     return h
 
 
@@ -291,6 +296,12 @@ async def list_tools() -> list[Tool]:
                 "required": [],
             },
         ),
+        Tool(
+            name="ohm_domain_onboarding",
+            description="Get the OHM domain schema for this tenant: node types, edge types, layers, and domain tables. "
+            "Call this when connecting to a new OHM instance to understand the active domain configuration.",
+            inputSchema={"type": "object", "properties": {}, "required": []},
+        ),
     ]
 
 
@@ -431,6 +442,10 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             params["limit"] = str(arguments.get("limit", 100))
             params["offset"] = str(arguments.get("offset", 0))
             data = await _ohm_get("/nodes", params)
+            return CallToolResult(content=_text(data))
+
+        elif name == "ohm_domain_onboarding":
+            data = await _ohm_get("/schema")
             return CallToolResult(content=_text(data))
 
         else:
