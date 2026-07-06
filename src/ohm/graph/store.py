@@ -310,6 +310,14 @@ class OhmStore:
                     conn.execute(f"ATTACH IF NOT EXISTS '{ducklake_path}' AS {dl_catalog} (TYPE ducklake)")
                     logger.info("DuckLake attached for recovery")
 
+                    # OHM-knxf.2: ensure mirror tables exist before restore.
+                    from .db import _create_ducklake_tables
+
+                    try:
+                        _create_ducklake_tables(conn, dl_catalog, schema=self.schema)
+                    except Exception as e:
+                        logger.debug("DuckLake mirror table creation skipped: %s", e)
+
                     # OHM-8bli: iterate the DuckLake registry (not a hardcoded list)
                     # so domain tables (e.g. topo_prospects) get recovered too.
                     for dlt in self.schema.ducklake_tables:
@@ -412,6 +420,15 @@ class OhmStore:
             self.conn.execute("INSTALL ducklake FROM core")
             self.conn.execute("LOAD ducklake")
             self.conn.execute(f"ATTACH IF NOT EXISTS '{ducklake_path}' AS {dl_catalog} (TYPE ducklake)")
+
+            # OHM-knxf.2: ensure mirror tables exist in DuckLake before
+            # attempting restore (covers tables newly added to the registry).
+            from .db import _create_ducklake_tables
+
+            try:
+                _create_ducklake_tables(self.conn, dl_catalog, schema=self.schema)
+            except Exception as e:
+                logger.debug("DuckLake mirror table creation skipped: %s", e)
 
             # Try DuckLake 0.3+ metadata schema first, then fall back to catalog-qualified names
             dl_schema_prefix = f"__ducklake_metadata_{dl_catalog}"

@@ -713,6 +713,20 @@ def _create_ducklake_tables(
                 occurred_at VARCHAR
             )
         """,
+        "ohm_outcomes": """
+            CREATE TABLE IF NOT EXISTS {alias}.ohm_outcomes (
+                id           VARCHAR,
+                source_agent VARCHAR,
+                claim_node   VARCHAR,
+                outcome      VARCHAR,
+                recorded_by  VARCHAR,
+                recorded_at  VARCHAR,
+                notes        VARCHAR,
+                claimed_by   VARCHAR,
+                verified_by  VARCHAR,
+                domain       VARCHAR
+            )
+        """,
     }
 
     for table_name, ddl in core_mirror_ddl.items():
