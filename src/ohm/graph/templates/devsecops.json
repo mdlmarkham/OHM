@@ -1,0 +1,352 @@
+{
+    "name": "devsecops",
+    "template_version": 1,
+    "case_strategy": "uppercase",
+    "description": "Domain template for small-team DevSecOps agent mesh: code, infrastructure, security, compliance, and incident response.",
+    "node_types": [
+        "agent",
+        "area",
+        "asset",
+        "audit",
+        "compliance_requirement",
+        "concept",
+        "container_image",
+        "control",
+        "decision",
+        "dependency",
+        "deployment",
+        "equipment",
+        "event",
+        "finding",
+        "fragment",
+        "goal",
+        "hypothesis",
+        "idea",
+        "incident",
+        "infrastructure",
+        "institution",
+        "pattern",
+        "person",
+        "pipeline",
+        "policy",
+        "practice",
+        "process",
+        "release",
+        "risk",
+        "role",
+        "runbook",
+        "sast_tool",
+        "dast_tool",
+        "secret",
+        "service",
+        "skill",
+        "source",
+        "system",
+        "technology",
+        "threat",
+        "topic",
+        "value",
+        "vulnerability"
+    ],
+    "layer_edge_types": {
+        "L0": [
+            "CONTEXT_OF",
+            "CONTRADICTS_FRAG",
+            "INSPIRED_BY",
+            "REFINES_FRAG",
+            "RESONANCE"
+        ],
+        "L1": [
+            "BELONGS_TO",
+            "CONTAINS",
+            "DEPLOYS",
+            "HAS_COMPONENT",
+            "MANAGES",
+            "MONITORS",
+            "OPERATES",
+            "PART_OF",
+            "RUNS_ON",
+            "SERVES",
+            "VALUES"
+        ],
+        "L2": [
+            "AWAITING",
+            "DEPENDS_ON",
+            "DOWNSTREAM_OF",
+            "ESCALATES_TO",
+            "FLOWS_TO",
+            "NOTIFIES",
+            "TRIGGERS",
+            "UPSTREAM_OF"
+        ],
+        "L3": [
+            "BLOCKS",
+            "CAUSES",
+            "DEPENDS_ON",
+            "ENABLES",
+            "EXPLOITS",
+            "INDICATES",
+            "MITIGATES",
+            "REFERENCES",
+            "SATISFIES",
+            "SUPPORTS",
+            "THREATENS",
+            "VIOLATES"
+        ],
+        "L4": [
+            "APPROVES",
+            "DECLINES",
+            "EXPECTS",
+            "ORDERS_TEST",
+            "PLANS",
+            "PREDICTS",
+            "RECOMMENDS",
+            "RISKS"
+        ]
+    },
+    "layer_descriptions": {
+        "L0": "Thinking — Raw hunches, questions, and fragments from agents and humans",
+        "L1": "Structure — Assets, services, pipelines, teams, controls, and their ownership",
+        "L2": "Flow — Dependencies, data flows, incident escalation, and CI/CD sequences",
+        "L3": "Knowledge — Threats, vulnerabilities, findings, mitigations, and compliance mappings",
+        "L4": "Prospect — Risk decisions, planned remediations, audits, and recommended actions"
+    },
+    "observation_types": [
+        "alert",
+        "anomaly",
+        "challenge",
+        "finding",
+        "health_check",
+        "measurement",
+        "pattern",
+        "scan_result",
+        "sentiment",
+        "support"
+    ],
+    "observation_sources": [
+        "analysis",
+        "ci_cd",
+        "conversation",
+        "feed-ingest",
+        "monitoring",
+        "observation",
+        "research",
+        "sast",
+        "dast",
+        "secret_scan",
+        "signal",
+        "vulnerability_db"
+    ],
+    "visibilities": [
+        "private",
+        "team",
+        "public",
+        "vault"
+    ],
+    "provenances": [
+        "bookmark",
+        "clio-research",
+        "conversation",
+        "feed-ingest",
+        "healthcheck",
+        "metis-research",
+        "metis-synthesis",
+        "metis-review-request",
+        "observation",
+        "research",
+        "socrates-curriculum"
+    ],
+    "domain_tables": [
+        {
+            "name": "security_findings",
+            "ordering": 100,
+            "description": "Security findings from SAST, DAST, secret scanning, dependency checks, and manual reviews.",
+            "columns": [
+                ["id", "VARCHAR"],
+                ["node_id", "VARCHAR"],
+                ["finding_type", "VARCHAR"],
+                ["severity", "VARCHAR"],
+                ["status", "VARCHAR DEFAULT 'open'"],
+                ["cvss_score", "FLOAT"],
+                ["cve_id", "VARCHAR"],
+                ["cwe_id", "VARCHAR"],
+                ["scanner", "VARCHAR"],
+                ["file_path", "VARCHAR"],
+                ["line_number", "INTEGER"],
+                ["description", "TEXT"],
+                ["remediation", "TEXT"],
+                ["assignee", "VARCHAR"],
+                ["due_date", "TIMESTAMP"],
+                ["resolved_at", "TIMESTAMP"],
+                ["created_by", "VARCHAR NOT NULL"],
+                ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+                ["updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+                ["metadata", "JSON"]
+            ],
+            "primary_key": "id",
+            "indexes": [
+                ["idx_findings_node", ["node_id"]],
+                ["idx_findings_status", ["status"]],
+                ["idx_findings_severity", ["severity"]],
+                ["idx_findings_type", ["finding_type"]],
+                ["idx_findings_assignee", ["assignee"]],
+                ["idx_findings_due", ["due_date"]]
+            ]
+        },
+        {
+            "name": "incidents",
+            "ordering": 110,
+            "description": "DevSecOps incidents: alerts, outages, breaches, and operational disruptions.",
+            "columns": [
+                ["id", "VARCHAR"],
+                ["node_id", "VARCHAR"],
+                ["incident_type", "VARCHAR"],
+                ["severity", "VARCHAR"],
+                ["status", "VARCHAR DEFAULT 'open'"],
+                ["title", "VARCHAR"],
+                ["summary", "TEXT"],
+                ["root_cause_id", "VARCHAR"],
+                ["commander", "VARCHAR"],
+                ["started_at", "TIMESTAMP"],
+                ["detected_at", "TIMESTAMP"],
+                ["mitigated_at", "TIMESTAMP"],
+                ["resolved_at", "TIMESTAMP"],
+                ["created_by", "VARCHAR NOT NULL"],
+                ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+                ["updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+                ["metadata", "JSON"]
+            ],
+            "primary_key": "id",
+            "indexes": [
+                ["idx_incidents_node", ["node_id"]],
+                ["idx_incidents_status", ["status"]],
+                ["idx_incidents_severity", ["severity"]],
+                ["idx_incidents_type", ["incident_type"]],
+                ["idx_incidents_time", ["started_at"]],
+                ["idx_incidents_commander", ["commander"]]
+            ]
+        },
+        {
+            "name": "compliance_audits",
+            "ordering": 120,
+            "description": "Control compliance status per requirement, framework, and audit cycle.",
+            "columns": [
+                ["id", "VARCHAR"],
+                ["requirement_id", "VARCHAR"],
+                ["control_id", "VARCHAR"],
+                ["framework", "VARCHAR"],
+                ["status", "VARCHAR DEFAULT 'not_assessed'"],
+                ["evidence", "JSON"],
+                ["auditor", "VARCHAR"],
+                ["audit_cycle", "VARCHAR"],
+                ["assessed_at", "TIMESTAMP"],
+                ["expires_at", "TIMESTAMP"],
+                ["created_by", "VARCHAR NOT NULL"],
+                ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+                ["updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+                ["metadata", "JSON"]
+            ],
+            "primary_key": "id",
+            "indexes": [
+                ["idx_audits_requirement", ["requirement_id"]],
+                ["idx_audits_control", ["control_id"]],
+                ["idx_audits_framework", ["framework"]],
+                ["idx_audits_status", ["status"]],
+                ["idx_audits_cycle", ["audit_cycle"]]
+            ]
+        },
+        {
+            "name": "pipeline_runs",
+            "ordering": 130,
+            "description": "CI/CD pipeline execution tracking: build, test, deploy, and security gates.",
+            "columns": [
+                ["id", "VARCHAR"],
+                ["pipeline_id", "VARCHAR"],
+                ["node_id", "VARCHAR"],
+                ["run_type", "VARCHAR"],
+                ["status", "VARCHAR DEFAULT 'pending'"],
+                ["commit_sha", "VARCHAR"],
+                ["branch", "VARCHAR"],
+                ["inputs", "JSON"],
+                ["outputs", "JSON"],
+                ["error", "TEXT"],
+                ["duration_ms", "INTEGER"],
+                ["started_at", "TIMESTAMP"],
+                ["completed_at", "TIMESTAMP"],
+                ["created_by", "VARCHAR NOT NULL"],
+                ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+                ["updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+                ["metadata", "JSON"]
+            ],
+            "primary_key": "id",
+            "indexes": [
+                ["idx_runs_pipeline", ["pipeline_id"]],
+                ["idx_runs_node", ["node_id"]],
+                ["idx_runs_status", ["status"]],
+                ["idx_runs_type", ["run_type"]],
+                ["idx_runs_time", ["started_at"]],
+                ["idx_runs_commit", ["commit_sha"]]
+            ]
+        },
+        {
+            "name": "policy_versions",
+            "ordering": 140,
+            "description": "Versioned policy and runbook documents with approval history.",
+            "columns": [
+                ["id", "VARCHAR"],
+                ["node_id", "VARCHAR"],
+                ["policy_type", "VARCHAR"],
+                ["version", "INTEGER DEFAULT 1"],
+                ["status", "VARCHAR DEFAULT 'draft'"],
+                ["content_url", "VARCHAR"],
+                ["approved_by", "VARCHAR"],
+                ["approved_at", "TIMESTAMP"],
+                ["superseded_by", "VARCHAR"],
+                ["created_by", "VARCHAR NOT NULL"],
+                ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+                ["updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+                ["metadata", "JSON"]
+            ],
+            "primary_key": "id",
+            "indexes": [
+                ["idx_policy_node", ["node_id"]],
+                ["idx_policy_type", ["policy_type"]],
+                ["idx_policy_version", ["node_id", "version"]],
+                ["idx_policy_status", ["status"]]
+            ]
+        }
+    ],
+    "required_integrations": {},
+    "optional_integrations": {
+        "github_actions": "pipeline_runs ingestion from GitHub Actions workflows",
+        "sonarqube": "security_findings ingestion from SAST scans",
+        "snyk": "security_findings ingestion from dependency and container scans",
+        "trivy": "security_findings ingestion from container and misconfiguration scans",
+        "pagerduty": "incidents ingestion from on-call alerts",
+        "wiz": "cloud security posture findings",
+        "lacework": "runtime threat findings"
+    },
+    "seed_agents": [
+        {
+            "agent_name": "atlas",
+            "label": "Atlas",
+            "current_focus": "DevSecOps coordination and incident command",
+            "active_patterns": [
+                "service-health",
+                "security-findings",
+                "incident-response",
+                "compliance-mapping"
+            ]
+        },
+        {
+            "agent_name": "metis",
+            "label": "Métis",
+            "current_focus": "Pattern synthesis across security, infrastructure, and code",
+            "active_patterns": [
+                "threat-vulnerability-linkage",
+                "control-effectiveness",
+                "incident-learning"
+            ]
+        }
+    ]
+}
