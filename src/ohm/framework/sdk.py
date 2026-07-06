@@ -5279,6 +5279,293 @@ class Graph:
             limit=limit,
         )
 
+    # ── TOPO Temporal Domain Tables (OHM-dh9l.1) ────────────────────────────
+
+    def create_plan(
+        self,
+        plan_id: str,
+        *,
+        node_id: str | None = None,
+        plan_type: str,
+        label: str | None = None,
+        start_ts: str | None = None,
+        end_ts: str | None = None,
+        horizon: str | None = None,
+        status: str = "active",
+        metadata: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Create a TOPO plan (time-bounded grouping of events).
+
+        Args:
+            plan_id: Unique plan identifier.
+            node_id: Optional primary node this plan is anchored to.
+            plan_type: Plan category (e.g., 'maintenance_window', 'annual_outage').
+            label: Optional human-readable label.
+            start_ts: Optional ISO timestamp for plan start.
+            end_ts: Optional ISO timestamp for plan end.
+            horizon: Optional horizon tag (e.g., 'short', 'medium', 'long').
+            status: Plan status (default 'active').
+            metadata: Optional structured key-value data (JSON dict).
+
+        Returns:
+            The created plan record as a dict.
+        """
+        from ohm.queries import create_plan as _create_plan
+
+        return _create_plan(
+            self._conn,
+            plan_id=plan_id,
+            node_id=node_id,
+            plan_type=plan_type,
+            label=label,
+            start_ts=start_ts,
+            end_ts=end_ts,
+            horizon=horizon,
+            status=status,
+            created_by=self.actor,
+            metadata=metadata,
+            **kwargs,
+        )
+
+    def get_plan(self, plan_id: str) -> dict[str, Any] | None:
+        """Retrieve a single TOPO plan by ID.
+
+        Returns the full plan record or None if not found.
+        """
+        from ohm.queries import get_plan as _get_plan
+
+        return _get_plan(self._conn, plan_id)
+
+    def list_plans(
+        self,
+        *,
+        node_id: str | None = None,
+        plan_type: str | None = None,
+        status: str | None = None,
+        horizon: str | None = None,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        """List TOPO plans with optional filters.
+
+        Args:
+            node_id: Filter by primary node.
+            plan_type: Filter by plan type.
+            status: Filter by status.
+            horizon: Filter by horizon tag.
+
+        Returns:
+            List of plan dicts ordered by start_ts.
+        """
+        from ohm.queries import list_plans as _list_plans
+
+        return _list_plans(
+            self._conn,
+            node_id=node_id,
+            plan_type=plan_type,
+            status=status,
+            horizon=horizon,
+            **kwargs,
+        )
+
+    def create_event(
+        self,
+        event_id: str,
+        *,
+        node_id: str,
+        event_class: str,
+        start_ts: str,
+        plan_id: str | None = None,
+        node_path: str | None = None,
+        title: str | None = None,
+        end_ts: str | None = None,
+        horizon: str | None = None,
+        operating_state: str | None = None,
+        description: str | None = None,
+        confidence: float | None = None,
+        authority: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Create a TOPO temporal event.
+
+        Args:
+            event_id: Unique event identifier.
+            node_id: Node this event is anchored to (required).
+            event_class: Event category (e.g., 'shutdown', 'restart', 'outage').
+            start_ts: ISO timestamp for event start (required).
+            plan_id: Optional parent plan ID.
+            node_path: Optional hierarchical node path.
+            title: Optional human-readable title.
+            end_ts: Optional ISO timestamp for event end.
+            horizon: Optional horizon tag.
+            operating_state: Optional operating state (e.g., 'low', 'medium', 'high').
+            description: Optional free-text description.
+            confidence: Optional confidence score in [0, 1].
+            authority: Optional authority attribution.
+            metadata: Optional structured key-value data (JSON dict).
+            **kwargs: Additional JSON columns (source_refs, l3_context, flow_impact,
+                forecast_basis, decision_metadata) or future schema columns.
+
+        Returns:
+            The created event record as a dict.
+        """
+        from ohm.queries import create_event as _create_event
+
+        return _create_event(
+            self._conn,
+            event_id=event_id,
+            plan_id=plan_id,
+            node_id=node_id,
+            node_path=node_path,
+            event_class=event_class,
+            title=title,
+            start_ts=start_ts,
+            end_ts=end_ts,
+            horizon=horizon,
+            operating_state=operating_state,
+            description=description,
+            confidence=confidence,
+            authority=authority,
+            created_by=self.actor,
+            metadata=metadata,
+            **kwargs,
+        )
+
+    def get_event(self, event_id: str) -> dict[str, Any] | None:
+        """Retrieve a single TOPO event by ID.
+
+        Returns the full event record or None if not found.
+        """
+        from ohm.queries import get_event as _get_event
+
+        return _get_event(self._conn, event_id)
+
+    def get_events_for_node(
+        self,
+        node_id: str,
+        *,
+        horizon: str | None = None,
+        plan_id: str | None = None,
+        event_class: str | None = None,
+        start_after: str | None = None,
+        end_before: str | None = None,
+        limit: int = 100,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        """Fetch TOPO events for a node with optional filters.
+
+        Args:
+            node_id: Node to fetch events for.
+            horizon: Optional horizon filter.
+            plan_id: Optional plan filter.
+            event_class: Optional event class filter.
+            start_after: Optional ISO timestamp; only events starting at or after.
+            end_before: Optional ISO timestamp; only events ending at or before.
+            limit: Maximum number of results (default 100).
+
+        Returns:
+            List of event dicts ordered by start_ts ascending.
+        """
+        from ohm.queries import get_events_for_node as _get_events_for_node
+
+        return _get_events_for_node(
+            self._conn,
+            node_id,
+            horizon=horizon,
+            plan_id=plan_id,
+            event_class=event_class,
+            start_after=start_after,
+            end_before=end_before,
+            limit=limit,
+            **kwargs,
+        )
+
+    def get_events_for_plan(self, plan_id: str) -> list[dict[str, Any]]:
+        """Fetch all TOPO events for a plan, ordered by start_ts.
+
+        Args:
+            plan_id: Plan ID to fetch events for.
+
+        Returns:
+            List of event dicts ordered by start_ts ascending.
+        """
+        from ohm.queries import get_events_for_plan as _get_events_for_plan
+
+        return _get_events_for_plan(self._conn, plan_id)
+
+    def create_event_link(
+        self,
+        link_id: str,
+        *,
+        from_event_id: str,
+        to_event_id: str,
+        edge_type: str,
+        layer: str = "L1",
+        confidence: float = 1.0,
+        metadata: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Create a directed link between two TOPO events.
+
+        Args:
+            link_id: Unique link identifier.
+            from_event_id: Source event ID.
+            to_event_id: Target event ID.
+            edge_type: Link type (e.g., 'caused_by', 'followed_by', 'overlaps').
+            layer: Layer tag (default 'L1').
+            confidence: Confidence score in [0, 1] (default 1.0).
+            metadata: Optional structured key-value data (JSON dict).
+
+        Returns:
+            The created event link record as a dict.
+        """
+        from ohm.queries import create_event_link as _create_event_link
+
+        return _create_event_link(
+            self._conn,
+            link_id=link_id,
+            from_event_id=from_event_id,
+            to_event_id=to_event_id,
+            edge_type=edge_type,
+            layer=layer,
+            confidence=confidence,
+            created_by=self.actor,
+            metadata=metadata,
+            **kwargs,
+        )
+
+    def get_event_links(
+        self,
+        *,
+        event_id: str | None = None,
+        from_event_id: str | None = None,
+        to_event_id: str | None = None,
+        edge_type: str | None = None,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        """Fetch TOPO event links with optional filters.
+
+        Args:
+            event_id: Filter to links where this event is either from or to.
+            from_event_id: Filter by source event.
+            to_event_id: Filter by target event.
+            edge_type: Filter by link type.
+
+        Returns:
+            List of event link dicts ordered by created_at ascending.
+        """
+        from ohm.queries import get_event_links as _get_event_links
+
+        return _get_event_links(
+            self._conn,
+            event_id=event_id,
+            from_event_id=from_event_id,
+            to_event_id=to_event_id,
+            edge_type=edge_type,
+            **kwargs,
+        )
+
     def close(self) -> None:
         """Close the database connection."""
         self._conn.close()

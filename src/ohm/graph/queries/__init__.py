@@ -13602,3 +13602,280 @@ def list_pending_verifications(
         results.append(d)
 
     return results
+
+
+# ── TOPO Temporal Domain Tables (OHM-dh9l.1) ────────────────────────────────
+
+
+def create_plan(
+    conn: DuckDBPyConnection,
+    *,
+    plan_id: str,
+    node_id: str | None = None,
+    plan_type: str,
+    label: str | None = None,
+    start_ts: str | None = None,
+    end_ts: str | None = None,
+    horizon: str | None = None,
+    status: str = "active",
+    created_by: str,
+    metadata: dict | None = None,
+) -> dict[str, Any]:
+    """Insert a new plan into topo_plans and return the row as a dict."""
+    import json
+
+    from ohm.validation import validate_identifier
+
+    plan_id = validate_identifier(plan_id, name="plan_id")
+    if node_id is not None:
+        node_id = validate_identifier(node_id, name="node_id")
+    if not plan_type:
+        raise ValueError("plan_type must be non-empty")
+
+    metadata_json = json.dumps(metadata) if metadata else None
+    conn.execute(
+        """INSERT INTO topo_plans
+           (id, node_id, plan_type, label, start_ts, end_ts, horizon, status, created_by, metadata)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [plan_id, node_id, plan_type, label, start_ts, end_ts, horizon, status, created_by, metadata_json],
+    )
+    _log_change(conn, "topo_plans", plan_id, "INSERT", created_by)
+    return _rows_to_dicts(conn.execute("SELECT * FROM topo_plans WHERE id = ?", [plan_id]))[0]
+
+
+def get_plan(
+    conn: DuckDBPyConnection,
+    plan_id: str,
+) -> dict[str, Any] | None:
+    """Fetch a single plan by id. Returns dict or None."""
+    from ohm.validation import validate_identifier
+
+    plan_id = validate_identifier(plan_id, name="plan_id")
+    rows = _rows_to_dicts(conn.execute("SELECT * FROM topo_plans WHERE id = ?", [plan_id]))
+    return rows[0] if rows else None
+
+
+def list_plans(
+    conn: DuckDBPyConnection,
+    *,
+    node_id: str | None = None,
+    plan_type: str | None = None,
+    status: str | None = None,
+    horizon: str | None = None,
+) -> list[dict[str, Any]]:
+    """List plans with optional filters."""
+    query = "SELECT * FROM topo_plans WHERE 1=1"
+    params: list[Any] = []
+    if node_id is not None:
+        query += " AND node_id = ?"
+        params.append(node_id)
+    if plan_type is not None:
+        query += " AND plan_type = ?"
+        params.append(plan_type)
+    if status is not None:
+        query += " AND status = ?"
+        params.append(status)
+    if horizon is not None:
+        query += " AND horizon = ?"
+        params.append(horizon)
+    query += " ORDER BY start_ts NULLS LAST, created_at DESC"
+    return _rows_to_dicts(conn.execute(query, params))
+
+
+def create_event(
+    conn: DuckDBPyConnection,
+    *,
+    event_id: str,
+    plan_id: str | None = None,
+    node_id: str,
+    node_path: str | None = None,
+    event_class: str,
+    title: str | None = None,
+    start_ts: str,
+    end_ts: str | None = None,
+    horizon: str | None = None,
+    operating_state: str | None = None,
+    description: str | None = None,
+    confidence: float | None = None,
+    authority: str | None = None,
+    created_by: str,
+    metadata: dict | None = None,
+    **extra_kw: Any,
+) -> dict[str, Any]:
+    """Insert a new event. extra_kw captures optional JSON/advanced fields."""
+    import json
+
+    from ohm.validation import validate_identifier, validate_confidence
+
+    event_id = validate_identifier(event_id, name="event_id")
+    if plan_id is not None:
+        plan_id = validate_identifier(plan_id, name="plan_id")
+    node_id = validate_identifier(node_id, name="node_id")
+    if not event_class:
+        raise ValueError("event_class must be non-empty")
+    if not start_ts:
+        raise ValueError("start_ts must be non-empty")
+    if confidence is not None:
+        confidence = validate_confidence(confidence)
+
+    metadata_json = json.dumps(metadata) if metadata else None
+
+    json_columns = ("source_refs", "l3_context", "flow_impact", "forecast_basis", "decision_metadata")
+    json_values: dict[str, str | None] = {}
+    for col in json_columns:
+        val = extra_kw.pop(col, None)
+        json_values[col] = json.dumps(val) if val is not None else None
+
+    extra_columns = tuple(extra_kw.keys())
+    extra_values = tuple(extra_kw.values())
+
+    columns = (
+        "id", "plan_id", "node_id", "node_path", "event_class", "title",
+        "start_ts", "end_ts", "horizon", "operating_state", "description",
+        "confidence", "authority", "created_by", "metadata",
+    ) + json_columns + extra_columns
+
+    placeholders = ",".join(["?"] * len(columns))
+    values: list[Any] = [
+        event_id, plan_id, node_id, node_path, event_class, title,
+        start_ts, end_ts, horizon, operating_state, description,
+        confidence, authority, created_by, metadata_json,
+    ]
+    for col in json_columns:
+        values.append(json_values[col])
+    values.extend(extra_values)
+
+    conn.execute(
+        f"INSERT INTO topo_events ({','.join(columns)}) VALUES ({placeholders})",
+        values,
+    )
+    _log_change(conn, "topo_events", event_id, "INSERT", created_by)
+    return _rows_to_dicts(conn.execute("SELECT * FROM topo_events WHERE id = ?", [event_id]))[0]
+
+
+def get_event(
+    conn: DuckDBPyConnection,
+    event_id: str,
+) -> dict[str, Any] | None:
+    """Fetch a single event by id. Returns dict or None."""
+    from ohm.validation import validate_identifier
+
+    event_id = validate_identifier(event_id, name="event_id")
+    rows = _rows_to_dicts(conn.execute("SELECT * FROM topo_events WHERE id = ?", [event_id]))
+    return rows[0] if rows else None
+
+
+def get_events_for_node(
+    conn: DuckDBPyConnection,
+    node_id: str,
+    *,
+    horizon: str | None = None,
+    plan_id: str | None = None,
+    event_class: str | None = None,
+    start_after: str | None = None,
+    end_before: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """Fetch events for a node with optional filters."""
+    from ohm.validation import validate_identifier
+
+    node_id = validate_identifier(node_id, name="node_id")
+    query = "SELECT * FROM topo_events WHERE node_id = ?"
+    params: list[Any] = [node_id]
+    if horizon is not None:
+        query += " AND horizon = ?"
+        params.append(horizon)
+    if plan_id is not None:
+        query += " AND plan_id = ?"
+        params.append(plan_id)
+    if event_class is not None:
+        query += " AND event_class = ?"
+        params.append(event_class)
+    if start_after is not None:
+        query += " AND start_ts >= ?"
+        params.append(start_after)
+    if end_before is not None:
+        query += " AND end_ts <= ?"
+        params.append(end_before)
+    query += " ORDER BY start_ts ASC LIMIT ?"
+    params.append(limit)
+    return _rows_to_dicts(conn.execute(query, params))
+
+
+def get_events_for_plan(
+    conn: DuckDBPyConnection,
+    plan_id: str,
+) -> list[dict[str, Any]]:
+    """Fetch all events for a plan, ordered by start_ts."""
+    from ohm.validation import validate_identifier
+
+    plan_id = validate_identifier(plan_id, name="plan_id")
+    return _rows_to_dicts(
+        conn.execute(
+            "SELECT * FROM topo_events WHERE plan_id = ? ORDER BY start_ts ASC",
+            [plan_id],
+        )
+    )
+
+
+def create_event_link(
+    conn: DuckDBPyConnection,
+    *,
+    link_id: str,
+    from_event_id: str,
+    to_event_id: str,
+    edge_type: str,
+    layer: str = "L1",
+    confidence: float = 1.0,
+    created_by: str,
+    metadata: dict | None = None,
+) -> dict[str, Any]:
+    """Link two events."""
+    import json
+
+    from ohm.validation import validate_identifier, validate_confidence
+
+    link_id = validate_identifier(link_id, name="link_id")
+    from_event_id = validate_identifier(from_event_id, name="from_event_id")
+    to_event_id = validate_identifier(to_event_id, name="to_event_id")
+    if not edge_type:
+        raise ValueError("edge_type must be non-empty")
+    confidence = validate_confidence(confidence)
+
+    metadata_json = json.dumps(metadata) if metadata else None
+    conn.execute(
+        """INSERT INTO topo_event_links
+           (id, from_event_id, to_event_id, edge_type, layer, confidence, created_by, metadata)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        [link_id, from_event_id, to_event_id, edge_type, layer, confidence, created_by, metadata_json],
+    )
+    _log_change(conn, "topo_event_links", link_id, "INSERT", created_by)
+    return _rows_to_dicts(conn.execute("SELECT * FROM topo_event_links WHERE id = ?", [link_id]))[0]
+
+
+def get_event_links(
+    conn: DuckDBPyConnection,
+    *,
+    event_id: str | None = None,
+    from_event_id: str | None = None,
+    to_event_id: str | None = None,
+    edge_type: str | None = None,
+) -> list[dict[str, Any]]:
+    """Fetch event links with optional filters."""
+    query = "SELECT * FROM topo_event_links WHERE 1=1"
+    params: list[Any] = []
+    if event_id is not None:
+        query += " AND (from_event_id = ? OR to_event_id = ?)"
+        params.append(event_id)
+        params.append(event_id)
+    if from_event_id is not None:
+        query += " AND from_event_id = ?"
+        params.append(from_event_id)
+    if to_event_id is not None:
+        query += " AND to_event_id = ?"
+        params.append(to_event_id)
+    if edge_type is not None:
+        query += " AND edge_type = ?"
+        params.append(edge_type)
+    query += " ORDER BY created_at ASC"
+    return _rows_to_dicts(conn.execute(query, params))
