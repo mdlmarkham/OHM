@@ -5804,6 +5804,79 @@ class Graph:
             limit=limit,
         )
 
+    def create_run(
+        self,
+        run_id: str,
+        *,
+        run_type: str,
+        report_id: str | None = None,
+        node_id: str | None = None,
+        inputs: dict[str, Any] | None = None,
+        status: str = "pending",
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Create a DataProductRun execution record (OHM-08uk)."""
+        from ohm.queries import create_run as _create_run
+
+        return _create_run(
+            self._conn,
+            run_id=run_id,
+            report_id=report_id,
+            node_id=node_id,
+            run_type=run_type,
+            inputs=inputs,
+            status=status,
+            created_by=self.actor,
+            metadata=metadata,
+        )
+
+    def get_run(self, run_id: str) -> dict[str, Any] | None:
+        """Fetch a single run by id (OHM-08uk)."""
+        from ohm.queries import get_run as _get_run
+
+        return _get_run(self._conn, run_id)
+
+    def list_runs(
+        self,
+        *,
+        report_id: str | None = None,
+        node_id: str | None = None,
+        run_type: str | None = None,
+        status: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List runs with optional filters (OHM-08uk)."""
+        from ohm.queries import list_runs as _list_runs
+
+        return _list_runs(
+            self._conn,
+            report_id=report_id,
+            node_id=node_id,
+            run_type=run_type,
+            status=status,
+        )
+
+    def complete_run(
+        self,
+        run_id: str,
+        *,
+        status: str = "completed",
+        outputs: dict[str, Any] | None = None,
+        error: str | None = None,
+        duration_ms: int | None = None,
+    ) -> dict[str, Any]:
+        """Mark a run as completed/failed and record outputs (OHM-08uk)."""
+        from ohm.queries import complete_run as _complete_run
+
+        return _complete_run(
+            self._conn,
+            run_id=run_id,
+            status=status,
+            outputs=outputs,
+            error=error,
+            duration_ms=duration_ms,
+            created_by=self.actor,
+        )
+
     def propagate_observation(
         self,
         source_node_id: str,

@@ -1175,6 +1175,34 @@ class SchemaConfig:
                 ordering=230,
                 description="TOPO versioned analytical report artifacts (e.g., sensitivity_analysis, rca_report, correlation_study) linked to graph entities.",
             ),
+            DomainTable(
+                name="topo_runs",
+                columns=(
+                    ("id", "VARCHAR"),
+                    ("report_id", "VARCHAR"),
+                    ("node_id", "VARCHAR"),
+                    ("run_type", "VARCHAR"),
+                    ("status", "VARCHAR DEFAULT 'pending'"),
+                    ("inputs", "JSON"),
+                    ("outputs", "JSON"),
+                    ("error", "TEXT"),
+                    ("duration_ms", "INTEGER"),
+                    ("started_at", "TIMESTAMP"),
+                    ("completed_at", "TIMESTAMP"),
+                    ("created_by", "VARCHAR NOT NULL"),
+                    ("created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+                    ("metadata", "JSON"),
+                ),
+                primary_key="id",
+                indexes=(
+                    ("idx_topo_runs_report", ("report_id",)),
+                    ("idx_topo_runs_node", ("node_id",)),
+                    ("idx_topo_runs_type", ("run_type",)),
+                    ("idx_topo_runs_status", ("status",)),
+                ),
+                ordering=240,
+                description="TOPO DataProductRun execution tracking: individual notebook/analytical runs with inputs, outputs, status, and timing.",
+            ),
         ]
 
         return cls(
