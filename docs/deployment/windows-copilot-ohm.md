@@ -525,6 +525,14 @@ Write-Host "OHM directories created under $base"
 
 ---
 
+## Other deployment scenarios
+
+- **Simpler**: [Single-Project Deployment](single-project-ohm.md) — one agent, no daemon, library mode.
+- **Remote**: [Remote Daemon Deployment](remote-copilot-ohm.md) — agents on multiple machines, CI/CD, or cloud.
+- **Linux/macOS**: [Local Agent Deployment](local-copilot-ohm.md) — same topology, systemd packaging.
+
+---
+
 ## Pending improvements
 
 The Windows deployment works today with env-var sidecars, but two upcoming issues make it cleaner:

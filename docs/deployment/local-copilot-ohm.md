@@ -278,4 +278,7 @@ After deployment:
 2. Define skills/runbooks (`OHM-461f`) so agents know when and how to query OHM.
 3. Configure Agent Profiles (`OHM-yzyk.3`) for agents that use both SDK and MCP.
 
-For hosted or remote agents, see `OHM-yzyk.2` (hosted MCP gateway).
+For other deployment scenarios:
+- **Simpler**: [Single-Project Deployment](single-project-ohm.md) — one agent, no daemon.
+- **Remote**: [Remote Daemon Deployment](remote-copilot-ohm.md) — agents on multiple machines, CI/CD, or cloud.
+- **Hosted gateway**: `OHM-yzyk.2` (planned).

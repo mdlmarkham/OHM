@@ -443,9 +443,11 @@ See [ADR-006](docs/adr/0007-schema-evolution-and-type-governance.md) (graduated 
 - [Integration Patterns](docs/integration-patterns.md) — OHM + HZL, task nodes, provenance, challenge/support, reliability tracking
 - [Edge Type Guide](docs/edge-type-guide.md) — All 30+ edge types across L1-L4
 - [Schema](docs/schema.md) — Node types, edge types, layers, confidence
-- [Deployment](docs/deployment.md) — Installation and configuration
-- [Local Agent Deployment](docs/deployment/local-copilot-ohm.md) — System-level `ohmd` + per-tenant MCP endpoints for Copilot, Cursor, Claude Code, and OpenCode
-- [Local Agent Deployment (Windows)](docs/deployment/windows-copilot-ohm.md) — Same topology, packaged for Windows (Task Scheduler, NSSM, WinSW)
+- [Deployment Guide](docs/deployment.md) — Scenario index: single project, local daemon, remote daemon
+- [Single-Project Deployment](docs/deployment/single-project-ohm.md) — One agent, no daemon, library mode
+- [Local Agent Deployment](docs/deployment/local-copilot-ohm.md) — System-level `ohmd` + per-tenant MCP (Linux/macOS)
+- [Local Agent Deployment (Windows)](docs/deployment/windows-copilot-ohm.md) — Same topology, packaged for Windows
+- [Remote Daemon Deployment](docs/deployment/remote-copilot-ohm.md) — Hosted OHM for distributed agents, CI/CD, and cloud
 - [ADR Index](docs/adr/README.md) — Architecture Decision Records
 
 ## CLI

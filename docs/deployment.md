@@ -1,14 +1,88 @@
 # OHM Deployment Guide
 
-How to run ohmd in production with TLS, authentication, and systemd.
+Choose the deployment model that matches your scale and connectivity needs.
 
-## Quick Start: Caddy Reverse Proxy
+## Deployment scenarios
 
-ohmd serves plain HTTP on `127.0.0.1:8710`. For production, run it behind
-[Caddy](https://caddyserver.com/) — a zero-config reverse proxy that
-auto-provisions Let's Encrypt TLS certificates.
+| Scenario | Agents | Daemon | Network | Best for |
+|----------|--------|--------|---------|----------|
+| [Single project](single-project-ohm.md) | 1 | None | None (library mode) | A solo developer or researcher with one agent |
+| [Local daemon](local-copilot-ohm.md) | 2–10 | One `ohmd --multi-tenant` | localhost only | A small team with multiple agents or tenants |
+| [Remote daemon](remote-copilot-ohm.md) | 2–50+ | One `ohmd` behind TLS proxy | HTTPS | Agents on multiple machines, CI/CD, or cloud |
+| [Per-agent cache](#per-agent-local-duckdb) | Any | Optional | Sync via DuckLake | Zero-latency local reads with shared knowledge |
 
-### 1. Install Caddy
+Each scenario builds on the one before it. Start with **single project** and add components as needed.
+
+---
+
+## 1. Single project — library mode
+
+The simplest deployment: one agent, one local DuckDB, no daemon, no HTTP.
+
+```python
+from ohm.store import OhmStore
+
+store = OhmStore.for_agent(
+    agent_name="metis",
+    ducklake_path="/var/lib/ohm/ohm_lake.ducklake",  # optional sync
+)
+store.write_node(id="concept-x", label="X", type="concept")
+result = store.sync_heartbeat()  # push/pull from DuckLake if configured
+```
+
+See [Single-Project Deployment](single-project-ohm.md) for the full guide.
+
+---
+
+## 2. Local daemon — multi-tenant
+
+One `ohmd` daemon on the local machine, multiple tenants, one MCP sidecar per tenant.
+
+```text
+┌─────────────────────────────────────┐
+│        system-level ohmd            │
+│  (--multi-tenant, port 8710)        │
+│  ┌──────────────┐ ┌──────────────┐  │
+│  │ tenant: devops│ │ tenant: dataops│ │
+│  └──────┬───────┘ └──────┬───────┘  │
+└─────────┼────────────────┼──────────┘
+     ohm-mcp-devops    ohm-mcp-dataops
+          │                │
+     Copilot "OHM DevOps"   Copilot "OHM DataOps"
+```
+
+- Linux/macOS: [Local Agent Deployment](local-copilot-ohm.md)
+- Windows: [Windows Local Agent Deployment](windows-copilot-ohm.md)
+
+---
+
+## 3. Remote daemon — hosted gateway
+
+Agents on different machines connect to a shared `ohmd` over HTTPS. Use a reverse proxy (Caddy, nginx) for TLS termination and access control.
+
+```text
+┌──────────────────────┐
+│  ohmd behind Caddy   │
+│  ohm.example.com     │
+│  (TLS, auth, rate    │
+│   limiting)          │
+└──────────┬───────────┘
+           │ HTTPS
+    ┌──────┼──────┐
+    │      │      │
+  Agent 1  Agent 2  CI/CD
+  (SDK)    (MCP)   (CLI)
+```
+
+See [Remote Daemon Deployment](remote-copilot-ohm.md) for the full guide, or read on for the production Caddy/nginx configuration.
+
+---
+
+## Production reverse proxy
+
+ohmd serves plain HTTP on `127.0.0.1:8710`. For production, run it behind a reverse proxy that handles TLS and access control.
+
+### Caddy (recommended)
 
 ```bash
 # Debian/Ubuntu
@@ -21,32 +95,13 @@ sudo apt update && sudo apt install caddy
 brew install caddy
 ```
 
-### 2. Caddyfile
-
-Create `/etc/caddy/Caddyfile`:
+`/etc/caddy/Caddyfile`:
 
 ```caddyfile
 ohm.example.com {
     reverse_proxy 127.0.0.1:8710
 
-    # Optional: rate limit at the reverse proxy level
-    # rate_limit {
-    #     zone dynamic {
-    #         key {remote_host}
-    #         events 100
-    #         window 1m
-    #     }
-    # }
-
-    # Optional: IP allowlist for admin endpoints
-    # @admin path /admin*
-    # handle @admin {
-    #     @allowed remote_ip 10.0.0.0/8 172.16.0.0/12
-    #     respond @allowed 403
-    # }
-
     header {
-        # Security headers
         Strict-Transport-Security "max-age=31536000; includeSubDomains"
         X-Content-Type-Options "nosniff"
         X-Frame-Options "DENY"
@@ -55,29 +110,42 @@ ohm.example.com {
 }
 ```
 
-### 3. Start Caddy
-
 ```bash
 sudo systemctl enable --now caddy
-sudo systemctl reload caddy
 ```
 
-Caddy auto-provisions TLS certificates from Let's Encrypt. No manual
-certificate management needed.
+### nginx
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name ohm.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/ohm.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/ohm.example.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:8710;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+---
 
 ## ohmd Configuration
 
 ### Token Setup
 
-Generate tokens for each agent:
-
 ```bash
 ohmd --init-token metis
 ohmd --init-token clio
-ohmd --init-token socrates
 ```
 
-This writes tokens to `~/.ohm/ohmd.json`. Copy tokens to agents securely.
+Writes tokens to `~/.ohm/ohmd.json`. Copy tokens to agents securely.
 
 ### Production Config
 
@@ -90,13 +158,11 @@ This writes tokens to `~/.ohm/ohmd.json`. Copy tokens to agents securely.
   "db_path": "/var/lib/ohm/ohm.duckdb",
   "tokens": {
     "abc123...": "metis",
-    "def456...": "clio",
-    "ghi789...": "socrates"
+    "def456...": "clio"
   },
   "roles": {
     "metis": "read-write",
-    "clio": "read-write",
-    "socrates": "read-only"
+    "clio": "read-write"
   }
 }
 ```
@@ -121,7 +187,6 @@ Environment=OHM_DB_PATH=/var/lib/ohm/ohm.duckdb
 Environment=OHM_HOST=127.0.0.1
 Environment=OHM_PORT=8710
 
-# Security hardening
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
@@ -139,27 +204,7 @@ sudo chown ohm:ohm /var/lib/ohm
 sudo systemctl enable --now ohmd
 ```
 
-## Alternative: nginx
-
-If you prefer nginx:
-
-```nginx
-server {
-    listen 443 ssl http2;
-    server_name ohm.example.com;
-
-    ssl_certificate     /etc/letsencrypt/live/ohm.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/ohm.example.com/privkey.pem;
-
-    location / {
-        proxy_pass http://127.0.0.1:8710;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-```
+---
 
 ## Security Checklist
 
@@ -168,41 +213,36 @@ server {
 - [ ] Tokens configured for all agents
 - [ ] Roles set (read-only for observers)
 - [ ] `--no-auth` flag NOT used in production
-- [ ] Database file permissions: `600` (owner read/write only)
-- [ ] Config file permissions: `600` (contains plaintext tokens)
-- [ ] Firewall allows only 443 (HTTPS), not 8710 (ohmd direct)
-- [ ] systemd service runs as unprivileged `ohm` user
+- [ ] Database file permissions: `600`
+- [ ] Config file permissions: `600`
+- [ ] Firewall allows only 443 (HTTPS), not 8710
+
+---
 
 ## Per-Agent Local DuckDB
 
-Each agent can run its own local DuckDB for zero-latency reads/writes,
-syncing to the shared DuckLake on heartbeat. This eliminates the
-single-writer bottleneck of the centralized daemon.
+Each agent can run its own local DuckDB for zero-latency reads/writes, syncing to a shared DuckLake on heartbeat. This works in any scenario — with or without a daemon.
 
 ### Setup
 
 ```python
 from ohm.store import OhmStore
-from ohm.schema import SchemaConfig
 
-# Each agent creates its own store
 store = OhmStore.for_agent(
     agent_name="metis",
     ducklake_path="/var/lib/ohm/ohm_lake.ducklake",
 )
 
-# Read/write locally (zero latency, no HTTP)
 store.write_node(id="concept-x", label="X", type="concept", ...)
 node = store.get_node("concept-x")
 
-# Sync with other agents on heartbeat
 result = store.sync_heartbeat()
 # → {"pushed": 3, "pulled": 7, "last_sync": "..."}
 ```
 
 ### Architecture
 
-```
+```text
 Agent (local DuckDB)  ←→  DuckLake (shared Parquet)  ←→  Agent (local DuckDB)
 
 Each agent:
@@ -225,11 +265,16 @@ ohmd:
 
 See [ADR-012](adr/0012-per-agent-local-cache.md) for full details.
 
+---
 
-## Local agents with MCP
+## Scenario comparison
 
-For small teams using GitHub Copilot, Cursor, Claude Code, or OpenCode locally, see [Deploying OHM for Local Agents: System Daemon + Per-Tenant MCP](local-copilot-ohm.md).
-
-### Windows
-
-For the same topology on Windows, see [Deploying OHM on Windows for Local Agents](windows-copilot-ohm.md).
+| Feature | Single project | Local daemon | Remote daemon |
+|---------|---------------|--------------|---------------|
+| Daemon required | No | Yes (localhost) | Yes (TLS) |
+| Multi-tenant | No | Yes | Yes |
+| MCP access | No | Yes (stdio/SSE) | Yes (SSE/HTTPS) |
+| SDK access | Yes (local) | Yes (local + HTTP) | Yes (HTTPS) |
+| Cross-agent sync | DuckLake only | DuckLake + daemon | DuckLake + daemon |
+| Setup complexity | Minimal | Medium | Medium + TLS |
+| Best for | Solo dev, research | Small team, local agents | Team, CI/CD, cloud |
