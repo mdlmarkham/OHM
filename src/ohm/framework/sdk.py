@@ -5412,7 +5412,7 @@ class Graph:
         """
         from ohm.queries import create_event as _create_event
 
-        return _create_event(
+        result = _create_event(
             self._conn,
             event_id=event_id,
             plan_id=plan_id,
@@ -5431,6 +5431,22 @@ class Graph:
             metadata=metadata,
             **kwargs,
         )
+
+        # Fire post_event_create hooks for propagation (OHM-vatf)
+        try:
+            from ohm.hooks import HookRunner
+
+            runner = HookRunner(self._conn)
+            runner.run_hooks("post_event_create", {"event": result})
+        except Exception:
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                "post_event_create hook failed for event %s (non-fatal)", event_id
+            )
+
+        return result
 
     def get_event(self, event_id: str) -> dict[str, Any] | None:
         """Retrieve a single TOPO event by ID.

@@ -138,6 +138,7 @@ def _register_builtin_hooks(store: OhmStore) -> None:
         ("pre_ingest", "python:ohm.hooks_builtin.cross_link_check", "system"),
         ("pre_ingest", "python:ohm.hooks_builtin.source_url_required", "system"),
         ("pre_ingest", "python:ohm.hooks_builtin.observation_source_required", "system"),
+        ("post_event_create", "python:ohm.hooks_builtin.propagate_on_event", "system"),
     ]
     for event, command, created_by in builtins:
         existing = store.conn.execute(
