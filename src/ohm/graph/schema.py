@@ -1059,8 +1059,10 @@ class SchemaConfig:
                     ("id", "VARCHAR"),
                     ("node_id", "VARCHAR"),
                     ("plan_type", "VARCHAR"),
-                    ("horizon_start", "TIMESTAMP"),
-                    ("horizon_end", "TIMESTAMP"),
+                    ("label", "VARCHAR"),
+                    ("start_ts", "TIMESTAMP"),
+                    ("end_ts", "TIMESTAMP"),
+                    ("horizon", "VARCHAR"),
                     ("status", "VARCHAR DEFAULT 'active'"),
                     ("created_by", "VARCHAR NOT NULL"),
                     ("created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
@@ -1071,10 +1073,11 @@ class SchemaConfig:
                 indexes=(
                     ("idx_topo_plans_node", ("node_id",)),
                     ("idx_topo_plans_type", ("plan_type",)),
-                    ("idx_topo_plans_horizon", ("horizon_start", "horizon_end")),
+                    ("idx_topo_plans_window", ("start_ts", "end_ts")),
                     ("idx_topo_plans_status", ("status",)),
+                    ("idx_topo_plans_horizon", ("horizon",)),
                 ),
-                ordering=150,
+                ordering=200,
                 description="TOPO maintenance plans: time-bounded groupings of events (e.g., 4-day maintenance window, annual outage).",
             ),
             DomainTable(
@@ -1083,11 +1086,22 @@ class SchemaConfig:
                     ("id", "VARCHAR"),
                     ("plan_id", "VARCHAR"),
                     ("node_id", "VARCHAR"),
-                    ("event_type", "VARCHAR"),
-                    ("start_time", "TIMESTAMP"),
-                    ("end_time", "TIMESTAMP"),
-                    ("severity", "VARCHAR"),
+                    ("node_path", "VARCHAR"),
+                    ("event_class", "VARCHAR"),
+                    ("title", "VARCHAR"),
+                    ("start_ts", "TIMESTAMP"),
+                    ("end_ts", "TIMESTAMP"),
+                    ("horizon", "VARCHAR"),
+                    ("operating_state", "VARCHAR"),
                     ("description", "TEXT"),
+                    ("source_refs", "JSON"),
+                    ("l3_context", "JSON"),
+                    ("flow_impact", "JSON"),
+                    ("forecast_basis", "JSON"),
+                    ("decision_metadata", "JSON"),
+                    ("confidence", "DOUBLE"),
+                    ("authority", "VARCHAR"),
+                    ("revision", "INTEGER DEFAULT 1"),
                     ("created_by", "VARCHAR NOT NULL"),
                     ("created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
                     ("updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
@@ -1097,10 +1111,12 @@ class SchemaConfig:
                 indexes=(
                     ("idx_topo_events_plan", ("plan_id",)),
                     ("idx_topo_events_node", ("node_id",)),
-                    ("idx_topo_events_type", ("event_type",)),
-                    ("idx_topo_events_time", ("start_time", "end_time")),
+                    ("idx_topo_events_path_class", ("node_path", "event_class", "start_ts")),
+                    ("idx_topo_events_path_window", ("node_path", "start_ts", "end_ts")),
+                    ("idx_topo_events_horizon", ("plan_id", "horizon", "event_class")),
+                    ("idx_topo_events_state", ("operating_state", "start_ts")),
                 ),
-                ordering=160,
+                ordering=210,
                 description="TOPO temporal events: discrete occurrences within a plan (e.g., shutdown, restart, inspection, outage).",
             ),
             DomainTable(
@@ -1109,7 +1125,10 @@ class SchemaConfig:
                     ("id", "VARCHAR"),
                     ("from_event_id", "VARCHAR"),
                     ("to_event_id", "VARCHAR"),
-                    ("link_type", "VARCHAR"),
+                    ("edge_type", "VARCHAR"),
+                    ("layer", "VARCHAR DEFAULT 'L1'"),
+                    ("confidence", "DOUBLE DEFAULT 1.0"),
+                    ("revision", "INTEGER DEFAULT 1"),
                     ("created_by", "VARCHAR NOT NULL"),
                     ("created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
                     ("metadata", "JSON"),
@@ -1118,9 +1137,10 @@ class SchemaConfig:
                 indexes=(
                     ("idx_topo_elinks_from", ("from_event_id",)),
                     ("idx_topo_elinks_to", ("to_event_id",)),
-                    ("idx_topo_elinks_type", ("link_type",)),
+                    ("idx_topo_elinks_from_type", ("from_event_id", "edge_type")),
+                    ("idx_topo_elinks_to_type", ("to_event_id", "edge_type")),
                 ),
-                ordering=170,
+                ordering=220,
                 description="TOPO event links: directed relationships between events (e.g., caused_by, followed_by, overlaps).",
             ),
         ]
@@ -2641,6 +2661,11 @@ def _create_domain_tables(conn: "DuckDBPyConnection", schema: "SchemaConfig | No
                 err = str(e).lower()
                 if "already exists" in err:
                     pass
+                elif "not found" in err or "binder error" in err:
+                    logger.debug(
+                        "Skipping index '%s' on '%s' (column not found, migration may be pending): %s",
+                        idx_name, dt.name, e,
+                    )
                 else:
                     raise RuntimeError(f"Failed to create index '{idx_name}' on '{dt.name}': {e}") from e
 
@@ -2691,6 +2716,127 @@ def _create_domain_tables(conn: "DuckDBPyConnection", schema: "SchemaConfig | No
         len(schema.domain_tables),
         schema.name,
     )
+
+    # OHM-dh9l.1: migrate TOPO temporal tables from pilot to target column vocabulary.
+    if schema.name == "topo":
+        _migrate_topo_temporal_tables(conn)
+
+
+def _column_exists(conn: "DuckDBPyConnection", table_name: str, col_name: str) -> bool:
+    """Return True if *col_name* exists on *table_name* (OHM-dh9l.1)."""
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_name = ? AND column_name = ?",
+            [table_name, col_name],
+        ).fetchone()
+        return row is not None and row[0] > 0
+    except Exception:
+        return False
+
+
+def _rename_column_if_exists(conn: "DuckDBPyConnection", table: str, old_col: str, new_col: str) -> None:
+    """Rename *old_col* to *new_col* on *table* if the old column exists and the new one does not."""
+    if _column_exists(conn, table, old_col) and not _column_exists(conn, table, new_col):
+        try:
+            conn.execute(f"ALTER TABLE {table} RENAME COLUMN {old_col} TO {new_col}")
+            logger.info("Renamed %s.%s → %s", table, old_col, new_col)
+        except Exception as e:
+            logger.warning("Failed to rename %s.%s → %s: %s", table, old_col, new_col, e)
+
+
+def _add_column_if_not_exists(conn: "DuckDBPyConnection", table: str, col_name: str, col_type: str) -> None:
+    """Add *col_name* to *table* if it does not already exist."""
+    if not _column_exists(conn, table, col_name):
+        try:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}")
+            logger.info("Added column %s.%s (%s)", table, col_name, col_type)
+        except Exception as e:
+            err = str(e).lower()
+            if "already exists" in err or "column with name" in err:
+                pass
+            else:
+                logger.warning("Failed to add column %s.%s: %s", table, col_name, e)
+
+
+def _drop_index_if_exists(conn: "DuckDBPyConnection", index_name: str) -> None:
+    """Drop *index_name* if it exists (idempotent)."""
+    try:
+        conn.execute(f"DROP INDEX IF EXISTS {index_name}")
+    except Exception:
+        pass
+
+
+def _migrate_topo_temporal_tables(conn: "DuckDBPyConnection") -> None:
+    """Migrate TOPO temporal tables from pilot to target column vocabulary (OHM-dh9l.1).
+
+    The pilot (OHM-dm2b) shipped with a simplified column vocabulary:
+    ``event_type``/``severity``/``start_time``/``end_time``/``horizon_start``/
+    ``horizon_end``/``link_type``. The target vocabulary (ADR-041) renames
+    these and adds new columns for richer temporal semantics.
+
+    This migration is idempotent: it detects the old pilot schema by the
+    presence of the ``event_type`` column on ``topo_events`` and renames/adds
+    columns only when the old schema is found. Re-running on an already-
+    migrated or fresh database is a no-op.
+    """
+    # Gate: only run if topo_events exists and has the old event_type column.
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_name = 'topo_events' AND column_name = 'event_type'"
+        ).fetchone()
+    except Exception:
+        return
+    if row is None or row[0] == 0:
+        return  # Fresh schema or already migrated
+
+    logger.info("Migrating TOPO temporal tables to target column vocabulary (OHM-dh9l.1)")
+
+    # --- topo_plans: horizon_start → start_ts, horizon_end → end_ts ---
+    _rename_column_if_exists(conn, "topo_plans", "horizon_start", "start_ts")
+    _rename_column_if_exists(conn, "topo_plans", "horizon_end", "end_ts")
+    _add_column_if_not_exists(conn, "topo_plans", "label", "VARCHAR")
+    _add_column_if_not_exists(conn, "topo_plans", "horizon", "VARCHAR")
+    # The old idx_topo_plans_horizon was on (horizon_start, horizon_end).
+    # After rename it's on (start_ts, end_ts). The new idx_topo_plans_horizon
+    # indexes the `horizon` column — drop the old index so the new one can
+    # be created by _create_domain_tables().
+    _drop_index_if_exists(conn, "idx_topo_plans_horizon")
+
+    # --- topo_events: event_type → event_class, severity → operating_state,
+    #     start_time → start_ts, end_time → end_ts ---
+    _rename_column_if_exists(conn, "topo_events", "event_type", "event_class")
+    _rename_column_if_exists(conn, "topo_events", "severity", "operating_state")
+    _rename_column_if_exists(conn, "topo_events", "start_time", "start_ts")
+    _rename_column_if_exists(conn, "topo_events", "end_time", "end_ts")
+    for col, typ in (
+        ("node_path", "VARCHAR"),
+        ("horizon", "VARCHAR"),
+        ("title", "VARCHAR"),
+        ("source_refs", "JSON"),
+        ("l3_context", "JSON"),
+        ("flow_impact", "JSON"),
+        ("forecast_basis", "JSON"),
+        ("decision_metadata", "JSON"),
+        ("confidence", "DOUBLE"),
+        ("authority", "VARCHAR"),
+        ("revision", "INTEGER DEFAULT 1"),
+    ):
+        _add_column_if_not_exists(conn, "topo_events", col, typ)
+    # Drop old indexes that are no longer in the target spec.
+    _drop_index_if_exists(conn, "idx_topo_events_type")
+    _drop_index_if_exists(conn, "idx_topo_events_time")
+
+    # --- topo_event_links: link_type → edge_type ---
+    _rename_column_if_exists(conn, "topo_event_links", "link_type", "edge_type")
+    _add_column_if_not_exists(conn, "topo_event_links", "layer", "VARCHAR DEFAULT 'L1'")
+    _add_column_if_not_exists(conn, "topo_event_links", "confidence", "DOUBLE DEFAULT 1.0")
+    _add_column_if_not_exists(conn, "topo_event_links", "revision", "INTEGER DEFAULT 1")
+    # Drop old index that is no longer in the target spec.
+    _drop_index_if_exists(conn, "idx_topo_elinks_type")
+
+    logger.info("TOPO temporal table migration complete (OHM-dh9l.1)")
 
 
 def get_schema_version(conn: "DuckDBPyConnection") -> str:

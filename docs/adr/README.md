@@ -686,4 +686,4 @@ Pilot the model as TOPO DomainTables (`topo_plans`, `topo_events`, `topo_event_l
 - Other OHM consumers are not forced to adopt immature temporal primitives
 - Core schema team can design `ohm_intervals` / `ohm_plans` with real field evidence
 - Future migration is acknowledged and planned, not deferred as technical debt
-- See [full ADR](ADR-041-temporal-event-model.md)
+- See [full ADR](0041-temporal-event-model.md)
