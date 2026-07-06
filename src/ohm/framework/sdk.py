@@ -5566,6 +5566,50 @@ class Graph:
             **kwargs,
         )
 
+    def propagate_observation(
+        self,
+        source_node_id: str,
+        *,
+        observation_weight: float = 1.0,
+        prior_alpha: float = 1.0,
+        prior_beta: float = 1.0,
+        max_depth: int = 10,
+        edge_types: tuple[str, ...] | None = None,
+        layers: tuple[str, ...] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Propagate a Bayesian observation downstream through the causal graph.
+
+        Walks the L3 causal graph from *source_node_id* and updates each
+        reachable node's belief using a conjugate Beta-Binomial update.
+
+        Args:
+            source_node_id: Node where the observation originates.
+            observation_weight: Strength of the observation in [0, 1]
+                (default 1.0).
+            prior_alpha: Alpha parameter of the Beta prior (default 1.0).
+            prior_beta: Beta parameter of the Beta prior (default 1.0).
+            max_depth: Maximum traversal depth (default 10).
+            edge_types: Causal edge types to traverse. Defaults to
+                ('CAUSES', 'DEPENDS_ON', 'THREATENS', 'EXPECTED_LIKELIHOOD').
+            layers: Layer filter (e.g., ('L3', 'L4')). None = all layers.
+
+        Returns:
+            List of dicts with node_id, posterior_alpha/beta, posterior_mean,
+            accumulated_weight, depth, path.
+        """
+        from ohm.queries import propagate_observation as _propagate
+
+        return _propagate(
+            self._conn,
+            source_node_id,
+            observation_weight=observation_weight,
+            prior_alpha=prior_alpha,
+            prior_beta=prior_beta,
+            max_depth=max_depth,
+            edge_types=edge_types,
+            layers=layers,
+        )
+
     def close(self) -> None:
         """Close the database connection."""
         self._conn.close()

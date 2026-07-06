@@ -4130,6 +4130,152 @@ def query_what_if(
     }
 
 
+def propagate_observation(
+    conn: DuckDBPyConnection,
+    source_node_id: str,
+    *,
+    observation_weight: float = 1.0,
+    prior_alpha: float = 1.0,
+    prior_beta: float = 1.0,
+    max_depth: int = 10,
+    edge_types: tuple[str, ...] | None = None,
+    layers: tuple[str, ...] | None = None,
+) -> list[dict[str, Any]]:
+    """Propagate a Bayesian observation downstream through the causal graph.
+
+    Walks the L3 causal graph downstream from *source_node_id* and updates
+    each reachable node's belief using a conjugate Beta-Binomial update:
+
+        posterior_alpha = prior_alpha + accumulated_weight
+        posterior_beta  = prior_beta + (1 - accumulated_weight)
+
+    The accumulated weight at each downstream node is the product of the
+    *observation_weight* and all edge probabilities/confidences along the
+    shortest path from the source.
+
+    This is a deterministic Bayesian propagation (OHM-vatf). For Monte Carlo
+    cascade simulation use :func:`monte_carlo_cascade`. For heuristic
+    probability-product cascade use :func:`query_deterministic_cascade`.
+
+    Args:
+        conn: Database connection.
+        source_node_id: Node where the observation originates.
+        observation_weight: Strength of the observation in [0, 1]
+            (default 1.0 = fully confident observation).
+        prior_alpha: Alpha parameter of the Beta prior for all downstream
+            nodes (default 1.0, i.e. uniform prior Beta(1,1)).
+        prior_beta: Beta parameter of the Beta prior (default 1.0).
+        max_depth: Maximum traversal depth (default 10).
+        edge_types: Edge types to traverse. Defaults to causal types
+            (CAUSES, DEPENDS_ON, THREATENS, EXPECTED_LIKELIHOOD).
+        layers: Optional layer filter (e.g., ('L3', 'L4')). If None,
+            all layers are included.
+
+    Returns:
+        List of dicts with keys:
+            node_id: The downstream node.
+            node_label: Human-readable label.
+            node_type: Node type from ohm_nodes.
+            depth: Distance from source in edges.
+            path: List of node IDs along the shortest path.
+            prior_alpha: The prior alpha used.
+            prior_beta: The prior beta used.
+            posterior_alpha: Updated alpha after propagation.
+            posterior_beta: Updated beta after propagation.
+            posterior_mean: posterior_alpha / (posterior_alpha + posterior_beta).
+            accumulated_weight: Total weight that reached this node.
+    """
+    from ohm.validation import validate_confidence, validate_depth, validate_identifier
+
+    source_node_id = validate_identifier(source_node_id, name="source_node_id")
+    observation_weight = validate_confidence(observation_weight)
+    max_depth = validate_depth(max_depth)
+
+    if observation_weight <= 0.0:
+        return []
+
+    if edge_types is None:
+        edge_types = ("CAUSES", "DEPENDS_ON", "THREATENS", "EXPECTED_LIKELIHOOD")
+
+    edge_type_list = list(edge_types)
+    placeholders = ", ".join(["?"] * len(edge_type_list))
+
+    layer_filter = ""
+    layer_params: list[str] = []
+    if layers:
+        layer_filter = f"AND e.layer IN ({', '.join(['?'] * len(layers))})"
+        layer_params = list(layers)
+
+    query = f"""
+        WITH RECURSIVE propagation AS (
+            SELECT
+                ? AS source_node,
+                ? AS node_id,
+                0 AS depth,
+                CAST(? AS FLOAT) AS accumulated_weight,
+                list_value(?) AS path
+            UNION ALL
+            SELECT
+                p.source_node,
+                e.to_node AS node_id,
+                p.depth + 1 AS depth,
+                CAST(
+                    p.accumulated_weight *
+                    COALESCE(e.probability, e.confidence, 0.5)
+                    AS FLOAT
+                ) AS accumulated_weight,
+                list_concat(p.path, list_value(e.to_node)) AS path
+            FROM propagation p
+            JOIN ohm_edges e ON e.from_node = p.node_id
+            WHERE p.depth < ?
+              AND e.edge_type IN ({placeholders})
+              AND e.deleted_at IS NULL
+              AND e.to_node != p.source_node
+              AND NOT list_contains(p.path, e.to_node)
+              {layer_filter}
+        )
+        SELECT DISTINCT
+            p.node_id,
+            n.label AS node_label,
+            n.type AS node_type,
+            p.depth,
+            p.path,
+            p.accumulated_weight
+        FROM propagation p
+        JOIN ohm_nodes n ON p.node_id = n.id
+        WHERE p.depth > 0
+        ORDER BY p.depth, p.accumulated_weight DESC
+    """
+    params: list[Any] = [source_node_id, source_node_id, observation_weight, source_node_id, max_depth]
+    params.extend(edge_type_list)
+    params.extend(layer_params)
+
+    result = conn.execute(query, params)
+    rows = _rows_to_dicts(result)
+
+    output = []
+    for row in rows:
+        w = float(row["accumulated_weight"])
+        post_alpha = prior_alpha + w
+        post_beta = prior_beta + (1.0 - w)
+        post_mean = post_alpha / (post_alpha + post_beta) if (post_alpha + post_beta) > 0 else 0.5
+        output.append({
+            "node_id": row["node_id"],
+            "node_label": row["node_label"],
+            "node_type": row["node_type"],
+            "depth": row["depth"],
+            "path": row["path"],
+            "prior_alpha": prior_alpha,
+            "prior_beta": prior_beta,
+            "posterior_alpha": round(post_alpha, 6),
+            "posterior_beta": round(post_beta, 6),
+            "posterior_mean": round(post_mean, 6),
+            "accumulated_weight": round(w, 6),
+        })
+
+    return output
+
+
 # ── Customer Support: Handoff, Escalation, Provenance ───────────────────────
 
 HANDOFF_EDGE_TYPES = frozenset(
