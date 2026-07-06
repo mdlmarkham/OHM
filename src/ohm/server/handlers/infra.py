@@ -55,6 +55,8 @@ class InfraHandlerMixin:
                     "/status": {"method": "GET", "description": "Daemon status and configuration"},
                     "/schema": {"method": "GET", "description": "Node types, edge types, layers"},
                     "/layers": {"method": "GET", "description": "L1-L4 layer descriptions"},
+                    "/templates": {"method": "GET", "description": "Usage template for a node type (?type=skill|runbook)"},
+                    "/queries": {"method": "GET", "description": "Useful query patterns for a domain (?domain=skill|runbook|open-skills)"},
                     "/node/{id}": {"method": "GET", "description": "Get a single node by ID"},
                     "/edge/{id}": {"method": "GET", "description": "Get a single edge by ID"},
                     "/neighborhood/{id}": {"method": "GET", "description": "Bounded-depth graph traversal"},

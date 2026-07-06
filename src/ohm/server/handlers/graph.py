@@ -343,6 +343,42 @@ class GraphHandlerMixin:
         """GET /layers — layer descriptions."""
         self._json_response(200, self.schema_config.layer_descriptions)
 
+    def _get_templates(self, path: str, qs: dict) -> None:
+        """GET /templates?type=<node_type> — usage template for a node type (OHM-461f.1)."""
+        from ohm.queries import node_type_template
+
+        node_type = qs.get("type", [""])[0]
+        if not node_type:
+            self._json_response(
+                200,
+                {
+                    "ok": True,
+                    "available_types": ["skill", "runbook"],
+                    "usage": "GET /templates?type=skill or GET /templates?type=runbook",
+                },
+            )
+            return
+        result = node_type_template(self.current_store.read_conn, node_type=node_type)
+        self._json_response(200, {"ok": True, "data": result})
+
+    def _get_queries(self, path: str, qs: dict) -> None:
+        """GET /queries?domain=<domain> — useful query patterns for a domain (OHM-461f.1)."""
+        domain = qs.get("domain", [""])[0]
+        if domain in ("skill", "runbook", "open-skills"):
+            from ohm.queries import skill_runbook_query_guide
+
+            result = skill_runbook_query_guide(self.current_store.read_conn)
+            self._json_response(200, {"ok": True, "data": result})
+            return
+        self._json_response(
+            200,
+            {
+                "ok": True,
+                "available_domains": ["skill", "runbook", "open-skills"],
+                "usage": "GET /queries?domain=skill",
+            },
+        )
+
     def _get_node(self, path: str, qs: dict) -> None:
         """GET /node/<id> — fetch a node with effective_layer and constraint_status."""
         node_id = path[6:]

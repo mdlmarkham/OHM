@@ -2162,6 +2162,26 @@ def suggest_edge_type(
         suggested_layer = "L3"
         reasoning = f"Decision→{to_type} should use DECISION_DEPENDS_ON."
         alternatives = ["RELATED_TO"]
+    elif from_type == "runbook" and to_type == "skill":
+        suggested_edge_type = "DEPENDS_ON"
+        suggested_layer = "L4"
+        reasoning = "runbook→skill should use DEPENDS_ON (L4). A runbook is an ordered chain of skills; each DEPENDS_ON edge encodes step order."
+        alternatives = ["ENABLES"]
+    elif from_type == "skill" and to_type == "runbook":
+        suggested_edge_type = "ENABLES"
+        suggested_layer = "L4"
+        reasoning = "skill→runbook should use ENABLES (L4). A skill enables the runbook it participates in."
+        alternatives = ["DEPENDS_ON"]
+    elif from_type == "skill" and to_type == "skill":
+        suggested_edge_type = "DEPENDS_ON"
+        suggested_layer = "L4"
+        reasoning = "skill→skill should use DEPENDS_ON (L4) to express prerequisite ordering between skill steps."
+        alternatives = ["RELATED_TO"]
+    elif from_type in {"skill", "runbook"} and to_type == "agent":
+        suggested_edge_type = "CAPABLE_OF"
+        suggested_layer = "L1"
+        reasoning = f"{from_type}→agent should use CAPABLE_OF (L1). The agent is capable of performing this {from_type}."
+        alternatives = ["USES"]
     else:
         suggested_edge_type = "RELATED_TO"
         suggested_layer = "L3"
@@ -2333,6 +2353,137 @@ def get_runbook_steps(
         "label": row[1],
         "skills": skills,
         "skill_count": len(skills),
+    }
+
+
+def node_type_template(
+    conn: DuckDBPyConnection,
+    *,
+    node_type: str,
+) -> dict[str, Any]:
+    """Return a usage template for a node type (OHM-461f.1).
+
+    Provides required/optional fields, an example payload, and suggested edge
+    types so agents can construct valid nodes without reading the ADR.
+    """
+    from ohm.validation import validate_identifier
+
+    node_type = validate_identifier(node_type, name="node_type").lower()
+
+    templates: dict[str, dict[str, Any]] = {
+        "skill": {
+            "node_type": "skill",
+            "description": "Portable agent capability with trigger, scope, tools, boundaries, output, and verification evidence.",
+            "required_fields": {"label": "str", "trigger": "str (stored in metadata.trigger)"},
+            "optional_fields": {
+                "scope": "personal | project | universal (default personal)",
+                "required_tools": "list[str] (tools the skill needs)",
+                "boundaries": "str (what the skill should NOT do)",
+                "output_format": "str (expected output shape)",
+                "verification_evidence": "list[str] (evidence types the skill produces)",
+                "connects_to": "list[str] (existing node ids to cross-link)",
+            },
+            "example": {
+                "label": "Verify causal claim against source",
+                "trigger": "When a new CAUSES edge is created with confidence > 0.8",
+                "scope": "project",
+                "required_tools": ["ohm.graph.queries.get_edge", "ohm.graph.queries.get_node"],
+                "boundaries": "Read-only. Do not modify the edge under review.",
+                "output_format": "observation record with outcome=True/False",
+                "verification_evidence": ["source_url", "source_tier"],
+                "connects_to": ["existing_claim_node_id"],
+            },
+            "suggested_edge_types": [
+                {"edge_type": "DEPENDS_ON", "layer": "L4", "when": "skill→skill prerequisite"},
+                {"edge_type": "CAPABLE_OF", "layer": "L1", "when": "agent→skill (agent can perform)"},
+                {"edge_type": "ENABLES", "layer": "L4", "when": "skill→runbook"},
+            ],
+            "create_endpoint": "POST /skill",
+        },
+        "runbook": {
+            "node_type": "runbook",
+            "description": "Ordered chain of skill nodes connected by DEPENDS_ON edges. Represents a repeatable procedure.",
+            "required_fields": {"label": "str", "skill_ids": "list[str] (existing skill node ids, in order)"},
+            "optional_fields": {
+                "description": "str (what the runbook accomplishes)",
+                "connects_to": "list[str] (existing node ids to cross-link)",
+            },
+            "example": {
+                "label": "Causal claim verification runbook",
+                "skill_ids": ["skill_fetch_edge", "skill_check_source", "skill_record_observation"],
+                "description": "Fetch a causal edge, validate its source, and record an observation outcome.",
+            },
+            "suggested_edge_types": [
+                {"edge_type": "DEPENDS_ON", "layer": "L4", "when": "runbook→skill (step ordering)"},
+                {"edge_type": "ENABLES", "layer": "L4", "when": "skill→runbook (skill participates)"},
+            ],
+            "create_endpoint": "POST /runbook",
+            "query_endpoint": "GET /runbook/{id}/steps",
+        },
+    }
+
+    if node_type not in templates:
+        return {
+            "node_type": node_type,
+            "error": "no template available for this node type",
+            "available_types": list(templates.keys()),
+        }
+
+    return templates[node_type]
+
+
+def skill_runbook_query_guide(
+    conn: DuckDBPyConnection,
+) -> dict[str, Any]:
+    """Return useful query patterns for skill/runbook graphs (OHM-461f.1).
+
+    Lists endpoint recipes an agent can call to discover, traverse, and audit
+    skill and runbook nodes.
+    """
+    return {
+        "queries": [
+            {
+                "name": "list_all_skills",
+                "endpoint": "GET /nodes?type=skill",
+                "description": "List every skill node in the graph.",
+            },
+            {
+                "name": "list_all_runbooks",
+                "endpoint": "GET /nodes?type=runbook",
+                "description": "List every runbook node in the graph.",
+            },
+            {
+                "name": "get_runbook_steps",
+                "endpoint": "GET /runbook/{runbook_id}/steps",
+                "description": "Fetch the ordered skill chain for a runbook.",
+            },
+            {
+                "name": "suggest_edge_for_skill_pair",
+                "endpoint": "GET /edge/suggest-type?from={skill_id}&to={skill_id}",
+                "description": "Suggest the correct edge type between two skills (typically DEPENDS_ON L4).",
+            },
+            {
+                "name": "find_skills_for_agent",
+                "endpoint": "GET /neighborhood/{agent_node_id}?layer=L1",
+                "description": "Find skills an agent is capable of via CAPABLE_OF edges.",
+            },
+            {
+                "name": "trace_runbook_dependencies",
+                "endpoint": "GET /neighborhood/{runbook_id}?layer=L4",
+                "description": "Trace the DEPENDS_ON chain from a runbook to its skills.",
+            },
+            {
+                "name": "search_skills_by_trigger",
+                "endpoint": "GET /search?q={trigger_keyword}&type=skill",
+                "description": "Full-text search skill nodes by trigger keywords.",
+            },
+        ],
+        "edge_types": {
+            "skill_to_skill": "DEPENDS_ON (L4) — prerequisite ordering",
+            "runbook_to_skill": "DEPENDS_ON (L4) — step order in the chain",
+            "skill_to_runbook": "ENABLES (L4) — skill participates in runbook",
+            "agent_to_skill": "CAPABLE_OF (L1) — agent can perform this skill",
+        },
     }
 
 

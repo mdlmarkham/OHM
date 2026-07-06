@@ -806,6 +806,8 @@ def _build_router() -> _RouteRegistry:
         "/graph/changes",
         "/markov/absorbing",
         "/markov/expected_steps",
+        "/templates",
+        "/queries",
     ):
         r.add("GET", _p)
 
@@ -2539,6 +2541,8 @@ OhmHandler._GET_EXACT = {
     "/stats": "_get_stats",
     "/status": "_get_status",
     "/schema": "_get_schema",
+    "/templates": "_get_templates",
+    "/queries": "_get_queries",
     "/layers": "_get_layers",
     "/agents": "_get_agents",
     "/nodes": "_get_nodes",
