@@ -56,6 +56,8 @@ VALID_HOOK_EVENTS = frozenset(
         "post_parse",
         "pre_commit",
         "post_commit",
+        # Event-driven propagation (OHM-vatf)
+        "post_event_create",
         "on_error",
     }
 )

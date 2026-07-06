@@ -200,3 +200,67 @@ def observation_source_required(payload: dict[str, Any]) -> tuple[int, str, str]
 
     # Advisory mode: log warning but allow
     return 0, "", ""
+
+
+TRIGGER_EVENT_CLASSES = frozenset({"FAILURE", "UNPLANNED_STOP", "COMPLETED"})
+
+
+def propagate_on_event(payload: dict) -> tuple[int, str, str]:
+    """Propagate observation downstream when a triggering event is created.
+
+    Registered as a ``post_event_create`` hook. When an event with a
+    triggering event_class (FAILURE, UNPLANNED_STOP, COMPLETED) is created,
+    calls ``propagate_observation`` from the event's source node using the
+    event's confidence as the observation weight.
+
+    payload keys:
+        event: dict — the created event record returned by create_event
+        __conn: connection — DuckDB connection (injected by HookRunner)
+    """
+    import json
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    event = payload.get("event", {})
+    event_class = event.get("event_class", "")
+    node_id = event.get("node_id")
+    confidence = event.get("confidence")
+    conn = payload.get("__conn")
+
+    if conn is None:
+        logger.warning("propagate_on_event: no __conn in payload")
+        return 1, "", "propagate_on_event: no database connection"
+
+    if event_class not in TRIGGER_EVENT_CLASSES:
+        return 0, "", ""
+
+    if not node_id:
+        return 0, "", ""
+
+    obs_weight = confidence if confidence is not None and 0.0 < confidence <= 1.0 else 1.0
+
+    try:
+        from ohm.graph.queries import propagate_observation
+
+        results = propagate_observation(
+            conn,
+            node_id,
+            observation_weight=obs_weight,
+        )
+
+        summary = {
+            "propagated": True,
+            "source_node_id": node_id,
+            "event_class": event_class,
+            "observation_weight": obs_weight,
+            "nodes_updated": len(results),
+            "downstream": [
+                {"node_id": r["node_id"], "posterior_mean": r["posterior_mean"]}
+                for r in results
+            ],
+        }
+        return 0, json.dumps(summary), ""
+    except Exception as e:
+        logger.warning("propagate_on_event: propagation failed for event %s: %s", event.get("id", "?"), e)
+        return 0, json.dumps({"propagated": False, "error": str(e)}), ""
