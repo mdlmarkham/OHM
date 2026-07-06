@@ -723,6 +723,30 @@ def build_parser() -> argparse.ArgumentParser:
     hooks_run.add_argument("--payload", default=None, help="Path to JSON payload file (default: stdin)")
     hooks_run.add_argument("--db", default=None, help="Database path (default: ~/.ohm/ohm.duckdb)")
 
+    # ── instances ──────────────────────────────────────────────────────
+    # OHM-yzyk.5: instance registry and discovery
+    instances_parser = subparsers.add_parser("instances", help="OHM instance discovery and registry (OHM-yzyk.5)")
+    instances_sub = instances_parser.add_subparsers(dest="instances_command", help="Instance commands")
+
+    # instances list
+    inst_list = instances_sub.add_parser("list", help="List discovered OHM instances")
+    inst_list.add_argument("--registry", default=None, help="Path to registry JSON (default: ~/.ohm/registry.json)")
+
+    # instances discover
+    inst_discover = instances_sub.add_parser("discover", help="Scan local config and probe for OHM instances")
+    inst_discover.add_argument("--output", default=None, help="Write registry JSON to this path (default: ~/.ohm/registry.json)")
+    inst_discover.add_argument("--timeout", type=float, default=3.0, help="Probe timeout in seconds (default: 3)")
+
+    # instances health
+    inst_health = instances_sub.add_parser("health", help="Check health of all discovered instances")
+    inst_health.add_argument("--registry", default=None, help="Path to registry JSON")
+    inst_health.add_argument("--timeout", type=float, default=5.0, help="Health check timeout in seconds")
+
+    # instances show
+    inst_show = instances_sub.add_parser("show", help="Show details of a specific instance")
+    inst_show.add_argument("instance_id", help="Instance ID to show")
+    inst_show.add_argument("--registry", default=None, help="Path to registry JSON")
+
     return parser
 
 
@@ -780,6 +804,8 @@ def _dispatch(args: argparse.Namespace) -> None:
         _handle_topo(args)
     elif args.command == "hooks":
         _handle_hooks(args)
+    elif args.command == "instances":
+        _handle_instances(args)
 
 
 def _handle_sync(args: argparse.Namespace) -> None:
@@ -2993,4 +3019,172 @@ def _handle_hooks(args: argparse.Namespace) -> None:
             conn.close()
     else:
         print("Usage: ohm hooks [list|run] ...")
+        _sys.exit(1)
+
+
+def _registry_path(args) -> str:
+    """Resolve the registry JSON path."""
+    return args.registry or str(Path.home() / ".ohm" / "registry.json")
+
+
+def _discover_instances(timeout: float = 3.0) -> list[dict]:
+    """Scan local config locations and probe for OHM instances (OHM-yzyk.5).
+
+    Checks well-known locations for OHM endpoints, probes each with
+    GET /instance, and returns a list of instance metadata dicts.
+    """
+    import json as _json
+    import urllib.request
+
+    candidates: list[str] = []
+
+    # Default ohmd port
+    candidates.append("http://127.0.0.1:8710")
+
+    # From environment
+    env_url = os.environ.get("OHM_URL")
+    if env_url and env_url not in candidates:
+        candidates.append(env_url)
+
+    # From per-agent config dirs
+    ohm_dir = Path.home() / ".ohm"
+    if ohm_dir.exists():
+        for agent_dir in ohm_dir.iterdir():
+            cfg = agent_dir / "ohm.json"
+            if cfg.exists():
+                try:
+                    data = _json.loads(cfg.read_text())
+                    url = data.get("ohm_url") or data.get("url")
+                    if url and url not in candidates:
+                        candidates.append(url)
+                except Exception:
+                    pass
+
+    # From /etc/ohm/ config files
+    etc_ohm = Path("/etc/ohm")
+    if etc_ohm.exists():
+        for cfg_file in etc_ohm.glob("ohmd*.json"):
+            try:
+                data = _json.loads(cfg_file.read_text())
+                host = data.get("host", "127.0.0.1")
+                port = data.get("port", 8710)
+                url = f"http://{host}:{port}"
+                if url not in candidates:
+                    candidates.append(url)
+            except Exception:
+                pass
+
+    # Probe each candidate
+    instances: list[dict] = []
+    for url in candidates:
+        try:
+            req = urllib.request.Request(
+                f"{url}/instance",
+                headers={"Accept": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                data = _json.loads(resp.read())
+                data["discovered_url"] = url
+                data["health"] = "ok"
+                instances.append(data)
+        except Exception as e:
+            instances.append({
+                "discovered_url": url,
+                "health": "unreachable",
+                "error": str(e)[:200],
+            })
+
+    return instances
+
+
+def _handle_instances(args: argparse.Namespace) -> None:
+    """Handle 'ohm instances' subcommands (OHM-yzyk.5)."""
+    import json as _json
+    import sys as _sys
+
+    if args.instances_command == "discover":
+        timeout = getattr(args, "timeout", 3.0)
+        instances = _discover_instances(timeout=timeout)
+        output_path = args.output or str(Path.home() / ".ohm" / "registry.json")
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        registry = {
+            "version": "1",
+            "discovered_at": _json.dumps(None),
+            "instances": instances,
+        }
+        from datetime import datetime, timezone
+
+        registry["discovered_at"] = datetime.now(timezone.utc).isoformat()
+        Path(output_path).write_text(_json.dumps(registry, indent=2))
+        print(f"Discovered {len(instances)} instance(s). Registry: {output_path}")
+        for inst in instances:
+            status = inst.get("health", "unknown")
+            url = inst.get("discovered_url", "?")
+            iid = inst.get("instance_id", "?")
+            purpose = inst.get("purpose", "")
+            print(f"  {iid:30s} {url:35s} {status:12s} {purpose}")
+
+    elif args.instances_command == "list":
+        reg_path = _registry_path(args)
+        try:
+            registry = _json.loads(Path(reg_path).read_text())
+            instances = registry.get("instances", [])
+        except FileNotFoundError:
+            print(f"No registry found at {reg_path}. Run 'ohm instances discover' first.")
+            _sys.exit(1)
+        if not instances:
+            print("Registry is empty.")
+            return
+        print(f"{'Instance ID':30s} {'URL':35s} {'Health':12s} {'Purpose'}")
+        print("-" * 90)
+        for inst in instances:
+            iid = inst.get("instance_id", "?")
+            url = inst.get("discovered_url", inst.get("listen_url", "?"))
+            health = inst.get("health", "unknown")
+            purpose = inst.get("purpose", "")
+            print(f"{iid:30s} {url:35s} {health:12s} {purpose}")
+
+    elif args.instances_command == "health":
+        reg_path = _registry_path(args)
+        timeout = getattr(args, "timeout", 5.0)
+        try:
+            registry = _json.loads(Path(reg_path).read_text())
+            instances = registry.get("instances", [])
+        except FileNotFoundError:
+            print(f"No registry found at {reg_path}. Run 'ohm instances discover' first.")
+            _sys.exit(1)
+        # Re-probe each
+        import urllib.request
+
+        for inst in instances:
+            url = inst.get("discovered_url", inst.get("listen_url"))
+            if not url:
+                continue
+            try:
+                req = urllib.request.Request(f"{url}/instance", headers={"Accept": "application/json"})
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    data = _json.loads(resp.read())
+                    inst["health"] = "ok"
+                    inst.update(data)
+                    print(f"  {inst.get('instance_id', '?'):30s} {url:35s} ok")
+            except Exception as e:
+                inst["health"] = "unreachable"
+                print(f"  {inst.get('instance_id', '?'):30s} {url:35s} UNREACHABLE ({str(e)[:80]})")
+
+    elif args.instances_command == "show":
+        reg_path = _registry_path(args)
+        try:
+            registry = _json.loads(Path(reg_path).read_text())
+            instances = registry.get("instances", [])
+        except FileNotFoundError:
+            print(f"No registry found at {reg_path}. Run 'ohm instances discover' first.")
+            _sys.exit(1)
+        for inst in instances:
+            if inst.get("instance_id") == args.instance_id:
+                print(_json.dumps(inst, indent=2))
+                return
+        print(f"Instance '{args.instance_id}' not found in registry.")
+
+    else:
+        print("Usage: ohm instances [list|discover|health|show] ...")
         _sys.exit(1)
