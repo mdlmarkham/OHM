@@ -1825,7 +1825,21 @@ class OhmHandler(
         except ValueError as e:
             self._error_response(ValidationError(str(e)))
         except Exception as e:
-            self._error_response(OHMError(str(e)))
+            # OHM-hf7u: map DuckDB exceptions to appropriate HTTP codes and
+            # log the full traceback so transient 500s are diagnosable.
+            import logging as _logging
+
+            _logger = _logging.getLogger("ohm.server")
+            _type = type(e).__name__
+            if "Constraint" in _type or "constraint" in str(e).lower():
+                _logger.warning("POST %s → 409 Conflict: %s", self.path, e)
+                self._error_response(ConflictError(f"Constraint violation: {e}"))
+            elif "Catalog" in _type or "Transaction" in _type or "IO" in _type:
+                _logger.error("POST %s → 500 (transient DuckDB %s): %s", self.path, _type, e, exc_info=True)
+                self._error_response(OHMError(f"Database error ({_type}): {e}"))
+            else:
+                _logger.error("POST %s → 500 (unhandled %s): %s", self.path, _type, e, exc_info=True)
+                self._error_response(OHMError(str(e)))
         finally:
             elapsed = (time.time() - start) * 1000
             code = getattr(self, "_response_code", 0)
@@ -1875,7 +1889,16 @@ class OhmHandler(
         except ValueError as e:
             self._error_response(ValidationError(str(e)))
         except Exception as e:
-            self._error_response(OHMError(str(e)))
+            import logging as _logging
+
+            _logger = _logging.getLogger("ohm.server")
+            _type = type(e).__name__
+            if "Constraint" in _type or "constraint" in str(e).lower():
+                _logger.warning("DELETE %s → 409 Conflict: %s", self.path, e)
+                self._error_response(ConflictError(f"Constraint violation: {e}"))
+            else:
+                _logger.error("DELETE %s → 500 (unhandled %s): %s", self.path, _type, e, exc_info=True)
+                self._error_response(OHMError(str(e)))
         finally:
             elapsed = (time.time() - start) * 1000
             code = getattr(self, "_response_code", 0)
