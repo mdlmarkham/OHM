@@ -98,3 +98,22 @@ def make_headers() -> dict[str, str]:
         h["X-Tenant-ID"] = config["tenant_id"]
     h["X-OHM-Agent"] = config["agent_id"]
     return h
+
+
+def validate_domain_config(expected: str | None, actual_schema: dict) -> bool:
+    """Check if the configured domain_config matches the daemon's schema (OHM-yzyk.1.2 #4).
+
+    Args:
+        expected: The domain_config name from the MCP config (e.g., 'devsecops.json').
+        actual_schema: The /schema response from the daemon.
+
+    Returns:
+        True if they match or expected is None (no validation needed).
+        False if there's a mismatch.
+    """
+    if not expected:
+        return True
+    actual = actual_schema.get("schema", "")
+    # The daemon returns schema name like "devsecops" or "topo"
+    expected_base = expected.replace(".json", "")
+    return actual == expected_base or actual == expected

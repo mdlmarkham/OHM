@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from ohm.mcp.config import config, load_config_file, is_tool_allowed, make_headers, WRITE_TOOLS, _should_send_tenant_header
+from ohm.mcp.config import config, load_config_file, is_tool_allowed, make_headers, WRITE_TOOLS, _should_send_tenant_header, validate_domain_config
 
 
 class TestConfigFileLoading:
@@ -226,3 +226,22 @@ class TestTenantHeaderResolution:
             config.clear()
             config.update(original)
             os.unlink(f.name)
+
+
+class TestDomainConfigValidation:
+    """OHM-yzyk.1.2 #4: domain config validation on startup."""
+
+    def test_matching_config_returns_true(self):
+        assert validate_domain_config("devsecops.json", {"schema": "devsecops"}) is True
+
+    def test_matching_without_extension(self):
+        assert validate_domain_config("topo", {"schema": "topo"}) is True
+
+    def test_mismatch_returns_false(self):
+        assert validate_domain_config("devsecops.json", {"schema": "topo"}) is False
+
+    def test_none_expected_returns_true(self):
+        assert validate_domain_config(None, {"schema": "anything"}) is True
+
+    def test_empty_expected_returns_true(self):
+        assert validate_domain_config("", {"schema": "anything"}) is True

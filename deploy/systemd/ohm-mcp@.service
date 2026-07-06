@@ -1,0 +1,22 @@
+[Unit]
+Description=OHM MCP sidecar for tenant %i
+After=network.target ohmd.service
+Wants=ohmd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/ohm-mcp --config /etc/ohm/mcp-%i.json
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Environment fallbacks (config file takes priority)
+Environment=OHM_URL=http://127.0.0.1:8710
+
+# Isolation
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target
