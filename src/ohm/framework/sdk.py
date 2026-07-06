@@ -5629,6 +5629,123 @@ class Graph:
             max_depth=max_depth,
         )
 
+    def create_report(
+        self,
+        report_id: str,
+        *,
+        report_type: str,
+        node_id: str | None = None,
+        plan_id: str | None = None,
+        title: str | None = None,
+        summary: str | None = None,
+        findings: dict[str, Any] | None = None,
+        recommendations: dict[str, Any] | None = None,
+        confidence_adjustments: dict[str, Any] | None = None,
+        status: str = "draft",
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Create a TOPO analytical report artifact (OHM-o3rd).
+
+        Args:
+            report_id: Unique report identifier.
+            report_type: Type of report (e.g., 'sensitivity_analysis', 'rca_report', 'correlation_study').
+            node_id: Optional OHM node the report applies to.
+            plan_id: Optional plan the report is associated with.
+            title: Human-readable report title.
+            summary: Short summary of findings.
+            findings: Structured findings as a JSON dict.
+            recommendations: Structured recommendations as a JSON dict.
+            confidence_adjustments: Edge ID → new confidence mapping (applied on finalize).
+            status: Report status (draft, finalized, superseded).
+            metadata: Optional extensible metadata.
+
+        Returns:
+            The created report record as a dict.
+        """
+        from ohm.queries import create_report as _create_report
+
+        return _create_report(
+            self._conn,
+            report_id=report_id,
+            report_type=report_type,
+            node_id=node_id,
+            plan_id=plan_id,
+            title=title,
+            summary=summary,
+            findings=findings,
+            recommendations=recommendations,
+            confidence_adjustments=confidence_adjustments,
+            status=status,
+            created_by=self.actor,
+            metadata=metadata,
+        )
+
+    def get_report(self, report_id: str) -> dict[str, Any] | None:
+        """Fetch a single TOPO report by id (OHM-o3rd)."""
+        from ohm.queries import get_report as _get_report
+
+        return _get_report(self._conn, report_id)
+
+    def list_reports(
+        self,
+        *,
+        report_type: str | None = None,
+        node_id: str | None = None,
+        plan_id: str | None = None,
+        status: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List TOPO reports with optional filters (OHM-o3rd)."""
+        from ohm.queries import list_reports as _list_reports
+
+        return _list_reports(
+            self._conn,
+            report_type=report_type,
+            node_id=node_id,
+            plan_id=plan_id,
+            status=status,
+        )
+
+    def finalize_report(
+        self,
+        report_id: str,
+        *,
+        confidence_adjustments: dict[str, float] | None = None,
+    ) -> dict[str, Any]:
+        """Finalize a TOPO report and optionally apply L3 edge confidence
+        adjustments (OHM-o3rd feedback loop).
+
+        Args:
+            report_id: The report to finalize.
+            confidence_adjustments: Optional mapping of edge ID → new confidence.
+                Each edge is updated in place when provided.
+
+        Returns:
+            The updated report record as a dict.
+        """
+        from ohm.queries import finalize_report as _finalize_report
+
+        return _finalize_report(
+            self._conn,
+            report_id=report_id,
+            confidence_adjustments=confidence_adjustments,
+            created_by=self.actor,
+        )
+
+    def supersede_report(
+        self,
+        old_report_id: str,
+        new_report_id: str,
+    ) -> None:
+        """Mark an old TOPO report as superseded by a newer version (OHM-o3rd)."""
+        from ohm.queries import supersede_report as _supersede_report
+
+        _supersede_report(
+            self._conn,
+            old_report_id=old_report_id,
+            new_report_id=new_report_id,
+            created_by=self.actor,
+        )
+
     def propagate_observation(
         self,
         source_node_id: str,

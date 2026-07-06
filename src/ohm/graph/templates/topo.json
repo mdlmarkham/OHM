@@ -411,6 +411,38 @@
         ["idx_topo_elinks_from_type", ["from_event_id", "edge_type"]],
         ["idx_topo_elinks_to_type", ["to_event_id", "edge_type"]]
       ]
+    },
+    {
+      "name": "topo_reports",
+      "ordering": 230,
+      "description": "TOPO versioned analytical report artifacts (e.g., sensitivity_analysis, rca_report, correlation_study) linked to graph entities.",
+      "columns": [
+        ["id", "VARCHAR"],
+        ["report_type", "VARCHAR"],
+        ["node_id", "VARCHAR"],
+        ["plan_id", "VARCHAR"],
+        ["title", "VARCHAR"],
+        ["summary", "TEXT"],
+        ["findings", "JSON"],
+        ["recommendations", "JSON"],
+        ["confidence_adjustments", "JSON"],
+        ["status", "VARCHAR DEFAULT 'draft'"],
+        ["version", "INTEGER DEFAULT 1"],
+        ["superseded_by", "VARCHAR"],
+        ["created_by", "VARCHAR NOT NULL"],
+        ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+        ["updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+        ["finalized_at", "TIMESTAMP"],
+        ["metadata", "JSON"]
+      ],
+      "primary_key": "id",
+      "indexes": [
+        ["idx_topo_reports_type", ["report_type"]],
+        ["idx_topo_reports_node", ["node_id"]],
+        ["idx_topo_reports_plan", ["plan_id"]],
+        ["idx_topo_reports_status", ["status"]],
+        ["idx_topo_reports_version", ["id", "version"]]
+      ]
     }
   ]
 }

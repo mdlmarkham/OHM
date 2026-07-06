@@ -1143,6 +1143,38 @@ class SchemaConfig:
                 ordering=220,
                 description="TOPO event links: directed relationships between events (e.g., caused_by, followed_by, overlaps).",
             ),
+            DomainTable(
+                name="topo_reports",
+                columns=(
+                    ("id", "VARCHAR"),
+                    ("report_type", "VARCHAR"),
+                    ("node_id", "VARCHAR"),
+                    ("plan_id", "VARCHAR"),
+                    ("title", "VARCHAR"),
+                    ("summary", "TEXT"),
+                    ("findings", "JSON"),
+                    ("recommendations", "JSON"),
+                    ("confidence_adjustments", "JSON"),
+                    ("status", "VARCHAR DEFAULT 'draft'"),
+                    ("version", "INTEGER DEFAULT 1"),
+                    ("superseded_by", "VARCHAR"),
+                    ("created_by", "VARCHAR NOT NULL"),
+                    ("created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+                    ("updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+                    ("finalized_at", "TIMESTAMP"),
+                    ("metadata", "JSON"),
+                ),
+                primary_key="id",
+                indexes=(
+                    ("idx_topo_reports_type", ("report_type",)),
+                    ("idx_topo_reports_node", ("node_id",)),
+                    ("idx_topo_reports_plan", ("plan_id",)),
+                    ("idx_topo_reports_status", ("status",)),
+                    ("idx_topo_reports_version", ("id", "version")),
+                ),
+                ordering=230,
+                description="TOPO versioned analytical report artifacts (e.g., sensitivity_analysis, rca_report, correlation_study) linked to graph entities.",
+            ),
         ]
 
         return cls(
