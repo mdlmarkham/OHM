@@ -209,6 +209,62 @@ There is currently no automatic migration tool; this is tracked under `OHM-s139`
 
 ---
 
+## Growth-stage summary
+
+| Stage | Recommended topology |
+|---|---|
+| 1 agent, 1 laptop | `ohm standup --mode local` |
+| 2–3 agents, same LAN, occasional sharing | Local mode + shared DuckLake |
+| 2+ agents, real-time collaboration, or remote access | `ohm standup --mode greenfield` + local MCP sidecars |
+| SaaS / CI / browser / mobile agents | Daemon + `ohm-gateway` (ADR-028) |
+
+### Path A: federated sharing via DuckLake
+
+Add a shared DuckLake catalog to an existing local store:
+
+```bash
+# Edit ~/.ohm/agents/my-agent/agent.json
+{
+  "agent_id": "my-agent",
+  "mode": "local",
+  "db_path": "/home/you/.ohm/agents/my-agent/ohm.duckdb",
+  "ducklake_path": "/var/lib/ohm/ohm_lake.ducklake"
+}
+```
+
+Then call `store.sync_heartbeat()` from each agent. This is the smallest step up from solo local mode and avoids introducing a daemon or network surface.
+
+### Path B: remote MCP connections
+
+When agents are off-machine or you need real-time shared state:
+
+```bash
+# 1. Stand up a multi-tenant daemon
+sudo ohm standup --mode greenfield \
+  --multi-tenant \
+  --template personal-knowledge \
+  --tenant shared \
+  --agent-id my-agent \
+  --service-mode systemd
+
+# 2. Optionally deploy the hosted gateway (ADR-028)
+ohm-gateway --config /etc/ohm/gateway.json
+```
+
+Re-point the local agent from `OhmStore.for_agent("my-agent")` to the HTTP SDK using the generated customer key.
+
+### Hybrid mode
+
+You can run both at once:
+
+- Keep a **local DuckDB** for private scratch notes and fast drafts.
+- Use the **shared daemon** for team-vetted knowledge.
+- Periodically promote important local nodes to the shared tenant via the SDK or MCP tools.
+
+This matches the `promote_to_shared` pattern described in the agent network runbook.
+
+---
+
 ## Related
 
 - [Single-Project Deployment](single-project-ohm.md) — library mode without even a per-agent directory.
