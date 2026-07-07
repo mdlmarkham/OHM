@@ -747,6 +747,10 @@ def build_parser() -> argparse.ArgumentParser:
     inst_show.add_argument("instance_id", help="Instance ID to show")
     inst_show.add_argument("--registry", default=None, help="Path to registry JSON")
 
+    from ohm.cli import standup
+
+    standup.build_parser(subparsers)
+
     return parser
 
 
@@ -806,6 +810,9 @@ def _dispatch(args: argparse.Namespace) -> None:
         _handle_hooks(args)
     elif args.command == "instances":
         _handle_instances(args)
+    elif args.command == "standup":
+        from ohm.cli import standup
+        standup.run(args)
 
 
 def _handle_sync(args: argparse.Namespace) -> None:

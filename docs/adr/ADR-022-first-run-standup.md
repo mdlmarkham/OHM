@@ -1,7 +1,7 @@
 # ADR-022: First-Run / Standup CLI for OHM
 
 **Date:** 2026-07-07
-**Status:** Proposed
+**Status:** Implemented (MVP)
 
 ## Context
 
@@ -60,6 +60,27 @@ and `seed_payload(name)` for use by the standup CLI and tests.
 - **Separate commands (`ohm standup` vs `ohm onboard`)**: Rejected. The distinction is not meaningful to users; a single adaptive command is simpler.
 - **Pure documentation**: Current state. Rejected because it leaves the cold-start problem unsolved.
 - **Installer script only**: Rejected. Installation is only half the problem; purpose-aligned seeding and verification are equally important.
+
+## Implementation Status
+
+- CLI entry point: `src/ohm/cli/standup.py` registered as `ohm standup`.
+- Auto-detection: OS, service manager, existing `ohmd`, local agent hosts.
+- Connect mode: probes `/health`, lists/provisions tenant, emits MCP config, patches
+  detected agent hosts, verifies `tools/list`.
+- Service adapters: systemd unit installation/enablement; foreground fallback;
+  placeholders for launchd / Windows.
+- Seed templates: `src/ohm/templates/seeds/` + loader + tests.
+- Tests: `tests/test_templates.py` (11), `tests/test_standup.py` (7),
+  `tests/test_cli.py` still passes (130 total in combined run).
+
+## Known Gaps
+
+- Greenfield mode is a stub; needs `ohmd --init`, admin token creation,
+  tenant provisioning, and seeding wired together.
+- `launchd` and Windows service adapters are not yet implemented.
+- Agent host patching for Cursor / Claude Code / OpenCode paths are best-effort
+  and may need adjustment as those products evolve.
+- Remote HTTPS/Caddy deployments need `--url` and token handling tested.
 
 ## Related Documents
 
