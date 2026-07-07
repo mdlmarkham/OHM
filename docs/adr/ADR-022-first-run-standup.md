@@ -31,6 +31,23 @@ It shall:
    - **SDK-only mode**: skip MCP entirely; write a local agent config for direct SDK usage.
 5. Verify end-to-end before exiting: `/health`, `/orient`, tenant schema, `ohm-mcp tools/list`, minimum viable graph metrics.
 
+### Domain seed templates
+
+Purpose-aligned seeding is implemented as JSON templates under `src/ohm/templates/seeds/`.
+Each template defines:
+- `domain_schema`: the tenant schema template to use (e.g., `ohm`, `devsecops`).
+- `agents`, `values`, `capabilities`, `concepts`, `sources`: initial node populations.
+- `edges`: cross-links that ensure `/suggest` and `/orient` return signal immediately.
+
+Initial templates:
+- `personal-knowledge` — external cognition, Zettelkasten, AND→OR, context gates.
+- `devsecops` — agent authorization gap, CI/CD AND-gate, incident response.
+- `trading-research` — source reliability, evaluation trap, autocatalytic systems.
+- `data-pipelines` — lineage, schema drift, pipeline observability.
+
+The loader module `ohm.templates` provides `list_templates()`, `load_template(name)`,
+and `seed_payload(name)` for use by the standup CLI and tests.
+
 ## Consequences
 
 - Lower activation energy for new OHM deployments.
@@ -49,5 +66,15 @@ It shall:
 - `docs/bootstrap.md` — seeding protocol
 - `docs/deployment.md` — deployment topologies
 - `docs/deployment/local-copilot-ohm.md` — daemon + MCP sidecar topology
+- `src/ohm/templates/` — domain seed templates and loader
 - `reseed_ohm.py` — existing seed data
-- `domain-configs.md` — domain template definitions
+- `domain-configs.md` — domain schema definitions
+
+## Implementation Notes
+
+- Spike: `scripts/spikes/ohm_standup_spike.py` — connect-to-existing-daemon path.
+- Spike: `scripts/spikes/ohm_seed_template_spike.py` — greenfield seeding path.
+- Tests: `tests/test_templates.py` — template loading and validation.
+- Current local deployments use agent tokens without an explicit admin role, so
+  tenant provisioning requires either `ohmd --init` in greenfield mode or a
+  pre-existing customer API key in connect mode.

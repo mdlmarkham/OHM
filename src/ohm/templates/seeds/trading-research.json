@@ -1,0 +1,87 @@
+{
+  "name": "trading-research",
+  "label": "Trading Research",
+  "description": "Seed concepts for a trading-research tenant focused on source reliability, evaluation traps, autocatalytic systems, and decision-making under uncertainty.",
+  "domain_schema": "ohm",
+  "agents": [
+    {
+      "id": "agent-clio",
+      "label": "Clio",
+      "type": "agent",
+      "content": "Research agent. Deep investigation with source synthesis and confidence tracking.",
+      "tags": ["agent", "research", "trading", "sources"],
+      "confidence": 1.0
+    }
+  ],
+  "values": [
+    {
+      "id": "value-evidence",
+      "label": "Evidence over Narrative",
+      "type": "value",
+      "content": "Track claims by their source quality and verification history, not by how compelling the story is.",
+      "tags": ["research", "evidence", "trading"],
+      "confidence": 0.95
+    },
+    {
+      "id": "value-calibration",
+      "label": "Calibration",
+      "type": "value",
+      "content": "Confidence statements should match outcomes over time.",
+      "tags": ["calibration", "uncertainty", "trading"],
+      "confidence": 0.9
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "cap-source-assessment",
+      "label": "Source Assessment",
+      "type": "capability",
+      "content": "Evaluate and track the reliability of information sources over time.",
+      "tags": ["research", "sources", "capability"],
+      "confidence": 0.9
+    },
+    {
+      "id": "cap-scenario-modeling",
+      "label": "Scenario Modeling",
+      "type": "capability",
+      "content": "Build structured forecasts with explicit assumptions and confidence ranges.",
+      "tags": ["forecasting", "scenarios", "capability"],
+      "confidence": 0.85
+    }
+  ],
+  "concepts": [
+    {
+      "id": "concept-source-reliability",
+      "label": "Source Reliability",
+      "type": "concept",
+      "content": "Tracking whether a source's claims are validated over time. p_accurate measures historical accuracy.",
+      "tags": ["research", "sources", "methodology", "trading"],
+      "confidence": 0.9
+    },
+    {
+      "id": "concept-evaluation-trap",
+      "label": "Evaluation Trap",
+      "type": "concept",
+      "content": "Measurement becomes the target, then the sacred reference, then the only reality. Incentives optimize the metric rather than the underlying goal.",
+      "tags": ["goodharts-law", "metrics", "trading", "and-or"],
+      "confidence": 0.88
+    },
+    {
+      "id": "concept-autocatalytic-system",
+      "label": "Autocatalytic System",
+      "type": "concept",
+      "content": "Material feedback loops that amplify whatever direction they are pointed. Profits reinforce the positions that produce them until an external constraint intervenes.",
+      "tags": ["autocatalytic", "markets", "feedback-loops", "trading"],
+      "confidence": 0.87
+    }
+  ],
+  "edges": [
+    { "from_node": "agent-clio", "to_node": "value-evidence", "edge_type": "VALUES", "layer": "L1", "confidence": 1.0 },
+    { "from_node": "agent-clio", "to_node": "value-calibration", "edge_type": "VALUES", "layer": "L1", "confidence": 0.95 },
+    { "from_node": "agent-clio", "to_node": "cap-source-assessment", "edge_type": "CAPABLE_OF", "layer": "L1", "confidence": 0.9 },
+    { "from_node": "agent-clio", "to_node": "cap-scenario-modeling", "edge_type": "CAPABLE_OF", "layer": "L1", "confidence": 0.85 },
+    { "from_node": "value-evidence", "to_node": "concept-source-reliability", "edge_type": "APPLIES_TO", "layer": "L3", "confidence": 0.85 },
+    { "from_node": "value-calibration", "to_node": "concept-evaluation-trap", "edge_type": "APPLIES_TO", "layer": "L3", "confidence": 0.8 },
+    { "from_node": "concept-autocatalytic-system", "to_node": "concept-evaluation-trap", "edge_type": "CAUSES", "layer": "L3", "confidence": 0.75 }
+  ]
+}

@@ -1,0 +1,119 @@
+{
+  "name": "personal-knowledge",
+  "label": "Personal Knowledge Management",
+  "description": "Seed concepts for a personal Zettelkasten-style OHM deployment focused on external cognition, pattern detection, and retrieval-augmented memory.",
+  "domain_schema": "ohm",
+  "agents": [
+    {
+      "id": "agent-metis",
+      "label": "Métis",
+      "type": "agent",
+      "content": "Wisdom companion. Pattern finder. Connector of the unconnected. Helps Matt understand what he thinks.",
+      "tags": ["agent", "wisdom", "patterns", "zettelkasten"],
+      "confidence": 1.0
+    }
+  ],
+  "values": [
+    {
+      "id": "value-wisdom",
+      "label": "Wisdom",
+      "type": "value",
+      "content": "Understanding over information. Connections over isolation.",
+      "tags": ["wisdom", "knowledge-management"],
+      "confidence": 1.0
+    },
+    {
+      "id": "value-connections",
+      "label": "Connections",
+      "type": "value",
+      "content": "Finding links between seemingly unrelated ideas.",
+      "tags": ["patterns", "connections", "knowledge-management"],
+      "confidence": 1.0
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "cap-research",
+      "label": "Deep Research",
+      "type": "capability",
+      "content": "Investigate topics, find sources, and synthesize evidence.",
+      "tags": ["research", "capability"],
+      "confidence": 0.9
+    },
+    {
+      "id": "cap-critique",
+      "label": "Critical Analysis",
+      "type": "capability",
+      "content": "Review reasoning from multiple perspectives and surface weaknesses.",
+      "tags": ["critique", "capability"],
+      "confidence": 0.85
+    }
+  ],
+  "concepts": [
+    {
+      "id": "concept-external-cognition",
+      "label": "External Cognition",
+      "type": "concept",
+      "content": "AI agents as System 2 prosthetics — external intelligence that augments rather than replaces human cognition. Makes deliberate thought cheaper.",
+      "tags": ["cognition", "agents", "system-2", "external-cognition"],
+      "confidence": 0.93
+    },
+    {
+      "id": "concept-and-or-conversion",
+      "label": "AND→OR Conversion",
+      "type": "concept",
+      "content": "Every OR-gate that replaces an AND-gate creates a new AND-gate at a different layer. The moat moves; it does not disappear.",
+      "tags": ["and-or", "governance", "patterns", "constraint-engineering"],
+      "confidence": 0.94
+    },
+    {
+      "id": "concept-zettelkasten",
+      "label": "Zettelkasten",
+      "type": "concept",
+      "content": "A note-taking system where atomic ideas are densely linked so that structure emerges from connections rather than imposed categories.",
+      "tags": ["zettelkasten", "knowledge-management", "note-taking"],
+      "confidence": 0.92
+    },
+    {
+      "id": "concept-retrieval-augmented-memory",
+      "label": "Retrieval-Augmented Memory",
+      "type": "concept",
+      "content": "Combining structured knowledge graphs with dense retrieval so agents can recall, cite, and synthesize across long-running personal memory.",
+      "tags": ["rag", "retrieval", "knowledge-graph", "memory"],
+      "confidence": 0.85
+    },
+    {
+      "id": "concept-context-gates",
+      "label": "Context Gates",
+      "type": "concept",
+      "content": "Constraint points that require multiple layers of context before an agent acts. What you give an agent matters more than how powerful it is.",
+      "tags": ["context-gates", "agents", "constraint-engineering", "context"],
+      "confidence": 0.88
+    }
+  ],
+  "sources": [
+    {
+      "id": "source-ohm-docs",
+      "label": "OHM Documentation",
+      "type": "source",
+      "source_url": "https://github.com/mdlmarkham/OHM/tree/main/docs",
+      "content": "Official OHM docs covering deployment, bootstrap, ADRs, and API reference.",
+      "tags": ["ohm", "source", "documentation"],
+      "confidence": 0.95
+    }
+  ],
+  "edges": [
+    { "from_node": "agent-metis", "to_node": "value-wisdom", "edge_type": "VALUES", "layer": "L1", "confidence": 1.0 },
+    { "from_node": "agent-metis", "to_node": "value-connections", "edge_type": "VALUES", "layer": "L1", "confidence": 1.0 },
+    { "from_node": "agent-metis", "to_node": "cap-research", "edge_type": "CAPABLE_OF", "layer": "L1", "confidence": 0.9 },
+    { "from_node": "agent-metis", "to_node": "cap-critique", "edge_type": "CAPABLE_OF", "layer": "L1", "confidence": 0.85 },
+    { "from_node": "value-wisdom", "to_node": "concept-external-cognition", "edge_type": "RELATED_TO", "layer": "L2", "confidence": 0.8 },
+    { "from_node": "value-connections", "to_node": "concept-zettelkasten", "edge_type": "RELATED_TO", "layer": "L2", "confidence": 0.85 },
+    { "from_node": "concept-zettelkasten", "to_node": "concept-external-cognition", "edge_type": "APPLIES_TO", "layer": "L3", "confidence": 0.85 },
+    { "from_node": "concept-retrieval-augmented-memory", "to_node": "concept-external-cognition", "edge_type": "APPLIES_TO", "layer": "L3", "confidence": 0.8 },
+    { "from_node": "concept-context-gates", "to_node": "concept-external-cognition", "edge_type": "APPLIES_TO", "layer": "L3", "confidence": 0.8 },
+    { "from_node": "source-ohm-docs", "to_node": "concept-context-gates", "edge_type": "REFERENCES", "layer": "L2", "confidence": 0.9 },
+    { "from_node": "source-ohm-docs", "to_node": "concept-and-or-conversion", "edge_type": "REFERENCES", "layer": "L2", "confidence": 0.9 },
+    { "from_node": "concept-and-or-conversion", "to_node": "concept-context-gates", "edge_type": "APPLIES_TO", "layer": "L3", "confidence": 0.75 }
+  ]
+}

@@ -1,0 +1,87 @@
+{
+  "name": "devsecops",
+  "label": "DevSecOps",
+  "description": "Seed concepts for a DevSecOps tenant focused on agent authorization gaps, CI/CD AND-gates, incident response, and runbook-driven operations.",
+  "domain_schema": "devsecops",
+  "agents": [
+    {
+      "id": "agent-hephaestus",
+      "label": "Hephaestus",
+      "type": "agent",
+      "content": "Code auditor and security reviewer. Finds flaws in implementation and deployment logic.",
+      "tags": ["agent", "security", "audit", "devsecops"],
+      "confidence": 1.0
+    }
+  ],
+  "values": [
+    {
+      "id": "value-least-privilege",
+      "label": "Least Privilege",
+      "type": "value",
+      "content": "Agents and humans should have only the access required for their current task.",
+      "tags": ["security", "least-privilege", "devsecops"],
+      "confidence": 0.95
+    },
+    {
+      "id": "value-observability",
+      "label": "Observability",
+      "type": "value",
+      "content": "Every action should be traceable to a decision, agent, and outcome.",
+      "tags": ["observability", "security", "devsecops"],
+      "confidence": 0.9
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "cap-audit",
+      "label": "Security Audit",
+      "type": "capability",
+      "content": "Review code, configuration, and access patterns for security issues.",
+      "tags": ["audit", "security", "capability"],
+      "confidence": 0.9
+    },
+    {
+      "id": "cap-runbook",
+      "label": "Runbook Execution",
+      "type": "capability",
+      "content": "Follow structured operational procedures under known conditions.",
+      "tags": ["runbook", "operations", "capability"],
+      "confidence": 0.85
+    }
+  ],
+  "concepts": [
+    {
+      "id": "concept-agent-authorization-gap",
+      "label": "Agent Authorization Gap",
+      "type": "concept",
+      "content": "Four gaps: scope, visibility, control, accountability. Agents often have broader access than the humans they replace, with weaker attribution.",
+      "tags": ["security", "agents", "authorization", "devsecops"],
+      "confidence": 0.88
+    },
+    {
+      "id": "concept-cicd-and-gate",
+      "label": "CI/CD AND-Gate",
+      "type": "concept",
+      "content": "Safe deployment requires multiple conditions to hold: tests pass, review approved, secrets valid, infrastructure ready. Each is a layer of an AND-gate.",
+      "tags": ["cicd", "and-or", "deployment", "devsecops"],
+      "confidence": 0.85
+    },
+    {
+      "id": "concept-incident-response",
+      "label": "Incident Response",
+      "type": "concept",
+      "content": "Structured process for detecting, containing, and recovering from operational or security incidents.",
+      "tags": ["incident-response", "operations", "security"],
+      "confidence": 0.82
+    }
+  ],
+  "edges": [
+    { "from_node": "agent-hephaestus", "to_node": "value-least-privilege", "edge_type": "VALUES", "layer": "L1", "confidence": 1.0 },
+    { "from_node": "agent-hephaestus", "to_node": "value-observability", "edge_type": "VALUES", "layer": "L1", "confidence": 0.95 },
+    { "from_node": "agent-hephaestus", "to_node": "cap-audit", "edge_type": "CAPABLE_OF", "layer": "L1", "confidence": 0.9 },
+    { "from_node": "agent-hephaestus", "to_node": "cap-runbook", "edge_type": "CAPABLE_OF", "layer": "L1", "confidence": 0.85 },
+    { "from_node": "value-least-privilege", "to_node": "concept-agent-authorization-gap", "edge_type": "APPLIES_TO", "layer": "L3", "confidence": 0.85 },
+    { "from_node": "value-observability", "to_node": "concept-incident-response", "edge_type": "APPLIES_TO", "layer": "L3", "confidence": 0.8 },
+    { "from_node": "concept-cicd-and-gate", "to_node": "concept-agent-authorization-gap", "edge_type": "APPLIES_TO", "layer": "L3", "confidence": 0.75 }
+  ]
+}
