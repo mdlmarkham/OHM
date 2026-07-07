@@ -67,17 +67,20 @@ and `seed_payload(name)` for use by the standup CLI and tests.
 - Auto-detection: OS, service manager, existing `ohmd`, local agent hosts.
 - Connect mode: probes `/health`, lists/provisions tenant, emits MCP config, patches
   detected agent hosts, verifies `tools/list`.
-- Service adapters: systemd unit installation/enablement; foreground fallback;
-  placeholders for launchd / Windows.
+- Greenfield mode: writes default config with an `admin` agent, starts `ohmd` via
+  selected service adapter, waits for health, provisions tenant, seeds from domain
+  template, generates agent tokens, emits MCP config, starts sidecar, verifies.
+- Service adapters: systemd unit install/enablement; launchd plist install/load;
+  Windows `New-Service` wrapper; foreground fallback.
 - Seed templates: `src/ohm/templates/seeds/` + loader + tests.
-- Tests: `tests/test_templates.py` (11), `tests/test_standup.py` (7),
-  `tests/test_cli.py` still passes (130 total in combined run).
+- Tests: `tests/test_templates.py` (11), `tests/test_standup.py` (10),
+  `tests/test_cli.py` still passes (133 total in combined run).
 
 ## Known Gaps
 
-- Greenfield mode is a stub; needs `ohmd --init`, admin token creation,
-  tenant provisioning, and seeding wired together.
-- `launchd` and Windows service adapters are not yet implemented.
+- Greenfield mode is implemented but not yet exercised end-to-end against a clean
+  environment because the local test deployment already has a running `ohmd`.
+- Windows service adapter is best-effort (`New-Service`); production may prefer nssm.
 - Agent host patching for Cursor / Claude Code / OpenCode paths are best-effort
   and may need adjustment as those products evolve.
 - Remote HTTPS/Caddy deployments need `--url` and token handling tested.
