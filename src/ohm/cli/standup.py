@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from ohm.exceptions import OHMError
+from ohm.store import OhmStore
 from ohm.templates import list_templates, load_template, seed_payload
 
 
@@ -929,6 +930,59 @@ def run_greenfield(args: argparse.Namespace) -> None:
     print("\n✓ Greenfield standup completed.")
 
 
+def run_local(args: argparse.Namespace) -> None:
+    """Set up a local per-agent DuckDB store (SDK-only, no daemon)."""
+    print("OHM standup — local per-agent store")
+    agent_id = args.agent_id or _prompt("Agent ID")
+
+    env_ducklake = os.environ.get("OHM_DUCKLAKE_PATH")
+    ducklake_path = None
+    if env_ducklake:
+        if _confirm(f"Use DuckLake sync at {env_ducklake}?", default=False):
+            ducklake_path = env_ducklake
+    elif _confirm("Configure DuckLake sync for shared knowledge?", default=False):
+        ducklake_path = _prompt("DuckLake path", "/var/lib/ohm/ohm_lake.ducklake")
+
+    print(f"  Creating local store for agent '{agent_id}' ...")
+    # Pass an empty string for ducklake_path when sync is declined so
+    # OhmStore.for_agent() does not try to attach the default system
+    # DuckLake and emit lock-conflict warnings.
+    store = OhmStore.for_agent(
+        agent_name=agent_id,
+        ducklake_path=ducklake_path or "",
+    )
+
+    # Verify store works by writing and reading a marker node
+    marker_id = f"_agent_store_ready_{agent_id}"
+    store.write_node(
+        id=marker_id,
+        label=f"Agent store ready: {agent_id}",
+        type="system",
+        content="Local per-agent OHM store initialized successfully.",
+        confidence=1.0,
+        provenance="ohm_standup",
+    )
+    _ = store.get_node(marker_id)
+
+    # Write agent config file for SDK consumers next to the DB
+    config_dir = Path(store.db_path).parent
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_path = config_dir / "agent.json"
+    agent_config = {
+        "agent_id": agent_id,
+        "mode": "local",
+        "db_path": str(store.db_path),
+        "ducklake_path": ducklake_path,
+    }
+    config_path.write_text(json.dumps(agent_config, indent=2) + "\n")
+
+    print(f"  ✓ Local DB ready at {store.db_path}")
+    print(f"  ✓ Agent config written to {config_path}")
+    if ducklake_path:
+        print(f"  ✓ DuckLake sync configured at {ducklake_path}")
+    print("  ✓ Marker node written and verified")
+
+
 def run_sdk(args: argparse.Namespace) -> None:
     """Emit a local SDK agent config only."""
     print("OHM standup — SDK-only config")
@@ -959,12 +1013,14 @@ def run(args: argparse.Namespace) -> None:
         elif args.sdk:
             mode = "sdk"
         else:
-            mode = _choose(["connect", "greenfield", "sdk"], "No existing OHM found. What do you want to do?")
+            mode = _choose(["connect", "greenfield", "local", "sdk"], "No existing OHM found. What do you want to do?")
 
     if mode == "connect":
         run_connect(args)
     elif mode == "greenfield":
         run_greenfield(args)
+    elif mode == "local":
+        run_local(args)
     elif mode == "sdk":
         run_sdk(args)
     else:
@@ -976,7 +1032,7 @@ def build_parser(subparsers: Any) -> None:
     parser = subparsers.add_parser("standup", help="First-run onboarding for OHM")
     parser.add_argument(
         "--mode",
-        choices=["auto", "connect", "greenfield", "sdk"],
+        choices=["auto", "connect", "greenfield", "local", "sdk"],
         default="auto",
         help="Onboarding mode (default: auto-detect)",
     )

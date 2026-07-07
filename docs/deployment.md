@@ -8,10 +8,11 @@ Choose the deployment model that matches your scale and connectivity needs.
 |----------|--------|--------|---------|----------|
 | [Single project](single-project-ohm.md) | 1 | None | None (library mode) | A solo developer or researcher with one agent |
 | [Local daemon](local-copilot-ohm.md) | 2–10 | One `ohmd --multi-tenant` | localhost only | A small team with multiple agents or tenants |
+| [Per-agent cache](per-agent-ohm.md) | Any | Optional | Sync via DuckLake | A single agent or laptop-first user before adding a daemon |
 | [Remote daemon](remote-copilot-ohm.md) | 2–50+ | One `ohmd` behind TLS proxy | HTTPS | Agents on multiple machines, CI/CD, or cloud |
 | [Per-agent cache](#per-agent-local-duckdb) | Any | Optional | Sync via DuckLake | Zero-latency local reads with shared knowledge |
 
-Each scenario builds on the one before it. Start with **single project** and add components as needed.
+Each scenario builds on the one before it. Start with **single project** or **per-agent cache** and add components as needed.
 
 ---
 
@@ -34,7 +35,26 @@ See [Single-Project Deployment](single-project-ohm.md) for the full guide.
 
 ---
 
-## 2. Local daemon — multi-tenant
+## 2. Per-agent cache — local DuckDB
+
+One step up from single-project mode: each agent gets its own DuckDB file under `~/.ohm/agents/{agent_name}/`, with optional DuckLake sync to a shared catalog.
+
+Best for:
+- A developer with 1–2 personal agents.
+- Zero-latency local reads/writes.
+- A path toward team sharing without committing to a daemon.
+
+Quick start:
+
+```bash
+ohm standup --mode local --agent-id my-agent
+```
+
+See [Per-Agent Deployment](per-agent-ohm.md) for the full guide.
+
+---
+
+## 3. Local daemon — multi-tenant
 
 One `ohmd` daemon on the local machine, multiple tenants, one MCP sidecar per tenant.
 
@@ -52,11 +72,12 @@ One `ohmd` daemon on the local machine, multiple tenants, one MCP sidecar per te
 ```
 
 - Linux/macOS: [Local Agent Deployment](local-copilot-ohm.md)
+- Per-agent local cache: [Per-Agent Deployment](per-agent-ohm.md)
 - Windows: [Windows Local Agent Deployment](windows-copilot-ohm.md)
 
 ---
 
-## 3. Remote daemon — hosted gateway
+## 4. Remote daemon — hosted gateway
 
 Agents on different machines connect to a shared `ohmd` over HTTPS. Use a reverse proxy (Caddy, nginx) for TLS termination and access control.
 
@@ -269,12 +290,25 @@ See [ADR-012](adr/0012-per-agent-local-cache.md) for full details.
 
 ## Scenario comparison
 
-| Feature | Single project | Local daemon | Remote daemon |
-|---------|---------------|--------------|---------------|
-| Daemon required | No | Yes (localhost) | Yes (TLS) |
-| Multi-tenant | No | Yes | Yes |
-| MCP access | No | Yes (stdio/SSE) | Yes (SSE/HTTPS) |
-| SDK access | Yes (local) | Yes (local + HTTP) | Yes (HTTPS) |
-| Cross-agent sync | DuckLake only | DuckLake + daemon | DuckLake + daemon |
-| Setup complexity | Minimal | Medium | Medium + TLS |
-| Best for | Solo dev, research | Small team, local agents | Team, CI/CD, cloud |
+| Feature | Single project | Per-agent cache | Local daemon | Remote daemon |
+|---------|---------------|-----------------|--------------|---------------|
+| Daemon required | No | No | Yes (localhost) | Yes (TLS) |
+| Multi-tenant | No | No | Yes | Yes |
+| MCP access | No | No | Yes (stdio/SSE) | Yes (SSE/HTTPS) |
+| SDK access | Yes (local) | Yes (local) | Yes (local + HTTP) | Yes (HTTPS) |
+| Cross-agent sync | DuckLake only | DuckLake only | DuckLake + daemon | DuckLake + daemon |
+| Setup complexity | Minimal | Minimal | Medium | Medium + TLS |
+| Best for | Solo dev, research | Single agent, laptop-first | Small team, local agents | Team, CI/CD, cloud |
+
+---
+
+## See also
+
+- [Per-Agent Deployment Guide](per-agent-ohm.md)
+- [Local Agent Deployment](local-copilot-ohm.md)
+- [Remote Daemon Deployment](remote-copilot-ohm.md)
+- [Windows Local Agent Deployment](windows-copilot-ohm.md)
+- [ADR-012: Per-Agent Local Cache](adr/0012-per-agent-local-cache.md)
+- `OHM-s139` — lightweight per-agent OHM packaging
+- `OHM-yzyk` — small-team multi-agent mesh
+- `OHM-gdql` — Quack multi-reader mode

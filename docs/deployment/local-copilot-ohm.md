@@ -66,9 +66,56 @@ Or use the container image:
 docker run -p 127.0.0.1:8710:8710 -v /var/lib/ohm:/var/lib/ohm ghcr.io/mdlmarkham/ohm:latest --multi-tenant
 ```
 
-### 2. Start the system daemon
+### 2. Run `ohm standup` (recommended)
 
-Create `/etc/systemd/system/ohmd.service`:
+The fastest way to stand up a multi-tenant daemon with per-tenant MCP sidecars is the `ohm standup` CLI (ADR-022):
+
+```bash
+sudo ohm standup --mode greenfield \
+  --multi-tenant \
+  --template devsecops \
+  --tenant devops \
+  --agent-id copilot-vscode \
+  --service-mode systemd
+```
+
+This will:
+
+1. Write a default `/etc/ohm/ohmd.json` with an admin agent.
+2. Install and start the `ohmd` systemd service.
+3. Provision the `devops` tenant with the `devsecops` domain template.
+4. Generate a customer API key for the tenant.
+5. Emit `/etc/ohm/mcp-devops.json`.
+6. Install and start the `ohm-mcp@devops` systemd sidecar.
+7. Verify the tenant schema, minimum viable graph, and MCP `tools/list`.
+
+Repeat for additional tenants:
+
+```bash
+sudo ohm standup --mode greenfield \
+  --multi-tenant \
+  --template datapipelines \
+  --tenant dataops \
+  --agent-id copilot-vscode \
+  --service-mode systemd
+```
+
+For a quick foreground test on a non-conflicting port:
+
+```bash
+OHM_CONFIG=/tmp/ohm-test/ohmd.json \
+OHM_DB_PATH=/tmp/ohm-test/ohm.duckdb \
+ohm standup --mode greenfield \
+  --url http://127.0.0.1:18710 \
+  --service-mode foreground \
+  --template devsecops \
+  --tenant devops \
+  --agent-id copilot-vscode
+```
+
+### 2. Manual daemon setup (alternative)
+
+If you prefer to set up the daemon by hand, create `/etc/systemd/system/ohmd.service`:
 
 ```ini
 [Unit]

@@ -14,6 +14,7 @@ from ohm.cli.standup import (
     ensure_config_dir,
     install_systemd_service,
     install_launchd_service,
+    run_local,
     write_default_config,
     write_mcp_config,
     write_sdk_config,
@@ -128,6 +129,32 @@ def test_mcp_server_entry():
     entry = _mcp_server_entry(Path("/tmp/mcp-foo.json"))
     assert entry["command"] == "ohm-mcp"
     assert entry["args"] == ["--config", "/tmp/mcp-foo.json"]
+
+
+def test_run_local_creates_agent_store(tmp_path, monkeypatch):
+    """Local per-agent mode creates a DuckDB and writes agent.json."""
+    import argparse
+
+    agents_dir = tmp_path / "agents"
+    monkeypatch.setenv("OHM_AGENTS_DIR", str(agents_dir))
+    # Ensure we do not accidentally try to attach the system DuckLake.
+    monkeypatch.delenv("OHM_DUCKLAKE_PATH", raising=False)
+    # Decline DuckLake sync prompt.
+    monkeypatch.setattr("ohm.cli.standup._confirm", lambda prompt, default=False: False)
+
+    args = argparse.Namespace(agent_id="test-local-agent")
+    run_local(args)
+
+    config_path = agents_dir / "test-local-agent" / "agent.json"
+    db_path = agents_dir / "test-local-agent" / "ohm.duckdb"
+    assert config_path.exists()
+    assert db_path.exists()
+
+    data = json.loads(config_path.read_text())
+    assert data["agent_id"] == "test-local-agent"
+    assert data["mode"] == "local"
+    assert data["db_path"] == str(db_path)
+    assert data["ducklake_path"] is None
 
 
 # Re-import json inside tests because the module-level import above is not real
