@@ -54,8 +54,11 @@ def connect(db_path: str | pathlib.Path | None = None) -> "duckdb.DuckDBPyConnec
 
     Handles WAL corruption recovery (OHM-b5a): if DuckDB fails to open
     due to WAL replay errors, deletes the WAL file and retries.
-    The WAL contains only uncommitted writes, so this is safe — the
-    main DB file is intact.
+    NOTE: DuckDB's WAL contains *committed* writes that have not yet been
+    checkpointed into the main .duckdb file — NOT uncommitted writes.
+    Deleting the WAL therefore discards committed-but-not-checkpointed data.
+    This is intentional for corruption recovery; use /admin/checkpoint to
+    flush safely before stopping the daemon.
 
     Args:
         db_path: Path to the DuckDB file. If None, uses the default path.
@@ -135,6 +138,14 @@ def _apply_pragmas(conn: "duckdb.DuckDBPyConnection") -> None:
       ``OHM_DUCKDB_TEMP_DIR`` is configured; DuckDB's own default
       (system temp) is fine for most deployments.
 
+    - ``PRAGMA wal_autocheckpoint = N`` -- fold the WAL into the main
+      .duckdb file automatically after N pages of writes (1 page = 4KB).
+      DuckDB's default is 1000 pages (~4MB). For a knowledge-graph workload
+      with modest write volume, the WAL never grows that large, so auto-
+      checkpoint never fires and committed data stays in the WAL file only.
+      Setting this to 100 (~400KB) ensures frequent folding without
+      meaningful overhead. Override via ``OHM_WAL_AUTOCHECKPOINT`` (pages).
+
     Errors are logged and swallowed: PRAGMA tuning is a perf optimisation,
     not a correctness requirement. A container that can't write to the
     configured temp dir still runs -- it just spills to the default.
@@ -173,6 +184,13 @@ def _apply_pragmas(conn: "duckdb.DuckDBPyConnection") -> None:
             conn.execute(f"PRAGMA temp_directory = '{safe_temp_dir}'")
         except Exception:
             logger.debug("PRAGMA temp_directory failed", exc_info=True)
+
+    try:
+        raw = os.environ.get("OHM_WAL_AUTOCHECKPOINT", "100")
+        pages = max(1, int(raw))
+        conn.execute(f"PRAGMA wal_autocheckpoint = {pages}")
+    except Exception:
+        logger.debug("PRAGMA wal_autocheckpoint failed", exc_info=True)
 
 
 def _load_extensions(conn: "duckdb.DuckDBPyConnection") -> None:

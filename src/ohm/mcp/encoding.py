@@ -1,7 +1,8 @@
 """Content encoding helpers for OHM MCP transport.
 
 Provides optional TOON encoding for tool results to reduce token usage
-when the consuming agent requests it. JSON remains the default.
+when the consuming agent requests it. TOON is the default when available;
+JSON is used as a fallback or when explicitly requested.
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ except ImportError:  # pragma: no cover
     _toon_decode = None  # type: ignore[assignment]
 
 
-DEFAULT_FORMAT = "json"
+DEFAULT_FORMAT = "toon" if _TOON_AVAILABLE else "json"
 TOON_MIME_TYPE = "text/toon"
 JSON_MIME_TYPE = "application/json"
 
