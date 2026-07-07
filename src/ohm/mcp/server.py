@@ -31,6 +31,12 @@ from mcp.types import (
 # Config — delegate to ohm.mcp.config (OHM-yzyk.1.2)
 # ---------------------------------------------------------------------------
 
+from ohm.mcp.encoding import (
+    DEFAULT_FORMAT,
+    encode_payload,
+    format_supported,
+    requested_format,
+)
 from ohm.mcp.config import config as _config, load_config_file as _load_config_file, is_tool_allowed as _is_tool_allowed, make_headers, validate_domain_config as _validate_domain_config, WRITE_TOOLS as _WRITE_TOOLS
 
 # Backward-compat properties
@@ -80,9 +86,13 @@ async def _ohm_delete(path: str) -> dict:
         return r.json()
 
 
-def _text(data: Any) -> list[TextContent]:
-    """Format response as MCP text content."""
-    return [TextContent(type="text", text=json.dumps(data, indent=2, default=str))]
+def _text(data: Any, fmt: str = DEFAULT_FORMAT) -> list[TextContent]:
+    """Format response as MCP text content.
+
+    If the agent requested TOON, encode the payload as TOON text to reduce
+    token usage; otherwise use pretty-printed JSON.
+    """
+    return [TextContent(type="text", text=encode_payload(data, fmt))]
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +109,8 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="ohm_stats",
             description="Get OHM knowledge graph statistics: total nodes, edges, agents, observations, challenge ratio, edge types by layer.",
-            inputSchema={"type": "object", "properties": {}, "required": []},
+            inputSchema={"type": "object", "properties": {
+            "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},}, "required": []},
         ),
         Tool(
             name="ohm_search",
@@ -107,6 +118,7 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
+            "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},
                     "q": {"type": "string", "description": "Search query text"},
                     "type": {"type": "string", "description": "Optional node type filter (concept, pattern, source, etc.)"},
                     "created_by": {"type": "string", "description": "Optional agent name filter"},
@@ -121,6 +133,7 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
+            "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},
                     "node_id": {"type": "string", "description": "Node ID"},
                 },
                 "required": ["node_id"],
@@ -132,6 +145,7 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
+            "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},
                     "node_id": {"type": "string", "description": "Center node ID"},
                     "depth": {"type": "integer", "description": "Traversal depth (default 1)", "default": 1},
                     "layer": {"type": "string", "description": "Filter by layer (L1, L2, L3, L4)"},
@@ -145,6 +159,7 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
+            "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},
                     "since": {"type": "string", "description": "ISO timestamp for changes since (default: 24h ago)"},
                     "agent": {"type": "string", "description": "Filter changes by agent name"},
                     "enrich": {"type": "boolean", "description": "Include change data (default true)", "default": True},
@@ -159,6 +174,7 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
+            "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},
                     "edge_id": {"type": "string", "description": "Edge ID to audit"},
                 },
                 "required": ["edge_id"],
@@ -170,6 +186,7 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
+            "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},
                     "from_id": {"type": "string", "description": "Source node ID"},
                     "to_id": {"type": "string", "description": "Target node ID"},
                 },
@@ -179,7 +196,8 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="ohm_agents",
             description="List registered agents and their current state — focus areas, patterns, services, last sync.",
-            inputSchema={"type": "object", "properties": {}, "required": []},
+            inputSchema={"type": "object", "properties": {
+            "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},}, "required": []},
         ),
         # ── Write tier ──
         Tool(
@@ -287,6 +305,7 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
+            "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},
                     "type": {"type": "string", "description": "Filter by node type"},
                     "label_contains": {"type": "string", "description": "Filter by label content (ILIKE)"},
                     "created_by": {"type": "string", "description": "Filter by creating agent"},
@@ -300,7 +319,8 @@ async def list_tools() -> list[Tool]:
             name="ohm_domain_onboarding",
             description="Get the OHM domain schema for this tenant: node types, edge types, layers, and domain tables. "
             "Call this when connecting to a new OHM instance to understand the active domain configuration.",
-            inputSchema={"type": "object", "properties": {}, "required": []},
+            inputSchema={"type": "object", "properties": {
+            "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},}, "required": []},
         ),
     ]
     # OHM-yzyk.1.2: filter tools by allowed_tools and read_only
@@ -330,9 +350,14 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 isError=True,
             )
 
+        # Response format negotiation: JSON remains default; TOON reduces tokens
+        # for read-heavy results. The 'format' argument is consumed here so it
+        # is not forwarded to OHM.
+        fmt = requested_format(arguments)
+
         if name == "ohm_stats":
             data = await _ohm_get("/stats")
-            return CallToolResult(content=_text(data))
+            return CallToolResult(content=_text(data, fmt))
 
         elif name == "ohm_search":
             params = {"q": arguments["q"]}
@@ -343,11 +368,11 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             if arguments.get("limit"):
                 params["limit"] = str(arguments["limit"])
             data = await _ohm_get("/search", params)
-            return CallToolResult(content=_text(data))
+            return CallToolResult(content=_text(data, fmt))
 
         elif name == "ohm_get_node":
             data = await _ohm_get(f"/node/{arguments['node_id']}")
-            return CallToolResult(content=_text(data))
+            return CallToolResult(content=_text(data, fmt))
 
         elif name == "ohm_neighborhood":
             params = {}
@@ -356,7 +381,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             if arguments.get("layer"):
                 params["layer"] = arguments["layer"]
             data = await _ohm_get(f"/neighborhood/{arguments['node_id']}", params)
-            return CallToolResult(content=_text(data))
+            return CallToolResult(content=_text(data, fmt))
 
         elif name == "ohm_listen":
             params = {"enrich": str(arguments.get("enrich", True)).lower(), "limit": str(arguments.get("limit", 50))}
@@ -365,19 +390,19 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             if arguments.get("agent"):
                 params["agent"] = arguments["agent"]
             data = await _ohm_get("/listen", params)
-            return CallToolResult(content=_text(data))
+            return CallToolResult(content=_text(data, fmt))
 
         elif name == "ohm_confidence":
             data = await _ohm_get(f"/confidence/{arguments['edge_id']}")
-            return CallToolResult(content=_text(data))
+            return CallToolResult(content=_text(data, fmt))
 
         elif name == "ohm_path":
             data = await _ohm_get(f"/path/{arguments['from_id']}/{arguments['to_id']}")
-            return CallToolResult(content=_text(data))
+            return CallToolResult(content=_text(data, fmt))
 
         elif name == "ohm_agents":
             data = await _ohm_get("/agents")
-            return CallToolResult(content=_text(data))
+            return CallToolResult(content=_text(data, fmt))
 
         elif name == "ohm_create_node":
             body: dict[str, Any] = {
@@ -397,7 +422,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             if not arguments.get("create_only", True):
                 url += "?create_only=false"
             data = await _ohm_post(url, body)
-            return CallToolResult(content=_text(data))
+            return CallToolResult(content=_text(data, fmt))
 
         elif name == "ohm_create_edge":
             body = {
@@ -411,7 +436,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             if arguments.get("condition"):
                 body["condition"] = arguments["condition"]
             data = await _ohm_post("/edge", body)
-            return CallToolResult(content=_text(data))
+            return CallToolResult(content=_text(data, fmt))
 
         elif name == "ohm_observe":
             body = {
@@ -424,7 +449,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             if arguments.get("notes"):
                 body["notes"] = arguments["notes"]
             data = await _ohm_post(f"/observe/{arguments['node_id']}", body)
-            return CallToolResult(content=_text(data))
+            return CallToolResult(content=_text(data, fmt))
 
         elif name == "ohm_challenge":
             body = {
@@ -432,7 +457,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 "confidence": arguments.get("confidence", 0.5),
             }
             data = await _ohm_post(f"/challenge/{arguments['edge_id']}", body)
-            return CallToolResult(content=_text(data))
+            return CallToolResult(content=_text(data, fmt))
 
         elif name == "ohm_support":
             body = {
@@ -440,7 +465,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 "confidence": arguments.get("confidence", 0.7),
             }
             data = await _ohm_post(f"/support/{arguments['edge_id']}", body)
-            return CallToolResult(content=_text(data))
+            return CallToolResult(content=_text(data, fmt))
 
         elif name == "ohm_update_state":
             body = {"agent": OHM_AGENT}
@@ -451,7 +476,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             if arguments.get("services"):
                 body["services"] = json.loads(arguments["services"]) if isinstance(arguments["services"], str) else arguments["services"]
             data = await _ohm_post("/state", body)
-            return CallToolResult(content=_text(data))
+            return CallToolResult(content=_text(data, fmt))
 
         elif name == "ohm_list_nodes":
             params = {}
@@ -464,11 +489,11 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             params["limit"] = str(arguments.get("limit", 100))
             params["offset"] = str(arguments.get("offset", 0))
             data = await _ohm_get("/nodes", params)
-            return CallToolResult(content=_text(data))
+            return CallToolResult(content=_text(data, fmt))
 
         elif name == "ohm_domain_onboarding":
             data = await _ohm_get("/schema")
-            return CallToolResult(content=_text(data))
+            return CallToolResult(content=_text(data, fmt))
 
         else:
             return CallToolResult(content=[TextContent(type="text", text=f"Unknown tool: {name}")], isError=True)
