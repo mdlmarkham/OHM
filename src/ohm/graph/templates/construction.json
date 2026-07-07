@@ -133,7 +133,8 @@
     "safety_incident",
     "sentiment",
     "support",
-    "weather_delay"
+    "weather_delay",
+    "assessment"
   ],
   "observation_sources": [
     "analysis",

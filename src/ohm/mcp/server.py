@@ -232,7 +232,7 @@ async def list_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "node_id": {"type": "string", "description": "Node to observe"},
-                    "obs_type": {"type": "string", "description": "Observation type (measurement, assessment, anomaly)"},
+                    "obs_type": {"type": "string", "description": "Observation type (measurement, assessment, anomaly, support, health_check, experiment_result, sentiment, pattern, challenge)"},
                     "value": {"type": "number", "description": "Observed value"},
                     "sigma": {"type": "number", "description": "Uncertainty/standard deviation"},
                     "source": {"type": "string", "description": "Source of observation"},

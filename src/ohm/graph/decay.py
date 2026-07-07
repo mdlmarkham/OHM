@@ -107,11 +107,27 @@ def confidence_at(
         if t >= valid_to:
             return 0.0
 
-    base_value = float(obs.get("value") or 1.0)
+    # Defensive casting: observations may store numeric fields as strings (OHM-8t60)
+    def _as_float(v: Any, default: float | None = None) -> float | None:
+        if v is None:
+            return default
+        if isinstance(v, (int, float)):
+            return float(v)
+        if isinstance(v, str):
+            try:
+                return float(v)
+            except ValueError:
+                return default
+        return default
+
+    raw_value = obs.get("value")
+    base_value = _as_float(raw_value, 1.0)
+    if base_value is None:
+        base_value = 1.0
     base_value = max(0.0, min(1.0, base_value))
 
     # Determine half_life_days: use stored value if present, else obs_type default
-    half_life = obs.get("half_life_days")
+    half_life = _as_float(obs.get("half_life_days"))
     if half_life is None:
         half_life = default_half_life(obs.get("type", "_default"))
 
@@ -131,12 +147,14 @@ def confidence_at(
     age_days = max(0.0, (t - anchor).total_seconds() / 86400.0)
 
     # Determine Weibull shape: use stored value, then obs_type default, then 1.0
-    weibull_shape = obs.get("weibull_shape")
+    weibull_shape = _as_float(obs.get("weibull_shape"))
     if weibull_shape is None:
         weibull_shape = default_weibull_shape(obs.get("type", "_default"))
+    if weibull_shape is None:
+        weibull_shape = 1.0
 
     # Weibull decay (OHM-24g9)
-    if use_weibull and weibull_shape is not None:
+    if use_weibull:
         return _confidence_weibull(base_value, age_days, half_life, weibull_shape)
 
     # Phase 1 fallback: discrete decay profiles

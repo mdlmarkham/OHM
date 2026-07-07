@@ -110,6 +110,9 @@ class TestSchemaValidation:
     def test_valid_observation_types(self):
         assert "anomaly" in VALID_OBSERVATION_TYPES
         assert "measurement" in VALID_OBSERVATION_TYPES
+        assert "assessment" in VALID_OBSERVATION_TYPES
+        assert "health_check" in VALID_OBSERVATION_TYPES
+        assert "experiment_result" in VALID_OBSERVATION_TYPES
 
     def test_valid_visibilities(self):
         assert "private" in VALID_VISIBILITIES

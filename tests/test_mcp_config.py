@@ -117,6 +117,28 @@ class TestAllowedToolsEnforcement:
                     "ohm_challenge", "ohm_support", "ohm_update_state"}
         assert WRITE_TOOLS == expected
 
+    def test_empty_list_denies_all(self):
+        original = dict(config)
+        try:
+            config["allowed_tools"] = []
+            config["read_only"] = False
+            assert is_tool_allowed("ohm_search") is False
+            assert is_tool_allowed("ohm_create_node") is False
+        finally:
+            config.clear()
+            config.update(original)
+
+    def test_missing_allowed_tools_defaults_to_star(self):
+        original = dict(config)
+        try:
+            config.pop("allowed_tools", None)
+            config["read_only"] = False
+            assert is_tool_allowed("ohm_search") is True
+            assert is_tool_allowed("ohm_create_node") is True
+        finally:
+            config.clear()
+            config.update(original)
+
 
 class TestHeadersUseConfig:
     """make_headers() uses config values."""

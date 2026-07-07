@@ -63,10 +63,18 @@ def load_config_file(path: str) -> None:
 
 
 def is_tool_allowed(tool_name: str) -> bool:
-    """Check if a tool is permitted by allowed_tools and read_only (OHM-yzyk.1.2)."""
+    """Check if a tool is permitted by allowed_tools and read_only (OHM-yzyk.1.2).
+
+    Semantics for allowed_tools:
+    - Missing or ["*"]: all tools allowed.
+    - Empty list []: interpreted as deny-all (no tools allowed). Use ["*"] for broad access.
+    - Specific list: only those tool names are allowed.
+    """
     if config["read_only"] and tool_name in WRITE_TOOLS:
         return False
     allowed = config.get("allowed_tools", ["*"])
+    if not allowed:
+        return False
     if allowed == ["*"]:
         return True
     return tool_name in allowed

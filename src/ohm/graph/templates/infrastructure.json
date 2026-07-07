@@ -137,7 +137,8 @@
     "measurement",
     "pattern",
     "sentiment",
-    "support"
+    "support",
+    "assessment"
   ],
   "observation_sources": [
     "analysis",

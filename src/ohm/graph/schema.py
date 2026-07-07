@@ -310,6 +310,7 @@ VALID_OBSERVATION_TYPES = frozenset(
         "sentiment",  # customer support: sentiment observation
         "health_check",  # Infrastructure health/status (OHM-infra)
         "experiment_result",  # Experiment measurement with dev/test metrics (OHM-ss22)
+        "assessment",  # Agent-evaluated judgment without raw measurement (OHM-36ps)
     }
 )
 

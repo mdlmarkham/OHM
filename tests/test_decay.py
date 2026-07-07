@@ -263,6 +263,35 @@ def test_get_observation_chain_two_deep(mem_conn):
     assert ids[1] == "obs-v2"
 
 
+def test_confidence_at_handles_string_numeric_fields():
+    """String values for numeric observation fields should not crash (OHM-8t60)."""
+    created = datetime.now(timezone.utc) - timedelta(days=3)
+    obs = {
+        "value": "0.85",
+        "created_at": created.isoformat(),
+        "valid_from": created.isoformat(),
+        "half_life_days": "7",
+        "weibull_shape": "1.0",
+        "type": "measurement",
+    }
+    result = confidence_at(obs, t=datetime.now(timezone.utc))
+    assert 0.0 <= result <= 1.0
+
+
+def test_confidence_at_handles_invalid_string_value_gracefully():
+    """A non-numeric value string should fall back to default 1.0 (OHM-8t60)."""
+    created = datetime.now(timezone.utc)
+    obs = {
+        "value": "not-a-number",
+        "created_at": created.isoformat(),
+        "valid_from": created.isoformat(),
+        "half_life_days": None,
+        "type": "measurement",
+    }
+    result = confidence_at(obs, t=datetime.now(timezone.utc))
+    assert result == pytest.approx(1.0, abs=1e-6)
+
+
 # ── get_active_observations ─────────────────────────────────────────────────
 
 

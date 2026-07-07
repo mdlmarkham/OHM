@@ -133,7 +133,8 @@
     "pattern",
     "sentiment",
     "support",
-    "wait_time"
+    "wait_time",
+    "assessment"
   ],
   "observation_sources": [
     "analysis",

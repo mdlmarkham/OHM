@@ -155,7 +155,8 @@
     "sentiment",
     "setup_time",
     "support",
-    "throughput"
+    "throughput",
+    "assessment"
   ],
   "observation_sources": [
     "analysis",

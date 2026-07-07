@@ -139,7 +139,8 @@
     "revenue_per_job",
     "sentiment",
     "support",
-    "travel_time"
+    "travel_time",
+    "assessment"
   ],
   "observation_sources": [
     "analysis",

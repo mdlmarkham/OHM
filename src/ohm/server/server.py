@@ -100,6 +100,12 @@ def _prewarm_pgmpy() -> None:
         logger.info("pgmpy not available — Bayesian inference will be disabled")
 
 
+def _prewarm_pgmpy_async() -> None:
+    """Start pgmpy pre-warming in a daemon thread so /health can respond sooner."""
+    thread = threading.Thread(target=_prewarm_pgmpy, daemon=True, name="pgmpy-prewarm")
+    thread.start()
+
+
 def run_metric_actions_heartbeat(conn: Any, repo_path: str | None = None) -> dict[str, Any]:
     """Run semantic-layer metrics and execute threshold actions.
 
@@ -2810,8 +2816,8 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
         if "require_read_auth" not in config:
             OhmHandler.require_read_auth = True
 
-    # ── pgmpy pre-warm (OHM-a689): avoid 5.3s cold-import penalty on first inference ──
-    _prewarm_pgmpy()
+    # ── pgmpy pre-warm (OHM-a689): avoid cold-import penalty on first inference ──
+    _prewarm_pgmpy_async()
 
     # ── Register built-in hooks (OHM-aznh.11) ────────────────────────────
     _register_builtin_hooks(store)
@@ -3093,22 +3099,6 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
             logger.exception("Shutdown: store.close failed")
 
 
-def _prewarm_pgmpy() -> None:
-    """Pre-warm pgmpy imports to avoid 5.3s cold-import penalty on first inference call.
-
-    Called at daemon startup after DB initialization but before accepting connections.
-    Subsequent calls are no-ops (Python's module cache).
-    """
-    try:
-        from pgmpy.inference import VariableElimination  # noqa: F401
-        from pgmpy.models import BayesianNetwork  # noqa: F401
-        from pgmpy.factors.discrete import TabularCPD  # noqa: F401
-
-        logger.debug("pgmpy pre-warmed (imports loaded)")
-    except ImportError:
-        logger.info("pgmpy not available — Bayesian inference will be disabled")
-
-
 def main(schema_config: SchemaConfig | None = None):
     """CLI entry point for ohmd.
 
@@ -3165,13 +3155,20 @@ def main(schema_config: SchemaConfig | None = None):
     )
     args = parser.parse_args()
 
+    # Canonical config path: CLI --config wins, then OHM_CONFIG, then default.
+    config_path = Path(
+        args.config
+        if args.config is not None
+        else os.environ.get("OHM_CONFIG", str(Path.home() / ".ohm" / "ohmd.json"))
+    )
+
     # Allow CLI override of schema
     if args.schema == "topo":
         from ohm.schema import TOPO_SCHEMA
 
         schema_config = TOPO_SCHEMA
 
-    config = load_config(args.config)
+    config = load_config(str(config_path))
 
     # CLI overrides
     if args.host:
@@ -3206,7 +3203,6 @@ def main(schema_config: SchemaConfig | None = None):
             "hash": token_hash,
             "role": "read-write",
         }
-        config_path = Path(os.environ.get("OHM_CONFIG", str(Path.home() / ".ohm" / "ohmd.json")))
         config_path.parent.mkdir(parents=True, exist_ok=True)
         with open(config_path, "w") as f:
             json.dump(config, f, indent=2)
@@ -3222,7 +3218,6 @@ def main(schema_config: SchemaConfig | None = None):
         customer_id = validate_customer_id(args.init_customer_token)
         token, token_hash = _generate_customer_token(customer_id)
         config.setdefault("customer_tokens", {})[customer_id] = {"hash": token_hash}
-        config_path = Path(os.environ.get("OHM_CONFIG", str(Path.home() / ".ohm" / "ohmd.json")))
         config_path.parent.mkdir(parents=True, exist_ok=True)
         with open(config_path, "w") as f:
             json.dump(config, f, indent=2)
@@ -3300,8 +3295,8 @@ def main(schema_config: SchemaConfig | None = None):
     # so both connections have matching configuration.
     store._ensure_read_conn()
 
-    # Pre-warm pgmpy to avoid 5.3s cold-import penalty on first inference call (OHM-a689)
-    _prewarm_pgmpy()
+    # Pre-warm pgmpy to avoid cold-import penalty on first inference call (OHM-a689)
+    _prewarm_pgmpy_async()
 
     # Run server
     try:
