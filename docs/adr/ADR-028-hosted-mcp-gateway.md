@@ -21,6 +21,7 @@ Use FastMCP as the gateway framework because:
 - It implements MCP over SSE and Streamable HTTP transports.
 - It provides client-auth helpers (Bearer, OAuth 2.1, CIMD) that we can adapt for server-side token validation.
 - It gives us transforms we need: `Namespace` for multi-tenant composition safety, `RegexSearchTransform` for tool discovery at scale, `ResourcesAsTools` for clients without resource support.
+- It supports MCP background tasks (`@mcp.tool(task=True)`) for long-running OHM queries such as `ohm_listen`, complex `ohm_neighborhood`, or large `ohm_search` results, which lets clients start an operation, track progress, and retrieve results later instead of blocking on API Gateway's 29s limit.
 - Tool fingerprinting helps detect schema drift between gateway deployments.
 
 The existing local `ohm-mcp` sidecar stays on the raw `mcp` SDK. Do not migrate it to FastMCP; its `--config`, `allowed_tools`, and `read_only` logic is OHM-specific and not simplified by FastMCP.
@@ -69,7 +70,7 @@ A session/connection is pinned to one profile for its lifetime. No runtime tenan
 ### 5. MCP transport
 
 - **Primary remote transport:** MCP over SSE (`/mcp/sse`).
-- **Serverless transport:** Streamable HTTP (`/mcp`). Preferred for Lambda because it is request/response and fits API Gateway's 29s limit.
+- **Serverless transport:** Streamable HTTP (`/mcp`) and MCP Background Tasks (`task=True`) for long-running queries such as `ohm_listen`, large `ohm_search`, and deep `ohm_neighborhood`. These avoid API Gateway's 29s synchronous limit by returning a task ID immediately and letting the client poll/retrieve later.
 - **Health endpoint:** `/health` checks gateway health and OHM backend reachability.
 - **Management endpoint:** `/admin/keys` (admin-key only) for key CRUD.
 
@@ -128,13 +129,13 @@ Add optional dependency group `gateway` to `pyproject.toml`:
 ```toml
 [project.optional-dependencies]
 gateway = [
-    "fastmcp>=3.0",
+    "fastmcp>=3.0[tasks]",
     "mcp>=1.6",
     "httpx>=0.27",
 ]
 ```
 
-Core OHM keeps only `duckdb`, `click`, etc. The gateway is opt-in.
+Core OHM keeps only `duckdb`, `click`, etc. The gateway is opt-in. The `tasks` extra is required for long-running OHM operations.
 
 ## Consequences
 
@@ -149,8 +150,8 @@ Core OHM keeps only `duckdb`, `click`, etc. The gateway is opt-in.
 
 - Adds a new runtime component with its own auth store and config.
 - FastMCP is a moving target; auth patterns are noted as "rapidly evolving" in their docs.
-- Lambda cold start + FastMCP dependency may be slow; need to measure and possibly trim the package.
-- SSE transport is awkward behind API Gateway; we bias toward Streamable HTTP for Lambda.
+- Lambda cold start + FastMCP dependency may be slow; need to measure and possibly trim the package. Background Tasks add a Docket dependency, which may require Redis for horizontal scaling; for single-tenant or low-volume Lambda, task state can live in DynamoDB or be kept local.
+- SSE transport is awkward behind API Gateway; we bias toward Streamable HTTP and Background Tasks for Lambda.
 
 ## Alternatives considered
 
