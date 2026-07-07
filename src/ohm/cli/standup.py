@@ -559,22 +559,52 @@ def verify_tenant_orient(url: str, customer_key: str, agent_id: str) -> dict:
 
 
 def verify_mcp_tools(config_path: Path) -> int:
-    """Run `ohm-mcp --config ... tools/list` and return tool count."""
-    payload = b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n'
+    """List tools from an ohm-mcp sidecar using the proper MCP handshake.
+
+    OHM-yzyk.1.4: uses the mcp SDK stdio client so the initialize handshake
+    is performed before tools/list. Falls back to a warning if mcp is not
+    installed.
+    """
     try:
-        result = subprocess.run(
-            ["ohm-mcp", "--config", str(config_path)],
-            input=payload,
-            capture_output=True,
-            timeout=10,
+        import asyncio
+
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+    except Exception as exc:
+        print(f"  ℹ MCP SDK not available, skipping tools/list verification: {exc}")
+        return -2
+
+    async def _list() -> int:
+        params = StdioServerParameters(
+            command="ohm-mcp",
+            args=["--config", str(config_path)],
+            env=None,
         )
-        if result.returncode != 0:
+        try:
+            async with stdio_client(params) as (read, write):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    result = await session.list_tools()
+                    return len(result.tools)
+        except Exception as exc:
+            print(f"  ℹ MCP tools/list handshake failed: {exc}")
             return -1
-        out = result.stdout.decode("utf-8", errors="ignore").splitlines()[0]
-        parsed = json.loads(out)
-        return len(parsed.get("result", {}).get("tools", []))
-    except Exception:
+
+    try:
+        return asyncio.run(_list())
+    except Exception as exc:
+        print(f"  ℹ Could not run MCP tools/list verification: {exc}")
         return -1
+
+
+def _mcp_tools_message(count: int) -> str:
+    if count == -2:
+        return "ℹ MCP SDK not installed; tools/list not verified"
+    if count == -1:
+        return "⚠ MCP tools/list handshake failed"
+    if count == 0:
+        return "⚠ MCP tools/list returned 0 tools"
+    return f"✓ MCP tools/list returned {count} tools"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -750,10 +780,7 @@ def run_connect(args: argparse.Namespace) -> None:
         print(f"  ⚠ Orient check failed: {e}")
 
     tool_count = verify_mcp_tools(config_path)
-    if tool_count >= 0:
-        print(f"  ✓ MCP tools/list returned {tool_count} tools")
-    else:
-        print("  ⚠ MCP tools/list failed (is ohm-mcp installed?)")
+    print(f"  {_mcp_tools_message(tool_count)}")
 
 
 def run_greenfield(args: argparse.Namespace) -> None:
@@ -897,10 +924,7 @@ def run_greenfield(args: argparse.Namespace) -> None:
         print(f"  ⚠ Orient check failed: {e}")
 
     tool_count = verify_mcp_tools(config_path_mcp)
-    if tool_count >= 0:
-        print(f"  ✓ MCP tools/list returned {tool_count} tools")
-    else:
-        print("  ⚠ MCP tools/list failed (is ohm-mcp installed?)")
+    print(f"  {_mcp_tools_message(tool_count)}")
 
     print("\n✓ Greenfield standup completed.")
 

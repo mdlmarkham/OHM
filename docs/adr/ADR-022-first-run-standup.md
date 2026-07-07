@@ -84,8 +84,7 @@ and `seed_payload(name)` for use by the standup CLI and tests.
 - Agent host patching for Cursor / Claude Code / OpenCode paths are best-effort
   and may need adjustment as those products evolve.
 - Remote HTTPS/Caddy deployments need `--url` and token handling tested.
-- MCP sidecar in greenfield foreground mode returns 0 tools in the test; may be a
-  config/env issue in the sidecar rather than the standup script.
+- SSE transport for `ohm-mcp` is accepted by config but not implemented in `server.py`.
 
 ## Related Documents
 
