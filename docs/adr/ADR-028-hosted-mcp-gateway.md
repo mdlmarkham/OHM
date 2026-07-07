@@ -24,7 +24,17 @@ Use FastMCP as the gateway framework because:
 - It supports MCP background tasks (`@mcp.tool(task=True)`) for long-running OHM queries such as `ohm_listen`, complex `ohm_neighborhood`, or large `ohm_search` results, which lets clients start an operation, track progress, and retrieve results later instead of blocking on API Gateway's 29s limit.
 - Tool fingerprinting helps detect schema drift between gateway deployments.
 
-The existing local `ohm-mcp` sidecar stays on the raw `mcp` SDK. Do not migrate it to FastMCP; its `--config`, `allowed_tools`, and `read_only` logic is OHM-specific and not simplified by FastMCP.
+The existing local `ohm-mcp` sidecar stays on the raw `mcp` SDK. Do not migrate it to FastMCP; its `--config`, `allowed_tools`, and `read_only` logic is OHM-specific and not simplified by FastMCP. FastMCP's main advantages (HTTP transports, remote auth, background tasks) solve remote-agent problems, not local stdio problems. If we later want one codebase for both, we can add a `--stdio` mode to the gateway and deprecate the separate sidecar, but only after the gateway is proven in production.
+
+### 1.1. Should local MCP use FastMCP too?
+
+No. The local `ohm-mcp` sidecar is stdio-only, single-config-file, and already hardened under OHM-yzyk.1. Migrating it now would:
+
+- Introduce dependency weight (Docket for tasks, etc.) for no local benefit.
+- Risk regressions in a component that is working end-to-end.
+- Waste the recent yzyk.1 hardening work.
+
+Selective backport of concepts (tool fingerprinting, generated resource-as-tool wrappers) is OK, but the transport/server layer stays on the raw `mcp` SDK.
 
 ### 2. Deployment targets (in order)
 
