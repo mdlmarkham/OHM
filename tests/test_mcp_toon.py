@@ -97,3 +97,50 @@ def test_text_content_uses_format():
     toon_content = _text(payload, "toon")
     assert json.loads(json_content[0].text) == payload
     assert decode_payload(toon_content[0].text, "toon") == payload
+
+
+def test_toon_saves_tokens_on_uniform_arrays():
+    """TOON should be measurably smaller than JSON for OHM-style uniform arrays."""
+    import json
+
+    payload = {
+        "events": [
+            {
+                "id": f"event-{i:04d}",
+                "type": "edge.created" if i % 2 == 0 else "node.created",
+                "actor": ["metis", "socrates", "hephaestus"][i % 3],
+                "node_id": f"concept-{i:03d}",
+                "edge_id": f"edge-{i:04d}" if i % 2 == 0 else None,
+                "timestamp": f"2026-07-07T{i:02d}:00:00Z",
+            }
+            for i in range(50)
+        ]
+    }
+    json_text = json.dumps(payload, indent=2)
+    toon_text = encode_payload(payload, "toon")
+    assert len(toon_text) < len(json_text)
+    assert decode_payload(toon_text, "toon") == payload
+
+
+def test_toon_saves_tokens_on_search_results():
+    """TOON should be smaller than JSON for uniform search result arrays."""
+    import json
+
+    nodes = [
+        {
+            "id": f"concept-and-or-{i:03d}",
+            "label": f"AND-OR conversion example {i}",
+            "type": "concept",
+            "content": "Every infrastructure OR-gate creates a hidden AND-gate at a different layer.",
+            "confidence": 0.85,
+            "created_by": "metis",
+            "created_at": "2026-07-07T12:00:00Z",
+            "tags": ["and-or", "infrastructure", "gates"],
+        }
+        for i in range(20)
+    ]
+    payload = {"results": nodes, "total": 20, "query": "AND-OR conversion"}
+    json_text = json.dumps(payload, indent=2)
+    toon_text = encode_payload(payload, "toon")
+    assert len(toon_text) < len(json_text)
+    assert decode_payload(toon_text, "toon") == payload
