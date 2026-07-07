@@ -15,17 +15,17 @@
   ],
   "values": [
     {
-      "id": "value-evidence",
+      "id": "concept-value-evidence",
       "label": "Evidence over Narrative",
-      "type": "value",
+      "type": "concept",
       "content": "Track claims by their source quality and verification history, not by how compelling the story is.",
       "tags": ["research", "evidence", "trading"],
       "confidence": 0.95
     },
     {
-      "id": "value-calibration",
+      "id": "concept-value-calibration",
       "label": "Calibration",
-      "type": "value",
+      "type": "concept",
       "content": "Confidence statements should match outcomes over time.",
       "tags": ["calibration", "uncertainty", "trading"],
       "confidence": 0.9
@@ -33,17 +33,17 @@
   ],
   "capabilities": [
     {
-      "id": "cap-source-assessment",
+      "id": "concept-cap-source-assessment",
       "label": "Source Assessment",
-      "type": "capability",
+      "type": "concept",
       "content": "Evaluate and track the reliability of information sources over time.",
       "tags": ["research", "sources", "capability"],
       "confidence": 0.9
     },
     {
-      "id": "cap-scenario-modeling",
+      "id": "concept-cap-scenario-modeling",
       "label": "Scenario Modeling",
-      "type": "capability",
+      "type": "concept",
       "content": "Build structured forecasts with explicit assumptions and confidence ranges.",
       "tags": ["forecasting", "scenarios", "capability"],
       "confidence": 0.85
@@ -76,12 +76,12 @@
     }
   ],
   "edges": [
-    { "from_node": "agent-clio", "to_node": "value-evidence", "edge_type": "VALUES", "layer": "L1", "confidence": 1.0 },
-    { "from_node": "agent-clio", "to_node": "value-calibration", "edge_type": "VALUES", "layer": "L1", "confidence": 0.95 },
-    { "from_node": "agent-clio", "to_node": "cap-source-assessment", "edge_type": "CAPABLE_OF", "layer": "L1", "confidence": 0.9 },
-    { "from_node": "agent-clio", "to_node": "cap-scenario-modeling", "edge_type": "CAPABLE_OF", "layer": "L1", "confidence": 0.85 },
-    { "from_node": "value-evidence", "to_node": "concept-source-reliability", "edge_type": "APPLIES_TO", "layer": "L3", "confidence": 0.85 },
-    { "from_node": "value-calibration", "to_node": "concept-evaluation-trap", "edge_type": "APPLIES_TO", "layer": "L3", "confidence": 0.8 },
+    { "from_node": "agent-clio", "to_node": "concept-value-evidence", "edge_type": "VALUES", "layer": "L1", "confidence": 1.0 },
+    { "from_node": "agent-clio", "to_node": "concept-value-calibration", "edge_type": "VALUES", "layer": "L1", "confidence": 0.95 },
+    { "from_node": "agent-clio", "to_node": "concept-cap-source-assessment", "edge_type": "CAPABLE_OF", "layer": "L1", "confidence": 0.9 },
+    { "from_node": "agent-clio", "to_node": "concept-cap-scenario-modeling", "edge_type": "CAPABLE_OF", "layer": "L1", "confidence": 0.85 },
+    { "from_node": "concept-value-evidence", "to_node": "concept-source-reliability", "edge_type": "APPLIES_TO", "layer": "L3", "confidence": 0.85 },
+    { "from_node": "concept-value-calibration", "to_node": "concept-evaluation-trap", "edge_type": "APPLIES_TO", "layer": "L3", "confidence": 0.8 },
     { "from_node": "concept-autocatalytic-system", "to_node": "concept-evaluation-trap", "edge_type": "CAUSES", "layer": "L3", "confidence": 0.75 }
   ]
 }

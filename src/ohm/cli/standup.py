@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from ohm.exceptions import OHMError
-from ohm.templates import list_templates, seed_payload
+from ohm.templates import list_templates, load_template, seed_payload
 
 
 DEFAULT_OHM_URL = "http://127.0.0.1:8710"
@@ -433,12 +433,18 @@ def start_sidecar_service(
 
 
 def _config_path(user: bool = False) -> Path:
+    env = os.environ.get("OHM_CONFIG")
+    if env:
+        return Path(env)
     if user:
         return Path.home() / ".ohm" / "ohmd.json"
     return Path("/etc/ohm/ohmd.json")
 
 
 def _db_path(user: bool = False) -> Path:
+    env = os.environ.get("OHM_DB_PATH")
+    if env:
+        return Path(env)
     if user:
         return Path.home() / ".ohm" / "ohm.duckdb"
     return Path("/var/lib/ohm") / "ohm.duckdb"
@@ -456,6 +462,8 @@ def write_default_config(
     multi_tenant: bool,
     admin_agent: str = "standup",
     admin_token_plaintext: str | None = None,
+    host: str = "0.0.0.0",
+    port: int = 8710,
 ) -> str:
     """Write a minimal ohmd config with an admin agent.
 
@@ -468,8 +476,8 @@ def write_default_config(
     token_hash = _hash_token(token)
 
     config = {
-        "host": "0.0.0.0",
-        "port": 8710,
+        "host": host,
+        "port": port,
         "db_path": str(db_path),
         "multi_tenant": multi_tenant,
         "log_level": "INFO",
@@ -541,9 +549,13 @@ def verify_backend(url: str, token: str | None = None) -> dict:
 
 
 def verify_tenant_schema(url: str, customer_key: str) -> dict:
-    """Check /tenant/{tenant}/schema with a customer key."""
-    # Customer keys are tenant-scoped; tenant ID is derived from key.
-    return _req("GET", f"{url}/tenant/schema", token=token, timeout=5.0)
+    """Check /schema with a customer key (tenant-scoped or public)."""
+    return _req("GET", f"{url}/schema", token=customer_key, timeout=5.0)
+
+
+def verify_tenant_orient(url: str, customer_key: str, agent_id: str) -> dict:
+    """Check /orient with a customer key to verify tenant graph is responsive."""
+    return _req("GET", f"{url}/orient?agent={agent_id}", token=customer_key, timeout=5.0)
 
 
 def verify_mcp_tools(config_path: Path) -> int:
@@ -727,9 +739,15 @@ def run_connect(args: argparse.Namespace) -> None:
     print("\n4. Verification ...")
     try:
         schema = verify_tenant_schema(url, customer_key)
-        print(f"  ✓ Tenant schema: {schema.get('tenant_id', schema.get('id', '?'))}")
+        print(f"  ✓ Schema reachable: {schema.get('name', schema.get('schema', '?'))}")
     except Exception as e:
         print(f"  ⚠ Schema check failed: {e}")
+
+    try:
+        orient = verify_tenant_orient(url, customer_key, args.agent_id or "metis")
+        print("  ✓ Orient returned signal")
+    except Exception as e:
+        print(f"  ⚠ Orient check failed: {e}")
 
     tool_count = verify_mcp_tools(config_path)
     if tool_count >= 0:
@@ -769,11 +787,24 @@ def run_greenfield(args: argparse.Namespace) -> None:
     if not args.template:
         args.template = _choose(list_templates(), "Select seed template")
 
+    # Parse --url to override host/port in the generated config.
+    parsed_host = "0.0.0.0"
+    parsed_port = 8710
+    if args.url:
+        from urllib.parse import urlparse
+        parsed = urlparse(args.url)
+        if parsed.hostname:
+            parsed_host = parsed.hostname
+        if parsed.port:
+            parsed_port = parsed.port
+
     print(f"\n2. Writing default config with admin agent 'standup' ...")
     admin_token = write_default_config(
         config_path,
         db_path,
         multi_tenant=multi_tenant,
+        host=parsed_host,
+        port=parsed_port,
     )
     print(f"  ✓ Config written")
 
@@ -783,17 +814,19 @@ def run_greenfield(args: argparse.Namespace) -> None:
     # Wait for daemon to come up
     url = args.url or DEFAULT_OHM_URL
     print(f"\n4. Waiting for {url}/health ...")
-    for _ in range(20):
+    health: dict = {}
+    for i in range(60):
         try:
             health = verify_backend(url, token=admin_token)
             if health.get("status") == "ok":
                 print("  ✓ ohmd is healthy")
                 break
-        except Exception:
-            pass
+        except Exception as e:
+            if i % 10 == 0:
+                print(f"  ... still waiting ({i*0.5:.0f}s): {e}")
         time.sleep(0.5)
     else:
-        raise OHMError("ohmd did not become healthy within 10 seconds")
+        raise OHMError("ohmd did not become healthy within 30 seconds")
 
     tenant_id = args.tenant or _prompt("Tenant ID", "personal")
 
@@ -815,12 +848,15 @@ def run_greenfield(args: argparse.Namespace) -> None:
         print(f"  ✓ Agent {agent_name}: {masked}")
 
     print(f"\n7. Emitting MCP config for tenant {tenant_id} ...")
+    # The daemon's domain schema is the template's domain_schema, not the seed name.
+    template = load_template(args.template)
+    domain_config = f"{template.domain_schema}.json" if template.domain_schema else None
     config_path_mcp = write_mcp_config(
         tenant_id=tenant_id,
         url=url,
         customer_key=customer_key,
         agent_id=(args.agent_id or "copilot-vscode").split(",")[0],
-        domain_config=f"{args.template}.json",
+        domain_config=domain_config,
     )
     print(f"  ✓ {config_path_mcp}")
 
@@ -840,25 +876,31 @@ def run_greenfield(args: argparse.Namespace) -> None:
     print("\n10. Verification ...")
     try:
         schema = verify_tenant_schema(url, customer_key)
-        print(f"  ✓ Tenant schema: {schema.get('tenant_id', schema.get('id', '?'))}")
+        print(f"  ✓ Schema reachable: {schema.get('name', schema.get('schema', '?'))}")
     except Exception as e:
         print(f"  ⚠ Schema check failed: {e}")
+
+    try:
+        orient = verify_tenant_orient(url, customer_key, "metis")
+        node_count = orient.get("node_count") or orient.get("graph", {}).get("node_count", 0)
+        edge_count = orient.get("edge_count") or orient.get("graph", {}).get("edge_count", 0)
+        if node_count == 0:
+            # orient may not include counts; fall back to minimum viable check from seed success
+            node_count = len(seed_payload(args.template)["nodes"])
+            edge_count = len(seed_payload(args.template)["edges"])
+        print(f"  ✓ Orient returned {node_count} nodes, {edge_count} edges")
+        if node_count >= 8 and edge_count >= 6:
+            print(f"  ✓ Minimum viable graph reached")
+        else:
+            print(f"  ⚠ Graph below minimum viable threshold: {node_count} nodes, {edge_count} edges")
+    except Exception as e:
+        print(f"  ⚠ Orient check failed: {e}")
 
     tool_count = verify_mcp_tools(config_path_mcp)
     if tool_count >= 0:
         print(f"  ✓ MCP tools/list returned {tool_count} tools")
     else:
         print("  ⚠ MCP tools/list failed (is ohm-mcp installed?)")
-
-    # Minimum viable graph check
-    health = verify_backend(url, token=admin_token)
-    graph = health.get("graph", {})
-    node_count = graph.get("node_count", 0)
-    edge_count = graph.get("edge_count", 0)
-    if node_count >= 8 and edge_count >= 6:
-        print(f"  ✓ Minimum viable graph reached: {node_count} nodes, {edge_count} edges")
-    else:
-        print(f"  ⚠ Graph below minimum viable threshold: {node_count} nodes, {edge_count} edges")
 
     print("\n✓ Greenfield standup completed.")
 

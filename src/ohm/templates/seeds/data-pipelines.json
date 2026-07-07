@@ -15,17 +15,17 @@
   ],
   "values": [
     {
-      "id": "value-lineage",
+      "id": "concept-value-lineage",
       "label": "Lineage",
-      "type": "value",
+      "type": "concept",
       "content": "Every output should be traceable to its inputs, transformations, and owners.",
       "tags": ["data", "lineage", "observability"],
       "confidence": 0.95
     },
     {
-      "id": "value-reliability",
+      "id": "concept-value-reliability",
       "label": "Reliability",
-      "type": "value",
+      "type": "concept",
       "content": "Pipelines fail silently more often than loudly. Explicit contracts and monitoring are required.",
       "tags": ["reliability", "data", "operations"],
       "confidence": 0.9
@@ -33,17 +33,17 @@
   ],
   "capabilities": [
     {
-      "id": "cap-schema-audit",
+      "id": "concept-cap-schema-audit",
       "label": "Schema Audit",
-      "type": "capability",
+      "type": "concept",
       "content": "Detect and report schema drift and contract violations across pipeline stages.",
       "tags": ["data", "schema", "audit", "capability"],
       "confidence": 0.9
     },
     {
-      "id": "cap-lineage-tracing",
+      "id": "concept-cap-lineage-tracing",
       "label": "Lineage Tracing",
-      "type": "capability",
+      "type": "concept",
       "content": "Trace the origin and transformations of any data artifact.",
       "tags": ["data", "lineage", "capability"],
       "confidence": 0.85
@@ -76,12 +76,12 @@
     }
   ],
   "edges": [
-    { "from_node": "agent-clio", "to_node": "value-lineage", "edge_type": "VALUES", "layer": "L1", "confidence": 1.0 },
-    { "from_node": "agent-clio", "to_node": "value-reliability", "edge_type": "VALUES", "layer": "L1", "confidence": 0.95 },
-    { "from_node": "agent-clio", "to_node": "cap-schema-audit", "edge_type": "CAPABLE_OF", "layer": "L1", "confidence": 0.9 },
-    { "from_node": "agent-clio", "to_node": "cap-lineage-tracing", "edge_type": "CAPABLE_OF", "layer": "L1", "confidence": 0.85 },
-    { "from_node": "value-lineage", "to_node": "concept-data-lineage", "edge_type": "APPLIES_TO", "layer": "L3", "confidence": 0.85 },
-    { "from_node": "value-reliability", "to_node": "concept-schema-drift", "edge_type": "APPLIES_TO", "layer": "L3", "confidence": 0.8 },
+    { "from_node": "agent-clio", "to_node": "concept-value-lineage", "edge_type": "VALUES", "layer": "L1", "confidence": 1.0 },
+    { "from_node": "agent-clio", "to_node": "concept-value-reliability", "edge_type": "VALUES", "layer": "L1", "confidence": 0.95 },
+    { "from_node": "agent-clio", "to_node": "concept-cap-schema-audit", "edge_type": "CAPABLE_OF", "layer": "L1", "confidence": 0.9 },
+    { "from_node": "agent-clio", "to_node": "concept-cap-lineage-tracing", "edge_type": "CAPABLE_OF", "layer": "L1", "confidence": 0.85 },
+    { "from_node": "concept-value-lineage", "to_node": "concept-data-lineage", "edge_type": "APPLIES_TO", "layer": "L3", "confidence": 0.85 },
+    { "from_node": "concept-value-reliability", "to_node": "concept-schema-drift", "edge_type": "APPLIES_TO", "layer": "L3", "confidence": 0.8 },
     { "from_node": "concept-schema-drift", "to_node": "concept-pipeline-observability", "edge_type": "CAUSES", "layer": "L3", "confidence": 0.75 }
   ]
 }

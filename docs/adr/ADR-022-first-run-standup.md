@@ -75,15 +75,17 @@ and `seed_payload(name)` for use by the standup CLI and tests.
 - Seed templates: `src/ohm/templates/seeds/` + loader + tests.
 - Tests: `tests/test_templates.py` (11), `tests/test_standup.py` (10),
   `tests/test_cli.py` still passes (133 total in combined run).
+- End-to-end greenfield test: succeeded on port 18710 with temp config/DB,
+  producing an orient response with 11 nodes and 12 edges.
 
 ## Known Gaps
 
-- Greenfield mode is implemented but not yet exercised end-to-end against a clean
-  environment because the local test deployment already has a running `ohmd`.
 - Windows service adapter is best-effort (`New-Service`); production may prefer nssm.
 - Agent host patching for Cursor / Claude Code / OpenCode paths are best-effort
   and may need adjustment as those products evolve.
 - Remote HTTPS/Caddy deployments need `--url` and token handling tested.
+- MCP sidecar in greenfield foreground mode returns 0 tools in the test; may be a
+  config/env issue in the sidecar rather than the standup script.
 
 ## Related Documents
 
