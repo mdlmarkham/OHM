@@ -17,10 +17,40 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
-from ohm.graph_reader import coerce_reader as _coerce_reader
+from ohm.graph_reader import coerce_reader as _coerce_reader, raw_conn as _raw_conn
 from ohm.semantic_roles import SemanticRoles
 
 logger = logging.getLogger(__name__)
+
+# Module-level LRU cache for Markov transition-matrix construction.
+# Keyed by (conn_id, graph_generation, edge_types, state_nodes, semantic_roles, collapse_sccs).
+# Graph generation invalidates entries automatically when it changes.
+_MAX_MARKOV_MATRIX_CACHE_SIZE = 20
+
+
+class _LRUMarkovCache(dict):
+    """dict subclass that evicts the oldest entry when maxsize is exceeded."""
+
+    def __init__(self, maxsize: int = _MAX_MARKOV_MATRIX_CACHE_SIZE):
+        super().__init__()
+        self._maxsize = maxsize
+        self._key_order: list[tuple] = []
+
+    def __setitem__(self, key, value):
+        if key not in self:
+            self._key_order.append(key)
+        super().__setitem__(key, value)
+        while len(self._key_order) > self._maxsize:
+            oldest = self._key_order.pop(0)
+            if oldest in self:
+                super().__delitem__(oldest)
+
+    def clear(self):
+        super().clear()
+        self._key_order.clear()
+
+
+_markov_matrix_cache: _LRUMarkovCache = _LRUMarkovCache()
 
 try:
     import numpy as np
@@ -211,13 +241,33 @@ def _build_transition_matrix(
     """
     _require_numpy()
 
+    reader = _coerce_reader(conn)
+
     if edge_types is None:
         if semantic_roles is not None:
             edge_types = semantic_roles.state_transitions_list()
         else:
             edge_types = ["CAUSES", "TRANSITIONS_TO"]
 
-    reader = _coerce_reader(conn)
+    # Normalize cache key components.
+    edge_types_key = tuple(sorted(edge_types))
+    state_nodes_key = tuple(sorted(state_nodes)) if state_nodes is not None else None
+    semantic_roles_key = tuple(sorted(semantic_roles.state_transitions_list())) if semantic_roles is not None else None
+    cache_key = (
+        id(_raw_conn(reader)),
+        reader.get_graph_generation(),
+        edge_types_key,
+        state_nodes_key,
+    )
+    if semantic_roles_key is not None:
+        cache_key = cache_key + (semantic_roles_key,)
+    cache_key = cache_key + (collapse_sccs,)
+
+    cached = _markov_matrix_cache.get(cache_key)
+    if cached is not None:
+        logger.debug("Markov matrix cache hit for key=%s", cache_key)
+        return cached
+
     _edge_records = reader.get_edges(edge_types=edge_types)
 
     if state_nodes is not None:
@@ -285,7 +335,9 @@ def _build_transition_matrix(
             i = meta_to_idx[meta_id]
             matrix[i, i] = 1.0
 
-        return meta_nodes, matrix, meta_transient, meta_absorbing, sccs, meta_members
+        result = (meta_nodes, matrix, meta_transient, meta_absorbing, sccs, meta_members)
+        _markov_matrix_cache[cache_key] = result
+        return result
 
     matrix = np.zeros((n, n), dtype=np.float64)
 
@@ -313,7 +365,9 @@ def _build_transition_matrix(
         i = node_to_idx[node]
         matrix[i, i] = 1.0
 
-    return nodes, matrix, transient, absorbing, sccs, {}
+    result = (nodes, matrix, transient, absorbing, sccs, {})
+    _markov_matrix_cache[cache_key] = result
+    return result
 
 
 def markov_absorbing_risk(

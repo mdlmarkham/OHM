@@ -254,3 +254,40 @@ class TestSCCCollapse:
 
         assert result["method"] == "markov_expected_steps"
         assert result["scc_collapsed"] is True
+
+
+class TestMarkovCache:
+    """Tests for module-level Markov transition-matrix cache."""
+
+    def test_matrix_cache_reused_across_calls(self, test_db):
+        from ohm.inference.markov import _markov_matrix_cache
+
+        healthy, symptomatic, critical, deceased = _build_linear_chain(test_db)
+
+        _markov_matrix_cache.clear()
+
+        result1 = markov_absorbing_risk(test_db, healthy, edge_types=["TRANSITIONS_TO"])
+        result2 = markov_absorbing_risk(test_db, healthy, edge_types=["TRANSITIONS_TO"])
+        result3 = markov_expected_steps(test_db, healthy, edge_types=["TRANSITIONS_TO"])
+
+        # Only one matrix build should be cached for identical parameters.
+        assert len(_markov_matrix_cache) == 1
+        assert result1["absorption_probabilities"]
+        assert result2["absorption_probabilities"] == result1["absorption_probabilities"]
+        assert result3["expected_steps"] is not None
+
+    def test_cache_invalidation_on_graph_generation_change(self, test_db):
+        from ohm.inference.markov import _markov_matrix_cache
+
+        healthy, symptomatic, critical, deceased = _build_linear_chain(test_db)
+
+        _markov_matrix_cache.clear()
+        markov_absorbing_risk(test_db, healthy, edge_types=["TRANSITIONS_TO"])
+        assert len(_markov_matrix_cache) == 1
+
+        # Manually bump graph_generation (mimics what OhmStore does on writes).
+        test_db.execute("UPDATE ohm_meta SET value = '1' WHERE key = 'graph_generation'")
+
+        markov_absorbing_risk(test_db, healthy, edge_types=["TRANSITIONS_TO"])
+        # New generation means a new cache entry, so total should be 2.
+        assert len(_markov_matrix_cache) == 2
