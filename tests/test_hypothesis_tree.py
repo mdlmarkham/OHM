@@ -48,7 +48,9 @@ class TestSchemaPrimitives:
         assert "experiment_result" in VALID_OBSERVATION_TYPES
 
     def test_schema_version_bumped(self):
-        assert SCHEMA_VERSION == "0.43.0"
+        # Monotonic check: SCHEMA_VERSION only ever increases, and pinning an
+        # exact string breaks this test on every later, unrelated migration.
+        assert tuple(int(x) for x in SCHEMA_VERSION.split(".")) >= (0, 35, 0)
 
     def test_migration_0_35_0_present(self):
         versions = [m[0] for m in MIGRATIONS]

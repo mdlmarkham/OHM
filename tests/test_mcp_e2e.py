@@ -164,8 +164,10 @@ async def test_mcp_e2e_stats_and_read_only(ohmd):
 
     from ohm.mcp.server import call_tool
 
-    # call ohm_stats
-    result = await call_tool("ohm_stats", {})
+    # call ohm_stats — force json explicitly; DEFAULT_FORMAT is "toon" whenever
+    # python-toon is installed (e.g. via the `gateway` extra this module ships
+    # under), so asserting json.loads() below requires opting out of that default.
+    result = await call_tool("ohm_stats", {"format": "json"})
     assert not result.isError, f"ohm_stats call errored: {result.content}"
     assert len(result.content) > 0
     first_text = result.content[0].text
