@@ -24,6 +24,13 @@ import urllib.request
 from ohm.templates import seed_payload
 
 
+def _mask_credential(value: str) -> str:
+    """Return a masked representation for display. Does not expose the original."""
+    if len(value) > 12:
+        return value[:8] + "..." + value[-4:]
+    return "***"
+
+
 def _req(method: str, url: str, token: str | None = None, data: dict | None = None, timeout: float = 5.0) -> dict:
     headers = {"Accept": "application/json"}
     if token:
@@ -136,7 +143,7 @@ def main() -> int:
         if not customer_key:
             print("Provisioning did not return a customer key. Check admin token / permissions.")
             return 2
-        masked = customer_key[:8] + "..." + customer_key[-4:] if len(customer_key) > 12 else "***"
+        masked = _mask_credential(customer_key)
         print(f"  Customer token (masked): {masked}")
     else:
         if not customer_key:

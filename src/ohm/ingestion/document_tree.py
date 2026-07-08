@@ -286,9 +286,13 @@ def parse_markdown_to_tree(
 
     if _markdown_lib is None:
         title = default_title
-        m = re.search(r"^\s*#{1,6}\s+(\S.*?)\s*$", markdown, re.MULTILINE)
-        if m:
-            title = m.group(1)
+        # Strip each line before matching to avoid ReDoS from \s+ / \s*$ ambiguity.
+        for line in markdown.splitlines():
+            stripped = line.strip()
+            m = re.match(r"^#{1,6}\s+(\S.*)$", stripped)
+            if m:
+                title = m.group(1).strip()
+                break
         root = DocumentNode(
             id=source_id,
             title=title,
