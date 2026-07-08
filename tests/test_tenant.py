@@ -752,6 +752,27 @@ class TestPerTenantQuotas:
         with pytest.raises(QuotaExceededError, match="store not in cache"):
             tm.check_quota("acme_hvac", "nodes", amount=1)
 
+    def test_check_quota_fails_closed_on_db_error(self, tm, monkeypatch):
+        """check_quota raises (not silently allows) when the COUNT query itself errors.
+
+        Previously a DB error during the quota count was swallowed and treated
+        as current_count=0, letting writes through despite quota exhaustion
+        (e.g. during corruption or lock contention). Must fail closed.
+        """
+        from ohm.tenant import QuotaExceededError
+
+        tm.provision("acme_hvac")
+        store = tm.get_store("acme_hvac")
+
+        class _BoomConn:
+            def execute(self, *args, **kwargs):
+                raise RuntimeError("simulated DB error")
+
+        monkeypatch.setattr(store, "conn", _BoomConn())
+
+        with pytest.raises(QuotaExceededError, match="quota check failed"):
+            tm.check_quota("acme_hvac", "nodes", amount=1)
+
     def test_check_quota_db_size(self, tm, monkeypatch):
         from ohm.tenant import QuotaExceededError, TIER_QUOTAS
 
