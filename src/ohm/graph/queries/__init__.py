@@ -14250,7 +14250,7 @@ def timeline_rollup(
     max_depth = validate_depth(max_depth)
 
     descendant_params: list[Any] = [ancestor_node_id, max_depth]
-    descendant_query = f"""
+    descendant_query = """
         WITH RECURSIVE descendants AS (
             SELECT ? AS node, 0 AS hop
             UNION
