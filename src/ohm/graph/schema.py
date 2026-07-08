@@ -92,6 +92,116 @@ VALID_NODE_TYPES = frozenset(
     }
 )
 
+# ── Analysis guide for /schema endpoints ───────────────────────────────────
+# Quick guidance for agents and clients: what each node type is good for,
+# which evidence it needs, whether it supports causal interventions, and
+# provenance rules to keep in mind.
+ANALYSIS_GUIDE: dict[str, dict[str, object]] = {
+    "source": {
+        "use_for": ["raw evidence", "outcome tracking", "reliability scoring"],
+        "supports_inference": False,
+        "required_evidence": ["source_url"],
+        "provenance_rules": ["source_url is required (ADR-013)", "reliability is tracked via recorded outcomes"],
+    },
+    "concept": {
+        "use_for": ["definitions", "shared vocabulary", "L2 structure"],
+        "supports_inference": True,
+        "required_evidence": [],
+        "provenance_rules": ["link to sources via REFERENCES edges", "keep definitions narrow enough to challenge"],
+    },
+    "pattern": {
+        "use_for": ["syntheses", "cross-domain abstractions", "Bayesian targets"],
+        "supports_inference": True,
+        "required_evidence": ["supporting edges", "confidence >= 0.8 for L3"],
+        "provenance_rules": ["must be challengeable", "prefer CAUSES/ENABLES/DEPENDS_ON edges for inference"],
+    },
+    "event": {
+        "use_for": ["dated facts", "turning points", "trigger nodes"],
+        "supports_inference": True,
+        "required_evidence": [],
+        "provenance_rules": ["include date/timestamp in metadata when possible", "link to decisions it triggers"],
+    },
+    "decision": {
+        "use_for": ["action selection", "utility optimization", "policy nodes"],
+        "supports_inference": True,
+        "required_evidence": ["utility_scale", "action_alternatives"],
+        "provenance_rules": ["utility_scale and action_alternatives enable /nash and /policy", "update current_best_action when evidence shifts"],
+    },
+    "task": {
+        "use_for": ["work tracking", "status transitions", "agent assignments"],
+        "supports_inference": False,
+        "required_evidence": ["status", "assigned_to"],
+        "provenance_rules": ["use status lifecycle: open -> in_progress -> review -> done", "link to runbooks/skills for execution context"],
+    },
+    "hypothesis": {
+        "use_for": ["testable claims", "experiment targets"],
+        "supports_inference": True,
+        "required_evidence": ["falsifiability criteria"],
+        "provenance_rules": ["link to at least one experiment or evidence node", "update confidence as outcomes arrive"],
+    },
+    "experiment": {
+        "use_for": ["bounded evaluations", "metric collection"],
+        "supports_inference": False,
+        "required_evidence": ["metrics", "artifact reference"],
+        "provenance_rules": ["link to the hypothesis being tested", "record outcome to update source reliability"],
+    },
+    "fragment": {
+        "use_for": ["L0 hunches", "raw agent thinking", "questions"],
+        "supports_inference": False,
+        "required_evidence": [],
+        "provenance_rules": ["excluded from search/stats/neighborhood by default", "promote to a typed node when confidence >= 0.8"],
+    },
+    "agent": {
+        "use_for": ["actor metadata", "services offered", "focus areas"],
+        "supports_inference": False,
+        "required_evidence": [],
+        "provenance_rules": ["keep services and focus_areas current", "use for A2A routing and trust scoring"],
+    },
+    "skill": {
+        "use_for": ["portable capability", "Open Skills contracts"],
+        "supports_inference": False,
+        "required_evidence": ["trigger", "output_format"],
+        "provenance_rules": ["declare required_tools and boundaries", "link to runbooks that invoke the skill"],
+    },
+    "runbook": {
+        "use_for": ["ordered skill chains", "reusable procedures"],
+        "supports_inference": False,
+        "required_evidence": ["DEPENDS_ON chain of skill nodes"],
+        "provenance_rules": ["order matters: edges are DEPENDS_ON", "version for breaking changes"],
+    },
+    "twin": {
+        "use_for": ["digital twins", "model candidates", "drift monitoring"],
+        "supports_inference": True,
+        "required_evidence": ["snap-in contract", "registered model candidates"],
+        "provenance_rules": ["model candidates compete via model_evaluation nodes", "drift_events should reference this twin"],
+    },
+    "scenario": {
+        "use_for": ["counterfactuals", "what-if reasoning"],
+        "supports_inference": True,
+        "required_evidence": ["target node and assumed state"],
+        "provenance_rules": ["link to the node being varied", "actions are proposed in response"],
+    },
+    "action": {
+        "use_for": ["proposed or executed interventions"],
+        "supports_inference": True,
+        "required_evidence": ["linked scenario or decision"],
+        "provenance_rules": ["record whether executed", "update outcome for causal learning"],
+    },
+}
+
+# Generic guidance for types that don't have a dedicated entry above.
+_DEFAULT_ANALYSIS = {
+    "use_for": ["general knowledge graph node"],
+    "supports_inference": False,
+    "required_evidence": [],
+    "provenance_rules": ["link to related nodes to avoid orphans", "include source_url when representing external information"],
+}
+
+
+def node_analysis(node_type: str) -> dict[str, object]:
+    """Return analysis guidance for a node type (generic fallback if unknown)."""
+    return ANALYSIS_GUIDE.get(node_type, _DEFAULT_ANALYSIS)
+
 # ── Cross-link requirement (ADR-018 / OHM-tjzh) ──────────────────────────────
 # Node types in this set represent derived claims — synthesis, decisions, tasks.
 # A bare creation of one of these is a dead-end: it can never be reached from

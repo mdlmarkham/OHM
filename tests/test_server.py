@@ -416,6 +416,30 @@ class TestEdgeEndpoints:
         assert status == 400
         assert data["error"] == "validation_error"
 
+    def test_get_schema_node_types_includes_analysis(self, test_server):
+        port, store = test_server
+        status, data = _request("GET", port, "/schema/node-types?type=pattern")
+        assert status == 200
+        assert "analysis" in data["data"]
+        analysis = data["data"]["analysis"]
+        assert analysis["supports_inference"] is True
+        assert "use_for" in analysis
+        assert "provenance_rules" in analysis
+
+    def test_get_schema_includes_analysis_when_requested(self, test_server):
+        port, store = test_server
+        status, data = _request("GET", port, "/schema?include_analysis=true")
+        assert status == 200
+        assert "analysis" in data
+        assert data["analysis"]["pattern"]["supports_inference"] is True
+        assert "_DEFAULT_ANALYSIS" not in data["analysis"]
+
+    def test_get_schema_analysis_default_hidden(self, test_server):
+        port, store = test_server
+        status, data = _request("GET", port, "/schema")
+        assert status == 200
+        assert "analysis" not in data
+
     def test_create_edge(self, test_server):
         port, store = test_server
         _request(

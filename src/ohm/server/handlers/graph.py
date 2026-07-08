@@ -238,6 +238,8 @@ class GraphHandlerMixin(OhmHandlerBase):
             "observation_source_required": "observation_source_required",
         }
         result["live_hooks"] = [{"hook": cmd, "constraint": name} for cmd, name in hook_map.items() if any(cmd in h["command"] for h in hooks)]
+        from ohm.graph.schema import node_analysis
+        result["analysis"] = node_analysis(node_type)
         self._json_response(200, {"ok": True, "data": result})
 
     def _get_schema(self, path: str, qs: dict) -> None:
@@ -346,22 +348,29 @@ class GraphHandlerMixin(OhmHandlerBase):
             },
             "cross_link_rule": f"Nodes of type {sorted(schema.must_have_edge_node_types)} MUST have at least one edge when created. Use connects_to or create_edge in the same request.",
             "exempt_from_cross_link": f"Nodes of type {sorted(schema.exempt_cross_link_node_types)} are exempt from the cross-link requirement.",
+            "analysis_guide": "See /schema/node-types?type=<type> for per-node-type analysis guidance, or /schema?include_analysis=true for the full map.",
         }
+
+        from ohm.graph.schema import ANALYSIS_GUIDE
+        include_analysis = qs.get("include_analysis", ["false"])[0].lower() in ("1", "true", "yes")
+        response = {
+            "schema": schema.name,
+            "node_types": sorted(schema.node_types),
+            "edge_types": sorted(all_edge_types),
+            "edge_types_by_layer": {k: sorted(v) for k, v in schema.layer_edge_types.items()},
+            "layers": schema.layer_descriptions,
+            "observation_types": sorted(schema.observation_types),
+            "observation_sources": sorted(schema.observation_sources),
+            "visibilities": sorted(schema.visibilities),
+            "provenances": sorted(schema.provenances),
+            "guide": guide,
+        }
+        if include_analysis:
+            response["analysis"] = ANALYSIS_GUIDE
 
         self._json_response(
             200,
-            {
-                "schema": schema.name,
-                "node_types": sorted(schema.node_types),
-                "edge_types": sorted(all_edge_types),
-                "edge_types_by_layer": {k: sorted(v) for k, v in schema.layer_edge_types.items()},
-                "layers": schema.layer_descriptions,
-                "observation_types": sorted(schema.observation_types),
-                "observation_sources": sorted(schema.observation_sources),
-                "visibilities": sorted(schema.visibilities),
-                "provenances": sorted(schema.provenances),
-                "guide": guide,
-            },
+            response,
         )
 
     def _get_layers(self, path: str, qs: dict) -> None:
