@@ -37,7 +37,10 @@ def _rows_to_dicts(result: Any) -> list[dict[str, Any]]:
         if "from_node" in row:
             row["from"] = row["from_node"]
             row["to"] = row["to_node"]
-            row["type"] = row["edge_type"]
+            # Not every from_node/to_node table is an edge table (e.g.
+            # ohm_suggestions has from_node/to_node but no edge_type column).
+            if "edge_type" in row:
+                row["type"] = row["edge_type"]
         # node_type is the write API field name; DB column is type. Expose both.
         if "type" in row and "from_node" not in row and "node_type" not in row:
             row["node_type"] = row["type"]
