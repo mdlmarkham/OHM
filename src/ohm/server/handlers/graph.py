@@ -3675,17 +3675,26 @@ class GraphHandlerMixin:
 
                 if causal_edges:
                     # Build evidence from observed nodes (high-confidence observations)
-                    evidence = {}
-                    for nid in target_ids:
+                    # OHM-w1iv.2: batch the latest probability observation for all targets.
+                    if target_ids:
+                        placeholders = ",".join(["?"] * len(target_ids))
                         obs_rows = self.current_store.execute(
-                            "SELECT value FROM ohm_observations WHERE node_id = ? AND type = 'probability' AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1",
-                            [nid],
+                            f"""SELECT node_id, value FROM (
+                                SELECT node_id, value,
+                                    ROW_NUMBER() OVER (PARTITION BY node_id ORDER BY created_at DESC) AS rn
+                                FROM ohm_observations
+                                WHERE node_id IN ({placeholders})
+                                  AND type = 'probability'
+                                  AND deleted_at IS NULL
+                            ) WHERE rn = 1""",
+                            target_ids,
                         )
-                        if obs_rows:
+                        evidence = {}
+                        for row in obs_rows:
                             try:
-                                val = float(obs_rows[0]["value"])
+                                val = float(row["value"])
                                 if 0.0 <= val <= 1.0:
-                                    evidence[nid] = 1 if val >= 0.5 else 0
+                                    evidence[row["node_id"]] = 1 if val >= 0.5 else 0
                             except (ValueError, TypeError, KeyError):
                                 pass
 
