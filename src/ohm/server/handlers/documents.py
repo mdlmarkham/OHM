@@ -73,14 +73,19 @@ def _reconstruct_url(parsed: ParseResult) -> str:
     return result
 
 
-def _canonicalize_and_check_ip(addr: str, allow_loopback: bool) -> ipaddress._BaseAddress:
-    """Canonicalize *addr* and raise ValidationError if it is private/loopback.
+def _canonicalize_ip(addr: str) -> ipaddress._BaseAddress:
+    """Parse *addr* and collapse IPv4-mapped/NAT64 IPv6 to its embedded IPv4.
 
-    Uses the shared ``canonicalize_ip`` helper, which collapses IPv4-mapped
-    *and* NAT64 IPv6 addresses to their embedded IPv4 so mapped literals like
-    ``::ffff:169.254.169.254`` cannot bypass the IPv4 blocklist.
+    Thin string-in wrapper around the shared ``canonicalize_ip`` helper (which
+    takes an already-parsed address), kept as a module-level function since
+    it's exercised directly in tests.
     """
-    ip = canonicalize_ip(ipaddress.ip_address(addr))
+    return canonicalize_ip(ipaddress.ip_address(addr))
+
+
+def _canonicalize_and_check_ip(addr: str, allow_loopback: bool) -> ipaddress._BaseAddress:
+    """Canonicalize *addr* and raise ValidationError if it is private/loopback."""
+    ip = _canonicalize_ip(addr)
     for net in _FETCH_BLOCKED_NETWORKS:
         if ip in net:
             raise ValidationError(f"URL fetch blocked: host resolves to private address {addr} (SSRF protection)")
