@@ -16,6 +16,7 @@ OHM-tss4.2 / OHM-tlza acceptance criteria:
 import json
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -837,6 +838,77 @@ class TestPerTenantQuotas:
         tm.update_integrations("invalidate_test", {"slack": {"channel": "#test"}})
         with tm._cache_lock:
             assert "invalidate_test" not in tm._quota_cache
+
+
+class TestMetaAndTemplateCache:
+    """Tests for in-memory caching of meta.json and domain templates (OHM-66i7)."""
+
+    def test_meta_cache_avoids_repeated_disk_reads(self, tm, tmp_path, monkeypatch):
+        tm.provision("meta_cache_test", domain="ohm")
+        # First call warms cache
+        meta1 = tm._read_meta("meta_cache_test")
+        meta_path = tm._tenant_dir("meta_cache_test") / "meta.json"
+
+        read_calls = []
+        original_read_text = Path.read_text
+
+        def counting_read_text(self, *args, **kwargs):
+            if self == meta_path:
+                read_calls.append(1)
+            return original_read_text(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", counting_read_text)
+
+        # Repeated calls should hit cache and not read disk
+        for _ in range(5):
+            assert tm._read_meta("meta_cache_test") == meta1
+        assert len(read_calls) == 0
+
+    def test_meta_cache_invalidation_on_write(self, tm, monkeypatch):
+        tm.provision("meta_invalidate_test", domain="ohm")
+        meta = tm._read_meta("meta_invalidate_test")
+        assert meta["tier"] == "starter"
+
+        read_calls = []
+        original_read_text = Path.read_text
+        meta_path = tm._tenant_dir("meta_invalidate_test") / "meta.json"
+
+        def counting_read_text(self, *args, **kwargs):
+            if self == meta_path:
+                read_calls.append(1)
+            return original_read_text(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", counting_read_text)
+
+        meta["tier"] = "enterprise"
+        tm._write_meta("meta_invalidate_test", meta)
+        # After write, the next read must go to disk
+        fresh = tm._read_meta("meta_invalidate_test")
+        assert fresh["tier"] == "enterprise"
+        assert len(read_calls) >= 1
+
+    def test_schema_cache_avoids_repeated_disk_reads(self, tm, tmp_path, monkeypatch):
+        tm.provision("schema_cache_test", domain="ohm")
+        schema1 = tm._load_schema("ohm")
+
+        read_calls = []
+        original_read_text = Path.read_text
+
+        def counting_read_text(self, *args, **kwargs):
+            # Count reads of any template JSON under templates dir or package
+            if self.suffix == ".json" and "templates" in str(self):
+                read_calls.append(str(self))
+            return original_read_text(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", counting_read_text)
+
+        for _ in range(5):
+            s = tm._load_schema("ohm")
+            assert s.template_version == schema1.template_version
+
+        # First load already warmed cache, so no additional JSON reads
+        json_reads = [p for p in read_calls if p.endswith(".json")]
+        assert len(json_reads) == 0
 
 
 class TestBackupRestore:

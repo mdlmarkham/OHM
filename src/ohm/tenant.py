@@ -154,6 +154,13 @@ class TenantManager:
         self._quota_cache: dict[str, tuple[str, dict]] = {}  # customer_id → (tier, quotas)
         self._quota_cache_lock = threading.Lock()
 
+        # In-memory caches for meta.json and domain templates to avoid repeated
+        # disk reads on every tenant access (OHM-66i7). Invalidated on writes.
+        self._meta_cache: dict[str, tuple[int, dict]] = {}  # customer_id → (mtime_ns, meta)
+        self._meta_cache_lock = threading.Lock()
+        self._schema_cache: dict[str, tuple[int, dict]] = {}  # resolved_path → (mtime_ns, raw_dict)
+        self._schema_cache_lock = threading.Lock()
+
     # ── Public API ────────────────────────────────────────────────────────────
 
     def provision(self, customer_id: str, domain: str = "ohm", tier: str = "starter", integrations: Optional[dict] = None) -> dict:
@@ -714,6 +721,9 @@ class TenantManager:
 
     def _write_meta(self, customer_id: str, meta: dict) -> None:
         """Atomically write meta.json for a tenant (write to temp, fsync, then rename) (OHM-2i4y)."""
+        # Invalidate before writing so concurrent readers cannot observe stale cache.
+        with self._meta_cache_lock:
+            self._meta_cache.pop(customer_id, None)
         meta_path = self._tenant_dir(customer_id) / _META_FILENAME
         tmp_path = meta_path.with_suffix(".tmp")
         with tmp_path.open("w") as f:
@@ -729,37 +739,69 @@ class TenantManager:
         meta_path = self._tenant_dir(customer_id) / _META_FILENAME
         if not meta_path.exists():
             raise TenantNotFoundError(f"Tenant '{customer_id}' not found — provision first")
-        return json.loads(meta_path.read_text())
+
+        # Fast path: return cached copy if meta.json mtime has not changed.
+        with self._meta_cache_lock:
+            cached = self._meta_cache.get(customer_id)
+        if cached is not None:
+            cached_mtime, cached_meta = cached
+            try:
+                if meta_path.stat().st_mtime_ns == cached_mtime:
+                    return cached_meta
+            except OSError:
+                pass
+
+        meta = json.loads(meta_path.read_text())
+        with self._meta_cache_lock:
+            try:
+                mtime = meta_path.stat().st_mtime_ns
+            except OSError:
+                mtime = 0
+            self._meta_cache[customer_id] = (mtime, meta)
+        return meta
 
     def _load_schema(self, domain: str) -> SchemaConfig:
         import re as _re
 
         if not _re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,62}", domain):
             raise ValueError(f"Invalid domain '{domain}' — must be lowercase alphanumeric/underscore/hyphen, 1-63 chars")
-        # Try custom templates dir first
+
+        # Resolve the template file we will actually load.
+        json_path: Path | None = None
         if self._templates_dir:
-            json_path = self._templates_dir / f"{domain}.json"
-            if json_path.exists():
-                try:
-                    return SchemaConfig.from_json_file(str(json_path))
-                except Exception as e:
-                    logger.warning("Could not load template %s: %s — using default", json_path, e)
+            custom_path = self._templates_dir / f"{domain}.json"
+            if custom_path.exists():
+                json_path = custom_path
+        if json_path is None:
+            package_template = Path(__file__).parent / "graph" / "templates" / f"{domain}.json"
+            if package_template.exists():
+                json_path = package_template
+        if json_path is None:
+            ohm_template = Path(__file__).parent / "graph" / "templates" / "ohm.json"
+            if ohm_template.exists():
+                json_path = ohm_template
 
-        # Try package-bundled templates
-        package_template = Path(__file__).parent / "graph" / "templates" / f"{domain}.json"
-        if package_template.exists():
+        if json_path is not None:
+            # Cache by resolved path + mtime to avoid re-reading/parsing JSON.
             try:
-                return SchemaConfig.from_json_file(str(package_template))
+                mtime = json_path.stat().st_mtime_ns
+            except OSError:
+                mtime = 0
+            with self._schema_cache_lock:
+                cached = self._schema_cache.get(str(json_path))
+            if cached is not None:
+                cached_mtime, cached_dict = cached
+                if mtime == cached_mtime:
+                    return SchemaConfig.from_dict(cached_dict)
+            try:
+                raw = json.loads(json_path.read_text())
             except Exception as e:
-                logger.warning("Could not load package template %s: %s — using default", package_template, e)
+                logger.warning("Could not load template %s: %s — using default", json_path, e)
+                return SchemaConfig()
+            with self._schema_cache_lock:
+                self._schema_cache[str(json_path)] = (mtime, raw)
+            return SchemaConfig.from_dict(raw)
 
-        # Fallback to base ohm schema
-        ohm_template = Path(__file__).parent / "graph" / "templates" / "ohm.json"
-        if ohm_template.exists():
-            try:
-                return SchemaConfig.from_json_file(str(ohm_template))
-            except Exception:
-                pass
         return SchemaConfig()
 
     def _apply_lazy_migrations(self, customer_id: str, store: OhmStore) -> None:
