@@ -146,7 +146,7 @@ class TestValidateBackupId:
     """backup_id is joined into a filesystem path in restore_tenant and must be
     validated to prevent path traversal (it arrives from request bodies)."""
 
-    @pytest.mark.parametrize("value", ["20260524T180000Z", "20260524T180000Z_a1b2c3", "pre_restore-1", "ok.name"])
+    @pytest.mark.parametrize("value", ["20260524T180000Z", "20260524T180000Z_a1b2c3", "pre_restore-1"])
     def test_accepts_generated_ids(self, value):
         assert validate_backup_id(value) == value
 

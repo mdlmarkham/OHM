@@ -5,6 +5,7 @@ import pytest
 from ohm.validation import (
     validate_identifier,
     validate_customer_id,
+    validate_backup_id,
     validate_layer,
     validate_timestamp,
     validate_confidence,
@@ -115,6 +116,68 @@ class TestValidateCustomerId:
     def test_dot_rejected(self):
         with pytest.raises(ValueError, match="Invalid customer_id"):
             validate_customer_id("acme.hvac")
+
+
+class TestValidateBackupId:
+    """Tests for validate_backup_id — path traversal prevention."""
+
+    @pytest.mark.parametrize(
+        "input,expected",
+        [
+            ("acme_hvac", "acme_hvac"),
+            ("my-shop-123", "my-shop-123"),
+            ("abc", "abc"),
+            ("a_b-c-1234", "a_b-c-1234"),
+            ("UPPERCASE", "UPPERCASE"),
+            ("2026-07-08T12-30-00", "2026-07-08T12-30-00"),
+        ],
+    )
+    def test_valid_backup_ids(self, input, expected):
+        assert validate_backup_id(input) == expected
+
+    @pytest.mark.parametrize(
+        "input",
+        [
+            "",
+            "..",
+            "../etc",
+            "..\\windows",
+            "../../etc/passwd",
+            "acme/../../etc",
+            "acme\\..\\..\\etc",
+            "acme\0null",
+            "/absolute/path",
+            "\\absolute\\path",
+            "a.b",
+            "ab",
+            "x" * 129,
+            "-leading-hyphen",
+            "_leading_underscore",
+        ],
+    )
+    def test_invalid_backup_ids_path_traversal(self, input):
+        with pytest.raises(ValueError, match="Invalid backup_id"):
+            validate_backup_id(input)
+
+    def test_null_byte_detected(self):
+        with pytest.raises(ValueError, match="null byte"):
+            validate_backup_id("acme\0hvac")
+
+    def test_path_separator_forward(self):
+        with pytest.raises(ValueError, match="path separator"):
+            validate_backup_id("acme/hvac")
+
+    def test_path_separator_backward(self):
+        with pytest.raises(ValueError, match="path separator"):
+            validate_backup_id("acme\\hvac")
+
+    def test_traversal_sequence(self):
+        with pytest.raises(ValueError, match="path traversal"):
+            validate_backup_id("../../etc")
+
+    def test_dot_rejected(self):
+        with pytest.raises(ValueError, match="Invalid backup_id"):
+            validate_backup_id("acme.hvac")
 
 
 class TestValidateLayer:

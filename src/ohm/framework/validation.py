@@ -14,10 +14,6 @@ import re
 # Identifiers: alphanumeric, underscore, hyphen, dot (for compound IDs)
 _IDENTIFIER_RE = re.compile(r"^[a-zA-Z0-9_\-\.]+$")
 
-# Backup IDs: generated as "YYYYMMDDTHHMMSSZ" optionally suffixed with
-# "_<6 hex>". Restrict to a safe charset with no path separators or "..".
-_BACKUP_ID_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,128}$")
-
 # NAT64 well-known prefix — the low 32 bits embed an IPv4 address.
 _NAT64_PREFIX = ipaddress.ip_network("64:ff9b::/96")
 
@@ -26,6 +22,9 @@ _LAYER_RE = re.compile(r"^L[0-4]$")
 
 # Customer ID: alphanumeric, underscore, hyphen — NO dots or path separators
 _CUSTOMER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{2,63}$")
+
+# Backup ID: same safety rules as customer_id (no traversal, no path separators)
+_BACKUP_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{2,127}$")
 
 # ISO timestamp: basic format check
 _ISO_TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?)?(Z|[+-]\d{2}:?\d{2})?$")
@@ -59,6 +58,21 @@ def validate_table_name(value: str, *, name: str = "table") -> str:
     return value
 
 
+def _validate_path_safe_id(value: str, name: str, regex: re.Pattern, max_chars: int) -> str:
+    """Common validator for filesystem-safe identifiers."""
+    if not value:
+        raise ValueError(f"Invalid {name}: empty value")
+    if "\x00" in value:
+        raise ValueError(f"Invalid {name}: null byte detected in '{value}'")
+    if ".." in value:
+        raise ValueError(f"Invalid {name}: path traversal sequence in '{value}'")
+    if "/" in value or "\\" in value:
+        raise ValueError(f"Invalid {name}: path separator in '{value}'")
+    if not regex.match(value):
+        raise ValueError(f"Invalid {name}: '{value}' — must be 3-{max_chars} chars, alphanumeric/underscore/hyphen, starting with alphanumeric")
+    return value
+
+
 def validate_customer_id(value: str) -> str:
     """Validate that *value* is a safe customer_id for filesystem path construction.
 
@@ -71,41 +85,21 @@ def validate_customer_id(value: str) -> str:
     Raises:
         ValueError: If *value* contains unsafe characters or patterns.
     """
-    if not value:
-        raise ValueError("Invalid customer_id: empty value")
-    if "\x00" in value:
-        raise ValueError(f"Invalid customer_id: null byte detected in '{value}'")
-    if ".." in value:
-        raise ValueError(f"Invalid customer_id: path traversal sequence in '{value}'")
-    if "/" in value or "\\" in value:
-        raise ValueError(f"Invalid customer_id: path separator in '{value}'")
-    if not _CUSTOMER_ID_RE.match(value):
-        raise ValueError(f"Invalid customer_id: '{value}' — must be 3-64 chars, lowercase alphanumeric, underscore, or hyphen, starting with alphanumeric")
-    return value
+    return _validate_path_safe_id(value, "customer_id", _CUSTOMER_ID_RE, 64)
 
 
 def validate_backup_id(value: str) -> str:
-    """Validate a backup_id before it is joined into a filesystem path.
+    """Validate that *value* is a safe backup_id for filesystem path construction.
 
-    Backup IDs are generated internally as ``YYYYMMDDTHHMMSSZ`` (optionally
-    suffixed with ``_<hex>``), but ``restore_tenant`` accepts them from
-    request bodies, so an unvalidated value is a path-traversal sink.
-    Rejects path separators, ``..``, null bytes, and anything outside a
-    conservative charset.
+    Same rules as validate_customer_id but allows uppercase and up to 128 chars.
+    Backup IDs are often timestamps or user-provided labels.
 
-    Returns *value* unchanged if valid; raises ``ValueError`` otherwise.
+    Returns *value* unchanged if valid.
+
+    Raises:
+        ValueError: If *value* contains unsafe characters or patterns.
     """
-    if not value:
-        raise ValueError("Invalid backup_id: empty value")
-    if "\x00" in value:
-        raise ValueError(f"Invalid backup_id: null byte detected in '{value}'")
-    if ".." in value:
-        raise ValueError(f"Invalid backup_id: path traversal sequence in '{value}'")
-    if "/" in value or "\\" in value:
-        raise ValueError(f"Invalid backup_id: path separator in '{value}'")
-    if not _BACKUP_ID_RE.match(value):
-        raise ValueError(f"Invalid backup_id: '{value}' — must be 1-128 chars of alphanumeric, underscore, hyphen, or dot")
-    return value
+    return _validate_path_safe_id(value, "backup_id", _BACKUP_ID_RE, 128)
 
 
 def canonicalize_ip(ip: ipaddress._BaseAddress) -> ipaddress._BaseAddress:
