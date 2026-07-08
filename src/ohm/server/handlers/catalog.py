@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 
-class CatalogHandlerMixin:
+from ohm.server.handlers._base import OhmHandlerBase
+
+class CatalogHandlerMixin(OhmHandlerBase):
     """Handler mixin for BOS ODPS data product catalog endpoints (ADR-027).
 
     GET  /data-products          — list products (filterable)

@@ -11,12 +11,14 @@ ohm.server.handlers.graph with a thin wrapper that:
 
 from __future__ import annotations
 
+from ohm.server.handlers._base import OhmHandlerBase
+
 from typing import Any
 
 from ohm.server.ask_router import AskRouter, DEFAULT_INTENT
 
 
-class AskHandlerMixin:
+class AskHandlerMixin(OhmHandlerBase):
     """Handler mixin for POST /ask intent routing."""
 
     def _post_ask(self, path: str, qs: dict, body: dict, agent: str) -> None:

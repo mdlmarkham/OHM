@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from ohm.server.handlers._base import OhmHandlerBase
+
 import json
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-class AnalysisHandlerMixin:
+class AnalysisHandlerMixin(OhmHandlerBase):
     """Handler mixin for graph analysis endpoints (OHM-lzhk)."""
 
     def _get_health_graph(self, path: str, qs: dict) -> None:

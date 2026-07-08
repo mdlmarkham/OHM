@@ -47,8 +47,20 @@ jobs:
       - name: Lint with ruff
         run: python -m ruff check src/ tests/
 
-      - name: Type check with mypy
-        run: python -m mypy src/
+      - name: Type check server handlers with mypy
+        run: python -m mypy src/ohm/server --ignore-missing-imports
+
+      - name: Type check full source with mypy
+        run: python -m mypy src/ --ignore-missing-imports
+
+      - name: Check for bare except blocks
+        run: |
+          BARE=$(grep -rn '^\s*except\s*:\s*$' src/ tests/ || true)
+          if [ -n "$BARE" ]; then
+            echo "Bare 'except:' blocks found:"
+            echo "$BARE"
+            exit 1
+          fi
 
       - name: Test (fast) with pytest
         run: |

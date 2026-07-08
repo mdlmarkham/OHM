@@ -1,5 +1,7 @@
 """Tenant handler mixin — tenant provisioning and management endpoints."""
 
+from ohm.server.handlers._base import OhmHandlerBase
+
 from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlparse
 
@@ -12,7 +14,7 @@ from ohm.exceptions import (
 from ohm.server import server as _server_module
 
 
-class TenantHandlerMixin:
+class TenantHandlerMixin(OhmHandlerBase):
     """Handler mixin for tenant provisioning and management (OHM-97q8)."""
 
     def _require_multi_tenant_active(self) -> None:
