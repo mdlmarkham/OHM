@@ -581,6 +581,14 @@ def _lookup_role(roles: dict, agent: str, customer_id: str | None = None) -> str
     return roles.get(agent, "read-write")
 
 
+_ROLE_RANKS = {"read-only": 0, "read-write": 1, "admin": 2}
+
+
+def _role_rank(role: str) -> int:
+    """Return privilege rank (higher = more powerful). Used to prevent escalation."""
+    return _ROLE_RANKS.get(role, 1)
+
+
 def _build_token_lookup(tokens_config: dict) -> tuple[dict, dict]:
     """Build token lookup tables from config.
 
@@ -1193,10 +1201,15 @@ class OhmHandler(
                     self._authenticated_agent = agent_name
                     if client_ip:
                         _clear_auth_failures(client_ip)
-                    # Honor X-Ohm-Agent header if the authenticated agent has write access
+                    # Honor X-Ohm-Agent header if the authenticated agent has write
+                    # access AND the header value does not escalate privileges
+                    # (the spoofed agent's role must not exceed the token's own role).
                     ohm_agent = self.headers.get("X-Ohm-Agent")
-                    if ohm_agent and _lookup_role(self.roles, agent_name, self._customer_id) != "read-only":
-                        return ohm_agent
+                    if ohm_agent:
+                        token_role = _lookup_role(self.roles, agent_name, self._customer_id)
+                        header_role = _lookup_role(self.roles, ohm_agent, self._customer_id)
+                        if token_role != "read-only" and _role_rank(header_role) <= _role_rank(token_role):
+                            return ohm_agent
                     return agent_name
             for token_hash, customer_id in self.customer_tokens.items():
                 if _verify_token(token, token_hash):
@@ -1216,10 +1229,14 @@ class OhmHandler(
                     self._authenticated_agent = agent_name
                     if client_ip:
                         _clear_auth_failures(client_ip)
-                    # Honor X-Ohm-Agent header if the authenticated agent has write access
+                    # Honor X-Ohm-Agent header if the authenticated agent has write
+                    # access AND the header value does not escalate privileges.
                     ohm_agent = self.headers.get("X-Ohm-Agent")
-                    if ohm_agent and _lookup_role(self.roles, agent_name, self._customer_id) != "read-only":
-                        return ohm_agent
+                    if ohm_agent:
+                        token_role = _lookup_role(self.roles, agent_name, self._customer_id)
+                        header_role = _lookup_role(self.roles, ohm_agent, self._customer_id)
+                        if token_role != "read-only" and _role_rank(header_role) <= _role_rank(token_role):
+                            return ohm_agent
                     return agent_name
             for token_hash, customer_id in self.customer_tokens.items():
                 if _verify_token(token, token_hash):

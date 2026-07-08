@@ -405,7 +405,7 @@ class TenantManager:
                     current = entry.store.conn.execute(f"SELECT COUNT(*) FROM {table_name} WHERE deleted_at IS NULL").fetchone()
                     current_count = current[0] if current else 0
                 except Exception:
-                    current_count = 0
+                    raise QuotaExceededError(f"Tenant '{customer_id}' quota check failed — cannot verify {resource} count (DB error)")
             else:
                 raise QuotaExceededError(f"Tenant '{customer_id}' cannot verify {resource} quota — store not in cache")
 
