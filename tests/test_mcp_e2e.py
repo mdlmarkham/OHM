@@ -247,3 +247,50 @@ async def test_mcp_e2e_verify_dump_tools(ohmd):
     assert verify["write_probe"]["ok"] is False or verify["write_probe"]["reason"] is not None
     assert not verify["errors"]
     assert any(t == "ohm_stats" for t in verify["tools"])
+
+
+@pytest.mark.anyio
+async def test_mcp_e2e_inference_tools(ohmd):
+    """New inference tools (ohm_inference, ohm_intervene, ohm_voi, ohm_refute, ohm_discover) work end-to-end."""
+    base_url, admin_token, _db_path = ohmd
+    tenant_id = "acme_inference"
+    domain = "ohm"
+
+    customer_token = _provision_tenant(base_url, admin_token, tenant_id, domain)
+    _load_mcp_config(base_url, customer_token, tenant_id, domain)
+
+    from ohm.mcp.config import config as mcp_config
+
+    mcp_config["allowed_tools"] = ["*"]
+    mcp_config["read_only"] = False
+
+    from ohm.mcp.server import call_tool
+
+    # Seed a tiny causal graph
+    _req("POST", base_url, "/node", body={"id": "cause_node", "label": "Cause", "node_type": "concept"}, token=customer_token)
+    _req("POST", base_url, "/node", body={"id": "effect_node", "label": "Effect", "node_type": "concept"}, token=customer_token)
+    _req(
+        "POST",
+        base_url,
+        "/edge",
+        body={"from": "cause_node", "to": "effect_node", "type": "CAUSES", "layer": "L3"},
+        token=customer_token,
+    )
+    _req("POST", base_url, "/observe/cause_node", body={"obs_type": "measurement", "value": 0.8}, token=customer_token)
+    _req("POST", base_url, "/observe/effect_node", body={"obs_type": "measurement", "value": 0.7}, token=customer_token)
+    # Add additional observations so ohm_discover has enough samples
+    for _ in range(4):
+        _req("POST", base_url, "/observe/cause_node", body={"obs_type": "measurement", "value": 0.75}, token=customer_token)
+        _req("POST", base_url, "/observe/effect_node", body={"obs_type": "measurement", "value": 0.72}, token=customer_token)
+
+    for tool, args in [
+        ("ohm_inference", {"target": "effect_node", "evidence": "cause_node:1", "format": "json"}),
+        ("ohm_intervene", {"target": "effect_node", "state": 1, "format": "json"}),
+        ("ohm_voi", {"decision": "effect_node", "format": "json"}),
+        ("ohm_refute", {"cause": "cause_node", "effect": "effect_node", "format": "json"}),
+        ("ohm_discover", {"nodes": "cause_node,effect_node", "method": "pc", "format": "json"}),
+    ]:
+        result = await call_tool(tool, args)
+        assert not result.isError, f"{tool} failed: {result.content}"
+        payload = json.loads(result.content[0].text)
+        assert "error" not in payload, f"{tool} returned error payload: {payload}"

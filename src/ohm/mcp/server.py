@@ -208,6 +208,83 @@ async def list_tools() -> list[Tool]:
                 "required": [],
             },
         ),
+        # ── Inference / analysis tier ──
+        Tool(
+            name="ohm_inference",
+            description="Run Bayesian inference on a target node given optional evidence. Returns posterior probabilities (good/bad) and supporting metadata.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                    "target": {"type": "string", "description": "Target node ID to compute P(target | evidence) for"},
+                    "evidence": {"type": "string", "description": "Comma-separated evidence assignments, e.g. 'node_a:1,node_b:0.7'"},
+                    "layers": {"type": "string", "description": "Comma-separated layer filter, e.g. 'L1,L2,L3'"},
+                    "leak": {"type": "number", "description": "Leak probability for unobserved influences (default 0.15)", "default": 0.15},
+                },
+                "required": ["target"],
+            },
+        ),
+        Tool(
+            name="ohm_intervene",
+            description="Causal intervention (do-operator): compute P(target | do(intervention_node=state)) given the causal graph.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                    "target": {"type": "string", "description": "Target node ID"},
+                    "state": {"type": "integer", "description": "Intervention state: 0 (bad) or 1 (good)"},
+                    "query": {"type": "string", "description": "Comma-separated list of nodes whose posteriors to return (default: target only)"},
+                    "layers": {"type": "string", "description": "Comma-separated layer filter"},
+                    "leak": {"type": "number", "description": "Leak probability (default 0.15)", "default": 0.15},
+                },
+                "required": ["target", "state"],
+            },
+        ),
+        Tool(
+            name="ohm_voi",
+            description="Value of information ranking: given a decision node (or nodes), rank other nodes by how much observing them would improve the decision.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                    "decision": {"type": "string", "description": "Comma-separated decision node IDs"},
+                    "top": {"type": "integer", "description": "Number of top candidates to return (default 10)", "default": 10},
+                    "layers": {"type": "string", "description": "Comma-separated layer filter"},
+                    "leak": {"type": "number", "description": "Leak probability (default 0.15)", "default": 0.15},
+                },
+                "required": ["decision"],
+            },
+        ),
+        Tool(
+            name="ohm_refute",
+            description="Causal refutation tests for a claimed cause-effect pair. Runs placebo, data subset, and random-variable refutation methods and returns a refutation score.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                    "cause": {"type": "string", "description": "Cause node ID"},
+                    "effect": {"type": "string", "description": "Effect node ID"},
+                    "n_samples": {"type": "integer", "description": "Number of samples (default 1000)", "default": 1000},
+                    "methods": {"type": "string", "description": "Comma-separated refutation methods (default: use all)"},
+                },
+                "required": ["cause", "effect"],
+            },
+        ),
+        Tool(
+            name="ohm_discover",
+            description="Causal structure discovery from observation data (PC/GES algorithm). Returns candidate edges for human review.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                    "nodes": {"type": "string", "description": "Comma-separated node IDs to restrict discovery to"},
+                    "method": {"type": "string", "description": "Algorithm: pc, ges, or both (default pc)", "enum": ["pc", "ges", "both"], "default": "pc"},
+                    "alpha": {"type": "number", "description": "Significance threshold (default 0.05)", "default": 0.05},
+                    "min_observations": {"type": "integer", "description": "Minimum observations per node (default 5)", "default": 5},
+                },
+                "required": [],
+            },
+        ),
         # ── Write tier ──
         Tool(
             name="ohm_create_node",
@@ -442,6 +519,67 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
 
         elif name == "ohm_agents":
             data = await _ohm_get("/agents")
+            return CallToolResult(content=_text(data, fmt))
+
+        elif name == "ohm_inference":
+            params = {"target": arguments["target"]}
+            if arguments.get("evidence"):
+                params["evidence"] = arguments["evidence"]
+            if arguments.get("layers"):
+                params["layers"] = arguments["layers"]
+            if arguments.get("leak") is not None:
+                params["leak"] = str(arguments["leak"])
+            data = await _ohm_get("/inference", params)
+            return CallToolResult(content=_text(data, fmt))
+
+        elif name == "ohm_intervene":
+            params = {
+                "target": arguments["target"],
+                "state": str(arguments["state"]),
+            }
+            if arguments.get("query"):
+                params["query"] = arguments["query"]
+            if arguments.get("layers"):
+                params["layers"] = arguments["layers"]
+            if arguments.get("leak") is not None:
+                params["leak"] = str(arguments["leak"])
+            data = await _ohm_get("/intervene", params)
+            return CallToolResult(content=_text(data, fmt))
+
+        elif name == "ohm_voi":
+            params = {"decision": arguments["decision"]}
+            if arguments.get("top") is not None:
+                params["top"] = str(arguments["top"])
+            if arguments.get("layers"):
+                params["layers"] = arguments["layers"]
+            if arguments.get("leak") is not None:
+                params["leak"] = str(arguments["leak"])
+            data = await _ohm_get("/voi", params)
+            return CallToolResult(content=_text(data, fmt))
+
+        elif name == "ohm_refute":
+            params = {
+                "cause": arguments["cause"],
+                "effect": arguments["effect"],
+            }
+            if arguments.get("n_samples") is not None:
+                params["n_samples"] = str(arguments["n_samples"])
+            if arguments.get("methods"):
+                params["methods"] = arguments["methods"]
+            data = await _ohm_get("/refute", params)
+            return CallToolResult(content=_text(data, fmt))
+
+        elif name == "ohm_discover":
+            params = {}
+            if arguments.get("nodes"):
+                params["nodes"] = arguments["nodes"]
+            if arguments.get("method"):
+                params["method"] = arguments["method"]
+            if arguments.get("alpha") is not None:
+                params["alpha"] = str(arguments["alpha"])
+            if arguments.get("min_observations") is not None:
+                params["min_observations"] = str(arguments["min_observations"])
+            data = await _ohm_get("/discover", params)
             return CallToolResult(content=_text(data, fmt))
 
         elif name == "ohm_create_node":
