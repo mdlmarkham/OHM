@@ -1783,18 +1783,6 @@ class AdminHandlerMixin:
             },
         )
 
-    def _get_source_reliability_agent(self, path: str, qs: dict, agent_id: str) -> None:
-        """GET /source-reliability/{agent_id} — effective reliability with authority decay.
-
-        OHM-8fdb Feature 6: Returns p_accurate and effective_reliability (decayed
-        toward community prior) for a specific agent.
-        """
-        from ohm.graph.calibration import effective_reliability
-
-        conn = self.current_store.conn
-        result = effective_reliability(conn, agent_id)
-        self._json_response(200, result)
-
     def _get_metrics_semantic(self, path: str, qs: dict) -> None:
         """GET /metrics/semantic — YAML-defined semantic-layer metrics.
 

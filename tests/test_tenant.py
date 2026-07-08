@@ -911,6 +911,17 @@ class TestBackupRestore:
         with pytest.raises(ValueError, match="not found"):
             tm.restore_tenant("acme_hvac", "nonexistent_backup")
 
+    @pytest.mark.parametrize(
+        "evil_id",
+        ["../../etc", "../acme_hvac/backups/x", "a/b", "..", "with space"],
+    )
+    def test_restore_rejects_path_traversal_backup_id(self, tm, evil_id):
+        """backup_id comes from the request body; a traversal sequence must be
+        rejected before it is joined into a filesystem path (OHM SSRF/pathsec)."""
+        tm.provision("acme_hvac")
+        with pytest.raises(ValueError, match="backup_id|escapes"):
+            tm.restore_tenant("acme_hvac", evil_id)
+
     def test_restore_creates_pre_restore_backup(self, tm):
         tm.provision("acme_hvac")
         result = tm.backup_tenant("acme_hvac")

@@ -8,10 +8,18 @@ identifiers before interpolation.
 
 from __future__ import annotations
 
+import ipaddress
 import re
 
 # Identifiers: alphanumeric, underscore, hyphen, dot (for compound IDs)
 _IDENTIFIER_RE = re.compile(r"^[a-zA-Z0-9_\-\.]+$")
+
+# Backup IDs: generated as "YYYYMMDDTHHMMSSZ" optionally suffixed with
+# "_<6 hex>". Restrict to a safe charset with no path separators or "..".
+_BACKUP_ID_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,128}$")
+
+# NAT64 well-known prefix — the low 32 bits embed an IPv4 address.
+_NAT64_PREFIX = ipaddress.ip_network("64:ff9b::/96")
 
 # Layer values: exactly L1, L2, L3, L4
 _LAYER_RE = re.compile(r"^L[0-4]$")
@@ -74,6 +82,48 @@ def validate_customer_id(value: str) -> str:
     if not _CUSTOMER_ID_RE.match(value):
         raise ValueError(f"Invalid customer_id: '{value}' — must be 3-64 chars, lowercase alphanumeric, underscore, or hyphen, starting with alphanumeric")
     return value
+
+
+def validate_backup_id(value: str) -> str:
+    """Validate a backup_id before it is joined into a filesystem path.
+
+    Backup IDs are generated internally as ``YYYYMMDDTHHMMSSZ`` (optionally
+    suffixed with ``_<hex>``), but ``restore_tenant`` accepts them from
+    request bodies, so an unvalidated value is a path-traversal sink.
+    Rejects path separators, ``..``, null bytes, and anything outside a
+    conservative charset.
+
+    Returns *value* unchanged if valid; raises ``ValueError`` otherwise.
+    """
+    if not value:
+        raise ValueError("Invalid backup_id: empty value")
+    if "\x00" in value:
+        raise ValueError(f"Invalid backup_id: null byte detected in '{value}'")
+    if ".." in value:
+        raise ValueError(f"Invalid backup_id: path traversal sequence in '{value}'")
+    if "/" in value or "\\" in value:
+        raise ValueError(f"Invalid backup_id: path separator in '{value}'")
+    if not _BACKUP_ID_RE.match(value):
+        raise ValueError(f"Invalid backup_id: '{value}' — must be 1-128 chars of alphanumeric, underscore, hyphen, or dot")
+    return value
+
+
+def canonicalize_ip(ip: ipaddress._BaseAddress) -> ipaddress._BaseAddress:
+    """Collapse IPv4-mapped and NAT64 IPv6 addresses to their embedded IPv4.
+
+    ``ipaddress`` membership tests silently return ``False`` across address
+    families, so an IPv4-mapped literal like ``::ffff:169.254.169.254`` would
+    slip past an IPv4-only SSRF blocklist even though the OS routes it to the
+    mapped IPv4 address. SSRF guards must canonicalize each resolved address
+    with this helper before testing it against their network blocklists.
+    """
+    if isinstance(ip, ipaddress.IPv6Address):
+        mapped = ip.ipv4_mapped
+        if mapped is not None:
+            return mapped
+        if ip in _NAT64_PREFIX:
+            return ipaddress.ip_address(int(ip) & 0xFFFFFFFF)
+    return ip
 
 
 def validate_layer(value: str) -> str:

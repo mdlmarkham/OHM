@@ -19,6 +19,7 @@ from urllib.parse import ParseResult, urlparse
 from ohm.documents.ingest import ingest_file
 from ohm.documents.store import BedrockKnowledgeStore, DocumentStore, LocalDocumentStore, S3DocumentStore
 from ohm.exceptions import NodeNotFoundError, ValidationError
+from ohm.framework.validation import canonicalize_ip
 
 
 SUPPORTED_CONTENT_TYPES = {
@@ -286,7 +287,9 @@ class DocumentHandlerMixin:
 
         for info in infos:
             addr = str(info[4][0])
-            ip = ipaddress.ip_address(addr)
+            # Canonicalize IPv4-mapped/NAT64 IPv6 to IPv4 so mapped literals
+            # like ::ffff:169.254.169.254 cannot bypass the IPv4 blocklist.
+            ip = canonicalize_ip(ipaddress.ip_address(addr))
             for net in _FETCH_BLOCKED_NETWORKS:
                 if ip in net:
                     raise ValidationError(f"URL fetch blocked: host resolves to private address {addr} (SSRF protection)")
