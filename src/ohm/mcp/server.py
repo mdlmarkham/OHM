@@ -104,7 +104,7 @@ mcp = Server("ohm")
 
 @mcp.list_tools()
 async def list_tools() -> list[Tool]:
-    return [
+    all_tools = [
         # ── Read tier ──
         Tool(
             name="ohm_stats",

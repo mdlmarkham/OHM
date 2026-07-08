@@ -193,7 +193,6 @@ async def test_mcp_e2e_read_only_blocks_writes(ohmd):
 
 
 @pytest.mark.anyio
-@pytest.mark.xfail(reason="list_tools filtering depends on freshly compiled ohm.mcp.server; stale .pyc/installed package can load legacy code")
 async def test_mcp_e2e_tools_list_filtered(ohmd):
     """list_tools should respect allowed_tools and read_only."""
     base_url, admin_token, _db_path = ohmd
