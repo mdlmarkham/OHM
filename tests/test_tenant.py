@@ -890,6 +890,12 @@ class TestBackupRestore:
         with pytest.raises(ValueError, match="not found"):
             tm.restore_tenant("acme_hvac", "nonexistent_backup")
 
+    def test_restore_rejects_path_traversal_in_backup_id(self, tm):
+        tm.provision("acme_hvac")
+        tm.backup_tenant("acme_hvac")
+        with pytest.raises(ValueError, match="Invalid backup_id"):
+            tm.restore_tenant("acme_hvac", "../etc/passwd")
+
     def test_restore_creates_pre_restore_backup(self, tm):
         tm.provision("acme_hvac")
         result = tm.backup_tenant("acme_hvac")

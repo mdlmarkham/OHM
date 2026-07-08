@@ -208,7 +208,9 @@ class TenantHandlerMixin:
         elif sub == "restore":
             if not body or "backup_id" not in body:
                 raise ValidationError("backup_id is required")
-            result = self.tenant_manager.restore_tenant(customer_id, body["backup_id"])
+            from ohm.framework.validation import validate_backup_id
+            backup_id = validate_backup_id(body["backup_id"])
+            result = self.tenant_manager.restore_tenant(customer_id, backup_id)
             self._json_response(200, result)
         else:
             self._json_response(404, {"error": f"Unknown tenant endpoint: {path}"})

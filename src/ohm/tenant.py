@@ -1320,6 +1320,9 @@ class TenantManager:
             Dict with status and backup metadata.
         """
         customer_id = validate_customer_id(customer_id)
+        from ohm.framework.validation import validate_backup_id
+
+        backup_id = validate_backup_id(backup_id)
         backup_path = self._tenant_dir(customer_id) / _BACKUP_DIR_NAME / backup_id
         if not backup_path.exists():
             raise ValueError(f"Backup '{backup_id}' not found for tenant '{customer_id}'")

@@ -19,6 +19,9 @@ _LAYER_RE = re.compile(r"^L[0-4]$")
 # Customer ID: alphanumeric, underscore, hyphen — NO dots or path separators
 _CUSTOMER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{2,63}$")
 
+# Backup ID: same safety rules as customer_id (no traversal, no path separators)
+_BACKUP_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{2,127}$")
+
 # ISO timestamp: basic format check
 _ISO_TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?)?(Z|[+-]\d{2}:?\d{2})?$")
 
@@ -51,6 +54,23 @@ def validate_table_name(value: str, *, name: str = "table") -> str:
     return value
 
 
+def _validate_path_safe_id(value: str, name: str, regex: re.Pattern, max_chars: int) -> str:
+    """Common validator for filesystem-safe identifiers."""
+    if not value:
+        raise ValueError(f"Invalid {name}: empty value")
+    if "\x00" in value:
+        raise ValueError(f"Invalid {name}: null byte detected in '{value}'")
+    if ".." in value:
+        raise ValueError(f"Invalid {name}: path traversal sequence in '{value}'")
+    if "/" in value or "\\" in value:
+        raise ValueError(f"Invalid {name}: path separator in '{value}'")
+    if not regex.match(value):
+        raise ValueError(
+            f"Invalid {name}: '{value}' — must be 3-{max_chars} chars, alphanumeric/underscore/hyphen, starting with alphanumeric"
+        )
+    return value
+
+
 def validate_customer_id(value: str) -> str:
     """Validate that *value* is a safe customer_id for filesystem path construction.
 
@@ -63,17 +83,21 @@ def validate_customer_id(value: str) -> str:
     Raises:
         ValueError: If *value* contains unsafe characters or patterns.
     """
-    if not value:
-        raise ValueError("Invalid customer_id: empty value")
-    if "\x00" in value:
-        raise ValueError(f"Invalid customer_id: null byte detected in '{value}'")
-    if ".." in value:
-        raise ValueError(f"Invalid customer_id: path traversal sequence in '{value}'")
-    if "/" in value or "\\" in value:
-        raise ValueError(f"Invalid customer_id: path separator in '{value}'")
-    if not _CUSTOMER_ID_RE.match(value):
-        raise ValueError(f"Invalid customer_id: '{value}' — must be 3-64 chars, lowercase alphanumeric, underscore, or hyphen, starting with alphanumeric")
-    return value
+    return _validate_path_safe_id(value, "customer_id", _CUSTOMER_ID_RE, 64)
+
+
+def validate_backup_id(value: str) -> str:
+    """Validate that *value* is a safe backup_id for filesystem path construction.
+
+    Same rules as validate_customer_id but allows uppercase and up to 128 chars.
+    Backup IDs are often timestamps or user-provided labels.
+
+    Returns *value* unchanged if valid.
+
+    Raises:
+        ValueError: If *value* contains unsafe characters or patterns.
+    """
+    return _validate_path_safe_id(value, "backup_id", _BACKUP_ID_RE, 128)
 
 
 def validate_layer(value: str) -> str:
