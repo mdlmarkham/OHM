@@ -607,6 +607,87 @@ async def main():
         await mcp.run(read_stream, write_stream, mcp.create_initialization_options())
 
 
+async def _run_verify() -> dict[str, Any]:
+    """Diagnostics mode for ohm-mcp --verify.
+
+    Connects to OHM, checks /health and /schema, lists tools, and attempts a
+    harmless write probe if a write tool is allowed.
+    """
+    import httpx
+
+    result: dict[str, Any] = {
+        "config": {k: v for k, v in _config.items() if k not in ("token", "domain_config") and v is not None},
+        "headers": _headers(),
+        "health": None,
+        "schema": None,
+        "tools": [],
+        "allowed_tools": _config.get("allowed_tools", ["*"]),
+        "read_only": _config.get("read_only", False),
+        "write_probe": None,
+        "errors": [],
+    }
+    # Scrub sensitive header values for the printed report
+    result["headers"] = {k: ("***" if k == "Authorization" else v) for k, v in result["headers"].items()}
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        url = _config["ohm_url"]
+        try:
+            r = await client.get(f"{url}/health", headers=make_headers())
+            r.raise_for_status()
+            result["health"] = r.json()
+        except Exception as e:
+            result["errors"].append(f"/health failed: {e}")
+            return result
+
+        try:
+            r = await client.get(f"{url}/schema", headers=make_headers())
+            r.raise_for_status()
+            result["schema"] = {
+                "name": r.json().get("data", {}).get("schema", "?"),
+            }
+        except Exception as e:
+            result["errors"].append(f"/schema failed: {e}")
+
+    # Compute effective tool list using the same logic as list_tools()
+    tools = await list_tools()
+    result["tools"] = [t.name for t in tools]
+
+    # Harmless write probe: try creating a node with a deterministic probe id
+    if not _config.get("read_only", False) and _is_tool_allowed("ohm_create_node"):
+        probe_id = f"mcp-probe-{_config['agent_id']}"
+        body = {
+            "label": "MCP verify probe",
+            "node_type": "concept",
+            "id": probe_id,
+            "tags": ["mcp-verify"],
+        }
+        try:
+            r = await _ohm_post("/node", body)
+            result["write_probe"] = {"ok": True, "node_id": r.get("data", {}).get("id", r.get("id"))}
+            try:
+                await _ohm_delete(f"/node/{probe_id}")
+                result["write_probe"]["cleanup"] = "deleted"
+            except Exception as e:
+                result["write_probe"]["cleanup"] = f"failed: {e}"
+        except Exception as e:
+            result["write_probe"] = {"ok": False, "error": str(e)}
+    else:
+        result["write_probe"] = {"ok": None, "reason": "read_only or ohm_create_node not allowed"}
+
+    return result
+
+
+async def _dump_tools() -> dict[str, Any]:
+    """Print the raw list of tool names and whether each is allowed."""
+    tools = await list_tools()
+    return {
+        "read_only": _config.get("read_only", False),
+        "allowed_tools": _config.get("allowed_tools", ["*"]),
+        "tools": [{"name": t.name, "allowed": _is_tool_allowed(t.name)} for t in tools],
+        "write_tools_blocked": sorted(_WRITE_TOOLS),
+    }
+
+
 def cli_main():
     """Synchronous entry point for the OHM MCP server.
 
@@ -618,10 +699,21 @@ def cli_main():
 
     parser = argparse.ArgumentParser(description="OHM MCP Server")
     parser.add_argument("--config", default=None, help="Path to JSON config file")
+    parser.add_argument("--verify", action="store_true", help="Run diagnostics and exit (no MCP stdio transport)")
+    parser.add_argument("--dump-tools", action="store_true", help="Print tool names and allowed status, then exit")
     args = parser.parse_args()
 
     if args.config:
         _load_config_file(args.config)
+
+    if args.dump_tools:
+        print(json.dumps(asyncio.run(_dump_tools()), indent=2))
+        return
+
+    if args.verify:
+        report = asyncio.run(_run_verify())
+        print(json.dumps(report, indent=2, default=str))
+        return
 
     asyncio.run(main())
 

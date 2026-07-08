@@ -332,6 +332,11 @@ _PRIVATE_NETWORKS = [
 ]
 
 
+def _is_private_ip(ip: ipaddress._BaseAddress) -> bool:
+    """Return True if *ip* falls in any of the private/loopback networks."""
+    return any(ip in net for net in _PRIVATE_NETWORKS)
+
+
 def _resolve_webhook_ips(host: str) -> list[str]:
     """Resolve *host* and reject any private/loopback address (SSRF guard).
 
@@ -345,11 +350,12 @@ def _resolve_webhook_ips(host: str) -> list[str]:
     """
     import socket
 
+    from ohm.framework.validation import canonicalize_ip
+
     try:
         infos = socket.getaddrinfo(host, None)
     except Exception:
         raise ValidationError(f"Cannot resolve webhook host: {host!r}")
-    from ohm.framework.validation import canonicalize_ip
 
     seen: list[str] = []
     for info in infos:
@@ -359,9 +365,8 @@ def _resolve_webhook_ips(host: str) -> list[str]:
         # Canonicalize IPv4-mapped/NAT64 IPv6 to IPv4 so mapped literals like
         # ::ffff:169.254.169.254 cannot bypass the IPv4 blocklist entries.
         ip = canonicalize_ip(ipaddress.ip_address(addr))
-        for net in _PRIVATE_NETWORKS:
-            if ip in net:
-                raise ValidationError(f"Webhook URL targets a private/loopback address ({addr}) — SSRF not allowed")
+        if _is_private_ip(ip):
+            raise ValidationError(f"Webhook URL targets a private/loopback address ({addr}) — SSRF not allowed")
         seen.append(addr)
     if not seen:
         raise ValidationError(f"Cannot resolve webhook host: {host!r}")
@@ -792,6 +797,7 @@ def _build_router() -> _RouteRegistry:
         "/stats",
         "/status",
         "/schema",
+        "/schema/node-types",
         "/layers",
         "/agents",
         "/nodes",
@@ -830,6 +836,7 @@ def _build_router() -> _RouteRegistry:
         "/reports",
         "/runs",
         "/rul",
+        "/edges",
     ):
         r.add("GET", _p)
 
@@ -1273,6 +1280,26 @@ class OhmHandler(
         agent = self._require_auth()
         self._check_write_access(agent)
         return agent
+
+    def _require_admin(self, action: str = "this admin endpoint") -> str:
+        """Authenticate and require admin role. Returns agent name or raises.
+
+        *action* only phrases the error message (e.g. "provisioning",
+        "administrative maintenance endpoints").
+        """
+        agent = self._authenticate()
+        if agent is None:
+            if self.no_auth and not self.tokens and not self.customer_tokens:
+                agent = "ohm"
+            else:
+                raise AuthenticationError("Authentication required — provide Bearer token")
+        # Customer API keys are tenant-scoped and must never reach admin endpoints.
+        if getattr(self, "_resolved_customer_id", None) is not None:
+            raise PermissionDeniedError("Admin endpoints require an agent token, not a customer key")
+        role = _lookup_role(self.roles, agent, self._customer_id)
+        if role == "admin" or (self.no_auth and not self.roles):
+            return agent
+        raise PermissionDeniedError(f"Agent '{agent}' role '{role}' is not authorized for {action} (requires 'admin' role)")
 
     def _json_response(self, code: int, data):
         """Send a JSON response.
@@ -2588,6 +2615,7 @@ OhmHandler._GET_EXACT = {
     "/stats": "_get_stats",
     "/status": "_get_status",
     "/schema": "_get_schema",
+    "/schema/node-types": "_get_schema_node_types",
     "/templates": "_get_templates",
     "/queries": "_get_queries",
     "/plans": "_get_plans",
@@ -2673,6 +2701,7 @@ OhmHandler._GET_EXACT = {
     "/admin/duplicates": "_get_admin_duplicates",
     "/admin/fragment-resonance": "_get_fragment_resonance",
     "/tenants": "_get_tenants",
+    "/edges": "_get_edges",
 }
 
 

@@ -917,16 +917,9 @@ class AdminHandlerMixin:
     def _post_admin_verification_decay(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /admin/verification-decay — Run verification-aware confidence decay.
 
-        ADR-018.3: Unverified causal edges decay with 30-day half-life.
-        Verified edges decay with 365-day half-life.
-
-        Body params:
-            dry_run (bool): If true, return what would change without modifying. Default true.
-            unverified_half_life_days (float): Half-life for unverified edges. Default 30.
-            verified_half_life_days (float): Half-life for verified edges. Default 365.
-            min_confidence (float): Floor for decayed confidence. Default 0.1.
-            verification_grace_days (float): Days before decay starts. Default 14.
+        Requires admin role.
         """
+        self._require_admin()
         from ohm.graph.methods import apply_verification_decay
 
         dry_run = body.get("dry_run", True)  # Default to dry run for safety
@@ -948,11 +941,9 @@ class AdminHandlerMixin:
     def _post_admin_apply_decay(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /admin/apply-decay — Apply confidence decay to L3/L4 edges (OHM-2x2u).
 
-        Body params:
-            dry_run (bool): If true, return what would change without modifying. Default true.
-            half_life_days (float): Override half-life for all layers. Default 30.
-            floor (float): Minimum confidence after decay. Default 0.1.
+        Requires admin role.
         """
+        self._require_admin()
         from ohm.queries import apply_decay_to_edges
 
         dry_run = body.get("dry_run", True)
@@ -974,14 +965,11 @@ class AdminHandlerMixin:
         self._json_response(200, {"snapshots": snapshots, "count": len(snapshots)})
 
     def _post_admin_vacuum_lake(self, path: str, qs: dict, body: dict, agent: str) -> None:
-        """POST /admin/vacuum-lake — run VACUUM on DuckLake to prune old snapshots and reduce bloat.
+        """POST /admin/vacuum-lake — run VACUUM on DuckLake to prune old snapshots.
 
-        DuckLake accumulates snapshots on every write. Without periodic VACUUM,
-        the snapshot metadata grows unbounded, increasing memory usage and
-        causing health check queries to consume excessive resources.
-
-        Body (optional): {"keep_versions": N} — keep last N snapshot versions (default: 10)
+        Requires admin role.
         """
+        self._require_admin()
         body.get("keep_versions", 10) if body else 10
         try:
             # Check if DuckLake is attached
@@ -1176,12 +1164,9 @@ class AdminHandlerMixin:
     def _post_admin_merge(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /admin/merge — merge duplicate nodes (OHM-g0kv.6).
 
-        Re-points all edges and observations from *merge_id* into *keep_id*,
-        then soft-deletes *merge_id*. Duplicate edges (same from→to, type,
-        layer) are silently skipped for idempotency.
-
-        Body: {"keep": "<node_id>", "merge": "<node_id>"}
+        Requires admin role.
         """
+        self._require_admin()
         from ohm.exceptions import NodeNotFoundError
 
         keep_id = body.get("keep", "")
@@ -1371,7 +1356,11 @@ class AdminHandlerMixin:
         self._json_response(200, {"resonance": result, "count": len(result)})
 
     def _post_admin_evict_fragments(self, path: str, qs: dict, body: dict, agent: str) -> None:
-        """POST /admin/evict-fragments — run fragment TTL eviction on-demand (OHM-a5rz.27)."""
+        """POST /admin/evict-fragments — run fragment TTL eviction on-demand (OHM-a5rz.27).
+
+        Requires admin role.
+        """
+        self._require_admin()
         from ohm.queries import evict_expired_fragments
 
         ttl_days = body.get("ttl_days", 30)
@@ -1475,22 +1464,10 @@ class AdminHandlerMixin:
     def _post_admin_purge_orphans(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /admin/purge-orphans — hard-delete orphaned nodes whose creators no longer have auth.
 
-        Finds nodes where created_by agent has no token in the current config, the node
-        has no edges (orphan), and optionally matches a provenance filter.
-        Requires agent to have admin-level write access.
-
-        Body params:
-            dry_run: If true, only report what would be purged (default: true)
-            provenance_filter: Only purge nodes matching this provenance prefix (e.g. "ranch_")
-            min_age_hours: Only purge nodes created at least N hours ago (default: 24)
-            max_observations: Only purge nodes with <= N observations (default: 500)
-
-        Returns:
-            candidates: Number of orphan nodes matching criteria
-            purged: Number of nodes hard-deleted (0 if dry_run)
-            observations_removed: Total observations deleted
-            edges_removed: Total edges removed
+        Requires admin role.
         """
+        self._require_admin()
+
         dry_run = body.get("dry_run", True)
         provenance_filter = body.get("provenance_filter")
         min_age_hours = body.get("min_age_hours", 24)

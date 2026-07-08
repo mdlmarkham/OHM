@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlparse
 
 from ohm.exceptions import (
-    AuthenticationError,
     ConflictError,
     NodeNotFoundError,
     PermissionDeniedError,
@@ -15,24 +14,6 @@ from ohm.server import server as _server_module
 
 class TenantHandlerMixin:
     """Handler mixin for tenant provisioning and management (OHM-97q8)."""
-
-    def _require_admin(self, action: str = "provisioning") -> str:
-        """Require admin role. Raises AuthenticationError or PermissionDeniedError.
-
-        *action* only phrases the error message (e.g. "provisioning",
-        "administrative maintenance endpoints").
-        """
-        if self.no_auth:
-            return self._authenticate() or "ohm"
-        agent = self._authenticate()
-        if agent is None:
-            raise AuthenticationError("Authentication required — provide Bearer token")
-        if getattr(self, "_resolved_customer_id", None) is not None:
-            raise PermissionDeniedError("Admin endpoints require an agent token, not a customer key")
-        role = _server_module._lookup_role(self.roles, agent, self._customer_id)
-        if role != "admin":
-            raise PermissionDeniedError(f"Agent '{agent}' requires 'admin' role for {action}")
-        return agent
 
     def _require_multi_tenant_active(self) -> None:
         """Raise ValidationError if multi-tenancy or TenantManager is not active."""

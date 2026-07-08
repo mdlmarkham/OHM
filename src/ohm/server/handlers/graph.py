@@ -215,6 +215,30 @@ class GraphHandlerMixin:
         status["multi_tenant"] = self.multi_tenant
         self._json_response(200, status)
 
+    def _get_schema_node_types(self, path: str, qs: dict) -> None:
+        """GET /schema/node-types?type=X — per-node-type template + hook constraints."""
+        from ohm.exceptions import ValidationError
+        from ohm.queries import node_type_template
+
+        node_type = qs.get("type", [None])[0]
+        if not node_type:
+            self._json_response(
+                400,
+                {"error": "validation_error", "message": "?type=<node_type> is required"},
+            )
+            return
+        result = node_type_template(self.current_store.read_conn, node_type=node_type)
+        # Enrich with live hook constraints for this schema
+        hooks = self.current_store.execute("SELECT command FROM ohm_hooks WHERE event = 'pre_ingest' AND enabled = TRUE")
+        hook_names = {h["command"] for h in hooks}
+        hook_map = {
+            "source_url_required": "source_url_required",
+            "cross_link_check": "cross_link_required",
+            "observation_source_required": "observation_source_required",
+        }
+        result["live_hooks"] = [{"hook": cmd, "constraint": name} for cmd, name in hook_map.items() if any(cmd in h["command"] for h in hooks)]
+        self._json_response(200, {"ok": True, "data": result})
+
     def _get_schema(self, path: str, qs: dict) -> None:
         """GET /schema — schema description with usage guidance."""
         schema = self.schema_config
@@ -491,6 +515,94 @@ class GraphHandlerMixin:
             self._json_response(404, {"ok": False, "error": "Run not found"})
         else:
             self._json_response(200, {"ok": True, "data": result})
+
+    def _get_edges(self, path: str, qs: dict) -> None:
+        """GET /edges — list edges with filtering.
+
+        Query params:
+          from_node, to_node: exact node id filters
+          from_type, to_type: node type filters (requires joining ohm_nodes)
+          edge_type: exact edge type
+          layer: L0/L1/L2/L3/L4
+          created_by: agent name
+          limit, offset: pagination
+        """
+        from_node = qs.get("from_node", [None])[0]
+        to_node = qs.get("to_node", [None])[0]
+        from_type = qs.get("from_type", [None])[0]
+        to_type = qs.get("to_type", [None])[0]
+        edge_type = qs.get("edge_type", [None])[0]
+        layer = qs.get("layer", [None])[0]
+        created_by = qs.get("created_by", [None])[0]
+        limit = int(qs.get("limit", [100])[0])
+        offset = int(qs.get("offset", [0])[0])
+
+        conditions = ["e.deleted_at IS NULL"]
+        params: list[Any] = []
+        joins: list[str] = []
+
+        if from_node:
+            conditions.append("e.from_node = ?")
+            params.append(from_node)
+        if to_node:
+            conditions.append("e.to_node = ?")
+            params.append(to_node)
+        if edge_type:
+            conditions.append("e.edge_type = ?")
+            params.append(edge_type)
+        if layer:
+            conditions.append("e.layer = ?")
+            params.append(layer)
+        if created_by:
+            conditions.append("e.created_by = ?")
+            params.append(created_by)
+        if from_type:
+            joins.append("JOIN ohm_nodes nf ON nf.id = e.from_node AND nf.deleted_at IS NULL")
+            conditions.append("nf.type = ?")
+            params.append(from_type)
+        if to_type:
+            joins.append("JOIN ohm_nodes nt ON nt.id = e.to_node AND nt.deleted_at IS NULL")
+            conditions.append("nt.type = ?")
+            params.append(to_type)
+
+        from ohm.server.boundary import get_agent_read_scope
+
+        agent = getattr(self, "_current_agent", "ohm")
+        scope = get_agent_read_scope(self.current_store.conn, agent)
+        if scope is not None:
+            allowed_tiers = scope.get("source_tier")
+            if allowed_tiers is not None:
+                joins.append("JOIN ohm_nodes ns ON ns.id = e.from_node AND ns.deleted_at IS NULL")
+                placeholders = ",".join(["?"] * len(allowed_tiers))
+                conditions.append(f"(ns.source_tier IS NULL OR ns.source_tier IN ({placeholders}))")
+                params.extend(allowed_tiers)
+            allowed_creators = scope.get("created_by")
+            if allowed_creators is not None:
+                placeholders = ",".join(["?"] * len(allowed_creators))
+                conditions.append(f"e.created_by IN ({placeholders})")
+                params.extend(allowed_creators)
+
+        params.append(limit)
+        params.append(offset)
+        where_clause = " AND ".join(conditions)
+        join_clause = " ".join(joins)
+        sql = f"""SELECT e.* FROM ohm_edges e {join_clause}
+                  WHERE {where_clause}
+                  ORDER BY e.created_at DESC LIMIT ? OFFSET ?"""
+        results = self.current_store.execute(sql, params)
+        count_sql = f"""SELECT COUNT(*) as cnt FROM ohm_edges e {join_clause} WHERE {where_clause}"""
+        count_params = params[:-2]
+        total_result = self.current_store.execute(count_sql, count_params)
+        total = total_result[0].get("cnt", len(results)) if total_result else len(results)
+        self._json_response(
+            200,
+            {
+                "edges": results,
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            },
+        )
 
     def _get_node(self, path: str, qs: dict) -> None:
         """GET /node/<id> — fetch a node with effective_layer and constraint_status."""
