@@ -27,6 +27,13 @@ from pathlib import Path
 
 import pytest
 
+# This module exercises the MCP server, which requires the optional `mcp`
+# package (installed via the `gateway`/`science` extras, not the base test
+# install). Skip the whole module when it is absent so CI jobs that install
+# only `.[dev,bayesian,markov]` skip these tests instead of erroring on the
+# in-test `from ohm.mcp.server import ...` import.
+pytest.importorskip("mcp")
+
 # Spawns a real ohmd subprocess and makes real HTTP requests — same category
 # as test_server.py / test_customer_auth.py, and excluded from the parallel
 # "fast" pool for the same reason: it needs the process/port to itself.
