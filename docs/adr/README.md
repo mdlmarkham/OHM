@@ -687,3 +687,27 @@ Pilot the model as TOPO DomainTables (`topo_plans`, `topo_events`, `topo_event_l
 - Core schema team can design `ohm_intervals` / `ohm_plans` with real field evidence
 - Future migration is acknowledged and planned, not deferred as technical debt
 - See [full ADR](0041-temporal-event-model.md)
+
+---
+
+## ADR-042: Instance Registry and Monitoring for Local Agent Mesh
+
+**Date:** 2026-07-08
+**Status:** Accepted
+
+### Context
+
+In a small-team multi-agent mesh, multiple OHM instances run on a host (one ohmd daemon, per-agent local stores, remote instances). Operators and agents need to discover which instances exist, their health, and sync status. No centralized registry existed — discovery was tribal knowledge passed through environment variables and config files.
+
+### Decision
+
+Local-first, pull-based registry: each ohmd exposes no-auth `GET /instance` with structured metadata (instance_id, version, purpose, multi_tenant, tenants, domain_configs, listen_url, DuckLake sync status, uptime, agent_count). `ohm instances discover` CLI scans well-known locations (127.0.0.1:8710, `OHM_URL` env, `~/.ohm/agents/*/ohm.json`, `/etc/ohm/ohmd*.json`) and probes each with `GET /instance`, writing a registry JSON to `~/.ohm/registry.json` consumable by SDK and MCP. Prometheus `/metrics` endpoint exposes graph counts, uptime, request stats, and DuckLake sync lag. `ohm instances health` re-probes all registered instances. MCP tool `ohm_list_instances` exposes the registry to agents.
+
+### Consequences
+
+- Single command reveals every reachable OHM instance — no more tribal knowledge of URLs
+- Agents discover the correct endpoint programmatically (SDK reads registry JSON; MCP agents call `ohm_list_instances`)
+- Prometheus `/metrics` plugs into standard scraping/alerting with graph counts, latency, and DuckLake sync lag
+- Discovery is pull-based — no push registration; remote instances outside well-known configs must be added manually until push is added
+- Registry is local-first (no central server), consistent with OHM's local-DuckDB architecture
+- See [full ADR](0042-instance-registry-monitoring.md)
