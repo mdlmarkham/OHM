@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13"]
+        python-version: ["3.13", "3.14"]
 
     steps:
       - uses: actions/checkout@v4
@@ -54,7 +54,7 @@ jobs:
         run: |
           python -m pytest tests/ -v --tb=short --benchmark-disable \
             -m "not slow and not integration and not concurrent and not smoke" \
-            --timeout=60 --timeout-method=thread -n auto \
+            --timeout=60 --timeout-method=thread -n auto --dist loadgroup \
             --junitxml=test-results.xml
 
       - name: Test (integration + slow) with pytest
@@ -62,7 +62,7 @@ jobs:
         run: |
           python -m pytest tests/ -v --tb=short --benchmark-disable \
             -m "slow or integration" \
-            --timeout=120 --timeout-method=thread \
+            --timeout=120 --timeout-method=thread -n 0 \
             -k "not concurrent"
 
       - name: Upload test results
@@ -80,7 +80,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.13"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable

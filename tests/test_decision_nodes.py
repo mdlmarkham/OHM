@@ -33,7 +33,11 @@ class TestDecisionSchema:
             assert "DECISION_DEPENDS_ON" not in LAYER_EDGE_TYPES.get(layer, frozenset())
 
     def test_schema_version_bumped(self):
-        assert SCHEMA_VERSION == "0.43.0"
+        # Monotonic check (not exact-match): SCHEMA_VERSION is bumped on every
+        # migration, so pinning an exact string here breaks on every later
+        # migration unrelated to this one. The migration-presence tests below
+        # cover the real invariant.
+        assert tuple(int(x) for x in SCHEMA_VERSION.split(".")) >= (0, 38, 0)
 
     def test_migration_0_38_0_present(self):
         from ohm.schema import MIGRATIONS

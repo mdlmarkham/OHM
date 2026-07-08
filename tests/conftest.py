@@ -377,6 +377,11 @@ def _start_test_server(store, tokens=None, roles=None, no_auth=False, schema_con
         OhmHandler.tokens = token_hashes
     else:
         OhmHandler.tokens = {}
+    # OhmHandler.customer_tokens is shared class-level state (like .tokens),
+    # so it must be reset too — otherwise a stale dict left by an earlier
+    # test (e.g. one that sets OhmHandler.customer_tokens directly) leaks
+    # into later tests sharing the same sequential worker.
+    OhmHandler.customer_tokens = {}
     OhmHandler.roles = roles or {}
     OhmHandler.no_auth = no_auth
     OhmHandler.multi_tenant = multi_tenant

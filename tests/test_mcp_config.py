@@ -281,6 +281,8 @@ class TestDomainConfigValidation:
 async def test_check_domain_config_mismatch_exits(tmp_path):
     """If configured domain_config does not match daemon /schema, startup exits."""
     import sys
+
+    pytest.importorskip("mcp")  # ohm.mcp.server requires the optional `mcp` package
     from ohm.mcp.config import config as mcp_config
     from ohm.mcp.server import _check_domain_config
 
@@ -306,6 +308,7 @@ async def test_check_domain_config_mismatch_exits(tmp_path):
 @pytest.mark.anyio
 async def test_check_domain_config_match_passes(tmp_path):
     """If configured domain_config matches daemon /schema, startup continues."""
+    pytest.importorskip("mcp")  # ohm.mcp.server requires the optional `mcp` package
     from ohm.mcp.config import config as mcp_config
     from ohm.mcp.server import _check_domain_config
 

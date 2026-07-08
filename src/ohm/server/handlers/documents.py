@@ -19,6 +19,7 @@ from urllib.parse import ParseResult, urlparse
 from ohm.documents.ingest import ingest_file
 from ohm.documents.store import BedrockKnowledgeStore, DocumentStore, LocalDocumentStore, S3DocumentStore
 from ohm.exceptions import NodeNotFoundError, ValidationError
+from ohm.framework.validation import canonicalize_ip
 
 
 SUPPORTED_CONTENT_TYPES = {
@@ -72,20 +73,17 @@ def _reconstruct_url(parsed: ParseResult) -> str:
     return result
 
 
-def _canonicalize_ip(addr: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
-    """Parse an IP address and collapse IPv4-mapped IPv6 to pure IPv4.
+def _canonicalize_ip(addr: str) -> ipaddress._BaseAddress:
+    """Parse *addr* and collapse IPv4-mapped/NAT64 IPv6 to its embedded IPv4.
 
-    ``::ffff:169.254.169.254`` would otherwise fail to match the IPv4
-    link-local block because ``ipaddress.__contains__`` does not cross
-    address families. Collapsing first closes that SSRF bypass.
+    Thin string-in wrapper around the shared ``canonicalize_ip`` helper (which
+    takes an already-parsed address), kept as a module-level function since
+    it's exercised directly in tests.
     """
-    ip = ipaddress.ip_address(addr)
-    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
-        return ip.ipv4_mapped
-    return ip
+    return canonicalize_ip(ipaddress.ip_address(addr))
 
 
-def _canonicalize_and_check_ip(addr: str, allow_loopback: bool) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
+def _canonicalize_and_check_ip(addr: str, allow_loopback: bool) -> ipaddress._BaseAddress:
     """Canonicalize *addr* and raise ValidationError if it is private/loopback."""
     ip = _canonicalize_ip(addr)
     for net in _FETCH_BLOCKED_NETWORKS:

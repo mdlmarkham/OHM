@@ -15,7 +15,6 @@ Configuration via environment variables:
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 
@@ -35,7 +34,6 @@ from mcp.types import (
 from ohm.mcp.encoding import (
     DEFAULT_FORMAT,
     encode_payload,
-    format_supported,
     requested_format,
 )
 from ohm.mcp.config import config as _config, load_config_file as _load_config_file, is_tool_allowed as _is_tool_allowed, make_headers, validate_domain_config as _validate_domain_config, WRITE_TOOLS as _WRITE_TOOLS
@@ -614,12 +612,9 @@ async def _run_verify() -> dict[str, Any]:
     harmless write probe if a write tool is allowed.
     """
     import httpx
+
     result: dict[str, Any] = {
-        "config": {
-            k: v
-            for k, v in _config.items()
-            if k not in ("token", "domain_config") and v is not None
-        },
+        "config": {k: v for k, v in _config.items() if k not in ("token", "domain_config") and v is not None},
         "headers": _headers(),
         "health": None,
         "schema": None,
@@ -686,10 +681,7 @@ async def _dump_tools() -> dict[str, Any]:
     return {
         "read_only": _config.get("read_only", False),
         "allowed_tools": _config.get("allowed_tools", ["*"]),
-        "tools": [
-            {"name": t.name, "allowed": _is_tool_allowed(t.name)}
-            for t in tools
-        ],
+        "tools": [{"name": t.name, "allowed": _is_tool_allowed(t.name)} for t in tools],
         "write_tools_blocked": sorted(_WRITE_TOOLS),
     }
 

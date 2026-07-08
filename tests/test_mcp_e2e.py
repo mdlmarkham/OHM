@@ -27,6 +27,18 @@ from pathlib import Path
 
 import pytest
 
+# This module exercises the MCP server, which requires the optional `mcp`
+# package (installed via the `gateway`/`science` extras, not the base test
+# install). Skip the whole module when it is absent so CI jobs that install
+# only `.[dev,bayesian,markov]` skip these tests instead of erroring on the
+# in-test `from ohm.mcp.server import ...` import.
+pytest.importorskip("mcp")
+
+# Spawns a real ohmd subprocess and makes real HTTP requests — same category
+# as test_server.py / test_customer_auth.py, and excluded from the parallel
+# "fast" pool for the same reason: it needs the process/port to itself.
+pytestmark = pytest.mark.integration
+
 
 def _wait_for_health(base_url: str, deadline_s: float = 30.0) -> bool:
     deadline = time.monotonic() + deadline_s
@@ -164,7 +176,9 @@ async def test_mcp_e2e_stats_and_read_only(ohmd):
 
     from ohm.mcp.server import call_tool
 
-    # call ohm_stats (request JSON explicitly; TOON may be the default format)
+    # call ohm_stats — force json explicitly; DEFAULT_FORMAT is "toon" whenever
+    # python-toon is installed (e.g. via the `gateway` extra this module ships
+    # under), so asserting json.loads() below requires opting out of that default.
     result = await call_tool("ohm_stats", {"format": "json"})
     assert not result.isError, f"ohm_stats call errored: {result.content}"
     assert len(result.content) > 0

@@ -90,6 +90,7 @@ def test_decode_payload_falls_back_to_json_for_toon_if_unavailable(monkeypatch):
 
 
 def test_text_content_uses_format():
+    pytest.importorskip("mcp")  # ohm.mcp.server requires the optional `mcp` package
     from ohm.mcp.server import _text
 
     payload = sample_payload()

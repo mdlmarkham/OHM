@@ -382,7 +382,9 @@ class TestEdgeEndpoints:
         _request("POST", port, "/node", body={"id": "ea", "label": "EA", "type": "concept"})
         _request("POST", port, "/node", body={"id": "eb", "label": "EB", "type": "concept"})
         _request(
-            "POST", port, "/edge",
+            "POST",
+            port,
+            "/edge",
             body={"from": "ea", "to": "eb", "type": "CAUSES", "layer": "L3"},
         )
         status, data = _request("GET", port, "/edges?edge_type=CAUSES")

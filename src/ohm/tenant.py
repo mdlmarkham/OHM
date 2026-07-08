@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from ohm.framework.validation import validate_customer_id
+from ohm.framework.validation import validate_backup_id, validate_customer_id
 from ohm.graph.store import OhmStore
 from ohm.schema import SchemaConfig
 
@@ -1320,10 +1320,13 @@ class TenantManager:
             Dict with status and backup metadata.
         """
         customer_id = validate_customer_id(customer_id)
-        from ohm.framework.validation import validate_backup_id
-
         backup_id = validate_backup_id(backup_id)
-        backup_path = self._tenant_dir(customer_id) / _BACKUP_DIR_NAME / backup_id
+        backups_root = (self._tenant_dir(customer_id) / _BACKUP_DIR_NAME).resolve()
+        backup_path = (backups_root / backup_id).resolve()
+        # Defense in depth: even with the charset check above, ensure the
+        # resolved path stays inside this tenant's backups directory.
+        if backup_path != backups_root and backups_root not in backup_path.parents:
+            raise ValueError(f"Invalid backup_id: '{backup_id}' escapes the tenant backup directory")
         if not backup_path.exists():
             raise ValueError(f"Backup '{backup_id}' not found for tenant '{customer_id}'")
 

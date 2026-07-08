@@ -172,6 +172,62 @@ class TestAuthenticateCustomerToken:
         assert result == "customer:acme_hvac"
         assert getattr(handler, "_resolved_customer_id", None) == "acme_hvac"
 
+
+class TestXOhmAgentPrivilegeEscalation:
+    """OHM-security: X-Ohm-Agent header must not let a caller escalate role.
+
+    Regression coverage for the fix that compares the spoofed agent's role
+    rank against the authenticating token's own role rank — a read-write
+    token must not be able to claim an admin agent's identity via the header.
+    """
+
+    def _handler(self, token, roles, header_agent):
+        h = _make_handler(agent_tokens={_hash_token(token): "caller"}, customer_tokens={})
+        h.roles = roles
+        h.headers = _FakeHeaders(
+            {
+                "authorization": f"Bearer {token}",
+                "x-ohm-agent": header_agent,
+            }
+        )
+        return h
+
+    def test_read_write_cannot_impersonate_admin(self):
+        handler = self._handler("tok", {"caller": "read-write", "root": "admin"}, "root")
+        assert handler._authenticate() == "caller"
+
+    def test_read_write_can_impersonate_another_read_write_agent(self):
+        handler = self._handler("tok", {"caller": "read-write", "peer": "read-write"}, "peer")
+        assert handler._authenticate() == "peer"
+
+    def test_read_only_cannot_use_header_at_all(self):
+        handler = self._handler("tok", {"caller": "read-only", "peer": "read-write"}, "peer")
+        assert handler._authenticate() == "caller"
+
+    def test_admin_can_impersonate_anyone(self):
+        handler = self._handler("tok", {"caller": "admin", "peer": "read-write"}, "peer")
+        assert handler._authenticate() == "peer"
+
+    def test_read_write_cannot_impersonate_unknown_name_defaulting_to_admin(self):
+        """An unlisted agent name defaults to read-write, not admin — so
+        claiming an arbitrary/unregistered name cannot yield admin rank."""
+        handler = self._handler("tok", {"caller": "read-write"}, "nonexistent-agent")
+        # Unknown name defaults to read-write == caller's own rank, so this
+        # is allowed (matches legitimate SDK impersonation use case) but
+        # must never grant admin.
+        result = handler._authenticate()
+        assert result == "nonexistent-agent"
+        from ohm.server.server import _lookup_role
+
+        assert _lookup_role(handler.roles, result, None) != "admin"
+
+    def test_query_string_token_same_escalation_guard(self):
+        h = _make_handler(agent_tokens={_hash_token("tok"): "caller"})
+        h.roles = {"caller": "read-write", "root": "admin"}
+        h.headers = _FakeHeaders({"x-ohm-agent": "root"})
+        h.path = "/node?token=tok"
+        assert h._authenticate() == "caller"
+
     def test_two_tenants_isolated(self):
         token_a, hash_a = _generate_customer_token("tenant_a")
         token_b, hash_b = _generate_customer_token("tenant_b")

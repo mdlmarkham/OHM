@@ -8,11 +8,13 @@ Covers:
 - CORS no-op (M1): _set_extra_cors_headers is a safe no-op for agent-only access.
 """
 
+import ipaddress
+
 import pytest
 
 import ohm.server.server as srv
 from ohm.exceptions import AuthenticationError, PermissionDeniedError, ValidationError
-from ohm.validation import validate_table_name
+from ohm.validation import canonicalize_ip, validate_backup_id, validate_table_name
 
 
 class TestValidateTableName:
@@ -96,6 +98,19 @@ class TestResolveWebhookIps:
         with pytest.raises(ValidationError, match="private"):
             srv._resolve_webhook_ips(host)
 
+    @pytest.mark.parametrize(
+        "host",
+        [
+            "::ffff:169.254.169.254",  # IPv4-mapped link-local (AWS metadata)
+            "::ffff:127.0.0.1",  # IPv4-mapped loopback
+            "::ffff:10.0.0.1",  # IPv4-mapped private
+        ],
+    )
+    def test_rejects_ipv4_mapped_ipv6(self, host):
+        """IPv4-mapped IPv6 literals must not bypass the IPv4 blocklist (SSRF)."""
+        with pytest.raises(ValidationError, match="private"):
+            srv._resolve_webhook_ips(host)
+
     def test_validate_rejects_non_http_scheme(self):
         with pytest.raises(ValidationError, match="http or https"):
             srv._validate_webhook_url("ftp://example.com/hook")
@@ -103,6 +118,45 @@ class TestResolveWebhookIps:
     def test_validate_rejects_missing_host(self):
         with pytest.raises(ValidationError, match="missing host"):
             srv._validate_webhook_url("http:///path")
+
+
+class TestCanonicalizeIp:
+    """IPv4-mapped / NAT64 IPv6 addresses collapse to their embedded IPv4 so
+    that SSRF blocklists (which mix IPv4 and IPv6 networks) cannot be bypassed
+    by ipaddress's cross-family membership check silently returning False."""
+
+    def test_ipv4_mapped_collapses_to_ipv4(self):
+        canon = canonicalize_ip(ipaddress.ip_address("::ffff:169.254.169.254"))
+        assert canon == ipaddress.ip_address("169.254.169.254")
+        assert canon in ipaddress.ip_network("169.254.0.0/16")
+
+    def test_nat64_collapses_to_ipv4(self):
+        # 64:ff9b::/96 embeds the IPv4 in the low 32 bits (7f00:0001 = 127.0.0.1)
+        assert canonicalize_ip(ipaddress.ip_address("64:ff9b::7f00:1")) == ipaddress.ip_address("127.0.0.1")
+
+    def test_genuine_ipv6_unchanged(self):
+        for addr in ("::1", "fc00::1", "fe80::1", "2606:4700:4700::1111"):
+            assert canonicalize_ip(ipaddress.ip_address(addr)) == ipaddress.ip_address(addr)
+
+    def test_genuine_ipv4_unchanged(self):
+        assert canonicalize_ip(ipaddress.ip_address("8.8.8.8")) == ipaddress.ip_address("8.8.8.8")
+
+
+class TestValidateBackupId:
+    """backup_id is joined into a filesystem path in restore_tenant and must be
+    validated to prevent path traversal (it arrives from request bodies)."""
+
+    @pytest.mark.parametrize("value", ["20260524T180000Z", "20260524T180000Z_a1b2c3", "pre_restore-1"])
+    def test_accepts_generated_ids(self, value):
+        assert validate_backup_id(value) == value
+
+    @pytest.mark.parametrize(
+        "value",
+        ["../../etc", "a/b", "a\\b", "..", "foo/../bar", "", "with space", "semi;colon"],
+    )
+    def test_rejects_traversal_and_unsafe(self, value):
+        with pytest.raises(ValueError):
+            validate_backup_id(value)
 
 
 class TestHookAdminGate:
@@ -139,3 +193,41 @@ class TestCorsNoOp:
     def test_is_safe_noop(self):
         handler = srv.OhmHandler.__new__(srv.OhmHandler)
         handler._set_extra_cors_headers()
+
+
+@pytest.mark.integration
+class TestAdminEndpointGate:
+    """Destructive /admin/* POST endpoints require the admin role, not merely
+    write access. Normal agent writes use /node, /edge, /observe — never
+    /admin/*. Gated centrally in _do_POST."""
+
+    @pytest.fixture
+    def admin_server(self, tmp_path):
+        from tests.conftest import _start_test_server
+        from ohm.graph.embeddings import NullBackend
+        from ohm.store import OhmStore
+
+        store = OhmStore(
+            db_path=str(tmp_path / "test_admin_gate.duckdb"),
+            agent_name="test_agent",
+            embedding_backend=NullBackend(dimensions=768),
+        )
+        tokens = {"rw-token": "worker", "admin-token": "boss"}
+        roles = {"worker": "read-write", "boss": "admin"}
+        port, server, thread = _start_test_server(store, tokens=tokens, roles=roles)
+        yield port
+        server.shutdown()
+        thread.join(timeout=2)
+        store.close()
+
+    def test_read_write_agent_rejected(self, admin_server):
+        from tests.conftest import _request
+
+        status, data = _request("POST", admin_server, "/admin/apply-decay", body={"dry_run": True}, token="rw-token")
+        assert status == 403, f"expected 403 for read-write agent, got {status}: {data}"
+
+    def test_admin_agent_allowed(self, admin_server):
+        from tests.conftest import _request
+
+        status, data = _request("POST", admin_server, "/admin/apply-decay", body={"dry_run": True}, token="admin-token")
+        assert status != 403, f"admin agent should not be blocked, got 403: {data}"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Any
 
 from ohm.server import suggestions as _suggestions_module
 
@@ -217,7 +218,6 @@ class GraphHandlerMixin:
 
     def _get_schema_node_types(self, path: str, qs: dict) -> None:
         """GET /schema/node-types?type=X — per-node-type template + hook constraints."""
-        from ohm.exceptions import ValidationError
         from ohm.queries import node_type_template
 
         node_type = qs.get("type", [None])[0]
@@ -229,20 +229,13 @@ class GraphHandlerMixin:
             return
         result = node_type_template(self.current_store.read_conn, node_type=node_type)
         # Enrich with live hook constraints for this schema
-        hooks = self.current_store.execute(
-            "SELECT command FROM ohm_hooks WHERE event = 'pre_ingest' AND enabled = TRUE"
-        )
-        hook_names = {h["command"] for h in hooks}
+        hooks = self.current_store.execute("SELECT command FROM ohm_hooks WHERE event = 'pre_ingest' AND enabled = TRUE")
         hook_map = {
             "source_url_required": "source_url_required",
             "cross_link_check": "cross_link_required",
             "observation_source_required": "observation_source_required",
         }
-        result["live_hooks"] = [
-            {"hook": cmd, "constraint": name}
-            for cmd, name in hook_map.items()
-            if any(cmd in h["command"] for h in hooks)
-        ]
+        result["live_hooks"] = [{"hook": cmd, "constraint": name} for cmd, name in hook_map.items() if any(cmd in h["command"] for h in hooks)]
         self._json_response(200, {"ok": True, "data": result})
 
     def _get_schema(self, path: str, qs: dict) -> None:
@@ -3481,247 +3474,6 @@ class GraphHandlerMixin:
         result = self.current_store.delete_edge(edge_id, deleted_by=agent)
         self._json_response(200, result)
 
-    def _patch_node(self, path: str, body: dict, agent: str) -> None:
-        """PATCH /node/<id> — partial node update."""
-        from datetime import datetime, timezone
-        from ohm.exceptions import NodeNotFoundError, ValidationError
-        from ohm.validation import validate_identifier
-
-        node_id = path[6:]
-        node_id = validate_identifier(node_id, name="node_id")
-        node = self.current_store.get_node(node_id)
-        if not node:
-            raise NodeNotFoundError(f"Node not found: {node_id}")
-
-        from ohm.server.boundary import enforce_l2_immutability
-
-        enforce_l2_immutability(self.current_store.conn, agent, node_id)
-
-        # Validate type change against schema
-        if "type" in body and body["type"] not in self.schema_config.node_types:
-            raise ValidationError(f"Invalid node type: '{body['type']}' — must be one of: {', '.join(sorted(self.schema_config.node_types))}")
-
-        now = datetime.now(timezone.utc).isoformat()
-        patchable = [
-            "label",
-            "type",
-            "content",
-            "confidence",
-            "visibility",
-            "provenance",
-            "tags",
-            "metadata",
-            "priority",
-            "url",
-            "task_status",
-            "assigned_to",
-            "due_date",
-            "utility_scale",
-            "current_best_action",
-            "action_alternatives",
-            "utility_usd_per_day",
-            "utility_currency",
-            "expected_claim",
-            "success_criteria",
-        ]
-        update_fields = []
-        update_params = []
-        for field in patchable:
-            if field in body:
-                update_fields.append(f"{field} = ?")
-                update_params.append(body[field])
-
-        if not update_fields:
-            raise ValidationError("No updatable fields provided")
-
-        update_fields.append("updated_at = ?")
-        update_params.append(now)
-        update_fields.append("updated_by = ?")
-        update_params.append(agent)
-        update_params.append(node_id)
-
-        self.current_store.conn.execute(
-            f"UPDATE ohm_nodes SET {', '.join(update_fields)} WHERE id = ?",
-            update_params,
-        )
-        self.current_store._log_change("ohm_nodes", node_id, "UPDATE", "L3", agent_name=agent)
-        self.current_store._increment_graph_generation()
-        updated = self.current_store.get_node(node_id)
-        _server_module._trigger_webhooks(
-            {"type": "node.updated", "agent": agent, "node": updated},
-            customer_id=self._customer_id,
-        )
-        self._json_response(200, updated)
-
-    def _patch_edge(self, path: str, body: dict, agent: str) -> None:
-        """PATCH /edge/<id> — partial edge update."""
-        from datetime import datetime, timezone
-        from ohm.exceptions import NodeNotFoundError, ValidationError
-        from ohm.validation import validate_identifier
-
-        edge_id = path[6:]
-        edge_id = validate_identifier(edge_id, name="edge_id")
-        edge = self.current_store.get_edge(edge_id)
-        if not edge:
-            raise NodeNotFoundError(f"Edge not found: {edge_id}")
-
-        from ohm.server.boundary import enforce_write_boundary
-
-        enforce_write_boundary(self.current_store.conn, agent, edge_id)
-
-        now = datetime.now(timezone.utc).isoformat()
-        pert_fields = [
-            "probability",
-            "probability_p05",
-            "probability_p50",
-            "probability_p95",
-            "confidence",
-            "confidence_p05",
-            "confidence_p50",
-            "confidence_p95",
-            "condition",
-            "provenance",
-            "urgency",
-        ]
-        update_fields = []
-        update_params = []
-        for field in pert_fields:
-            if field in body:
-                update_fields.append(f"{field} = ?")
-                update_params.append(body[field])
-
-        # Allow edge_type updates for causal restructuring (ADR-023)
-        if "edge_type" in body:
-            from ohm.validation import validate_identifier
-
-            new_type = validate_identifier(body["edge_type"], name="edge_type")
-            update_fields.append("edge_type = ?")
-            update_params.append(new_type)
-
-        if "probability_p50" in body and "probability" not in body:
-            from ohm.pert import compute_pert_mean
-
-            p05 = body.get("probability_p05", edge.get("probability_p05") or body["probability_p50"])
-            p95 = body.get("probability_p95", edge.get("probability_p95") or body["probability_p50"])
-            pert_mean = compute_pert_mean(p05, body["probability_p50"], p95)
-            update_fields.append("probability = ?")
-            update_params.append(pert_mean)
-
-        if not update_fields:
-            raise ValidationError("No updatable fields provided")
-
-        update_fields.append("updated_at = ?")
-        update_params.append(now)
-        update_fields.append("updated_by = ?")
-        update_params.append(agent)
-        update_params.append(edge_id)
-
-        self.current_store.conn.execute(
-            f"UPDATE ohm_edges SET {', '.join(update_fields)} WHERE id = ?",
-            update_params,
-        )
-        self.current_store._log_change("ohm_edges", edge_id, "UPDATE", edge["layer"], agent_name=agent)
-        self.current_store._increment_graph_generation()
-        updated = self.current_store.get_edge(edge_id)
-        _server_module._trigger_webhooks(
-            {"type": "edge.updated", "agent": agent, "edge": updated},
-            customer_id=self._customer_id,
-        )
-        self._json_response(200, updated)
-
-    def _patch_edges(self, path: str, body: dict, agent: str) -> None:
-        """PATCH /edges — bulk edge update with PERT fields."""
-        from datetime import datetime, timezone
-        from ohm.exceptions import ValidationError
-        from ohm.validation import validate_identifier
-
-        edges = body.get("edges", [])
-        if not edges:
-            raise ValidationError("No edges provided in 'edges' array")
-        if not isinstance(edges, list):
-            raise ValidationError("'edges' must be an array of {id, ...} objects")
-
-        now = datetime.now(timezone.utc).isoformat()
-        pert_fields = [
-            "probability",
-            "probability_p05",
-            "probability_p50",
-            "probability_p95",
-            "confidence",
-            "confidence_p05",
-            "confidence_p50",
-            "confidence_p95",
-            "condition",
-            "provenance",
-            "urgency",
-        ]
-
-        results = []
-        errors = []
-        for item in edges:
-            edge_id = item.get("id")
-            if not edge_id:
-                errors.append({"error": "missing id field", "item": item})
-                continue
-            edge_id = validate_identifier(edge_id, name="edge_id")
-            edge = self.current_store.get_edge(edge_id)
-            if not edge:
-                errors.append({"error": f"Edge not found: {edge_id}"})
-                continue
-
-            from ohm.server.boundary import enforce_write_boundary
-
-            enforce_write_boundary(self.current_store.conn, agent, edge_id)
-
-            update_fields = []
-            update_params = []
-            for field in pert_fields:
-                if field in item:
-                    update_fields.append(f"{field} = ?")
-                    update_params.append(item[field])
-
-            # Allow edge_type updates for causal restructuring (ADR-023)
-            if "edge_type" in item:
-                new_type = validate_identifier(item["edge_type"], name="edge_type")
-                update_fields.append("edge_type = ?")
-                update_params.append(new_type)
-
-            if "probability_p50" in item and "probability" not in item:
-                from ohm.pert import compute_pert_mean
-
-                p05 = item.get("probability_p05", edge.get("probability_p05") or item["probability_p50"])
-                p95 = item.get("probability_p95", edge.get("probability_p95") or item["probability_p50"])
-                pert_mean = compute_pert_mean(p05, item["probability_p50"], p95)
-                update_fields.append("probability = ?")
-                update_params.append(pert_mean)
-
-            if not update_fields:
-                errors.append({"error": "No updatable fields provided", "edge_id": edge_id})
-                continue
-
-            update_fields.append("updated_at = ?")
-            update_params.append(now)
-            update_fields.append("updated_by = ?")
-            update_params.append(agent)
-            update_params.append(edge_id)
-
-            try:
-                self.current_store.conn.execute(
-                    f"UPDATE ohm_edges SET {', '.join(update_fields)} WHERE id = ?",
-                    update_params,
-                )
-                self.current_store._log_change("ohm_edges", edge_id, "UPDATE", edge["layer"], agent_name=agent)
-                self.current_store._increment_graph_generation()
-                updated = self.current_store.get_edge(edge_id)
-                results.append(updated)
-            except Exception as e:
-                errors.append({"error": str(e), "edge_id": edge_id})
-
-        response = {"updated": results, "count": len(results)}
-        if errors:
-            response["errors"] = errors
-        self._json_response(200 if not errors else 207, response)
-
     def _post_ask_synthesis(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /ask — conversational analytics: natural language question → synthesized insights.
 
@@ -4084,11 +3836,6 @@ class GraphHandlerMixin:
             response["inference_reason"] = "include_inference=false"
 
         self._json_response(200, response)
-
-    def _patch_task(self, path: str, body: dict, agent: str) -> None:
-        """PATCH /tasks/<id> — task update via node patch."""
-        node_id = path[8:]
-        self._patch_node(f"/node/{node_id}", body, agent)
 
     def _post_register_twin(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /twin/register — register an external domain twin (OHM-josq).

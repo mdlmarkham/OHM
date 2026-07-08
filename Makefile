@@ -80,7 +80,7 @@ test-performance:
 	$(PYTEST) $(PYTEST_FLAGS) \
 		$(TESTS_DIR)/ -m "performance" \
 		--timeout=$(TEST_TIMEOUT) \
-		--benchmark-only \
+		--benchmark-only -n 0 \
 		--benchmark-json=$(REPORTS_DIR)/benchmark.json 2>&1 | tee $(REPORTS_DIR)/performance-test.log
 	@echo ""
 
@@ -90,7 +90,7 @@ test-concurrent:
 	@mkdir -p $(REPORTS_DIR)
 	$(PYTEST) $(PYTEST_FLAGS) \
 		$(TESTS_DIR)/ -m "concurrent" \
-		--timeout=120 \
+		--timeout=120 -n 0 \
 		--durations=10 2>&1 | tee $(REPORTS_DIR)/concurrent-test.log
 	@echo ""
 

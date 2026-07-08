@@ -366,7 +366,9 @@ class TestInitializeSchemaWithDomainTables:
 
 class TestMigrationForDomainDDL:
     def test_schema_version_040_bumped(self):
-        assert SCHEMA_VERSION == "0.43.0"
+        # Monotonic check: SCHEMA_VERSION only ever increases, and pinning an
+        # exact string breaks this test on every later, unrelated migration.
+        assert tuple(int(x) for x in SCHEMA_VERSION.split(".")) >= (0, 40, 0)
 
     def test_migration_0_40_0_present(self):
         from ohm.schema import MIGRATIONS

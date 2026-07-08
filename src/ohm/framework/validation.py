@@ -8,10 +8,14 @@ identifiers before interpolation.
 
 from __future__ import annotations
 
+import ipaddress
 import re
 
 # Identifiers: alphanumeric, underscore, hyphen, dot (for compound IDs)
 _IDENTIFIER_RE = re.compile(r"^[a-zA-Z0-9_\-\.]+$")
+
+# NAT64 well-known prefix — the low 32 bits embed an IPv4 address.
+_NAT64_PREFIX = ipaddress.ip_network("64:ff9b::/96")
 
 # Layer values: exactly L1, L2, L3, L4
 _LAYER_RE = re.compile(r"^L[0-4]$")
@@ -65,9 +69,7 @@ def _validate_path_safe_id(value: str, name: str, regex: re.Pattern, max_chars: 
     if "/" in value or "\\" in value:
         raise ValueError(f"Invalid {name}: path separator in '{value}'")
     if not regex.match(value):
-        raise ValueError(
-            f"Invalid {name}: '{value}' — must be 3-{max_chars} chars, alphanumeric/underscore/hyphen, starting with alphanumeric"
-        )
+        raise ValueError(f"Invalid {name}: '{value}' — must be 3-{max_chars} chars, alphanumeric/underscore/hyphen, starting with alphanumeric")
     return value
 
 
@@ -98,6 +100,24 @@ def validate_backup_id(value: str) -> str:
         ValueError: If *value* contains unsafe characters or patterns.
     """
     return _validate_path_safe_id(value, "backup_id", _BACKUP_ID_RE, 128)
+
+
+def canonicalize_ip(ip: ipaddress._BaseAddress) -> ipaddress._BaseAddress:
+    """Collapse IPv4-mapped and NAT64 IPv6 addresses to their embedded IPv4.
+
+    ``ipaddress`` membership tests silently return ``False`` across address
+    families, so an IPv4-mapped literal like ``::ffff:169.254.169.254`` would
+    slip past an IPv4-only SSRF blocklist even though the OS routes it to the
+    mapped IPv4 address. SSRF guards must canonicalize each resolved address
+    with this helper before testing it against their network blocklists.
+    """
+    if isinstance(ip, ipaddress.IPv6Address):
+        mapped = ip.ipv4_mapped
+        if mapped is not None:
+            return mapped
+        if ip in _NAT64_PREFIX:
+            return ipaddress.ip_address(int(ip) & 0xFFFFFFFF)
+    return ip
 
 
 def validate_layer(value: str) -> str:

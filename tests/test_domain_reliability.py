@@ -217,7 +217,9 @@ class TestSchemaMigration:
     def test_schema_version_is_043(self):
         from ohm.graph.schema import SCHEMA_VERSION
 
-        assert SCHEMA_VERSION == "0.43.0"
+        # Monotonic check: SCHEMA_VERSION only ever increases, and pinning an
+        # exact string breaks this test on every later, unrelated migration.
+        assert tuple(int(x) for x in SCHEMA_VERSION.split(".")) >= (0, 43, 0)
 
     def test_domain_index_exists(self):
         conn = _init_db()
