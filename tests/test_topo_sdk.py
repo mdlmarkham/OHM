@@ -87,19 +87,19 @@ class TestListPlans:
         assert plans == []
 
     def test_list_plans_by_type(self, graph, sample_plan):
-        result = graph.create_plan(plan_id="p2", plan_type="campaign")
+        graph.create_plan(plan_id="p2", plan_type="campaign")
         plans = graph.list_plans(plan_type="maintenance_window")
         assert len(plans) == 1
         assert plans[0]["id"] == "plan_001"
 
     def test_list_plans_by_status(self, graph, sample_plan):
-        result = graph.create_plan(plan_id="p2", plan_type="campaign", status="completed")
+        graph.create_plan(plan_id="p2", plan_type="campaign", status="completed")
         plans = graph.list_plans(status="active")
         assert len(plans) == 1
         assert plans[0]["id"] == "plan_001"
 
     def test_list_plans_by_horizon(self, graph, sample_plan):
-        result = graph.create_plan(plan_id="p2", plan_type="campaign", horizon="FORECAST")
+        graph.create_plan(plan_id="p2", plan_type="campaign", horizon="FORECAST")
         plans = graph.list_plans(horizon="PLANNED")
         assert len(plans) == 1
         assert plans[0]["id"] == "plan_001"
@@ -269,7 +269,7 @@ class TestCreateAndGetEventLink:
 
 class TestIntegration4DayMaintenanceWindow:
     def test_full_scenario(self, graph):
-        plan = graph.create_plan(
+        graph.create_plan(
             plan_id="plan_mw",
             node_id="pump_P101",
             plan_type="maintenance_window",
@@ -278,7 +278,7 @@ class TestIntegration4DayMaintenanceWindow:
             end_ts="2026-07-05 00:00:00",
             horizon="PLANNED",
         )
-        evt_shutdown = graph.create_event(
+        graph.create_event(
             event_id="evt_shutdown",
             plan_id="plan_mw",
             node_id="pump_P101",
@@ -289,7 +289,7 @@ class TestIntegration4DayMaintenanceWindow:
             operating_state="stopped",
             horizon="PLANNED",
         )
-        evt_inspect = graph.create_event(
+        graph.create_event(
             event_id="evt_inspect",
             plan_id="plan_mw",
             node_id="pump_P101",
@@ -300,7 +300,7 @@ class TestIntegration4DayMaintenanceWindow:
             operating_state="stopped",
             horizon="PLANNED",
         )
-        evt_restart = graph.create_event(
+        graph.create_event(
             event_id="evt_restart",
             plan_id="plan_mw",
             node_id="pump_P101",
