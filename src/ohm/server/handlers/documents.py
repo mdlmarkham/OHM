@@ -5,6 +5,8 @@ Provides ``POST /documents/upload`` for ingesting files and URLs.
 
 from __future__ import annotations
 
+from ohm.server.handlers._base import OhmHandlerBase
+
 import email.policy
 import ipaddress
 import mimetypes
@@ -152,7 +154,7 @@ def _fetch_pinned(url: str, *, timeout: float = 30.0, allow_loopback: bool = Tru
         conn.close()
 
 
-class DocumentHandlerMixin:
+class DocumentHandlerMixin(OhmHandlerBase):
     """Handler mixin for the OHM document library endpoints."""
 
     def _post_documents_upload(self, path: str, qs: dict, body: Any, agent: str) -> None:

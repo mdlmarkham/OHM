@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 
-class DecisionHandlerMixin:
+from ohm.server.handlers._base import OhmHandlerBase
+
+class DecisionHandlerMixin(OhmHandlerBase):
     """Handler mixin for decision-node recommendation endpoints."""
 
     def _get_decision_recommendation(self, path: str, qs: dict) -> None:

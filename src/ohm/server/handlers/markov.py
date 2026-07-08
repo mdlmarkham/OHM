@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 
-class MarkovHandlerMixin:
+from ohm.server.handlers._base import OhmHandlerBase
+
+class MarkovHandlerMixin(OhmHandlerBase):
     """Markov endpoint handlers for OhmHandler.
 
     Provides GET /markov/absorbing and GET /markov/expected_steps.

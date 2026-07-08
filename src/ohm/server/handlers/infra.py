@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from ohm.server.handlers._base import OhmHandlerBase
+
 import time
 from datetime import datetime, timezone
 from typing import Any
 
 
-class InfraHandlerMixin:
+class InfraHandlerMixin(OhmHandlerBase):
     """Handler mixin for infrastructure endpoints (OHM-shpq)."""
 
     def _set_extra_cors_headers(self) -> None:

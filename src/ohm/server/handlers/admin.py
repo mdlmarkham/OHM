@@ -1,5 +1,7 @@
 """Admin handler mixin — checkpoint, embeddings, snapshot, and hook endpoints."""
 
+from ohm.server.handlers._base import OhmHandlerBase
+
 import time
 import threading
 from datetime import datetime, timedelta, timezone
@@ -9,7 +11,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class AdminHandlerMixin:
+class AdminHandlerMixin(OhmHandlerBase):
     """Handler mixin for administrative operations (OHM-brry)."""
 
     def _post_hooks(self, path: str, qs: dict, body: dict, agent: str) -> None:

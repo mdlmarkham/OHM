@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from ohm.server.handlers._base import OhmHandlerBase
+
 import logging
 import time
 from typing import Any
@@ -33,7 +35,7 @@ def _resolve_type_field(body: dict, *aliases: str, default: str | None = None) -
     return default
 
 
-class GraphHandlerMixin:
+class GraphHandlerMixin(OhmHandlerBase):
     """Handler mixin for graph CRUD endpoints (OHM-hpxa).
 
     Methods migrated from server.py: 38 handler methods covering node/edge
