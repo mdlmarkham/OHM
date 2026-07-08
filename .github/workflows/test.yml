@@ -94,16 +94,18 @@ jobs:
             rust/target
           key: ${{ runner.os }}-cargo-${{ hashFiles('rust/Cargo.toml') }}
 
-      - name: Install maturin and build the extension
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install maturin
+          pip install ".[dev]" maturin
+
+      - name: Build and install Rust extension
+        run: |
           maturin build --release --manifest-path rust/Cargo.toml
           pip install rust/target/wheels/*.whl
 
       - name: Test Rust extension delegation
         run: |
-          pip install -e ".[dev]"
           python -m pytest tests/test_mc.py -v --benchmark-disable --timeout=60
 
       - name: Verify Rust extension is active
