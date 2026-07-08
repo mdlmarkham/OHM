@@ -747,6 +747,14 @@ def build_parser() -> argparse.ArgumentParser:
     inst_show.add_argument("instance_id", help="Instance ID to show")
     inst_show.add_argument("--registry", default=None, help="Path to registry JSON")
 
+    profile_parser = subparsers.add_parser("profile", help="Manage OHM agent profiles")
+    profile_sub = profile_parser.add_subparsers(dest="profile_command", help="Profile commands")
+    profile_sub.add_parser("list", help="List available profiles")
+    profile_show = profile_sub.add_parser("show", help="Show profile details")
+    profile_show.add_argument("profile_name", help="Profile name to show")
+    profile_use = profile_sub.add_parser("use", help="Set active profile")
+    profile_use.add_argument("profile_name", help="Profile name to activate")
+
     from ohm.cli import standup
 
     standup.build_parser(subparsers)
@@ -810,6 +818,8 @@ def _dispatch(args: argparse.Namespace) -> None:
         _handle_hooks(args)
     elif args.command == "instances":
         _handle_instances(args)
+    elif args.command == "profile":
+        _handle_profile(args)
     elif args.command == "standup":
         from ohm.cli import standup
 
@@ -3197,4 +3207,97 @@ def _handle_instances(args: argparse.Namespace) -> None:
 
     else:
         print("Usage: ohm instances [list|discover|health|show] ...")
+        _sys.exit(1)
+
+
+def _load_profile_catalog() -> tuple[dict, list[str]]:
+    import json as _json
+
+    try:
+        from ohm.framework.profiles import load_catalog
+
+        catalog = load_catalog()
+        if isinstance(catalog, dict) and isinstance(catalog.get("profiles"), dict):
+            return catalog, []
+    except Exception:
+        pass
+
+    candidates = [
+        Path.home() / ".ohm" / "profiles.json",
+        Path.cwd() / ".ohm" / "profiles.json",
+    ]
+    sources: list[str] = []
+    profiles: dict[str, dict] = {}
+    selectors: dict = {}
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            data = _json.loads(path.read_text())
+        except Exception:
+            continue
+        sources.append(str(path))
+        for name, prof in (data.get("profiles") or {}).items():
+            if isinstance(prof, dict):
+                profiles[name] = prof
+        sel = data.get("selectors")
+        if isinstance(sel, dict):
+            for key, val in sel.items():
+                if isinstance(val, dict):
+                    selectors.setdefault(key, {}).update(val)
+    return {"version": "1", "profiles": profiles, "selectors": selectors}, sources
+
+
+def _profile_catalog_message(sources: list[str]) -> str:
+    if not sources:
+        return "No profile catalog found. Create '.ohm/profiles.json' or '~/.ohm/profiles.json'."
+    return "No profiles defined in catalog."
+
+
+def _handle_profile(args: argparse.Namespace) -> None:
+    import json as _json
+    import sys as _sys
+
+    catalog, sources = _load_profile_catalog()
+    profiles = catalog.get("profiles", {})
+
+    if args.profile_command == "list":
+        if not profiles:
+            print(_profile_catalog_message(sources))
+            return
+        print(f"{'Name':20s} {'Label':24s} {'OHM URL':32s} {'Tenant':12s} {'Default'}")
+        print("-" * 100)
+        for name, prof in profiles.items():
+            label = str(prof.get("label", ""))[:24]
+            ohm_url = str(prof.get("ohm_url", ""))[:32]
+            tenant_id = str(prof.get("tenant_id", ""))[:12]
+            default = "*" if prof.get("default") else ""
+            print(f"{str(name)[:20]:20s} {label:24s} {ohm_url:32s} {tenant_id:12s} {default}")
+
+    elif args.profile_command == "show":
+        name = args.profile_name
+        if not profiles:
+            print(_profile_catalog_message(sources))
+            _sys.exit(1)
+        if name not in profiles:
+            print(f"Profile '{name}' not found in catalog.")
+            _sys.exit(1)
+        print(f"Profile: {name}")
+        print(_json.dumps(profiles[name], indent=2))
+
+    elif args.profile_command == "use":
+        name = args.profile_name
+        if not profiles:
+            print(_profile_catalog_message(sources))
+            _sys.exit(1)
+        if name not in profiles:
+            print(f"Profile '{name}' not found in catalog.")
+            _sys.exit(1)
+        active_path = Path.home() / ".ohm" / "active_profile"
+        active_path.parent.mkdir(parents=True, exist_ok=True)
+        active_path.write_text(name)
+        print(f"Active profile set to '{name}'.")
+
+    else:
+        print("Usage: ohm profile [list|show|use] ...")
         _sys.exit(1)

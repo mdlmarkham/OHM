@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -336,6 +337,17 @@ async def list_tools() -> list[Tool]:
                 "required": [],
             },
         ),
+        Tool(
+            name="ohm_list_instances",
+            description="List discovered OHM instances and their health status from the local registry (~/.ohm/registry.json). Run 'ohm instances discover' first to populate the registry.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},
+                },
+                "required": [],
+            },
+        ),
     ]
     # OHM-yzyk.1.2: filter tools by allowed_tools and read_only
     _ALL_TOOL_NAMES.clear()
@@ -524,6 +536,26 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
         elif name == "ohm_domain_onboarding":
             data = await _ohm_get("/schema")
             return CallToolResult(content=_text(data, fmt))
+
+        elif name == "ohm_list_instances":
+            registry_path = Path.home() / ".ohm" / "registry.json"
+            if not registry_path.exists():
+                data = {
+                    "instances": [],
+                    "message": "No registry found. Run 'ohm instances discover' to scan for OHM instances.",
+                }
+                return CallToolResult(content=_text(data, fmt))
+            try:
+                registry = json.loads(registry_path.read_text())
+                instances = registry.get("instances", [])
+                data = {"instances": instances, "count": len(instances)}
+                return CallToolResult(content=_text(data, fmt))
+            except Exception as e:
+                data = {
+                    "instances": [],
+                    "error": f"Failed to read registry: {e}",
+                }
+                return CallToolResult(content=_text(data, fmt))
 
         else:
             return CallToolResult(content=[TextContent(type="text", text=f"Unknown tool: {name}")], isError=True)

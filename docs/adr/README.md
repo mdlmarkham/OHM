@@ -687,3 +687,53 @@ Pilot the model as TOPO DomainTables (`topo_plans`, `topo_events`, `topo_event_l
 - Core schema team can design `ohm_intervals` / `ohm_plans` with real field evidence
 - Future migration is acknowledged and planned, not deferred as technical debt
 - See [full ADR](0041-temporal-event-model.md)
+
+---
+
+## ADR-042: Instance Registry and Monitoring for Local Agent Mesh
+
+**Date:** 2026-07-08
+**Status:** Accepted
+
+### Context
+
+In a small-team multi-agent mesh, multiple OHM instances run on a host (one ohmd daemon, per-agent local stores, remote instances). Operators and agents need to discover which instances exist, their health, and sync status. No centralized registry existed — discovery was tribal knowledge passed through environment variables and config files.
+
+### Decision
+
+Local-first, pull-based registry: each ohmd exposes no-auth `GET /instance` with structured metadata (instance_id, version, purpose, multi_tenant, tenants, domain_configs, listen_url, DuckLake sync status, uptime, agent_count). `ohm instances discover` CLI scans well-known locations (127.0.0.1:8710, `OHM_URL` env, `~/.ohm/agents/*/ohm.json`, `/etc/ohm/ohmd*.json`) and probes each with `GET /instance`, writing a registry JSON to `~/.ohm/registry.json` consumable by SDK and MCP. Prometheus `/metrics` endpoint exposes graph counts, uptime, request stats, and DuckLake sync lag. `ohm instances health` re-probes all registered instances. MCP tool `ohm_list_instances` exposes the registry to agents.
+
+### Consequences
+
+- Single command reveals every reachable OHM instance — no more tribal knowledge of URLs
+- Agents discover the correct endpoint programmatically (SDK reads registry JSON; MCP agents call `ohm_list_instances`)
+- Prometheus `/metrics` plugs into standard scraping/alerting with graph counts, latency, and DuckLake sync lag
+- Discovery is pull-based — no push registration; remote instances outside well-known configs must be added manually until push is added
+- Registry is local-first (no central server), consistent with OHM's local-DuckDB architecture
+- See [full ADR](0042-instance-registry-monitoring.md)
+
+---
+
+## ADR-043: Agent Profiles — Multi-Instance Access for a Single Agent
+
+**Date:** 2026-07-08
+**Status:** Accepted
+
+### Context
+
+In a small-team multi-agent mesh, a single agent may need to access multiple OHM instances: different tenants on the same `ohmd`, separate `ohmd` daemons, or a mix of local and remote instances. Today, selecting the right store means hardcoding URLs, tokens, and tenant IDs in every call site. ADR-042 solved discovery (which instances exist); this ADR solves connection (how an agent picks and uses the right one for each operation). A single-profile version already exists in the MCP server (`mcp/config.py`); profiles are its multi-profile, SDK-and-CLI-facing generalization.
+
+### Decision
+
+Agent Profiles: a JSON catalog file (`.ohm/profiles.json` project-level, `~/.ohm/profiles.json` user-level) of named profiles, each with `ohm_url`, `tenant_id`, `token`, `agent_id`, `domain_config`, `allowed_tools`, `read_only`, `token_type`, and a `default` flag. Profile routing: if `ohm_url` is present, connect via HTTP (`connect_http`); if absent, connect to local DuckDB (`connect`). If `tenant_id` is present, route to that tenant (`agent` tokens send `X-Tenant-ID`; `customer` keys are already tenant-scoped, header omitted). Selection: explicit (`--profile devops`), heuristic (future: repo/file-based), or default (the profile marked `default: true`). CLI: `ohm profile list/show/use` commands; global `--profile` flag for `ohm --profile devops graph search`. SDK: `Graph.from_profile(name)` loads the catalog and returns a context manager. Tokens support `${ENV_VAR}` interpolation so committed catalogs carry no secrets. Profiles compose with server-side multi-tenancy (ADR-015) — a profile routes to a tenant/daemon/file; the server still enforces isolation and boundaries.
+
+### Consequences
+
+- Single agent seamlessly works across dev/sec/ops tenants and local/remote instances with no code changes — switching is a `--profile` flag or `from_profile(name)` call
+- Profile catalog is declarative and version-controllable (`.ohm/profiles.json`); tokens interpolated from env vars so no secrets committed
+- Pure client-side — no server changes; profiles resolve into existing `connect` / `connect_http` calls and reuse `mcp/config.py` tool-filtering / tenant-header semantics
+- `read_only` and `allowed_tools` add client-side guardrails on top of server-side boundary enforcement (ADR-003/037)
+- Token still lives in env var or (worst case) user-level catalog; `${ENV_VAR}` interpolation is the documented pattern, `ohm profile show --reveal` is the only token-printing command
+- Two catalog locations (project + user) introduce a merge order; `ohm profile show` prints the source of each resolved field for debuggability
+- Profiles compose with — do not replace — ADR-015 multi-tenancy and ADR-042 instance registry
+- See [full ADR](0043-agent-profiles-tenants.md)
