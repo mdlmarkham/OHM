@@ -242,7 +242,7 @@ def main() -> int:
         print("  ⚠ Skipping schema verification (auth). Config will still be written.")
 
     masked = customer_key[:8] + "..." + customer_key[-4:] if len(customer_key) > 12 else "***"
-    print(f"  ✓ Key: {masked}")
+    print(f"  ✓ Token (masked): {masked}")
 
     print("\n5. Writing MCP config...")
     config_path = write_mcp_config(base_url, tenant_id, customer_key)

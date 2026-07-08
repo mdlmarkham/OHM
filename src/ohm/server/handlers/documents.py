@@ -6,12 +6,15 @@ Provides ``POST /documents/upload`` for ingesting files and URLs.
 from __future__ import annotations
 
 import email.policy
+import ipaddress
 import mimetypes
 import os
+import socket
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from ohm.documents.ingest import ingest_file
 from ohm.documents.store import BedrockKnowledgeStore, DocumentStore, LocalDocumentStore, S3DocumentStore
@@ -25,6 +28,23 @@ SUPPORTED_CONTENT_TYPES = {
     "text/x-markdown",
     "text/html",
 }
+
+# Private/loopback networks blocked by default for URL fetches.
+# Loopback (127.0.0.0/8, ::1/128) is allowed by default when
+# ``documents.allow_loopback`` is True (the default for local-first OHM).
+_FETCH_BLOCKED_NETWORKS = [
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("169.254.0.0/16"),  # link-local (AWS metadata etc.)
+    ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("fe80::/10"),
+]
+
+_LOOPBACK_NETWORKS = [
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("::1/128"),
+]
 
 
 class DocumentHandlerMixin:
@@ -205,11 +225,58 @@ class DocumentHandlerMixin:
         detected_type = file_item.get_content_type() or self._detect_content_type(filename)
         return filename, content_bytes, detected_type
 
+    def _validate_fetch_url(self, url: str) -> str:
+        """Validate a user-supplied fetch URL to prevent SSRF attacks.
+
+        - Rejects non-http(s) schemes.
+        - Resolves the host and rejects private/loopback addresses.
+        - Loopback (127.0.0.0/8, ::1) is allowed when
+          ``documents.allow_loopback`` is True in config (default: True,
+          since OHM is local-first and tests use 127.0.0.1).
+        - Additional hosts can be allowlisted via
+          ``documents.allowed_fetch_hosts`` in config.
+
+        Returns the validated URL.
+        """
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            raise ValidationError(f"URL fetch requires http or https scheme, got: {parsed.scheme!r}")
+        host = parsed.hostname
+        if not host:
+            raise ValidationError("URL fetch missing host")
+
+        config = self.current_config or {}
+        allow_loopback = config.get("documents", {}).get("allow_loopback", True)
+        allowed_hosts = set(config.get("documents", {}).get("allowed_fetch_hosts", []))
+
+        if host in allowed_hosts:
+            return url
+
+        try:
+            infos = socket.getaddrinfo(host, None)
+        except Exception:
+            raise ValidationError(f"Cannot resolve fetch URL host: {host!r}")
+
+        for info in infos:
+            addr = str(info[4][0])
+            ip = ipaddress.ip_address(addr)
+            for net in _FETCH_BLOCKED_NETWORKS:
+                if ip in net:
+                    raise ValidationError(f"URL fetch blocked: host resolves to private address {addr} (SSRF protection)")
+            if not allow_loopback:
+                for net in _LOOPBACK_NETWORKS:
+                    if ip in net:
+                        raise ValidationError(f"URL fetch blocked: host resolves to loopback address {addr} (SSRF protection)")
+
+        return url
+
     def _fetch_url_upload(self, body: dict) -> tuple[str, bytes, str | None]:
         """Fetch a document from a URL and return its filename, bytes, and type."""
         url = body.get("url") if isinstance(body, dict) else None
         if not url or not isinstance(url, str):
             raise ValidationError("JSON upload requires a 'url' string field")
+
+        url = self._validate_fetch_url(url)
 
         try:
             req = urllib.request.Request(url, method="GET", headers={"User-Agent": "OHM-document-library/1.0"})

@@ -96,19 +96,26 @@ class TestCompleteRun:
 class TestRunSchema:
     def test_topo_runs_table_exists(self, graph):
         conn = graph._conn
-        row = conn.execute(
-            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'topo_runs'"
-        ).fetchone()
+        row = conn.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'topo_runs'").fetchone()
         assert row[0] == 1
 
     def test_topo_runs_has_expected_columns(self, graph):
         conn = graph._conn
-        cols = {r[0] for r in conn.execute(
-            "SELECT column_name FROM information_schema.columns WHERE table_name = 'topo_runs'"
-        ).fetchall()}
+        cols = {r[0] for r in conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'topo_runs'").fetchall()}
         expected = {
-            "id", "report_id", "node_id", "run_type", "status",
-            "inputs", "outputs", "error", "duration_ms",
-            "started_at", "completed_at", "created_by", "created_at", "metadata",
+            "id",
+            "report_id",
+            "node_id",
+            "run_type",
+            "status",
+            "inputs",
+            "outputs",
+            "error",
+            "duration_ms",
+            "started_at",
+            "completed_at",
+            "created_by",
+            "created_at",
+            "metadata",
         }
         assert expected.issubset(cols)

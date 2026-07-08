@@ -133,6 +133,7 @@ def _provision_tenant(base_url: str, admin_token: str, customer_id: str, domain:
 
 def _load_mcp_config(base_url: str, token: str, tenant_id: str, domain: str) -> None:
     from ohm.mcp.config import load_config_file
+
     cfg = {
         "ohm_url": base_url,
         "token": token,
@@ -145,6 +146,7 @@ def _load_mcp_config(base_url: str, token: str, tenant_id: str, domain: str) -> 
         "transport": "stdio",
     }
     import tempfile
+
     cfg_path = Path(tempfile.gettempdir()) / f"mcp-e2e-{tenant_id}.json"
     cfg_path.write_text(json.dumps(cfg))
     load_config_file(str(cfg_path))

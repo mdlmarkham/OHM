@@ -76,8 +76,7 @@ class TestSemanticSearchLatency:
 
         def run():
             conn.execute(
-                "SELECT id, label, array_cosine_distance(embedding, ?::FLOAT[768]) AS dist "
-                "FROM ohm_nodes WHERE embedding IS NOT NULL ORDER BY dist LIMIT 10",
+                "SELECT id, label, array_cosine_distance(embedding, ?::FLOAT[768]) AS dist FROM ohm_nodes WHERE embedding IS NOT NULL ORDER BY dist LIMIT 10",
                 [query_emb],
             ).fetchall()
 
@@ -95,8 +94,7 @@ class TestSemanticSearchLatency:
 
         def run():
             conn.execute(
-                "SELECT id, label, array_cosine_distance(embedding, ?::FLOAT[768]) AS dist "
-                "FROM ohm_nodes WHERE embedding IS NOT NULL ORDER BY dist LIMIT 10",
+                "SELECT id, label, array_cosine_distance(embedding, ?::FLOAT[768]) AS dist FROM ohm_nodes WHERE embedding IS NOT NULL ORDER BY dist LIMIT 10",
                 [query_emb],
             ).fetchall()
 
@@ -114,8 +112,7 @@ class TestSemanticSearchLatency:
             for i in range(100):
                 q = [float(i % 10) / 10.0] * 768
                 conn.execute(
-                    "SELECT id FROM ohm_nodes WHERE embedding IS NOT NULL "
-                    "ORDER BY array_cosine_distance(embedding, ?::FLOAT[768]) LIMIT 5",
+                    "SELECT id FROM ohm_nodes WHERE embedding IS NOT NULL ORDER BY array_cosine_distance(embedding, ?::FLOAT[768]) LIMIT 5",
                     [q],
                 ).fetchall()
 
@@ -190,14 +187,12 @@ class TestSourceDiversityLatency:
 
         for sup in supporters:
             conn.execute(
-                "INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, confidence, created_by) "
-                "VALUES (?, ?, ?, 'SUPPORTS', 'L3', 0.8, 'perf')",
+                "INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, confidence, created_by) VALUES (?, ?, ?, 'SUPPORTS', 'L3', 0.8, 'perf')",
                 [f"e_{sup}_{target}", sup, target],
             )
             for j, leaf in enumerate(leaves[:3]):
                 conn.execute(
-                    "INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, confidence, created_by) "
-                    "VALUES (?, ?, ?, 'SUPPORTS', 'L3', 0.7, 'perf')",
+                    "INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, confidence, created_by) VALUES (?, ?, ?, 'SUPPORTS', 'L3', 0.7, 'perf')",
                     [f"e_{leaf}_{sup}_{j}", leaf, sup],
                 )
 

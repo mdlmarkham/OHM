@@ -4410,19 +4410,21 @@ def propagate_observation(
         post_alpha = prior_alpha + w
         post_beta = prior_beta + (1.0 - w)
         post_mean = post_alpha / (post_alpha + post_beta) if (post_alpha + post_beta) > 0 else 0.5
-        output.append({
-            "node_id": row["node_id"],
-            "node_label": row["node_label"],
-            "node_type": row["node_type"],
-            "depth": row["depth"],
-            "path": row["path"],
-            "prior_alpha": prior_alpha,
-            "prior_beta": prior_beta,
-            "posterior_alpha": round(post_alpha, 6),
-            "posterior_beta": round(post_beta, 6),
-            "posterior_mean": round(post_mean, 6),
-            "accumulated_weight": round(w, 6),
-        })
+        output.append(
+            {
+                "node_id": row["node_id"],
+                "node_label": row["node_label"],
+                "node_type": row["node_type"],
+                "depth": row["depth"],
+                "path": row["path"],
+                "prior_alpha": prior_alpha,
+                "prior_beta": prior_beta,
+                "posterior_alpha": round(post_alpha, 6),
+                "posterior_beta": round(post_beta, 6),
+                "posterior_mean": round(post_mean, 6),
+                "accumulated_weight": round(w, 6),
+            }
+        )
 
     return output
 
@@ -14027,16 +14029,44 @@ def create_event(
     extra_values = tuple(extra_kw.values())
 
     columns = (
-        "id", "plan_id", "node_id", "node_path", "event_class", "title",
-        "start_ts", "end_ts", "horizon", "operating_state", "description",
-        "confidence", "authority", "created_by", "metadata",
-    ) + json_columns + extra_columns
+        (
+            "id",
+            "plan_id",
+            "node_id",
+            "node_path",
+            "event_class",
+            "title",
+            "start_ts",
+            "end_ts",
+            "horizon",
+            "operating_state",
+            "description",
+            "confidence",
+            "authority",
+            "created_by",
+            "metadata",
+        )
+        + json_columns
+        + extra_columns
+    )
 
     placeholders = ",".join(["?"] * len(columns))
     values: list[Any] = [
-        event_id, plan_id, node_id, node_path, event_class, title,
-        start_ts, end_ts, horizon, operating_state, description,
-        confidence, authority, created_by, metadata_json,
+        event_id,
+        plan_id,
+        node_id,
+        node_path,
+        event_class,
+        title,
+        start_ts,
+        end_ts,
+        horizon,
+        operating_state,
+        description,
+        confidence,
+        authority,
+        created_by,
+        metadata_json,
     ]
     for col in json_columns:
         values.append(json_values[col])
@@ -14240,14 +14270,7 @@ def timeline_rollup(
     if not descendant_ids:
         return {"ancestor": ancestor_node_id, "events": [], "plans": []}
 
-    event_query = (
-        "SELECT e.*, n.label AS node_label "
-        "FROM topo_events e "
-        "LEFT JOIN ohm_nodes n ON n.id = e.node_id "
-        "WHERE e.node_id IN ("
-        + ",".join(["?"] * len(descendant_ids))
-        + ")"
-    )
+    event_query = "SELECT e.*, n.label AS node_label FROM topo_events e LEFT JOIN ohm_nodes n ON n.id = e.node_id WHERE e.node_id IN (" + ",".join(["?"] * len(descendant_ids)) + ")"
     event_params: list[Any] = list(descendant_ids)
     if horizon is not None:
         event_query += " AND e.horizon = ?"
@@ -14275,11 +14298,7 @@ def timeline_rollup(
             plan_ids = {plan_id}
         plans: list[dict[str, Any]] = []
         if plan_ids:
-            plan_query = (
-                "SELECT * FROM topo_plans WHERE id IN ("
-                + ",".join(["?"] * len(plan_ids))
-                + ") ORDER BY start_ts NULLS LAST, created_at DESC"
-            )
+            plan_query = "SELECT * FROM topo_plans WHERE id IN (" + ",".join(["?"] * len(plan_ids)) + ") ORDER BY start_ts NULLS LAST, created_at DESC"
             plans = _rows_to_dicts(conn.execute(plan_query, list(plan_ids)))
         result["plans"] = plans
 
@@ -14325,8 +14344,7 @@ def create_report(
            (id, report_type, node_id, plan_id, title, summary, findings,
             recommendations, confidence_adjustments, status, created_by, metadata)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        [report_id, report_type, node_id, plan_id, title, summary,
-         findings_json, recs_json, adj_json, status, created_by, meta_json],
+        [report_id, report_type, node_id, plan_id, title, summary, findings_json, recs_json, adj_json, status, created_by, meta_json],
     )
     _log_change(conn, "topo_reports", report_id, "INSERT", created_by)
     return _rows_to_dicts(conn.execute("SELECT * FROM topo_reports WHERE id = ?", [report_id]))[0]
@@ -14405,9 +14423,7 @@ def finalize_report(
             )
 
     conn.execute(
-        "UPDATE topo_reports SET status = 'finalized', finalized_at = ?::TIMESTAMP, "
-        "confidence_adjustments = COALESCE(?, confidence_adjustments), updated_at = ?::TIMESTAMP "
-        "WHERE id = ?",
+        "UPDATE topo_reports SET status = 'finalized', finalized_at = ?::TIMESTAMP, confidence_adjustments = COALESCE(?, confidence_adjustments), updated_at = ?::TIMESTAMP WHERE id = ?",
         [now, adj_json, now, report_id],
     )
     _log_change(conn, "topo_reports", report_id, "UPDATE", created_by)
@@ -14431,8 +14447,7 @@ def supersede_report(
     now = datetime.now(timezone.utc).isoformat()
 
     conn.execute(
-        "UPDATE topo_reports SET status = 'superseded', superseded_by = ?, updated_at = ?::TIMESTAMP "
-        "WHERE id = ?",
+        "UPDATE topo_reports SET status = 'superseded', superseded_by = ?, updated_at = ?::TIMESTAMP WHERE id = ?",
         [new_report_id, now, old_report_id],
     )
     _log_change(conn, "topo_reports", old_report_id, "UPDATE", created_by)
@@ -14492,14 +14507,11 @@ def register_rul_assessment(
         """INSERT INTO topo_prospects
            (id, equipment_id, site_id, rul_days, risk_class, model_version, created_by, metadata)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        [prospect_id, equipment_node_id, site_id, rul_days, risk_class,
-         model_version, created_by, meta_json],
+        [prospect_id, equipment_node_id, site_id, rul_days, risk_class, model_version, created_by, meta_json],
     )
     _log_change(conn, "topo_prospects", prospect_id, "INSERT", created_by)
 
-    prospect = _rows_to_dicts(
-        conn.execute("SELECT * FROM topo_prospects WHERE id = ?", [prospect_id])
-    )[0]
+    prospect = _rows_to_dicts(conn.execute("SELECT * FROM topo_prospects WHERE id = ?", [prospect_id]))[0]
 
     edge_id = None
     node_exists = conn.execute(
@@ -14644,8 +14656,7 @@ def complete_run(
     outputs_json = json.dumps(outputs) if outputs else None
 
     conn.execute(
-        "UPDATE topo_runs SET status = ?, outputs = ?, error = ?, duration_ms = ?, "
-        "completed_at = ?::TIMESTAMP WHERE id = ?",
+        "UPDATE topo_runs SET status = ?, outputs = ?, error = ?, duration_ms = ?, completed_at = ?::TIMESTAMP WHERE id = ?",
         [status, outputs_json, error, duration_ms, now, run_id],
     )
     _log_change(conn, "topo_runs", run_id, "UPDATE", created_by)
@@ -14678,9 +14689,7 @@ def set_node_path(
     if not node_path:
         raise ValueError("node_path must be non-empty")
 
-    row = conn.execute(
-        "SELECT COUNT(*) FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node_id]
-    ).fetchone()
+    row = conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node_id]).fetchone()
     if not row or row[0] == 0:
         raise NodeNotFoundError(f"Node not found: {node_id}")
 
@@ -14716,8 +14725,7 @@ def get_nodes_by_path_prefix(
         raise ValueError("path_prefix must be non-empty")
     prefix = path_prefix + "%"
     rows = conn.execute(
-        "SELECT * FROM ohm_nodes WHERE node_path LIKE ? AND deleted_at IS NULL "
-        "ORDER BY node_path LIMIT ?",
+        "SELECT * FROM ohm_nodes WHERE node_path LIKE ? AND deleted_at IS NULL ORDER BY node_path LIMIT ?",
         [prefix, limit],
     )
     return _rows_to_dicts(rows)

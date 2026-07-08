@@ -2732,7 +2732,9 @@ def _create_domain_tables(conn: "DuckDBPyConnection", schema: "SchemaConfig | No
                 elif "not found" in err or "binder error" in err:
                     logger.debug(
                         "Skipping index '%s' on '%s' (column not found, migration may be pending): %s",
-                        idx_name, dt.name, e,
+                        idx_name,
+                        dt.name,
+                        e,
                     )
                 else:
                     raise RuntimeError(f"Failed to create index '{idx_name}' on '{dt.name}': {e}") from e
@@ -2794,8 +2796,7 @@ def _column_exists(conn: "DuckDBPyConnection", table_name: str, col_name: str) -
     """Return True if *col_name* exists on *table_name* (OHM-dh9l.1)."""
     try:
         row = conn.execute(
-            "SELECT COUNT(*) FROM information_schema.columns "
-            "WHERE table_name = ? AND column_name = ?",
+            "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = ? AND column_name = ?",
             [table_name, col_name],
         ).fetchone()
         return row is not None and row[0] > 0
@@ -2850,10 +2851,7 @@ def _migrate_topo_temporal_tables(conn: "DuckDBPyConnection") -> None:
     """
     # Gate: only run if topo_events exists and has the old event_type column.
     try:
-        row = conn.execute(
-            "SELECT COUNT(*) FROM information_schema.columns "
-            "WHERE table_name = 'topo_events' AND column_name = 'event_type'"
-        ).fetchone()
+        row = conn.execute("SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'topo_events' AND column_name = 'event_type'").fetchone()
     except Exception:
         return
     if row is None or row[0] == 0:

@@ -152,18 +152,10 @@ def main() -> None:
     print(f"{'Payload':<18} {'JSON tok':>10} {'TOON tok':>10} {'Saved':>10} {'%':>8} {'JSON chars':>12} {'TOON chars':>12}")
     print("-" * 92)
     for r in results:
-        print(
-            f"{r['name']:<18} "
-            f"{r['json_tokens']:>10} "
-            f"{r['toon_tokens']:>10} "
-            f"{r['savings']:>10} "
-            f"{r['ratio']*100:>7.1f}% "
-            f"{r['json_chars']:>12} "
-            f"{r['toon_chars']:>12}"
-        )
+        print(f"{r['name']:<18} {r['json_tokens']:>10} {r['toon_tokens']:>10} {r['savings']:>10} {r['ratio'] * 100:>7.1f}% {r['json_chars']:>12} {r['toon_chars']:>12}")
     print("-" * 92)
     avg_ratio = statistics.mean(r["ratio"] for r in results)
-    print(f"{'Average':<18} {'':>10} {'':>10} {'':>10} {avg_ratio*100:>7.1f}%")
+    print(f"{'Average':<18} {'':>10} {'':>10} {'':>10} {avg_ratio * 100:>7.1f}%")
 
 
 if __name__ == "__main__":

@@ -2089,7 +2089,13 @@ class GraphHandlerMixin:
         self._json_response(201, result)
 
     def _post_challenge(self, path: str, qs: dict, body: dict, agent: str) -> None:
-        """POST /challenge/{id} — challenge an existing edge."""
+        """POST /challenge/{id} — challenge an existing edge.
+
+        ADR-025: ``challenge_type`` in the request body is a semantic label
+        (e.g. ``empirical``, ``logical``) stored in the ``challenge_type``
+        column. The ``edge_type`` is always ``CHALLENGED_BY`` for this
+        endpoint — use POST /support/{id} to create SUPPORTS edges.
+        """
         edge_id = path[11:]
         from ohm.validation import validate_identifier
         from ohm.exceptions import EdgeNotFoundError
@@ -2097,8 +2103,15 @@ class GraphHandlerMixin:
         edge_id = validate_identifier(edge_id, name="edge_id")
         reason = body.get("reason", "")
         confidence = body.get("confidence", 0.5)
-        challenge_type = body.get("challenge_type", "CHALLENGED_BY")
-        result = self.current_store.challenge_edge(edge_id, reason, confidence, challenge_type, agent_name=agent)
+        semantic_type = body.get("challenge_type", "CHALLENGED_BY")
+        result = self.current_store.challenge_edge(
+            edge_id,
+            reason,
+            confidence,
+            "CHALLENGED_BY",
+            agent_name=agent,
+            challenge_type_column=semantic_type,
+        )
         if result:
             # OHM-a5rz.15: reflect the challenge back to originating L0 fragments
             try:
@@ -2119,7 +2132,7 @@ class GraphHandlerMixin:
                     "type": "edge.challenged",
                     "agent": agent,
                     "edge": result,
-                    "challenge_type": challenge_type,
+                    "challenge_type": semantic_type,
                 },
                 customer_id=self._customer_id,
             )
@@ -2136,7 +2149,7 @@ class GraphHandlerMixin:
         edge_id = validate_identifier(edge_id, name="edge_id")
         reason = body.get("reason", "")
         confidence = body.get("confidence", 0.8)
-        result = self.current_store.challenge_edge(edge_id, reason, confidence, "SUPPORTS", agent_name=agent)
+        result = self.current_store.challenge_edge(edge_id, reason, confidence, "SUPPORTS", agent_name=agent, challenge_type_column="SUPPORTS")
         if result:
             _server_module._trigger_webhooks(
                 {

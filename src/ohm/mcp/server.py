@@ -109,8 +109,13 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="ohm_stats",
             description="Get OHM knowledge graph statistics: total nodes, edges, agents, observations, challenge ratio, edge types by layer.",
-            inputSchema={"type": "object", "properties": {
-            "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},}, "required": []},
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},
+                },
+                "required": [],
+            },
         ),
         Tool(
             name="ohm_search",
@@ -118,7 +123,7 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-            "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},
                     "q": {"type": "string", "description": "Search query text"},
                     "type": {"type": "string", "description": "Optional node type filter (concept, pattern, source, etc.)"},
                     "created_by": {"type": "string", "description": "Optional agent name filter"},
@@ -133,7 +138,7 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-            "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},
                     "node_id": {"type": "string", "description": "Node ID"},
                 },
                 "required": ["node_id"],
@@ -145,7 +150,7 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-            "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},
                     "node_id": {"type": "string", "description": "Center node ID"},
                     "depth": {"type": "integer", "description": "Traversal depth (default 1)", "default": 1},
                     "layer": {"type": "string", "description": "Filter by layer (L1, L2, L3, L4)"},
@@ -159,7 +164,7 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-            "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},
                     "since": {"type": "string", "description": "ISO timestamp for changes since (default: 24h ago)"},
                     "agent": {"type": "string", "description": "Filter changes by agent name"},
                     "enrich": {"type": "boolean", "description": "Include change data (default true)", "default": True},
@@ -174,7 +179,7 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-            "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},
                     "edge_id": {"type": "string", "description": "Edge ID to audit"},
                 },
                 "required": ["edge_id"],
@@ -186,7 +191,7 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-            "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},
                     "from_id": {"type": "string", "description": "Source node ID"},
                     "to_id": {"type": "string", "description": "Target node ID"},
                 },
@@ -196,8 +201,13 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="ohm_agents",
             description="List registered agents and their current state — focus areas, patterns, services, last sync.",
-            inputSchema={"type": "object", "properties": {
-            "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},}, "required": []},
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},
+                },
+                "required": [],
+            },
         ),
         # ── Write tier ──
         Tool(
@@ -305,7 +315,7 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-            "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},
                     "type": {"type": "string", "description": "Filter by node type"},
                     "label_contains": {"type": "string", "description": "Filter by label content (ILIKE)"},
                     "created_by": {"type": "string", "description": "Filter by creating agent"},
@@ -317,10 +327,14 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="ohm_domain_onboarding",
-            description="Get the OHM domain schema for this tenant: node types, edge types, layers, and domain tables. "
-            "Call this when connecting to a new OHM instance to understand the active domain configuration.",
-            inputSchema={"type": "object", "properties": {
-            "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},}, "required": []},
+            description="Get the OHM domain schema for this tenant: node types, edge types, layers, and domain tables. Call this when connecting to a new OHM instance to understand the active domain configuration.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},
+                },
+                "required": [],
+            },
         ),
     ]
     # OHM-yzyk.1.2: filter tools by allowed_tools and read_only
@@ -336,17 +350,33 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
         if not _is_tool_allowed(name):
             if _config["read_only"] and name in _WRITE_TOOLS:
                 return CallToolResult(
-                    content=[TextContent(type="text", text=json.dumps({
-                        "error": "tool_blocked",
-                        "message": f"Tool '{name}' is a write-tier tool and read_only is enabled.",
-                    }, indent=2))],
+                    content=[
+                        TextContent(
+                            type="text",
+                            text=json.dumps(
+                                {
+                                    "error": "tool_blocked",
+                                    "message": f"Tool '{name}' is a write-tier tool and read_only is enabled.",
+                                },
+                                indent=2,
+                            ),
+                        )
+                    ],
                     isError=True,
                 )
             return CallToolResult(
-                content=[TextContent(type="text", text=json.dumps({
-                    "error": "tool_not_allowed",
-                    "message": f"Tool '{name}' is not in the allowed_tools list for this MCP sidecar.",
-                }, indent=2))],
+                content=[
+                    TextContent(
+                        type="text",
+                        text=json.dumps(
+                            {
+                                "error": "tool_not_allowed",
+                                "message": f"Tool '{name}' is not in the allowed_tools list for this MCP sidecar.",
+                            },
+                            indent=2,
+                        ),
+                    )
+                ],
                 isError=True,
             )
 
@@ -524,10 +554,12 @@ async def _check_domain_config() -> None:
         schema = await _ohm_get("/schema")
     except Exception as exc:
         import logging
+
         logging.warning("Could not fetch /schema for domain validation: %s", exc)
         return
     if not _validate_domain_config(expected, schema):
         import sys
+
         actual = schema.get("schema", "<unknown>")
         print(
             f"Domain config mismatch: sidecar expects '{expected}' but daemon reports '{actual}'",

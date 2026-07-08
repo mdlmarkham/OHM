@@ -117,9 +117,7 @@ class TestEdgeCases:
 
     def test_deleted_edges_excluded(self, graph):
         _add_edge(graph, "A", "B", probability=0.8)
-        graph._conn.execute(
-            "UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE from_node = 'A' AND to_node = 'B'"
-        )
+        graph._conn.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE from_node = 'A' AND to_node = 'B'")
         result = graph.propagate_observation("A", observation_weight=1.0)
         assert result == []
 

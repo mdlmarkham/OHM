@@ -64,6 +64,7 @@ def test_write_default_config(tmp_path):
 
 def test_install_systemd_service(tmp_path):
     from ohm.cli.standup import _systemd_unit_path
+
     monkeypatch = pytest.MonkeyPatch()
     with monkeypatch.context() as m:
         m.setattr("ohm.cli.standup._systemd_unit_path", lambda name, user=False: tmp_path / name)
@@ -82,6 +83,7 @@ def test_install_systemd_service(tmp_path):
 
 def test_install_launchd_service(tmp_path):
     from ohm.cli.standup import _launchd_plist_path
+
     monkeypatch = pytest.MonkeyPatch()
     with monkeypatch.context() as m:
         m.setattr("ohm.cli.standup._launchd_plist_path", lambda label: tmp_path / f"{label}.plist")

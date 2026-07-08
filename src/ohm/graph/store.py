@@ -1501,11 +1501,23 @@ class OhmStore:
         confidence: float,
         challenge_type: str = "CHALLENGED_BY",
         agent_name: Optional[str] = None,
+        *,
+        challenge_type_column: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
         """Challenge an existing edge. Creates a new edge referencing the original.
 
         Args:
+            edge_id: The edge to challenge/support.
+            reason: Non-empty reasoning (OHM-e0t1).
+            confidence: Confidence on the new edge.
+            challenge_type: The graph edge type to create (``CHALLENGED_BY``
+                or ``SUPPORTS``). Used as the ``edge_type`` column.
             agent_name: Agent to attribute the challenge to. Defaults to self.agent_name.
+            challenge_type_column: Semantic label stored in the
+                ``challenge_type`` column (e.g. ``empirical``, ``logical``,
+                ``CONSENSUS_FLAG``). Defaults to ``challenge_type`` for
+                backward compatibility (OHM-7el6 callers pass the edge type
+                here, so both columns match).
 
         Boundary rule: cannot modify the original edge — only create a challenge.
         Enforces that only L3/L4 edges can be challenged (via enforce_challenge_boundary).
@@ -1541,6 +1553,11 @@ class OhmStore:
             # Return the existing challenge/support edge instead of creating a duplicate
             return self.get_edge(existing[0])
 
+        # ADR-025: challenge_type_column carries the semantic label
+        # (empirical/logical/CONSENSUS_FLAG). Defaults to the edge type
+        # for backward compatibility with OHM-7el6 callers.
+        semantic_type = challenge_type_column if challenge_type_column is not None else challenge_type
+
         return self.write_edge(
             from_node=original["from_node"],
             to_node=original["to_node"],
@@ -1549,7 +1566,7 @@ class OhmStore:
             confidence=confidence,
             provenance=reason,
             challenge_of=edge_id,
-            challenge_type=challenge_type,
+            challenge_type=semantic_type,
             agent_name=actor,
         )
 

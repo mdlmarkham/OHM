@@ -19,9 +19,7 @@ def graph():
 @pytest.fixture
 def node(graph):
     conn = graph._conn
-    conn.execute(
-        "INSERT INTO ohm_nodes (id, label, type, created_by) VALUES ('pump_A', 'Pump A', 'concept', 'test')"
-    )
+    conn.execute("INSERT INTO ohm_nodes (id, label, type, created_by) VALUES ('pump_A', 'Pump A', 'concept', 'test')")
     return "pump_A"
 
 
@@ -105,10 +103,7 @@ class TestFinalizeReport:
 
     def test_finalize_applies_confidence_adjustments(self, graph, node):
         conn = graph._conn
-        conn.execute(
-            "INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, confidence, created_by) "
-            "VALUES ('edge_1', 'pump_A', 'valve_B', 'CAUSES', 'L3', 0.5, 'test')"
-        )
+        conn.execute("INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, confidence, created_by) VALUES ('edge_1', 'pump_A', 'valve_B', 'CAUSES', 'L3', 0.5, 'test')")
         graph.create_report(
             report_id="rpt_adj",
             report_type="sensitivity_analysis",
@@ -132,20 +127,29 @@ class TestSupersedeReport:
 class TestReportSchema:
     def test_topo_reports_table_exists(self, graph):
         conn = graph._conn
-        row = conn.execute(
-            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'topo_reports'"
-        ).fetchone()
+        row = conn.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'topo_reports'").fetchone()
         assert row[0] == 1
 
     def test_topo_reports_has_expected_columns(self, graph):
         conn = graph._conn
-        cols = {r[0] for r in conn.execute(
-            "SELECT column_name FROM information_schema.columns WHERE table_name = 'topo_reports'"
-        ).fetchall()}
+        cols = {r[0] for r in conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'topo_reports'").fetchall()}
         expected = {
-            "id", "report_type", "node_id", "plan_id", "title", "summary",
-            "findings", "recommendations", "confidence_adjustments",
-            "status", "version", "superseded_by", "created_by",
-            "created_at", "updated_at", "finalized_at", "metadata",
+            "id",
+            "report_type",
+            "node_id",
+            "plan_id",
+            "title",
+            "summary",
+            "findings",
+            "recommendations",
+            "confidence_adjustments",
+            "status",
+            "version",
+            "superseded_by",
+            "created_by",
+            "created_at",
+            "updated_at",
+            "finalized_at",
+            "metadata",
         }
         assert expected.issubset(cols)

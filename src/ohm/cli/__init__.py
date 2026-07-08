@@ -812,6 +812,7 @@ def _dispatch(args: argparse.Namespace) -> None:
         _handle_instances(args)
     elif args.command == "standup":
         from ohm.cli import standup
+
         standup.run(args)
 
 
@@ -3095,11 +3096,13 @@ def _discover_instances(timeout: float = 3.0) -> list[dict]:
                 data["health"] = "ok"
                 instances.append(data)
         except Exception as e:
-            instances.append({
-                "discovered_url": url,
-                "health": "unreachable",
-                "error": str(e)[:200],
-            })
+            instances.append(
+                {
+                    "discovered_url": url,
+                    "health": "unreachable",
+                    "error": str(e)[:200],
+                }
+            )
 
     return instances
 

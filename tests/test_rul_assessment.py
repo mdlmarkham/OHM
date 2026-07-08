@@ -19,10 +19,7 @@ def graph():
 @pytest.fixture
 def equipment(graph):
     conn = graph._conn
-    conn.execute(
-        "INSERT INTO ohm_nodes (id, label, type, created_by) VALUES "
-        "('pump_P101', 'Pump P101', 'concept', 'test')"
-    )
+    conn.execute("INSERT INTO ohm_nodes (id, label, type, created_by) VALUES ('pump_P101', 'Pump P101', 'concept', 'test')")
     return "pump_P101"
 
 
@@ -47,9 +44,7 @@ class TestRegisterRulAssessment:
         )
         assert result["edge_id"] is not None
         conn = graph._conn
-        edge = conn.execute(
-            "SELECT edge_type, layer FROM ohm_edges WHERE id = ?", [result["edge_id"]]
-        ).fetchone()
+        edge = conn.execute("SELECT edge_type, layer FROM ohm_edges WHERE id = ?", [result["edge_id"]]).fetchone()
         assert edge[0] == "PREDICTS"
         assert edge[1] == "L4"
 
@@ -70,6 +65,7 @@ class TestRegisterRulAssessment:
             node_path="plant/unit_a/pump_P101",
         )
         import json
+
         meta = json.loads(result["prospect"]["metadata"])
         assert meta["node_path"] == "plant/unit_a/pump_P101"
 
@@ -126,7 +122,5 @@ class TestGetRulAssessments:
 class TestRulSchema:
     def test_topo_prospects_table_exists(self, graph):
         conn = graph._conn
-        row = conn.execute(
-            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'topo_prospects'"
-        ).fetchone()
+        row = conn.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'topo_prospects'").fetchone()
         assert row[0] == 1

@@ -106,17 +106,12 @@ class TestGetNodesByPathPrefix:
 class TestNodePathSchema:
     def test_node_path_column_exists(self, graph):
         conn = graph._conn
-        cols = {r[0] for r in conn.execute(
-            "SELECT column_name FROM information_schema.columns WHERE table_name = 'ohm_nodes'"
-        ).fetchall()}
+        cols = {r[0] for r in conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'ohm_nodes'").fetchall()}
         assert "node_path" in cols
 
     def test_node_path_index_exists(self, graph):
         conn = graph._conn
-        row = conn.execute(
-            "SELECT COUNT(*) FROM duckdb_indexes() "
-            "WHERE table_name = 'ohm_nodes' AND index_name = 'idx_nodes_path'"
-        ).fetchone()
+        row = conn.execute("SELECT COUNT(*) FROM duckdb_indexes() WHERE table_name = 'ohm_nodes' AND index_name = 'idx_nodes_path'").fetchone()
         assert row[0] >= 1
 
     def test_schema_version_bumped(self, graph):

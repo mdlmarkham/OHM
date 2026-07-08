@@ -166,7 +166,7 @@ class TestSyncBeadsToOHMTasks:
         r2 = sync_beads_to_ohm_tasks(test_db, [issue])
         assert r1["created"] == 1
         assert r2["created"] == 0
-        assert r2["updated"] == 1
+        assert r2["skipped"] == 1
 
     def test_multiple_issues(self, test_db):
         issues = [
@@ -204,11 +204,11 @@ class TestSyncBeadsHTTP:
         status, data = _request("POST", port, "/admin/sync-beads", body={"issues": issues})
         assert status == 200
         assert data["created"] == 1
-        # Second sync — should update, not create
+        # Second sync — no fields changed, so it's skipped (OHM-sbtz.1)
         status, data = _request("POST", port, "/admin/sync-beads", body={"issues": issues})
         assert status == 200
         assert data["created"] == 0
-        assert data["updated"] == 1
+        assert data["skipped"] == 1
 
     def test_sync_task_appears_in_tasks_endpoint(self, test_server):
         port, store = test_server

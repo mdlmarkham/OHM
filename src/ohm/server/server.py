@@ -3156,11 +3156,7 @@ def main(schema_config: SchemaConfig | None = None):
     args = parser.parse_args()
 
     # Canonical config path: CLI --config wins, then OHM_CONFIG, then default.
-    config_path = Path(
-        args.config
-        if args.config is not None
-        else os.environ.get("OHM_CONFIG", str(Path.home() / ".ohm" / "ohmd.json"))
-    )
+    config_path = Path(args.config if args.config is not None else os.environ.get("OHM_CONFIG", str(Path.home() / ".ohm" / "ohmd.json")))
 
     # Allow CLI override of schema
     if args.schema == "topo":

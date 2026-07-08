@@ -89,7 +89,9 @@ class DocumentTree:
 
 def _looks_like_html(text: str) -> bool:
     """Heuristic: does the text contain HTML tags?"""
-    return bool(re.search(r"<[^>]+>", text.strip()))
+    # Use a character class that excludes both < and > to prevent
+    # catastrophic backtracking (ReDoS) on input with many '<' chars.
+    return bool(re.search(r"<[^<>]+>", text.strip()))
 
 
 def _extract_text(element) -> str:  # type: ignore[no-untyped-def]
@@ -284,7 +286,7 @@ def parse_markdown_to_tree(
 
     if _markdown_lib is None:
         title = default_title
-        m = re.search(r"^\s*#{1,6}\s+(.+?)\s*$", markdown, re.MULTILINE)
+        m = re.search(r"^\s*#{1,6}\s+(\S.*?)\s*$", markdown, re.MULTILINE)
         if m:
             title = m.group(1)
         root = DocumentNode(

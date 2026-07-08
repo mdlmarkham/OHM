@@ -137,7 +137,7 @@ def main() -> int:
             print("Provisioning did not return a customer key. Check admin token / permissions.")
             return 2
         masked = customer_key[:8] + "..." + customer_key[-4:] if len(customer_key) > 12 else "***"
-        print(f"  Customer key: {masked}")
+        print(f"  Customer token (masked): {masked}")
     else:
         if not customer_key:
             print("--skip-provision requires OHM_CUSTOMER_KEY.")

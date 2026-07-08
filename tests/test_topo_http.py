@@ -37,6 +37,7 @@ def _free_port() -> int:
 
 def _safe_json(s: str):
     import json
+
     try:
         return json.loads(s)
     except (ValueError, TypeError):
@@ -185,8 +186,6 @@ def test_get_run_not_found(topo_ohmd):
 
 
 def test_get_plans_with_filters(topo_ohmd):
-    status, body = _http_get(
-        f"{topo_ohmd}/plans?node_id=n1&plan_type=maintenance&status=active&horizon=30d"
-    )
+    status, body = _http_get(f"{topo_ohmd}/plans?node_id=n1&plan_type=maintenance&status=active&horizon=30d")
     assert status == 200, f"/plans with filters failed: {body}"
     assert body.get("ok") is True

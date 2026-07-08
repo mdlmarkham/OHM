@@ -42,9 +42,7 @@ def test_ohmd_init_token_uses_config_flag(tmp_config: Path) -> None:
         # by checking that the token only exists in the supplied path. We cannot safely
         # assert non-existence of the default file if tests share a home directory.
         default_data = json.loads(default_config.read_text())
-        assert "test-agent" not in default_data.get("tokens", {}), (
-            "--init-token wrote token to default config despite --config"
-        )
+        assert "test-agent" not in default_data.get("tokens", {}), "--init-token wrote token to default config despite --config"
 
 
 def test_ohmd_init_customer_token_uses_config_flag(tmp_config: Path) -> None:

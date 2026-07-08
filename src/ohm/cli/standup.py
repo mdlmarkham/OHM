@@ -332,12 +332,7 @@ def install_windows_service(
     restart policies better than New-Service.
     """
     args_str = " ".join(exec_args)
-    ps_cmd = (
-        f"New-Service -Name '{service_name}' "
-        f"-DisplayName '{service_name}' "
-        f"-BinaryPathName '\"{exec_path}\" {args_str}' "
-        f"-StartupType Automatic"
-    )
+    ps_cmd = f"New-Service -Name '{service_name}' -DisplayName '{service_name}' -BinaryPathName '\"{exec_path}\" {args_str}' -StartupType Automatic"
     subprocess.run(["powershell.exe", "-Command", ps_cmd], check=False)
 
 
@@ -820,6 +815,7 @@ def run_greenfield(args: argparse.Namespace) -> None:
     parsed_port = 8710
     if args.url:
         from urllib.parse import urlparse
+
         parsed = urlparse(args.url)
         if parsed.hostname:
             parsed_host = parsed.hostname
@@ -851,7 +847,7 @@ def run_greenfield(args: argparse.Namespace) -> None:
                 break
         except Exception as e:
             if i % 10 == 0:
-                print(f"  ... still waiting ({i*0.5:.0f}s): {e}")
+                print(f"  ... still waiting ({i * 0.5:.0f}s): {e}")
         time.sleep(0.5)
     else:
         raise OHMError("ohmd did not become healthy within 30 seconds")

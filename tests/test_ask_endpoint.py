@@ -206,8 +206,8 @@ class TestChallengeTypeMetadata:
         )
         assert status in (200, 201)
 
-        # Challenge creates a CHALLENGED_BY edge from the challenged node to the challenger
-        challenge_edges = store.execute("SELECT edge_type, challenge_type FROM ohm_edges WHERE edge_type = 'CHALLENGED_BY' AND (from_node = 'challenge-dst' OR to_node = 'challenge-src') AND deleted_at IS NULL")
+        # Challenge creates a CHALLENGED_BY edge — same direction as original (OHM-7el6)
+        challenge_edges = store.execute("SELECT edge_type, challenge_type FROM ohm_edges WHERE edge_type = 'CHALLENGED_BY' AND from_node = 'challenge-src' AND to_node = 'challenge-dst' AND deleted_at IS NULL")
         assert len(challenge_edges) >= 1
         assert challenge_edges[0]["edge_type"] == "CHALLENGED_BY"
         assert challenge_edges[0]["challenge_type"] == "empirical"
@@ -234,7 +234,7 @@ class TestChallengeTypeMetadata:
         )
         assert status in (200, 201)
 
-        challenge_edges = store.execute("SELECT edge_type, challenge_type, provenance FROM ohm_edges WHERE edge_type = 'CHALLENGED_BY' AND (from_node = 'ctype-dst' OR to_node = 'ctype-src') AND deleted_at IS NULL")
+        challenge_edges = store.execute("SELECT edge_type, challenge_type, provenance FROM ohm_edges WHERE edge_type = 'CHALLENGED_BY' AND from_node = 'ctype-src' AND to_node = 'ctype-dst' AND deleted_at IS NULL")
         assert len(challenge_edges) >= 1
         assert challenge_edges[0]["edge_type"] == "CHALLENGED_BY"
         assert challenge_edges[0]["challenge_type"] == "logical"

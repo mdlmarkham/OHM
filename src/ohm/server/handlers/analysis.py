@@ -94,9 +94,7 @@ class AnalysisHandlerMixin:
             from ohm.server.boundary import filter_results_by_read_scope
 
             agent = getattr(self, "_current_agent", "ohm")
-            result = filter_results_by_read_scope(
-                self.current_store.conn, agent, result, layer_field="layer"
-            )
+            result = filter_results_by_read_scope(self.current_store.conn, agent, result, layer_field="layer")
         self._json_response(200, result)
 
     def _get_decay(self, path: str, qs: dict) -> None:

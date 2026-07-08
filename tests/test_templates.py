@@ -13,12 +13,15 @@ def test_list_templates_returns_known_templates():
     assert expected.issubset(set(names))
 
 
-@pytest.mark.parametrize("name", [
-    "personal-knowledge",
-    "devsecops",
-    "trading-research",
-    "data-pipelines",
-])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "personal-knowledge",
+        "devsecops",
+        "trading-research",
+        "data-pipelines",
+    ],
+)
 def test_each_template_loads_and_validates(name: str):
     template = load_template(name)
     errors = template.validate()
@@ -27,12 +30,15 @@ def test_each_template_loads_and_validates(name: str):
     assert template.edges
 
 
-@pytest.mark.parametrize("name", [
-    "personal-knowledge",
-    "devsecops",
-    "trading-research",
-    "data-pipelines",
-])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "personal-knowledge",
+        "devsecops",
+        "trading-research",
+        "data-pipelines",
+    ],
+)
 def test_seed_payload_contains_nodes_and_edges(name: str):
     payload = seed_payload(name)
     assert "nodes" in payload

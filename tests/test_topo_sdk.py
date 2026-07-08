@@ -16,7 +16,7 @@ def graph():
     return Graph(conn, actor="test_agent")
 
 
-@ pytest.fixture
+@pytest.fixture
 def sample_plan(graph):
     return graph.create_plan(
         plan_id="plan_001",
@@ -30,7 +30,7 @@ def sample_plan(graph):
     )
 
 
-@ pytest.fixture
+@pytest.fixture
 def sample_event(graph, sample_plan):
     return graph.create_event(
         event_id="evt_shutdown",
@@ -311,12 +311,8 @@ class TestIntegration4DayMaintenanceWindow:
             operating_state="running",
             horizon="PLANNED",
         )
-        graph.create_event_link(
-            link_id="link_01", from_event_id="evt_shutdown", to_event_id="evt_inspect", edge_type="followed_by"
-        )
-        graph.create_event_link(
-            link_id="link_02", from_event_id="evt_inspect", to_event_id="evt_restart", edge_type="followed_by"
-        )
+        graph.create_event_link(link_id="link_01", from_event_id="evt_shutdown", to_event_id="evt_inspect", edge_type="followed_by")
+        graph.create_event_link(link_id="link_02", from_event_id="evt_inspect", to_event_id="evt_restart", edge_type="followed_by")
         plan_r = graph.get_plan("plan_mw")
         assert plan_r is not None
         assert plan_r["plan_type"] == "maintenance_window"
@@ -367,8 +363,7 @@ class TestTimelineRollup:
             ("unit_b", "compressor_C1"),
         ):
             conn.execute(
-                "INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, confidence, created_by) "
-                "VALUES (?, ?, ?, 'CONTAINS', 'L1', 1.0, 'test_agent')",
+                "INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, confidence, created_by) VALUES (?, ?, ?, 'CONTAINS', 'L1', 1.0, 'test_agent')",
                 [f"e_{src}_{dst}", src, dst],
             )
 
@@ -460,9 +455,7 @@ class TestTimelineRollup:
         assert ids == {"evt_c1_failure"}
 
     def test_rollup_date_range_filter(self, graph, hierarchy):
-        result = graph.timeline_rollup(
-            "plant", start_after="2026-07-01 00:00:00", end_before="2026-07-31 23:59:59"
-        )
+        result = graph.timeline_rollup("plant", start_after="2026-07-01 00:00:00", end_before="2026-07-31 23:59:59")
         ids = {e["id"] for e in result["events"]}
         assert ids == {"evt_p101_shutdown", "evt_p102_inspect"}
 
@@ -492,22 +485,15 @@ class TestTimelineRollup:
 
     def test_rollup_empty_subtree(self, graph, hierarchy):
         conn = graph._conn
-        conn.execute(
-            "INSERT INTO ohm_nodes (id, label, type, created_by) VALUES ('empty_unit', 'Empty Unit', 'concept', 'test_agent')"
-        )
-        conn.execute(
-            "INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, confidence, created_by) "
-            "VALUES ('e_plant_empty', 'plant', 'empty_unit', 'CONTAINS', 'L1', 1.0, 'test_agent')"
-        )
+        conn.execute("INSERT INTO ohm_nodes (id, label, type, created_by) VALUES ('empty_unit', 'Empty Unit', 'concept', 'test_agent')")
+        conn.execute("INSERT INTO ohm_edges (id, from_node, to_node, edge_type, layer, confidence, created_by) VALUES ('e_plant_empty', 'plant', 'empty_unit', 'CONTAINS', 'L1', 1.0, 'test_agent')")
         result = graph.timeline_rollup("empty_unit")
         assert result["events"] == []
         assert result["plans"] == []
 
     def test_rollup_no_descendants(self, graph):
         conn = graph._conn
-        conn.execute(
-            "INSERT INTO ohm_nodes (id, label, type, created_by) VALUES ('orphan', 'Orphan', 'concept', 'test_agent')"
-        )
+        conn.execute("INSERT INTO ohm_nodes (id, label, type, created_by) VALUES ('orphan', 'Orphan', 'concept', 'test_agent')")
         result = graph.timeline_rollup("orphan")
         assert result["events"] == []
         assert result["plans"] == []

@@ -5442,9 +5442,7 @@ class Graph:
             import logging
 
             logger = logging.getLogger(__name__)
-            logger.warning(
-                "post_event_create hook failed for event %s (non-fatal)", event_id
-            )
+            logger.warning("post_event_create hook failed for event %s (non-fatal)", event_id)
 
         return result
 

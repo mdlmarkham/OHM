@@ -16,14 +16,17 @@ class TestConfigFileLoading:
 
     def test_load_config_file_sets_values(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-            json.dump({
-                "ohm_url": "http://10.0.0.1:9999",
-                "token": "test-token-xyz",
-                "agent_id": "copilot",
-                "tenant_id": "devops",
-                "allowed_tools": ["ohm_search", "ohm_get_node"],
-                "read_only": True,
-            }, f)
+            json.dump(
+                {
+                    "ohm_url": "http://10.0.0.1:9999",
+                    "token": "test-token-xyz",
+                    "agent_id": "copilot",
+                    "tenant_id": "devops",
+                    "allowed_tools": ["ohm_search", "ohm_get_node"],
+                    "read_only": True,
+                },
+                f,
+            )
             f.flush()
 
         original = dict(config)
@@ -113,8 +116,7 @@ class TestAllowedToolsEnforcement:
             config.update(original)
 
     def test_write_tools_set_complete(self):
-        expected = {"ohm_create_node", "ohm_create_edge", "ohm_observe",
-                    "ohm_challenge", "ohm_support", "ohm_update_state"}
+        expected = {"ohm_create_node", "ohm_create_edge", "ohm_observe", "ohm_challenge", "ohm_support", "ohm_update_state"}
         assert WRITE_TOOLS == expected
 
     def test_empty_list_denies_all(self):
@@ -229,11 +231,14 @@ class TestTenantHeaderResolution:
 
     def test_config_file_can_set_token_type_customer(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-            json.dump({
-                "token": "ohm-cust-dataops-xyz",
-                "tenant_id": "dataops",
-                "token_type": "customer",
-            }, f)
+            json.dump(
+                {
+                    "token": "ohm-cust-dataops-xyz",
+                    "tenant_id": "dataops",
+                    "token_type": "customer",
+                },
+                f,
+            )
             f.flush()
 
         original = dict(config)
@@ -271,6 +276,7 @@ class TestDomainConfigValidation:
 
 # OHM-yzyk.1.3 — validate_domain_config wired into server startup
 
+
 @pytest.mark.anyio
 async def test_check_domain_config_mismatch_exits(tmp_path):
     """If configured domain_config does not match daemon /schema, startup exits."""
@@ -286,6 +292,7 @@ async def test_check_domain_config_mismatch_exits(tmp_path):
         return {"schema": "topo"}
 
     from ohm.mcp import server as server_mod
+
     original_get = server_mod._ohm_get
     server_mod._ohm_get = fake_ohm_get
     try:
@@ -308,6 +315,7 @@ async def test_check_domain_config_match_passes(tmp_path):
         return {"schema": "devsecops"}
 
     from ohm.mcp import server as server_mod
+
     original_get = server_mod._ohm_get
     server_mod._ohm_get = fake_ohm_get
     try:

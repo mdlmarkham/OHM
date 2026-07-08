@@ -255,10 +255,7 @@ def propagate_on_event(payload: dict) -> tuple[int, str, str]:
             "event_class": event_class,
             "observation_weight": obs_weight,
             "nodes_updated": len(results),
-            "downstream": [
-                {"node_id": r["node_id"], "posterior_mean": r["posterior_mean"]}
-                for r in results
-            ],
+            "downstream": [{"node_id": r["node_id"], "posterior_mean": r["posterior_mean"]} for r in results],
         }
         return 0, json.dumps(summary), ""
     except Exception as e:

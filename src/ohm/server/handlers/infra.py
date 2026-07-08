@@ -228,9 +228,7 @@ class InfraHandlerMixin:
         domain_configs: dict[str, str] = {}
         if multi_tenant:
             try:
-                tenant_rows = self.current_store.execute(
-                    "SELECT customer_id, domain_config FROM ohm_tenants WHERE deleted_at IS NULL"
-                )
+                tenant_rows = self.current_store.execute("SELECT customer_id, domain_config FROM ohm_tenants WHERE deleted_at IS NULL")
                 for row in tenant_rows:
                     tenants.append(row.get("customer_id", row.get("id", "")))
                     domain_configs[row.get("customer_id", row.get("id", ""))] = row.get("domain_config", "")
@@ -250,9 +248,7 @@ class InfraHandlerMixin:
                 }
                 # Try to get last sync time from agent_state or a sync table
                 try:
-                    sync_row = self.current_store.execute_one(
-                        "SELECT last_sync_at FROM ohm_sync_state WHERE id = 'ducklake' LIMIT 1"
-                    )
+                    sync_row = self.current_store.execute_one("SELECT last_sync_at FROM ohm_sync_state WHERE id = 'ducklake' LIMIT 1")
                     if sync_row and sync_row.get("last_sync_at"):
                         ducklake_info["last_sync_at"] = str(sync_row["last_sync_at"])
                 except Exception:
@@ -263,9 +259,7 @@ class InfraHandlerMixin:
         # Agent count (distinct created_by in recent edges)
         agent_count = 0
         try:
-            row = self.current_store.execute_one(
-                "SELECT COUNT(DISTINCT created_by) AS cnt FROM ohm_edges WHERE created_at > now() - INTERVAL '24 hours' AND deleted_at IS NULL"
-            )
+            row = self.current_store.execute_one("SELECT COUNT(DISTINCT created_by) AS cnt FROM ohm_edges WHERE created_at > now() - INTERVAL '24 hours' AND deleted_at IS NULL")
             agent_count = row.get("cnt", 0) if row else 0
         except Exception:
             pass
@@ -273,19 +267,22 @@ class InfraHandlerMixin:
         instance_id = config.get("instance_id", f"ohmd-{socket.gethostname()}")
         listen_url = f"http://{config.get('host', '127.0.0.1')}:{config.get('port', 8710)}"
 
-        self._json_response(200, {
-            "instance_id": instance_id,
-            "version": ohm_version,
-            "purpose": config.get("purpose", ""),
-            "multi_tenant": multi_tenant,
-            "tenants": tenants,
-            "domain_configs": domain_configs,
-            "listen_url": listen_url,
-            "ducklake": ducklake_info,
-            "started_at": None,
-            "uptime_seconds": uptime,
-            "agent_count": agent_count,
-        })
+        self._json_response(
+            200,
+            {
+                "instance_id": instance_id,
+                "version": ohm_version,
+                "purpose": config.get("purpose", ""),
+                "multi_tenant": multi_tenant,
+                "tenants": tenants,
+                "domain_configs": domain_configs,
+                "listen_url": listen_url,
+                "ducklake": ducklake_info,
+                "started_at": None,
+                "uptime_seconds": uptime,
+                "agent_count": agent_count,
+            },
+        )
 
     def _get_infra_ready(self, path: str, qs: dict) -> None:
         """GET /ready — readiness check (no auth)."""

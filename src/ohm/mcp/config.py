@@ -29,14 +29,16 @@ config: dict[str, Any] = {
 }
 
 # Write-tier tools that read_only mode blocks
-WRITE_TOOLS = frozenset({
-    "ohm_create_node",
-    "ohm_create_edge",
-    "ohm_observe",
-    "ohm_challenge",
-    "ohm_support",
-    "ohm_update_state",
-})
+WRITE_TOOLS = frozenset(
+    {
+        "ohm_create_node",
+        "ohm_create_edge",
+        "ohm_observe",
+        "ohm_challenge",
+        "ohm_support",
+        "ohm_update_state",
+    }
+)
 
 
 def load_config_file(path: str) -> None:
@@ -46,9 +48,7 @@ def load_config_file(path: str) -> None:
     """
     with open(path) as f:
         data = json.loads(f.read())
-    for key in ("ohm_url", "token", "agent_id", "tenant_id", "token_type",
-                "domain_config", "allowed_tools", "read_only", "log_path",
-                "temp_path", "transport"):
+    for key in ("ohm_url", "token", "agent_id", "tenant_id", "token_type", "domain_config", "allowed_tools", "read_only", "log_path", "temp_path", "transport"):
         if key in data:
             config[key] = data[key]
     # Env vars override config file for backward compat
