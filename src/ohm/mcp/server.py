@@ -37,7 +37,17 @@ from ohm.mcp.encoding import (
     requested_format,
 )
 from ohm.mcp.tools import all_tools as _all_tools
-from ohm.mcp.config import config as _config, load_config_file as _load_config_file, is_tool_allowed as _is_tool_allowed, make_headers, validate_domain_config as _validate_domain_config, WRITE_TOOLS as _WRITE_TOOLS
+from ohm.mcp.config import (
+    config as _config,
+    load_config_file as _load_config_file,
+    is_tool_allowed as _is_tool_allowed,
+    make_headers,
+    get_active_profile,
+    set_active_profile as _set_active_profile,
+    get_profiles as _get_profiles,
+    validate_domain_config as _validate_domain_config,
+    WRITE_TOOLS as _WRITE_TOOLS,
+)
 
 # Backward-compat properties
 OHM_URL = _config["ohm_url"]
@@ -58,6 +68,10 @@ if sys.stderr and hasattr(sys.stderr, "reconfigure"):
 # ---------------------------------------------------------------------------
 
 
+def _active_url() -> str:
+    return get_active_profile().get("ohm_url", _config["ohm_url"])
+
+
 def _headers() -> dict[str, str]:
     return make_headers()
 
@@ -66,17 +80,19 @@ _ALL_TOOL_NAMES: list[str] = []
 
 
 async def _ohm_get(path: str, params: dict | None = None) -> dict | list:
+    url = _active_url()
     async with httpx.AsyncClient(timeout=30) as client:
         # Only pass params to httpx when there are actual parameters; passing
         # an empty dict causes httpx to strip an existing query string.
-        r = await client.get(f"{_config['ohm_url']}{path}", headers=_headers(), params=params if params else None)
+        r = await client.get(f"{url}{path}", headers=_headers(), params=params if params else None)
         r.raise_for_status()
         return r.json()
 
 
 async def _ohm_post(path: str, body: dict) -> dict:
+    url = _active_url()
     async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.post(f"{_config['ohm_url']}{path}", headers=_headers(), json=body)
+        r = await client.post(f"{url}{path}", headers=_headers(), json=body)
         r.raise_for_status()
         return r.json()
 
@@ -156,6 +172,37 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
         fmt = requested_format(arguments)
 
         from ohm.mcp.dispatch import build_request
+
+        # Local-only profile tools: the sidecar can switch between multiple
+        # configured OHM instances/tenants.
+        if name == "ohm_list_profiles":
+            profiles = _get_profiles()
+            active = get_active_profile()
+            data = {
+                "profiles": [p.get("name") for p in profiles],
+                "active": active.get("name"),
+            }
+            return CallToolResult(content=_text(data, fmt))
+
+        if name == "ohm_select_profile":
+            selected = arguments.get("name", "")
+            ok = _set_active_profile(selected)
+            if not ok:
+                data = {
+                    "error": "profile_not_found",
+                    "available": [p.get("name") for p in _get_profiles()],
+                }
+                return CallToolResult(content=_text(data, fmt), isError=True)
+            active = get_active_profile()
+            data = {
+                "active": active.get("name"),
+                "ohm_url": active.get("ohm_url"),
+                "tenant_id": active.get("tenant_id"),
+                "agent_id": active.get("agent_id"),
+                "read_only": active.get("read_only"),
+                "allowed_tools": active.get("allowed_tools"),
+            }
+            return CallToolResult(content=_text(data, fmt))
 
         # Local-only tool: reads the gateway host's instance registry.
         if name == "ohm_list_instances":

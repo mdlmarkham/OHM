@@ -303,8 +303,8 @@ def _register_tools() -> None:
     from fastmcp.tools.function_tool import FunctionTool
 
     for tool in _all_tools():
-        if tool.name == "ohm_list_instances":
-            # Local-only: the gateway has no access to the client's registry.
+        if tool.name in ("ohm_list_instances", "ohm_list_profiles", "ohm_select_profile"):
+            # Local-only: the gateway resolves profiles per HTTP request.
             continue
         handler = _build_tool_handler(tool.name)
         ft = FunctionTool(

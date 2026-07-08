@@ -8,6 +8,11 @@ OHM-yzyk.1.1: token_type field controls whether X-Tenant-ID is sent.
 Customer API keys are already tenant-scoped (the key selects the tenant),
 so sending X-Tenant-ID is unnecessary and ignored after OHM-tss4.19.
 Admin agent tokens need X-Tenant-ID to select the tenant.
+
+OHM-yzyk.3: Agent profiles — a single sidecar can switch between multiple
+OHM instances/tenants at runtime via ``ohm_select_profile``. The config
+may contain either the legacy flat keys (one implicit default profile) or
+a ``profiles`` array with per-profile credentials and policy.
 """
 
 from __future__ import annotations
@@ -41,6 +46,43 @@ WRITE_TOOLS = frozenset(
 )
 
 
+def _profile_defaults() -> dict[str, Any]:
+    """Return a profile dict seeded from the legacy flat config keys."""
+    return {
+        "name": "default",
+        "ohm_url": config.get("ohm_url", "http://127.0.0.1:8710"),
+        "token": config.get("token", ""),
+        "agent_id": config.get("agent_id", "mcp"),
+        "tenant_id": config.get("tenant_id", ""),
+        "token_type": config.get("token_type", "agent"),
+        "domain_config": config.get("domain_config"),
+        "allowed_tools": config.get("allowed_tools", ["*"]),
+        "read_only": config.get("read_only", False),
+    }
+
+
+def _normalize_profiles() -> None:
+    """Ensure ``config`` always has a ``profiles`` list and an active profile.
+
+    If the loaded config does not contain ``profiles``, synthesize a single
+    implicit profile from the legacy flat keys and name it ``default``.
+    """
+    profiles = config.get("profiles")
+    config["_profiles_explicit"] = bool(profiles)
+    if not profiles:
+        profiles = [_profile_defaults()]
+        config["profiles"] = profiles
+    # Ensure every profile has a name.
+    for i, p in enumerate(profiles):
+        if "name" not in p or not p["name"]:
+            p["name"] = f"profile_{i}"
+    # Resolve active profile name.
+    active = config.get("active_profile")
+    names = [p.get("name") for p in profiles]
+    if not active or active not in names:
+        config["active_profile"] = names[0]
+
+
 def load_config_file(path: str) -> None:
     """Load config from a JSON file, overriding env-var defaults (OHM-yzyk.1.2).
 
@@ -48,21 +90,89 @@ def load_config_file(path: str) -> None:
     """
     with open(path) as f:
         data = json.loads(f.read())
-    for key in ("ohm_url", "token", "agent_id", "tenant_id", "token_type", "domain_config", "allowed_tools", "read_only", "log_path", "temp_path", "transport"):
+    # Replace profiles wholesale if the file defines them; otherwise clear any
+    # previously loaded profiles so _normalize_profiles() builds a fresh implicit
+    # default profile from the new flat keys.
+    if "profiles" in data:
+        config["profiles"] = data["profiles"]
+    else:
+        config.pop("profiles", None)
+    for key in (
+        "ohm_url",
+        "token",
+        "agent_id",
+        "tenant_id",
+        "token_type",
+        "domain_config",
+        "allowed_tools",
+        "read_only",
+        "log_path",
+        "temp_path",
+        "transport",
+        "active_profile",
+    ):
         if key in data:
             config[key] = data[key]
     # Env vars override config file for backward compat
     if os.environ.get("OHM_URL"):
-        config["ohm_url"] = os.environ["OHM_URL"]
+        config["ohm_url"] = os.environ.get("OHM_URL")
     if os.environ.get("OHM_TOKEN"):
-        config["token"] = os.environ["OHM_TOKEN"]
+        config["token"] = os.environ.get("OHM_TOKEN")
     if os.environ.get("OHM_AGENT"):
-        config["agent_id"] = os.environ["OHM_AGENT"]
+        config["agent_id"] = os.environ.get("OHM_AGENT")
     if os.environ.get("OHM_TENANT_ID"):
-        config["tenant_id"] = os.environ["OHM_TENANT_ID"]
+        config["tenant_id"] = os.environ.get("OHM_TENANT_ID")
+    _normalize_profiles()
 
 
-def is_tool_allowed(tool_name: str) -> bool:
+def get_profiles() -> list[dict[str, Any]]:
+    """Return all configured profiles."""
+    if "profiles" not in config:
+        _normalize_profiles()
+    return list(config["profiles"])
+
+
+def get_active_profile() -> dict[str, Any]:
+    """Return the currently active profile.
+
+    For the implicit default profile (no explicit ``profiles`` array in the
+    config), the active profile is simply the current legacy flat config
+    keys. This keeps existing callers — including tests that mutate
+    ``config["allowed_tools"]`` directly — working without change.
+
+    For explicit ``profiles`` arrays, the active profile's explicit keys
+    take precedence, with any missing fields falling back to the legacy
+    defaults.
+    """
+    if "profiles" not in config:
+        _normalize_profiles()
+    if not config.get("_profiles_explicit", False):
+        return _profile_defaults()
+    active_name = config.get("active_profile")
+    active: dict[str, Any] | None = None
+    for p in config["profiles"]:
+        if p.get("name") == active_name:
+            active = p
+            break
+    if active is None:
+        active = config["profiles"][0]
+    merged = _profile_defaults()
+    merged.update(active)
+    return merged
+
+
+def set_active_profile(name: str) -> bool:
+    """Activate a profile by name. Returns True on success, False if not found."""
+    if "profiles" not in config:
+        _normalize_profiles()
+    names = {p.get("name") for p in config["profiles"]}
+    if name not in names:
+        return False
+    config["active_profile"] = name
+    return True
+
+
+def is_tool_allowed(tool_name: str, profile: dict[str, Any] | None = None) -> bool:
     """Check if a tool is permitted by allowed_tools and read_only (OHM-yzyk.1.2).
 
     Semantics for allowed_tools:
@@ -70,9 +180,11 @@ def is_tool_allowed(tool_name: str) -> bool:
     - Empty list []: interpreted as deny-all (no tools allowed). Use ["*"] for broad access.
     - Specific list: only those tool names are allowed.
     """
-    if config["read_only"] and tool_name in WRITE_TOOLS:
+    if profile is None:
+        profile = get_active_profile()
+    if profile.get("read_only", False) and tool_name in WRITE_TOOLS:
         return False
-    allowed = config.get("allowed_tools", ["*"])
+    allowed = profile.get("allowed_tools", ["*"])
     if not allowed:
         return False
     if allowed == ["*"]:
@@ -80,31 +192,35 @@ def is_tool_allowed(tool_name: str) -> bool:
     return tool_name in allowed
 
 
-def _should_send_tenant_header() -> bool:
+def _should_send_tenant_header(profile: dict[str, Any] | None = None) -> bool:
     """Decide whether to send X-Tenant-ID (OHM-yzyk.1.1).
 
     - Admin agent tokens (token_type="agent"): send X-Tenant-ID if tenant_id is set.
     - Customer API keys (token_type="customer"): never send X-Tenant-ID.
       The key itself is tenant-scoped; X-Tenant-ID is ignored after OHM-tss4.19.
     """
-    if not config.get("tenant_id"):
+    if profile is None:
+        profile = get_active_profile()
+    if not profile.get("tenant_id"):
         return False
-    token_type = config.get("token_type", "agent")
+    token_type = profile.get("token_type", "agent")
     return token_type == "agent"
 
 
-def make_headers() -> dict[str, str]:
-    """Build HTTP headers from current config (OHM-yzyk.1.1).
+def make_headers(profile: dict[str, Any] | None = None) -> dict[str, str]:
+    """Build HTTP headers from the active profile (OHM-yzyk.1.1, OHM-yzyk.3).
 
     X-Tenant-ID is only sent for admin agent tokens with a tenant_id set.
     Customer API keys never send X-Tenant-ID — the key selects the tenant.
     """
+    if profile is None:
+        profile = get_active_profile()
     h: dict[str, str] = {"Content-Type": "application/json"}
-    if config["token"]:
-        h["Authorization"] = f"Bearer {config['token']}"
-    if _should_send_tenant_header():
-        h["X-Tenant-ID"] = config["tenant_id"]
-    h["X-OHM-Agent"] = config["agent_id"]
+    if profile.get("token"):
+        h["Authorization"] = f"Bearer {profile['token']}"
+    if _should_send_tenant_header(profile):
+        h["X-Tenant-ID"] = profile["tenant_id"]
+    h["X-OHM-Agent"] = profile.get("agent_id", "mcp")
     return h
 
 
@@ -122,6 +238,6 @@ def validate_domain_config(expected: str | None, actual_schema: dict) -> bool:
     if not expected:
         return True
     actual = actual_schema.get("schema", "")
-    # The daemon returns schema name like "devsecops" or "topo"
+    # The daemon returns schema name like "devops" or "topo"
     expected_base = expected.replace(".json", "")
     return actual == expected_base or actual == expected

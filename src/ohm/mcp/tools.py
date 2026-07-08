@@ -323,6 +323,28 @@ def all_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="ohm_list_profiles",
+            description="List the OHM instance profiles configured for this sidecar and show which profile is currently active. Each profile may point to a different OHM tenant or instance. Use ohm_select_profile to switch.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="ohm_select_profile",
+            description="Switch the active OHM profile by name. Subsequent tool calls will use the selected profile's URL, token, tenant, and tool policy. Returns the active profile summary.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Profile name to activate (from ohm_list_profiles)"},
+                },
+                "required": ["name"],
+            },
+        ),
+        Tool(
             name="ohm_list_instances",
             description="List discovered OHM instances and their health status from the local registry (~/.ohm/registry.json). Run 'ohm instances discover' first to populate the registry.",
             inputSchema={

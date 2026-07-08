@@ -8,7 +8,18 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from ohm.mcp.config import config, load_config_file, is_tool_allowed, make_headers, WRITE_TOOLS, _should_send_tenant_header, validate_domain_config
+from ohm.mcp.config import (
+    config,
+    load_config_file,
+    is_tool_allowed,
+    make_headers,
+    WRITE_TOOLS,
+    _should_send_tenant_header,
+    validate_domain_config,
+    get_active_profile,
+    set_active_profile,
+    get_profiles,
+)
 
 
 class TestConfigFileLoading:
@@ -272,6 +283,86 @@ class TestDomainConfigValidation:
 
     def test_empty_expected_returns_true(self):
         assert validate_domain_config("", {"schema": "anything"}) is True
+
+
+class TestAgentProfiles:
+    """OHM-yzyk.3: profiles let a single sidecar switch between OHM instances."""
+
+    def test_profiles_list_is_loaded(self):
+        original = dict(config)
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+                json.dump(
+                    {
+                        "profiles": [
+                            {"name": "personal", "token": "tok-personal"},
+                            {"name": "work", "token": "tok-work", "read_only": True},
+                        ],
+                        "active_profile": "work",
+                    },
+                    f,
+                )
+                f.flush()
+            load_config_file(f.name)
+            profiles = get_profiles()
+            assert {p["name"] for p in profiles} == {"personal", "work"}
+            active = get_active_profile()
+            assert active["name"] == "work"
+            assert active["token"] == "tok-work"
+            assert active["read_only"] is True
+            assert is_tool_allowed("ohm_create_node") is False
+            assert is_tool_allowed("ohm_stats") is True
+            os.unlink(f.name)
+        finally:
+            config.clear()
+            config.update(original)
+
+    def test_set_active_profile_switches_policy(self):
+        original = dict(config)
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+                json.dump(
+                    {
+                        "profiles": [
+                            {"name": "write", "allowed_tools": ["*"], "read_only": False},
+                            {"name": "read", "allowed_tools": ["*"], "read_only": True},
+                        ]
+                    },
+                    f,
+                )
+                f.flush()
+            load_config_file(f.name)
+            assert get_active_profile()["name"] == "write"
+            assert is_tool_allowed("ohm_create_node") is True
+            assert set_active_profile("read") is True
+            assert get_active_profile()["name"] == "read"
+            assert is_tool_allowed("ohm_create_node") is False
+            assert set_active_profile("missing") is False
+            os.unlink(f.name)
+        finally:
+            config.clear()
+            config.update(original)
+
+    def test_reloading_flat_config_clears_previous_profiles(self):
+        original = dict(config)
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f1:
+                json.dump({"profiles": [{"name": "alpha", "allowed_tools": ["ohm_stats"]}]}, f1)
+                f1.flush()
+            load_config_file(f1.name)
+            assert {p["name"] for p in get_profiles()} == {"alpha"}
+
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f2:
+                json.dump({"allowed_tools": ["*"], "read_only": False}, f2)
+                f2.flush()
+            load_config_file(f2.name)
+            assert config.get("_profiles_explicit") is False
+            assert is_tool_allowed("ohm_create_node") is True
+            os.unlink(f1.name)
+            os.unlink(f2.name)
+        finally:
+            config.clear()
+            config.update(original)
 
 
 # OHM-yzyk.1.3 — validate_domain_config wired into server startup

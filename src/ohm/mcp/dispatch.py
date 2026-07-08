@@ -220,6 +220,14 @@ def build_request(name: str, arguments: dict[str, Any], agent_id: str) -> tuple[
             "use the local ohm-mcp sidecar for instance registry access."
         )
 
+    if name in ("ohm_list_profiles", "ohm_select_profile"):
+        # Profile management is per-sidecar state; the gateway resolves profiles
+        # from the Authorization header on every request.
+        raise NotImplementedError(
+            f"{name} is not supported by the hosted gateway; "
+            "use the local ohm-mcp sidecar for profile switching."
+        )
+
     raise KeyError(f"Unknown tool: {name}")
 
 
