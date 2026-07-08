@@ -27,6 +27,11 @@ from pathlib import Path
 
 import pytest
 
+# Spawns a real ohmd subprocess and makes real HTTP requests — same category
+# as test_server.py / test_customer_auth.py, and excluded from the parallel
+# "fast" pool for the same reason: it needs the process/port to itself.
+pytestmark = pytest.mark.integration
+
 
 def _wait_for_health(base_url: str, deadline_s: float = 30.0) -> bool:
     deadline = time.monotonic() + deadline_s
