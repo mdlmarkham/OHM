@@ -6876,6 +6876,289 @@ def connect_http(
             path = f"/suggest_causes?min_confidence={min_confidence}"
             return self._http_request("GET", path)
 
+        def voi(
+            self,
+            decision: list[str] | None = None,
+            *,
+            top: int = 10,
+            leak_probability: float = 0.15,
+            root_prior: float = 0.3,
+            layers: list[str] | None = None,
+            edge_types: list[str] | None = None,
+            timeout: float | None = None,
+            min_observations: int = 0,
+        ) -> dict[str, Any]:
+            """Rank nodes by Value of Information for a set of decision nodes.
+
+            Args:
+                decision: Optional list of decision node IDs. Auto-detected if omitted.
+                top: Number of top candidates to return.
+                leak_probability: Baseline probability of bad outcome.
+                root_prior: Prior probability of root bad state.
+                layers: Layer filter list.
+                edge_types: Edge-type filter list.
+                timeout: Optional timeout in seconds.
+                min_observations: Minimum observations before low-data warning.
+
+            Returns:
+                Dict with ranked VoI candidates and metadata.
+            """
+            import urllib.parse
+
+            params = [f"top={top}", f"leak={leak_probability}", f"root_prior={root_prior}"]
+            if decision:
+                params.append(f"decision={urllib.parse.quote(','.join(decision))}")
+            if layers:
+                params.append(f"layers={urllib.parse.quote(','.join(layers))}")
+            if edge_types:
+                params.append(f"edge_types={urllib.parse.quote(','.join(edge_types))}")
+            if timeout:
+                params.append(f"timeout={timeout}")
+            if min_observations:
+                params.append(f"min_observations={min_observations}")
+            path = "/voi?" + "&".join(params)
+            return self._http_request("GET", path)
+
+        def voi_tasks(
+            self,
+            *,
+            agent: str | None = None,
+            decision: list[str] | None = None,
+            top: int = 5,
+            leak_probability: float = 0.15,
+            root_prior: float = 0.3,
+            layers: list[str] | None = None,
+        ) -> dict[str, Any]:
+            """Generate concrete observation tasks from VoI ranking.
+
+            Args:
+                agent: Filter tasks for a specific agent.
+                decision: List of decision node IDs.
+                top: Number of tasks to generate.
+                leak_probability: Baseline probability of bad outcome.
+                root_prior: Prior probability of root bad state.
+                layers: Layer filter list.
+
+            Returns:
+                Dict with task assignments.
+            """
+            import urllib.parse
+
+            params = [f"top={top}", f"leak={leak_probability}", f"root_prior={root_prior}"]
+            if agent:
+                params.append(f"agent={urllib.parse.quote(agent)}")
+            if decision:
+                params.append(f"decision={urllib.parse.quote(','.join(decision))}")
+            if layers:
+                params.append(f"layers={urllib.parse.quote(','.join(layers))}")
+            path = "/voi/tasks?" + "&".join(params)
+            return self._http_request("GET", path)
+
+        def regime(
+            self,
+            target: str,
+            evidence: dict[str, int | float] | None = None,
+            *,
+            leak_probability: float = 0.15,
+            window_days: float = 30.0,
+            layers: list[str] | None = None,
+        ) -> dict[str, Any]:
+            """Detect regime shifts by comparing full-history vs windowed inference.
+
+            Args:
+                target: Target node ID.
+                evidence: Dict of node-state evidence.
+                leak_probability: Baseline probability of bad outcome.
+                window_days: Window size in days.
+                layers: Layer filter list.
+
+            Returns:
+                Dict with full_history, windowed, shift, and regime label.
+            """
+            import urllib.parse
+
+            params = [f"target={urllib.parse.quote(target)}"]
+            if evidence:
+                ev_str = ",".join(f"{k}:{v}" for k, v in evidence.items())
+                params.append(f"evidence={urllib.parse.quote(ev_str)}")
+            params.append(f"leak={leak_probability}")
+            params.append(f"window_days={window_days}")
+            if layers:
+                params.append(f"layers={urllib.parse.quote(','.join(layers))}")
+            path = "/regime?" + "&".join(params)
+            return self._http_request("GET", path)
+
+        def game(
+            self,
+            target: str,
+            *,
+            players: list[str] | None = None,
+            layers: list[str] | None = None,
+        ) -> dict[str, Any]:
+            """Extract a normal-form game from the causal graph around a target.
+
+            Args:
+                target: Target node ID.
+                players: Optional list of player node IDs.
+                layers: Layer filter list.
+
+            Returns:
+                Dict with payoff matrices, players, and actions.
+            """
+            import urllib.parse
+
+            params = [f"target={urllib.parse.quote(target)}"]
+            if players:
+                params.append(f"players={urllib.parse.quote(','.join(players))}")
+            if layers:
+                params.append(f"layers={urllib.parse.quote(','.join(layers))}")
+            path = "/game?" + "&".join(params)
+            return self._http_request("GET", path)
+
+        def nash(
+            self,
+            players: list[str],
+            payoffs: list[list[list[float]]],
+        ) -> dict[str, Any]:
+            """Compute Nash equilibrium for an extracted game.
+
+            Args:
+                players: List of player identifiers.
+                payoffs: Payoff matrices as returned by game().
+
+            Returns:
+                Dict with equilibrium strategies and payoffs.
+            """
+            import json
+            import urllib.parse
+
+            params = [f"players={urllib.parse.quote(','.join(players))}", f"payoffs={urllib.parse.quote(json.dumps(payoffs))}"]
+            path = "/nash?" + "&".join(params)
+            return self._http_request("GET", path)
+
+        def policy(
+            self,
+            target: str,
+            *,
+            observation_cost: float | None = None,
+            horizon: int = 1,
+            leak_probability: float = 0.15,
+            layers: list[str] | None = None,
+        ) -> dict[str, Any]:
+            """Compute a POMDP Phase-1 policy: observe vs act.
+
+            Args:
+                target: Target node ID.
+                observation_cost: Cost of one observation.
+                horizon: Planning horizon.
+                leak_probability: Baseline probability of bad outcome.
+                layers: Layer filter list.
+
+            Returns:
+                Dict with recommended action, EVPI, and belief state.
+            """
+            import urllib.parse
+
+            params = [f"target={urllib.parse.quote(target)}", f"horizon={horizon}", f"leak={leak_probability}"]
+            if observation_cost is not None:
+                params.append(f"observation_cost={observation_cost}")
+            if layers:
+                params.append(f"layers={urllib.parse.quote(','.join(layers))}")
+            path = "/policy?" + "&".join(params)
+            return self._http_request("GET", path)
+
+        def discover(
+            self,
+            nodes: list[str] | None = None,
+            *,
+            method: str = "pc",
+            alpha: float = 0.05,
+            min_observations: int = 5,
+            indep_test: str = "fisherz",
+            score_class: str = "local_score_BIC",
+            queue: bool = False,
+        ) -> dict[str, Any]:
+            """Run causal structure discovery (PC/GES) on observation data.
+
+            Args:
+                nodes: Optional list of node IDs to restrict discovery to.
+                method: 'pc', 'ges', or 'both'.
+                alpha: Significance threshold.
+                min_observations: Minimum observations per node.
+                indep_test: Independence test for PC.
+                score_class: Score class for GES.
+                queue: If True, queue candidate edges for review.
+
+            Returns:
+                Dict with candidate_edges and optional queued_ids.
+            """
+            import urllib.parse
+
+            params = [f"method={urllib.parse.quote(method)}", f"alpha={alpha}", f"min_observations={min_observations}"]
+            if nodes:
+                params.append(f"nodes={urllib.parse.quote(','.join(nodes))}")
+            params.append(f"indep_test={urllib.parse.quote(indep_test)}")
+            params.append(f"score_class={urllib.parse.quote(score_class)}")
+            if queue:
+                params.append("queue=true")
+            path = "/discover?" + "&".join(params)
+            return self._http_request("GET", path)
+
+        def discovery_queue(
+            self,
+            *,
+            status: str | None = None,
+            method: str | None = None,
+            limit: int = 100,
+        ) -> dict[str, Any]:
+            """List pending causal-discovery candidates for review.
+
+            Args:
+                status: Filter by status.
+                method: Filter by discovery method.
+                limit: Maximum records.
+
+            Returns:
+                Dict with queue list and count.
+            """
+            import urllib.parse
+
+            params = [f"limit={limit}"]
+            if status:
+                params.append(f"status={urllib.parse.quote(status)}")
+            if method:
+                params.append(f"method={urllib.parse.quote(method)}")
+            path = "/discover/queue?" + "&".join(params)
+            return self._http_request("GET", path)
+
+        def review_discovery(
+            self,
+            queue_id: str,
+            action: str,
+            *,
+            reviewed_by: str | None = None,
+            review_notes: str | None = None,
+            edge_layer: str = "L3",
+        ) -> dict[str, Any]:
+            """Accept or reject a queued discovery candidate.
+
+            Args:
+                queue_id: Discovery queue entry ID.
+                action: 'accept' or 'reject'.
+                reviewed_by: Agent name.
+                review_notes: Optional notes.
+                edge_layer: Layer for created edge.
+
+            Returns:
+                Result dict from the review operation.
+            """
+            body: dict[str, Any] = {"queue_id": queue_id, "action": action, "edge_layer": edge_layer}
+            if reviewed_by:
+                body["reviewed_by"] = reviewed_by
+            if review_notes:
+                body["review_notes"] = review_notes
+            return self._http_request("POST", "/discover/queue/review", body)
+
         def refute(
             self,
             cause: str,
