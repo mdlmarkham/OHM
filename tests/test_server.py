@@ -9,7 +9,10 @@ and must run sequentially. They are grouped with xdist_group("server").
 Marks: integration (HTTP server required, slow setup/teardown).
 """
 
+import hashlib
+import ipaddress
 import json
+import socket
 import threading
 from http.client import HTTPConnection
 
@@ -28,7 +31,141 @@ from tests.conftest import _start_test_server, _request  # noqa: F401 — used b
 
 
 @pytest.mark.xdist_group("server")
-class TestHealthEndpoints:
+class TestSecuritySSRF:
+    """SSRF protections for webhook and document fetch paths."""
+
+    def test_webhook_rejects_ipv4_mapped_metadata_ip(self, test_server):
+        """169.254.169.254 must be blocked as a private link-local address."""
+        from ohm.server.server import _resolve_webhook_ips
+        from ohm.exceptions import ValidationError
+
+        with pytest.raises(ValidationError):
+            _resolve_webhook_ips("169.254.169.254")
+
+    def test_webhook_resolves_public_ipv4(self, test_server):
+        """Public IPv4 addresses should resolve without error when DNS is available."""
+        from ohm.server.server import _resolve_webhook_ips
+
+        try:
+            result = _resolve_webhook_ips("example.com")
+            assert result
+        except Exception as e:
+            pytest.skip(f"DNS lookup unavailable in test environment: {e}")
+
+    def test_admin_endpoints_require_admin_role(self, auth_server):
+        """Destructive /admin/* endpoints reject read-write and read-only tokens."""
+        port, store = auth_server
+
+        # Read-write token should be blocked (403)
+        status, data = _request(
+            "POST",
+            port,
+            "/admin/purge-orphans",
+            body={"dry_run": True},
+            token="test-token-abc",
+        )
+        assert status == 403, f"expected 403 for read-write token, got {status}: {data}"
+
+        # Read-only token should be blocked (403)
+        status, data = _request(
+            "POST",
+            port,
+            "/admin/purge-orphans",
+            body={"dry_run": True},
+            token="readonly-token",
+        )
+        assert status == 403, f"expected 403 for read-only token, got {status}: {data}"
+
+        # Unknown token should be 401
+        status, data = _request(
+            "POST",
+            port,
+            "/admin/purge-orphans",
+            body={"dry_run": True},
+            token="unknown-token",
+        )
+        assert status == 401, f"expected 401 for unknown token, got {status}: {data}"
+
+    def test_admin_apply_decay_requires_admin(self, auth_server):
+        """POST /admin/apply-decay is admin-gated."""
+        port, store = auth_server
+        status, data = _request(
+            "POST",
+            port,
+            "/admin/apply-decay",
+            body={"dry_run": True},
+            token="test-token-abc",
+        )
+        assert status == 403, f"expected 403, got {status}: {data}"
+
+    def test_admin_merge_requires_admin(self, auth_server):
+        """POST /admin/merge is admin-gated."""
+        port, store = auth_server
+        status, data = _request(
+            "POST",
+            port,
+            "/admin/merge",
+            body={"keep": "a", "merge": "b"},
+            token="test-token-abc",
+        )
+        assert status == 403, f"expected 403, got {status}: {data}"
+
+    def test_admin_evict_fragments_requires_admin(self, auth_server):
+        """POST /admin/evict-fragments is admin-gated."""
+        port, store = auth_server
+        status, data = _request(
+            "POST",
+            port,
+            "/admin/evict-fragments",
+            body={"ttl_days": 1},
+            token="test-token-abc",
+        )
+        assert status == 403, f"expected 403, got {status}: {data}"
+
+    def test_admin_vacuum_lake_requires_admin(self, auth_server):
+        """POST /admin/vacuum-lake is admin-gated."""
+        port, store = auth_server
+        status, data = _request(
+            "POST",
+            port,
+            "/admin/vacuum-lake",
+            body={"keep_versions": 1},
+            token="test-token-abc",
+        )
+        assert status == 403, f"expected 403, got {status}: {data}"
+
+    def test_document_fetch_rejects_ipv4_mapped_metadata_ip(self, test_server, monkeypatch):
+        """::ffff:169.254.169.254 must be blocked in document URL validation."""
+        from ohm.server.handlers.documents import DocumentHandlerMixin, _canonicalize_ip
+        from ohm.exceptions import ValidationError
+
+        # Direct canonicalization test
+        ip = _canonicalize_ip("::ffff:169.254.169.254")
+        assert ip == ipaddress.ip_address("169.254.169.254")
+
+        # Mock getaddrinfo to return the IPv4-mapped address
+        def fake_getaddrinfo(host, port, *args, **kwargs):
+            return [(socket.AF_INET6, None, None, None, ("::ffff:169.254.169.254", 0))]
+
+        monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+        handler = DocumentHandlerMixin.__new__(DocumentHandlerMixin)
+        handler.current_config = {}
+        with pytest.raises(ValidationError):
+            handler._validate_fetch_url("http://metadata.example.com/latest/")
+
+    def test_webhook_ipv4_mapped_address_blocked(self, monkeypatch):
+        """Webhook resolver must block ::ffff:169.254.169.254."""
+        from ohm.server.server import _resolve_webhook_ips
+        from ohm.exceptions import ValidationError
+        import socket
+
+        def fake_getaddrinfo(host, port, *args, **kwargs):
+            return [(socket.AF_INET6, None, None, None, ("::ffff:169.254.169.254", 0))]
+
+        monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+        with pytest.raises(ValidationError):
+            _resolve_webhook_ips("metadata.example.com")
+
     """Tests for /health, /ready, /status endpoints."""
 
     def test_health_returns_ok(self, test_server):

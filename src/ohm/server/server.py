@@ -332,6 +332,22 @@ _PRIVATE_NETWORKS = [
 ]
 
 
+def _canonicalize_ip(addr: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
+    """Parse an IP address and collapse IPv4-mapped IPv6 to pure IPv4.
+
+    ``::ffff:169.254.169.254`` would otherwise fail to match the IPv4
+    link-local block because ``ipaddress.__contains__`` does not cross
+    address families. Collapsing first closes that SSRF bypass.
+    """
+    ip = ipaddress.ip_address(addr)
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        return ip.ipv4_mapped
+    return ip
+
+
+def _is_private_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Return True if *ip* falls in any of the private/loopback networks."""
+    return any(ip in net for net in _PRIVATE_NETWORKS)
 def _resolve_webhook_ips(host: str) -> list[str]:
     """Resolve *host* and reject any private/loopback address (SSRF guard).
 
@@ -354,10 +370,9 @@ def _resolve_webhook_ips(host: str) -> list[str]:
         addr = str(info[4][0])
         if addr in seen:
             continue
-        ip = ipaddress.ip_address(addr)
-        for net in _PRIVATE_NETWORKS:
-            if ip in net:
-                raise ValidationError(f"Webhook URL targets a private/loopback address ({addr}) — SSRF not allowed")
+        ip = _canonicalize_ip(addr)
+        if _is_private_ip(ip):
+            raise ValidationError(f"Webhook URL targets a private/loopback address ({addr}) — SSRF not allowed")
         seen.append(addr)
     if not seen:
         raise ValidationError(f"Cannot resolve webhook host: {host!r}")
@@ -1198,27 +1213,25 @@ class OhmHandler(
         if auth.startswith("Bearer "):
             token = unquote(auth[7:])
             token_provided = True
-            for token_hash, agent_name in self.tokens.items():
-                if _verify_token(token, token_hash):
-                    self._authenticated_agent = agent_name
-                    if client_ip:
-                        _clear_auth_failures(client_ip)
-                    # Honor X-Ohm-Agent header if the authenticated agent has write
-                    # access AND the header value does not escalate privileges
-                    # (the spoofed agent's role must not exceed the token's own role).
-                    ohm_agent = self.headers.get("X-Ohm-Agent")
-                    if ohm_agent:
-                        token_role = _lookup_role(self.roles, agent_name, self._customer_id)
-                        header_role = _lookup_role(self.roles, ohm_agent, self._customer_id)
-                        if token_role != "read-only" and _role_rank(header_role) <= _role_rank(token_role):
-                            return ohm_agent
-                    return agent_name
-            for token_hash, customer_id in self.customer_tokens.items():
-                if _verify_token(token, token_hash):
-                    self._resolved_customer_id = customer_id
-                    if client_ip:
-                        _clear_auth_failures(client_ip)
-                    return f"customer:{customer_id}"
+            provided_hash = _hash_token(token)
+            agent_name = self.tokens.get(provided_hash)
+            if agent_name is not None:
+                self._authenticated_agent = agent_name
+                if client_ip:
+                    _clear_auth_failures(client_ip)
+                ohm_agent = self.headers.get("X-Ohm-Agent")
+                if ohm_agent:
+                    token_role = _lookup_role(self.roles, agent_name, self._customer_id)
+                    header_role = _lookup_role(self.roles, ohm_agent, self._customer_id)
+                    if token_role != "read-only" and _role_rank(header_role) <= _role_rank(token_role):
+                        return ohm_agent
+                return agent_name
+            customer_id = self.customer_tokens.get(provided_hash)
+            if customer_id is not None:
+                self._resolved_customer_id = customer_id
+                if client_ip:
+                    _clear_auth_failures(client_ip)
+                return f"customer:{customer_id}"
 
         from urllib.parse import parse_qs, urlparse
 
@@ -1226,26 +1239,25 @@ class OhmHandler(
         if "token" in qs:
             token = qs["token"][0]
             token_provided = True
-            for token_hash, agent_name in self.tokens.items():
-                if _verify_token(token, token_hash):
-                    self._authenticated_agent = agent_name
-                    if client_ip:
-                        _clear_auth_failures(client_ip)
-                    # Honor X-Ohm-Agent header if the authenticated agent has write
-                    # access AND the header value does not escalate privileges.
-                    ohm_agent = self.headers.get("X-Ohm-Agent")
-                    if ohm_agent:
-                        token_role = _lookup_role(self.roles, agent_name, self._customer_id)
-                        header_role = _lookup_role(self.roles, ohm_agent, self._customer_id)
-                        if token_role != "read-only" and _role_rank(header_role) <= _role_rank(token_role):
-                            return ohm_agent
-                    return agent_name
-            for token_hash, customer_id in self.customer_tokens.items():
-                if _verify_token(token, token_hash):
-                    self._resolved_customer_id = customer_id
-                    if client_ip:
-                        _clear_auth_failures(client_ip)
-                    return f"customer:{customer_id}"
+            provided_hash = _hash_token(token)
+            agent_name = self.tokens.get(provided_hash)
+            if agent_name is not None:
+                self._authenticated_agent = agent_name
+                if client_ip:
+                    _clear_auth_failures(client_ip)
+                ohm_agent = self.headers.get("X-Ohm-Agent")
+                if ohm_agent:
+                    token_role = _lookup_role(self.roles, agent_name, self._customer_id)
+                    header_role = _lookup_role(self.roles, ohm_agent, self._customer_id)
+                    if token_role != "read-only" and _role_rank(header_role) <= _role_rank(token_role):
+                        return ohm_agent
+                return agent_name
+            customer_id = self.customer_tokens.get(provided_hash)
+            if customer_id is not None:
+                self._resolved_customer_id = customer_id
+                if client_ip:
+                    _clear_auth_failures(client_ip)
+                return f"customer:{customer_id}"
 
         if token_provided and client_ip:
             _record_auth_failure(client_ip)
@@ -1270,6 +1282,19 @@ class OhmHandler(
         agent = self._require_auth()
         self._check_write_access(agent)
         return agent
+
+    def _require_admin(self) -> str:
+        """Authenticate and require admin role. Returns agent name or raises."""
+        agent = self._authenticate()
+        if agent is None:
+            if self.no_auth and not self.tokens and not self.customer_tokens:
+                agent = "ohm"
+            else:
+                raise AuthenticationError("Authentication required — provide Bearer token")
+        role = _lookup_role(self.roles, agent, self._customer_id)
+        if role == "admin" or (self.no_auth and not self.roles):
+            return agent
+        raise PermissionDeniedError(f"Agent '{agent}' role '{role}' is not authorized for this admin endpoint")
 
     def _json_response(self, code: int, data):
         """Send a JSON response.
