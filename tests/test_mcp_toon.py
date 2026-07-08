@@ -42,13 +42,13 @@ def test_requested_format_from_argument():
 def test_requested_format_from_accept_header():
     assert requested_format({}, accept=TOON_MIME_TYPE) == "toon"
     assert requested_format({}, accept="application/toon") == "toon"
-    assert requested_format({}, accept="application/json") == DEFAULT_FORMAT
-    assert requested_format({}, accept="text/plain") == DEFAULT_FORMAT
+    assert requested_format({}, accept="application/json") == "json"
+    assert requested_format({}, accept="text/plain") == "json"
 
 
 def test_requested_format_argument_beats_accept():
     args = {"format": "json"}
-    assert requested_format(args, accept=TOON_MIME_TYPE) == DEFAULT_FORMAT
+    assert requested_format(args, accept=TOON_MIME_TYPE) == "json"
 
 
 def test_encode_payload_json():

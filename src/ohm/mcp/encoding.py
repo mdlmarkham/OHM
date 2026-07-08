@@ -59,7 +59,7 @@ def requested_format(arguments: dict[str, Any], accept: str | None = None) -> st
     Precedence:
       1. `format` field in tool arguments (e.g. `format: "toon"`).
       2. `Accept` header / MIME type passed from the transport.
-      3. Default JSON.
+      3. Default format (TOON if available, otherwise JSON).
     """
     fmt, explicit = _format_from_argument(arguments)
     if explicit:
