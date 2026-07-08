@@ -67,7 +67,9 @@ _ALL_TOOL_NAMES: list[str] = []
 
 async def _ohm_get(path: str, params: dict | None = None) -> dict | list:
     async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.get(f"{_config['ohm_url']}{path}", headers=_headers(), params=params or {})
+        # Only pass params to httpx when there are actual parameters; passing
+        # an empty dict causes httpx to strip an existing query string.
+        r = await client.get(f"{_config['ohm_url']}{path}", headers=_headers(), params=params if params else None)
         r.raise_for_status()
         return r.json()
 
@@ -153,208 +155,10 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
         # is not forwarded to OHM.
         fmt = requested_format(arguments)
 
-        if name == "ohm_stats":
-            data = await _ohm_get("/stats")
-            return CallToolResult(content=_text(data, fmt))
+        from ohm.mcp.dispatch import build_request
 
-        elif name == "ohm_search":
-            params = {"q": arguments["q"]}
-            if arguments.get("type"):
-                params["type"] = arguments["type"]
-            if arguments.get("created_by"):
-                params["created_by"] = arguments["created_by"]
-            if arguments.get("limit"):
-                params["limit"] = str(arguments["limit"])
-            data = await _ohm_get("/search", params)
-            return CallToolResult(content=_text(data, fmt))
-
-        elif name == "ohm_get_node":
-            data = await _ohm_get(f"/node/{arguments['node_id']}")
-            return CallToolResult(content=_text(data, fmt))
-
-        elif name == "ohm_neighborhood":
-            params = {}
-            if arguments.get("depth"):
-                params["depth"] = str(arguments["depth"])
-            if arguments.get("layer"):
-                params["layer"] = arguments["layer"]
-            data = await _ohm_get(f"/neighborhood/{arguments['node_id']}", params)
-            return CallToolResult(content=_text(data, fmt))
-
-        elif name == "ohm_listen":
-            params = {"enrich": str(arguments.get("enrich", True)).lower(), "limit": str(arguments.get("limit", 50))}
-            if arguments.get("since"):
-                params["since"] = arguments["since"]
-            if arguments.get("agent"):
-                params["agent"] = arguments["agent"]
-            data = await _ohm_get("/listen", params)
-            return CallToolResult(content=_text(data, fmt))
-
-        elif name == "ohm_confidence":
-            data = await _ohm_get(f"/confidence/{arguments['edge_id']}")
-            return CallToolResult(content=_text(data, fmt))
-
-        elif name == "ohm_path":
-            data = await _ohm_get(f"/path/{arguments['from_id']}/{arguments['to_id']}")
-            return CallToolResult(content=_text(data, fmt))
-
-        elif name == "ohm_agents":
-            data = await _ohm_get("/agents")
-            return CallToolResult(content=_text(data, fmt))
-
-        elif name == "ohm_inference":
-            params = {"target": arguments["target"]}
-            if arguments.get("evidence"):
-                params["evidence"] = arguments["evidence"]
-            if arguments.get("layers"):
-                params["layers"] = arguments["layers"]
-            if arguments.get("leak") is not None:
-                params["leak"] = str(arguments["leak"])
-            data = await _ohm_get("/inference", params)
-            return CallToolResult(content=_text(data, fmt))
-
-        elif name == "ohm_intervene":
-            params = {
-                "target": arguments["target"],
-                "state": str(arguments["state"]),
-            }
-            if arguments.get("query"):
-                params["query"] = arguments["query"]
-            if arguments.get("layers"):
-                params["layers"] = arguments["layers"]
-            if arguments.get("leak") is not None:
-                params["leak"] = str(arguments["leak"])
-            data = await _ohm_get("/intervene", params)
-            return CallToolResult(content=_text(data, fmt))
-
-        elif name == "ohm_voi":
-            params = {"decision": arguments["decision"]}
-            if arguments.get("top") is not None:
-                params["top"] = str(arguments["top"])
-            if arguments.get("layers"):
-                params["layers"] = arguments["layers"]
-            if arguments.get("leak") is not None:
-                params["leak"] = str(arguments["leak"])
-            data = await _ohm_get("/voi", params)
-            return CallToolResult(content=_text(data, fmt))
-
-        elif name == "ohm_refute":
-            params = {
-                "cause": arguments["cause"],
-                "effect": arguments["effect"],
-            }
-            if arguments.get("n_samples") is not None:
-                params["n_samples"] = str(arguments["n_samples"])
-            if arguments.get("methods"):
-                params["methods"] = arguments["methods"]
-            data = await _ohm_get("/refute", params)
-            return CallToolResult(content=_text(data, fmt))
-
-        elif name == "ohm_discover":
-            params = {}
-            if arguments.get("nodes"):
-                params["nodes"] = arguments["nodes"]
-            if arguments.get("method"):
-                params["method"] = arguments["method"]
-            if arguments.get("alpha") is not None:
-                params["alpha"] = str(arguments["alpha"])
-            if arguments.get("min_observations") is not None:
-                params["min_observations"] = str(arguments["min_observations"])
-            data = await _ohm_get("/discover", params)
-            return CallToolResult(content=_text(data, fmt))
-
-        elif name == "ohm_create_node":
-            body: dict[str, Any] = {
-                "id": arguments["id"],
-                "label": arguments["label"],
-                "node_type": arguments.get("node_type", "concept"),
-                "confidence": arguments.get("confidence", 0.5),
-                "visibility": arguments.get("visibility", "team"),
-                "provenance": arguments.get("provenance", OHM_AGENT),
-            }
-            if arguments.get("content"):
-                body["content"] = arguments["content"]
-            if arguments.get("tags"):
-                tags_str = arguments["tags"]
-                body["tags"] = json.loads(tags_str) if isinstance(tags_str, str) else tags_str
-            url = "/node"
-            if not arguments.get("create_only", True):
-                url += "?create_only=false"
-            data = await _ohm_post(url, body)
-            return CallToolResult(content=_text(data, fmt))
-
-        elif name == "ohm_create_edge":
-            body = {
-                "from": arguments["from_node"],
-                "to": arguments["to_node"],
-                "type": arguments["edge_type"],
-                "layer": arguments.get("layer", "L3"),
-                "confidence": arguments.get("confidence", 0.5),
-                "provenance": arguments.get("provenance", OHM_AGENT),
-            }
-            if arguments.get("condition"):
-                body["condition"] = arguments["condition"]
-            data = await _ohm_post("/edge", body)
-            return CallToolResult(content=_text(data, fmt))
-
-        elif name == "ohm_observe":
-            body = {
-                "node_id": arguments["node_id"],
-                "obs_type": arguments["obs_type"],
-                "value": arguments["value"],
-                "sigma": arguments.get("sigma", 1.0),
-                "source": arguments.get("source", OHM_AGENT),
-            }
-            if arguments.get("notes"):
-                body["notes"] = arguments["notes"]
-            data = await _ohm_post(f"/observe/{arguments['node_id']}", body)
-            return CallToolResult(content=_text(data, fmt))
-
-        elif name == "ohm_challenge":
-            body = {
-                "reason": arguments["reason"],
-                "confidence": arguments.get("confidence", 0.5),
-            }
-            data = await _ohm_post(f"/challenge/{arguments['edge_id']}", body)
-            return CallToolResult(content=_text(data, fmt))
-
-        elif name == "ohm_support":
-            body = {
-                "reason": arguments["reason"],
-                "confidence": arguments.get("confidence", 0.7),
-            }
-            data = await _ohm_post(f"/support/{arguments['edge_id']}", body)
-            return CallToolResult(content=_text(data, fmt))
-
-        elif name == "ohm_update_state":
-            body = {"agent": OHM_AGENT}
-            if arguments.get("focus"):
-                body["focus"] = arguments["focus"]
-            if arguments.get("patterns"):
-                body["patterns"] = json.loads(arguments["patterns"]) if isinstance(arguments["patterns"], str) else arguments["patterns"]
-            if arguments.get("services"):
-                body["services"] = json.loads(arguments["services"]) if isinstance(arguments["services"], str) else arguments["services"]
-            data = await _ohm_post("/state", body)
-            return CallToolResult(content=_text(data, fmt))
-
-        elif name == "ohm_list_nodes":
-            params = {}
-            if arguments.get("type"):
-                params["type"] = arguments["type"]
-            if arguments.get("label_contains"):
-                params["label_contains"] = arguments["label_contains"]
-            if arguments.get("created_by"):
-                params["created_by"] = arguments["created_by"]
-            params["limit"] = str(arguments.get("limit", 100))
-            params["offset"] = str(arguments.get("offset", 0))
-            data = await _ohm_get("/nodes", params)
-            return CallToolResult(content=_text(data, fmt))
-
-        elif name == "ohm_domain_onboarding":
-            data = await _ohm_get("/schema")
-            return CallToolResult(content=_text(data, fmt))
-
-        elif name == "ohm_list_instances":
+        # Local-only tool: reads the gateway host's instance registry.
+        if name == "ohm_list_instances":
             registry_path = Path.home() / ".ohm" / "registry.json"
             if not registry_path.exists():
                 data = {
@@ -374,8 +178,12 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 }
                 return CallToolResult(content=_text(data, fmt))
 
+        method, path, body = build_request(name, arguments, OHM_AGENT)
+        if method == "GET":
+            data = await _ohm_get(path)
         else:
-            return CallToolResult(content=[TextContent(type="text", text=f"Unknown tool: {name}")], isError=True)
+            data = await _ohm_post(path, body or {})
+        return CallToolResult(content=_text(data, fmt))
 
     except httpx.HTTPStatusError as e:
         return CallToolResult(

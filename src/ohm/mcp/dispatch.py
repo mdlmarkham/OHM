@@ -1,0 +1,233 @@
+"""Transport-agnostic request builder for OHM MCP tools.
+
+Maps an MCP tool name and its JSON arguments to the HTTP method, path, and
+body that the OHM daemon expects. Used by both the local stdio sidecar
+(``ohm.mcp.server``) and the hosted FastMCP gateway (``ohm.mcp.gateway``).
+
+Keeping the mapping in one place guarantees that local and remote transports
+hit the same endpoints with the same parameter shapes.
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+
+def build_request(name: str, arguments: dict[str, Any], agent_id: str) -> tuple[str, str, dict[str, Any] | None]:
+    """Return ``(method, path, body)`` for an OHM MCP tool call.
+
+    The returned ``path`` includes the query string when method is ``GET``.
+    ``body`` is ``None`` for GET requests. The ``agent_id`` is used as the
+    default provenance/source for writes.
+
+    Raises:
+        KeyError: if a required argument is missing.
+    """
+    # ── Read tier ──
+    if name == "ohm_stats":
+        return "GET", "/stats", None
+
+    if name == "ohm_search":
+        params: dict[str, str] = {"q": arguments["q"]}
+        if arguments.get("type"):
+            params["type"] = arguments["type"]
+        if arguments.get("created_by"):
+            params["created_by"] = arguments["created_by"]
+        if arguments.get("limit") is not None:
+            params["limit"] = str(arguments["limit"])
+        return "GET", _qs("/search", params), None
+
+    if name == "ohm_get_node":
+        return "GET", f"/node/{arguments['node_id']}", None
+
+    if name == "ohm_neighborhood":
+        params = {}
+        if arguments.get("depth") is not None:
+            params["depth"] = str(arguments["depth"])
+        if arguments.get("layer"):
+            params["layer"] = arguments["layer"]
+        return "GET", _qs(f"/neighborhood/{arguments['node_id']}", params), None
+
+    if name == "ohm_listen":
+        params = {
+            "enrich": str(arguments.get("enrich", True)).lower(),
+            "limit": str(arguments.get("limit", 50)),
+        }
+        if arguments.get("since"):
+            params["since"] = arguments["since"]
+        if arguments.get("agent"):
+            params["agent"] = arguments["agent"]
+        return "GET", _qs("/listen", params), None
+
+    if name == "ohm_confidence":
+        return "GET", f"/confidence/{arguments['edge_id']}", None
+
+    if name == "ohm_path":
+        return "GET", f"/path/{arguments['from_id']}/{arguments['to_id']}", None
+
+    if name == "ohm_agents":
+        return "GET", "/agents", None
+
+    # ── Inference / analysis tier ──
+    if name == "ohm_inference":
+        params = {"target": arguments["target"]}
+        if arguments.get("evidence"):
+            params["evidence"] = arguments["evidence"]
+        if arguments.get("layers"):
+            params["layers"] = arguments["layers"]
+        if arguments.get("leak") is not None:
+            params["leak"] = str(arguments["leak"])
+        return "GET", _qs("/inference", params), None
+
+    if name == "ohm_intervene":
+        params = {
+            "target": arguments["target"],
+            "state": str(arguments["state"]),
+        }
+        if arguments.get("query"):
+            params["query"] = arguments["query"]
+        if arguments.get("layers"):
+            params["layers"] = arguments["layers"]
+        if arguments.get("leak") is not None:
+            params["leak"] = str(arguments["leak"])
+        return "GET", _qs("/intervene", params), None
+
+    if name == "ohm_voi":
+        params = {"decision": arguments["decision"]}
+        if arguments.get("top") is not None:
+            params["top"] = str(arguments["top"])
+        if arguments.get("layers"):
+            params["layers"] = arguments["layers"]
+        if arguments.get("leak") is not None:
+            params["leak"] = str(arguments["leak"])
+        return "GET", _qs("/voi", params), None
+
+    if name == "ohm_refute":
+        params = {
+            "cause": arguments["cause"],
+            "effect": arguments["effect"],
+        }
+        if arguments.get("n_samples") is not None:
+            params["n_samples"] = str(arguments["n_samples"])
+        if arguments.get("methods"):
+            params["methods"] = arguments["methods"]
+        return "GET", _qs("/refute", params), None
+
+    if name == "ohm_discover":
+        params: dict[str, str] = {}
+        if arguments.get("nodes"):
+            params["nodes"] = arguments["nodes"]
+        if arguments.get("method"):
+            params["method"] = arguments["method"]
+        if arguments.get("alpha") is not None:
+            params["alpha"] = str(arguments["alpha"])
+        if arguments.get("min_observations") is not None:
+            params["min_observations"] = str(arguments["min_observations"])
+        return "GET", _qs("/discover", params), None
+
+    # ── Write tier ──
+    if name == "ohm_create_node":
+        body: dict[str, Any] = {
+            "id": arguments["id"],
+            "label": arguments["label"],
+            "node_type": arguments.get("node_type", "concept"),
+            "confidence": arguments.get("confidence", 0.5),
+            "visibility": arguments.get("visibility", "team"),
+            "provenance": arguments.get("provenance", agent_id),
+        }
+        if arguments.get("content"):
+            body["content"] = arguments["content"]
+        if arguments.get("tags"):
+            tags_str = arguments["tags"]
+            body["tags"] = json.loads(tags_str) if isinstance(tags_str, str) else tags_str
+        url = "/node"
+        if not arguments.get("create_only", True):
+            url += "?create_only=false"
+        return "POST", url, body
+
+    if name == "ohm_create_edge":
+        body = {
+            "from": arguments["from_node"],
+            "to": arguments["to_node"],
+            "type": arguments["edge_type"],
+            "layer": arguments.get("layer", "L3"),
+            "confidence": arguments.get("confidence", 0.5),
+            "provenance": arguments.get("provenance", agent_id),
+        }
+        if arguments.get("condition"):
+            body["condition"] = arguments["condition"]
+        return "POST", "/edge", body
+
+    if name == "ohm_observe":
+        body = {
+            "node_id": arguments["node_id"],
+            "obs_type": arguments["obs_type"],
+            "value": arguments["value"],
+            "sigma": arguments.get("sigma", 1.0),
+            "source": arguments.get("source", agent_id),
+        }
+        if arguments.get("notes"):
+            body["notes"] = arguments["notes"]
+        return "POST", f"/observe/{arguments['node_id']}", body
+
+    if name == "ohm_challenge":
+        body = {
+            "reason": arguments["reason"],
+            "confidence": arguments.get("confidence", 0.5),
+        }
+        return "POST", f"/challenge/{arguments['edge_id']}", body
+
+    if name == "ohm_support":
+        body = {
+            "reason": arguments["reason"],
+            "confidence": arguments.get("confidence", 0.7),
+        }
+        return "POST", f"/support/{arguments['edge_id']}", body
+
+    # ── Update / utility tier ──
+    if name == "ohm_update_state":
+        body = {"agent": agent_id}
+        if arguments.get("focus"):
+            body["focus"] = arguments["focus"]
+        if arguments.get("patterns"):
+            patterns = arguments["patterns"]
+            body["patterns"] = json.loads(patterns) if isinstance(patterns, str) else patterns
+        if arguments.get("services"):
+            services = arguments["services"]
+            body["services"] = json.loads(services) if isinstance(services, str) else services
+        return "POST", "/state", body
+
+    if name == "ohm_list_nodes":
+        params = {}
+        if arguments.get("type"):
+            params["type"] = arguments["type"]
+        if arguments.get("label_contains"):
+            params["label_contains"] = arguments["label_contains"]
+        if arguments.get("created_by"):
+            params["created_by"] = arguments["created_by"]
+        params["limit"] = str(arguments.get("limit", 100))
+        params["offset"] = str(arguments.get("offset", 0))
+        return "GET", _qs("/nodes", params), None
+
+    if name == "ohm_domain_onboarding":
+        return "GET", "/schema", None
+
+    if name == "ohm_list_instances":
+        # Local-only operation; not meaningful for a hosted gateway.
+        raise NotImplementedError(
+            "ohm_list_instances is not supported by the hosted gateway; "
+            "use the local ohm-mcp sidecar for instance registry access."
+        )
+
+    raise KeyError(f"Unknown tool: {name}")
+
+
+def _qs(path: str, params: dict[str, str]) -> str:
+    """Append a URL query string built from a parameter dict."""
+    import urllib.parse
+
+    if not params:
+        return path
+    encoded = urllib.parse.urlencode(sorted(params.items()))
+    return f"{path}?{encoded}"

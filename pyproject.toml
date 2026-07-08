@@ -43,7 +43,7 @@ toon = [
     "python-toon>=0.1.3",
 ]
 gateway = [
-    "fastmcp>=2.0",
+    "fastmcp[tasks]>=3.0",
     "httpx>=0.27",
     "python-toon>=0.1.3",
 ]
@@ -98,6 +98,7 @@ ignore_errors = true
 ohm = "ohm.cli:main"
 ohmd = "ohm.server:main"
 ohm-mcp = "ohm.mcp.server:cli_main"
+ohm-gateway = "ohm.mcp.gateway:cli_main"
 topo = "ohm.cli:topo_main"
 topod = "ohm.server:topod_main"
 
