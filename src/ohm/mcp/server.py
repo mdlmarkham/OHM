@@ -15,7 +15,6 @@ Configuration via environment variables:
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 
@@ -35,7 +34,6 @@ from mcp.types import (
 from ohm.mcp.encoding import (
     DEFAULT_FORMAT,
     encode_payload,
-    format_supported,
     requested_format,
 )
 from ohm.mcp.config import config as _config, load_config_file as _load_config_file, is_tool_allowed as _is_tool_allowed, make_headers, validate_domain_config as _validate_domain_config, WRITE_TOOLS as _WRITE_TOOLS

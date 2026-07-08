@@ -19,7 +19,6 @@ import os
 import platform
 import shutil
 import subprocess
-import sys
 import time
 import urllib.error
 import urllib.request
@@ -770,7 +769,7 @@ def run_connect(args: argparse.Namespace) -> None:
         print(f"  ⚠ Schema check failed: {e}")
 
     try:
-        orient = verify_tenant_orient(url, customer_key, args.agent_id or "metis")
+        verify_tenant_orient(url, customer_key, args.agent_id or "metis")
         print("  ✓ Orient returned signal")
     except Exception as e:
         print(f"  ⚠ Orient check failed: {e}")
@@ -822,7 +821,7 @@ def run_greenfield(args: argparse.Namespace) -> None:
         if parsed.port:
             parsed_port = parsed.port
 
-    print(f"\n2. Writing default config with admin agent 'standup' ...")
+    print("\n2. Writing default config with admin agent 'standup' ...")
     admin_token = write_default_config(
         config_path,
         db_path,
@@ -830,7 +829,7 @@ def run_greenfield(args: argparse.Namespace) -> None:
         host=parsed_host,
         port=parsed_port,
     )
-    print(f"  ✓ Config written")
+    print("  ✓ Config written")
 
     print(f"\n3. Starting ohmd via {service_mode} ...")
     start_ohmd_service(service_mode, db_path, multi_tenant=multi_tenant, user=user_scope)
@@ -856,7 +855,7 @@ def run_greenfield(args: argparse.Namespace) -> None:
 
     print(f"\n5. Provisioning tenant {tenant_id} ...")
     customer_key = provision_tenant(url, admin_token, tenant_id, args.template)
-    print(f"  ✓ Tenant provisioned")
+    print("  ✓ Tenant provisioned")
 
     print(f"\n6. Seeding tenant with template {args.template} ...")
     seed_tenant(url, customer_key, tenant_id, args.template)
@@ -914,7 +913,7 @@ def run_greenfield(args: argparse.Namespace) -> None:
             edge_count = len(seed_payload(args.template)["edges"])
         print(f"  ✓ Orient returned {node_count} nodes, {edge_count} edges")
         if node_count >= 8 and edge_count >= 6:
-            print(f"  ✓ Minimum viable graph reached")
+            print("  ✓ Minimum viable graph reached")
         else:
             print(f"  ⚠ Graph below minimum viable threshold: {node_count} nodes, {edge_count} edges")
     except Exception as e:

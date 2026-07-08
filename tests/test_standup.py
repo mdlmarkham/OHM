@@ -157,7 +157,3 @@ def test_run_local_creates_agent_store(tmp_path, monkeypatch):
     assert data["mode"] == "local"
     assert data["db_path"] == str(db_path)
     assert data["ducklake_path"] is None
-
-
-# Re-import json inside tests because the module-level import above is not real
-import json  # noqa: E402

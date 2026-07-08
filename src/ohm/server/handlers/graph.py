@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Any
 
 from ohm.server import suggestions as _suggestions_module
 
@@ -217,7 +218,6 @@ class GraphHandlerMixin:
 
     def _get_schema_node_types(self, path: str, qs: dict) -> None:
         """GET /schema/node-types?type=X — per-node-type template + hook constraints."""
-        from ohm.exceptions import ValidationError
         from ohm.queries import node_type_template
 
         node_type = qs.get("type", [None])[0]
@@ -230,7 +230,6 @@ class GraphHandlerMixin:
         result = node_type_template(self.current_store.read_conn, node_type=node_type)
         # Enrich with live hook constraints for this schema
         hooks = self.current_store.execute("SELECT command FROM ohm_hooks WHERE event = 'pre_ingest' AND enabled = TRUE")
-        hook_names = {h["command"] for h in hooks}
         hook_map = {
             "source_url_required": "source_url_required",
             "cross_link_check": "cross_link_required",
