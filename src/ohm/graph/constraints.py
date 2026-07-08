@@ -464,6 +464,214 @@ def effective_layer(conn: DuckDBPyConnection, node_id: str, t: str | None = None
     return original_layer, {}
 
 
+def effective_layers(conn: DuckDBPyConnection, node_ids: list[str], t: str | None = None) -> dict[str, str]:
+    """Batch version of effective_layer() for a list of node IDs.
+
+    Returns only the effective layer string for each node (not the full
+    constraint_status dict). This is intended for callers such as
+    /neighborhood that need effective_layer on many nodes and can avoid
+    the N+1 query cost of calling effective_layer() individually.
+
+    The algorithm mirrors effective_layer():
+      - fragment -> L0
+      - source -> L1
+      - L0/L1/L2 -> original layer
+      - L3/L4 -> original layer gated by chain_validity, sources,
+        verified outcomes, open challenges, and L3 support counts.
+    """
+    if not node_ids:
+        return {}
+
+    placeholders = ", ".join("?" for _ in node_ids)
+
+    # 1. Node types
+    node_types = {}
+    rows = conn.execute(
+        f"SELECT id, type FROM ohm_nodes WHERE id IN ({placeholders}) AND deleted_at IS NULL",
+        node_ids,
+    ).fetchall()
+    for nid, ntype in rows:
+        node_types[nid] = ntype
+
+    # 2. Max incident edge layer per node
+    max_levels: dict[str, int] = {}
+    rows = conn.execute(
+        f"""
+        SELECT node_id, MAX(level) AS max_level FROM (
+            SELECT from_node AS node_id,
+                   CASE layer
+                       WHEN 'L0' THEN 0 WHEN 'L1' THEN 1
+                       WHEN 'L2' THEN 2 WHEN 'L3' THEN 3
+                       WHEN 'L4' THEN 4 ELSE 0 END AS level
+            FROM ohm_edges
+            WHERE from_node IN ({placeholders}) AND deleted_at IS NULL
+            UNION ALL
+            SELECT to_node AS node_id,
+                   CASE layer
+                       WHEN 'L0' THEN 0 WHEN 'L1' THEN 1
+                       WHEN 'L2' THEN 2 WHEN 'L3' THEN 3
+                       WHEN 'L4' THEN 4 ELSE 0 END AS level
+            FROM ohm_edges
+            WHERE to_node IN ({placeholders}) AND deleted_at IS NULL
+        ) GROUP BY node_id
+        """,
+        node_ids + node_ids,
+    ).fetchall()
+    for nid, lvl in rows:
+        max_levels[nid] = lvl
+
+    # 3. Sources per node
+    sources: dict[str, int] = {nid: 0 for nid in node_ids}
+    rows = conn.execute(
+        f"""
+        SELECT target_id, COUNT(DISTINCT source_id) AS cnt FROM (
+            SELECT e.from_node AS target_id, e.to_node AS source_id
+            FROM ohm_edges e
+            JOIN ohm_nodes n ON n.id = e.to_node AND n.type = 'source' AND n.deleted_at IS NULL
+            WHERE e.from_node IN ({placeholders}) AND e.deleted_at IS NULL AND n.id != e.from_node
+            UNION ALL
+            SELECT e.to_node AS target_id, e.from_node AS source_id
+            FROM ohm_edges e
+            JOIN ohm_nodes n ON n.id = e.from_node AND n.type = 'source' AND n.deleted_at IS NULL
+            WHERE e.to_node IN ({placeholders}) AND e.deleted_at IS NULL AND n.id != e.to_node
+        ) GROUP BY target_id
+        """,
+        node_ids + node_ids,
+    ).fetchall()
+    for nid, cnt in rows:
+        sources[nid] = cnt
+
+    # 4. Verified outcomes per node
+    verified_outcomes: dict[str, int] = {nid: 0 for nid in node_ids}
+    rows = conn.execute(
+        f"""
+        SELECT claim_node, COUNT(*) AS cnt
+        FROM ohm_outcomes
+        WHERE claim_node IN ({placeholders}) AND outcome = TRUE
+        GROUP BY claim_node
+        """,
+        node_ids,
+    ).fetchall()
+    for nid, cnt in rows:
+        verified_outcomes[nid] = cnt
+
+    # 5. Open challenges per node
+    challenges: dict[str, int] = {nid: 0 for nid in node_ids}
+    rows = conn.execute(
+        f"""
+        SELECT target_id, COUNT(*) AS cnt FROM (
+            SELECT from_node AS target_id FROM ohm_edges
+            WHERE from_node IN ({placeholders}) AND edge_type = 'CHALLENGED_BY'
+              AND deleted_at IS NULL AND challenge_type IS NULL
+            UNION ALL
+            SELECT to_node AS target_id FROM ohm_edges
+            WHERE to_node IN ({placeholders}) AND edge_type = 'CHALLENGED_BY'
+              AND deleted_at IS NULL AND challenge_type IS NULL
+        ) GROUP BY target_id
+        """,
+        node_ids + node_ids,
+    ).fetchall()
+    for nid, cnt in rows:
+        challenges[nid] = cnt
+
+    # 6. L2/L3 supporting nodes per node
+    support: dict[str, int] = {nid: 0 for nid in node_ids}
+    rows = conn.execute(
+        f"""
+        SELECT target_id, COUNT(DISTINCT peer_id) AS cnt FROM (
+            SELECT e.from_node AS target_id, e.to_node AS peer_id
+            FROM ohm_edges e
+            WHERE e.from_node IN ({placeholders})
+              AND e.deleted_at IS NULL
+              AND (e.layer = 'L3' OR e.layer = 'L2')
+              AND e.to_node != e.from_node
+            UNION ALL
+            SELECT e.to_node AS target_id, e.from_node AS peer_id
+            FROM ohm_edges e
+            WHERE e.to_node IN ({placeholders})
+              AND e.deleted_at IS NULL
+              AND (e.layer = 'L3' OR e.layer = 'L2')
+              AND e.from_node != e.to_node
+        ) GROUP BY target_id
+        """,
+        node_ids + node_ids,
+    ).fetchall()
+    for nid, cnt in rows:
+        support[nid] = cnt
+
+    # 7. Chain validity (min observation confidence) per node
+    chain_validities: dict[str, float] = {nid: 0.0 for nid in node_ids}
+    if t:
+        rows = conn.execute(
+            f"""
+            SELECT node_id, MIN(COALESCE(value, 0.5)) AS cv
+            FROM ohm_observations
+            WHERE node_id IN ({placeholders}) AND deleted_at IS NULL
+              AND (valid_to IS NULL OR valid_to > ?::TIMESTAMP)
+            GROUP BY node_id
+            """,
+            node_ids + [t],
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            f"""
+            SELECT node_id, MIN(COALESCE(value, 0.5)) AS cv
+            FROM ohm_observations
+            WHERE node_id IN ({placeholders}) AND deleted_at IS NULL
+            GROUP BY node_id
+            """,
+            node_ids,
+        ).fetchall()
+    for nid, cv in rows:
+        chain_validities[nid] = cv if cv is not None else 0.0
+
+    level_map = {0: "L0", 1: "L1", 2: "L2", 3: "L3", 4: "L4"}
+    result: dict[str, str] = {}
+    for nid in node_ids:
+        ntype = node_types.get(nid)
+        if ntype is None:
+            result[nid] = "unknown"
+            continue
+        if ntype == "fragment":
+            result[nid] = "L0"
+            continue
+        if ntype == "source":
+            result[nid] = "L1"
+            continue
+
+        original_layer = level_map.get(max_levels.get(nid, 0), "L1")
+        if original_layer in ("L0", "L1", "L2"):
+            result[nid] = original_layer
+            continue
+
+        cv = chain_validities.get(nid, 0.0)
+        src = sources.get(nid, 0)
+        out = verified_outcomes.get(nid, 0)
+        ch = challenges.get(nid, 0)
+
+        if original_layer == "L3":
+            if cv >= 0.3 and src >= 2 and out >= 1 and ch == 0:
+                result[nid] = "L3"
+            elif cv >= 0.1 and src >= 1:
+                result[nid] = "L2"
+            else:
+                result[nid] = "L1"
+        elif original_layer == "L4":
+            sup = support.get(nid, 0)
+            if cv >= 0.5 and sup >= 3 and out >= 2 and ch == 0:
+                result[nid] = "L4"
+            elif cv >= 0.3 and sup >= 2 and out >= 1:
+                result[nid] = "L3"
+            elif cv >= 0.1:
+                result[nid] = "L2"
+            else:
+                result[nid] = "L1"
+        else:
+            result[nid] = original_layer
+
+    return result
+
+
 def _build_constraint_status(conn: DuckDBPyConnection, node_id: str, layer: str, t: str | None = None) -> dict[str, Any]:
     status: dict[str, Any] = {}
     layer.replace("L", "L")

@@ -762,15 +762,16 @@ class GraphHandlerMixin:
         # ADR-022: Add effective_layer for each node in the neighborhood
         # ADR-023: Skip effective_layer computation for large neighborhoods (>500 nodes)
         # to prevent OOM crashes. Include warning when skipped.
-        from ohm.graph.constraints import effective_layer
+        from ohm.graph.constraints import effective_layers
 
         LARGE_NEIGHBORHOOD_THRESHOLD = 500
         response = {"nodes": node_rows, "edges": edges}
 
         if len(node_rows) <= LARGE_NEIGHBORHOOD_THRESHOLD:
+            node_ids_list = [n["id"] for n in node_rows]
+            eff_layers = effective_layers(self.current_store.conn, node_ids_list)
             for n in node_rows:
-                eff_layer, _cs = effective_layer(self.current_store.conn, n["id"])
-                n["effective_layer"] = eff_layer
+                n["effective_layer"] = eff_layers.get(n["id"], "unknown")
         else:
             response["warning"] = f"Neighborhood has {len(node_rows)} nodes; effective_layer computation skipped for performance. Use /constraint-report?batch=true for bulk analysis."
             response["truncated"] = True

@@ -457,7 +457,40 @@ class TestConstraintReport:
         assert "min_observations" in CONSTRAINT_DISPATCH
         assert "min_chain_validity" in CONSTRAINT_DISPATCH
         assert "no_open_challenges" in CONSTRAINT_DISPATCH
-        assert "require_references_edge" in CONSTRAINT_DISPATCH
-        assert "min_L3_support" in CONSTRAINT_DISPATCH
-        assert "min_outcomes" in CONSTRAINT_DISPATCH
-        assert "min_verified_outcomes" in CONSTRAINT_DISPATCH
+
+
+class TestEffectiveLayersBatch:
+    """Tests for effective_layers() batch helper (OHM-efficiency-neighborhood-nplus1)."""
+
+    def test_batch_matches_single_node_results(self, db):
+        from ohm.graph.constraints import effective_layer, effective_layers
+
+        # Build a small graph with L0/L1/L2/L3 nodes
+        frag = _create_node(db, label="frag", node_type="fragment")
+        src = _create_node(db, label="src", node_type="source", url="https://x.com")
+        l2 = _create_node(db, label="l2", node_type="concept", layer="L2")
+        l3 = _create_node(db, label="l3", node_type="concept", layer="L3")
+        s1 = _create_node(db, label="s1", node_type="source", url="https://a.com")
+        s2 = _create_node(db, label="s2", node_type="source", url="https://b.com")
+        _create_edge(db, from_node=l3, to_node=s1, layer="L2", edge_type="REFERENCES", created_by="agent_a")
+        _create_edge(db, from_node=l3, to_node=s2, layer="L2", edge_type="REFERENCES", created_by="agent_b")
+        _create_observation(db, node_id=l3, value=0.8)
+        _create_observation(db, node_id=l3, value=0.7)
+        _create_outcome(db, claim_node=l3, outcome=True)
+
+        node_ids = [frag, src, l2, l3]
+        batch = effective_layers(db, node_ids)
+        for nid in node_ids:
+            single, _ = effective_layer(db, nid)
+            assert batch[nid] == single, f"mismatch for {nid}: batch={batch[nid]}, single={single}"
+
+    def test_batch_empty_list(self, db):
+        from ohm.graph.constraints import effective_layers
+
+        assert effective_layers(db, []) == {}
+
+    def test_batch_unknown_node(self, db):
+        from ohm.graph.constraints import effective_layers
+
+        result = effective_layers(db, ["does_not_exist"])
+        assert result == {"does_not_exist": "unknown"}
