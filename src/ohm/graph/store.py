@@ -646,6 +646,10 @@ class OhmStore:
                 row["from"] = row["from_node"]
                 row["to"] = row["to_node"]
                 row["type"] = row["edge_type"]
+            # Add convenience alias for node type (write API uses node_type,
+            # DB column is type; expose both so read responses are symmetric)
+            if "type" in row and "from_node" not in row and "node_type" not in row:
+                row["node_type"] = row["type"]
         return results
 
     def execute_one(self, sql: str, params: Optional[list] = None) -> Optional[dict[str, Any]]:
@@ -658,6 +662,9 @@ class OhmStore:
             row["from"] = row["from_node"]
             row["to"] = row["to_node"]
             row["type"] = row["edge_type"]
+        # Add node_type alias on single-node reads too
+        if row and "type" in row and "from_node" not in row and "node_type" not in row:
+            row["node_type"] = row["type"]
         return row
 
     @property

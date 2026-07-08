@@ -85,6 +85,7 @@ class TestSchemaEndpoints:
 
 
 @pytest.mark.xdist_group("server")
+@pytest.mark.xdist_group("server")
 class TestNodeEndpoints:
     """Tests for node CRUD via HTTP."""
 
@@ -92,6 +93,45 @@ class TestNodeEndpoints:
         port, _ = test_server
         status, data = _request("GET", port, "/node/nonexistent")
         assert status == 404
+
+    def test_create_and_get_node(self, test_server):
+        port, store = test_server
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "test_node_1",
+                "label": "Test Node",
+                "type": "concept",
+            },
+        )
+        assert status == 201
+        assert data["id"] == "test_node_1"
+
+        status, data = _request("GET", port, "/node/test_node_1")
+        assert status == 200
+        assert data["label"] == "Test Node"
+        assert data["type"] == "concept"
+        assert data["node_type"] == "concept"
+
+    def test_get_nodes_includes_node_type_alias(self, test_server):
+        port, store = test_server
+        _request(
+            "POST",
+            port,
+            "/node",
+            body={
+                "id": "nt_alias_node",
+                "label": "Alias Test",
+                "type": "concept",
+            },
+        )
+        status, data = _request("GET", port, "/nodes?type=concept&limit=1")
+        assert status == 200
+        assert data["nodes"]
+        assert data["nodes"][0]["type"] == "concept"
+        assert data["nodes"][0]["node_type"] == "concept"
 
 
 @pytest.mark.xdist_group("server")
@@ -189,25 +229,6 @@ class TestFragmentResonanceEndpoint:
         status, data = _request("GET", port, "/admin/fragment-resonance?min_shared=1")
         assert status == 200
 
-    def test_create_and_get_node(self, test_server):
-        port, store = test_server
-        status, data = _request(
-            "POST",
-            port,
-            "/node",
-            body={
-                "id": "test_node_1",
-                "label": "Test Node",
-                "type": "concept",
-            },
-        )
-        assert status == 201
-        assert data["id"] == "test_node_1"
-
-        status, data = _request("GET", port, "/node/test_node_1")
-        assert status == 200
-        assert data["label"] == "Test Node"
-
 
 @pytest.mark.xdist_group("server")
 class TestEdgeEndpoints:
@@ -218,6 +239,43 @@ class TestEdgeEndpoints:
         status, data = _request("GET", port, "/edge/nonexistent")
         assert status == 404
         assert data["error"] == "not_found"
+
+    def test_get_edges_filtered(self, test_server):
+        port, store = test_server
+        _request("POST", port, "/node", body={"id": "ea", "label": "EA", "type": "concept"})
+        _request("POST", port, "/node", body={"id": "eb", "label": "EB", "type": "concept"})
+        _request(
+            "POST", port, "/edge",
+            body={"from": "ea", "to": "eb", "type": "CAUSES", "layer": "L3"},
+        )
+        status, data = _request("GET", port, "/edges?edge_type=CAUSES")
+        assert status == 200
+        assert len(data["edges"]) == 1
+        assert data["edges"][0]["edge_type"] == "CAUSES"
+        assert data["total"] == 1
+
+        status, data = _request("GET", port, "/edges?from_type=concept&to_type=concept")
+        assert status == 200
+        assert len(data["edges"]) == 1
+
+        status, data = _request("GET", port, "/edges?edge_type=REFERENCES")
+        assert status == 200
+        assert len(data["edges"]) == 0
+
+    def test_get_schema_node_types(self, test_server):
+        port, store = test_server
+        status, data = _request("GET", port, "/schema/node-types?type=pattern")
+        assert status == 200
+        assert data["ok"] is True
+        assert data["data"]["node_type"] == "pattern"
+        assert "cross_link_required" in data["data"]["hook_constraints"]
+        assert "required_fields" in data["data"]
+
+    def test_get_schema_node_types_requires_type(self, test_server):
+        port, store = test_server
+        status, data = _request("GET", port, "/schema/node-types")
+        assert status == 400
+        assert data["error"] == "validation_error"
 
     def test_create_edge(self, test_server):
         port, store = test_server

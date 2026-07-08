@@ -208,3 +208,28 @@ async def test_mcp_e2e_tools_list_filtered(ohmd):
     tool_names = {t.name for t in tools}
     assert "ohm_stats" in tool_names, f"ohm_stats not in tools: {tool_names}"
     assert "ohm_create_node" not in tool_names, f"read_only/allowed_tools filtering failed: {tool_names}"
+
+
+@pytest.mark.anyio
+async def test_mcp_e2e_verify_dump_tools(ohmd):
+    """--dump-tools and --verify should work without starting stdio transport."""
+    base_url, admin_token, _db_path = ohmd
+    tenant_id = "acme_devops4"
+    domain = "ohm"
+
+    customer_token = _provision_tenant(base_url, admin_token, tenant_id, domain)
+    _load_mcp_config(base_url, customer_token, tenant_id, domain)
+
+    from ohm.mcp.server import _dump_tools, _run_verify
+
+    dump = await _dump_tools()
+    assert dump["read_only"] is True
+    assert "ohm_stats" in {t["name"] for t in dump["tools"]}
+    assert all(t["allowed"] == (t["name"] == "ohm_stats") for t in dump["tools"])
+
+    verify = await _run_verify()
+    assert verify["health"] is not None
+    assert verify["health"].get("status") == "ok"
+    assert verify["write_probe"]["ok"] is False or verify["write_probe"]["reason"] is not None
+    assert not verify["errors"]
+    assert any(t == "ohm_stats" for t in verify["tools"])

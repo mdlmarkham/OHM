@@ -31,7 +31,17 @@ def _rows_to_dicts(result: Any) -> list[dict[str, Any]]:
     if not result:
         return []
     columns = [desc[0] for desc in result.description]
-    return [dict(zip(columns, row)) for row in result.fetchall()]
+    rows = [dict(zip(columns, row)) for row in result.fetchall()]
+    # Convenience aliases
+    for row in rows:
+        if "from_node" in row:
+            row["from"] = row["from_node"]
+            row["to"] = row["to_node"]
+            row["type"] = row["edge_type"]
+        # node_type is the write API field name; DB column is type. Expose both.
+        if "type" in row and "from_node" not in row and "node_type" not in row:
+            row["node_type"] = row["type"]
+    return rows
 
 
 def _percentile(count: int, trials: int, pct: float) -> float:
@@ -2371,6 +2381,169 @@ def node_type_template(
     node_type = validate_identifier(node_type, name="node_type").lower()
 
     templates: dict[str, dict[str, Any]] = {
+        "concept": {
+            "node_type": "concept",
+            "description": "Core abstract idea, pattern, or theory. Can stand alone until it becomes a derived claim.",
+            "required_fields": {"label": "str"},
+            "optional_fields": {
+                "id": "str (auto-generated from label if omitted)",
+                "content": "str (description)",
+                "node_type": "'concept' (default)",
+                "confidence": "float 0.0-1.0 (default 1.0)",
+                "provenance": "str",
+                "tags": "list[str]",
+                "metadata": "dict",
+                "source_url": "str (alias for url)",
+                "source_tier": "raw|unverified|preliminary|official|verified",
+                "source_author": "str",
+                "source_institution": "str",
+            },
+            "example": {
+                "label": "AND→OR Conversion",
+                "content": "A Boolean gate where all inputs must be TRUE...",
+                "node_type": "concept",
+                "tags": ["boolean", "governance"],
+            },
+            "suggested_edge_types": [
+                {"edge_type": "CAUSES", "layer": "L3", "when": "concept→concept causal claim"},
+                {"edge_type": "APPLIES_TO", "layer": "L3", "when": "pattern→instance"},
+            ],
+            "create_endpoint": "POST /node",
+        },
+        "source": {
+            "node_type": "source",
+            "description": "External reference (article, book, paper, URL). MUST include source_url.",
+            "required_fields": {"label": "str", "source_url": "str"},
+            "optional_fields": {
+                "id": "str",
+                "content": "str",
+                "node_type": "'source'",
+                "confidence": "float",
+                "provenance": "str",
+                "tags": "list[str]",
+                "metadata": "dict",
+                "source_tier": "raw|unverified|preliminary|official|verified",
+                "source_author": "str",
+                "source_institution": "str",
+            },
+            "example": {
+                "label": "Reuters Hormuz transit report",
+                "node_type": "source",
+                "source_url": "https://www.reuters.com/article/hormuz-transit",
+                "source_tier": "verified",
+            },
+            "suggested_edge_types": [
+                {"edge_type": "REFERENCES", "layer": "L2", "when": "interpretation/source→source"},
+            ],
+            "create_endpoint": "POST /node",
+            "hook_constraints": ["source_url_required"],
+        },
+        "pattern": {
+            "node_type": "pattern",
+            "description": "Recurring structure (AND-gate, trap, cycle, equilibrium). Must anchor to existing nodes.",
+            "required_fields": {"label": "str"},
+            "optional_fields": {
+                "id": "str",
+                "content": "str",
+                "node_type": "'pattern'",
+                "confidence": "float",
+                "provenance": "str",
+                "tags": "list[str]",
+                "metadata": "dict",
+                "connects_to": "list[str] (existing node ids — required by cross_link rule)",
+            },
+            "example": {
+                "label": "AND→OR Conversion Family",
+                "node_type": "pattern",
+                "connects_to": ["concept-and-or-conversion"],
+            },
+            "suggested_edge_types": [
+                {"edge_type": "CONTAINS", "layer": "L1", "when": "pattern→member concept"},
+                {"edge_type": "APPLIES_TO", "layer": "L3", "when": "pattern→instance"},
+            ],
+            "create_endpoint": "POST /node",
+            "hook_constraints": ["cross_link_required"],
+        },
+        "task": {
+            "node_type": "task",
+            "description": "Action item with status, priority, assignment, due date.",
+            "required_fields": {"label": "str"},
+            "optional_fields": {
+                "id": "str",
+                "content": "str",
+                "node_type": "'task'",
+                "priority": "P0|P1|P2|P3|P4",
+                "task_status": "open|in_progress|blocked|review|done|cancelled",
+                "assigned_to": "str (agent name)",
+                "due_date": "ISO 8601 timestamp",
+                "connects_to": "list[str] (existing node ids — required by cross_link rule)",
+            },
+            "example": {
+                "label": "Verify AND→OR framework",
+                "node_type": "task",
+                "priority": "P1",
+                "task_status": "open",
+                "assigned_to": "socrates",
+                "connects_to": ["concept-and-or-conversion"],
+            },
+            "suggested_edge_types": [
+                {"edge_type": "REFERENCES", "layer": "L2", "when": "task→concept it validates"},
+                {"edge_type": "DELEGATED_TO", "layer": "L2", "when": "task→agent"},
+            ],
+            "create_endpoint": "POST /node or POST /tasks",
+            "hook_constraints": ["cross_link_required"],
+        },
+        "decision": {
+            "node_type": "decision",
+            "description": "Choice node with utility, alternatives, and current best action. Enables VoI and game-theoretic analysis.",
+            "required_fields": {"label": "str"},
+            "optional_fields": {
+                "id": "str",
+                "content": "str",
+                "node_type": "'decision'",
+                "utility_scale": "float 0-1 or best/neutral/worst",
+                "utility_usd_per_day": "float",
+                "utility_currency": "ISO 4217 code",
+                "current_best_action": "str",
+                "action_alternatives": "list[str]",
+                "connects_to": "list[str] (existing node ids — required by cross_link rule)",
+            },
+            "example": {
+                "label": "Escalate Hormuz response",
+                "node_type": "decision",
+                "utility_scale": 0.9,
+                "current_best_action": "diplomatic_channel",
+                "action_alternatives": ["military_response", "sanctions"],
+                "connects_to": ["event-hormuz-closure"],
+            },
+            "suggested_edge_types": [
+                {"edge_type": "INFLUENCES", "layer": "L2", "when": "factor→decision"},
+                {"edge_type": "DEPENDS_ON", "layer": "L4", "when": "decision→prerequisite"},
+            ],
+            "create_endpoint": "POST /node",
+            "hook_constraints": ["cross_link_required"],
+        },
+        "observation": {
+            "node_type": "observation",
+            "description": "A recorded measurement or assessment on an existing node. Use POST /observe/{id} in most cases.",
+            "required_fields": {"label": "str"},
+            "optional_fields": {
+                "id": "str",
+                "content": "str",
+                "node_type": "'observation'",
+                "connects_to": "list[str] (existing node ids — required by cross_link rule)",
+            },
+            "example": {
+                "label": "Brent price observation",
+                "node_type": "observation",
+                "connects_to": ["concept-hormuz-demand-rationing"],
+            },
+            "suggested_edge_types": [
+                {"edge_type": "REFERENCES", "layer": "L2", "when": "observation→source"},
+            ],
+            "create_endpoint": "POST /node (rare) or POST /observe/{node_id}",
+            "hook_constraints": ["cross_link_required"],
+        },
         "skill": {
             "node_type": "skill",
             "description": "Portable agent capability with trigger, scope, tools, boundaries, output, and verification evidence.",
@@ -2399,6 +2572,7 @@ def node_type_template(
                 {"edge_type": "ENABLES", "layer": "L4", "when": "skill→runbook"},
             ],
             "create_endpoint": "POST /skill",
+            "hook_constraints": ["cross_link_required"],
         },
         "runbook": {
             "node_type": "runbook",
@@ -2419,6 +2593,7 @@ def node_type_template(
             ],
             "create_endpoint": "POST /runbook",
             "query_endpoint": "GET /runbook/{id}/steps",
+            "hook_constraints": ["cross_link_required"],
         },
     }
 

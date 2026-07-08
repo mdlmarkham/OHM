@@ -53,6 +53,20 @@ class TestNodeTypeTemplate:
         result = node_type_template(conn, node_type="SKILL")
         assert result["node_type"] == "skill"
 
+    def test_common_node_types_have_templates(self, conn):
+        for t in ["concept", "source", "pattern", "task", "decision", "observation"]:
+            result = node_type_template(conn, node_type=t)
+            assert result["node_type"] == t, f"template returned wrong node_type for {t}"
+            assert "required_fields" in result
+            assert "example" in result
+            assert "suggested_edge_types" in result
+
+    def test_template_exposes_hook_constraints(self, conn):
+        source = node_type_template(conn, node_type="source")
+        assert source.get("hook_constraints") == ["source_url_required"]
+        pattern = node_type_template(conn, node_type="pattern")
+        assert "cross_link_required" in pattern.get("hook_constraints", [])
+
 
 class TestSkillRunbookQueryGuide:
     """GET /queries?domain=skill — skill_runbook_query_guide()."""

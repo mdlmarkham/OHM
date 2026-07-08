@@ -788,6 +788,7 @@ def _build_router() -> _RouteRegistry:
         "/stats",
         "/status",
         "/schema",
+        "/schema/node-types",
         "/layers",
         "/agents",
         "/nodes",
@@ -826,6 +827,7 @@ def _build_router() -> _RouteRegistry:
         "/reports",
         "/runs",
         "/rul",
+        "/edges",
     ):
         r.add("GET", _p)
 
@@ -2573,6 +2575,7 @@ OhmHandler._GET_EXACT = {
     "/stats": "_get_stats",
     "/status": "_get_status",
     "/schema": "_get_schema",
+    "/schema/node-types": "_get_schema_node_types",
     "/templates": "_get_templates",
     "/queries": "_get_queries",
     "/plans": "_get_plans",
@@ -2658,6 +2661,7 @@ OhmHandler._GET_EXACT = {
     "/admin/duplicates": "_get_admin_duplicates",
     "/admin/fragment-resonance": "_get_fragment_resonance",
     "/tenants": "_get_tenants",
+    "/edges": "_get_edges",
 }
 
 

@@ -1356,7 +1356,11 @@ class Graph:
         if result is None:
             return None
         columns = [desc[0] for desc in self._conn.description]
-        return dict(zip(columns, result))
+        row = dict(zip(columns, result))
+        # node_type is the write API field name; DB column is type. Expose both.
+        if "type" in row and "node_type" not in row:
+            row["node_type"] = row["type"]
+        return row
 
     def get_edge(self, edge_id: str) -> dict[str, Any] | None:
         """Retrieve a single edge by ID.
