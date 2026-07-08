@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -249,8 +250,12 @@ class InfraHandlerMixin:
                 # Try to get last sync time from agent_state or a sync table
                 try:
                     sync_row = self.current_store.execute_one("SELECT last_sync_at FROM ohm_sync_state WHERE id = 'ducklake' LIMIT 1")
-                    if sync_row and sync_row.get("last_sync_at"):
-                        ducklake_info["last_sync_at"] = str(sync_row["last_sync_at"])
+                    last_sync = sync_row.get("last_sync_at") if sync_row else None
+                    if last_sync:
+                        ducklake_info["last_sync_at"] = str(last_sync)
+                        if last_sync.tzinfo is None:
+                            last_sync = last_sync.replace(tzinfo=timezone.utc)
+                        ducklake_info["lag_seconds"] = (datetime.now(timezone.utc) - last_sync).total_seconds()
                 except Exception:
                     pass
         except Exception:
@@ -278,7 +283,7 @@ class InfraHandlerMixin:
                 "domain_configs": domain_configs,
                 "listen_url": listen_url,
                 "ducklake": ducklake_info,
-                "started_at": None,
+                "started_at": datetime.fromtimestamp(_START_TIME, tz=timezone.utc).isoformat(),
                 "uptime_seconds": uptime,
                 "agent_count": agent_count,
             },
@@ -374,6 +379,23 @@ class InfraHandlerMixin:
                     f"ohm_instance_uptime_seconds {uptime}",
                     "",
                 ]
+                try:
+                    sync_row = self.current_store.execute_one("SELECT last_sync_at FROM ohm_sync_state WHERE id = 'ducklake' LIMIT 1")
+                    last_sync_at = sync_row.get("last_sync_at") if sync_row else None
+                    if last_sync_at is not None:
+                        last_sync_ts = float(last_sync_at.timestamp()) if hasattr(last_sync_at, "timestamp") else float(last_sync_at)
+                        lag_seconds = max(0.0, round(time.time() - last_sync_ts, 3))
+                        lines += [
+                            "# HELP ohm_ducklake_sync_lag_seconds Seconds since last DuckLake sync",
+                            "# TYPE ohm_ducklake_sync_lag_seconds gauge",
+                            f"ohm_ducklake_sync_lag_seconds {lag_seconds}",
+                            "# HELP ohm_ducklake_last_sync_timestamp Unix timestamp of last DuckLake sync",
+                            "# TYPE ohm_ducklake_last_sync_timestamp gauge",
+                            f"ohm_ducklake_last_sync_timestamp {last_sync_ts}",
+                            "",
+                        ]
+                except Exception:
+                    pass
             except Exception:
                 pass
             body_bytes = "\n".join(lines).encode()

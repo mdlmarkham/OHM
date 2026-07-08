@@ -27,13 +27,6 @@ from pathlib import Path
 from typing import Any
 
 
-def _mask_credential(value: str) -> str:
-    """Return a masked representation for display. Does not expose the original."""
-    if len(value) > 12:
-        return value[:8] + "..." + value[-4:]
-    return "***"
-
-
 def _req(method: str, url: str, token: str | None = None, data: dict | None = None, timeout: float = 5.0) -> dict:
     headers = {"Accept": "application/json"}
     if token:
@@ -248,8 +241,10 @@ def main() -> int:
     else:
         print("  ⚠ Skipping schema verification (auth). Config will still be written.")
 
-    masked = _mask_credential(customer_key)
-    print(f"  ✓ Token (masked): {masked}")
+    if customer_key:
+        print("  ✓ Token configured (masked for security)")
+    else:
+        print("  ✗ No token available")
 
     print("\n5. Writing MCP config...")
     config_path = write_mcp_config(base_url, tenant_id, customer_key)

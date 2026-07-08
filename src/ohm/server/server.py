@@ -1998,6 +1998,7 @@ class OhmHandler(
                 _request_latencies.append(elapsed)
             _record_endpoint_latency("PATCH", self.path, elapsed, code)
             self.log_message(
+                "%s %s %.3fms",
                 self.path,
                 code,
                 elapsed,
