@@ -250,6 +250,22 @@ async def test_mcp_e2e_verify_dump_tools(ohmd):
 
 
 @pytest.mark.anyio
+async def test_mcp_e2e_shared_tool_registry(ohmd):
+    """The transport-agnostic tool registry exposes the same schemas as the server."""
+    from ohm.mcp.tools import all_tools
+    from ohm.mcp.server import list_tools
+
+    registry_tools = {t.name for t in all_tools()}
+    server_tools = {t.name for t in await list_tools()}
+    assert "ohm_inference" in registry_tools
+    assert "ohm_create_node" in registry_tools
+    # The server may filter based on allowed_tools, but the registry contains
+    # all known tools.
+    assert server_tools.issubset(registry_tools)
+    assert len(registry_tools) >= 22
+
+
+@pytest.mark.anyio
 async def test_mcp_e2e_inference_tools(ohmd):
     """New inference tools (ohm_inference, ohm_intervene, ohm_voi, ohm_refute, ohm_discover) work end-to-end."""
     base_url, admin_token, _db_path = ohmd
