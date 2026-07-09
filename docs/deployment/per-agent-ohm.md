@@ -216,6 +216,7 @@ There is currently no automatic migration tool; this is tracked under `OHM-s139`
 | 1 agent, 1 laptop | `ohm standup --mode local` |
 | 2–3 agents, same LAN, occasional sharing | Local mode + shared DuckLake |
 | 2+ agents, real-time collaboration, or remote access | `ohm standup --mode greenfield` + local MCP sidecars |
+| Multiple tenants from one local agent | Local daemon + MCP sidecar with [agent profiles](local-copilot-ohm.md#agent-profiles-one-sidecar-many-tenants) |
 | SaaS / CI / browser / mobile agents | Daemon + `ohm-gateway` (ADR-028) |
 
 ### Path A: federated sharing via DuckLake
@@ -247,7 +248,7 @@ sudo ohm standup --mode greenfield \
   --agent-id my-agent \
   --service-mode systemd
 
-# 2. Optionally deploy the hosted gateway (ADR-028)
+# 2. Optionally deploy the hosted gateway (ADR-028, available)
 ohm-gateway --config /etc/ohm/gateway.json
 ```
 
