@@ -15,6 +15,10 @@ build/
 *.duckdb
 *.duckdb.wal
 
+# Agent profile catalogs contain bearer tokens — never commit them
+.ohm/profiles.json
+.ohm/active_profile
+
 # IDE
 .vscode/
 .idea/

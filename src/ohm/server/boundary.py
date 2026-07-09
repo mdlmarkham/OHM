@@ -358,3 +358,199 @@ def filter_results_by_read_scope(
         filtered.append(r)
 
     return filtered
+
+
+def enforce_read_scope_for_edge(conn, agent_name: str, edge: dict) -> None:
+    """Enforce read scope on a single edge and both endpoint nodes.
+
+    Edges themselves have no ``source_tier`` column, so visibility to an edge
+    requires visibility to both nodes it connects. This helper checks edge
+    ``layer``/``created_by`` and then looks up the two endpoint nodes and
+    enforces node scope on each.
+    """
+    scope = get_agent_read_scope(conn, agent_name)
+    if scope is None:
+        return
+
+    # Edge-level dimensions
+    enforce_read_scope(
+        conn,
+        agent_name,
+        layer=edge.get("layer"),
+        created_by=edge.get("created_by"),
+    )
+
+    from_node = edge.get("from_node")
+    to_node = edge.get("to_node")
+    if not from_node or not to_node:
+        return
+
+    rows = conn.execute(
+        "SELECT id, source_tier, created_by FROM ohm_nodes WHERE id IN (?, ?) AND deleted_at IS NULL",
+        [from_node, to_node],
+    ).fetchall()
+    node_map = {row[0]: {"source_tier": row[1], "created_by": row[2]} for row in rows}
+    for node_id in (from_node, to_node):
+        node = node_map.get(node_id)
+        if node is None:
+            raise PermissionDeniedError(f"Agent '{agent_name}' cannot read edge: endpoint node '{node_id}' is not visible")
+        enforce_read_scope(
+            conn,
+            agent_name,
+            node_id=node_id,
+            source_tier=node.get("source_tier"),
+            created_by=node.get("created_by"),
+        )
+
+
+def filter_edges_by_read_scope(
+    conn,
+    agent_name: str,
+    edges: list[dict],
+    endpoint_nodes: dict[str, dict] | None = None,
+) -> list[dict]:
+    """Post-filter a list of edges by an agent's read scope.
+
+    Uses SQL-level scope when possible, but this helper is useful for
+    endpoints (e.g. neighborhood) that compute edges before scope is known.
+
+    Args:
+        conn: Active DuckDB connection.
+        agent_name: The agent whose scope to enforce.
+        edges: List of edge dicts with ``from_node`` and ``to_node``.
+        endpoint_nodes: Optional map of node_id -> node dict. If not
+            provided, endpoint nodes are looked up in one SQL query.
+
+    Returns:
+        Filtered list of edges. If no scope is set, returns all edges.
+    """
+    scope = get_agent_read_scope(conn, agent_name)
+    if scope is None:
+        return edges
+
+    if endpoint_nodes is None:
+        node_ids = set()
+        for e in edges:
+            node_ids.add(e.get("from_node"))
+            node_ids.add(e.get("to_node"))
+        node_ids.discard(None)
+        node_map: dict[str, dict] = {}
+        if node_ids:
+            placeholders = ", ".join("?" * len(node_ids))
+            rows = conn.execute(
+                f"SELECT id, source_tier, created_by FROM ohm_nodes WHERE id IN ({placeholders}) AND deleted_at IS NULL",
+                list(node_ids),
+            ).fetchall()
+            node_map = {row[0]: {"source_tier": row[1], "created_by": row[2]} for row in rows}
+    else:
+        node_map = endpoint_nodes
+
+    filtered: list[dict] = []
+    for e in edges:
+        allowed_layers = scope.get("layer")
+        if allowed_layers is not None and e.get("layer") not in allowed_layers:
+            continue
+
+        allowed_creators = scope.get("created_by")
+        if allowed_creators is not None and e.get("created_by") not in allowed_creators:
+            continue
+
+        from_node = e.get("from_node")
+        to_node = e.get("to_node")
+        from_node_data = node_map.get(from_node)
+        to_node_data = node_map.get(to_node)
+        if from_node_data is None or to_node_data is None:
+            continue
+
+        allowed_tiers = scope.get("source_tier")
+        if allowed_tiers is not None:
+            if from_node_data.get("source_tier") not in allowed_tiers:
+                continue
+            if to_node_data.get("source_tier") not in allowed_tiers:
+                continue
+
+        if allowed_creators is not None:
+            if from_node_data.get("created_by") not in allowed_creators:
+                continue
+            if to_node_data.get("created_by") not in allowed_creators:
+                continue
+
+        allowed_nodes = scope.get("node_id")
+        if allowed_nodes is not None:
+            if from_node not in allowed_nodes or to_node not in allowed_nodes:
+                continue
+
+        filtered.append(e)
+
+    return filtered
+
+
+def apply_read_scope_edge_filters(
+    conn,
+    agent_name: str,
+    *,
+    edge_alias: str = "e.",
+    from_alias: str = "ns_from",
+    to_alias: str = "ns_to",
+) -> tuple[list[str], list[str], list]:
+    """Build SQL WHERE-clause fragments for edge-list queries (GET /edges).
+
+    Unlike ``apply_read_scope_filters``, this helper knows that edges have
+    no ``source_tier`` column. It joins ``ohm_nodes`` for both endpoints
+    and applies source_tier / created_by / node_id scope to each endpoint,
+    while applying layer / created_by scope to the edge itself.
+
+    Returns:
+        ``(joins, conditions, params)`` ready to splice into a query.
+    """
+    scope = get_agent_read_scope(conn, agent_name)
+    if scope is None:
+        return [], [], []
+
+    joins: list[str] = []
+    conditions: list[str] = []
+    params: list[Any] = []
+    e_prefix = edge_alias
+
+    allowed_layers = scope.get("layer")
+    if allowed_layers is not None:
+        placeholders = ", ".join("?" * len(allowed_layers))
+        conditions.append(f"{e_prefix}layer IN ({placeholders})")
+        params.extend(allowed_layers)
+
+    allowed_creators = scope.get("created_by")
+    if allowed_creators is not None:
+        placeholders = ", ".join("?" * len(allowed_creators))
+        conditions.append(f"{e_prefix}created_by IN ({placeholders})")
+        params.extend(allowed_creators)
+
+    joins.append(
+        f"JOIN ohm_nodes {from_alias} ON {from_alias}.id = {e_prefix}from_node AND {from_alias}.deleted_at IS NULL"
+    )
+    joins.append(
+        f"JOIN ohm_nodes {to_alias} ON {to_alias}.id = {e_prefix}to_node AND {to_alias}.deleted_at IS NULL"
+    )
+
+    allowed_tiers = scope.get("source_tier")
+    if allowed_tiers is not None:
+        placeholders = ", ".join("?" * len(allowed_tiers))
+        for alias in (from_alias, to_alias):
+            conditions.append(
+                f"({alias}.source_tier IS NULL OR {alias}.source_tier IN ({placeholders}))"
+            )
+            params.extend(allowed_tiers)
+
+    if allowed_creators is not None:
+        placeholders = ", ".join("?" * len(allowed_creators))
+        for alias in (from_alias, to_alias):
+            conditions.append(f"{alias}.created_by IN ({placeholders})")
+            params.extend(allowed_creators)
+
+    allowed_nodes = scope.get("node_id")
+    if allowed_nodes is not None:
+        placeholders = ", ".join("?" * len(allowed_nodes))
+        for alias in (from_alias, to_alias):
+            conditions.append(f"{alias}.id IN ({placeholders})")
+            params.extend(allowed_nodes)
+
+    return joins, conditions, params

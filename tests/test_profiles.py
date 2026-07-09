@@ -245,3 +245,43 @@ class TestFromProfile:
         assert graph.actor == "copilot-agent"
         assert graph.tenant_id is None
         graph.close()
+
+
+class TestCliProfileShow:
+    """``ohm profile show`` masks bearer tokens in output."""
+
+    def test_profile_show_masks_token(self, tmp_path, monkeypatch, capsys):
+        home = tmp_path / "home"
+        (home / ".ohm").mkdir(parents=True)
+        catalog = {
+            "version": "1",
+            "profiles": {
+                "devops": {
+                    "label": "DevOps",
+                    "ohm_url": "http://127.0.0.1:8710",
+                    "tenant_id": "devops",
+                    "token": "ohm-cust-devops-super-secret-token-1234",
+                    "agent_id": "copilot",
+                }
+            },
+        }
+        (home / ".ohm" / "profiles.json").write_text(json.dumps(catalog))
+        empty_cwd = tmp_path / "cwd"
+        empty_cwd.mkdir()
+        monkeypatch.chdir(empty_cwd)
+        monkeypatch.setenv("HOME", str(home))
+
+        from ohm.cli import _handle_profile, _mask_token
+        import argparse
+
+        args = argparse.Namespace(profile_command="show", profile_name="devops")
+        _handle_profile(args)
+        captured = capsys.readouterr()
+        assert "super-secret" not in captured.out
+        assert "ohm-cust-devops-super-secret-token-1234" not in captured.out
+        assert _mask_token(catalog["profiles"]["devops"]["token"]) in captured.out
+
+    def test_mask_token_short_input(self):
+        from ohm.cli import _mask_token
+        assert _mask_token("short") == "***"
+        assert _mask_token("x" * 20) == ("x" * 8) + "..." + ("x" * 4)

@@ -575,22 +575,19 @@ class GraphHandlerMixin(OhmHandlerBase):
             conditions.append("nt.type = ?")
             params.append(to_type)
 
-        from ohm.server.boundary import get_agent_read_scope
+        from ohm.server.boundary import apply_read_scope_edge_filters, get_agent_read_scope
 
         agent = getattr(self, "_current_agent", "ohm")
         scope = get_agent_read_scope(self.current_store.conn, agent)
         if scope is not None:
-            allowed_tiers = scope.get("source_tier")
-            if allowed_tiers is not None:
-                joins.append("JOIN ohm_nodes ns ON ns.id = e.from_node AND ns.deleted_at IS NULL")
-                placeholders = ",".join(["?"] * len(allowed_tiers))
-                conditions.append(f"(ns.source_tier IS NULL OR ns.source_tier IN ({placeholders}))")
-                params.extend(allowed_tiers)
-            allowed_creators = scope.get("created_by")
-            if allowed_creators is not None:
-                placeholders = ",".join(["?"] * len(allowed_creators))
-                conditions.append(f"e.created_by IN ({placeholders})")
-                params.extend(allowed_creators)
+            scope_joins, scope_conds, scope_params = apply_read_scope_edge_filters(
+                self.current_store.conn,
+                agent,
+                edge_alias="e.",
+            )
+            joins.extend(scope_joins)
+            conditions.extend(scope_conds)
+            params.extend(scope_params)
 
         params.append(limit)
         params.append(offset)
@@ -652,10 +649,21 @@ class GraphHandlerMixin(OhmHandlerBase):
         node_id = validate_identifier(node_id, name="node_id")
         try:
             result = self.current_store.deep_content(node_id)
+            from ohm.server.boundary import enforce_read_scope, filter_edges_by_read_scope
+
+            agent = getattr(self, "_current_agent", "ohm")
+            enforce_read_scope(
+                self.current_store.conn,
+                agent,
+                node_id=node_id,
+                source_tier=result.get("source_tier"),
+                created_by=result.get("created_by"),
+            )
             edges = self.current_store.execute(
                 "SELECT * FROM ohm_edges WHERE (from_node = ? OR to_node = ?) AND deleted_at IS NULL ORDER BY created_at DESC",
                 [node_id, node_id],
             )
+            edges = filter_edges_by_read_scope(self.current_store.conn, agent, edges)
             result["edges"] = edges
             result["edge_count"] = len(edges)
             self._json_response(200, result)
@@ -691,15 +699,13 @@ class GraphHandlerMixin(OhmHandlerBase):
         edge_id = validate_identifier(edge_id, name="edge_id")
         edge = self.current_store.get_edge(edge_id)
         if edge:
-            from ohm.server.boundary import enforce_read_scope
+            from ohm.server.boundary import enforce_read_scope_for_edge
 
             agent = getattr(self, "_current_agent", "ohm")
-            enforce_read_scope(
+            enforce_read_scope_for_edge(
                 self.current_store.conn,
                 agent,
-                layer=edge.get("layer"),
-                source_tier=edge.get("source_tier"),
-                created_by=edge.get("created_by"),
+                edge,
             )
             self._json_response(200, edge)
         else:
@@ -774,8 +780,27 @@ class GraphHandlerMixin(OhmHandlerBase):
         # ADR-023: Skip effective_layer computation for large neighborhoods (>500 nodes)
         # to prevent OOM crashes. Include warning when skipped.
         from ohm.graph.constraints import effective_layers
+        from ohm.server.boundary import filter_edges_by_read_scope, filter_results_by_read_scope
 
         LARGE_NEIGHBORHOOD_THRESHOLD = 500
+
+        # OHM-oqyc: enforce read scope on every returned node and edge
+        agent = getattr(self, "_current_agent", "ohm")
+        node_rows = filter_results_by_read_scope(
+            self.current_store.conn,
+            agent,
+            node_rows,
+            id_field="id",
+            created_by_field="created_by",
+            source_tier_field="source_tier",
+        )
+        allowed_node_ids = {n["id"] for n in node_rows}
+        edges = [
+            e
+            for e in filter_edges_by_read_scope(self.current_store.conn, agent, edges)
+            if e.get("from_node") in allowed_node_ids and e.get("to_node") in allowed_node_ids
+        ]
+
         response = {"nodes": node_rows, "edges": edges}
 
         if len(node_rows) <= LARGE_NEIGHBORHOOD_THRESHOLD:

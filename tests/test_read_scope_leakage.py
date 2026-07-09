@@ -19,7 +19,7 @@ def _create_node_direct(store, node_id, label, created_by="metis", source_tier=N
 def _create_edge_direct(store, from_id, to_id, edge_type="CAUSES", layer="L3", created_by="metis"):
     from ohm.graph.queries import create_edge
 
-    create_edge(store.conn, from_node=from_id, to_node=to_id, edge_type=edge_type, layer=layer, created_by=created_by)
+    return create_edge(store.conn, from_node=from_id, to_node=to_id, edge_type=edge_type, layer=layer, created_by=created_by)
 
 
 def _set_scope(store, agent, scope):
@@ -165,6 +165,63 @@ class TestNeighborhoodScopeLeakage:
         _create_edge_direct(store, "my_root", "my_child")
         status, data = _request("GET", port, "/neighborhood/my_root", token="test-token-abc")
         assert status == 200
+
+    def test_neighbor_nodes_filtered_for_scoped_agent(self, auth_server):
+        """Edges pointing to nodes outside the agent's scope must not leak those nodes."""
+        port, store = auth_server
+        _set_scope(store, "metis", {"created_by": ["metis"]})
+        _create_node_direct(store, "my_root", "My Root", created_by="metis")
+        _create_node_direct(store, "my_child", "My Child", created_by="metis")
+        _create_node_direct(store, "obs_child", "Observer Child", created_by="observer")
+        _create_edge_direct(store, "my_root", "my_child", created_by="metis")
+        _create_edge_direct(store, "my_root", "obs_child", created_by="metis")
+        status, data = _request("GET", port, "/neighborhood/my_root", token="test-token-abc")
+        assert status == 200
+        node_ids = {n["id"] for n in data.get("nodes", [])}
+        edge_pairs = {(e["from_node"], e["to_node"]) for e in data.get("edges", [])}
+        assert "my_root" in node_ids
+        assert "my_child" in node_ids
+        assert "obs_child" not in node_ids
+        assert ("my_root", "obs_child") not in edge_pairs
+
+
+class TestEdgesScopeLeakage:
+    """GET /edges and GET /edge/<id> enforce read scope on endpoints."""
+
+    def test_edge_list_hides_cross_tier_edges(self, auth_server):
+        port, store = auth_server
+        _set_scope(store, "metis", {"source_tier": ["verified"]})
+        _create_node_direct(store, "ver_a", "Verified A", created_by="metis", source_tier="verified")
+        _create_node_direct(store, "ver_b", "Verified B", created_by="metis", source_tier="verified")
+        _create_node_direct(store, "raw_c", "Raw C", created_by="metis", source_tier="raw")
+        _create_edge_direct(store, "ver_a", "ver_b", layer="L3", created_by="metis")
+        _create_edge_direct(store, "ver_a", "raw_c", layer="L3", created_by="metis")
+        status, data = _request("GET", port, "/edges?from_node=ver_a", token="test-token-abc")
+        assert status == 200
+        edges = data.get("edges", [])
+        pairs = {(e["from_node"], e["to_node"]) for e in edges}
+        assert ("ver_a", "ver_b") in pairs
+        assert ("ver_a", "raw_c") not in pairs
+
+    def test_single_edge_hides_inaccessible_endpoint(self, auth_server):
+        port, store = auth_server
+        _set_scope(store, "metis", {"source_tier": ["verified"]})
+        _create_node_direct(store, "ver_a", "Verified A", created_by="metis", source_tier="verified")
+        _create_node_direct(store, "raw_c", "Raw C", created_by="metis", source_tier="raw")
+        edge = _create_edge_direct(store, "ver_a", "raw_c", layer="L3", created_by="metis")
+        status, data = _request("GET", port, f"/edge/{edge['id']}", token="test-token-abc")
+        assert status == 403
+        assert data.get("error") == "permission_denied"
+
+    def test_single_edge_allows_accessible_endpoints(self, auth_server):
+        port, store = auth_server
+        _set_scope(store, "metis", {"source_tier": ["verified"]})
+        _create_node_direct(store, "ver_a", "Verified A", created_by="metis", source_tier="verified")
+        _create_node_direct(store, "ver_b", "Verified B", created_by="metis", source_tier="verified")
+        edge = _create_edge_direct(store, "ver_a", "ver_b", layer="L3", created_by="metis")
+        status, data = _request("GET", port, f"/edge/{edge['id']}", token="test-token-abc")
+        assert status == 200
+        assert data["id"] == edge["id"]
 
 
 class TestNoScopeFullAccess:

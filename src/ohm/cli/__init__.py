@@ -3254,6 +3254,14 @@ def _profile_catalog_message(sources: list[str]) -> str:
     return "No profiles defined in catalog."
 
 
+def _mask_token(token: Any) -> str:
+    """Mask a bearer token for console output: keep first 8 and last 4 chars."""
+    token = str(token or "")
+    if len(token) <= 16:
+        return "***"
+    return f"{token[:8]}...{token[-4:]}"
+
+
 def _handle_profile(args: argparse.Namespace) -> None:
     import json as _json
     import sys as _sys
@@ -3282,8 +3290,11 @@ def _handle_profile(args: argparse.Namespace) -> None:
         if name not in profiles:
             print(f"Profile '{name}' not found in catalog.")
             _sys.exit(1)
+        display = dict(profiles[name])
+        if "token" in display:
+            display["token"] = _mask_token(display["token"])
         print(f"Profile: {name}")
-        print(_json.dumps(profiles[name], indent=2))
+        print(_json.dumps(display, indent=2))
 
     elif args.profile_command == "use":
         name = args.profile_name

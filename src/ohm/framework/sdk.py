@@ -6099,6 +6099,7 @@ def connect_http(
     actor: str = "unknown",
     token: str | None = None,
     tenant_id: str | None = None,
+    token_type: str | None = None,
 ) -> Graph:
     """Connect to an OHM daemon via HTTP REST API.
 
@@ -6116,7 +6117,8 @@ def connect_http(
 
     Multi-tenant usage:
         - Customer API key (token='ohm-cust-...') auto-routes to the tenant
-          via server-side token resolution. No tenant_id needed.
+          via server-side token resolution. Do NOT pass tenant_id; the SDK
+          will not send X-Tenant-ID for customer keys.
         - Agent token on behalf of a tenant: pass tenant_id to send
           X-Tenant-ID header. The server routes to that tenant's store.
 
@@ -6125,6 +6127,7 @@ def connect_http(
         actor: Agent name for attribution.
         token: Bearer token for authentication. Reads from OHM_TOKEN env if not provided.
         tenant_id: Optional tenant ID. Sends X-Tenant-ID header for agent-acting-on-tenant.
+        token_type: Optional 'agent' or 'customer'. If omitted, inferred from the token prefix.
 
     Returns:
         A Graph instance connected via HTTP.
@@ -6137,16 +6140,21 @@ def connect_http(
     from ohm.db import connect as db_connect
 
     resolved_token = token or os.environ.get("OHM_TOKEN")
+    resolved_token_type = token_type
+    if resolved_token and resolved_token_type is None:
+        # Customer API keys start with 'ohm-cu...'; everything else is treated as agent.
+        resolved_token_type = "customer" if resolved_token.lower().startswith("ohm-cu") else "agent"
     conn = db_connect(":memory:")
 
     class HttpGraph(Graph):
         """Graph subclass that routes all requests through HTTP API."""
 
-        def __init__(self, conn, actor, base_url, token, tenant_id=None):
+        def __init__(self, conn, actor, base_url, token, tenant_id=None, token_type=None):
             super().__init__(conn, actor=actor)
             self._base_url = base_url.rstrip("/")
             self._token = token
             self._tenant_id = tenant_id
+            self._token_type = token_type
 
         def _http_request(self, method: str, path: str, body: dict | None = None) -> dict:
             """Make an HTTP request to the ohmd daemon with timeout."""
@@ -6162,7 +6170,9 @@ def connect_http(
 
                     token_header = f"Bearer {quote(self._token, safe='-._~')}"
                 headers["Authorization"] = token_header
-            if self._tenant_id:
+            # ADR-043: customer-scoped tokens must NOT send X-Tenant-ID in transit.
+            # Only agent tokens send the header, and only when a tenant_id was supplied.
+            if self._tenant_id and self._token_type != "customer":
                 headers["X-Tenant-ID"] = self._tenant_id
             # Pass actor identity as X-Ohm-Agent header so the server
             # can use it for created_by when the token maps to a generic agent.
@@ -7287,7 +7297,7 @@ def connect_http(
             path = "/verifications/pending?" + "&".join(params)
             return self._http_request("GET", path)
 
-    graph = HttpGraph(conn, actor, base_url, resolved_token, tenant_id=tenant_id)
+    graph = HttpGraph(conn, actor, base_url, resolved_token, tenant_id=tenant_id, token_type=resolved_token_type)
     graph.tenant_id = tenant_id
     graph.token = resolved_token
     return graph
