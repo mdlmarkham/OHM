@@ -574,10 +574,10 @@ class InferenceHandlerMixin(OhmHandlerBase):
             except Exception:
                 voi_result = {"recommendations": []}
 
-            # Extract posterior values
-            posterior = inference_result.get("posterior", inference_result)
-            p_bad = float(posterior.get("P(bad)", posterior.get("bad", 0.0)))
-            p_good = float(posterior.get("P(good)", posterior.get("good", 1.0 - p_bad)))
+            # Extract posterior values — drill into target node first
+            posterior = inference_result.get("posterior", {}).get(target, {})
+            p_bad = float(posterior.get("bad", 0.0))
+            p_good = float(posterior.get("good", 1.0 - p_bad))
 
             # Build driver list from neighborhood edges
             drivers = []
