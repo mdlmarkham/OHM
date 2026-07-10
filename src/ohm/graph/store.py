@@ -1898,7 +1898,7 @@ class OhmStore:
         """
         import uuid as _uuid
 
-        from ohm.graph.queries import _link_provenance, _seed_reliability
+        from ohm.graph.queries.data_products import _link_provenance, _seed_reliability
 
         actor = agent_name or self.agent_name
         now = self._now()
