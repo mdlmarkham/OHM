@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
 from ohm.graph.queries._shared import _log_change, _rows_to_dicts, _percentile
 
+
 def register_twin(
     conn: DuckDBPyConnection,
     *,
@@ -1121,4 +1122,15 @@ def assemble_twin_for_decision(
         "reasoning": reasoning,
     }
 
+# OHM-447: Lazy cross-domain imports resolved at access time
+_LAZY_IMPORTS = {
+    "create_node",
+    "create_edge",
+}
+
+def __getattr__(name):
+    if name in _LAZY_IMPORTS:
+        import ohm.graph.queries as _q
+        return getattr(_q, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

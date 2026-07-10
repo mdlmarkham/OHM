@@ -67,3 +67,9 @@ def _log_change(
         )
     except Exception:
         pass
+
+
+def _existing_label(conn: "DuckDBPyConnection", node_id: str) -> str:
+    """Look up the label of an existing node by id."""
+    row = conn.execute("SELECT label FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node_id]).fetchone()
+    return row[0] if row else node_id
