@@ -39,6 +39,19 @@ _BACKUP_DIR_NAME = "backups"
 _DEFAULT_BACKUP_RETENTION = 7
 _DEFAULT_BACKUP_INTERVAL_HOURS = 6
 
+# OHM-735: cross-process migration lock for federated mode
+_SCHEMA_LOCK_SCHEMA = "ohm_system"
+_SCHEMA_LOCK_TABLE = "ohm_schema_lock"
+_LOCK_TIMEOUT_SECONDS = 300        # stale-lock recovery after 5 min
+_LOCK_RETRY_INTERVAL = 0.5         # seconds between retries
+_LOCK_MAX_WAIT = 60.0              # max seconds to wait for another daemon's migration
+
+
+def _version_tuple_local(v: str) -> tuple[int, ...]:
+    """Convert a version string to a comparable tuple."""
+    return tuple(int(x) for x in str(v).split("."))
+
+
 TIER_QUOTAS: dict[str, dict] = {
     "starter": {
         "max_nodes": 10_000,
@@ -236,15 +249,38 @@ class TenantManager:
         # Now attach the shared DuckLake catalog
         conn.execute(f"ATTACH IF NOT EXISTS '{self._shared_catalog_url}' AS ohm_lake (TYPE ducklake)")
         conn.execute(f"CREATE SCHEMA IF NOT EXISTS ohm_lake.{schema_name}")
-        conn.execute(f"SET schema TO ohm_lake.{schema_name}")
 
-        # Initialize OHM schema tables in this schema (DuckLake-compatible, no PK)
-        from ohm.schema import initialize_schema_ducklake
-
-        initialize_schema_ducklake(conn, schema=schema)
-
-        # Switch back to the tenant schema for normal operations
-        conn.execute(f"SET schema TO ohm_lake.{schema_name}")
+        # OHM-735: Acquire cross-process migration lock before running DDL.
+        # This prevents two daemons from concurrently creating tables or
+        # running migrations against the same tenant schema.
+        if self._acquire_migration_lock(conn, schema_name):
+            try:
+                conn.execute(f"SET schema TO ohm_lake.{schema_name}")
+                from ohm.schema import initialize_schema_ducklake
+                initialize_schema_ducklake(conn, schema=schema)
+                conn.execute(f"SET schema TO ohm_lake.{schema_name}")
+            finally:
+                self._release_migration_lock(conn, schema_name)
+        else:
+            # Another daemon holds the lock — wait for it to finish, then
+            # verify the schema is current.
+            from ohm.schema import SCHEMA_VERSION, get_schema_version
+            if not self._wait_for_migration(conn, schema_name):
+                # Lock holder didn't finish in time — try to acquire ourselves
+                # (stale-lock recovery will kick in if the other daemon crashed)
+                if self._acquire_migration_lock(conn, schema_name, timeout=5.0):
+                    try:
+                        conn.execute(f"SET schema TO ohm_lake.{schema_name}")
+                        from ohm.schema import initialize_schema_ducklake
+                        initialize_schema_ducklake(conn, schema=schema)
+                        conn.execute(f"SET schema TO ohm_lake.{schema_name}")
+                    finally:
+                        self._release_migration_lock(conn, schema_name)
+                else:
+                    raise RuntimeError(
+                        f"Could not acquire migration lock for schema '{schema_name}' "
+                        f"— another daemon may be stuck"
+                    )
 
         store = OhmStore.__new__(OhmStore)
         store._lock = threading.RLock()
@@ -270,6 +306,133 @@ class TenantManager:
         store._embedding_backend = NullBackend(dimensions=768)
 
         return store
+
+    # ── OHM-735: Cross-process migration lock (federated mode only) ────────
+
+    @staticmethod
+    def _daemon_id() -> str:
+        """Unique identifier for this daemon process."""
+        return f"{os.getpid()}@{os.environ.get('HOSTNAME', 'localhost')}"
+
+    def _ensure_schema_lock_table(self, conn) -> None:
+        """Create the shared migration-lock table in the DuckLake catalog."""
+        conn.execute(f"CREATE SCHEMA IF NOT EXISTS ohm_lake.{_SCHEMA_LOCK_SCHEMA}")
+        conn.execute(f"""
+            CREATE TABLE IF NOT EXISTS ohm_lake.{_SCHEMA_LOCK_SCHEMA}.{_SCHEMA_LOCK_TABLE} (
+                schema_name       VARCHAR NOT NULL,
+                locked_by         VARCHAR,
+                locked_at         TIMESTAMP,
+                lock_expires_at   TIMESTAMP,
+                migration_version VARCHAR
+            )
+        """)
+
+    def _ensure_lock_row(self, conn, schema_name: str) -> None:
+        """Ensure a lock row exists for *schema_name* (idempotent)."""
+        existing = conn.execute(
+            f"SELECT COUNT(*) FROM ohm_lake.{_SCHEMA_LOCK_SCHEMA}.{_SCHEMA_LOCK_TABLE} "
+            f"WHERE schema_name = ?",
+            [schema_name],
+        ).fetchone()
+        if existing is None or existing[0] == 0:
+            conn.execute(
+                f"INSERT INTO ohm_lake.{_SCHEMA_LOCK_SCHEMA}.{_SCHEMA_LOCK_TABLE} "
+                f"(schema_name, locked_by, locked_at, lock_expires_at, migration_version) "
+                f"VALUES (?, NULL, NULL, NULL, NULL)",
+                [schema_name],
+            )
+
+    def _acquire_migration_lock(
+        self, conn, schema_name: str, timeout: float = _LOCK_MAX_WAIT
+    ) -> bool:
+        """Atomically acquire the migration lock for a tenant schema.
+
+        Uses UPDATE with a WHERE clause so it's atomic within a DuckLake
+        transaction — no PK/UNIQUE constraint needed. Stale-lock recovery:
+        if ``lock_expires_at`` has passed, the lock is reclaimable.
+
+        Returns True if acquired, False if timed out waiting for another daemon.
+        """
+        import time as _time
+
+        self._ensure_schema_lock_table(conn)
+        self._ensure_lock_row(conn, schema_name)
+
+        daemon_id = self._daemon_id()
+        deadline = _time.monotonic() + timeout
+        lock_qual = f"ohm_lake.{_SCHEMA_LOCK_SCHEMA}.{_SCHEMA_LOCK_TABLE}"
+
+        while _time.monotonic() < deadline:
+            conn.execute("BEGIN TRANSACTION")
+            conn.execute(
+                f"UPDATE {lock_qual} SET locked_by = ?, locked_at = CURRENT_TIMESTAMP, "
+                f"lock_expires_at = CURRENT_TIMESTAMP + INTERVAL '{_LOCK_TIMEOUT_SECONDS} seconds' "
+                f"WHERE schema_name = ? "
+                f"AND (locked_by IS NULL OR lock_expires_at < CURRENT_TIMESTAMP)",
+                [daemon_id, schema_name],
+            )
+            result = conn.execute(
+                f"SELECT locked_by FROM {lock_qual} WHERE schema_name = ?",
+                [schema_name],
+            ).fetchone()
+            conn.execute("COMMIT")
+
+            if result and result[0] == daemon_id:
+                logger.info(
+                    "Acquired migration lock for schema %s (daemon %s)",
+                    schema_name, daemon_id,
+                )
+                return True
+
+            _time.sleep(_LOCK_RETRY_INTERVAL)
+
+        logger.warning(
+            "Timed out waiting for migration lock on schema %s after %.1fs",
+            schema_name, timeout,
+        )
+        return False
+
+    def _release_migration_lock(self, conn, schema_name: str) -> None:
+        """Release the migration lock (only if we hold it)."""
+        daemon_id = self._daemon_id()
+        lock_qual = f"ohm_lake.{_SCHEMA_LOCK_SCHEMA}.{_SCHEMA_LOCK_TABLE}"
+        conn.execute(
+            f"UPDATE {lock_qual} SET locked_by = NULL, locked_at = NULL, "
+            f"lock_expires_at = NULL "
+            f"WHERE schema_name = ? AND locked_by = ?",
+            [schema_name, daemon_id],
+        )
+        logger.info("Released migration lock for schema %s", schema_name)
+
+    def _wait_for_migration(self, conn, schema_name: str, timeout: float = _LOCK_MAX_WAIT) -> bool:
+        """Wait for another daemon's migration to complete.
+
+        Returns True if the schema version is current, False if timed out.
+        """
+        import time as _time
+
+        from ohm.schema import SCHEMA_VERSION, get_schema_version
+
+        target = _version_tuple_local(SCHEMA_VERSION)
+        deadline = _time.monotonic() + timeout
+        lock_qual = f"ohm_lake.{_SCHEMA_LOCK_SCHEMA}.{_SCHEMA_LOCK_TABLE}"
+
+        while _time.monotonic() < deadline:
+            db_version = get_schema_version(conn)
+            if _version_tuple_local(db_version) >= target:
+                return True
+
+            lock_row = conn.execute(
+                f"SELECT locked_by FROM {lock_qual} WHERE schema_name = ?",
+                [schema_name],
+            ).fetchone()
+            if lock_row is None or lock_row[0] is None:
+                # Lock released but version still behind — acquire and migrate ourselves
+                return False
+
+            _time.sleep(_LOCK_RETRY_INTERVAL)
+
+        return False
 
     def provision(self, customer_id: str, domain: str = "ohm", tier: str = "starter", integrations: Optional[dict] = None) -> dict:
         """Create an isolated DuckDB instance for *customer_id*.
@@ -948,6 +1111,10 @@ class TenantManager:
         Migration lock file (.migration_lock) is created before applying
         migrations and removed after success. If a crash occurs mid-migration,
         the lock file persists and reconcile_tenants() detects it (OHM-xflr).
+
+        In federated mode (OHM-735): uses the shared DuckLake migration lock
+        instead of a file-based lock, so two daemons don't concurrently
+        migrate the same tenant schema.
         """
         from ohm.schema import SCHEMA_VERSION, get_schema_version
 
@@ -971,6 +1138,10 @@ class TenantManager:
         with self._cache_lock:
             entry = self._cache.get(customer_id)
         if entry is None:
+            return
+
+        if self.federated:
+            self._apply_lazy_migrations_federated(customer_id, store, meta, target_key, _vtuple)
             return
 
         lock_path = self._tenant_dir(customer_id) / ".migration_lock"
@@ -1025,6 +1196,74 @@ class TenantManager:
                 self._write_meta(customer_id, meta)
                 # Leave lock file in place — reconcile_tenants() will detect it
                 raise  # OHM-dlnx: re-raise so caller doesn't use half-migrated store
+
+    def _apply_lazy_migrations_federated(
+        self, customer_id: str, store: OhmStore, meta: dict, target_key: tuple[int, ...], _vtuple
+    ) -> None:
+        """Federated-mode lazy migration using the shared DuckLake lock (OHM-735)."""
+        from ohm.schema import SCHEMA_VERSION, get_schema_version
+
+        schema_name = self._tenant_schema_name(customer_id)
+
+        with self._cache_lock:
+            entry = self._cache.get(customer_id)
+        if entry is None:
+            return
+
+        with entry.write_lock:
+            db_version = get_schema_version(store.conn)
+            db_key = _vtuple(db_version)
+
+            if db_key >= target_key:
+                # DB is already current — sync meta.json
+                meta["schema_version"] = SCHEMA_VERSION
+                meta.pop("needs_attention", None)
+                meta.pop("migration_error", None)
+                self._write_meta(customer_id, meta)
+                logger.info("Synced meta.json for tenant %s to schema %s", customer_id, SCHEMA_VERSION)
+                return
+
+            # DB is behind — acquire the shared cross-process lock and migrate
+            if not self._acquire_migration_lock(store.conn, schema_name):
+                # Another daemon holds the lock — wait for it to finish
+                if self._wait_for_migration(store.conn, schema_name):
+                    # Other daemon finished — verify and sync meta.json
+                    db_version = get_schema_version(store.conn)
+                    if _vtuple(db_version) >= target_key:
+                        meta["schema_version"] = SCHEMA_VERSION
+                        meta.pop("needs_attention", None)
+                        meta.pop("migration_error", None)
+                        self._write_meta(customer_id, meta)
+                        logger.info("Synced meta.json for tenant %s after remote migration", customer_id)
+                        return
+                # Timeout or version still behind — try to acquire (stale-lock recovery)
+                if not self._acquire_migration_lock(store.conn, schema_name, timeout=5.0):
+                    raise RuntimeError(
+                        f"Could not acquire migration lock for tenant {customer_id} "
+                        f"— another daemon may be stuck"
+                    )
+
+            # We hold the lock — apply migrations
+            logger.info(
+                "Migrating federated tenant %s from %s to %s",
+                customer_id, db_version, SCHEMA_VERSION,
+            )
+            try:
+                from ohm.schema import _apply_migrations_ducklake
+                _apply_migrations_ducklake(store.conn)
+                meta["schema_version"] = SCHEMA_VERSION
+                meta.pop("needs_attention", None)
+                meta.pop("migration_error", None)
+                self._write_meta(customer_id, meta)
+                logger.info("Migrated federated tenant %s to schema %s", customer_id, SCHEMA_VERSION)
+            except Exception as e:
+                logger.error("Migration failed for federated tenant %s: %s", customer_id, e)
+                meta["needs_attention"] = True
+                meta["migration_error"] = str(e)
+                self._write_meta(customer_id, meta)
+                raise
+            finally:
+                self._release_migration_lock(store.conn, schema_name)
 
     def _propagate_template(self, customer_id: str, store: OhmStore) -> None:
         """Apply additive domain-template changes to an existing tenant (OHM-dcf3).
