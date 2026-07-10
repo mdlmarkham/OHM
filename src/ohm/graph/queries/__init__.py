@@ -3148,6 +3148,8 @@ from ohm.graph.queries.feed_investment import (
     record_mode_switch,
     get_current_mode,
     temporal_decision_summary,
+    VALID_SESSION_STATES,
+    SESSION_TRANSITIONS,
 )
 
 # OHM-447 Phase 3: mid-weight domains re-exports
@@ -3316,7 +3318,8 @@ _conf_mod.create_node = create_node
 _conf_mod.create_edge = create_edge
 
 
-# OHM-447 Phase 5: changefeed + outcomes re-exports
+# OHM-447 Phase 5: changefeed + outcomes re-exports (must come BEFORE
+# the injection block below, since some injected names are defined here)
 from ohm.graph.queries.changefeed import (
     query_change_feed,
     query_agent_changes,
@@ -3327,3 +3330,14 @@ from ohm.graph.queries.changefeed import (
     query_source_reliability,
     query_agent_state,
 )
+
+# OHM-447 Phase 5: inject into suggestions module (was missing entirely)
+import ohm.graph.queries.suggestions as _sugg_mod
+
+_sugg_mod.query_neighborhood = query_neighborhood
+
+# OHM-447 Phase 5: inject query_record_outcome into verification module
+_ver_mod.query_record_outcome = query_record_outcome
+
+# OHM-447 Phase 5: inject query_source_reliability into data_products module
+_dp_mod.query_source_reliability = query_source_reliability

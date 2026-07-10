@@ -162,12 +162,15 @@ def register_data_product(
 
 def _seed_reliability(conn: DuckDBPyConnection, producer_agent: str, created_by: str) -> float | None:
     """Seed source_reliability from the producer agent's outcome history."""
+    import logging
+
     prod_node = find_or_create_node(conn, label=producer_agent, node_type="agent", created_by=created_by)
     try:
         reliability = query_source_reliability(conn, prod_node["id"])
         eff = reliability.get("effective_reliability")
         return eff if eff is not None else None
-    except Exception:
+    except Exception as e:
+        logging.getLogger(__name__).warning("_seed_reliability failed for %s: %s", producer_agent, e)
         return None
 
 
