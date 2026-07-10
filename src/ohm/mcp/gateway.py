@@ -185,14 +185,22 @@ async def _forward(profile: GatewayProfile, method: str, path: str, body: dict[s
 
 
 def _build_tool_handler(tool_name: str):
-    """Build a FastMCP tool handler bound to a specific tool name."""
+    """Build a FastMCP tool handler bound to a specific tool name.
+
+    OHM-760: Handlers return structured data (dict) by default so
+    FastMCP populates structuredContent and generates outputSchema
+    automatically. When the caller requests TOON format (via the
+    ``format`` argument or Accept header), the handler returns a
+    TOON-encoded string instead — a text fallback for clients that
+    prefer the compact representation.
+    """
 
     async def _handler(
         *args: Any,
         ctx: Context = CurrentContext(),
         headers: dict[str, str] = CurrentHeaders(),
         **kwargs: Any,
-    ) -> str:
+    ) -> Any:
         from ohm.mcp.dispatch import build_request
 
         start = time.time()
@@ -202,55 +210,55 @@ def _build_tool_handler(tool_name: str):
         # python-toon is installed; callers should pass format=json for text.
         fmt = requested_format(kwargs)
         kwargs.pop("format", None)
+        use_text = fmt == "toon"
+
+        def _respond(data: Any) -> Any:
+            """Encode response — dict for structured content, str for TOON."""
+            if use_text:
+                return encode_payload(data, fmt)
+            return _strip_nulls(data)
 
         profile = _resolve_profile(headers)
         if profile is None:
-            text = encode_payload(
-                {"error": "auth_failed", "message": "Invalid or missing API key"},
-                fmt,
-            )
-            _audit(None, tool_name, status="auth_failed", latency_ms=(time.time() - start) * 1000, size=len(text))
-            return text
+            result = _respond({"error": "auth_failed", "message": "Invalid or missing API key"})
+            _audit(None, tool_name, status="auth_failed", latency_ms=(time.time() - start) * 1000, size=len(str(result)))
+            return result
 
         if not profile.is_tool_allowed(tool_name):
             reason = "read_only" if profile.read_only and tool_name in WRITE_TOOLS else "not_allowed"
-            text = encode_payload(
-                {"error": "tool_blocked", "message": f"Tool '{tool_name}' is not allowed for this API key"},
-                fmt,
-            )
-            _audit(profile, tool_name, status=reason, latency_ms=(time.time() - start) * 1000, size=len(text))
-            return text
+            result = _respond({"error": "tool_blocked", "message": f"Tool '{tool_name}' is not allowed for this API key"})
+            _audit(profile, tool_name, status=reason, latency_ms=(time.time() - start) * 1000, size=len(str(result)))
+            return result
 
         try:
             method, path, body = build_request(tool_name, kwargs, profile.agent_id)
         except NotImplementedError as e:
-            text = encode_payload({"error": "not_implemented", "message": str(e)}, fmt)
-            _audit(profile, tool_name, status="not_implemented", latency_ms=(time.time() - start) * 1000, size=len(text))
-            return text
+            result = _respond({"error": "not_implemented", "message": str(e)})
+            _audit(profile, tool_name, status="not_implemented", latency_ms=(time.time() - start) * 1000, size=len(str(result)))
+            return result
+        except (KeyError, ValueError) as e:
+            result = _respond({"error": "invalid_arguments", "message": str(e)})
+            _audit(profile, tool_name, status="invalid_arguments", latency_ms=(time.time() - start) * 1000, size=len(str(result)))
+            return result
 
         if profile.is_high_blast_radius(tool_name):
             # High-blast-radius tools require an explicit approval claim.
             approval = headers.get("x-ohm-approve", "")
             if approval != tool_name:
-                text = encode_payload(
+                result = _respond(
                     {
                         "error": "approval_required",
                         "message": f"Tool '{tool_name}' requires X-OHM-Approve: {tool_name} header",
-                    },
-                    fmt,
+                    }
                 )
-                _audit(profile, tool_name, status="approval_required", latency_ms=(time.time() - start) * 1000, size=len(text))
-                return text
+                _audit(profile, tool_name, status="approval_required", latency_ms=(time.time() - start) * 1000, size=len(str(result)))
+                return result
 
         try:
             data = await _forward(profile, method, path, body)
-            # OHM-747-2: strip null-valued keys from write responses
-            if tool_name in WRITE_TOOLS:
-                data = _strip_nulls(data)
+            # OHM-760: strip nulls from ALL responses (not just writes) for
+            # clean structured content. Previously only applied to write tools.
             # OHM-747-3 / OHM-764: deduplicate nudges per session.
-            # Use agent_id + request_id (if available from the MCP context)
-            # so different conversations for the same agent get independent
-            # nudge sets. Fall back to agent_id alone if ctx is unavailable.
             session_key = profile.agent_id
             try:
                 if ctx and hasattr(ctx, "request_id"):
@@ -258,9 +266,9 @@ def _build_tool_handler(tool_name: str):
             except Exception:
                 pass
             data = _deduplicate_nudges(session_key, data)
-            text = encode_payload(data, fmt)
-            _audit(profile, tool_name, status="ok", latency_ms=(time.time() - start) * 1000, size=len(text))
-            return text
+            result = _respond(data)
+            _audit(profile, tool_name, status="ok", latency_ms=(time.time() - start) * 1000, size=len(str(result)))
+            return result
         except httpx.HTTPStatusError as e:
             body_text = e.response.text
             try:
@@ -268,14 +276,14 @@ def _build_tool_handler(tool_name: str):
             except Exception:
                 detail = body_text
             payload = {"error": e.response.status_code, "detail": detail}
-            text = encode_payload(payload, fmt)
-            _audit(profile, tool_name, status=f"http_{e.response.status_code}", latency_ms=(time.time() - start) * 1000, size=len(text))
-            return text
+            result = _respond(payload)
+            _audit(profile, tool_name, status=f"http_{e.response.status_code}", latency_ms=(time.time() - start) * 1000, size=len(str(result)))
+            return result
         except Exception as e:
             payload = {"error": "gateway_error", "message": f"{type(e).__name__}: {e}"}
-            text = encode_payload(payload, fmt)
-            _audit(profile, tool_name, status="gateway_error", latency_ms=(time.time() - start) * 1000, size=len(text))
-            return text
+            result = _respond(payload)
+            _audit(profile, tool_name, status="gateway_error", latency_ms=(time.time() - start) * 1000, size=len(str(result)))
+            return result
 
     _handler.__name__ = f"handle_{tool_name}"
     return _handler

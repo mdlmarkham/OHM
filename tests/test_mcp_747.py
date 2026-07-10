@@ -281,3 +281,46 @@ class TestToolAnnotations:
         assert "ohm_create_edge" in WRITE_TOOLS
         assert "ohm_batch" in WRITE_TOOLS
         assert "ohm_observe" in WRITE_TOOLS
+
+
+class TestStructuredOutput:
+    """Test that structured output returns dict for JSON, str for TOON (OHM-760)."""
+
+    def test_strip_nulls_applied_to_all_responses(self):
+        """Null-stripping should work on all responses, not just writes (OHM-760)."""
+        from ohm.mcp.gateway_helpers import _strip_nulls
+
+        # Read-style response with nulls
+        read_data = {"id": "n1", "label": "Test", "content": None, "tags": ["a", "b"], "url": None}
+        result = _strip_nulls(read_data)
+        assert "content" not in result
+        assert "url" not in result
+        assert result["id"] == "n1"
+        assert result["label"] == "Test"
+        assert result["tags"] == ["a", "b"]
+
+    def test_encode_payload_json_returns_string(self):
+        """JSON encoding returns a string (TOON fallback path)."""
+        from ohm.mcp.encoding import encode_payload
+
+        data = {"id": "n1", "label": "Test"}
+        result = encode_payload(data, "json")
+        assert isinstance(result, str)
+        assert "n1" in result
+        assert "Test" in result
+
+    def test_strip_nulls_on_nested_read_response(self):
+        """Null-stripping handles nested dicts in read responses."""
+        from ohm.mcp.gateway_helpers import _strip_nulls
+
+        data = {
+            "node": {"id": "n1", "label": "Test", "content": None},
+            "edges": [{"from": "n1", "to": None}, {"from": "n1", "to": "n2"}],
+            "stats": {"count": 5, "avg": None},
+        }
+        result = _strip_nulls(data)
+        assert "content" not in result["node"]
+        assert result["edges"][0] == {"from": "n1"}
+        assert result["edges"][1] == {"from": "n1", "to": "n2"}
+        assert "avg" not in result["stats"]
+        assert result["stats"]["count"] == 5
