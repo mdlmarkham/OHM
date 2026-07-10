@@ -186,19 +186,23 @@ def _do_beads_sync(
         return None
     try:
         issues = fetch_beads_issues()
+        logger.info("Beads sync: fetched %d issues", len(issues))
     except Exception:
         logger.exception("Beads sync: fetch_beads_issues failed")
         return None
     try:
         report = sync_beads_to_ohm_tasks(conn, issues, actor=actor)
-        if report.get("created") or report.get("updated"):
-            logger.info(
-                "Beads sync: %d created, %d updated, %d skipped (of %d)",
-                report.get("created", 0),
-                report.get("updated", 0),
-                report.get("skipped", 0),
-                report.get("total", 0),
-            )
+        logger.info(
+            "Beads sync report: %d created, %d updated, %d skipped, %d errors (of %d)",
+            report.get("created", 0),
+            report.get("updated", 0),
+            report.get("skipped", 0),
+            len(report.get("errors", [])),
+            report.get("total", 0),
+        )
+        if report.get("errors"):
+            for err in report["errors"][:5]:
+                logger.warning("Beads sync error: %s", err)
         return report
     except Exception:
         logger.exception("Beads sync: sync_beads_to_ohm_tasks failed")
@@ -3170,6 +3174,10 @@ def main(schema_config: SchemaConfig | None = None):
     """
     if schema_config is None:
         schema_config = DEFAULT_SCHEMA
+
+    # OHM-sbtz: configure logging so logger.info/warning/exception calls
+    # (beads sync, DuckLake sync, etc.) are visible in journald/stderr.
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     parser = argparse.ArgumentParser(description="OHM daemon — multi-agent knowledge graph server")
     parser.add_argument("--host", default=None, help="Bind address (default: 127.0.0.1)")

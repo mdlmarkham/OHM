@@ -81,9 +81,27 @@ class AnalysisHandlerMixin(OhmHandlerBase):
 
         node_id = validate_identifier(node_id, name="node_id")
         max_depth = int(qs.get("depth", [10])[0])
+        # OHM-737: enforce read scope on the seed node, then filter results
+        from ohm.server.boundary import enforce_read_scope, filter_results_by_read_scope
+
+        agent = getattr(self, "_current_agent", "ohm")
+        node = self.current_store.get_node(node_id)
+        if node:
+            enforce_read_scope(
+                self.current_store.conn,
+                agent,
+                node_id=node_id,
+                source_tier=node.get("source_tier"),
+                created_by=node.get("created_by"),
+            )
         from ohm.queries import query_provenance
 
         result = query_provenance(self.current_store.read_conn, node_id, max_depth=max_depth)
+        # Provenance returns source node dicts with node_id as the id field
+        # and source_author as the creator field
+        result = filter_results_by_read_scope(
+            self.current_store.conn, agent, result, id_field="node_id", created_by_field="source_author"
+        )
         self._json_response(200, result)
 
     def _get_stale(self, path: str, qs: dict) -> None:

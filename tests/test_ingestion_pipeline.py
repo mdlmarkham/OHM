@@ -78,10 +78,12 @@ class TestPipelineBasic:
         result = run_pipeline(test_conn, item, created_by="test_agent", skip_hooks=True)
         assert result.success
         assert result.source_node_id is not None
-        assert len(result.stages) == 3
+        # OHM-682: dedup_check stage inserted between fetch and parse
+        assert len(result.stages) == 4
         assert result.stages[0]["stage"] == "fetch"
-        assert result.stages[1]["stage"] == "parse"
-        assert result.stages[2]["stage"] == "commit"
+        assert result.stages[1]["stage"] == "dedup_check"
+        assert result.stages[2]["stage"] == "parse"
+        assert result.stages[3]["stage"] == "commit"
 
     def test_pipeline_creates_correct_node_type(self, test_conn):
         item = _make_item()
@@ -115,6 +117,42 @@ class TestPipelineBasic:
         assert d["success"] is True
         assert "stages" in d
         assert "duration_ms" in d
+        assert "skipped_unchanged" in d
+
+
+class TestPipelineContentHashSkip:
+    """OHM-682: content-hash skip-if-unchanged behavior."""
+
+    def test_second_run_skips_unchanged_content(self, test_conn):
+        item = _make_item(content=b"unchanged content here", filename="doc.txt", content_type="text/plain")
+        r1 = run_pipeline(test_conn, item, created_by="test", skip_hooks=True)
+        assert r1.success
+        assert not r1.skipped_unchanged
+        assert r1.source_node_id is not None
+
+        r2 = run_pipeline(test_conn, item, created_by="test", skip_hooks=True)
+        assert r2.success
+        assert r2.skipped_unchanged, "Second run should skip unchanged content"
+        assert r2.source_node_id == r1.source_node_id
+
+    def test_changed_content_not_skipped(self, test_conn):
+        item1 = _make_item(content=b"version one", filename="v.txt", content_type="text/plain")
+        r1 = run_pipeline(test_conn, item1, created_by="test", skip_hooks=True)
+        assert not r1.skipped_unchanged
+
+        item2 = _make_item(content=b"version two", filename="v.txt", content_type="text/plain")
+        r2 = run_pipeline(test_conn, item2, created_by="test", skip_hooks=True)
+        assert not r2.skipped_unchanged, "Changed content should not be skipped"
+        assert r2.source_node_id != r1.source_node_id
+
+    def test_skip_result_has_dedup_check_stage(self, test_conn):
+        item = _make_item(content=b"dedup test body", filename="d.txt", content_type="text/plain")
+        run_pipeline(test_conn, item, created_by="test", skip_hooks=True)
+        r2 = run_pipeline(test_conn, item, created_by="test", skip_hooks=True)
+        dedup_stage = [s for s in r2.stages if s["stage"] == "dedup_check"]
+        assert len(dedup_stage) == 1
+        assert dedup_stage[0]["status"] == "skipped_unchanged"
+        assert "content_hash" in dedup_stage[0]
 
 
 class TestPipelineWithHooks:

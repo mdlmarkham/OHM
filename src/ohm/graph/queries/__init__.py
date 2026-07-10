@@ -206,6 +206,7 @@ def query_path(
     *,
     max_depth: int = 10,
     layer: str | None = None,
+    allowed_nodes: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Shortest path between *from_node* and *to_node* using directed BFS.
 
@@ -218,6 +219,15 @@ def query_path(
     preserving the correct BFS visited-set semantics that DuckDB recursive
     CTEs cannot express (the CTE form explored all paths, blowing up
     exponentially in dense graphs).
+
+    Args:
+        allowed_nodes: Optional set of node ids the caller is permitted to
+            see (OHM-737). When set, the BFS only traverses through nodes
+            in this set — restricted nodes can never appear as path
+            intermediates. ``from_node`` and ``to_node`` are NOT checked
+            against this set; the caller is responsible for enforcing scope
+            on the endpoints (and should 403 before calling if either is
+            out of scope). ``None`` means no scope constraint (full access).
     """
     from ohm.validation import validate_depth, validate_identifier, validate_layer
 
@@ -243,7 +253,7 @@ def query_path(
             params.append(layer)
         edges = _rows_to_dicts(
             conn.execute(
-                f"SELECT id, from_node, to_node, layer, edge_type, confidence FROM ohm_edges WHERE deleted_at IS NULL AND from_node IN ({placeholders}) {layer_clause}",
+                f"SELECT id, from_node, to_node, layer, edge_type, confidence, created_by FROM ohm_edges WHERE deleted_at IS NULL AND from_node IN ({placeholders}) {layer_clause}",
                 params,
             )
         )
@@ -256,6 +266,12 @@ def query_path(
         for current, path in frontier:
             for edge in by_from.get(current, []):
                 nxt = edge["to_node"]
+                # OHM-737: scope-aware traversal — skip edges to nodes the
+                # agent can't see, so restricted nodes never appear as path
+                # intermediates. The destination (to_node) is always allowed
+                # since the caller has already verified it's in scope.
+                if allowed_nodes is not None and nxt != to_node and nxt not in allowed_nodes:
+                    continue
                 if nxt == to_node:
                     final_path = path + [edge]
                     return [dict(e, depth=i + 1) for i, e in enumerate(final_path)]
@@ -295,6 +311,7 @@ def query_impact(
                 e.layer,
                 e.edge_type,
                 e.confidence,
+                e.created_by,
                 1 AS depth
             FROM ohm_edges e
             WHERE e.from_node = ?
@@ -310,6 +327,7 @@ def query_impact(
                 e.layer,
                 e.edge_type,
                 e.confidence,
+                e.created_by,
                 i.depth + 1
             FROM impact_cte i
             JOIN ohm_edges e ON e.from_node = i.to_node
@@ -317,7 +335,7 @@ def query_impact(
               AND e.deleted_at IS NULL
               AND e.layer IN ('L2', 'L3')
         )
-        SELECT edge_id, from_node, to_node, layer, edge_type, confidence, depth
+        SELECT edge_id, from_node, to_node, layer, edge_type, confidence, created_by, depth
         FROM impact_cte
         ORDER BY depth, edge_type
     """
@@ -3571,9 +3589,14 @@ def apply_confidence_decay(
         )
 
         if not dry_run:
-            conn.execute(
-                "UPDATE ohm_edges SET confidence = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                [new_confidence, edge["id"]],
+            # OHM-733: append to confidence log instead of direct UPDATE
+            log_confidence_change(
+                conn,
+                edge_id=edge["id"],
+                agent="system",
+                old_value=original_conf,
+                new_value=new_confidence,
+                reason="decay",
             )
             _log_change(conn, "ohm_edges", edge["id"], "UPDATE", "decay")
             updated += 1
@@ -5690,6 +5713,111 @@ def lookup_content_hash(
     result = conn.execute(
         "SELECT id, node_id, content_hash, created_at FROM ohm_content_hashes WHERE content_hash = ?",
         [content_hash],
+    )
+    return _rows_to_dicts(result)
+
+
+# ── Confidence Change Log (OHM-733) ─────────────────────────────────────────
+
+
+def log_confidence_change(
+    conn: DuckDBPyConnection,
+    *,
+    edge_id: str,
+    agent: str,
+    new_value: float,
+    reason: str,
+    old_value: float | None = None,
+    challenge_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Append a row to the confidence change log (OHM-733).
+
+    This is the single entry point for recording a confidence-affecting
+    event on an edge. The log is append-only — every change is attributed
+    to an agent with a reason. ``ohm_edges.confidence`` is refreshed from
+    the log via :func:`recompute_confidence_from_log` (idempotent).
+    """
+    import json as _json
+    import uuid as _uuid
+
+    from ohm.validation import validate_identifier
+
+    edge_id = validate_identifier(edge_id, name="edge_id")
+    log_id = str(_uuid.uuid4())
+    meta_json = _json.dumps(metadata) if metadata else None
+
+    conn.execute(
+        """INSERT INTO ohm_confidence_log
+           (id, edge_id, agent, old_value, new_value, reason, challenge_id, metadata)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        [log_id, edge_id, agent, old_value, new_value, reason, challenge_id, meta_json],
+    )
+
+    # Refresh the cached column from the log (idempotent recompute)
+    conn.execute(
+        "UPDATE ohm_edges SET confidence = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL",
+        [new_value, edge_id],
+    )
+
+    return {
+        "id": log_id,
+        "edge_id": edge_id,
+        "agent": agent,
+        "old_value": old_value,
+        "new_value": new_value,
+        "reason": reason,
+    }
+
+
+def recompute_confidence_from_log(
+    conn: DuckDBPyConnection,
+    edge_id: str,
+) -> float | None:
+    """Recompute an edge's confidence from the append-only log (OHM-733).
+
+    Takes the ``new_value`` from the most recent log row for this edge
+    and writes it to ``ohm_edges.confidence``. Idempotent — safe to call
+    from multiple daemons concurrently; the result is the same regardless
+    of ordering because "most recent by created_at" is deterministic.
+    """
+    from ohm.validation import validate_identifier
+
+    edge_id = validate_identifier(edge_id, name="edge_id")
+    row = conn.execute(
+        """SELECT new_value FROM ohm_confidence_log
+           WHERE edge_id = ?
+           ORDER BY created_at DESC LIMIT 1""",
+        [edge_id],
+    ).fetchone()
+    if row is None:
+        return None
+    value = row[0]
+    conn.execute(
+        "UPDATE ohm_edges SET confidence = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL",
+        [value, edge_id],
+    )
+    return value
+
+
+def get_confidence_history(
+    conn: DuckDBPyConnection,
+    edge_id: str,
+    *,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Return the full confidence change history for an edge (OHM-733)."""
+    from ohm.validation import validate_identifier
+
+    edge_id = validate_identifier(edge_id, name="edge_id")
+    result = conn.execute(
+        """SELECT id, edge_id, agent, old_value, new_value, reason,
+                  challenge_id, created_at
+           FROM ohm_confidence_log
+           WHERE edge_id = ?
+           ORDER BY created_at DESC
+           LIMIT ?""",
+        [edge_id, limit],
     )
     return _rows_to_dicts(result)
 
@@ -9161,8 +9289,17 @@ def apply_decay_to_edges(
                 meta_str = json.dumps(existing_meta)
 
                 conn.execute(
-                    "UPDATE ohm_edges SET confidence = ?, metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    [round(decayed_conf, 6), meta_str, edge_id],
+                    "UPDATE ohm_edges SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    [meta_str, edge_id],
+                )
+                # OHM-733: append to confidence log instead of direct UPDATE
+                log_confidence_change(
+                    conn,
+                    edge_id=edge_id,
+                    agent=created_by or "decay",
+                    old_value=original_conf,
+                    new_value=round(decayed_conf, 6),
+                    reason="decay",
                 )
                 agent = created_by or "decay"
                 _log_change(conn, "ohm_edges", edge_id, "UPDATE", agent)
@@ -14595,9 +14732,20 @@ def finalize_report(
                 new_conf_f = float(new_conf)
             except (TypeError, ValueError):
                 continue
-            conn.execute(
-                "UPDATE ohm_edges SET confidence = ? WHERE id = ? AND deleted_at IS NULL",
-                [new_conf_f, edge_id],
+            # OHM-733: append to confidence log instead of direct UPDATE
+            old_row = conn.execute(
+                "SELECT confidence FROM ohm_edges WHERE id = ? AND deleted_at IS NULL",
+                [edge_id],
+            ).fetchone()
+            old_val = old_row[0] if old_row else None
+            log_confidence_change(
+                conn,
+                edge_id=edge_id,
+                agent="topo_report",
+                old_value=old_val,
+                new_value=new_conf_f,
+                reason="topo_report_adjustment",
+                metadata={"report_id": report_id},
             )
 
     conn.execute(

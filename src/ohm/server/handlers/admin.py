@@ -1164,17 +1164,51 @@ class AdminHandlerMixin(OhmHandlerBase):
         )
 
     def _post_admin_merge(self, path: str, qs: dict, body: dict, agent: str) -> None:
-        """POST /admin/merge — merge duplicate nodes (OHM-g0kv.6).
+        """POST /admin/merge — merge duplicate nodes (OHM-g0kv.6, OHM-682).
 
         Requires admin role.
+
+        Two modes:
+        1. Explicit: ``{"keep": "id1", "merge": "id2"}`` — merge id2 into id1.
+        2. Strategy: ``{"strategy": "keep_higher_confidence", "duplicate_ids": ["id1","id2","id3"]}``
+           — auto-select the canonical node, merge the rest into it.
+        3. Batch: ``{"canonical_id": "id1", "duplicate_ids": ["id2","id3"]}``
+           — merge all duplicates into the explicit canonical node.
+
+        Strategies: ``keep_higher_confidence``, ``keep_newest``, ``keep_most_observed``.
         """
         self._require_admin()
         from ohm.exceptions import NodeNotFoundError
 
-        keep_id = body.get("keep", "")
+        keep_id = body.get("keep") or body.get("canonical_id", "")
         merge_id = body.get("merge", "")
+        strategy = body.get("strategy")
+        duplicate_ids = body.get("duplicate_ids", [])
+
+        # Strategy mode: auto-select canonical from the duplicate set
+        if strategy and duplicate_ids and not keep_id:
+            keep_id = self._select_canonical_by_strategy(strategy, duplicate_ids)
+            if not keep_id:
+                self._json_response(400, {"error": "validation_error", "message": f"Strategy '{strategy}' could not select a canonical node from duplicate_ids"})
+                return
+            # Remove the canonical from the duplicate list
+            duplicate_ids = [d for d in duplicate_ids if d != keep_id]
+
+        # Batch mode: merge all duplicates into the canonical
+        if duplicate_ids and keep_id:
+            results = []
+            for dup_id in duplicate_ids:
+                try:
+                    r = self.current_store.merge_nodes(keep_id, dup_id, merged_by=agent)
+                    results.append(r)
+                except (NodeNotFoundError, ValueError) as e:
+                    results.append({"merged": dup_id, "error": str(e)})
+            self._json_response(200, {"canonical": keep_id, "merges": results, "count": len(results)})
+            return
+
+        # Single-pair mode (original)
         if not keep_id or not merge_id:
-            self._json_response(400, {"error": "validation_error", "message": "Both 'keep' and 'merge' fields are required"})
+            self._json_response(400, {"error": "validation_error", "message": "Provide 'keep'+'merge' for a single pair, 'canonical_id'+'duplicate_ids' for batch, or 'strategy'+'duplicate_ids' for auto-selection."})
             return
 
         try:
@@ -1184,6 +1218,30 @@ class AdminHandlerMixin(OhmHandlerBase):
             self._json_response(404, {"error": "not_found", "message": str(e)})
         except ValueError as e:
             self._json_response(400, {"error": "validation_error", "message": str(e)})
+
+    def _select_canonical_by_strategy(self, strategy: str, node_ids: list[str]) -> str | None:
+        """Select the canonical node from a set of duplicates by strategy (OHM-682)."""
+        if not node_ids:
+            return None
+        conn = self.current_store.conn
+        placeholders = ",".join(["?"] * len(node_ids))
+        rows = conn.execute(
+            f"""SELECT id, confidence, created_at,
+                (SELECT COUNT(*) FROM ohm_observations WHERE node_id = ohm_nodes.id AND deleted_at IS NULL) AS obs_count
+                FROM ohm_nodes WHERE id IN ({placeholders}) AND deleted_at IS NULL""",
+            node_ids,
+        ).fetchall()
+        if not rows:
+            return None
+        if strategy == "keep_higher_confidence":
+            best = max(rows, key=lambda r: r[1] if r[1] is not None else 0.0)
+        elif strategy == "keep_newest":
+            best = max(rows, key=lambda r: r[2] if r[2] is not None else "")
+        elif strategy == "keep_most_observed":
+            best = max(rows, key=lambda r: r[3] if r[3] is not None else 0)
+        else:
+            return None
+        return best[0]
 
     def _post_admin_backfill_aliases(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /admin/backfill-aliases — populate ohm_aliases for all existing nodes.

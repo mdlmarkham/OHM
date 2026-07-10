@@ -348,7 +348,7 @@ def filter_results_by_read_scope(
             continue
 
         allowed_tiers = scope.get("source_tier")
-        if allowed_tiers is not None and r.get(source_tier_field) not in allowed_tiers:
+        if allowed_tiers is not None and r.get(source_tier_field) is not None and r.get(source_tier_field) not in allowed_tiers:
             continue
 
         allowed_nodes = scope.get("node_id")
@@ -464,9 +464,10 @@ def filter_edges_by_read_scope(
 
         allowed_tiers = scope.get("source_tier")
         if allowed_tiers is not None:
-            if from_node_data.get("source_tier") not in allowed_tiers:
+            # NULL source_tier is allowed (matches SQL-level helper behavior)
+            if from_node_data.get("source_tier") is not None and from_node_data.get("source_tier") not in allowed_tiers:
                 continue
-            if to_node_data.get("source_tier") not in allowed_tiers:
+            if to_node_data.get("source_tier") is not None and to_node_data.get("source_tier") not in allowed_tiers:
                 continue
 
         if allowed_creators is not None:
@@ -483,6 +484,49 @@ def filter_edges_by_read_scope(
         filtered.append(e)
 
     return filtered
+
+
+def compute_allowed_nodes(
+    conn,
+    agent_name: str,
+) -> set[str] | None:
+    """Compute the set of node ids an agent is permitted to see (OHM-737).
+
+    Returns ``None`` if the agent has no read scope set (full access —
+    backward compat). Otherwise returns the set of ``ohm_nodes.id`` values
+    that satisfy the agent's ``created_by``, ``source_tier``, and
+    ``node_id`` scope dimensions. Used by traversal-time scope enforcement
+    (e.g. ``query_path``'s BFS) where post-filtering would produce broken
+    results.
+    """
+    scope = get_agent_read_scope(conn, agent_name)
+    if scope is None:
+        return None
+
+    conditions: list[str] = ["deleted_at IS NULL"]
+    params: list = []
+
+    allowed_creators = scope.get("created_by")
+    if allowed_creators is not None:
+        placeholders = ", ".join("?" * len(allowed_creators))
+        conditions.append(f"created_by IN ({placeholders})")
+        params.extend(allowed_creators)
+
+    allowed_tiers = scope.get("source_tier")
+    if allowed_tiers is not None:
+        placeholders = ", ".join("?" * len(allowed_tiers))
+        conditions.append(f"(source_tier IS NULL OR source_tier IN ({placeholders}))")
+        params.extend(allowed_tiers)
+
+    allowed_nodes = scope.get("node_id")
+    if allowed_nodes is not None:
+        placeholders = ", ".join("?" * len(allowed_nodes))
+        conditions.append(f"id IN ({placeholders})")
+        params.extend(allowed_nodes)
+
+    where = " AND ".join(conditions)
+    rows = conn.execute(f"SELECT id FROM ohm_nodes WHERE {where}", params).fetchall()
+    return {row[0] for row in rows}
 
 
 def apply_read_scope_edge_filters(

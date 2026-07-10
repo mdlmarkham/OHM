@@ -244,3 +244,105 @@ class TestNoScopeFullAccess:
         assert status == 200
         results = data if isinstance(data, list) else data.get("results", [])
         assert len(results) >= 2
+
+
+class TestTraversalScopeLeakage:
+    """OHM-737: traversal endpoints enforce read scope on seeds and filter results.
+
+    Covers /path, /impact, /confidence, /narrative, /lineage, /provenance.
+    A scoped agent must not reach restricted nodes through traversal, and
+    must not see restricted edges/nodes in the returned results.
+    """
+
+    def test_path_blocked_when_endpoint_out_of_scope(self, auth_server):
+        port, store = auth_server
+        _create_node_direct(store, "p_src", "Path Src", created_by="metis")
+        _create_node_direct(store, "p_dst", "Path Dst", created_by="observer")
+        _create_edge_direct(store, "p_src", "p_dst", created_by="metis")
+        _set_scope(store, "metis", {"created_by": ["metis"]})
+        status, _ = _request("GET", port, "/path/p_src/p_dst", token="test-token-abc")
+        assert status == 403
+
+    def test_path_works_when_endpoints_in_scope(self, auth_server):
+        port, store = auth_server
+        _create_node_direct(store, "p_a", "Path A", created_by="metis")
+        _create_node_direct(store, "p_b", "Path B", created_by="metis")
+        _create_edge_direct(store, "p_a", "p_b", created_by="metis")
+        _set_scope(store, "metis", {"created_by": ["metis"]})
+        status, data = _request("GET", port, "/path/p_a/p_b", token="test-token-abc")
+        assert status == 200
+
+    def test_impact_blocked_for_out_of_scope_seed(self, auth_server):
+        port, store = auth_server
+        _create_node_direct(store, "imp_root", "Impact Root", created_by="observer")
+        _create_node_direct(store, "imp_child", "Impact Child", created_by="observer")
+        _create_edge_direct(store, "imp_root", "imp_child", created_by="observer")
+        _set_scope(store, "metis", {"created_by": ["metis"]})
+        status, _ = _request("GET", port, "/impact/imp_root", token="test-token-abc")
+        assert status == 403
+
+    def test_impact_filters_cross_scope_edges(self, auth_server):
+        port, store = auth_server
+        _set_scope(store, "metis", {"created_by": ["metis"]})
+        _create_node_direct(store, "my_root", "My Root", created_by="metis")
+        _create_node_direct(store, "my_child", "My Child", created_by="metis")
+        _create_node_direct(store, "obs_child", "Obs Child", created_by="observer")
+        _create_edge_direct(store, "my_root", "my_child", created_by="metis")
+        _create_edge_direct(store, "my_root", "obs_child", created_by="metis")
+        status, data = _request("GET", port, "/impact/my_root", token="test-token-abc")
+        assert status == 200
+        to_nodes = {e.get("to_node") for e in data} if isinstance(data, list) else set()
+        assert "my_child" in to_nodes
+        assert "obs_child" not in to_nodes
+
+    def test_confidence_blocked_for_out_of_scope_node(self, auth_server):
+        port, store = auth_server
+        _create_node_direct(store, "conf_n", "Conf Node", created_by="observer")
+        _set_scope(store, "metis", {"created_by": ["metis"]})
+        status, _ = _request("GET", port, "/confidence/conf_n", token="test-token-abc")
+        assert status == 403
+
+    def test_provenance_blocked_for_out_of_scope_seed(self, auth_server):
+        port, store = auth_server
+        _create_node_direct(store, "prov_n", "Prov Node", created_by="observer")
+        _set_scope(store, "metis", {"created_by": ["metis"]})
+        status, _ = _request("GET", port, "/provenance/prov_n", token="test-token-abc")
+        assert status == 403
+
+    def test_provenance_filters_out_of_scope_sources(self, auth_server):
+        port, store = auth_server
+        _set_scope(store, "metis", {"created_by": ["metis"]})
+        _create_node_direct(store, "prov_root", "Prov Root", created_by="metis")
+        _create_node_direct(store, "prov_mine", "My Source", created_by="metis", node_type="source")
+        _create_node_direct(store, "prov_obs", "Obs Source", created_by="observer", node_type="source")
+        _create_edge_direct(store, "prov_root", "prov_mine", edge_type="DERIVES_FROM", layer="L2", created_by="metis")
+        _create_edge_direct(store, "prov_root", "prov_obs", edge_type="DERIVES_FROM", layer="L2", created_by="metis")
+        status, data = _request("GET", port, "/provenance/prov_root", token="test-token-abc")
+        assert status == 200
+        source_ids = {r.get("node_id") for r in data} if isinstance(data, list) else set()
+        assert "prov_mine" in source_ids
+        assert "prov_obs" not in source_ids
+
+    def test_narrative_blocked_for_out_of_scope_seed(self, auth_server):
+        port, store = auth_server
+        _create_node_direct(store, "nar_n", "Narrative Node", created_by="observer")
+        _set_scope(store, "metis", {"created_by": ["metis"]})
+        status, _ = _request("GET", port, "/narrative/nar_n", token="test-token-abc")
+        assert status == 403
+
+    def test_lineage_blocked_for_out_of_scope_seed(self, auth_server):
+        port, store = auth_server
+        _create_node_direct(store, "lin_n", "Lineage Node", created_by="observer")
+        _set_scope(store, "metis", {"created_by": ["metis"]})
+        status, _ = _request("GET", port, "/lineage/lin_n", token="test-token-abc")
+        assert status == 403
+
+    def test_traversal_unscoped_works(self, auth_server):
+        """Without a scope, all traversal endpoints return normally (backward compat)."""
+        port, store = auth_server
+        _create_node_direct(store, "u_a", "U A", created_by="metis")
+        _create_node_direct(store, "u_b", "U B", created_by="observer")
+        _create_edge_direct(store, "u_a", "u_b", created_by="metis")
+        for endpoint in ("/path/u_a/u_b", "/impact/u_a", "/confidence/u_a", "/provenance/u_a"):
+            status, _ = _request("GET", port, endpoint, token="test-token-abc")
+            assert status == 200, f"{endpoint} returned {status}"

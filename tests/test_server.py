@@ -270,6 +270,29 @@ class TestNodeEndpoints:
         assert data["nodes"][0]["type"] == "concept"
         assert data["nodes"][0]["node_type"] == "concept"
 
+    def test_upsert_preserves_omitted_fields(self, test_server):
+        """OHM-742: POST /node?create_only=false with partial fields preserves existing values (PATCH semantics)."""
+        port, store = test_server
+        # Create with content + confidence
+        _request("POST", port, "/node", body={"id": "up742", "label": "Upsert Test", "type": "concept", "content": "original", "confidence": 0.8})
+        # Upsert with only confidence — content must be preserved
+        status, data = _request("POST", port, "/node?create_only=false", body={"id": "up742", "label": "Upsert Test", "type": "concept", "confidence": 0.9})
+        assert status == 200
+        assert data["content"] == "original", f"content was nulled: {data.get('content')}"
+        assert data["confidence"] == 0.9
+        # Upsert with only content — confidence must be preserved
+        status, data = _request("POST", port, "/node?create_only=false", body={"id": "up742", "label": "Upsert Test", "type": "concept", "content": "updated"})
+        assert status == 200
+        assert data["content"] == "updated"
+        assert data["confidence"] == 0.9, f"confidence was changed: {data.get('confidence')}"
+
+    def test_create_only_rejects_duplicate(self, test_server):
+        """POST /node?create_only=true rejects existing node with 409."""
+        port, store = test_server
+        _request("POST", port, "/node", body={"id": "co742", "label": "First", "type": "concept"})
+        status, data = _request("POST", port, "/node?create_only=true", body={"id": "co742", "label": "Second", "type": "concept"})
+        assert status == 409
+
 
 @pytest.mark.xdist_group("server")
 class TestQuestionAutoDetection:
@@ -474,6 +497,48 @@ class TestEdgeEndpoints:
             },
         )
         assert status == 201
+
+    def test_node_then_edge_no_race(self, test_server):
+        """OHM-744: POST /node then POST /edge referencing it must not race.
+
+        A node created moments ago must be visible to the edge existence
+        check in the same agent session (write-after-read guarantee).
+        """
+        port, store = test_server
+        # Create the node
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={"id": "race_src", "label": "Race Source", "type": "concept"},
+        )
+        assert status == 201
+        # Immediately create an edge referencing it — must not 404
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={"id": "race_dst", "label": "Race Dest", "type": "concept"},
+        )
+        assert status == 201
+        status, data = _request(
+            "POST",
+            port,
+            "/edge",
+            body={"from": "race_src", "to": "race_dst", "type": "CAUSES", "layer": "L3"},
+        )
+        assert status == 201, f"Edge creation raced: {status} {data}"
+
+    def test_edge_nonexistent_node_returns_404(self, test_server):
+        """OHM-744: edge referencing a truly nonexistent node must still 404."""
+        port, store = test_server
+        status, data = _request(
+            "POST",
+            port,
+            "/edge",
+            body={"from": "does_not_exist_xyz", "to": "also_missing_abc", "type": "CAUSES", "layer": "L3"},
+        )
+        assert status == 404
 
     def test_observe_invalid_obs_type_rejected(self, test_server):
         """POST /observe/{id} rejects observation types not in schema (OHM-jt98)."""
@@ -2320,6 +2385,41 @@ class TestSearchExcludesFragments:
         assert len(results) >= 1
         assert all(r.get("type") == "fragment" for r in results)
 
+    def test_search_type_filter_narrows_non_fragment(self, test_server):
+        """OHM-738: ?type= must narrow text-search results to that type."""
+        port, store = test_server
+        store.write_node("typefilt_concept", "RiskMetric concept node", "concept", agent_name="test")
+        store.write_node("typefilt_pattern", "RiskMetric pattern node", "pattern", agent_name="test")
+        # Bare query returns both
+        status, data = _request("GET", port, "/search?q=RiskMetric")
+        assert status == 200
+        results = data if isinstance(data, list) else data.get("results", data)
+        types = {r.get("type") for r in results}
+        assert "concept" in types and "pattern" in types
+        # type=concept narrows to only concept
+        status, data = _request("GET", port, "/search?q=RiskMetric&type=concept")
+        assert status == 200
+        results = data if isinstance(data, list) else data.get("results", data)
+        assert len(results) >= 1
+        assert all(r.get("type") == "concept" for r in results)
+        # type=pattern narrows to only pattern
+        status, data = _request("GET", port, "/search?q=RiskMetric&type=pattern")
+        assert status == 200
+        results = data if isinstance(data, list) else data.get("results", data)
+        assert len(results) >= 1
+        assert all(r.get("type") == "pattern" for r in results)
+
+    def test_search_type_filter_empty_no_fallback_leak(self, test_server):
+        """OHM-738: ?type= with no text matches must not leak other-type results via fallback."""
+        port, store = test_server
+        store.write_node("noleak_concept", "ZebraAlpha concept", "concept", agent_name="test")
+        store.write_node("noleak_pattern", "ZebraAlpha pattern", "pattern", agent_name="test")
+        # type=concept should return only concept nodes, never pattern
+        status, data = _request("GET", port, "/search?q=ZebraAlpha&type=concept")
+        assert status == 200
+        results = data if isinstance(data, list) else data.get("results", data)
+        assert all(r.get("type") == "concept" for r in results)
+
 
 @pytest.mark.xdist_group("server")
 class TestScratchConnectsToEdges:
@@ -2889,3 +2989,69 @@ class TestAutonomyLoopEndpoint:
         assert "summary" in data
         assert "proposed" in data
         assert "executed" in data
+
+
+@pytest.mark.xdist_group("server")
+class TestAdminMergeStrategyAndBatch:
+    """OHM-682: POST /admin/merge strategy auto-selection and batch support."""
+
+    def test_strategy_keep_higher_confidence(self, test_server):
+        port, store = test_server
+        store.write_node("m_a", "A", "concept", agent_name="t", confidence=0.3)
+        store.write_node("m_b", "B", "concept", agent_name="t", confidence=0.9)
+        store.write_node("m_c", "C", "concept", agent_name="t", confidence=0.5)
+        status, data = _request(
+            "POST",
+            port,
+            "/admin/merge",
+            body={"strategy": "keep_higher_confidence", "duplicate_ids": ["m_a", "m_b", "m_c"]},
+        )
+        assert status == 200, data
+        assert data["canonical"] == "m_b"
+        assert data["count"] == 2
+
+    def test_strategy_keep_newest(self, test_server):
+        port, store = test_server
+        store.write_node("o1", "Old", "concept", agent_name="t")
+        import time as _t
+
+        _t.sleep(0.1)
+        store.write_node("o2", "New", "concept", agent_name="t")
+        status, data = _request(
+            "POST",
+            port,
+            "/admin/merge",
+            body={"strategy": "keep_newest", "duplicate_ids": ["o1", "o2"]},
+        )
+        assert status == 200, data
+        assert data["canonical"] == "o2"
+        assert data["count"] == 1
+
+    def test_batch_merge_with_canonical_id(self, test_server):
+        port, store = test_server
+        store.write_node("canon", "Canonical", "concept", agent_name="t")
+        store.write_node("dup1", "Dup 1", "concept", agent_name="t")
+        store.write_node("dup2", "Dup 2", "concept", agent_name="t")
+        status, data = _request(
+            "POST",
+            port,
+            "/admin/merge",
+            body={"canonical_id": "canon", "duplicate_ids": ["dup1", "dup2"]},
+        )
+        assert status == 200, data
+        assert data["canonical"] == "canon"
+        assert data["count"] == 2
+
+    def test_single_pair_still_works(self, test_server):
+        port, store = test_server
+        store.write_node("sp1", "Keep Me", "concept", agent_name="t")
+        store.write_node("sp2", "Merge Me", "concept", agent_name="t")
+        status, data = _request(
+            "POST",
+            port,
+            "/admin/merge",
+            body={"keep": "sp1", "merge": "sp2"},
+        )
+        assert status == 200, data
+        assert data["keep"] == "sp1"
+        assert data["merged"] == "sp2"

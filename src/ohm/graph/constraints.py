@@ -381,6 +381,32 @@ def validate_edge_constraints(
 # ── Effective Layer ───────────────────────────────────────────────────────
 
 
+def _layer_constraints_satisfied(conn: DuckDBPyConnection, node_id: str, transition_key: str) -> bool:
+    """Check whether a node satisfies all constraints for a layer promotion (OHM-740).
+
+    ``transition_key`` is a key into ``PROMOTION_CONSTRAINTS`` (e.g.
+    ``"L0_to_L1"``, ``"L1_to_L2"``). Returns ``True`` if every constraint
+    for that transition is satisfied, ``False`` otherwise. Used by
+    ``effective_layer`` to gate L0/L1/L2 the same way L3/L4 are already
+    gated — a node with an edge tagged ``layer='L1'`` but failing L1's
+    structural requirements is demoted rather than reported as L1.
+    """
+    constraints = PROMOTION_CONSTRAINTS.get(transition_key, {})
+    if not constraints:
+        return True
+    for cname, threshold in constraints.items():
+        value = compute_constraint(conn, node_id, cname)
+        if isinstance(threshold, bool):
+            satisfied = bool(value) == threshold
+        elif isinstance(threshold, (int, float)):
+            satisfied = bool(value is not None and value >= threshold)
+        else:
+            satisfied = bool(value == threshold)
+        if not satisfied:
+            return False
+    return True
+
+
 def effective_layer(conn: DuckDBPyConnection, node_id: str, t: str | None = None) -> tuple[str, dict[str, Any]]:
     """Compute the effective layer of a node based on its edges and type.
 
@@ -424,9 +450,21 @@ def effective_layer(conn: DuckDBPyConnection, node_id: str, t: str | None = None
     original_layer = level_to_layer.get(inferred_level, "L1")
 
     if original_layer in ("L0", "L1"):
+        # OHM-740: gate L0/L1 on structural requirements, not unconditional.
+        # L1 requires the L0→L1 promotion constraints (min_context_links,
+        # require_promotion_action). L0 is the floor — always valid.
+        if original_layer == "L1" and not _layer_constraints_satisfied(conn, node_id, "L0_to_L1"):
+            return "L0", _build_constraint_status(conn, node_id, original_layer, t)
         return original_layer, _build_constraint_status(conn, node_id, original_layer, t)
 
     if original_layer == "L2":
+        # OHM-740: gate L2 on L1→L2 promotion constraints (min_sources,
+        # source_must_have_url, min_observations). Demote to L1 if unmet,
+        # then re-check L1's own requirements (L0→L1 constraints).
+        if not _layer_constraints_satisfied(conn, node_id, "L1_to_L2"):
+            if _layer_constraints_satisfied(conn, node_id, "L0_to_L1"):
+                return "L1", _build_constraint_status(conn, node_id, original_layer, t)
+            return "L0", _build_constraint_status(conn, node_id, original_layer, t)
         return original_layer, _build_constraint_status(conn, node_id, original_layer, t)
 
     cv = chain_validity(conn, node_id, t)
@@ -641,7 +679,22 @@ def effective_layers(conn: DuckDBPyConnection, node_ids: list[str], t: str | Non
 
         original_layer = level_map.get(max_levels.get(nid, 0), "L1")
         if original_layer in ("L0", "L1", "L2"):
-            result[nid] = original_layer
+            # OHM-740: gate L0/L1/L2 on structural requirements (same as
+            # the single-node effective_layer above). Use the per-node
+            # constraint checker — L0/L1/L2 nodes are less common than
+            # L3/L4, so the extra queries are acceptable.
+            if original_layer == "L1" and not _layer_constraints_satisfied(conn, nid, "L0_to_L1"):
+                result[nid] = "L0"
+            elif original_layer == "L2":
+                if not _layer_constraints_satisfied(conn, nid, "L1_to_L2"):
+                    if _layer_constraints_satisfied(conn, nid, "L0_to_L1"):
+                        result[nid] = "L1"
+                    else:
+                        result[nid] = "L0"
+                else:
+                    result[nid] = "L2"
+            else:
+                result[nid] = original_layer
             continue
 
         cv = chain_validities.get(nid, 0.0)

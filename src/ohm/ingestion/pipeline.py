@@ -40,6 +40,7 @@ class PipelineResult:
     error: str | None = None
     aborted_by_hook: str | None = None
     duration_ms: float = 0.0
+    skipped_unchanged: bool = False
 
     @property
     def success(self) -> bool:
@@ -54,6 +55,7 @@ class PipelineResult:
             "aborted_by_hook": self.aborted_by_hook,
             "duration_ms": round(self.duration_ms, 2),
             "stages": self.stages,
+            "skipped_unchanged": self.skipped_unchanged,
         }
 
 
@@ -129,6 +131,38 @@ def run_pipeline(
         post_fetch_payload = {**fetch_payload, "filename": filename, "content_type": content_type, "size": len(content_bytes)}
         _run_hooks("post_fetch", post_fetch_payload)
 
+        # OHM-682: Content-hash skip — if the fetched content's SHA-256
+        # matches a previously-ingested node, skip parse + commit entirely.
+        # This makes re-running the pipeline idempotent for unchanged content.
+        import hashlib as _hashlib
+
+        content_hash = _hashlib.sha256(content_bytes).hexdigest()
+        from ohm.queries import lookup_content_hash
+
+        existing = lookup_content_hash(conn, content_hash=content_hash)
+        if existing:
+            result.skipped_unchanged = True
+            result.source_node_id = existing[0]["node_id"]
+            result.stages.append(
+                {
+                    "stage": "dedup_check",
+                    "status": "skipped_unchanged",
+                    "content_hash": content_hash,
+                    "existing_node_id": existing[0]["node_id"],
+                    "matches": len(existing),
+                }
+            )
+            result.duration_ms = (time.time() - start) * 1000
+            return result
+
+        result.stages.append(
+            {
+                "stage": "dedup_check",
+                "status": "new",
+                "content_hash": content_hash,
+            }
+        )
+
         # ── Stage 2: Parse ─────────────────────────────────────────────
         parse_payload = {
             "item_id": item_id,
@@ -174,6 +208,15 @@ def run_pipeline(
 
         source_node_id = _do_commit(conn, tree, extracted_text, commit_payload)
         result.source_node_id = source_node_id
+
+        # OHM-682: Register the content hash so future runs skip unchanged content.
+        try:
+            from ohm.queries import register_content_hash
+
+            register_content_hash(conn, node_id=source_node_id, content_hash=content_hash)
+        except Exception as exc:
+            logger.debug("Content hash registration failed for %s: %s", source_node_id, exc)
+
         result.stages.append(
             {
                 "stage": "commit",

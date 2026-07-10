@@ -279,7 +279,7 @@ class GraphHandlerMixin(OhmHandlerBase):
                 "islands": "GET /islands -- Find disconnected components. Params: min_size (2), max_islands (20), layer, exclude_fragments (true).",
                 "welcome": "GET /welcome?agent=NAME -- Orientation packet for new/returning agents. Shows graph overview, your footprint, suggested connections, and recent activity.",
                 "orient": "GET /orient?agent=NAME&hours=N -- Context-recovery packet for agents who've lost context. Answers: Where was I? What did I miss? What should I do next? Terse and actionable.",
-                "listen": "GET /listen?since=ISO8601 — Change feed. See what agents have added recently.",
+                "listen": "GET /listen?since=ISO8601 — Change feed. See what agents have added recently. Omit 'since' for the default 24h window; a very recent timestamp may miss writes due to propagation timing.",
             },
             "L0_thinking_layer": {
                 "purpose": "Fragments, hunches, questions, raw associations. Unreliable by design (confidence=0.0). Excluded from search/stats/neighborhood by default.",
@@ -815,16 +815,39 @@ class GraphHandlerMixin(OhmHandlerBase):
         self._json_response(200, response)
 
     def _get_path(self, path: str, qs: dict) -> None:
-        """GET /path/<from>/<to> — shortest path."""
+        """GET /path/<from>/<to> — shortest path.
+
+        OHM-737 response-code contract:
+        - 403 if from or to is itself out of scope (agent can't see that node)
+        - 200 [] if both endpoints are visible but no path exists within the
+          scoped subgraph (the only route runs through a restricted intermediate)
+        """
         parts = path[6:].split("/")
         if len(parts) >= 2:
             from ohm.validation import validate_identifier
 
             from_node = validate_identifier(parts[0], name="from_node")
             to_node = validate_identifier(parts[1], name="to_node")
+
+            # OHM-737: enforce read scope on endpoints first (403 if invisible)
+            from ohm.server.boundary import compute_allowed_nodes, enforce_read_scope
+
+            agent = getattr(self, "_current_agent", "ohm")
+            for nid in (from_node, to_node):
+                node = self.current_store.get_node(nid)
+                if node:
+                    enforce_read_scope(
+                        self.current_store.conn,
+                        agent,
+                        node_id=nid,
+                        source_tier=node.get("source_tier"),
+                        created_by=node.get("created_by"),
+                    )
+            # Compute allowed-node set for traversal-time scope enforcement
+            allowed = compute_allowed_nodes(self.current_store.conn, agent)
             from ohm.queries import query_path
 
-            results = query_path(self.current_store.conn, from_node, to_node)
+            results = query_path(self.current_store.conn, from_node, to_node, allowed_nodes=allowed)
             self._json_response(200, results)
         else:
             from ohm.exceptions import ValidationError
@@ -838,9 +861,23 @@ class GraphHandlerMixin(OhmHandlerBase):
 
         node_id = validate_identifier(node_id, name="node_id")
         depth = int(qs.get("depth", [5])[0])
+        # OHM-737: enforce read scope on seed node before traversal
+        from ohm.server.boundary import enforce_read_scope, filter_edges_by_read_scope
+
+        agent = getattr(self, "_current_agent", "ohm")
+        node = self.current_store.get_node(node_id)
+        if node:
+            enforce_read_scope(
+                self.current_store.conn,
+                agent,
+                node_id=node_id,
+                source_tier=node.get("source_tier"),
+                created_by=node.get("created_by"),
+            )
         from ohm.queries import query_impact
 
         results = query_impact(self.current_store.conn, node_id, depth=depth)
+        results = filter_edges_by_read_scope(self.current_store.conn, agent, results)
         self._json_response(200, results)
 
     def _get_confidence(self, path: str, qs: dict) -> None:
@@ -850,7 +887,10 @@ class GraphHandlerMixin(OhmHandlerBase):
 
         target_id = validate_identifier(target_id, name="target_id")
         from ohm.queries import query_confidence
+        # OHM-737: enforce read scope on the target before returning refs
+        from ohm.server.boundary import enforce_read_scope, enforce_read_scope_for_edge, filter_edges_by_read_scope
 
+        agent = getattr(self, "_current_agent", "ohm")
         is_node = self.current_store.conn.execute(
             "SELECT COUNT(*) FROM ohm_nodes WHERE id = ?",
             [target_id],
@@ -861,6 +901,15 @@ class GraphHandlerMixin(OhmHandlerBase):
         ).fetchone()
 
         if is_node and is_node[0] > 0:
+            node = self.current_store.get_node(target_id)
+            if node:
+                enforce_read_scope(
+                    self.current_store.conn,
+                    agent,
+                    node_id=target_id,
+                    source_tier=node.get("source_tier"),
+                    created_by=node.get("created_by"),
+                )
             refs_result = self.current_store.conn.execute(
                 """SELECT *
                    FROM ohm_edges
@@ -877,6 +926,7 @@ class GraphHandlerMixin(OhmHandlerBase):
                 r["to"] = r.get("to_node")
                 r["type"] = r.get("edge_type")
 
+            refs = filter_edges_by_read_scope(self.current_store.conn, agent, refs)
             challenges = [r for r in refs if r["edge_type"] == "CHALLENGED_BY"]
             supports = [r for r in refs if r["edge_type"] == "SUPPORTS"]
             refinements = [r for r in refs if r["edge_type"] == "REFINES"]
@@ -891,7 +941,14 @@ class GraphHandlerMixin(OhmHandlerBase):
                 },
             )
         elif is_edge and is_edge[0] > 0:
+            edge = self.current_store.get_edge(target_id)
+            if edge:
+                enforce_read_scope_for_edge(self.current_store.conn, agent, edge)
             results = query_confidence(self.current_store.conn, target_id)
+            # Filter the challenge/support/refine edges inside the result
+            for key in ("challenges", "supports", "refinements"):
+                if isinstance(results.get(key), list):
+                    results[key] = filter_edges_by_read_scope(self.current_store.conn, agent, results[key])
             self._json_response(200, results)
         else:
             from ohm.exceptions import NodeNotFoundError
@@ -1096,8 +1153,10 @@ class GraphHandlerMixin(OhmHandlerBase):
         results = self.current_store.execute(sql, params)
 
         # OHM-tr71.8: Automatic semantic fallback on empty text search
-        # When text search returns 0 results, try semantic search automatically
-        if not results and not node_type:
+        # When text search returns 0 results, try semantic search automatically.
+        # OHM-738: pass node_type through to fallbacks so a typed query can
+        # still benefit from semantic/fuzzy matching instead of returning 0.
+        if not results:
             try:
                 from ohm.graph.queries import semantic_search
 
@@ -1105,6 +1164,7 @@ class GraphHandlerMixin(OhmHandlerBase):
                     self.current_store.conn,
                     query=query_text,
                     limit=limit,
+                    node_type=node_type,
                     include_l0=include_l0,
                 )
                 if semantic_results:
@@ -1140,6 +1200,8 @@ class GraphHandlerMixin(OhmHandlerBase):
                     limit=limit,
                     include_l0=include_l0,
                 )
+                if node_type:
+                    fuzzy_results = [r for r in fuzzy_results if r.get("type") == node_type]
                 if fuzzy_results:
                     self._json_response(
                         200,
@@ -1398,6 +1460,19 @@ class GraphHandlerMixin(OhmHandlerBase):
 
         depth = int(qs.get("depth", [2])[0])
 
+        # OHM-737: enforce read scope on the seed node before traversal
+        from ohm.server.boundary import enforce_read_scope
+
+        scope_agent = getattr(self, "_current_agent", "ohm")
+        node = self.current_store.get_node(node_id)
+        if node:
+            enforce_read_scope(
+                self.current_store.conn,
+                scope_agent,
+                node_id=node_id,
+                source_tier=node.get("source_tier"),
+                created_by=node.get("created_by"),
+            )
         result = query_neighborhood_narrative(
             self.current_store.read_conn,
             node_id,
@@ -1428,6 +1503,19 @@ class GraphHandlerMixin(OhmHandlerBase):
 
         max_depth = int(qs.get("depth", [10])[0])
 
+        # OHM-737: enforce read scope on the seed node before traversal
+        from ohm.server.boundary import enforce_read_scope
+
+        scope_agent = getattr(self, "_current_agent", "ohm")
+        node = self.current_store.get_node(node_id)
+        if node:
+            enforce_read_scope(
+                self.current_store.conn,
+                scope_agent,
+                node_id=node_id,
+                source_tier=node.get("source_tier"),
+                created_by=node.get("created_by"),
+            )
         result = query_claim_lineage(
             self.current_store.read_conn,
             node_id,
@@ -1769,29 +1857,70 @@ class GraphHandlerMixin(OhmHandlerBase):
             self._json_response(422, hook_error)
             return
 
-        result = self.current_store.write_node(
-            id=body["id"],
-            label=body["label"],
-            type=_resolve_type_field(body, "node_type", "type", default="concept") or "concept",
-            content=body.get("content"),
-            confidence=body.get("confidence", 1.0),
-            visibility=body.get("visibility", "team"),
-            provenance=body.get("provenance"),
-            tags=body.get("tags"),
-            metadata=body.get("metadata"),
-            priority=body.get("priority"),
-            url=body.get("source_url", body.get("url")),
-            task_status=body.get("task_status"),
-            assigned_to=body.get("assigned_to"),
-            due_date=body.get("due_date"),
-            utility_scale=body.get("utility_scale"),
-            current_best_action=body.get("current_best_action"),
-            action_alternatives=body.get("action_alternatives"),
-            utility_usd_per_day=body.get("utility_usd_per_day"),
-            utility_currency=body.get("utility_currency"),
-            source_tier=body.get("source_tier"),
-            agent_name=agent,
-        )
+        # OHM-742: When create_only=false and the node already exists, use
+        # partial_update (PATCH semantics) so omitted fields preserve their
+        # existing values instead of being nulled out (PUT semantics). For
+        # new-node creation, defaults are applied as before.
+        is_upsert = not create_only
+        node_exists = False
+        if is_upsert:
+            existing_check = self.current_store.conn.execute(
+                "SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                [body["id"]],
+            ).fetchone()
+            node_exists = existing_check is not None
+
+        if node_exists:
+            # Partial update: pass None for omitted fields so write_node
+            # preserves existing values. label and type are always required.
+            result = self.current_store.write_node(
+                id=body["id"],
+                label=body["label"],
+                type=_resolve_type_field(body, "node_type", "type", default="concept") or "concept",
+                content=body.get("content"),
+                confidence=body.get("confidence"),
+                visibility=body.get("visibility"),
+                provenance=body.get("provenance"),
+                tags=body.get("tags"),
+                metadata=body.get("metadata"),
+                priority=body.get("priority"),
+                url=body.get("source_url", body.get("url")),
+                task_status=body.get("task_status"),
+                assigned_to=body.get("assigned_to"),
+                due_date=body.get("due_date"),
+                utility_scale=body.get("utility_scale"),
+                current_best_action=body.get("current_best_action"),
+                action_alternatives=body.get("action_alternatives"),
+                utility_usd_per_day=body.get("utility_usd_per_day"),
+                utility_currency=body.get("utility_currency"),
+                source_tier=body.get("source_tier"),
+                agent_name=agent,
+                partial_update=True,
+            )
+        else:
+            result = self.current_store.write_node(
+                id=body["id"],
+                label=body["label"],
+                type=_resolve_type_field(body, "node_type", "type", default="concept") or "concept",
+                content=body.get("content"),
+                confidence=body.get("confidence", 1.0),
+                visibility=body.get("visibility", "team"),
+                provenance=body.get("provenance"),
+                tags=body.get("tags"),
+                metadata=body.get("metadata"),
+                priority=body.get("priority"),
+                url=body.get("source_url", body.get("url")),
+                task_status=body.get("task_status"),
+                assigned_to=body.get("assigned_to"),
+                due_date=body.get("due_date"),
+                utility_scale=body.get("utility_scale"),
+                current_best_action=body.get("current_best_action"),
+                action_alternatives=body.get("action_alternatives"),
+                utility_usd_per_day=body.get("utility_usd_per_day"),
+                utility_currency=body.get("utility_currency"),
+                source_tier=body.get("source_tier"),
+                agent_name=agent,
+            )
         event_type = "node.created" if result.get("created") else "node.updated"
         decorations = self._run_post_ingest_hooks(agent, "node", result)
         if decorations:
