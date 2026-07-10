@@ -326,6 +326,10 @@ def _build_tool_handler(tool_name: str):
     return _handler
 
 
+# OHM-757: FastMCP native auth — GatewayTokenVerifier maps API keys
+# to AccessToken objects with the GatewayProfile as claims.
+# The inline _resolve_profile in the handler is the fallback path;
+# when FastMCP auth is active, the profile comes from the auth context.
 mcp = FastMCP("ohm-gateway", tasks=True)
 
 
