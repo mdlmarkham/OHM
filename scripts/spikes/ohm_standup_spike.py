@@ -20,11 +20,9 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any
 
 
 def _req(method: str, url: str, token: str | None = None, data: dict | None = None, timeout: float = 5.0) -> dict:
@@ -231,7 +229,7 @@ def main() -> int:
         tenant = prompt_choice(tenant_opts, label_key="tenant_id")
         tenant_id = tenant["tenant_id"]
 
-        print(f"\n3. Generating customer-scoped MCP key...")
+        print("\n3. Generating customer-scoped MCP key...")
         customer_key = get_or_create_customer_key(base_url, token, tenant_id)
 
     print(f"\n4. Fetching schema for tenant {tenant_id}...")
