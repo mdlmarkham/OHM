@@ -54,6 +54,9 @@ from ohm.mcp.tools import all_tools as _all_tools
 
 logger = logging.getLogger(__name__)
 
+# OHM-759: Long-analysis tools that support background task execution
+_LONG_ANALYSIS_TOOLS = {"ohm_inference", "ohm_discover", "ohm_voi", "ohm_refute"}
+
 
 @dataclass(frozen=True)
 class GatewayProfile:
@@ -269,7 +272,18 @@ def _build_tool_handler(tool_name: str):
                     return result
 
         try:
+            # OHM-759: Report progress for long-analysis tools
+            if tool_name in _LONG_ANALYSIS_TOOLS and ctx:
+                try:
+                    await ctx.report_progress(0, 1, f"Forwarding {tool_name} to ohmd...")
+                except Exception:
+                    pass
             data = await _forward(profile, method, path, body)
+            if tool_name in _LONG_ANALYSIS_TOOLS and ctx:
+                try:
+                    await ctx.report_progress(1, 1, "Done")
+                except Exception:
+                    pass
             # OHM-760: strip nulls from ALL responses (not just writes) for
             # clean structured content. Previously only applied to write tools.
             # OHM-747-3 / OHM-764: deduplicate nudges per session.
@@ -312,7 +326,7 @@ def _build_tool_handler(tool_name: str):
     return _handler
 
 
-mcp = FastMCP("ohm-gateway")
+mcp = FastMCP("ohm-gateway", tasks=True)
 
 
 @mcp.custom_route("/health", methods=["GET"])
@@ -372,19 +386,23 @@ def _tool_annotations(tool_name: str):
 def _register_tools() -> None:
     """Register all OHM tools that make sense in a remote gateway."""
     from fastmcp.tools.function_tool import FunctionTool
+    from fastmcp.utilities.tasks import TaskConfig
 
     for tool in _all_tools():
         if tool.name in ("ohm_list_instances", "ohm_list_profiles", "ohm_select_profile"):
             # Local-only: the gateway resolves profiles per HTTP request.
             continue
         handler = _build_tool_handler(tool.name)
-        ft = FunctionTool(
+        kwargs: dict[str, Any] = dict(
             name=tool.name,
             description=tool.description,
             parameters=tool.inputSchema,
             fn=handler,
             annotations=_tool_annotations(tool.name),
         )
+        if tool.name in _LONG_ANALYSIS_TOOLS:
+            kwargs["task_config"] = TaskConfig(mode="optional")
+        ft = FunctionTool(**kwargs)
         mcp.add_tool(ft)
 
 
