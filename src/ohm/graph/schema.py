@@ -2694,6 +2694,60 @@ def initialize_schema(conn: "DuckDBPyConnection", schema: "SchemaConfig | None" 
         _create_domain_tables(conn, schema)
 
 
+def initialize_schema_ducklake(conn: "DuckDBPyConnection", schema: "SchemaConfig | None" = None) -> None:
+    """Create OHM tables in a DuckLake schema (OHM-734 federated mode).
+
+    DuckLake does NOT support PRIMARY KEY or UNIQUE constraints, and has
+    limited index support. This function strips those from the DDL and
+    skips index creation. Uniqueness is enforced in application code
+    (same as the existing DuckLake mirror tables in db.py).
+    """
+    import re
+
+    for ddl in DDL_STATEMENTS:
+        # Skip sequences, indexes, and tables that use row_id (reserved by DuckLake)
+        if "CREATE SEQUENCE" in ddl or "CREATE INDEX" in ddl or "CREATE UNIQUE INDEX" in ddl:
+            continue
+        if "ohm_change_feed" in ddl or "ohm_metric_action_log" in ddl or "ohm_change_log" in ddl:
+            continue  # These use row_id (reserved by DuckLake) and are per-daemon
+        # Strip PRIMARY KEY (with optional column list in parentheses)
+        cleaned = re.sub(r",?\s*PRIMARY\s+KEY\s*\([^)]*\)", "", ddl, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s+PRIMARY\s+KEY", "", cleaned, flags=re.IGNORECASE)
+        # Strip UNIQUE(...) table constraints and trailing comma
+        cleaned = re.sub(r",?\s*UNIQUE\s*\([^)]*\)", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s+UNIQUE(?!\s*\()", "", cleaned, flags=re.IGNORECASE)
+        # Strip DEFAULT gen_random_uuid() — DuckLake may not support it
+        cleaned = re.sub(
+            r"DEFAULT\s+gen_random_uuid\(\)", "DEFAULT NULL", cleaned, flags=re.IGNORECASE
+        )
+        # Replace sequence defaults — DuckLake doesn't support sequences
+        cleaned = re.sub(
+            r"DEFAULT\s+nextval\([^)]+\)", "DEFAULT NULL", cleaned, flags=re.IGNORECASE
+        )
+        # Rename row_id — reserved by DuckLake for internal use
+        cleaned = cleaned.replace("row_id", "change_row_id")
+        # Clean up trailing commas before closing paren
+        cleaned = re.sub(r",\s*\)", "\n    )", cleaned)
+        try:
+            conn.execute(cleaned)
+        except Exception as e:
+            err_msg = str(e).lower()
+            if "already exists" in err_msg or "duplicate" in err_msg:
+                pass
+            else:
+                raise
+
+    # Skip indexes — DuckLake has limited index support
+    # Skip HNSW embedding index — not available in DuckLake
+    _ensure_meta_table(conn)
+    # Apply migrations — skip individual statements that DuckLake can't handle
+    # (arrays like FLOAT[768], sequences, indexes). Continue with the rest.
+    _apply_migrations_ducklake(conn)
+    if schema:
+        _seed_domain_agents(conn, schema)
+        _create_domain_tables(conn, schema)
+
+
 def _ensure_meta_table(conn: "DuckDBPyConnection") -> None:
     """Ensure the ohm_meta table exists and has a schema_version entry."""
     # Table is created by DDL_STATEMENTS, but ensure version row exists
@@ -2703,6 +2757,11 @@ def _ensure_meta_table(conn: "DuckDBPyConnection") -> None:
             "INSERT INTO ohm_meta (key, value) VALUES ('schema_version', ?)",
             ["0.1.0"],  # Base version before migrations
         )
+
+
+def _version_tuple(v: str) -> tuple[int, ...]:
+    """Convert a version string to a comparable tuple."""
+    return tuple(int(x) for x in v.split("."))
 
 
 def _apply_migrations(conn: "DuckDBPyConnection") -> None:
@@ -2715,9 +2774,6 @@ def _apply_migrations(conn: "DuckDBPyConnection") -> None:
     """
     current = conn.execute("SELECT value FROM ohm_meta WHERE key = 'schema_version'").fetchone()
     current_version = current[0] if current else "0.1.0"
-
-    def _version_tuple(v: str) -> tuple[int, ...]:
-        return tuple(int(x) for x in v.split("."))
 
     current_key = _version_tuple(current_version)
 
@@ -2768,6 +2824,54 @@ def _apply_migrations(conn: "DuckDBPyConnection") -> None:
             except Exception:
                 pass
 
+            current_key = _version_tuple(version)
+
+
+def _apply_migrations_ducklake(conn: "DuckDBPyConnection") -> None:
+    """Apply migrations for DuckLake-backed schemas (OHM-734).
+
+    Like _apply_migrations but skips individual statements that DuckLake
+    can't handle (arrays like FLOAT[768], sequences, indexes). The version
+    is still bumped so the schema is marked current.
+    """
+    current = conn.execute("SELECT value FROM ohm_meta WHERE key = 'schema_version'").fetchone()
+    current_version = current[0] if current else "0.1.0"
+    current_key = _version_tuple(current_version)
+
+    for version, description, statements in MIGRATIONS:
+        if current_key < _version_tuple(version):
+            # DuckLake: run each statement individually without a
+            # transaction so that a failed index/sequence doesn't
+            # roll back a successful ALTER TABLE ADD COLUMN.
+            for stmt in statements:
+                if not stmt:
+                    continue
+                # Skip statements referencing tables that weren't created in DuckLake
+                if "ohm_change_feed" in stmt or "ohm_metric_action_log" in stmt or "ohm_change_log" in stmt:
+                    continue
+                try:
+                    conn.execute(stmt)
+                except Exception as e:
+                    err_msg = str(e).lower()
+                    if any(s in err_msg for s in (
+                        "already exists", "duplicate", "already a column",
+                        "column with name", "unsupported type", "ducklake",
+                        "not implemented", "sequence", "row_id",
+                    )):
+                        # Abort the failed statement's transaction state
+                        try:
+                            conn.execute("ROLLBACK")
+                        except Exception:
+                            pass
+                        pass  # Skip unsupported DuckLake features
+                    else:
+                        from ohm.framework.exceptions import MigrationError
+                        raise MigrationError(f"Migration {version} failed: {e}") from e
+
+            conn.execute(
+                "UPDATE ohm_meta SET value = ? WHERE key = 'schema_version'",
+                [version],
+            )
             current_key = _version_tuple(version)
 
 

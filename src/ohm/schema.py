@@ -5,6 +5,7 @@ from ohm.graph.schema import (  # noqa: F401
     _apply_migrations,
     _create_hnsw_index,
     _seed_agent_configs,
+    initialize_schema_ducklake,
 )
 
 try:

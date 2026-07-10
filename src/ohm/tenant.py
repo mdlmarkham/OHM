@@ -129,6 +129,7 @@ class TenantManager:
         checkpoint_interval: int = _CHECKPOINT_INTERVAL_SECONDS,
         wal_size_threshold: int = _WAL_SIZE_THRESHOLD_BYTES,
         shared_patterns_dir: Optional[str | Path] = None,
+        shared_catalog_url: Optional[str] = None,
     ) -> None:
         self._tenants_dir = Path(tenants_dir)
         self._tenants_dir.mkdir(parents=True, exist_ok=True)
@@ -137,6 +138,12 @@ class TenantManager:
         self._checkpoint_interval = checkpoint_interval
         self._wal_size_threshold = wal_size_threshold
         self._shared_patterns_dir = Path(shared_patterns_dir) if shared_patterns_dir else None
+
+        # OHM-734: Federated shared-catalog mode. When set, tenants are
+        # provisioned into schemas within this DuckLake catalog instead of
+        # local .duckdb files. Multiple daemons pointing at the same catalog
+        # share live data for the same tenant.
+        self._shared_catalog_url = shared_catalog_url
 
         self._cache: OrderedDict[str, _TenantEntry] = OrderedDict()
         self._cache_lock = threading.Lock()
@@ -163,8 +170,112 @@ class TenantManager:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
+    @property
+    def federated(self) -> bool:
+        """True when the manager is in shared-catalog (federated) mode."""
+        return self._shared_catalog_url is not None
+
+    def _tenant_schema_name(self, customer_id: str) -> str:
+        """Return the DuckLake schema name for a tenant (OHM-734).
+
+        Reuses validate_customer_id() — the same validation that makes
+        customer_id safe as a filesystem path also makes it safe as a
+        SQL schema name (alphanumeric + underscores only).
+        """
+        return validate_customer_id(customer_id)
+
+    def _create_federated_store(self, customer_id: str, schema: "SchemaConfig") -> OhmStore:
+        """Create an OhmStore that connects directly to a tenant's schema
+        in the shared DuckLake catalog (OHM-734).
+
+        Instead of a local .duckdb file, the store opens an in-memory DuckDB
+        connection, ATTACHes the shared catalog, and creates/USEs the
+        tenant's schema. All reads/writes go straight to the shared catalog
+        — no local-file intermediary, no periodic sync needed.
+        """
+        import duckdb as _duckdb
+
+        schema_name = self._tenant_schema_name(customer_id)
+        conn = _duckdb.connect(":memory:")
+        try:
+            conn.execute("INSTALL ducklake FROM core")
+            conn.execute("LOAD ducklake")
+        except Exception as e:
+            logger.warning("DuckLake extension unavailable for federated mode: %s", e)
+            raise
+
+        # Create per-daemon tables in the local in-memory schema BEFORE
+        # attaching DuckLake — these use row_id (reserved by DuckLake)
+        # and are per-daemon audit logs, not shared state.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS ohm_change_feed (
+                id          BIGINT PRIMARY KEY,
+                table_name  VARCHAR NOT NULL,
+                row_id      VARCHAR NOT NULL,
+                operation   VARCHAR NOT NULL,
+                actor       VARCHAR,
+                layer       VARCHAR,
+                occurred_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_change_feed START 1")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS ohm_change_log (
+                id          VARCHAR PRIMARY KEY,
+                table_name  VARCHAR NOT NULL,
+                row_id      VARCHAR NOT NULL,
+                operation   VARCHAR NOT NULL,
+                agent_name  VARCHAR NOT NULL,
+                layer       VARCHAR,
+                snapshot_id VARCHAR,
+                changed_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                change_data JSON
+            )
+        """)
+
+        # Now attach the shared DuckLake catalog
+        conn.execute(f"ATTACH IF NOT EXISTS '{self._shared_catalog_url}' AS ohm_lake (TYPE ducklake)")
+        conn.execute(f"CREATE SCHEMA IF NOT EXISTS ohm_lake.{schema_name}")
+        conn.execute(f"SET schema TO ohm_lake.{schema_name}")
+
+        # Initialize OHM schema tables in this schema (DuckLake-compatible, no PK)
+        from ohm.schema import initialize_schema_ducklake
+
+        initialize_schema_ducklake(conn, schema=schema)
+
+        # Switch back to the tenant schema for normal operations
+        conn.execute(f"SET schema TO ohm_lake.{schema_name}")
+
+        store = OhmStore.__new__(OhmStore)
+        store._lock = threading.RLock()
+        store._read_lock = threading.RLock()
+        store.agent_name = "ohmd"
+        store.readonly = False
+        store.quack = False
+        store.quack_uri = "quack:localhost"
+        store.quack_token_env = "QUACK_TOKEN"
+        store.quack_started = False
+        store.sync_degraded = False
+        store.schema = schema
+        store.conn = conn
+        store.db_path = Path(":memory:")
+        store.ducklake_path = self._shared_catalog_url
+        store.ducklake_data_path = ""
+        store._read_conn = None
+        store._read_conn_ready = False
+        store._read_conn_deferred = True
+        from ohm.graph.embeddings import NullBackend
+
+        store._embedding_backend = NullBackend(dimensions=768)
+
+        return store
+
     def provision(self, customer_id: str, domain: str = "ohm", tier: str = "starter", integrations: Optional[dict] = None) -> dict:
         """Create an isolated DuckDB instance for *customer_id*.
+
+        In local-file mode (default): creates a .duckdb file per tenant.
+        In federated mode (shared_catalog_url set): creates a schema in
+        the shared DuckLake catalog per tenant (OHM-734).
 
         Raises TenantAlreadyExistsError if the tenant already exists.
         Raises ValueError if required integrations for the domain are missing.
@@ -194,9 +305,22 @@ class TenantManager:
             if missing:
                 raise ValueError(f"Missing required integrations for domain '{domain}': {', '.join(missing)}")
 
-        db_path = tenant_dir / _DB_FILENAME
-        store = OhmStore(db_path=str(db_path), agent_name="ohmd", schema=schema)
-        store.close()
+        if self.federated:
+            # OHM-734: provision into a DuckLake schema, not a local file
+            store = self._create_federated_store(customer_id, schema)
+            # Verify the schema was created
+            schema_name = self._tenant_schema_name(customer_id)
+            check = store.conn.execute(
+                "SELECT schema_name FROM information_schema.schemata WHERE schema_name = ?",
+                [schema_name],
+            ).fetchone()
+            if not check:
+                raise RuntimeError(f"Failed to create schema '{schema_name}' in shared catalog")
+            store.close()
+        else:
+            db_path = tenant_dir / _DB_FILENAME
+            store = OhmStore(db_path=str(db_path), agent_name="ohmd", schema=schema)
+            store.close()
 
         from ohm.schema import SCHEMA_VERSION
 
@@ -215,11 +339,12 @@ class TenantManager:
         }
         self._write_meta(customer_id, meta)
 
-        if self._shared_patterns_dir is not None:
+        if self._shared_patterns_dir is not None and not self.federated:
             from ohm.patterns import load_patterns, seed_patterns
 
             patterns = load_patterns(self._shared_patterns_dir, domain)
             if patterns:
+                db_path = self._tenant_dir(customer_id) / _DB_FILENAME
                 store = OhmStore(db_path=str(db_path), agent_name="ohmd", schema=schema)
                 seeded = seed_patterns(store, patterns, domain)
                 store.close()
@@ -257,8 +382,12 @@ class TenantManager:
         # Not cached — open and insert (dropping LRU entry if at capacity)
         meta = self._read_meta(customer_id)
         schema = self._load_schema(meta.get("domain", "ohm"))
-        db_path = self._tenant_dir(customer_id) / _DB_FILENAME
-        store = OhmStore(db_path=str(db_path), agent_name="ohmd", schema=schema)
+        if self.federated:
+            # OHM-734: open directly to the tenant's schema in the shared catalog
+            store = self._create_federated_store(customer_id, schema)
+        else:
+            db_path = self._tenant_dir(customer_id) / _DB_FILENAME
+            store = OhmStore(db_path=str(db_path), agent_name="ohmd", schema=schema)
 
         with self._cache_lock:
             # Check again under lock (another thread may have beaten us)
