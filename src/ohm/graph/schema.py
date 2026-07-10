@@ -1491,6 +1491,45 @@ class SchemaConfig:
         )
 
     @classmethod
+    def from_db(cls, conn: "DuckDBPyConnection") -> "SchemaConfig | None":
+        """Load schema config from ohm_meta (OHM-795).
+
+        Returns the persisted SchemaConfig if `domain_schema` key exists
+        in ohm_meta, or None if not yet persisted (backward-compatible
+        fallback for existing deployments).
+        """
+        import json as _json
+
+        try:
+            row = conn.execute("SELECT value FROM ohm_meta WHERE key = 'domain_schema'").fetchone()
+        except Exception:
+            return None
+        if row is None or not row[0]:
+            return None
+        try:
+            return cls.from_dict(_json.loads(row[0]))
+        except Exception:
+            return None
+
+    def to_db(self, conn: "DuckDBPyConnection") -> None:
+        """Persist this schema config to ohm_meta (OHM-795).
+
+        Writes `domain_schema` (JSON) and `domain_name` keys.
+        Idempotent — uses INSERT OR REPLACE.
+        """
+        import json as _json
+
+        data = self.to_dict()
+        conn.execute(
+            "INSERT OR REPLACE INTO ohm_meta (key, value) VALUES ('domain_schema', ?)",
+            [_json.dumps(data)],
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO ohm_meta (key, value) VALUES ('domain_name', ?)",
+            [self.name],
+        )
+
+    @classmethod
     def from_json_file(cls, filename: str, *, search_paths: list[str] | None = None) -> "SchemaConfig":
         """Load a schema configuration from a JSON template file.
 
@@ -1526,6 +1565,64 @@ class SchemaConfig:
                 return cls.from_dict(data)
 
         raise FileNotFoundError(f"Schema template '{filename}' not found in: {candidates}")
+
+
+def resolve_schema_by_name(
+    domain: str,
+    templates_dir: str | None = None,
+) -> SchemaConfig:
+    """Resolve a domain name to a SchemaConfig via JSON template lookup (OHM-795).
+
+    Shared helper used by both TenantManager._load_schema (multi-tenant)
+    and single-instance ohmd startup. Resolution order:
+
+    1. {domain}.json in the operator-supplied templates_dir (if configured)
+    2. {domain}.json in the bundled package templates directory
+    3. ohm.json in the bundled package templates directory (generic fallback)
+    4. SchemaConfig() (hardcoded defaults)
+
+    Args:
+        domain: Domain name (validated: lowercase alphanumeric/underscore/hyphen)
+        templates_dir: Optional path to operator-supplied template directory
+
+    Returns:
+        SchemaConfig resolved from the template, or generic defaults.
+    """
+    import json as _json
+    import re as _re
+
+    if not _re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,62}", domain):
+        raise ValueError(f"Invalid domain '{domain}' - must be lowercase alphanumeric/underscore/hyphen, 1-63 chars")
+
+    json_path: Path | None = None
+
+    # 1. Operator-supplied templates_dir
+    if templates_dir:
+        custom_path = Path(templates_dir) / f"{domain}.json"
+        if custom_path.exists():
+            json_path = custom_path
+
+    # 2. Bundled package template
+    if json_path is None:
+        package_template = Path(__file__).parent / "templates" / f"{domain}.json"
+        if package_template.exists():
+            json_path = package_template
+
+    # 3. Fallback to ohm.json
+    if json_path is None:
+        ohm_template = Path(__file__).parent / "templates" / "ohm.json"
+        if ohm_template.exists():
+            json_path = ohm_template
+
+    if json_path is not None:
+        try:
+            raw = _json.loads(json_path.read_text())
+            return SchemaConfig.from_dict(raw)
+        except Exception:
+            pass  # Fall through to default
+
+    # 4. Generic defaults
+    return SchemaConfig()
 
 
 # Default OHM schema config instance
@@ -2731,6 +2828,15 @@ def initialize_schema(conn: "DuckDBPyConnection", schema: "SchemaConfig | None" 
     # reference ohm_nodes / ohm_edges if needed.
     if schema:
         _create_domain_tables(conn, schema)
+
+    # OHM-795: Persist the active schema config to ohm_meta so the DB
+    # is the source of truth for domain vocabulary. On next startup,
+    # SchemaConfig.from_db(conn) can reload it without needing --schema.
+    if schema:
+        try:
+            schema.to_db(conn)
+        except Exception:
+            pass  # Non-fatal: ohm_meta may not exist on very old DBs
 
 
 def _clean_ddl_for_ducklake(ddl: str) -> str:

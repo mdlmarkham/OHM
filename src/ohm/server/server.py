@@ -3242,9 +3242,13 @@ def main(schema_config: SchemaConfig | None = None):
     )
     parser.add_argument(
         "--schema",
-        choices=["ohm", "topo"],
         default=None,
-        help="Schema configuration (default: determined by entry point)",
+        help="Domain schema name (e.g., ohm, topo, beef_herd, devsecops). Loads from bundled templates or --templates-dir. Resolved at startup; DB-stored schema takes precedence.",
+    )
+    parser.add_argument(
+        "--templates-dir",
+        default=None,
+        help="Directory containing custom domain schema templates ({domain}.json files)",
     )
     parser.add_argument(
         "--quack",
@@ -3276,11 +3280,15 @@ def main(schema_config: SchemaConfig | None = None):
     # Canonical config path: CLI --config wins, then OHM_CONFIG, then default.
     config_path = Path(args.config if args.config is not None else os.environ.get("OHM_CONFIG", str(Path.home() / ".ohm" / "ohmd.json")))
 
-    # Allow CLI override of schema
-    if args.schema == "topo":
-        from ohm.schema import TOPO_SCHEMA
+    # OHM-795: Resolve schema config — priority: --schema <name> → DEFAULT_SCHEMA
+    # After store creation, SchemaConfig.from_db() takes precedence (see below).
+    from ohm.graph.schema import resolve_schema_by_name, DEFAULT_SCHEMA
 
-        schema_config = TOPO_SCHEMA
+    templates_dir = args.templates_dir or config.get("templates_dir")
+    if args.schema:
+        schema_config = resolve_schema_by_name(args.schema, templates_dir=templates_dir)
+    else:
+        schema_config = DEFAULT_SCHEMA
 
     config = load_config(str(config_path))
 
@@ -3385,6 +3393,17 @@ def main(schema_config: SchemaConfig | None = None):
     # started with `ohmd --schema topo`.
     store = OhmStore(db_path=config["db_path"], agent_name="ohmd", schema=schema_config)
     print(f"OHM database: {config['db_path']}", file=sys.stderr)
+
+    # OHM-795: After store creation, check if a schema is already persisted
+    # in ohm_meta. If so, it takes precedence over the provisional schema
+    # used to bootstrap the store. This makes the DB the source of truth.
+    from ohm.graph.schema import SchemaConfig as _SC
+
+    db_schema = _SC.from_db(store.conn)
+    if db_schema is not None and db_schema.name != schema_config.name:
+        schema_config = db_schema
+        OhmHandler.schema_config = schema_config
+        print(f"Schema loaded from DB: {schema_config.name}", file=sys.stderr)
     print(f"Status: {store.status()}", file=sys.stderr)
 
     # Attach DuckLake if configured (OHM-kdk.1)

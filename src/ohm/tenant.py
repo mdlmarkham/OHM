@@ -178,7 +178,7 @@ class TenantManager:
         # disk reads on every tenant access (OHM-66i7). Invalidated on writes.
         self._meta_cache: dict[str, tuple[int, dict]] = {}  # customer_id → (mtime_ns, meta)
         self._meta_cache_lock = threading.Lock()
-        self._schema_cache: dict[str, tuple[int, dict]] = {}  # resolved_path → (mtime_ns, raw_dict)
+        self._schema_cache: dict[str, dict] = {}  # cache_key → raw_dict
         self._schema_cache_lock = threading.Lock()
 
     # ── Public API ────────────────────────────────────────────────────────────
@@ -1051,45 +1051,27 @@ class TenantManager:
         import re as _re
 
         if not _re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,62}", domain):
-            raise ValueError(f"Invalid domain '{domain}' — must be lowercase alphanumeric/underscore/hyphen, 1-63 chars")
+            raise ValueError(f"Invalid domain '{domain}' - must be lowercase alphanumeric/underscore/hyphen, 1-63 chars")
 
-        # Resolve the template file we will actually load.
-        json_path: Path | None = None
-        if self._templates_dir:
-            custom_path = self._templates_dir / f"{domain}.json"
-            if custom_path.exists():
-                json_path = custom_path
-        if json_path is None:
-            package_template = Path(__file__).parent / "graph" / "templates" / f"{domain}.json"
-            if package_template.exists():
-                json_path = package_template
-        if json_path is None:
-            ohm_template = Path(__file__).parent / "graph" / "templates" / "ohm.json"
-            if ohm_template.exists():
-                json_path = ohm_template
+        # OHM-795: Use shared resolve_schema_by_name helper
+        from ohm.graph.schema import resolve_schema_by_name
 
-        if json_path is not None:
-            # Cache by resolved path + mtime to avoid re-reading/parsing JSON.
-            try:
-                mtime = json_path.stat().st_mtime_ns
-            except OSError:
-                mtime = 0
-            with self._schema_cache_lock:
-                cached = self._schema_cache.get(str(json_path))
-            if cached is not None:
-                cached_mtime, cached_dict = cached
-                if mtime == cached_mtime:
-                    return SchemaConfig.from_dict(cached_dict)
-            try:
-                raw = json.loads(json_path.read_text())
-            except Exception as e:
-                logger.warning("Could not load template %s: %s — using default", json_path, e)
-                return SchemaConfig()
-            with self._schema_cache_lock:
-                self._schema_cache[str(json_path)] = (mtime, raw)
-            return SchemaConfig.from_dict(raw)
+        templates_dir = str(self._templates_dir) if self._templates_dir else None
 
-        return SchemaConfig()
+        # Check cache first (preserve existing caching behavior)
+        cache_key = f"{templates_dir or ''}/{domain}"
+        with self._schema_cache_lock:
+            cached = self._schema_cache.get(cache_key)
+        if cached is not None:
+            return SchemaConfig.from_dict(cached)
+
+        schema = resolve_schema_by_name(domain, templates_dir=templates_dir)
+        data = schema.to_dict()
+
+        with self._schema_cache_lock:
+            self._schema_cache[cache_key] = data
+
+        return schema
 
     def _apply_lazy_migrations(self, customer_id: str, store: OhmStore) -> None:
         """Apply pending schema migrations to a tenant instance (OHM-tss4.5).
