@@ -106,3 +106,19 @@ class TestSchemaOnboarding:
         status, data = _request("GET", port, "/schema")
         assert status == 200
         assert "onboarding_node_id" not in data
+
+    def test_welcome_shows_onboarding_for_new_agent(self, onboarding_server):
+        """GET /welcome for zero-activity agent includes domain_onboarding hint (OHM-774)."""
+        port, store = onboarding_server
+        status, data = _request("GET", port, "/welcome?agent=newagent")
+        assert status == 200
+        assert "domain_onboarding" in data
+        assert data["domain_onboarding"]["node_id"] == "welcome_onboarding_001"
+
+    def test_schema_includes_onboarding_hint(self, onboarding_server):
+        """GET /schema includes onboarding_hint when configured (OHM-774)."""
+        port, store = onboarding_server
+        status, data = _request("GET", port, "/schema")
+        assert status == 200
+        assert "onboarding_hint" in data
+        assert "welcome_onboarding_001" in data["onboarding_hint"]

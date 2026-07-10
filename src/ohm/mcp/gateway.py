@@ -136,12 +136,34 @@ def _profiles() -> dict[str, GatewayProfile]:
     return _PROFILES
 
 
+# OHM-770: Session-scoped profile cache for clients that drop
+# Authorization after the initial initialize request (e.g. Copilot Studio).
+_SESSION_PROFILES: dict[str, GatewayProfile] = {}
+
+
 def _resolve_profile(headers: dict[str, str]) -> GatewayProfile | None:
+    # 1. Check session cache first (OHM-770)
+    session_id = headers.get("mcp-session-id", headers.get("Mcp-Session-Id", ""))
+    if session_id and session_id in _SESSION_PROFILES:
+        return _SESSION_PROFILES[session_id]
+
+    # 2. Bearer token lookup (existing logic)
     auth = headers.get("authorization", headers.get("Authorization", ""))
-    if not auth.startswith("Bearer "):
+    if auth.startswith("Bearer "):
+        key = auth.split(" ", 1)[1].strip()
+        profile = _profiles().get(key)
+        if profile and session_id:
+            _SESSION_PROFILES[session_id] = profile
+        if profile:
+            return profile
         return None
-    key = auth.split(" ", 1)[1]
-    return _profiles().get(key)
+
+    # 3. OHM-771: Allow unauthenticated access in single-profile dev mode
+    all_profiles = _profiles()
+    if len(all_profiles) == 1 and os.environ.get("OHM_GATEWAY_ALLOW_UNAUTHENTICATED", "").lower() in ("1", "true", "yes"):
+        return next(iter(all_profiles.values()))
+
+    return None
 
 
 def _audit(profile: GatewayProfile | None, tool: str, *, status: str, latency_ms: float, size: int) -> None:
@@ -356,6 +378,7 @@ async def _health_route(request) -> Any:
             "status": "ok",
             "profiles": len(profiles),
             "backend_reachable": backend_ok,
+            "allow_unauthenticated": os.environ.get("OHM_GATEWAY_ALLOW_UNAUTHENTICATED", "").lower() in ("1", "true", "yes"),
         }
     )
 

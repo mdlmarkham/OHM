@@ -369,6 +369,7 @@ class GraphHandlerMixin(OhmHandlerBase):
         }
         if schema.onboarding_node_id:
             response["onboarding_node_id"] = schema.onboarding_node_id
+            response["onboarding_hint"] = f"This OHM instance has domain-specific onboarding content. GET /node/{schema.onboarding_node_id} to orient yourself before writing."
         if include_analysis:
             response["analysis"] = ANALYSIS_GUIDE
 

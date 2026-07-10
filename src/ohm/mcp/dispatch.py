@@ -201,6 +201,13 @@ def build_request(name: str, arguments: dict[str, Any], agent_id: str) -> tuple[
         total = len(nodes) + len(edges)
         if total > 500:
             raise ValueError(f"ohm_batch: max 500 combined items, got {total}")
+        # OHM-773: Auto-inject agent_id as default provenance for items that don't specify one
+        for node in nodes:
+            if isinstance(node, dict):
+                node.setdefault("provenance", agent_id)
+        for edge in edges:
+            if isinstance(edge, dict):
+                edge.setdefault("provenance", agent_id)
         body: dict[str, Any] = {"nodes": nodes, "edges": edges}
         return "POST", "/batch", body
 

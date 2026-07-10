@@ -1105,17 +1105,26 @@ class AnalysisHandlerMixin(OhmHandlerBase):
             "schema": "GET /schema — Full usage guide with all endpoints",
         }
 
-        self._json_response(
-            200,
-            {
-                "welcome": f"Hello {agent or 'agent'}, the knowledge graph has {node_count} nodes and {edge_count} edges.",
-                "overview": overview,
-                "your_footprint": agent_info,
-                "suggestions": suggestions,
-                "recent_activity": recent,
-                "quick_reference": quick_ref,
-            },
-        )
+        response = {
+            "welcome": f"Hello {agent or 'agent'}, the knowledge graph has {node_count} nodes and {edge_count} edges.",
+            "overview": overview,
+            "your_footprint": agent_info,
+            "suggestions": suggestions,
+            "recent_activity": recent,
+            "quick_reference": quick_ref,
+        }
+
+        # OHM-774: Domain onboarding hint for new agents
+        if agent and agent_info["nodes_created"] == 0 and agent_info["edges_created"] == 0:
+            schema = self.schema_config
+            onboarding_node_id = getattr(schema, "onboarding_node_id", None)
+            if onboarding_node_id:
+                response["domain_onboarding"] = {
+                    "node_id": onboarding_node_id,
+                    "message": (f"You appear to be new to this graph. Read GET /node/{onboarding_node_id} before writing — it contains naming conventions, layer discipline, and key anchor nodes."),
+                }
+
+        self._json_response(200, response)
 
     def _get_orient(self, path: str, qs: dict) -> None:
         """GET /orient?agent=NAME&hours=N -- Context-recovery packet for agents who've lost context.
