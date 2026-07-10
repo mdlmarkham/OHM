@@ -2911,6 +2911,44 @@ def _ensure_meta_table(conn: "DuckDBPyConnection") -> None:
         )
 
 
+def get_meta(conn: "DuckDBPyConnection", key: str, default: str | None = None) -> str | None:
+    """Read a value from ohm_meta (OHM-796).
+
+    Args:
+        conn: DuckDB connection
+        key: Meta key to read
+        default: Value to return if key doesn't exist
+
+    Returns:
+        The stored value string, or default if not found.
+    """
+    try:
+        row = conn.execute("SELECT value FROM ohm_meta WHERE key = ?", [key]).fetchone()
+        return row[0] if row else default
+    except Exception:
+        return default
+
+
+def set_meta(conn: "DuckDBPyConnection", key: str, value: str) -> None:
+    """Write a value to ohm_meta (OHM-796).
+
+    Idempotent — uses INSERT OR REPLACE.
+    """
+    conn.execute(
+        "INSERT OR REPLACE INTO ohm_meta (key, value) VALUES (?, ?)",
+        [key, value],
+    )
+
+
+def get_all_meta(conn: "DuckDBPyConnection") -> dict[str, str]:
+    """Read all key-value pairs from ohm_meta (OHM-796)."""
+    try:
+        rows = conn.execute("SELECT key, value FROM ohm_meta").fetchall()
+        return {row[0]: row[1] for row in rows}
+    except Exception:
+        return {}
+
+
 def _version_tuple(v: str) -> tuple[int, ...]:
     """Convert a version string to a comparable tuple."""
     return tuple(int(x) for x in v.split("."))

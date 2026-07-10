@@ -2372,3 +2372,40 @@ class AdminHandlerMixin(OhmHandlerBase):
         )
         result["dry_run"] = dry_run
         self._json_response(200, result)
+
+    def _get_config(self, path: str, qs: dict) -> None:
+        """GET /config — read all behavioral config from ohm_meta (OHM-796).
+
+        Requires admin role.
+        """
+        self._require_admin()
+        from ohm.graph.schema import get_all_meta
+
+        meta = get_all_meta(self.current_store.conn)
+        self._json_response(200, meta)
+
+    def _put_config(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """PUT /config — update behavioral config in ohm_meta (OHM-796).
+
+        Requires admin role. Accepts {key: value} pairs to update.
+        """
+        self._require_admin()
+        from ohm.graph.schema import set_meta
+
+        if not isinstance(body, dict):
+            from ohm.exceptions import ValidationError
+
+            raise ValidationError("PUT /config requires a JSON object of {key: value} pairs")
+
+        updated = {}
+        # Reserved keys that cannot be set via /config (managed by other mechanisms)
+        reserved = {"schema_version", "domain_schema", "domain_name"}
+        for key, value in body.items():
+            if key in reserved:
+                continue
+            if not isinstance(value, str):
+                value = str(value)
+            set_meta(self.current_store.conn, key, value)
+            updated[key] = value
+
+        self._json_response(200, {"updated": updated, "count": len(updated)})
