@@ -4289,6 +4289,17 @@ class Graph:
             agent_name or self.actor,
         )
 
+    def agent_profile(self, agent_name: str | None = None) -> dict:
+        """Extended agent calibration profile (OHM-792).
+
+        Returns confidence calibration PLUS loop-risk, novelty, contrarian
+        value, evidence quality, language-confidence bias, and blast-radius
+        awareness.
+        """
+        from ohm.graph.calibration import compute_agent_profile
+
+        return compute_agent_profile(self._conn, agent_name or self.actor)
+
     # ── Discovery & Export ──────────────────────────────────────────────
 
     def suggest_connections(self, *, limit: int = 20) -> list[dict[str, Any]]:

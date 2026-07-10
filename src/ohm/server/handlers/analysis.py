@@ -173,6 +173,17 @@ class AnalysisHandlerMixin(OhmHandlerBase):
         result = compute_confidence_calibration(self.current_store.read_conn, agent_name)
         self._json_response(200, result)
 
+    def _get_agent_profile(self, path: str, qs: dict) -> None:
+        """GET /agent_profile/<agent> - extended calibration profile (OHM-792)."""
+        agent_name = path[16:]
+        from ohm.validation import validate_identifier
+
+        agent_name = validate_identifier(agent_name, name="agent_name")
+        from ohm.graph.calibration import compute_agent_profile
+
+        result = compute_agent_profile(self.current_store.read_conn, agent_name)
+        self._json_response(200, result)
+
     def _get_orphans(self, path: str, qs: dict) -> None:
         """GET /orphans — find disconnected nodes."""
         from ohm.methods import find_orphans

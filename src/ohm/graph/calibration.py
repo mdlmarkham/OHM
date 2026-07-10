@@ -357,3 +357,401 @@ def all_effective_reliabilities(
     # Sort by effective_reliability descending
     results.sort(key=lambda r: r["effective_reliability"], reverse=True)
     return results
+
+
+# ── OHM-792: Extended Agent Profile ─────────────────────────────────────────
+
+
+def compute_agent_profile(
+    conn: "DuckDBPyConnection",
+    agent_name: str,
+) -> dict[str, Any]:
+    """Compute the extended agent calibration profile (OHM-792).
+
+    Extends compute_confidence_calibration with agora-aware fields:
+    loop-risk, novelty, contrarian value, evidence quality, language-
+    confidence bias, and blast-radius awareness.
+
+    Returns a dict with all fields from compute_confidence_calibration
+    PLUS the new agora profile fields.
+    """
+    from ohm.graph.methods import compute_confidence_calibration
+
+    base = compute_confidence_calibration(conn, agent_name)
+
+    total_edges = base.get("total_l3_l4_edges", 0)
+
+    # ── point_estimate_bias ──
+    # Average difference between agent's confidence and actual outcome rate
+    point_bias = _compute_point_estimate_bias(conn, agent_name, total_edges)
+
+    # ── overconfidence_rate ──
+    # Fraction of high-confidence (>=0.8) edges that were challenged
+    overconfidence = _compute_overconfidence_rate(conn, agent_name)
+
+    # ── language_confidence_bias ──
+    # Difference between verbal strength (from belief_statements) and
+    # stated probability. Requires ohm_belief_calibration_log.
+    lang_bias = _compute_language_confidence_bias(conn, agent_name)
+
+    # ── brier_score ──
+    # Mean squared error between stated confidence and actual outcome
+    brier = _compute_brier_score(conn, agent_name)
+
+    # ── novelty_score ──
+    # Expected information gain: fraction of agent's observations that
+    # were surprises (high sigma relative to baseline)
+    novelty = _compute_novelty_score(conn, agent_name)
+
+    # ── contrarian_value ──
+    # Outcome-weighted score for agents who disagree with the graph and
+    # turn out correct (their challenged edges held up)
+    contrarian = _compute_contrarian_value(conn, agent_name)
+
+    # ── evidence_quality ──
+    # Source reliability × source_url presence × sigma plausibility
+    evidence_quality = _compute_evidence_quality(conn, agent_name)
+
+    # ── evidence_freshness ──
+    # Average age of agent's observations relative to now (0 = stale, 1 = fresh)
+    freshness = _compute_evidence_freshness(conn, agent_name)
+
+    # ── mechanism_quality ──
+    # Fraction of agent's CAUSES edges that have a mechanism specified
+    mechanism = _compute_mechanism_quality(conn, agent_name)
+
+    # ── information_contribution ──
+    # Fraction of agent's nodes that are unique (not created by other agents)
+    info_contrib = _compute_information_contribution(conn, agent_name)
+
+    # ── loop_risk ──
+    # Per-target risk: recency of belief requests vs. independent evidence
+    loop_risk = _compute_loop_risk(conn, agent_name)
+
+    # ── blast_radius_awareness ──
+    # How well the agent calibrates confidence to actual stakes
+    blast_awareness = _compute_blast_radius_awareness(conn, agent_name, total_edges)
+
+    # ── Intervention ladder ──
+    max_loop_risk = max(loop_risk.values()) if loop_risk else 0.0
+    intervention = _intervention_ladder(max_loop_risk)
+
+    return {
+        **base,
+        "point_estimate_bias": point_bias,
+        "overconfidence_rate": overconfidence,
+        "language_confidence_bias": lang_bias,
+        "brier_score": brier,
+        "novelty_score": novelty,
+        "contrarian_value": contrarian,
+        "evidence_quality": evidence_quality,
+        "evidence_freshness": freshness,
+        "mechanism_quality": mechanism,
+        "information_contribution": info_contrib,
+        "loop_risk": loop_risk,
+        "max_loop_risk": round(max_loop_risk, 4),
+        "blast_radius_awareness": blast_awareness,
+        "intervention": intervention,
+    }
+
+
+def _compute_point_estimate_bias(conn, agent_name, total_edges):
+    try:
+        row = conn.execute(
+            """
+            SELECT AVG(ABS(e.confidence - COALESCE(o.outcome, 0.5)))
+            FROM ohm_edges e
+            LEFT JOIN ohm_outcomes o ON o.claim_node = e."from"
+            WHERE e.created_by = ? AND e.layer IN ('L3','L4')
+            """,
+            [agent_name],
+        ).fetchone()
+        return round(row[0] or 0.0, 4) if row and row[0] is not None else 0.0
+    except Exception:
+        return 0.0
+
+
+def _compute_overconfidence_rate(conn, agent_name):
+    try:
+        row = conn.execute(
+            """
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN c.id IS NOT NULL THEN 1 ELSE 0 END) AS challenged
+            FROM ohm_edges e
+            LEFT JOIN ohm_edges c ON c.challenge_of = e.id AND c.challenge_type = 'CHALLENGED_BY'
+            WHERE e.created_by = ? AND e.confidence >= 0.8 AND e.layer IN ('L3','L4')
+            """,
+            [agent_name],
+        ).fetchone()
+        total = row[0] or 0
+        challenged = row[1] or 0
+        return round(challenged / max(total, 1), 4) if total > 0 else 0.0
+    except Exception:
+        return 0.0
+
+
+def _compute_language_confidence_bias(conn, agent_name):
+    try:
+        rows = conn.execute(
+            """
+            SELECT claimed_probability, graph_probability
+            FROM ohm_belief_calibration_log
+            WHERE agent_id = ?
+            """,
+            [agent_name],
+        ).fetchall()
+        if not rows:
+            return 0.0
+        diffs = [abs(r[0] - r[1]) for r in rows if r[0] is not None and r[1] is not None]
+        return round(sum(diffs) / len(diffs), 4) if diffs else 0.0
+    except Exception:
+        return 0.0
+
+
+def _compute_brier_score(conn, agent_name):
+    try:
+        rows = conn.execute(
+            """
+            SELECT e.confidence, COALESCE(o.outcome, 0.5)
+            FROM ohm_edges e
+            LEFT JOIN ohm_outcomes o ON o.claim_node = e."from"
+            WHERE e.created_by = ? AND e.layer IN ('L3','L4')
+            """,
+            [agent_name],
+        ).fetchall()
+        if not rows:
+            return 0.0
+        total = sum((c - o) ** 2 for c, o in rows if c is not None and o is not None)
+        return round(total / len(rows), 4) if rows else 0.0
+    except Exception:
+        return 0.0
+
+
+def _compute_novelty_score(conn, agent_name):
+    try:
+        row = conn.execute(
+            """
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN sigma > 1.5 THEN 1 ELSE 0 END) AS surprises
+            FROM ohm_observations
+            WHERE created_by = ? AND sigma IS NOT NULL
+            """,
+            [agent_name],
+        ).fetchone()
+        total = row[0] or 0
+        surprises = row[1] or 0
+        return round(surprises / max(total, 1), 4) if total > 0 else 0.0
+    except Exception:
+        return 0.0
+
+
+def _compute_contrarian_value(conn, agent_name):
+    try:
+        row = conn.execute(
+            """
+            SELECT
+                COUNT(DISTINCT e.id) AS challenged_count,
+                SUM(CASE WHEN e.challenge_of IS NULL THEN 1 ELSE 0 END) AS survived
+            FROM ohm_edges c
+            JOIN ohm_edges e ON c.challenge_of = e.id
+            WHERE c.challenge_type = 'CHALLENGED_BY'
+              AND e.created_by = ?
+              AND e.layer IN ('L3','L4')
+            """,
+            [agent_name],
+        ).fetchone()
+        challenged = row[0] or 0
+        survived = row[1] or 0
+        if challenged == 0:
+            return 0.0
+        return round(survived / challenged, 4)
+    except Exception:
+        return 0.0
+
+
+def _compute_evidence_quality(conn, agent_name):
+    try:
+        row = conn.execute(
+            """
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN n.source_url IS NOT NULL THEN 1 ELSE 0 END) AS with_url
+            FROM ohm_nodes n
+            WHERE n.created_by = ? AND n.deleted_at IS NULL
+            """,
+            [agent_name],
+        ).fetchone()
+        total = row[0] or 0
+        with_url = row[1] or 0
+        if total == 0:
+            return 0.0
+        url_fraction = with_url / total
+        reliability = effective_reliability(conn, agent_name).get("effective_reliability", 0.5)
+        return round(reliability * 0.5 + url_fraction * 0.5, 4)
+    except Exception:
+        return 0.0
+
+
+def _compute_evidence_freshness(conn, agent_name):
+    try:
+        row = conn.execute(
+            """
+            SELECT
+                AVG(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - created_at)) / 86400) AS avg_age_days
+            FROM ohm_observations
+            WHERE created_by = ?
+            """,
+            [agent_name],
+        ).fetchone()
+        avg_age = row[0] if row and row[0] is not None else 999
+        # 0 days = 1.0 (fresh), 30+ days = 0.0 (stale)
+        return round(max(0.0, 1.0 - avg_age / 30.0), 4) if avg_age is not None else 0.0
+    except Exception:
+        return 0.0
+
+
+def _compute_mechanism_quality(conn, agent_name):
+    try:
+        row = conn.execute(
+            """
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN condition IS NOT NULL AND condition != '' THEN 1 ELSE 0 END) AS with_mechanism
+            FROM ohm_edges
+            WHERE created_by = ? AND edge_type = 'CAUSES' AND layer IN ('L3','L4')
+            """,
+            [agent_name],
+        ).fetchone()
+        total = row[0] or 0
+        with_mech = row[1] or 0
+        return round(with_mech / max(total, 1), 4) if total > 0 else 0.0
+    except Exception:
+        return 0.0
+
+
+def _compute_information_contribution(conn, agent_name):
+    try:
+        row = conn.execute(
+            """
+            SELECT
+                COUNT(*) AS total_nodes,
+                COUNT(DISTINCT id) AS unique_ids
+            FROM ohm_nodes
+            WHERE created_by = ? AND deleted_at IS NULL
+            """,
+            [agent_name],
+        ).fetchone()
+        total = row[0] or 0
+        if total == 0:
+            return 0.0
+        # Fraction of nodes that are unique to this agent (not created by others)
+        multi_row = conn.execute(
+            """
+            SELECT COUNT(DISTINCT id) FROM ohm_nodes
+            WHERE deleted_at IS NULL GROUP BY id HAVING COUNT(DISTINCT created_by) > 1
+            """,
+        ).fetchone()
+        shared = multi_row[0] if multi_row else 0
+        return round((total - shared) / total, 4) if total > 0 else 0.0
+    except Exception:
+        return 0.0
+
+
+def _compute_loop_risk(conn, agent_name):
+    """Per-target loop risk based on belief calibration log.
+
+    High loop risk = many belief requests on the same target without
+    new independent evidence.
+    """
+    try:
+        rows = conn.execute(
+            """
+            SELECT target_node, COUNT(*) AS n_requests
+            FROM ohm_belief_calibration_log
+            WHERE agent_id = ?
+            GROUP BY target_node
+            ORDER BY n_requests DESC
+            LIMIT 10
+            """,
+            [agent_name],
+        ).fetchall()
+        if not rows:
+            return {}
+        result = {}
+        max_requests = max(r[1] for r in rows) or 1
+        for target, n in rows:
+            # Normalize: 0 = no risk, 1 = max risk (most repeated requests)
+            risk = min(n / max_requests, 1.0) * 0.5
+            # Add language-graph divergence component
+            try:
+                div_row = conn.execute(
+                    """
+                    SELECT AVG(ABS(claimed_probability - graph_probability))
+                    FROM ohm_belief_calibration_log
+                    WHERE agent_id = ? AND target_node = ?
+                    """,
+                    [agent_name, target],
+                ).fetchone()
+                divergence = div_row[0] if div_row and div_row[0] is not None else 0.0
+                risk = min(risk + divergence * 0.5, 1.0)
+            except Exception:
+                pass
+            result[target] = round(risk, 4)
+        return result
+    except Exception:
+        return {}
+
+
+def _compute_blast_radius_awareness(conn, agent_name, total_edges):
+    """How well the agent calibrates confidence to actual stakes.
+
+    Measures whether the agent uses lower confidence for high-blast-radius
+    decisions (nodes with many downstream dependencies).
+    """
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+                e.confidence,
+                (SELECT COUNT(*) FROM ohm_edges d WHERE d."from" = e."to" AND d.layer IN ('L3','L4') AND d.deleted_at IS NULL) AS downstream
+            FROM ohm_edges e
+            WHERE e.created_by = ? AND e.layer IN ('L3','L4') AND e.deleted_at IS NULL
+            """,
+            [agent_name],
+        ).fetchall()
+        if not rows:
+            return 0.0
+        # Good awareness = negative correlation between confidence and downstream count
+        # High downstream should → lower confidence
+        confidences = [r[0] or 0.5 for r in rows]
+        downstreams = [r[1] or 0 for r in rows]
+        avg_conf = sum(confidences) / len(confidences)
+        avg_down = sum(downstreams) / len(downstreams)
+        if avg_down == 0:
+            return 0.5  # neutral — no downstream dependencies
+        # Simple proxy: if agent's avg confidence on high-downstream nodes
+        # is lower than on low-downstream nodes, awareness is good
+        high_stakes = [(c, d) for c, d in zip(confidences, downstreams) if d > avg_down]
+        low_stakes = [(c, d) for c, d in zip(confidences, downstreams) if d <= avg_down]
+        high_avg = sum(c for c, _ in high_stakes) / len(high_stakes) if high_stakes else avg_conf
+        low_avg = sum(c for c, _ in low_stakes) / len(low_stakes) if low_stakes else avg_conf
+        # Awareness = 1 when high_avg < low_avg (good), 0 when equal, negative when reversed
+        diff = low_avg - high_avg
+        return round(max(0.0, min(1.0, 0.5 + diff)), 4)
+    except Exception:
+        return 0.5
+
+
+def _intervention_ladder(max_loop_risk):
+    """Determine intervention level from max loop risk (OHM-792)."""
+    if max_loop_risk > 0.85:
+        return "observation_quarantine"
+    elif max_loop_risk > 0.6:
+        return "category_only_answer"
+    elif max_loop_risk > 0.3:
+        return "autonomy_prompt"
+    elif max_loop_risk > 0.0:
+        return "soft_nudge"
+    return "none"
