@@ -519,7 +519,38 @@ def all_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                },
+                "required": [],
+            },
+        ),
+        # ── Conversation state tier (OHM-789) ──
+        Tool(
+            name="ohm_conversation",
+            description=(
+                "Query or update the per-thread conversation state: active topics, "
+                "open deliberations, nudge history, agent contributions, and pending "
+                "Socratic questions. Pass thread_id to scope; pass updates to modify. "
+                "With no arguments, returns the current thread's state."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                    "thread_id": {"type": "string", "description": "Thread/conversation ID. Defaults to the MCP session ID."},
+                    "action": {
+                        "type": "string",
+                        "enum": ["get", "update", "evict", "answer_question"],
+                        "description": "Action: 'get' (default) returns state, 'update' merges fields, 'evict' clears thread, 'answer_question' marks a pending question answered.",
+                    },
+                    "updates": {
+                        "type": "object",
+                        "description": "Fields to merge when action=update: participants, topics, deliberations, nudge_history, agent_contributions, pending_questions, thread_entropy, needs_attention.",
+                    },
+                    "question_text": {
+                        "type": "string",
+                        "description": "Question text to mark as answered (action=answer_question).",
+                    },
                 },
                 "required": [],
             },

@@ -48,6 +48,7 @@ except ImportError as e:  # pragma: no cover
     raise ImportError("ohm-gateway requires fastmcp: pip install 'ohm[gateway]'") from e
 
 from ohm.mcp.config import WRITE_TOOLS
+from ohm.mcp.conversation_state import auto_update_from_tool, get_store, resolve_thread_id
 from ohm.mcp.encoding import encode_payload, requested_format
 from ohm.mcp.gateway_helpers import _strip_nulls, _deduplicate_nudges
 from ohm.mcp.tools import all_tools as _all_tools
@@ -237,12 +238,19 @@ def _build_tool_handler(tool_name: str):
         kwargs.pop("format", None)
         use_text = fmt == "toon"
 
+        # OHM-789: Resolve thread_id for conversation-state tracking.
+        # thread_id is resolved before profile so it's available even
+        # for auth-failed responses (though we skip conversation extras
+        # for those since profile is None).
+        thread_id = resolve_thread_id(kwargs, headers, None)
+
         def _respond(data: Any) -> Any:
             """Encode response — dict for structured content, str for TOON.
 
             OHM-787: Successful tool responses are wrapped in an
             {ok, data, ohm_context} envelope. Error responses stay
             flat for backward compatibility.
+            OHM-789: ohm_context enriched with conversation-state extras.
             """
             if isinstance(data, dict) and "error" in data:
                 # Error responses: no envelope, keep flat
@@ -264,6 +272,10 @@ def _build_tool_handler(tool_name: str):
                 if profile.tenant_id:
                     ohm_context["agent_state"]["tenant_id"] = profile.tenant_id
 
+            # OHM-789: Add conversation-state extras to ohm_context
+            conv_extras = get_store().get_ohm_context_extras(thread_id)
+            ohm_context.update(conv_extras)
+
             # Wrap in envelope
             envelope: dict[str, Any] = {"ok": True, "data": data}
             if ohm_context:
@@ -283,6 +295,27 @@ def _build_tool_handler(tool_name: str):
             reason = "read_only" if profile.read_only and tool_name in WRITE_TOOLS else "not_allowed"
             result = _respond({"error": "tool_blocked", "message": f"Tool '{tool_name}' is not allowed for this API key"})
             _audit(profile, tool_name, status=reason, latency_ms=(time.time() - start) * 1000, size=len(str(result)))
+            return result
+
+        # OHM-789: ohm_conversation is handled locally in the gateway (no
+        # daemon forward) — conversation state lives in gateway memory.
+        if tool_name == "ohm_conversation":
+            action = kwargs.get("action", "get")
+            if action == "get":
+                result_data: dict[str, Any] = get_store().get_state(thread_id) or {"thread_id": thread_id, "message": "No conversation state yet"}
+            elif action == "evict":
+                get_store().evict(thread_id)
+                result_data = {"thread_id": thread_id, "evicted": True}
+            elif action == "answer_question":
+                qt = kwargs.get("question_text", "")
+                found = get_store().answer_question(thread_id, qt)
+                result_data = {"thread_id": thread_id, "answered": found}
+            else:
+                updates = kwargs.get("updates", {})
+                updates.setdefault("thread_id", thread_id)
+                result_data = get_store().update_state(thread_id, updates)
+            result = _respond(result_data)
+            _audit(profile, tool_name, status="ok", latency_ms=(time.time() - start) * 1000, size=len(str(result)))
             return result
 
         try:
@@ -384,6 +417,9 @@ def _build_tool_handler(tool_name: str):
                     session_key = f"{profile.agent_id}:{ctx.request_id}"
             except Exception:
                 pass
+            # OHM-789: Auto-update conversation state from tool call before
+            # dedup (so nudge_history captures all nudges from the daemon).
+            auto_update_from_tool(thread_id, tool_name, kwargs, profile.agent_id, data)
             data = _deduplicate_nudges(session_key, data)
             result = _respond(data)
             _audit(profile, tool_name, status="ok", latency_ms=(time.time() - start) * 1000, size=len(str(result)))

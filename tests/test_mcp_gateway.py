@@ -67,9 +67,13 @@ async def test_gateway_stats_tool_forwards_to_tenant(ohmd, gateway_profile):
         headers={"authorization": f"Bearer {api_key}"},
         format="json",
     )
-    payload = json.loads(result)
+    if isinstance(result, str):
+        payload = json.loads(result)
+    else:
+        payload = result
     assert "error" not in payload, f"gateway returned error payload: {payload}"
-    assert any(k in payload for k in ("total_nodes", "total_edges")), f"unexpected stats: {payload}"
+    data = payload.get("data", payload)
+    assert any(k in data for k in ("total_nodes", "total_edges")), f"unexpected stats: {payload}"
 
 
 async def test_gateway_unknown_api_key_blocked(ohmd, gateway_profile):
@@ -106,5 +110,8 @@ async def test_gateway_unknown_api_key_blocked(ohmd, gateway_profile):
         headers={"authorization": "Bearer bad-key"},
         format="json",
     )
-    payload = json.loads(result)
+    if isinstance(result, str):
+        payload = json.loads(result)
+    else:
+        payload = result
     assert payload.get("error") == "auth_failed"
