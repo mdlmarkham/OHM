@@ -11,7 +11,10 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
-from ohm.graph.queries._shared import _log_change, _rows_to_dicts, _percentile
+    from ohm.graph.queries import query_record_outcome
+
+from ohm.graph.queries._shared import _log_change, _rows_to_dicts
+
 
 def detect_verifiable_claims(
     conn: DuckDBPyConnection,

@@ -11,7 +11,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
-from ohm.graph.queries._shared import _log_change, _rows_to_dicts, _percentile
+    from ohm.graph.queries import apply_decay_to_edges, compute_confidence_with_decay
+
 
 def query_loop_status(
     conn: DuckDBPyConnection,
@@ -279,6 +280,3 @@ def query_loop_status(
         },
         "temporal": temporal,
     }
-
-
-

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 if TYPE_CHECKING:
-    import ipaddress as _ip
+    pass
 
 from ohm.exceptions import ValidationError
 from ohm.framework.validation import canonicalize_ip

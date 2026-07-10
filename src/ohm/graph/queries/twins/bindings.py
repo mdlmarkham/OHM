@@ -5,12 +5,14 @@ Part of the twins/ML cluster decomposition. Re-exported from __init__.py.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Sequence
 
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
-from ohm.graph.queries._shared import _log_change, _rows_to_dicts, _percentile
+    from ohm.graph.queries import create_edge, create_node
+
+from ohm.graph.queries._shared import _log_change, _rows_to_dicts
 
 
 def register_twin_with_bindings(
@@ -443,5 +445,3 @@ def get_twin_readiness(
         },
         "threshold_state": threshold_state,
     }
-
-

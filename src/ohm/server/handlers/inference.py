@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from ohm.server.handlers._base import OhmHandlerBase
 
+
 class InferenceHandlerMixin(OhmHandlerBase):
     """Handler mixin for Bayesian/causal inference endpoints (OHM-rx7h)."""
 

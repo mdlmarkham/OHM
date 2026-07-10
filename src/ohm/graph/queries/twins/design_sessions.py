@@ -10,7 +10,19 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
-from ohm.graph.queries._shared import _log_change, _rows_to_dicts, _percentile
+    from ohm.graph.queries import (
+        assemble_twin_for_decision,
+        compute_decision_value,
+        create_edge,
+        create_node,
+        instantiate_twin_from_template,
+        promote_model,
+        register_model_candidate,
+    )
+
+from ohm.graph.queries.feed_investment import SESSION_TRANSITIONS, VALID_SESSION_STATES  # noqa: E402
+
+from ohm.graph.queries._shared import _log_change, _rows_to_dicts
 
 
 def start_twin_design_session(
@@ -777,7 +789,6 @@ def get_session_audit(
     *,
     session_id: str,
 ) -> dict[str, Any]:
-    import json as _json
 
     from ohm.validation import validate_identifier
     from ohm.exceptions import NodeNotFoundError
@@ -1035,5 +1046,3 @@ def auto_promote_best_model(
             "detail": str(exc),
             "best_candidate": best,
         }
-
-

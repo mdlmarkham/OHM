@@ -14,9 +14,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from duckdb import DuckDBPyConnection
 
-from ohm.graph.queries._shared import _log_change, _rows_to_dicts, _percentile
+    from ohm.graph.queries import query_stale_edges
+
+from ohm.graph.queries._shared import _log_change, _rows_to_dicts
+
 
 def apply_confidence_decay(
     conn: DuckDBPyConnection,
@@ -103,6 +108,7 @@ def apply_confidence_decay(
         "decayed": decayed,
     }
 
+
 def compute_confidence_with_decay(
     conn: DuckDBPyConnection,
     *,
@@ -127,7 +133,6 @@ def compute_confidence_with_decay(
     ``datetime.now(timezone.utc)`` is only used when the caller passes
     ``now`` explicitly or the DB read fails.
     """
-    import math
     from datetime import datetime as _dt, timezone as _tz
 
     if last_observed_at is None:
@@ -189,6 +194,7 @@ def compute_confidence_with_decay(
         "is_stale": is_stale,
     }
 
+
 def apply_decay_to_edges(
     conn: DuckDBPyConnection,
     *,
@@ -204,7 +210,6 @@ def apply_decay_to_edges(
     original confidence in metadata.confidence_original.
     """
     import json
-    import math
 
     defaults = {"L1": float("inf"), "L2": float("inf"), "L3": 90.0, "L4": 30.0}
     when_clauses = " ".join(f"WHEN '{k}' THEN {999999.0 if v == float('inf') or v <= 0 else float(v)}" for k, v in defaults.items())
@@ -291,11 +296,13 @@ def apply_decay_to_edges(
         "summary": summary[:100],
     }
 
+
 # OHM-447: Lazy cross-domain imports resolved at access time
 _LAZY_IMPORTS = {
     "create_node",
     "create_edge",
 }
+
 
 def log_confidence_change(
     conn: DuckDBPyConnection,
@@ -346,6 +353,7 @@ def log_confidence_change(
         "reason": reason,
     }
 
+
 def recompute_confidence_from_log(
     conn: DuckDBPyConnection,
     edge_id: str,
@@ -374,6 +382,7 @@ def recompute_confidence_from_log(
         [value, edge_id],
     )
     return value
+
 
 def get_confidence_history(
     conn: DuckDBPyConnection,

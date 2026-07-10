@@ -22,7 +22,10 @@ from ohm.documents.ingest import ingest_file
 from ohm.documents.store import BedrockKnowledgeStore, DocumentStore, LocalDocumentStore, S3DocumentStore
 from ohm.exceptions import NodeNotFoundError, ValidationError
 from ohm.framework.validation import canonicalize_ip
-from ohm.net_safety import safe_fetch_pinned as _fetch_pinned, _canonicalize_and_check_ip, _FETCH_BLOCKED_NETWORKS, _LOOPBACK_NETWORKS
+from ohm.net_safety import (
+    safe_fetch_pinned as _fetch_pinned,
+    _canonicalize_and_check_ip,
+)
 
 
 SUPPORTED_CONTENT_TYPES = {
@@ -32,23 +35,6 @@ SUPPORTED_CONTENT_TYPES = {
     "text/x-markdown",
     "text/html",
 }
-
-# Private/loopback networks blocked by default for URL fetches.
-# Loopback (127.0.0.0/8, ::1/128) is allowed by default when
-# ``documents.allow_loopback`` is True (the default for local-first OHM).
-_FETCH_BLOCKED_NETWORKS = [
-    ipaddress.ip_network("10.0.0.0/8"),
-    ipaddress.ip_network("172.16.0.0/12"),
-    ipaddress.ip_network("192.168.0.0/16"),
-    ipaddress.ip_network("169.254.0.0/16"),  # link-local (AWS metadata etc.)
-    ipaddress.ip_network("fc00::/7"),
-    ipaddress.ip_network("fe80::/10"),
-]
-
-_LOOPBACK_NETWORKS = [
-    ipaddress.ip_network("127.0.0.0/8"),
-    ipaddress.ip_network("::1/128"),
-]
 
 
 def _reconstruct_url(parsed: ParseResult) -> str:
@@ -84,75 +70,6 @@ def _canonicalize_ip(addr: str) -> ipaddress._BaseAddress:
     it's exercised directly in tests.
     """
     return canonicalize_ip(ipaddress.ip_address(addr))
-
-
-def _canonicalize_and_check_ip(addr: str, allow_loopback: bool) -> ipaddress._BaseAddress:
-    """Canonicalize *addr* and raise ValidationError if it is private/loopback."""
-    ip = _canonicalize_ip(addr)
-    for net in _FETCH_BLOCKED_NETWORKS:
-        if ip in net:
-            raise ValidationError(f"URL fetch blocked: host resolves to private address {addr} (SSRF protection)")
-    if not allow_loopback:
-        for net in _LOOPBACK_NETWORKS:
-            if ip in net:
-                raise ValidationError(f"URL fetch blocked: host resolves to loopback address {addr} (SSRF protection)")
-    return ip
-
-
-def _fetch_pinned(url: str, *, timeout: float = 30.0, allow_loopback: bool = True) -> tuple[bytes, str | None]:
-    """Fetch *url* with DNS-rebinding mitigation by pinning the resolved IP.
-
-    Validates all resolved addresses, then connects to the first validated
-    IP while preserving the original Host header / TLS SNI. Does not follow
-    redirects.
-    """
-    import http.client
-    import ssl
-
-    parsed = urlparse(url)
-    scheme = parsed.scheme
-    host = parsed.hostname
-    port = parsed.port or (443 if scheme == "https" else 80)
-    request_path = parsed.path or "/"
-    if parsed.query:
-        request_path += "?" + parsed.query
-
-    try:
-        infos = socket.getaddrinfo(host, None)
-    except Exception:
-        raise ValidationError(f"Cannot resolve fetch URL host: {host!r}")
-
-    validated: list[str] = []
-    for info in infos:
-        addr = str(info[4][0])
-        if addr in validated:
-            continue
-        _canonicalize_and_check_ip(addr, allow_loopback)
-        validated.append(addr)
-
-    if not validated:
-        raise ValidationError(f"Cannot resolve fetch URL host: {host!r}")
-
-    pinned_ip = validated[0]
-    headers = {"Host": host, "User-Agent": "OHM-document-library/1.0"}
-
-    if scheme == "http":
-        conn = http.client.HTTPConnection(pinned_ip, port, timeout=timeout)
-    else:
-        ctx = ssl.create_default_context()
-        conn = http.client.HTTPSConnection(pinned_ip, port, timeout=timeout, context=ctx)
-        conn.server_hostname = host  # Set SNI to original host for cert verification
-
-    try:
-        conn.request("GET", request_path, headers=headers)
-        resp = conn.getresponse()
-        if resp.status >= 400:
-            raise urllib.error.HTTPError(url, resp.status, resp.reason, resp.getheaders(), None)
-        content_bytes = resp.read()
-        detected_type = resp.headers.get("Content-Type")
-        return content_bytes, detected_type
-    finally:
-        conn.close()
 
 
 class DocumentHandlerMixin(OhmHandlerBase):

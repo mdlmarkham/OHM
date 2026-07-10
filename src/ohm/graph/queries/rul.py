@@ -10,7 +10,6 @@ if TYPE_CHECKING:
 from ohm.graph.queries._shared import _log_change, _rows_to_dicts
 
 
-
 def register_rul_assessment(
     conn: "DuckDBPyConnection",
     *,
@@ -27,7 +26,7 @@ def register_rul_assessment(
     import json
     import uuid
 
-    from ohm.validation import validate_identifier, validate_confidence
+    from ohm.validation import validate_identifier
 
     equipment_node_id = validate_identifier(equipment_node_id, name="equipment_node_id")
     if rul_days < 0:
@@ -95,5 +94,3 @@ def get_rul_assessments(
     query += " ORDER BY created_at DESC LIMIT ?"
     params.append(limit)
     return _rows_to_dicts(conn.execute(query, params))
-
-

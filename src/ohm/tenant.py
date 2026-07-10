@@ -42,9 +42,9 @@ _DEFAULT_BACKUP_INTERVAL_HOURS = 6
 # OHM-735: cross-process migration lock for federated mode
 _SCHEMA_LOCK_SCHEMA = "ohm_system"
 _SCHEMA_LOCK_TABLE = "ohm_schema_lock"
-_LOCK_TIMEOUT_SECONDS = 300        # stale-lock recovery after 5 min
-_LOCK_RETRY_INTERVAL = 0.5         # seconds between retries
-_LOCK_MAX_WAIT = 60.0              # max seconds to wait for another daemon's migration
+_LOCK_TIMEOUT_SECONDS = 300  # stale-lock recovery after 5 min
+_LOCK_RETRY_INTERVAL = 0.5  # seconds between retries
+_LOCK_MAX_WAIT = 60.0  # max seconds to wait for another daemon's migration
 
 
 def _version_tuple_local(v: str) -> tuple[int, ...]:
@@ -257,6 +257,7 @@ class TenantManager:
             try:
                 conn.execute(f"SET schema TO ohm_lake.{schema_name}")
                 from ohm.schema import initialize_schema_ducklake
+
                 initialize_schema_ducklake(conn, schema=schema)
                 conn.execute(f"SET schema TO ohm_lake.{schema_name}")
             finally:
@@ -264,7 +265,7 @@ class TenantManager:
         else:
             # Another daemon holds the lock — wait for it to finish, then
             # verify the schema is current.
-            from ohm.schema import SCHEMA_VERSION, get_schema_version
+
             if not self._wait_for_migration(conn, schema_name):
                 # Lock holder didn't finish in time — try to acquire ourselves
                 # (stale-lock recovery will kick in if the other daemon crashed)
@@ -272,15 +273,13 @@ class TenantManager:
                     try:
                         conn.execute(f"SET schema TO ohm_lake.{schema_name}")
                         from ohm.schema import initialize_schema_ducklake
+
                         initialize_schema_ducklake(conn, schema=schema)
                         conn.execute(f"SET schema TO ohm_lake.{schema_name}")
                     finally:
                         self._release_migration_lock(conn, schema_name)
                 else:
-                    raise RuntimeError(
-                        f"Could not acquire migration lock for schema '{schema_name}' "
-                        f"— another daemon may be stuck"
-                    )
+                    raise RuntimeError(f"Could not acquire migration lock for schema '{schema_name}' — another daemon may be stuck")
 
         store = OhmStore.__new__(OhmStore)
         store._lock = threading.RLock()
@@ -330,21 +329,16 @@ class TenantManager:
     def _ensure_lock_row(self, conn, schema_name: str) -> None:
         """Ensure a lock row exists for *schema_name* (idempotent)."""
         existing = conn.execute(
-            f"SELECT COUNT(*) FROM ohm_lake.{_SCHEMA_LOCK_SCHEMA}.{_SCHEMA_LOCK_TABLE} "
-            f"WHERE schema_name = ?",
+            f"SELECT COUNT(*) FROM ohm_lake.{_SCHEMA_LOCK_SCHEMA}.{_SCHEMA_LOCK_TABLE} WHERE schema_name = ?",
             [schema_name],
         ).fetchone()
         if existing is None or existing[0] == 0:
             conn.execute(
-                f"INSERT INTO ohm_lake.{_SCHEMA_LOCK_SCHEMA}.{_SCHEMA_LOCK_TABLE} "
-                f"(schema_name, locked_by, locked_at, lock_expires_at, migration_version) "
-                f"VALUES (?, NULL, NULL, NULL, NULL)",
+                f"INSERT INTO ohm_lake.{_SCHEMA_LOCK_SCHEMA}.{_SCHEMA_LOCK_TABLE} (schema_name, locked_by, locked_at, lock_expires_at, migration_version) VALUES (?, NULL, NULL, NULL, NULL)",
                 [schema_name],
             )
 
-    def _acquire_migration_lock(
-        self, conn, schema_name: str, timeout: float = _LOCK_MAX_WAIT
-    ) -> bool:
+    def _acquire_migration_lock(self, conn, schema_name: str, timeout: float = _LOCK_MAX_WAIT) -> bool:
         """Atomically acquire the migration lock for a tenant schema.
 
         Uses UPDATE with a WHERE clause so it's atomic within a DuckLake
@@ -365,10 +359,7 @@ class TenantManager:
         while _time.monotonic() < deadline:
             conn.execute("BEGIN TRANSACTION")
             conn.execute(
-                f"UPDATE {lock_qual} SET locked_by = ?, locked_at = CURRENT_TIMESTAMP, "
-                f"lock_expires_at = CURRENT_TIMESTAMP + INTERVAL '{_LOCK_TIMEOUT_SECONDS} seconds' "
-                f"WHERE schema_name = ? "
-                f"AND (locked_by IS NULL OR lock_expires_at < CURRENT_TIMESTAMP)",
+                f"UPDATE {lock_qual} SET locked_by = ?, locked_at = CURRENT_TIMESTAMP, lock_expires_at = CURRENT_TIMESTAMP + INTERVAL '{_LOCK_TIMEOUT_SECONDS} seconds' WHERE schema_name = ? AND (locked_by IS NULL OR lock_expires_at < CURRENT_TIMESTAMP)",
                 [daemon_id, schema_name],
             )
             result = conn.execute(
@@ -380,7 +371,8 @@ class TenantManager:
             if result and result[0] == daemon_id:
                 logger.info(
                     "Acquired migration lock for schema %s (daemon %s)",
-                    schema_name, daemon_id,
+                    schema_name,
+                    daemon_id,
                 )
                 return True
 
@@ -388,7 +380,8 @@ class TenantManager:
 
         logger.warning(
             "Timed out waiting for migration lock on schema %s after %.1fs",
-            schema_name, timeout,
+            schema_name,
+            timeout,
         )
         return False
 
@@ -397,9 +390,7 @@ class TenantManager:
         daemon_id = self._daemon_id()
         lock_qual = f"ohm_lake.{_SCHEMA_LOCK_SCHEMA}.{_SCHEMA_LOCK_TABLE}"
         conn.execute(
-            f"UPDATE {lock_qual} SET locked_by = NULL, locked_at = NULL, "
-            f"lock_expires_at = NULL "
-            f"WHERE schema_name = ? AND locked_by = ?",
+            f"UPDATE {lock_qual} SET locked_by = NULL, locked_at = NULL, lock_expires_at = NULL WHERE schema_name = ? AND locked_by = ?",
             [schema_name, daemon_id],
         )
         logger.info("Released migration lock for schema %s", schema_name)
@@ -1197,9 +1188,7 @@ class TenantManager:
                 # Leave lock file in place — reconcile_tenants() will detect it
                 raise  # OHM-dlnx: re-raise so caller doesn't use half-migrated store
 
-    def _apply_lazy_migrations_federated(
-        self, customer_id: str, store: OhmStore, meta: dict, target_key: tuple[int, ...], _vtuple
-    ) -> None:
+    def _apply_lazy_migrations_federated(self, customer_id: str, store: OhmStore, meta: dict, target_key: tuple[int, ...], _vtuple) -> None:
         """Federated-mode lazy migration using the shared DuckLake lock (OHM-735)."""
         from ohm.schema import SCHEMA_VERSION, get_schema_version
 
@@ -1238,18 +1227,18 @@ class TenantManager:
                         return
                 # Timeout or version still behind — try to acquire (stale-lock recovery)
                 if not self._acquire_migration_lock(store.conn, schema_name, timeout=5.0):
-                    raise RuntimeError(
-                        f"Could not acquire migration lock for tenant {customer_id} "
-                        f"— another daemon may be stuck"
-                    )
+                    raise RuntimeError(f"Could not acquire migration lock for tenant {customer_id} — another daemon may be stuck")
 
             # We hold the lock — apply migrations
             logger.info(
                 "Migrating federated tenant %s from %s to %s",
-                customer_id, db_version, SCHEMA_VERSION,
+                customer_id,
+                db_version,
+                SCHEMA_VERSION,
             )
             try:
                 from ohm.schema import _apply_migrations_ducklake
+
                 _apply_migrations_ducklake(store.conn)
                 meta["schema_version"] = SCHEMA_VERSION
                 meta.pop("needs_attention", None)

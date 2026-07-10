@@ -5,12 +5,14 @@ Part of the twins/ML cluster decomposition. Re-exported from __init__.py.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Sequence
 
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
-from ohm.graph.queries._shared import _log_change, _rows_to_dicts, _percentile
+    from ohm.graph.queries import compute_confidence_with_decay, create_edge, create_node
+
+from ohm.graph.queries._shared import _log_change, _rows_to_dicts
 
 
 def register_twin(
@@ -440,7 +442,6 @@ def create_twin_template(
     Returns:
         The created twin_template node record.
     """
-    import json as _json
 
     from ohm.validation import validate_identifier
     from ohm.exceptions import NodeNotFoundError
@@ -1121,5 +1122,3 @@ def assemble_twin_for_decision(
         },
         "reasoning": reasoning,
     }
-
-

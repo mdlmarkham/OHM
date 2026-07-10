@@ -283,5 +283,6 @@ class TestCliProfileShow:
 
     def test_mask_token_short_input(self):
         from ohm.cli import _mask_token
+
         assert _mask_token("short") == "***"
         assert _mask_token("x" * 20) == ("x" * 8) + "..." + ("x" * 4)

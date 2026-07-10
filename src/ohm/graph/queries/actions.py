@@ -11,7 +11,9 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
-from ohm.graph.queries._shared import _log_change, _rows_to_dicts, _percentile
+    from ohm.graph.queries import create_edge, create_node
+
+from ohm.graph.queries._shared import _log_change, _rows_to_dicts
 
 
 def propose_action(
@@ -151,5 +153,3 @@ def execute_action(
     _log_change(conn, "ohm_nodes", action_id, "EXECUTE", executed_by)
 
     return _rows_to_dicts(conn.execute("SELECT * FROM ohm_nodes WHERE id = ?", [action_id]))[0]
-
-

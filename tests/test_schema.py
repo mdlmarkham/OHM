@@ -797,15 +797,16 @@ class TestConfidenceDoubleMigration:
         assert any("ohm_edges ALTER COLUMN confidence TYPE DOUBLE" in s for s in stmts)
 
     def test_node_confidence_column_is_double(self, test_db):
-        cols = test_db.execute(
-            "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'ohm_nodes' AND column_name = 'confidence'"
-        ).fetchall()
+        cols = test_db.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'ohm_nodes' AND column_name = 'confidence'").fetchall()
         assert cols, "confidence column missing"
         assert cols[0][1].lower() == "double"
 
     def test_edge_confidence_and_probability_are_double(self, test_db):
         cols = test_db.execute(
-            "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'ohm_edges' AND column_name IN ('confidence', 'probability', 'probability_p05', 'probability_p50', 'probability_p95', 'confidence_p05', 'confidence_p50', 'confidence_p95')"
+            "SELECT column_name, data_type FROM information_schema.columns "
+            "WHERE table_name = 'ohm_edges' AND column_name IN "
+            "('confidence', 'probability', 'probability_p05', 'probability_p50', "
+            "'probability_p95', 'confidence_p05', 'confidence_p50', 'confidence_p95')"
         ).fetchall()
         col_map = {row[0]: row[1].lower() for row in cols}
         for col in ("confidence", "probability", "probability_p05", "probability_p50", "probability_p95", "confidence_p05", "confidence_p50", "confidence_p95"):

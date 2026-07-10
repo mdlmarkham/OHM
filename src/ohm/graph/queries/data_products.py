@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
+    from ohm.graph.queries import create_edge, find_or_create_node, query_source_reliability
+
 from ohm.graph.queries._shared import _log_change, _rows_to_dicts
 
 
@@ -186,7 +188,6 @@ def _link_provenance(
 
     Returns (ohm_node_id, source_reliability).
     """
-    import json as _json
 
     product_node = find_or_create_node(
         conn,
@@ -345,5 +346,3 @@ def list_data_products(
     where = " WHERE " + " AND ".join(conditions)
     params.append(limit)
     return _rows_to_dicts(conn.execute(f"SELECT * FROM ohm_data_products{where} ORDER BY updated_at DESC LIMIT ?", params))
-
-

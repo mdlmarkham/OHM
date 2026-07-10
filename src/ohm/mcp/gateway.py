@@ -48,7 +48,7 @@ except ImportError as e:  # pragma: no cover
     raise ImportError("ohm-gateway requires fastmcp: pip install 'ohm[gateway]'") from e
 
 from ohm.mcp.config import WRITE_TOOLS
-from ohm.mcp.encoding import DEFAULT_FORMAT, encode_payload, requested_format
+from ohm.mcp.encoding import encode_payload, requested_format
 from ohm.mcp.tools import all_tools as _all_tools
 
 logger = logging.getLogger(__name__)
@@ -95,9 +95,7 @@ def _load_profiles() -> dict[str, GatewayProfile]:
     elif os.path.exists(default_path):
         raw = json.loads(open(default_path).read())
     else:
-        logger.warning(
-            "No gateway profiles found. Set OHM_GATEWAY_PROFILES or OHM_GATEWAY_PROFILE."
-        )
+        logger.warning("No gateway profiles found. Set OHM_GATEWAY_PROFILES or OHM_GATEWAY_PROFILE.")
         return {}
 
     if isinstance(raw, dict):

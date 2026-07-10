@@ -5,12 +5,14 @@ Part of the twins/ML cluster decomposition. Re-exported from __init__.py.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Sequence
 
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
-from ohm.graph.queries._shared import _log_change, _rows_to_dicts, _percentile
+    from ohm.graph.queries import compute_confidence_with_decay, create_edge, create_node
+
+from ohm.graph.queries._shared import _log_change, _rows_to_dicts
 
 
 # ── Model Marketplace (OHM-75tw) ──────────────────────────────────────────────
@@ -759,7 +761,6 @@ def run_walk_forward_validation(
     min_train_size: int = 50,
     created_by: str,
 ) -> dict[str, Any]:
-    import json as _json
 
     from ohm.validation import validate_identifier
     from ohm.exceptions import NodeNotFoundError
@@ -1168,7 +1169,6 @@ def set_freshness_threshold(
     created_by: str,
     label: str | None = None,
 ) -> dict[str, Any]:
-    import json as _json
     from ohm.validation import validate_identifier
     from ohm.exceptions import NodeNotFoundError
 
@@ -1297,5 +1297,3 @@ def get_freshness_status(
         "max_age_seconds": max_age,
         "freshness_pressure": freshness_pressure,
     }
-
-

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from ohm.server.handlers._base import OhmHandlerBase
 
+
 class MarkovHandlerMixin(OhmHandlerBase):
     """Markov endpoint handlers for OhmHandler.
 

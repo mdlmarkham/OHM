@@ -11,7 +11,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
-from ohm.graph.queries._shared import _log_change, _rows_to_dicts, _percentile
+from ohm.graph.queries._shared import _rows_to_dicts
+
 
 def generate_embedding(
     text: str,
@@ -417,5 +418,3 @@ def update_node_embedding(
         [embedding, node_id],
     )
     return True
-
-

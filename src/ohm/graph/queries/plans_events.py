@@ -414,4 +414,3 @@ def timeline_rollup(
         result["plans"] = plans
 
     return result
-

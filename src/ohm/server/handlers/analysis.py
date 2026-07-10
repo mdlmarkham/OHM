@@ -99,9 +99,7 @@ class AnalysisHandlerMixin(OhmHandlerBase):
         result = query_provenance(self.current_store.read_conn, node_id, max_depth=max_depth)
         # Provenance returns source node dicts with node_id as the id field
         # and source_author as the creator field
-        result = filter_results_by_read_scope(
-            self.current_store.conn, agent, result, id_field="node_id", created_by_field="source_author"
-        )
+        result = filter_results_by_read_scope(self.current_store.conn, agent, result, id_field="node_id", created_by_field="source_author")
         self._json_response(200, result)
 
     def _get_stale(self, path: str, qs: dict) -> None:

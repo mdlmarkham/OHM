@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
-from ohm.graph.queries._shared import _log_change, _rows_to_dicts
 
 def sign_node_write(
     conn: DuckDBPyConnection,
@@ -110,4 +109,3 @@ def verify_edge_write(
     record = {"id": row[0], "from_node": row[1], "to_node": row[2], "layer": row[3], "edge_type": row[4], "created_by": row[5], "confidence": row[6], "probability": row[7], "source_tier": row[8], "write_signature": row[9]}
     verified = verify_write(record, kind="edge", key=key)
     return {"edge_id": edge_id, "verified": verified}
-

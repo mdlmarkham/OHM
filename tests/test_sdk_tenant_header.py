@@ -15,13 +15,17 @@ def _capture_request_headers(graph):
     def fake_urlopen(req, timeout=None):
         captured["headers"] = {k.lower(): v for k, v in req.headers.items()}
         captured["url"] = req.full_url
+
         class FakeResp:
             def read(self):
-                return b'{}'
+                return b"{}"
+
             def __enter__(self):
                 return self
+
             def __exit__(self, *args):
                 pass
+
         return FakeResp()
 
     with mock.patch("urllib.request.urlopen", fake_urlopen):

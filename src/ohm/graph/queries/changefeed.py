@@ -12,7 +12,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
-from ohm.graph.queries._shared import _log_change, _rows_to_dicts, _percentile
+from ohm.graph.queries._shared import _log_change, _rows_to_dicts
+
 
 def query_change_feed(
     conn: DuckDBPyConnection,
@@ -353,7 +354,6 @@ def _agent_changes_scoped(
     Kept as a private helper so the public function stays readable and so
     the sections can be skipped entirely when no agent is supplied.
     """
-    from datetime import datetime, timedelta, timezone
 
     sections: dict[str, Any] = {
         "new_observations_on_my_nodes": [],
@@ -1055,5 +1055,3 @@ def query_agent_state(
 
 
 # ── Stats ───────────────────────────────────────────────────────────────────
-
-

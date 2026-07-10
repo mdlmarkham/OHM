@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
-from ohm.graph.queries._shared import _log_change, _rows_to_dicts
+from ohm.graph.queries._shared import _rows_to_dicts
 
 # ── Alias Resolution & Content Hashing (OHM-g0kv) ────────────────────────
 
@@ -144,15 +144,6 @@ def lookup_content_hash(
 
 
 # ── Confidence Change Log (OHM-733) ─────────────────────────────────────────
-
-
-
-
-
-
-
-
-
 
 
 def resolve_node_by_alias(

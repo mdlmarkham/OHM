@@ -122,4 +122,3 @@ def delete_hook(
     conn.execute("DELETE FROM ohm_hooks WHERE id = ?", [hook_id])
     _log_change(conn, "ohm_hooks", hook_id, "DELETE", deleted_by)
     return {"deleted": hook_id, "type": "hook"}
-

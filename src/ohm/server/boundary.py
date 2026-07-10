@@ -18,6 +18,8 @@ Multi-tenancy (OHM-l1vs):
     — boundary.py does not need a tenant_id parameter
 """
 
+from typing import Any
+
 from ohm.exceptions import EdgeNotFoundError, PermissionDeniedError
 
 
@@ -568,20 +570,14 @@ def apply_read_scope_edge_filters(
         conditions.append(f"{e_prefix}created_by IN ({placeholders})")
         params.extend(allowed_creators)
 
-    joins.append(
-        f"JOIN ohm_nodes {from_alias} ON {from_alias}.id = {e_prefix}from_node AND {from_alias}.deleted_at IS NULL"
-    )
-    joins.append(
-        f"JOIN ohm_nodes {to_alias} ON {to_alias}.id = {e_prefix}to_node AND {to_alias}.deleted_at IS NULL"
-    )
+    joins.append(f"JOIN ohm_nodes {from_alias} ON {from_alias}.id = {e_prefix}from_node AND {from_alias}.deleted_at IS NULL")
+    joins.append(f"JOIN ohm_nodes {to_alias} ON {to_alias}.id = {e_prefix}to_node AND {to_alias}.deleted_at IS NULL")
 
     allowed_tiers = scope.get("source_tier")
     if allowed_tiers is not None:
         placeholders = ", ".join("?" * len(allowed_tiers))
         for alias in (from_alias, to_alias):
-            conditions.append(
-                f"({alias}.source_tier IS NULL OR {alias}.source_tier IN ({placeholders}))"
-            )
+            conditions.append(f"({alias}.source_tier IS NULL OR {alias}.source_tier IN ({placeholders}))")
             params.extend(allowed_tiers)
 
     if allowed_creators is not None:

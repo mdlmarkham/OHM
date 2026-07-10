@@ -85,9 +85,7 @@ class TestConfidenceLog:
         assert val is None, "Edge with no log history should return None"
 
     def test_log_table_exists_after_schema_init(self, test_db):
-        rows = test_db.execute(
-            "SELECT table_name FROM information_schema.tables WHERE table_name = 'ohm_confidence_log'"
-        ).fetchall()
+        rows = test_db.execute("SELECT table_name FROM information_schema.tables WHERE table_name = 'ohm_confidence_log'").fetchall()
         assert len(rows) == 1
 
     def test_schema_version_at_least_0_46_0(self):

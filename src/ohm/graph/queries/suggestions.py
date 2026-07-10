@@ -11,7 +11,10 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
-from ohm.graph.queries._shared import _log_change, _rows_to_dicts, _percentile
+    from ohm.graph.queries import query_neighborhood
+
+from ohm.graph.queries._shared import _rows_to_dicts
+
 
 def create_suggestion(
     conn: DuckDBPyConnection,
@@ -197,7 +200,6 @@ def batch_orphan_triage(
         exclude_types: Node types to skip (default: fragment, agent, skill, value, goal).
         min_confidence: Only triage orphans with confidence >= this value.
     """
-    from ohm.validation import validate_identifier
 
     if exclude_types is None:
         exclude_types = frozenset({"fragment", "agent", "skill", "value", "goal"})
@@ -386,7 +388,6 @@ def query_neighborhood_narrative(
           - agent_context: when agent_name is set, the agent's edges touching this node
     """
     from ohm.validation import validate_identifier, validate_depth
-    from ohm.graph.decay import confidence_at
 
     node_id = validate_identifier(node_id, name="node_id")
     depth = validate_depth(depth)
@@ -1348,5 +1349,3 @@ def query_confidence_report(
             "stale": len(stale_beliefs),
         },
     }
-
-

@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
-from ohm.graph.queries._shared import _log_change, _rows_to_dicts, _percentile
 
 # ── Scenario Engine (OHM-xagx) ──────────────────────────────────────────────
 
@@ -277,5 +276,3 @@ def query_compare_scenarios(
 
 
 # ── Autonomy Loop: Proposed/Executed Actions (OHM-446a) ─────────────────────
-
-

@@ -1,4 +1,5 @@
 """Test OHM-735: cross-process migration lock for federated mode."""
+
 import tempfile
 import os
 import time
@@ -25,6 +26,7 @@ def fed_env():
     yield tm, catalog, tmp
     # cleanup
     import shutil
+
     shutil.rmtree(tmp, ignore_errors=True)
 
 
@@ -47,9 +49,7 @@ class TestSchemaLockTable:
         tm, catalog, tmp = fed_env
         conn = _make_conn(catalog)
         tm._ensure_schema_lock_table(conn)
-        result = conn.execute(
-            "SELECT COUNT(*) FROM ohm_lake.ohm_system.ohm_schema_lock"
-        ).fetchone()
+        result = conn.execute("SELECT COUNT(*) FROM ohm_lake.ohm_system.ohm_schema_lock").fetchone()
         assert result[0] == 0
         conn.close()
 
@@ -60,10 +60,7 @@ class TestSchemaLockTable:
         tm._ensure_schema_lock_table(conn)
         tm._ensure_lock_row(conn, "acme_corp")
         tm._ensure_lock_row(conn, "acme_corp")  # idempotent
-        result = conn.execute(
-            "SELECT COUNT(*) FROM ohm_lake.ohm_system.ohm_schema_lock "
-            "WHERE schema_name = 'acme_corp'"
-        ).fetchone()
+        result = conn.execute("SELECT COUNT(*) FROM ohm_lake.ohm_system.ohm_schema_lock WHERE schema_name = 'acme_corp'").fetchone()
         assert result[0] == 1
         conn.close()
 
@@ -74,10 +71,7 @@ class TestSchemaLockTable:
         tm._ensure_schema_lock_table(conn)
         tm._ensure_lock_row(conn, "acme_corp")
         tm._ensure_lock_row(conn, "beta_inc")
-        result = conn.execute(
-            "SELECT schema_name FROM ohm_lake.ohm_system.ohm_schema_lock "
-            "ORDER BY schema_name"
-        ).fetchall()
+        result = conn.execute("SELECT schema_name FROM ohm_lake.ohm_system.ohm_schema_lock ORDER BY schema_name").fetchall()
         assert len(result) == 2
         assert result[0][0] == "acme_corp"
         assert result[1][0] == "beta_inc"
@@ -95,10 +89,7 @@ class TestLockAcquireRelease:
         assert acquired is True
 
         # Verify lock is held by our daemon
-        row = conn.execute(
-            "SELECT locked_by FROM ohm_lake.ohm_system.ohm_schema_lock "
-            "WHERE schema_name = 'acme_corp'"
-        ).fetchone()
+        row = conn.execute("SELECT locked_by FROM ohm_lake.ohm_system.ohm_schema_lock WHERE schema_name = 'acme_corp'").fetchone()
         assert row[0] is not None
         assert row[0] == tm._daemon_id()
 
@@ -106,10 +97,7 @@ class TestLockAcquireRelease:
         tm._release_migration_lock(conn, "acme_corp")
 
         # Verify lock is released
-        row = conn.execute(
-            "SELECT locked_by FROM ohm_lake.ohm_system.ohm_schema_lock "
-            "WHERE schema_name = 'acme_corp'"
-        ).fetchone()
+        row = conn.execute("SELECT locked_by FROM ohm_lake.ohm_system.ohm_schema_lock WHERE schema_name = 'acme_corp'").fetchone()
         assert row[0] is None
         conn.close()
 
@@ -133,10 +121,7 @@ class TestLockAcquireRelease:
             "AND (locked_by IS NULL OR lock_expires_at < CURRENT_TIMESTAMP)",
             [daemon2],
         )
-        row = conn.execute(
-            "SELECT locked_by FROM ohm_lake.ohm_system.ohm_schema_lock "
-            "WHERE schema_name = 'acme_corp'"
-        ).fetchone()
+        row = conn.execute("SELECT locked_by FROM ohm_lake.ohm_system.ohm_schema_lock WHERE schema_name = 'acme_corp'").fetchone()
         conn.execute("COMMIT")
         # Second daemon should NOT have acquired — first daemon still holds
         assert row[0] == tm._daemon_id(), "Second daemon should not have acquired the lock"
@@ -152,19 +137,11 @@ class TestLockAcquireRelease:
         # Manually set lock to a different daemon
         tm._ensure_schema_lock_table(conn)
         tm._ensure_lock_row(conn, "acme_corp")
-        conn.execute(
-            "UPDATE ohm_lake.ohm_system.ohm_schema_lock "
-            "SET locked_by = 'other-daemon', locked_at = CURRENT_TIMESTAMP, "
-            "lock_expires_at = CURRENT_TIMESTAMP + INTERVAL '300 seconds' "
-            "WHERE schema_name = 'acme_corp'"
-        )
+        conn.execute("UPDATE ohm_lake.ohm_system.ohm_schema_lock SET locked_by = 'other-daemon', locked_at = CURRENT_TIMESTAMP, lock_expires_at = CURRENT_TIMESTAMP + INTERVAL '300 seconds' WHERE schema_name = 'acme_corp'")
 
         # Try to release — should NOT clear (we're not the holder)
         tm._release_migration_lock(conn, "acme_corp")
-        row = conn.execute(
-            "SELECT locked_by FROM ohm_lake.ohm_system.ohm_schema_lock "
-            "WHERE schema_name = 'acme_corp'"
-        ).fetchone()
+        row = conn.execute("SELECT locked_by FROM ohm_lake.ohm_system.ohm_schema_lock WHERE schema_name = 'acme_corp'").fetchone()
         assert row[0] == "other-daemon", "Release should not clear another daemon's lock"
         conn.close()
 
@@ -180,22 +157,13 @@ class TestStaleLockRecovery:
         # Simulate a crashed daemon: set lock with expired timestamp
         tm._ensure_schema_lock_table(conn)
         tm._ensure_lock_row(conn, "acme_corp")
-        conn.execute(
-            "UPDATE ohm_lake.ohm_system.ohm_schema_lock "
-            "SET locked_by = 'crashed-daemon', "
-            "locked_at = CURRENT_TIMESTAMP - INTERVAL '600 seconds', "
-            "lock_expires_at = CURRENT_TIMESTAMP - INTERVAL '300 seconds' "
-            "WHERE schema_name = 'acme_corp'"
-        )
+        conn.execute("UPDATE ohm_lake.ohm_system.ohm_schema_lock SET locked_by = 'crashed-daemon', locked_at = CURRENT_TIMESTAMP - INTERVAL '600 seconds', lock_expires_at = CURRENT_TIMESTAMP - INTERVAL '300 seconds' WHERE schema_name = 'acme_corp'")
 
         # A new daemon should be able to acquire (stale lock recovery)
         acquired = tm._acquire_migration_lock(conn, "acme_corp", timeout=5.0)
         assert acquired is True
 
-        row = conn.execute(
-            "SELECT locked_by FROM ohm_lake.ohm_system.ohm_schema_lock "
-            "WHERE schema_name = 'acme_corp'"
-        ).fetchone()
+        row = conn.execute("SELECT locked_by FROM ohm_lake.ohm_system.ohm_schema_lock WHERE schema_name = 'acme_corp'").fetchone()
         assert row[0] == tm._daemon_id(), "New daemon should have reclaimed the stale lock"
 
         tm._release_migration_lock(conn, "acme_corp")
@@ -213,10 +181,7 @@ class TestFederatedStoreWithLock:
 
         # Lock should be released after provisioning
         conn = _make_conn(catalog)
-        row = conn.execute(
-            "SELECT locked_by FROM ohm_lake.ohm_system.ohm_schema_lock "
-            "WHERE schema_name = 'acme_corp'"
-        ).fetchone()
+        row = conn.execute("SELECT locked_by FROM ohm_lake.ohm_system.ohm_schema_lock WHERE schema_name = 'acme_corp'").fetchone()
         assert row is None or row[0] is None, "Lock should be released after provisioning"
         conn.close()
 
@@ -229,16 +194,11 @@ class TestFederatedStoreWithLock:
         assert store._federated is True
 
         # Verify schema was initialized (tables exist)
-        table_exists = store.conn.execute(
-            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'ohm_nodes'"
-        ).fetchone()[0]
+        table_exists = store.conn.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'ohm_nodes'").fetchone()[0]
         assert table_exists > 0  # Table exists (domain seeding may have added nodes)
 
         # Lock should be released
-        row = store.conn.execute(
-            "SELECT locked_by FROM ohm_lake.ohm_system.ohm_schema_lock "
-            "WHERE schema_name = 'acme_corp'"
-        ).fetchone()
+        row = store.conn.execute("SELECT locked_by FROM ohm_lake.ohm_system.ohm_schema_lock WHERE schema_name = 'acme_corp'").fetchone()
         assert row is None or row[0] is None, "Lock should be released after get_store"
         store.close()
 
@@ -254,10 +214,7 @@ class TestFederatedStoreWithLock:
         assert node["label"] == "Test Node"
 
         # Verify lock is not held after normal operation
-        row = store.conn.execute(
-            "SELECT locked_by FROM ohm_lake.ohm_system.ohm_schema_lock "
-            "WHERE schema_name = 'acme_corp'"
-        ).fetchone()
+        row = store.conn.execute("SELECT locked_by FROM ohm_lake.ohm_system.ohm_schema_lock WHERE schema_name = 'acme_corp'").fetchone()
         assert row is None or row[0] is None
         store.close()
 
@@ -269,6 +226,7 @@ class TestNonFederatedUnchanged:
         """Non-federated mode still uses file-based .migration_lock, not the shared lock."""
         tmp = tempfile.mkdtemp()
         import shutil
+
         try:
             tenants_dir = os.path.join(tmp, "tenants")
             os.makedirs(tenants_dir)
@@ -318,12 +276,7 @@ class TestWaitForMigration:
         # Set lock as held by another daemon (with future expiry)
         tm._ensure_schema_lock_table(conn)
         tm._ensure_lock_row(conn, "acme_corp")
-        conn.execute(
-            "UPDATE ohm_lake.ohm_system.ohm_schema_lock "
-            "SET locked_by = 'other-daemon', locked_at = CURRENT_TIMESTAMP, "
-            "lock_expires_at = CURRENT_TIMESTAMP + INTERVAL '300 seconds' "
-            "WHERE schema_name = 'acme_corp'"
-        )
+        conn.execute("UPDATE ohm_lake.ohm_system.ohm_schema_lock SET locked_by = 'other-daemon', locked_at = CURRENT_TIMESTAMP, lock_expires_at = CURRENT_TIMESTAMP + INTERVAL '300 seconds' WHERE schema_name = 'acme_corp'")
 
         # Should time out (version is behind, lock is held)
         result = tm._wait_for_migration(conn, "acme_corp", timeout=3.0)

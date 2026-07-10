@@ -178,6 +178,7 @@ def _resolve_document_content(item: dict[str, Any]) -> tuple[bytes, str, str]:
         from ohm.net_safety import validate_local_path
 
         import os as _os
+
         ingestion_root = item.get("_ingestion_root") or _os.environ.get("OHM_INGESTION_ROOT")
         safe_path = validate_local_path(local_path, root=ingestion_root)
         path = Path(safe_path)

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
-from ohm.graph.queries._shared import _log_change, _rows_to_dicts, _percentile
+    from ohm.graph.queries import create_edge, create_node, get_freshness_status
 
 
 def compute_feed_investment(
@@ -21,7 +21,6 @@ def compute_feed_investment(
     observation_cost: float = 0.5,
     label: str | None = None,
 ) -> dict[str, Any]:
-    import json as _json
     from ohm.validation import validate_identifier
     from ohm.exceptions import NodeNotFoundError
 
@@ -176,7 +175,6 @@ def record_mode_switch(
     reason: str | None = None,
     label: str | None = None,
 ) -> dict[str, Any]:
-    import json as _json
     from ohm.validation import validate_identifier
     from ohm.exceptions import NodeNotFoundError, ValidationError
 
@@ -420,5 +418,3 @@ SESSION_TRANSITIONS: dict[str, set[str]] = {
     "completed": set(),
     "abandoned": set(),
 }
-
-

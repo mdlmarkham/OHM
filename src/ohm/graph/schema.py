@@ -202,6 +202,7 @@ def node_analysis(node_type: str) -> dict[str, object]:
     """Return analysis guidance for a node type (generic fallback if unknown)."""
     return ANALYSIS_GUIDE.get(node_type, _DEFAULT_ANALYSIS)
 
+
 # ── Cross-link requirement (ADR-018 / OHM-tjzh) ──────────────────────────────
 # Node types in this set represent derived claims — synthesis, decisions, tasks.
 # A bare creation of one of these is a dead-end: it can never be reached from
@@ -2613,7 +2614,12 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
         "0.46.0",
         "OHM-733: append-only confidence change log table + indexes for multi-writer federation",
         [
-            "CREATE TABLE IF NOT EXISTS ohm_confidence_log (id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(), edge_id VARCHAR NOT NULL, agent VARCHAR NOT NULL, old_value DOUBLE, new_value DOUBLE NOT NULL, reason VARCHAR NOT NULL, challenge_id VARCHAR, metadata JSON, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
+            "CREATE TABLE IF NOT EXISTS ohm_confidence_log ("
+            "id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(), "
+            "edge_id VARCHAR NOT NULL, agent VARCHAR NOT NULL, "
+            "old_value DOUBLE, new_value DOUBLE NOT NULL, "
+            "reason VARCHAR NOT NULL, challenge_id VARCHAR, "
+            "metadata JSON, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
             "CREATE INDEX IF NOT EXISTS idx_conf_log_edge ON ohm_confidence_log(edge_id, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_conf_log_agent ON ohm_confidence_log(agent)",
         ],
@@ -2717,13 +2723,9 @@ def initialize_schema_ducklake(conn: "DuckDBPyConnection", schema: "SchemaConfig
         cleaned = re.sub(r",?\s*UNIQUE\s*\([^)]*\)", "", cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r"\s+UNIQUE(?!\s*\()", "", cleaned, flags=re.IGNORECASE)
         # Strip DEFAULT gen_random_uuid() — DuckLake may not support it
-        cleaned = re.sub(
-            r"DEFAULT\s+gen_random_uuid\(\)", "DEFAULT NULL", cleaned, flags=re.IGNORECASE
-        )
+        cleaned = re.sub(r"DEFAULT\s+gen_random_uuid\(\)", "DEFAULT NULL", cleaned, flags=re.IGNORECASE)
         # Replace sequence defaults — DuckLake doesn't support sequences
-        cleaned = re.sub(
-            r"DEFAULT\s+nextval\([^)]+\)", "DEFAULT NULL", cleaned, flags=re.IGNORECASE
-        )
+        cleaned = re.sub(r"DEFAULT\s+nextval\([^)]+\)", "DEFAULT NULL", cleaned, flags=re.IGNORECASE)
         # Rename row_id — reserved by DuckLake for internal use
         cleaned = cleaned.replace("row_id", "change_row_id")
         # Clean up trailing commas before closing paren
@@ -2853,11 +2855,20 @@ def _apply_migrations_ducklake(conn: "DuckDBPyConnection") -> None:
                     conn.execute(stmt)
                 except Exception as e:
                     err_msg = str(e).lower()
-                    if any(s in err_msg for s in (
-                        "already exists", "duplicate", "already a column",
-                        "column with name", "unsupported type", "ducklake",
-                        "not implemented", "sequence", "row_id",
-                    )):
+                    if any(
+                        s in err_msg
+                        for s in (
+                            "already exists",
+                            "duplicate",
+                            "already a column",
+                            "column with name",
+                            "unsupported type",
+                            "ducklake",
+                            "not implemented",
+                            "sequence",
+                            "row_id",
+                        )
+                    ):
                         # Abort the failed statement's transaction state
                         try:
                             conn.execute("ROLLBACK")
@@ -2866,6 +2877,7 @@ def _apply_migrations_ducklake(conn: "DuckDBPyConnection") -> None:
                         pass  # Skip unsupported DuckLake features
                     else:
                         from ohm.framework.exceptions import MigrationError
+
                         raise MigrationError(f"Migration {version} failed: {e}") from e
 
             conn.execute(

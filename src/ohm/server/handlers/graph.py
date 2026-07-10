@@ -239,6 +239,7 @@ class GraphHandlerMixin(OhmHandlerBase):
         }
         result["live_hooks"] = [{"hook": cmd, "constraint": name} for cmd, name in hook_map.items() if any(cmd in h["command"] for h in hooks)]
         from ohm.graph.schema import node_analysis
+
         result["analysis"] = node_analysis(node_type)
         self._json_response(200, {"ok": True, "data": result})
 
@@ -352,6 +353,7 @@ class GraphHandlerMixin(OhmHandlerBase):
         }
 
         from ohm.graph.schema import ANALYSIS_GUIDE
+
         include_analysis = qs.get("include_analysis", ["false"])[0].lower() in ("1", "true", "yes")
         response = {
             "schema": schema.name,
@@ -795,11 +797,7 @@ class GraphHandlerMixin(OhmHandlerBase):
             source_tier_field="source_tier",
         )
         allowed_node_ids = {n["id"] for n in node_rows}
-        edges = [
-            e
-            for e in filter_edges_by_read_scope(self.current_store.conn, agent, edges)
-            if e.get("from_node") in allowed_node_ids and e.get("to_node") in allowed_node_ids
-        ]
+        edges = [e for e in filter_edges_by_read_scope(self.current_store.conn, agent, edges) if e.get("from_node") in allowed_node_ids and e.get("to_node") in allowed_node_ids]
 
         response = {"nodes": node_rows, "edges": edges}
 
@@ -887,6 +885,7 @@ class GraphHandlerMixin(OhmHandlerBase):
 
         target_id = validate_identifier(target_id, name="target_id")
         from ohm.queries import query_confidence
+
         # OHM-737: enforce read scope on the target before returning refs
         from ohm.server.boundary import enforce_read_scope, enforce_read_scope_for_edge, filter_edges_by_read_scope
 

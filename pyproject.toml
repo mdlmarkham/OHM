@@ -83,7 +83,7 @@ ignore = ["E402"]
 
 [tool.ruff.lint.per-file-ignores]
 "**/__init__.py" = ["F401"]
-"tests/**" = ["F401"]
+"tests/**" = ["F401", "F811"]
 "reseed_ohm.py" = ["E501"]
 
 [tool.mypy]

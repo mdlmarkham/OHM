@@ -11,7 +11,9 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
-from ohm.graph.queries._shared import _log_change, _rows_to_dicts, _percentile, _existing_label
+    from ohm.graph.queries import create_edge, create_node
+
+from ohm.graph.queries._shared import _log_change, _rows_to_dicts, _existing_label
 
 
 def scratch(
@@ -135,7 +137,9 @@ def _auto_link_fragment(
     Returns list of created edge records.
     """
     # OHM-a5rz.19: Try semantic auto-linking first
-    import ohm.graph.queries as _gq; embedding = _gq.generate_embedding(content)
+    import ohm.graph.queries as _gq
+
+    embedding = _gq.generate_embedding(content)
     if embedding is not None:
         try:
             sem_links = _semantic_auto_link_fragment(
@@ -299,8 +303,6 @@ def _create_resonance_edges(
 
     if not rows:
         return []
-
-    from collections import defaultdict
 
     # Group by fragment, collecting shared targets
     fragment_targets: dict[str, dict[str, Any]] = {}
@@ -929,7 +931,6 @@ def evict_expired_fragments(
     return result
 
 
-
 def update_node_hd_fingerprint(
     conn: DuckDBPyConnection,
     node_id: str,
@@ -1103,5 +1104,3 @@ def batch_update_hd_fingerprints(
         "seed": seed,
         "method": "tastebud_hd_v1",
     }
-
-

@@ -36,6 +36,7 @@ import json
 import logging
 import os
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from ohm.schema import DEFAULT_SCHEMA, SchemaConfig
@@ -867,7 +868,10 @@ class OhmStore:
                 # and type are always required (they're positional, not
                 # optional), so they're always updated.
                 update_fields = [
-                    "label = ?", "type = ?", "updated_at = ?", "updated_by = ?",
+                    "label = ?",
+                    "type = ?",
+                    "updated_at = ?",
+                    "updated_by = ?",
                 ]
                 update_params: list = [label, type, now, actor]
                 # Map optional fields to (column, value) pairs
@@ -1304,27 +1308,49 @@ class OhmStore:
         # Referential integrity: verify both endpoints exist (OHM-7298)
         if challenge_of is None:  # challenge edges can reference deleted/nonexistent nodes
             for node_id, role in ((from_node, "from_node"), (to_node, "to_node")):
-                exists = self.conn.execute(
-                    "SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
-                    [node_id],
-                ).fetchone()
-                if not exists:
-                    # OHM-744: write-after-read guarantee. A node created moments
-                    # ago on this connection (or a concurrent writer via Quack)
-                    # may not be visible if the WAL hasn't been flushed. Force a
-                    # checkpoint and retry once before declaring NodeNotFound.
-                    try:
-                        self.conn.execute("CHECKPOINT")
-                    except Exception:
-                        pass
+                if getattr(self, "_federated", False):
+                    # OHM-744: In federated mode, a node written on another daemon
+                    # may not be immediately visible due to DuckLake snapshot
+                    # isolation. Bounded backoff-retry (10/25/50/100ms ~185ms total)
+                    # gives the catalog time to propagate. This is the standard fix
+                    # for read-after-write across independent readers of a shared
+                    # transactional store.
+                    _retry_delays = (0.010, 0.025, 0.050, 0.100)
+                    exists = None
+                    for i, delay in enumerate(_retry_delays):
+                        exists = self.conn.execute(
+                            "SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                            [node_id],
+                        ).fetchone()
+                        if exists:
+                            break
+                        if i < len(_retry_delays) - 1:
+                            time.sleep(delay)
+                    if not exists:
+                        from ohm.exceptions import NodeNotFoundError
+
+                        raise NodeNotFoundError(f"Edge {role} does not exist: {node_id}")
+                else:
+                    # Local-file mode: single-shot check with checkpoint retry.
+                    # The CHECKPOINT is inert here (same connection, same WAL),
+                    # but harmless and kept for defensive consistency.
                     exists = self.conn.execute(
                         "SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
                         [node_id],
                     ).fetchone()
                     if not exists:
-                        from ohm.exceptions import NodeNotFoundError
+                        try:
+                            self.conn.execute("CHECKPOINT")
+                        except Exception:
+                            pass
+                        exists = self.conn.execute(
+                            "SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                            [node_id],
+                        ).fetchone()
+                        if not exists:
+                            from ohm.exceptions import NodeNotFoundError
 
-                        raise NodeNotFoundError(f"Edge {role} does not exist: {node_id}")
+                            raise NodeNotFoundError(f"Edge {role} does not exist: {node_id}")
 
         # ADR-022: Validate edge-level constraints (advisory mode — warnings only)
         from ohm.graph.constraints import validate_edge_constraints
@@ -1683,7 +1709,6 @@ class OhmStore:
 
         check_can_update_edge(actor, edge["created_by"], edge_id)
 
-        now = self._now()
         # OHM-733: append to confidence log instead of direct UPDATE
         from ohm.graph.queries import log_confidence_change
 

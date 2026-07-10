@@ -74,7 +74,15 @@ def all_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},
-                    "since": {"type": "string", "description": "ISO timestamp for changes since. Omit for the default 24h window. Using a very recent timestamp may miss writes due to propagation timing — if you need the latest changes, omit this parameter rather than passing a near-now timestamp."},
+                    "since": {
+                        "type": "string",
+                        "description": (
+                            "ISO timestamp for changes since. Omit for the default 24h window. "
+                            "Using a very recent timestamp may miss writes due to propagation timing "
+                            "— if you need the latest changes, omit this parameter rather than "
+                            "passing a near-now timestamp."
+                        ),
+                    },
                     "agent": {"type": "string", "description": "Filter changes by agent name"},
                     "enrich": {"type": "boolean", "description": "Include change data (default true)", "default": True},
                     "limit": {"type": "integer", "description": "Max records (default 50)", "default": 50},
@@ -198,7 +206,12 @@ def all_tools() -> list[Tool]:
         # ── Write tier ──
         Tool(
             name="ohm_create_node",
-            description="Create a new node, or upsert if create_only=false. With create_only=false, omitted optional fields preserve their existing values (PATCH semantics, not PUT) — only fields present in the request are updated on an existing node. Use create_only=true (default) to reject duplicates with 409.",
+            description=(
+                "Create a new node, or upsert if create_only=false. With create_only=false, "
+                "omitted optional fields preserve their existing values (PATCH semantics, not PUT) "
+                "— only fields present in the request are updated on an existing node. "
+                "Use create_only=true (default) to reject duplicates with 409."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -210,7 +223,16 @@ def all_tools() -> list[Tool]:
                     "provenance": {"type": "string", "description": "Where this knowledge came from"},
                     "tags": {"type": "string", "description": 'JSON array of tags, e.g. \'["economics","pattern"]\''},
                     "visibility": {"type": "string", "description": "Visibility: team (default), private, public", "default": "team"},
-                    "create_only": {"type": "boolean", "description": "If true (default), reject on duplicate ID with 409. If false, upsert: create the node if new, or partially update the existing node — only fields present in the request are changed, omitted fields keep their existing values (PATCH semantics).", "default": True},
+                    "create_only": {
+                        "type": "boolean",
+                        "description": (
+                            "If true (default), reject on duplicate ID with 409. If false, upsert: "
+                            "create the node if new, or partially update the existing node — only "
+                            "fields present in the request are changed, omitted fields keep their "
+                            "existing values (PATCH semantics)."
+                        ),
+                        "default": True,
+                    },
                 },
                 "required": ["id", "label"],
             },

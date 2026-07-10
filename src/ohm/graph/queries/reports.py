@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 from ohm.graph.queries._shared import _log_change, _rows_to_dicts
 
+
 def create_report(
     conn: DuckDBPyConnection,
     *,

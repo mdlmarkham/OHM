@@ -903,7 +903,7 @@ def merge_nodes(
     """
     from ohm.exceptions import NodeNotFoundError
     from ohm.validation import validate_identifier
-    from datetime import datetime, timezone
+    from datetime import timezone
 
     keep_id = validate_identifier(keep_id, name="keep_id")
     merge_id = validate_identifier(merge_id, name="merge_id")
@@ -1018,7 +1018,6 @@ def create_edge(
     confidence must not exceed SOURCE_TIER_CEILINGS[tier]. None means tier
     not assessed — no ceiling applied (backward compatible).
     """
-    import uuid
     import json
 
     from ohm.schema import validate_edge_type, VALID_URGENCY
@@ -1653,7 +1652,6 @@ def create_challenge(
     Enforces boundary rules: only L3/L4 edges can be challenged.
     Enforces OHM-e0t1 lint: reason must be non-empty (ADR-018).
     """
-    import uuid
 
     from ohm.boundary import enforce_challenge_boundary
     from ohm.graph.challenges import require_challenge_reason
@@ -1708,7 +1706,6 @@ def create_support(
 
     Enforces boundary rules: only L3/L4 edges can be supported.
     """
-    import uuid
 
     from ohm.boundary import enforce_support_boundary
     from ohm.validation import validate_confidence, validate_identifier
@@ -1917,7 +1914,6 @@ def fire_verification_nudge(
     the target edge. Idempotent: if a CONSENSUS_FLAG nudge already exists for the
     edge, returns the existing one without creating a duplicate.
     """
-    import uuid
 
     from ohm.validation import validate_confidence, validate_identifier
 
@@ -2140,7 +2136,6 @@ def create_observation(
         raise ValueError(f"Invalid scale '{scale}' — must be one of: {', '.join(sorted(VALID_OBSERVATION_SCALES))}")
     if scale == "probability" and value is not None and (value < 0.0 or value > 1.0):
         raise ValueError(f"Observation value {value} is outside [0, 1] for scale='probability'")
-    import uuid
     from datetime import datetime, timezone
 
     # OHM-xdd4: resolve half_life_days — explicit override > type default
@@ -2477,8 +2472,6 @@ def query_stale_edges(
         edge["age_days"] = round(edge["age_days"], 1)
 
     return rows
-
-
 
 
 def batch_create_nodes(
@@ -2972,7 +2965,7 @@ def query_find_expiring_batches(
         List of dicts with batch_id, product_type, expires_at, days_until_expiry,
         from_node, to_node, and edge metadata.
     """
-    from datetime import datetime, timezone
+    from datetime import timezone
 
     conditions = ["e.edge_type = 'BATCH_EXPIRES_BEFORE'"]
     params: list = []
@@ -3056,8 +3049,6 @@ def query_find_expiring_batches(
 # ── Cascade Scenario (Supply Chain / Risk Modeling) ─────────────────────────
 
 
-
-
 # OHM-447: Re-exports from extracted submodules (leaf domains — Phase 1)
 from ohm.graph.queries.rul import register_rul_assessment, get_rul_assessments
 from ohm.graph.queries.runs import create_run, get_run, list_runs, complete_run
@@ -3081,29 +3072,8 @@ from ohm.graph.queries.reports import (
     finalize_report,
     supersede_report,
 )
+
 # OHM-447: Re-exports from extracted submodules (leaf domains — Phase 1)
-from ohm.graph.queries.rul import register_rul_assessment, get_rul_assessments
-from ohm.graph.queries.runs import create_run, get_run, list_runs, complete_run
-from ohm.graph.queries.node_paths import set_node_path, get_nodes_by_path_prefix
-from ohm.graph.queries.plans_events import (
-    create_plan,
-    get_plan,
-    list_plans,
-    create_event,
-    get_event,
-    get_events_for_node,
-    get_events_for_plan,
-    create_event_link,
-    get_event_links,
-    timeline_rollup,
-)
-from ohm.graph.queries.reports import (
-    create_report,
-    get_report,
-    list_reports,
-    finalize_report,
-    supersede_report,
-)
 from ohm.graph.queries.hooks import (
     create_hook,
     query_hooks,
@@ -3133,76 +3103,122 @@ from ohm.graph.queries.signing import (
 
 # OHM-447 Phase 2: twins/ML cluster re-exports
 from ohm.graph.queries.twins import (
-    register_twin, twin_predict, twin_constraints,
-    validate_action_against_twin, explain_twin,
-    create_twin_template, list_twin_templates,
-    get_twin_template, instantiate_twin_from_template,
+    register_twin,
+    twin_predict,
+    twin_constraints,
+    validate_action_against_twin,
+    explain_twin,
+    create_twin_template,
+    list_twin_templates,
+    get_twin_template,
+    instantiate_twin_from_template,
     assemble_twin_for_decision,
-    register_model_candidate, evaluate_model, compare_models,
-    promote_model, register_shadow_model,
-    detect_drift, run_walk_forward_validation,
-    ensemble_predict, compute_decision_value,
-    auto_retire_model, set_freshness_threshold,
+    register_model_candidate,
+    evaluate_model,
+    compare_models,
+    promote_model,
+    register_shadow_model,
+    detect_drift,
+    run_walk_forward_validation,
+    ensemble_predict,
+    compute_decision_value,
+    auto_retire_model,
+    set_freshness_threshold,
     get_freshness_status,
-    start_twin_design_session, transition_session,
-    add_session_observation, propose_twin_config,
-    review_proposal, instantiate_from_session,
-    record_calibration, evolve_session,
-    get_session_state, get_session_audit,
+    start_twin_design_session,
+    transition_session,
+    add_session_observation,
+    propose_twin_config,
+    review_proposal,
+    instantiate_from_session,
+    record_calibration,
+    evolve_session,
+    get_session_state,
+    get_session_audit,
     set_promotion_policy,
     auto_promote_best_model,
-    register_twin_with_bindings, add_twin_bindings,
-    attach_twin_models, get_twin_readiness,
+    register_twin_with_bindings,
+    add_twin_bindings,
+    attach_twin_models,
+    get_twin_readiness,
 )
 from ohm.graph.queries.feed_investment import (
-    compute_feed_investment, recommend_mode,
-    record_mode_switch, get_current_mode,
+    compute_feed_investment,
+    recommend_mode,
+    record_mode_switch,
+    get_current_mode,
     temporal_decision_summary,
 )
 
 # OHM-447 Phase 3: mid-weight domains re-exports
 from ohm.graph.queries.cascade import (
-    query_deterministic_cascade, query_cascade_scenario,
-    monte_carlo_cascade, query_what_if, propagate_observation,
+    query_deterministic_cascade,
+    query_cascade_scenario,
+    monte_carlo_cascade,
+    query_what_if,
+    propagate_observation,
 )
 from ohm.graph.queries.handoff import (
-    query_handoff, query_escalate, query_ticket_provenance,
+    query_handoff,
+    query_escalate,
+    query_ticket_provenance,
 )
 from ohm.graph.queries.embeddings import (
-    generate_embedding, semantic_search, search,
-    fuzzy_search, update_node_embedding,
+    generate_embedding,
+    semantic_search,
+    search,
+    fuzzy_search,
+    update_node_embedding,
 )
 from ohm.graph.queries.discovery import (
-    queue_discovery_candidates, query_discovery_queue,
+    queue_discovery_candidates,
+    query_discovery_queue,
     review_discovery_candidate,
 )
 from ohm.graph.queries.fragments import (
-    scratch, resolve_question, promote_fragment,
-    detect_fragment_resonance, detect_fragment_clusters,
-    evict_expired_fragments, hd_membership_search,
-    batch_update_hd_fingerprints, query_fragment_clusters,
-    reflect_challenge_to_fragments, update_node_hd_fingerprint,
+    scratch,
+    resolve_question,
+    promote_fragment,
+    detect_fragment_resonance,
+    detect_fragment_clusters,
+    evict_expired_fragments,
+    hd_membership_search,
+    batch_update_hd_fingerprints,
+    query_fragment_clusters,
+    reflect_challenge_to_fragments,
+    update_node_hd_fingerprint,
 )
 from ohm.graph.queries.suggestions import (
-    create_suggestion, query_suggestions, promote_suggestion,
-    reject_suggestion, expire_suggestions, batch_orphan_triage,
-    query_claim_lineage, query_confidence_report,
-    query_contradiction_summary, query_neighborhood_narrative,
+    create_suggestion,
+    query_suggestions,
+    promote_suggestion,
+    reject_suggestion,
+    expire_suggestions,
+    batch_orphan_triage,
+    query_claim_lineage,
+    query_confidence_report,
+    query_contradiction_summary,
+    query_neighborhood_narrative,
     query_task_context,
 )
 from ohm.graph.queries.cascade_scenario import (
-    query_counterfactual_cascade, query_compare_scenarios,
+    query_counterfactual_cascade,
+    query_compare_scenarios,
 )
 from ohm.graph.queries.actions import (
-    propose_action, execute_action,
+    propose_action,
+    execute_action,
 )
 from ohm.graph.queries.loop_status import (
     query_loop_status,
 )
 from ohm.graph.queries.verification import (
-    detect_verifiable_claims, create_verification_nudge,
-    record_verification_outcome, list_pending_verifications,
+    detect_verifiable_claims,
+    create_verification_nudge,
+    record_verification_outcome,
+    list_pending_verifications,
 )
+
 # OHM-447 Phase 4: confidence/decay re-exports (must come before injection)
 from ohm.graph.queries.confidence import (
     apply_confidence_decay,
@@ -3218,55 +3234,67 @@ from ohm.graph.queries.confidence import (
 # Submodules use bare-name access inside their function bodies, so the names
 # must be in the submodule's own namespace, not just resolvable via __getattr__.
 import ohm.graph.queries.fragments as _frag_mod
+
 _frag_mod.create_node = create_node
 _frag_mod.create_edge = create_edge
 _frag_mod.generate_embedding = generate_embedding
 _frag_mod.search = search
 
 import ohm.graph.queries.actions as _act_mod
+
 _act_mod.create_node = create_node
 _act_mod.create_edge = create_edge
 
 import ohm.graph.queries.discovery as _disc_mod
+
 _disc_mod.create_edge = create_edge
 
 import ohm.graph.queries.handoff as _ho_mod
+
 _ho_mod.create_edge = create_edge
 
 import ohm.graph.queries.feed_investment as _fi_mod
+
 _fi_mod.create_node = create_node
 _fi_mod.create_edge = create_edge
 _fi_mod.get_freshness_status = get_freshness_status
 
 import ohm.graph.queries.data_products as _dp_mod
+
 _dp_mod.create_node = create_node
 _dp_mod.create_edge = create_edge
 _dp_mod.find_or_create_node = find_or_create_node
 
 import ohm.graph.queries.rul as _rul_mod
+
 _rul_mod.node_exists = node_exists
 
 import ohm.graph.queries.cascade_scenario as _cs_mod
+
 _cs_mod.query_deterministic_cascade = query_deterministic_cascade
 
 import ohm.graph.queries.loop_status as _ls_mod
+
 _ls_mod.apply_decay_to_edges = apply_decay_to_edges
 _ls_mod.compute_confidence_with_decay = compute_confidence_with_decay
 
 import ohm.graph.queries.verification as _ver_mod
 
 import ohm.graph.queries.twins.core as _tc_mod
+
 _tc_mod.create_node = create_node
 _tc_mod.create_edge = create_edge
 _tc_mod.compute_confidence_with_decay = compute_confidence_with_decay
 _tc_mod.query_counterfactual_cascade = query_counterfactual_cascade
 
 import ohm.graph.queries.twins.model_registry as _tm_mod
+
 _tm_mod.create_node = create_node
 _tm_mod.create_edge = create_edge
 _tm_mod.compute_confidence_with_decay = compute_confidence_with_decay
 
 import ohm.graph.queries.twins.design_sessions as _td_mod
+
 _td_mod.create_node = create_node
 _td_mod.create_edge = create_edge
 _td_mod.assemble_twin_for_decision = assemble_twin_for_decision
@@ -3276,11 +3304,13 @@ _td_mod.promote_model = promote_model
 _td_mod.register_model_candidate = register_model_candidate
 
 import ohm.graph.queries.twins.bindings as _tb_mod
+
 _tb_mod.create_node = create_node
 _tb_mod.create_edge = create_edge
 
 # OHM-447 Phase 4: inject into confidence module
 import ohm.graph.queries.confidence as _conf_mod
+
 _conf_mod.query_stale_edges = query_stale_edges
 _conf_mod.create_node = create_node
 _conf_mod.create_edge = create_edge
@@ -3288,8 +3318,12 @@ _conf_mod.create_edge = create_edge
 
 # OHM-447 Phase 5: changefeed + outcomes re-exports
 from ohm.graph.queries.changefeed import (
-    query_change_feed, query_agent_changes,
-    query_threat_cluster, restore_outcomes_from_change_feed,
-    query_record_outcome, query_close_task_with_outcome,
-    query_source_reliability, query_agent_state,
+    query_change_feed,
+    query_agent_changes,
+    query_threat_cluster,
+    restore_outcomes_from_change_feed,
+    query_record_outcome,
+    query_close_task_with_outcome,
+    query_source_reliability,
+    query_agent_state,
 )

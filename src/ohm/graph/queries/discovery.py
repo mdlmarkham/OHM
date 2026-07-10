@@ -12,7 +12,9 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
-from ohm.graph.queries._shared import _log_change, _rows_to_dicts, _percentile, _existing_label
+    from ohm.graph.queries import create_edge
+
+from ohm.graph.queries._shared import _rows_to_dicts
 
 
 def queue_discovery_candidates(
@@ -168,12 +170,3 @@ def review_discovery_candidate(
 
     else:
         return {"error": "invalid_action", "message": "action must be 'accept' or 'reject'"}
-
-
-
-def _existing_label(conn: DuckDBPyConnection, node_id: str) -> str:
-    """Look up the label of an existing node by id."""
-    row = conn.execute("SELECT label FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node_id]).fetchone()
-    return row[0] if row else node_id
-
-

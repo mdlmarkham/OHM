@@ -11,7 +11,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
-from ohm.graph.queries._shared import _log_change, _rows_to_dicts, _percentile
+from ohm.graph.queries._shared import _rows_to_dicts, _percentile
+
 
 def query_deterministic_cascade(
     conn: DuckDBPyConnection,
@@ -479,5 +480,3 @@ STATE_MACHINE_EDGE_TYPES = frozenset(
         "CLOSED_BY",
     }
 )
-
-

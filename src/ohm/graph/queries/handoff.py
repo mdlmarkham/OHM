@@ -11,7 +11,10 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
-from ohm.graph.queries._shared import _log_change, _rows_to_dicts, _percentile
+    from ohm.graph.queries import create_edge
+
+from ohm.graph.queries._shared import _rows_to_dicts
+from ohm.graph.queries.cascade import HANDOFF_EDGE_TYPES, STATE_MACHINE_EDGE_TYPES  # noqa: E402
 
 
 def query_handoff(
@@ -278,5 +281,3 @@ def query_ticket_provenance(
 
 
 # ── Semantic Search ─────────────────────────────────────────────────────────
-
-
