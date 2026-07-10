@@ -1297,16 +1297,5 @@ def get_freshness_status(
         "max_age_seconds": max_age,
         "freshness_pressure": freshness_pressure,
     }
-
-# OHM-447: Lazy cross-domain imports resolved at access time
-_LAZY_IMPORTS = {
-    "create_node",
-    "create_edge",
-}
-
-def __getattr__(name):
-    if name in _LAZY_IMPORTS:
-        import ohm.graph.queries as _q
-        return getattr(_q, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 

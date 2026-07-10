@@ -95,15 +95,5 @@ def get_rul_assessments(
     query += " ORDER BY created_at DESC LIMIT ?"
     params.append(limit)
     return _rows_to_dicts(conn.execute(query, params))
-
-# OHM-447: Lazy cross-domain imports resolved at access time
-_LAZY_IMPORTS = {
-    "node_exists",
-}
-
-def __getattr__(name):
-    if name in _LAZY_IMPORTS:
-        import ohm.graph.queries as _q
-        return getattr(_q, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 

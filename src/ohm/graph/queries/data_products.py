@@ -345,17 +345,5 @@ def list_data_products(
     where = " WHERE " + " AND ".join(conditions)
     params.append(limit)
     return _rows_to_dicts(conn.execute(f"SELECT * FROM ohm_data_products{where} ORDER BY updated_at DESC LIMIT ?", params))
-
-# OHM-447: Lazy cross-domain imports resolved at access time
-_LAZY_IMPORTS = {
-    "create_node",
-    "create_edge",
-    "find_or_create_node",
-}
-
-def __getattr__(name):
-    if name in _LAZY_IMPORTS:
-        import ohm.graph.queries as _q
-        return getattr(_q, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 

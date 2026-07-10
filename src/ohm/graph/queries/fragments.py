@@ -1103,16 +1103,5 @@ def batch_update_hd_fingerprints(
         "seed": seed,
         "method": "tastebud_hd_v1",
     }
-
-# OHM-447: Lazy cross-domain imports resolved at access time
-_LAZY_IMPORTS = {
-    "create_node",
-    "create_edge",
-}
-
-def __getattr__(name):
-    if name in _LAZY_IMPORTS:
-        import ohm.graph.queries as _q
-        return getattr(_q, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 

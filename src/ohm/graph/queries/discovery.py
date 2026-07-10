@@ -175,15 +175,5 @@ def _existing_label(conn: DuckDBPyConnection, node_id: str) -> str:
     """Look up the label of an existing node by id."""
     row = conn.execute("SELECT label FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL", [node_id]).fetchone()
     return row[0] if row else node_id
-
-# OHM-447: Lazy cross-domain imports resolved at access time
-_LAZY_IMPORTS = {
-    "create_edge",
-}
-
-def __getattr__(name):
-    if name in _LAZY_IMPORTS:
-        import ohm.graph.queries as _q
-        return getattr(_q, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 

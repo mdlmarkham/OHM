@@ -420,16 +420,5 @@ SESSION_TRANSITIONS: dict[str, set[str]] = {
     "completed": set(),
     "abandoned": set(),
 }
-
-# OHM-447: Lazy cross-domain imports resolved at access time
-_LAZY_IMPORTS = {
-    "create_node",
-    "create_edge",
-}
-
-def __getattr__(name):
-    if name in _LAZY_IMPORTS:
-        import ohm.graph.queries as _q
-        return getattr(_q, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
