@@ -769,6 +769,7 @@ class OhmStore:
         source_institution: str | None = None,
         data_origin: str | None = None,
         agent_name: Optional[str] = None,
+        partial_update: bool = False,
     ) -> dict[str, Any]:
         """Create or update a node. Attributed to the given agent.
 
@@ -780,6 +781,12 @@ class OhmStore:
             assigned_to: For task nodes: agent assigned to this task.
             due_date: For task nodes: ISO 8601 due date string.
             utility_scale: For decision nodes: importance weight 0-1, or
+            partial_update: When True and the node already exists, only
+                update fields that are not None — omitted fields preserve
+                their existing values (PATCH semantics, OHM-742). When
+                False (default), the update is a full overwrite (PUT
+                semantics) — every column is set, with None for omitted
+                fields. Ignored for new-node creation.
                 one of {'best' (1.0), 'neutral' (0.5), 'worst' (0.0)}.
             current_best_action: For decision nodes: currently preferred action.
             action_alternatives: For decision nodes: list of alternative actions.
@@ -802,10 +809,22 @@ class OhmStore:
             validate_assigned_to,
         )
 
-        confidence = validate_confidence(confidence)
-        source_tier = validate_source_tier(source_tier)
-        data_origin = validate_data_origin(data_origin)
-        enforce_confidence_ceiling(confidence, source_tier)
+        # OHM-742: In partial_update mode, skip validation for None fields
+        # (they won't be updated, so their values don't need validation).
+        if partial_update:
+            if confidence is not None:
+                confidence = validate_confidence(confidence)
+            if source_tier is not None:
+                source_tier = validate_source_tier(source_tier)
+            if data_origin is not None:
+                data_origin = validate_data_origin(data_origin)
+            if confidence is not None and source_tier is not None:
+                enforce_confidence_ceiling(confidence, source_tier)
+        else:
+            confidence = validate_confidence(confidence)
+            source_tier = validate_source_tier(source_tier)
+            data_origin = validate_data_origin(data_origin)
+            enforce_confidence_ceiling(confidence, source_tier)
 
         # OHM-sbtz.2: validate task-specific fields for task nodes
         if type == "task":
@@ -841,47 +860,97 @@ class OhmStore:
             from ohm.server.boundary import check_can_update_l2_node
 
             check_can_update_l2_node(actor, id, self.conn)
-            self.conn.execute(
-                """
-                UPDATE ohm_nodes SET
-                    label = ?, type = ?, content = ?, confidence = ?,
-                    visibility = ?, provenance = ?, tags = ?, metadata = ?,
-                    priority = ?, url = ?, task_status = ?, assigned_to = ?,
-                    due_date = ?, utility_scale = ?, current_best_action = ?,
-                    action_alternatives = ?, utility_usd_per_day = ?,
-                    utility_currency = ?, source_tier = ?,
-                    source_author = ?, source_institution = ?, data_origin = ?,
-                    updated_at = ?, updated_by = ?
-                WHERE id = ?
-                """,
-                [
-                    label,
-                    type,
-                    content,
-                    confidence,
-                    visibility,
-                    provenance,
-                    tags_json,
-                    metadata_json,
-                    priority,
-                    url,
-                    task_status,
-                    assigned_to,
-                    due_date,
-                    utility_scale,
-                    current_best_action,
-                    alternatives_json,
-                    utility_usd_per_day,
-                    utility_currency,
-                    source_tier,
-                    source_author,
-                    source_institution,
-                    data_origin,
-                    now,
-                    actor,
-                    id,
-                ],
-            )
+            if partial_update:
+                # OHM-742: PATCH semantics — only update fields that are not
+                # None, preserving existing values for omitted fields. label
+                # and type are always required (they're positional, not
+                # optional), so they're always updated.
+                update_fields = [
+                    "label = ?", "type = ?", "updated_at = ?", "updated_by = ?",
+                ]
+                update_params: list = [label, type, now, actor]
+                # Map optional fields to (column, value) pairs
+                optional_fields: list[tuple[str, Any]] = [
+                    ("content", content),
+                    ("confidence", confidence),
+                    ("visibility", visibility),
+                    ("provenance", provenance),
+                    ("tags", tags_json),
+                    ("metadata", metadata_json),
+                    ("priority", priority),
+                    ("url", url),
+                    ("task_status", task_status),
+                    ("assigned_to", assigned_to),
+                    ("due_date", due_date),
+                    ("utility_scale", utility_scale),
+                    ("current_best_action", current_best_action),
+                    ("action_alternatives", alternatives_json),
+                    ("utility_usd_per_day", utility_usd_per_day),
+                    ("utility_currency", utility_currency),
+                    ("source_tier", source_tier),
+                    ("source_author", source_author),
+                    ("source_institution", source_institution),
+                    ("data_origin", data_origin),
+                ]
+                for col, val in optional_fields:
+                    # In partial mode, only update if the caller explicitly
+                    # passed a value. For most fields, None means "not passed"
+                    # (preserve existing). For confidence/visibility, the
+                    # defaults (1.0/"team") are always set by the caller, so
+                    # they can't be distinguished from "not passed" — this
+                    # matches the PUT behavior for those two fields. The
+                    # handler-level partial_update path (POST /node with
+                    # create_only=false) sets these to None when omitted.
+                    if val is not None:
+                        update_fields.insert(-2, f"{col} = ?")
+                        update_params.insert(-2, val)
+                update_params.append(id)
+                self.conn.execute(
+                    f"UPDATE ohm_nodes SET {', '.join(update_fields)} WHERE id = ?",
+                    update_params,
+                )
+            else:
+                self.conn.execute(
+                    """
+                    UPDATE ohm_nodes SET
+                        label = ?, type = ?, content = ?, confidence = ?,
+                        visibility = ?, provenance = ?, tags = ?, metadata = ?,
+                        priority = ?, url = ?, task_status = ?, assigned_to = ?,
+                        due_date = ?, utility_scale = ?, current_best_action = ?,
+                        action_alternatives = ?, utility_usd_per_day = ?,
+                        utility_currency = ?, source_tier = ?,
+                        source_author = ?, source_institution = ?, data_origin = ?,
+                        updated_at = ?, updated_by = ?
+                    WHERE id = ?
+                    """,
+                    [
+                        label,
+                        type,
+                        content,
+                        confidence,
+                        visibility,
+                        provenance,
+                        tags_json,
+                        metadata_json,
+                        priority,
+                        url,
+                        task_status,
+                        assigned_to,
+                        due_date,
+                        utility_scale,
+                        current_best_action,
+                        alternatives_json,
+                        utility_usd_per_day,
+                        utility_currency,
+                        source_tier,
+                        source_author,
+                        source_institution,
+                        data_origin,
+                        now,
+                        actor,
+                        id,
+                    ],
+                )
             self._log_change("ohm_nodes", id, "UPDATE", None, agent_name=actor)
             result = self.get_node(id) or {}
             result["created"] = False

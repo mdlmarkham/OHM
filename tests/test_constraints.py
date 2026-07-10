@@ -395,6 +395,74 @@ class TestEffectiveLayer:
         assert "min_sources" in status["L2_requirements"]
 
 
+class TestEffectiveLayerL0L1L2Gating:
+    """OHM-740: L0/L1/L2 effective_layer must gate on constraint_status, not return unconditionally."""
+
+    def test_l1_edge_without_context_links_demoted(self, db):
+        """A node with an L1 edge but no L0 context links is demoted to L0."""
+        a = _create_node(db, label="a")
+        b = _create_node(db, label="b")
+        _create_edge(db, from_node=a, to_node=b, layer="L1", edge_type="CONTAINS")
+        from ohm.graph.constraints import effective_layer
+
+        eff, _ = effective_layer(db, a)
+        assert eff == "L0", f"L1 edge without context links should be L0, got {eff}"
+
+    def test_l1_edge_with_context_links_stays_l1(self, db):
+        """A node with an L1 edge AND an L0 context link stays L1."""
+        a = _create_node(db, label="a")
+        b = _create_node(db, label="b")
+        _create_edge(db, from_node=a, to_node=b, layer="L1", edge_type="CONTAINS")
+        _create_edge(db, from_node=a, to_node=b, layer="L0", edge_type="CONTEXT_OF")
+        from ohm.graph.constraints import effective_layer
+
+        eff, _ = effective_layer(db, a)
+        assert eff == "L1", f"L1 edge with context links should stay L1, got {eff}"
+
+    def test_l2_edge_without_sources_demoted(self, db):
+        """A node with an L2 edge but no source-type node is demoted below L2."""
+        a = _create_node(db, label="a")
+        b = _create_node(db, label="b")
+        _create_edge(db, from_node=a, to_node=b, layer="L2", edge_type="DERIVES_FROM")
+        from ohm.graph.constraints import effective_layer
+
+        eff, _ = effective_layer(db, a)
+        assert eff != "L2", f"L2 edge without sources should be demoted, got {eff}"
+
+    def test_l2_edge_with_source_and_url_and_obs_stays_l2(self, db):
+        """A node with an L2 edge, a source with URL, and an observation stays L2."""
+        a = _create_node(db, label="a")
+        src = _create_node(db, label="src", node_type="source", url="https://x.com")
+        _create_edge(db, from_node=a, to_node=src, layer="L2", edge_type="REFERENCES")
+        _create_edge(db, from_node=a, to_node=src, layer="L0", edge_type="CONTEXT_OF")
+        _create_observation(db, node_id=a, value=0.8)
+        from ohm.graph.constraints import effective_layer
+
+        eff, _ = effective_layer(db, a)
+        assert eff == "L2", f"Fully qualified L2 should stay L2, got {eff}"
+
+    def test_l3_l4_demotion_still_works(self, db):
+        """L3/L4 demotion logic is unchanged (regression guard)."""
+        node_id = _create_node(db, label="decayed", node_type="pattern")
+        other = _create_node(db, label="other")
+        _create_edge(db, from_node=node_id, to_node=other, layer="L3", edge_type="CAUSES")
+        _create_observation(db, node_id=node_id, value=0.05)
+        from ohm.graph.constraints import effective_layer
+
+        eff, _ = effective_layer(db, node_id)
+        assert eff in ("L1", "L2"), f"L3 with decayed evidence should demote, got {eff}"
+
+    def test_batch_effective_layers_gates_l1l2(self, db):
+        """OHM-740: effective_layers batch version also gates L0/L1/L2."""
+        a = _create_node(db, label="a")
+        b = _create_node(db, label="b")
+        _create_edge(db, from_node=a, to_node=b, layer="L1", edge_type="CONTAINS")
+        from ohm.graph.constraints import effective_layers
+
+        batch = effective_layers(db, [a])
+        assert batch[a] == "L0", f"Batch: L1 edge without context links should be L0, got {batch[a]}"
+
+
 # ── promote_fragment Integration Test ───────────────────────────────────────
 
 

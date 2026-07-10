@@ -270,6 +270,29 @@ class TestNodeEndpoints:
         assert data["nodes"][0]["type"] == "concept"
         assert data["nodes"][0]["node_type"] == "concept"
 
+    def test_upsert_preserves_omitted_fields(self, test_server):
+        """OHM-742: POST /node?create_only=false with partial fields preserves existing values (PATCH semantics)."""
+        port, store = test_server
+        # Create with content + confidence
+        _request("POST", port, "/node", body={"id": "up742", "label": "Upsert Test", "type": "concept", "content": "original", "confidence": 0.8})
+        # Upsert with only confidence — content must be preserved
+        status, data = _request("POST", port, "/node?create_only=false", body={"id": "up742", "label": "Upsert Test", "type": "concept", "confidence": 0.9})
+        assert status == 200
+        assert data["content"] == "original", f"content was nulled: {data.get('content')}"
+        assert data["confidence"] == 0.9
+        # Upsert with only content — confidence must be preserved
+        status, data = _request("POST", port, "/node?create_only=false", body={"id": "up742", "label": "Upsert Test", "type": "concept", "content": "updated"})
+        assert status == 200
+        assert data["content"] == "updated"
+        assert data["confidence"] == 0.9, f"confidence was changed: {data.get('confidence')}"
+
+    def test_create_only_rejects_duplicate(self, test_server):
+        """POST /node?create_only=true rejects existing node with 409."""
+        port, store = test_server
+        _request("POST", port, "/node", body={"id": "co742", "label": "First", "type": "concept"})
+        status, data = _request("POST", port, "/node?create_only=true", body={"id": "co742", "label": "Second", "type": "concept"})
+        assert status == 409
+
 
 @pytest.mark.xdist_group("server")
 class TestQuestionAutoDetection:

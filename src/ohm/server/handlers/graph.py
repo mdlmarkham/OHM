@@ -279,7 +279,7 @@ class GraphHandlerMixin(OhmHandlerBase):
                 "islands": "GET /islands -- Find disconnected components. Params: min_size (2), max_islands (20), layer, exclude_fragments (true).",
                 "welcome": "GET /welcome?agent=NAME -- Orientation packet for new/returning agents. Shows graph overview, your footprint, suggested connections, and recent activity.",
                 "orient": "GET /orient?agent=NAME&hours=N -- Context-recovery packet for agents who've lost context. Answers: Where was I? What did I miss? What should I do next? Terse and actionable.",
-                "listen": "GET /listen?since=ISO8601 — Change feed. See what agents have added recently.",
+                "listen": "GET /listen?since=ISO8601 — Change feed. See what agents have added recently. Omit 'since' for the default 24h window; a very recent timestamp may miss writes due to propagation timing.",
             },
             "L0_thinking_layer": {
                 "purpose": "Fragments, hunches, questions, raw associations. Unreliable by design (confidence=0.0). Excluded from search/stats/neighborhood by default.",
@@ -1857,29 +1857,70 @@ class GraphHandlerMixin(OhmHandlerBase):
             self._json_response(422, hook_error)
             return
 
-        result = self.current_store.write_node(
-            id=body["id"],
-            label=body["label"],
-            type=_resolve_type_field(body, "node_type", "type", default="concept") or "concept",
-            content=body.get("content"),
-            confidence=body.get("confidence", 1.0),
-            visibility=body.get("visibility", "team"),
-            provenance=body.get("provenance"),
-            tags=body.get("tags"),
-            metadata=body.get("metadata"),
-            priority=body.get("priority"),
-            url=body.get("source_url", body.get("url")),
-            task_status=body.get("task_status"),
-            assigned_to=body.get("assigned_to"),
-            due_date=body.get("due_date"),
-            utility_scale=body.get("utility_scale"),
-            current_best_action=body.get("current_best_action"),
-            action_alternatives=body.get("action_alternatives"),
-            utility_usd_per_day=body.get("utility_usd_per_day"),
-            utility_currency=body.get("utility_currency"),
-            source_tier=body.get("source_tier"),
-            agent_name=agent,
-        )
+        # OHM-742: When create_only=false and the node already exists, use
+        # partial_update (PATCH semantics) so omitted fields preserve their
+        # existing values instead of being nulled out (PUT semantics). For
+        # new-node creation, defaults are applied as before.
+        is_upsert = not create_only
+        node_exists = False
+        if is_upsert:
+            existing_check = self.current_store.conn.execute(
+                "SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                [body["id"]],
+            ).fetchone()
+            node_exists = existing_check is not None
+
+        if node_exists:
+            # Partial update: pass None for omitted fields so write_node
+            # preserves existing values. label and type are always required.
+            result = self.current_store.write_node(
+                id=body["id"],
+                label=body["label"],
+                type=_resolve_type_field(body, "node_type", "type", default="concept") or "concept",
+                content=body.get("content"),
+                confidence=body.get("confidence"),
+                visibility=body.get("visibility"),
+                provenance=body.get("provenance"),
+                tags=body.get("tags"),
+                metadata=body.get("metadata"),
+                priority=body.get("priority"),
+                url=body.get("source_url", body.get("url")),
+                task_status=body.get("task_status"),
+                assigned_to=body.get("assigned_to"),
+                due_date=body.get("due_date"),
+                utility_scale=body.get("utility_scale"),
+                current_best_action=body.get("current_best_action"),
+                action_alternatives=body.get("action_alternatives"),
+                utility_usd_per_day=body.get("utility_usd_per_day"),
+                utility_currency=body.get("utility_currency"),
+                source_tier=body.get("source_tier"),
+                agent_name=agent,
+                partial_update=True,
+            )
+        else:
+            result = self.current_store.write_node(
+                id=body["id"],
+                label=body["label"],
+                type=_resolve_type_field(body, "node_type", "type", default="concept") or "concept",
+                content=body.get("content"),
+                confidence=body.get("confidence", 1.0),
+                visibility=body.get("visibility", "team"),
+                provenance=body.get("provenance"),
+                tags=body.get("tags"),
+                metadata=body.get("metadata"),
+                priority=body.get("priority"),
+                url=body.get("source_url", body.get("url")),
+                task_status=body.get("task_status"),
+                assigned_to=body.get("assigned_to"),
+                due_date=body.get("due_date"),
+                utility_scale=body.get("utility_scale"),
+                current_best_action=body.get("current_best_action"),
+                action_alternatives=body.get("action_alternatives"),
+                utility_usd_per_day=body.get("utility_usd_per_day"),
+                utility_currency=body.get("utility_currency"),
+                source_tier=body.get("source_tier"),
+                agent_name=agent,
+            )
         event_type = "node.created" if result.get("created") else "node.updated"
         decorations = self._run_post_ingest_hooks(agent, "node", result)
         if decorations:
