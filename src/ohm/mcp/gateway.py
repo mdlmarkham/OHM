@@ -394,6 +394,19 @@ async def main_async(host: str = "0.0.0.0", port: int = 8080, transport: str = "
         logger.error("No gateway profiles configured; refusing to start")
         sys.exit(1)
     _register_tools()
+
+    # OHM-758: Register middleware for cross-cutting concerns
+    from ohm.mcp.middleware import FormatMiddleware, AuditMiddleware
+
+    # Determine audit path from first profile that has one
+    audit_path = None
+    for p in _profiles().values():
+        if p.audit_path:
+            audit_path = p.audit_path
+            break
+    mcp.add_middleware(AuditMiddleware(audit_path=audit_path))
+    mcp.add_middleware(FormatMiddleware(session_key="default"))
+
     app = mcp.http_app(transport=transport)  # type: ignore[arg-type]
     import uvicorn
 
