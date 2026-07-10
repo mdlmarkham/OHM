@@ -42,7 +42,7 @@ class NudgeCategory(enum.Enum):
     NOVELTY = "novelty"  # Ask for disconfirming evidence
     STALE_EVIDENCE = "stale_evidence"  # Graph belief rests on old evidence
     METHOD_DIVERGENCE = "method_divergence"  # Statistical methods disagree
-    SOCRACTIC = "socratic"  # "What would change your mind?"
+    SOCRATIC = "socratic"  # "What would change your mind?"
     EVIDENCE_RACE = "evidence_race"  # Disagreement resolution mechanism
     THRESHOLD_NOT_MET = "threshold_not_met"  # Decision threshold not reached
     HUMAN_ESCALATION = "human_escalation"  # Quarantine / human review
@@ -73,7 +73,7 @@ _DEFAULT_SEVERITY: dict[NudgeCategory, SeverityLevel] = {
     NudgeCategory.NOVELTY: SeverityLevel.SOFT,
     NudgeCategory.STALE_EVIDENCE: SeverityLevel.CONTEXT,
     NudgeCategory.METHOD_DIVERGENCE: SeverityLevel.SOFT,
-    NudgeCategory.SOCRACTIC: SeverityLevel.SOFT,
+    NudgeCategory.SOCRATIC: SeverityLevel.SOFT,
     NudgeCategory.EVIDENCE_RACE: SeverityLevel.FIRM,
     NudgeCategory.THRESHOLD_NOT_MET: SeverityLevel.SOFT,
     NudgeCategory.HUMAN_ESCALATION: SeverityLevel.FIRM,
@@ -112,7 +112,7 @@ NUDGE_TYPE_MAP: dict[str, NudgeCategory] = {
     "autonomy_nudge": NudgeCategory.AUTONOMY,
     "novelty_nudge": NudgeCategory.NOVELTY,
     "method_divergence": NudgeCategory.METHOD_DIVERGENCE,
-    "socratic_question": NudgeCategory.SOCRACTIC,
+    "socratic_question": NudgeCategory.SOCRATIC,
     "evidence_race": NudgeCategory.EVIDENCE_RACE,
     "threshold_not_met": NudgeCategory.THRESHOLD_NOT_MET,
     "human_escalation": NudgeCategory.HUMAN_ESCALATION,
