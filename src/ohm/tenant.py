@@ -207,21 +207,21 @@ class TenantManager:
         # Create per-daemon tables in the local in-memory schema BEFORE
         # attaching DuckLake — these use row_id (reserved by DuckLake)
         # and are per-daemon audit logs, not shared state.
+        conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_change_feed START 1")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS ohm_change_feed (
-                id          BIGINT PRIMARY KEY,
+                id          BIGINT PRIMARY KEY DEFAULT nextval('seq_change_feed'),
                 table_name  VARCHAR NOT NULL,
                 row_id      VARCHAR NOT NULL,
                 operation   VARCHAR NOT NULL,
-                actor       VARCHAR,
+                agent_name  VARCHAR,
                 layer       VARCHAR,
                 occurred_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_change_feed START 1")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS ohm_change_log (
-                id          VARCHAR PRIMARY KEY,
+                id          VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
                 table_name  VARCHAR NOT NULL,
                 row_id      VARCHAR NOT NULL,
                 operation   VARCHAR NOT NULL,
@@ -256,6 +256,7 @@ class TenantManager:
         store.quack_token_env = "QUACK_TOKEN"
         store.quack_started = False
         store.sync_degraded = False
+        store._federated = True  # OHM-745: qualify local tables with main.
         store.schema = schema
         store.conn = conn
         store.db_path = Path(":memory:")

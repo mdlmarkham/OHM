@@ -180,6 +180,7 @@ class OhmStore:
         self.quack_token_env = quack_token_env
         self.quack_started = False
         self.sync_degraded = False
+        self._federated = False  # OHM-745: True when using shared DuckLake schema
         self.schema = schema or DEFAULT_SCHEMA
 
         # OHM-9zk7: Embedding backend (pluggable)
@@ -2319,9 +2320,14 @@ class OhmStore:
         """
         actor = agent_name or self.agent_name
         now = self._now()
+        # OHM-745: In federated mode, the search path is set to the DuckLake
+        # schema. Local-only tables (ohm_change_log, ohm_change_feed) live in
+        # the in-memory schema — qualify them so they resolve correctly.
+        log_table = "memory.ohm_change_log" if self._federated else "ohm_change_log"
+        feed_table = "memory.ohm_change_feed" if self._federated else "ohm_change_feed"
         self.conn.execute(
-            """
-            INSERT INTO ohm_change_log (table_name, row_id, operation, agent_name, layer, changed_at)
+            f"""
+            INSERT INTO {log_table} (table_name, row_id, operation, agent_name, layer, changed_at)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
             [table_name, row_id, operation, actor, layer, now],
@@ -2329,8 +2335,8 @@ class OhmStore:
         # Also populate the agent-facing change feed (non-critical: skip if table missing)
         try:
             self.conn.execute(
-                """
-                INSERT INTO ohm_change_feed (table_name, row_id, operation, agent_name, occurred_at)
+                f"""
+                INSERT INTO {feed_table} (table_name, row_id, operation, agent_name, occurred_at)
                 VALUES (?, ?, ?, ?, ?)
                 """,
                 [table_name, row_id, operation, actor, now],
@@ -2341,16 +2347,33 @@ class OhmStore:
         # OHM-cwrc: use ON CONFLICT upsert instead of check-then-insert; the
         # check-then-insert path raced under concurrent writes and produced
         # ConstraintException('Duplicate key "agent_name: ..."').
-        self.conn.execute(
-            """
-            INSERT INTO ohm_agent_state (agent_name, last_sync, updated_at)
-            VALUES (?, ?, ?)
-            ON CONFLICT (agent_name) DO UPDATE SET
-                last_sync = excluded.last_sync,
-                updated_at = excluded.updated_at
-            """,
-            [actor, now, now],
-        )
+        # OHM-745: In federated mode, DuckLake tables don't have PK/UNIQUE
+        # constraints (DuckLake limitation), so ON CONFLICT isn't available.
+        # Fall back to UPDATE-then-INSERT for that case.
+        if self._federated:
+            updated = self.conn.execute(
+                "UPDATE ohm_agent_state SET last_sync = ?, updated_at = ? WHERE agent_name = ?",
+                [now, now, actor],
+            ).fetchone()
+            if not updated or updated[0] == 0:
+                try:
+                    self.conn.execute(
+                        "INSERT INTO ohm_agent_state (agent_name, last_sync, updated_at) VALUES (?, ?, ?)",
+                        [actor, now, now],
+                    )
+                except Exception:
+                    pass  # Race — another writer inserted first
+        else:
+            self.conn.execute(
+                """
+                INSERT INTO ohm_agent_state (agent_name, last_sync, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT (agent_name) DO UPDATE SET
+                    last_sync = excluded.last_sync,
+                    updated_at = excluded.updated_at
+                """,
+                [actor, now, now],
+            )
 
     def _increment_graph_generation(self) -> int:
         """Increment the graph_generation counter and return the new value.
