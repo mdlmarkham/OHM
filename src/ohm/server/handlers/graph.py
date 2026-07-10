@@ -2502,6 +2502,7 @@ class GraphHandlerMixin(OhmHandlerBase):
             compression_type=compression_type,
             beneficiary=beneficiary,
             revisability=revisability,
+            idempotency_key=body.get("idempotency_key"),
         )
         _server_module._trigger_webhooks(
             {
@@ -2645,6 +2646,7 @@ class GraphHandlerMixin(OhmHandlerBase):
                     agent_name=agent,
                     half_life_days=obs.get("half_life_days"),
                     weibull_shape=obs.get("weibull_shape"),
+                    idempotency_key=obs.get("idempotency_key"),
                 )
                 results.append(result)
             except Exception as e:

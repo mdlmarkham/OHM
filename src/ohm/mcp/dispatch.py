@@ -197,7 +197,20 @@ def build_request(name: str, arguments: dict[str, Any], agent_id: str) -> tuple[
         }
         if arguments.get("notes"):
             body["notes"] = arguments["notes"]
+        if arguments.get("idempotency_key"):
+            body["idempotency_key"] = arguments["idempotency_key"]
         return "POST", f"/observe/{arguments['node_id']}", body
+
+    if name == "ohm_observe_batch":
+        observations = arguments.get("observations", [])
+        if len(observations) > 1000:
+            raise ValueError(f"ohm_observe_batch: max 1000 observations, got {len(observations)}")
+        # Inject agent_id as default source for items that don't specify one
+        for obs in observations:
+            if isinstance(obs, dict):
+                obs.setdefault("source", agent_id)
+        body: dict[str, Any] = {"observations": observations}
+        return "POST", "/observations", body
 
     if name == "ohm_challenge":
         body = {

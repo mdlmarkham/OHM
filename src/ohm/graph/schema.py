@@ -1963,7 +1963,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.47.0"
+SCHEMA_VERSION = "0.48.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -2647,6 +2647,14 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             "actual_state BOOLEAN, "
             "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
             "CREATE INDEX IF NOT EXISTS idx_belief_cal_agent ON ohm_belief_calibration_log(agent_name, created_at DESC)",
+        ],
+    ),
+    (
+        "0.48.0",
+        "OHM-794: idempotency_key on ohm_observations for retry-safe bulk observation emission",
+        [
+            "ALTER TABLE ohm_observations ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_obs_idempotency ON ohm_observations(idempotency_key) WHERE idempotency_key IS NOT NULL",
         ],
     ),
 ]

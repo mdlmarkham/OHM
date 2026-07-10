@@ -128,7 +128,7 @@ class TestAllowedToolsEnforcement:
             config.update(original)
 
     def test_write_tools_set_complete(self):
-        expected = {"ohm_create_node", "ohm_create_edge", "ohm_batch", "ohm_observe", "ohm_challenge", "ohm_support", "ohm_update_state"}
+        expected = {"ohm_create_node", "ohm_create_edge", "ohm_batch", "ohm_observe", "ohm_observe_batch", "ohm_challenge", "ohm_support", "ohm_update_state"}
         assert WRITE_TOOLS == expected
 
     def test_empty_list_denies_all(self):

@@ -40,6 +40,7 @@ WRITE_TOOLS = frozenset(
         "ohm_create_edge",
         "ohm_batch",
         "ohm_observe",
+        "ohm_observe_batch",
         "ohm_challenge",
         "ohm_support",
         "ohm_update_state",

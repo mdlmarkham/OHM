@@ -342,7 +342,7 @@ def all_tools() -> list[Tool]:
         ),
         Tool(
             name="ohm_observe",
-            description="Add an observation to a node — a data point with value, uncertainty (sigma), and source. Observations accumulate and can shift node confidence.",
+            description="Add an observation to a node - a data point with value, uncertainty (sigma), and source. Observations accumulate and can shift node confidence.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -352,12 +352,48 @@ def all_tools() -> list[Tool]:
                     "sigma": {"type": "number", "description": "Uncertainty/standard deviation"},
                     "source": {"type": "string", "description": "Source of observation"},
                     "notes": {"type": "string", "description": "Additional notes"},
+                    "idempotency_key": {"type": "string", "description": "Optional: dedup key for retry-safe emission (e.g. 'run_42:health_check'). Repeat writes with the same key are no-ops."},
                     "belief_statement": {
                         "type": "string",
                         "description": "Optional: your belief about the observed node's state, e.g. 'P(node=bad) = 0.3'. Compared to graph posterior for calibration.",
                     },
                 },
                 "required": ["node_id", "obs_type", "value"],
+            },
+        ),
+        Tool(
+            name="ohm_observe_batch",
+            description=(
+                "Bulk-emit observations against existing nodes. Wraps the /observations "
+                "HTTP endpoint — up to 1000 observations per call. Pass an idempotency_key "
+                "on each observation for retry-safe emission (duplicate keys are no-ops). "
+                "Use this for CI runs, pipeline orchestrators, health monitors, etc."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "observations": {
+                        "type": "array",
+                        "description": "Array of observation objects",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "node_id": {"type": "string", "description": "Node to observe"},
+                                "obs_type": {"type": "string", "description": "Observation type"},
+                                "value": {"type": "number", "description": "Observed value"},
+                                "sigma": {"type": "number", "description": "Uncertainty"},
+                                "source": {"type": "string", "description": "Source of observation"},
+                                "notes": {"type": "string", "description": "Additional notes"},
+                                "idempotency_key": {"type": "string", "description": "Dedup key for retry-safe emission"},
+                                "source_url": {"type": "string", "description": "Source URL"},
+                                "scale": {"type": "string", "description": "Measurement scale: probability, count, currency, percent, unknown"},
+                            },
+                            "required": ["node_id", "obs_type", "value"],
+                        },
+                        "maxItems": 1000,
+                    },
+                },
+                "required": ["observations"],
             },
         ),
         Tool(

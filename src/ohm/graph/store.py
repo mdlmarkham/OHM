@@ -1771,6 +1771,7 @@ class OhmStore:
         compression_type: Optional[str] = None,
         beneficiary: Optional[list[str]] = None,
         revisability: Optional[float] = None,
+        idempotency_key: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
         """Create an observation. Attributed to the given agent.
 
@@ -1810,16 +1811,32 @@ class OhmStore:
         actor = agent_name or self.agent_name
         now = self._now()
         beneficiary_json = json.dumps(beneficiary) if beneficiary else None
+
+        # OHM-794: Idempotency check — if idempotency_key is provided and
+        # an observation with the same key already exists, return it as a
+        # no-op instead of inserting a duplicate.
+        if idempotency_key:
+            try:
+                existing = self.execute_one(
+                    "SELECT * FROM ohm_observations WHERE idempotency_key = ? AND deleted_at IS NULL LIMIT 1",
+                    [idempotency_key],
+                )
+                if existing:
+                    return dict(existing) if not isinstance(existing, dict) else existing
+            except Exception:
+                pass  # Column may not exist yet on old DBs before migration
+
         self.conn.execute(
             """
             INSERT INTO ohm_observations
                 (node_id, edge_id, type, value, baseline, sigma, source,
                  created_by, created_at, notes, source_name, source_url, scale,
                  half_life_days, weibull_shape, valid_from,
-                 compression_degree, compression_type, beneficiary, revisability)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 compression_degree, compression_type, beneficiary, revisability,
+                 idempotency_key)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            [node_id, edge_id, type, value, baseline, sigma, source, actor, now, notes, source_name, source_url, scale, half_life_days, weibull_shape, now, compression_degree, compression_type, beneficiary_json, revisability],
+            [node_id, edge_id, type, value, baseline, sigma, source, actor, now, notes, source_name, source_url, scale, half_life_days, weibull_shape, now, compression_degree, compression_type, beneficiary_json, revisability, idempotency_key],
         )
 
         obs = self.execute_one(
