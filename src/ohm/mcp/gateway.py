@@ -47,6 +47,7 @@ try:
 except ImportError as e:  # pragma: no cover
     raise ImportError("ohm-gateway requires fastmcp: pip install 'ohm[gateway]'") from e
 
+from ohm.mcp.agora_nudges import generate_agora_nudges
 from ohm.mcp.config import WRITE_TOOLS
 from ohm.mcp.conversation_state import auto_update_from_tool, get_store, resolve_thread_id
 from ohm.mcp.encoding import encode_payload, requested_format
@@ -420,6 +421,23 @@ def _build_tool_handler(tool_name: str):
             # OHM-789: Auto-update conversation state from tool call before
             # dedup (so nudge_history captures all nudges from the daemon).
             auto_update_from_tool(thread_id, tool_name, kwargs, profile.agent_id, data)
+            # OHM-791: Generate agora-aware nudges from conversation context.
+            try:
+                conv_state = get_store().get_state(thread_id)
+                agora_nudges = generate_agora_nudges(
+                    thread_id=thread_id,
+                    tool_name=tool_name,
+                    kwargs=kwargs,
+                    agent_id=profile.agent_id,
+                    response_data=data,
+                    conversation_state=conv_state,
+                )
+                if agora_nudges:
+                    existing = data.get("nudges", [])
+                    existing.extend(agora_nudges)
+                    data["nudges"] = existing
+            except Exception:
+                logger.debug("agora nudge generation failed", exc_info=True)
             data = _deduplicate_nudges(session_key, data)
             result = _respond(data)
             _audit(profile, tool_name, status="ok", latency_ms=(time.time() - start) * 1000, size=len(str(result)))

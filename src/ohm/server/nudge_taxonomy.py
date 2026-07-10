@@ -110,12 +110,17 @@ NUDGE_TYPE_MAP: dict[str, NudgeCategory] = {
     # New types from the agora/deliberation design
     "belief_statement_suggestion": NudgeCategory.CALIBRATION,
     "autonomy_nudge": NudgeCategory.AUTONOMY,
+    "autonomy": NudgeCategory.AUTONOMY,
     "novelty_nudge": NudgeCategory.NOVELTY,
     "method_divergence": NudgeCategory.METHOD_DIVERGENCE,
     "socratic_question": NudgeCategory.SOCRATIC,
+    "socratic_falsifiability": NudgeCategory.SOCRATIC,
+    "socratic_steel_man": NudgeCategory.SOCRATIC,
     "evidence_race": NudgeCategory.EVIDENCE_RACE,
     "threshold_not_met": NudgeCategory.THRESHOLD_NOT_MET,
     "human_escalation": NudgeCategory.HUMAN_ESCALATION,
+    "loop_detected": NudgeCategory.AUTONOMY,
+    "dissent_rewarded": NudgeCategory.NOVELTY,
 }
 
 
