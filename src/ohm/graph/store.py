@@ -1239,9 +1239,22 @@ class OhmStore:
                     [node_id],
                 ).fetchone()
                 if not exists:
-                    from ohm.exceptions import NodeNotFoundError
+                    # OHM-744: write-after-read guarantee. A node created moments
+                    # ago on this connection (or a concurrent writer via Quack)
+                    # may not be visible if the WAL hasn't been flushed. Force a
+                    # checkpoint and retry once before declaring NodeNotFound.
+                    try:
+                        self.conn.execute("CHECKPOINT")
+                    except Exception:
+                        pass
+                    exists = self.conn.execute(
+                        "SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                        [node_id],
+                    ).fetchone()
+                    if not exists:
+                        from ohm.exceptions import NodeNotFoundError
 
-                    raise NodeNotFoundError(f"Edge {role} does not exist: {node_id}")
+                        raise NodeNotFoundError(f"Edge {role} does not exist: {node_id}")
 
         # ADR-022: Validate edge-level constraints (advisory mode — warnings only)
         from ohm.graph.constraints import validate_edge_constraints

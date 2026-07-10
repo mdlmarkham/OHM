@@ -781,3 +781,51 @@ class TestAliasAndContentHashTables:
         v023 = [m for m in MIGRATIONS if m[0] == "0.23.0"]
         assert len(v023) == 1
         assert "ohm_aliases" in v023[0][2][0]
+
+
+class TestConfidenceDoubleMigration:
+    """OHM-741: confidence/probability columns must be DOUBLE, not FLOAT."""
+
+    def test_schema_version_at_least_0_45_0(self):
+        assert SCHEMA_VERSION >= "0.45.0"
+
+    def test_migration_v0_45_0_present(self):
+        v045 = [m for m in MIGRATIONS if m[0] == "0.45.0"]
+        assert len(v045) == 1
+        stmts = v045[0][2]
+        assert any("ohm_nodes ALTER COLUMN confidence TYPE DOUBLE" in s for s in stmts)
+        assert any("ohm_edges ALTER COLUMN confidence TYPE DOUBLE" in s for s in stmts)
+
+    def test_node_confidence_column_is_double(self, test_db):
+        cols = test_db.execute(
+            "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'ohm_nodes' AND column_name = 'confidence'"
+        ).fetchall()
+        assert cols, "confidence column missing"
+        assert cols[0][1].lower() == "double"
+
+    def test_edge_confidence_and_probability_are_double(self, test_db):
+        cols = test_db.execute(
+            "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'ohm_edges' AND column_name IN ('confidence', 'probability', 'probability_p05', 'probability_p50', 'probability_p95', 'confidence_p05', 'confidence_p50', 'confidence_p95')"
+        ).fetchall()
+        col_map = {row[0]: row[1].lower() for row in cols}
+        for col in ("confidence", "probability", "probability_p05", "probability_p50", "probability_p95", "confidence_p05", "confidence_p50", "confidence_p95"):
+            assert col in col_map, f"{col} missing from ohm_edges"
+            assert col_map[col] == "double", f"{col} is {col_map[col]}, expected double"
+
+    def test_confidence_round_trips_cleanly(self, test_db):
+        """0.85 must round-trip without float32 noise."""
+        from ohm.graph.queries import create_edge, create_node
+
+        n1 = create_node(test_db, label="A", created_by="t", confidence=0.85)
+        n2 = create_node(test_db, label="B", created_by="t", confidence=0.85)
+        assert n1["confidence"] == 0.85
+        e = create_edge(test_db, from_node=n1["id"], to_node=n2["id"], layer="L3", edge_type="CAUSES", created_by="t", confidence=0.85, probability=0.7)
+        assert e["confidence"] == 0.85
+        assert e["probability"] == 0.7
+
+    def test_indexes_recreated_after_migration(self, test_db):
+        """The 0.45.0 migration drops and recreates indexes — verify they exist."""
+        idx = test_db.execute("SELECT index_name FROM duckdb_indexes() WHERE table_name IN ('ohm_nodes','ohm_edges')").fetchall()
+        names = {row[0] for row in idx}
+        for required in ("idx_nodes_type", "idx_nodes_created_by", "idx_edges_from", "idx_edges_to", "idx_edges_traversal"):
+            assert required in names, f"{required} missing after 0.45.0 migration"

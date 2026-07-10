@@ -475,6 +475,48 @@ class TestEdgeEndpoints:
         )
         assert status == 201
 
+    def test_node_then_edge_no_race(self, test_server):
+        """OHM-744: POST /node then POST /edge referencing it must not race.
+
+        A node created moments ago must be visible to the edge existence
+        check in the same agent session (write-after-read guarantee).
+        """
+        port, store = test_server
+        # Create the node
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={"id": "race_src", "label": "Race Source", "type": "concept"},
+        )
+        assert status == 201
+        # Immediately create an edge referencing it — must not 404
+        status, data = _request(
+            "POST",
+            port,
+            "/node",
+            body={"id": "race_dst", "label": "Race Dest", "type": "concept"},
+        )
+        assert status == 201
+        status, data = _request(
+            "POST",
+            port,
+            "/edge",
+            body={"from": "race_src", "to": "race_dst", "type": "CAUSES", "layer": "L3"},
+        )
+        assert status == 201, f"Edge creation raced: {status} {data}"
+
+    def test_edge_nonexistent_node_returns_404(self, test_server):
+        """OHM-744: edge referencing a truly nonexistent node must still 404."""
+        port, store = test_server
+        status, data = _request(
+            "POST",
+            port,
+            "/edge",
+            body={"from": "does_not_exist_xyz", "to": "also_missing_abc", "type": "CAUSES", "layer": "L3"},
+        )
+        assert status == 404
+
     def test_observe_invalid_obs_type_rejected(self, test_server):
         """POST /observe/{id} rejects observation types not in schema (OHM-jt98)."""
         port, store = test_server
@@ -2319,6 +2361,41 @@ class TestSearchExcludesFragments:
         results = data if isinstance(data, list) else data.get("results", data)
         assert len(results) >= 1
         assert all(r.get("type") == "fragment" for r in results)
+
+    def test_search_type_filter_narrows_non_fragment(self, test_server):
+        """OHM-738: ?type= must narrow text-search results to that type."""
+        port, store = test_server
+        store.write_node("typefilt_concept", "RiskMetric concept node", "concept", agent_name="test")
+        store.write_node("typefilt_pattern", "RiskMetric pattern node", "pattern", agent_name="test")
+        # Bare query returns both
+        status, data = _request("GET", port, "/search?q=RiskMetric")
+        assert status == 200
+        results = data if isinstance(data, list) else data.get("results", data)
+        types = {r.get("type") for r in results}
+        assert "concept" in types and "pattern" in types
+        # type=concept narrows to only concept
+        status, data = _request("GET", port, "/search?q=RiskMetric&type=concept")
+        assert status == 200
+        results = data if isinstance(data, list) else data.get("results", data)
+        assert len(results) >= 1
+        assert all(r.get("type") == "concept" for r in results)
+        # type=pattern narrows to only pattern
+        status, data = _request("GET", port, "/search?q=RiskMetric&type=pattern")
+        assert status == 200
+        results = data if isinstance(data, list) else data.get("results", data)
+        assert len(results) >= 1
+        assert all(r.get("type") == "pattern" for r in results)
+
+    def test_search_type_filter_empty_no_fallback_leak(self, test_server):
+        """OHM-738: ?type= with no text matches must not leak other-type results via fallback."""
+        port, store = test_server
+        store.write_node("noleak_concept", "ZebraAlpha concept", "concept", agent_name="test")
+        store.write_node("noleak_pattern", "ZebraAlpha pattern", "pattern", agent_name="test")
+        # type=concept should return only concept nodes, never pattern
+        status, data = _request("GET", port, "/search?q=ZebraAlpha&type=concept")
+        assert status == 200
+        results = data if isinstance(data, list) else data.get("results", data)
+        assert all(r.get("type") == "concept" for r in results)
 
 
 @pytest.mark.xdist_group("server")

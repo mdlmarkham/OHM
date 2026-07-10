@@ -206,6 +206,7 @@ def query_path(
     *,
     max_depth: int = 10,
     layer: str | None = None,
+    allowed_nodes: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Shortest path between *from_node* and *to_node* using directed BFS.
 
@@ -218,6 +219,15 @@ def query_path(
     preserving the correct BFS visited-set semantics that DuckDB recursive
     CTEs cannot express (the CTE form explored all paths, blowing up
     exponentially in dense graphs).
+
+    Args:
+        allowed_nodes: Optional set of node ids the caller is permitted to
+            see (OHM-737). When set, the BFS only traverses through nodes
+            in this set — restricted nodes can never appear as path
+            intermediates. ``from_node`` and ``to_node`` are NOT checked
+            against this set; the caller is responsible for enforcing scope
+            on the endpoints (and should 403 before calling if either is
+            out of scope). ``None`` means no scope constraint (full access).
     """
     from ohm.validation import validate_depth, validate_identifier, validate_layer
 
@@ -243,7 +253,7 @@ def query_path(
             params.append(layer)
         edges = _rows_to_dicts(
             conn.execute(
-                f"SELECT id, from_node, to_node, layer, edge_type, confidence FROM ohm_edges WHERE deleted_at IS NULL AND from_node IN ({placeholders}) {layer_clause}",
+                f"SELECT id, from_node, to_node, layer, edge_type, confidence, created_by FROM ohm_edges WHERE deleted_at IS NULL AND from_node IN ({placeholders}) {layer_clause}",
                 params,
             )
         )
@@ -256,6 +266,12 @@ def query_path(
         for current, path in frontier:
             for edge in by_from.get(current, []):
                 nxt = edge["to_node"]
+                # OHM-737: scope-aware traversal — skip edges to nodes the
+                # agent can't see, so restricted nodes never appear as path
+                # intermediates. The destination (to_node) is always allowed
+                # since the caller has already verified it's in scope.
+                if allowed_nodes is not None and nxt != to_node and nxt not in allowed_nodes:
+                    continue
                 if nxt == to_node:
                     final_path = path + [edge]
                     return [dict(e, depth=i + 1) for i, e in enumerate(final_path)]
@@ -295,6 +311,7 @@ def query_impact(
                 e.layer,
                 e.edge_type,
                 e.confidence,
+                e.created_by,
                 1 AS depth
             FROM ohm_edges e
             WHERE e.from_node = ?
@@ -310,6 +327,7 @@ def query_impact(
                 e.layer,
                 e.edge_type,
                 e.confidence,
+                e.created_by,
                 i.depth + 1
             FROM impact_cte i
             JOIN ohm_edges e ON e.from_node = i.to_node
@@ -317,7 +335,7 @@ def query_impact(
               AND e.deleted_at IS NULL
               AND e.layer IN ('L2', 'L3')
         )
-        SELECT edge_id, from_node, to_node, layer, edge_type, confidence, depth
+        SELECT edge_id, from_node, to_node, layer, edge_type, confidence, created_by, depth
         FROM impact_cte
         ORDER BY depth, edge_type
     """
