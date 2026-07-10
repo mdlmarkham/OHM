@@ -22,6 +22,7 @@ from ohm.documents.ingest import ingest_file
 from ohm.documents.store import BedrockKnowledgeStore, DocumentStore, LocalDocumentStore, S3DocumentStore
 from ohm.exceptions import NodeNotFoundError, ValidationError
 from ohm.framework.validation import canonicalize_ip
+from ohm.net_safety import safe_fetch_pinned as _fetch_pinned, _canonicalize_and_check_ip, _FETCH_BLOCKED_NETWORKS, _LOOPBACK_NETWORKS
 
 
 SUPPORTED_CONTENT_TYPES = {

@@ -3274,13 +3274,17 @@ class OhmStore:
         Returns:
             Number of rows pulled and applied.
         """
+        from ohm.framework.validation import validate_table_name, validate_identifier
+
+        validate_identifier(alias, name="alias")
         pulled = 0
 
-        # OHM-8bli: iterate the DuckLake registry instead of a hardcoded list
         for dlt in self._ducklake_sync_tables():
             table = dlt.name
             pk = dlt.primary_key
             try:
+                validate_table_name(table, name="sync_table")
+                validate_identifier(pk, name="primary_key")
                 mirror = self._ducklake_table(table, alias)
                 # Find rows in DuckLake that are not in local table
                 # (new rows from other agents). OHM-8bli: use the

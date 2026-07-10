@@ -245,8 +245,8 @@ def _do_fetch(item: dict[str, Any]) -> tuple[bytes, str, str | None]:
     """
     import base64
     import mimetypes
+    import os
     from pathlib import Path
-    import urllib.request
 
     if item.get("content_bytes"):
         content = base64.b64decode(item["content_bytes"])
@@ -255,18 +255,21 @@ def _do_fetch(item: dict[str, Any]) -> tuple[bytes, str, str | None]:
         return content, filename, ct
 
     if item.get("local_path"):
-        path = Path(item["local_path"])
+        from ohm.net_safety import validate_local_path
+
+        ingestion_root = item.get("_ingestion_root") or os.environ.get("OHM_INGESTION_ROOT")
+        safe_path = validate_local_path(item["local_path"], root=ingestion_root)
+        path = Path(safe_path)
         content = path.read_bytes()
         filename = path.name
         ct = item.get("content_type") or mimetypes.guess_type(filename)[0]
         return content, filename, ct
 
     if item.get("url"):
+        from ohm.net_safety import safe_fetch_pinned
+
+        content, ct = safe_fetch_pinned(item["url"], timeout=30)
         url = item["url"]
-        req = urllib.request.Request(url, headers={"User-Agent": "OHM-ingestion/1.0"})
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            content = resp.read()
-            ct = resp.headers.get("Content-Type")
         filename = item.get("filename") or Path(url).name or "download"
         if "." not in filename and ct:
             ext = mimetypes.guess_extension(ct.split(";")[0].strip())

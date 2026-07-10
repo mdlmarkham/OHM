@@ -83,7 +83,7 @@ class Graph:
         """
         import requests
 
-        r = requests.get(f"{self.url}/schema", headers=self._headers)
+        r = requests.get(f"{self.url}/schema", headers=self._headers, timeout=30)
         r.raise_for_status()
         data = r.json()
         return data.get("guide", data)

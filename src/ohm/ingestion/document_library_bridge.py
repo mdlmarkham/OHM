@@ -59,7 +59,7 @@ def _read_queue_items(queue_dir: Path, stage: str) -> list[dict]:
 
 
 def _write_queue_item(queue_dir: Path, stage: str, item: dict) -> str:
-    item_id = item.get("id") or hashlib.md5(json.dumps(item, sort_keys=True, default=str).encode()).hexdigest()[:16]
+    item_id = item.get("id") or hashlib.md5(json.dumps(item, sort_keys=True, default=str).encode(), usedforsecurity=False).hexdigest()[:16]
     item["id"] = item_id
     path = _queue_path(queue_dir, stage, item_id)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -141,11 +141,10 @@ def _api_post(
 
 
 def _fetch_url(url: str, timeout: int = 30) -> tuple[bytes, str | None]:
-    """Fetch a URL and return (content_bytes, content_type)."""
-    req = Request(url, headers={"User-Agent": "OHM-Ingestion/1.0"})
-    with urlopen(req, timeout=timeout) as resp:
-        content_type = resp.headers.get("Content-Type")
-        return resp.read(), content_type
+    """Fetch a URL safely with SSRF protection (DNS pinning, IP validation)."""
+    from ohm.net_safety import safe_fetch_pinned
+
+    return safe_fetch_pinned(url, timeout=timeout)
 
 
 def _build_multipart_body(filename: str, content_bytes: bytes, boundary: str, content_type: str) -> bytes:
@@ -176,7 +175,12 @@ def _resolve_document_content(item: dict[str, Any]) -> tuple[bytes, str, str]:
 
     local_path = item.get("local_path")
     if local_path:
-        path = Path(local_path)
+        from ohm.net_safety import validate_local_path
+
+        import os as _os
+        ingestion_root = item.get("_ingestion_root") or _os.environ.get("OHM_INGESTION_ROOT")
+        safe_path = validate_local_path(local_path, root=ingestion_root)
+        path = Path(safe_path)
         if not path.exists():
             raise FileNotFoundError(f"Document local path not found: {local_path}")
         content_bytes = path.read_bytes()
