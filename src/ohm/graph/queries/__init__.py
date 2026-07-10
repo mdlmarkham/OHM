@@ -415,19 +415,21 @@ def query_stats(conn: DuckDBPyConnection, include_l0: bool = False) -> dict[str,
     """
     stats: dict[str, Any] = {}
 
-    # Edge counts by layer
+    # Edge counts by layer (OHM-776: filter deleted_at IS NULL to match total_edges)
     result = conn.execute("""
         SELECT layer, COUNT(*) AS count
         FROM ohm_edges
+        WHERE deleted_at IS NULL
         GROUP BY layer
         ORDER BY layer
     """)
     stats["edges_by_layer"] = {row[0]: row[1] for row in result.fetchall()}
 
-    # Edge counts by type
+    # Edge counts by type (OHM-776: filter deleted_at IS NULL to match total_edges)
     result = conn.execute("""
         SELECT edge_type, COUNT(*) AS count
         FROM ohm_edges
+        WHERE deleted_at IS NULL
         GROUP BY edge_type
         ORDER BY count DESC
     """)

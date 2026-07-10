@@ -542,11 +542,20 @@ class OhmStore:
 
     @staticmethod
     def _connect_with_wal_recovery(db_path_str: str, readonly: bool = False):
-        """Connect to DuckDB with WAL corruption recovery (OHM-b5a).
+        """Connect to DuckDB with WAL replay error recovery (OHM-b5a, OHM-776).
 
-        If DuckDB fails to open due to WAL replay errors, deletes the
-        WAL file and retries. The WAL contains only uncommitted writes,
-        so this is safe -- the main DB file is intact.
+        If DuckDB fails to open due to WAL replay errors, backs up the WAL
+        file to a timestamped .orphaned path before retrying without it.
+
+        IMPORTANT: A DuckDB WAL contains **committed** transactions that
+        haven't been folded into the main DB file via CHECKPOINT. Deleting
+        the WAL discards all committed writes since the last checkpoint.
+        The WAL is NOT just "uncommitted writes" — that was a factual error
+        in the original docstring, corrected in OHM-776.
+
+        The backup ensures a support engineer can attempt forensic recovery
+        of the lost committed writes. A critical-level log entry records
+        the event so it's discoverable, not silent.
 
         DuckDB raises InternalException (not IOException) for WAL
         replay failures (e.g., "Calling DatabaseManager::GetDefaultDatabase
@@ -569,6 +578,23 @@ class OhmStore:
             if "WAL" in error_msg or "wal" in error_msg.lower() or "replay" in error_msg.lower():
                 wal_path = db_path_str + ".wal"
                 if os.path.exists(wal_path):
+                    # OHM-776: Never silently delete the WAL. Back it up
+                    # so forensic recovery is possible, and log at critical
+                    # so the event is discoverable by operators.
+                    import shutil
+                    from datetime import datetime, timezone
+
+                    backup_path = wal_path + f".orphaned.{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+                    try:
+                        shutil.copy2(wal_path, backup_path)
+                    except Exception:
+                        backup_path = "(backup failed)"
+                    logger.critical(
+                        "WAL replay failed for %s — WAL backed up to %s. Committed writes since the last checkpoint may be lost. Error: %s",
+                        db_path_str,
+                        backup_path,
+                        error_msg,
+                    )
                     os.remove(wal_path)
                 conn = duckdb.connect(db_path_str, read_only=readonly)
             else:

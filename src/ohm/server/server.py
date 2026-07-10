@@ -2967,6 +2967,16 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     _checkpoint_thread: threading.Thread | None = None
 
     def _checkpoint_loop():
+        # OHM-776: Fire first checkpoint shortly after startup (5s) rather
+        # than waiting a full interval — bounds the data-loss window from
+        # startup, not just from the first periodic tick.
+        startup_delay = min(5, checkpoint_interval)
+        if _checkpoint_stop.wait(startup_delay):
+            return
+        try:
+            store.conn.execute("CHECKPOINT")
+        except Exception:
+            logger.exception("Startup CHECKPOINT failed")
         while not _checkpoint_stop.wait(checkpoint_interval):
             try:
                 store.conn.execute("CHECKPOINT")
