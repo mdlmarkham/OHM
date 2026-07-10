@@ -242,17 +242,31 @@ def _build_tool_handler(tool_name: str):
             return result
 
         if profile.is_high_blast_radius(tool_name):
-            # High-blast-radius tools require an explicit approval claim.
+            # OHM-761: Use FastMCP elicitation for in-band approval when
+            # the client hasn't pre-approved via the X-OHM-Approve header.
+            # Falls back to the header-based error for non-interactive clients.
             approval = headers.get("x-ohm-approve", "")
             if approval != tool_name:
-                result = _respond(
-                    {
-                        "error": "approval_required",
-                        "message": f"Tool '{tool_name}' requires X-OHM-Approve: {tool_name} header",
-                    }
-                )
-                _audit(profile, tool_name, status="approval_required", latency_ms=(time.time() - start) * 1000, size=len(str(result)))
-                return result
+                # Try elicitation first (interactive clients)
+                approved = False
+                if ctx:
+                    try:
+                        resp = await ctx.elicit(
+                            f"Confirm execution of high-blast-radius tool '{tool_name}'?",
+                            result_schema={"type": "boolean"},
+                        )
+                        approved = bool(resp)
+                    except Exception:
+                        pass  # Non-interactive client or elicit unavailable
+                if not approved:
+                    result = _respond(
+                        {
+                            "error": "approval_required",
+                            "message": (f"Tool '{tool_name}' requires approval. Either respond to the elicitation prompt or resend with X-OHM-Approve: {tool_name} header."),
+                        }
+                    )
+                    _audit(profile, tool_name, status="approval_required", latency_ms=(time.time() - start) * 1000, size=len(str(result)))
+                    return result
 
         try:
             data = await _forward(profile, method, path, body)
@@ -275,6 +289,15 @@ def _build_tool_handler(tool_name: str):
                 detail = json.loads(body_text)
             except Exception:
                 detail = body_text
+            # OHM-761: Surface orphan edge targets with an actionable message
+            if e.response.status_code in (404, 422) and tool_name == "ohm_create_edge":
+                msg = str(detail)
+                if "not found" in msg.lower() or "does not exist" in msg.lower():
+                    detail = {
+                        "error": "orphan_edge_target",
+                        "message": (f"One or both edge endpoints don't exist yet. Create the node(s) first, or use ohm_batch to create nodes and edges atomically. Server detail: {msg}"),
+                        "hint": "Use ohm_create_node first, or ohm_batch with nodes + edges in one call.",
+                    }
             payload = {"error": e.response.status_code, "detail": detail}
             result = _respond(payload)
             _audit(profile, tool_name, status=f"http_{e.response.status_code}", latency_ms=(time.time() - start) * 1000, size=len(str(result)))

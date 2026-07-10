@@ -324,3 +324,50 @@ class TestStructuredOutput:
         assert result["edges"][1] == {"from": "n1", "to": "n2"}
         assert "avg" not in result["stats"]
         assert result["stats"]["count"] == 5
+
+
+class TestBuildRequestHardening:
+    """Test build_request error handling (OHM-761)."""
+
+    def test_missing_required_field_raises_key_error(self):
+        """Missing from_node on ohm_create_edge raises KeyError."""
+        from ohm.mcp.dispatch import build_request
+
+        with pytest.raises(KeyError, match="from_node"):
+            build_request("ohm_create_edge", {"to_node": "n2", "edge_type": "CAUSES"}, "test")
+
+    def test_missing_required_field_raises_key_error_to_node(self):
+        """Missing to_node raises KeyError."""
+        from ohm.mcp.dispatch import build_request
+
+        with pytest.raises(KeyError, match="to_node"):
+            build_request("ohm_create_edge", {"from_node": "n1", "edge_type": "CAUSES"}, "test")
+
+    def test_missing_edge_type_raises_key_error(self):
+        """Missing edge_type raises KeyError."""
+        from ohm.mcp.dispatch import build_request
+
+        with pytest.raises(KeyError, match="edge_type"):
+            build_request("ohm_create_edge", {"from_node": "n1", "to_node": "n2"}, "test")
+
+    def test_batch_over_50_raises_value_error(self):
+        """ohm_batch with >50 items raises ValueError."""
+        from ohm.mcp.dispatch import build_request
+
+        nodes = [{"id": f"n{i}", "label": f"Node {i}"} for i in range(51)]
+        with pytest.raises(ValueError, match="max 50"):
+            build_request("ohm_batch", {"nodes": nodes}, "test")
+
+    def test_missing_node_id_raises_key_error(self):
+        """Missing node_id on ohm_get_node raises KeyError."""
+        from ohm.mcp.dispatch import build_request
+
+        with pytest.raises(KeyError, match="node_id"):
+            build_request("ohm_get_node", {}, "test")
+
+    def test_missing_obs_type_raises_key_error(self):
+        """Missing obs_type on ohm_observe raises KeyError."""
+        from ohm.mcp.dispatch import build_request
+
+        with pytest.raises(KeyError, match="obs_type"):
+            build_request("ohm_observe", {"node_id": "n1", "value": 0.5}, "test")
