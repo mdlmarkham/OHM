@@ -1009,6 +1009,12 @@ def query_source_reliability(
 
     reliability_data = effective_reliability(conn, source_agent)
 
+    # OHM-768: Belief calibration metrics (distinct from outcome-based
+    # reliability above — this scores "did the agent's stated probability
+    # match the graph's probability at write time", not "was the claim
+    # eventually confirmed true/false")
+    belief_calibration = _compute_belief_calibration(conn, source_agent)
+
     return {
         "source_agent": source_agent,
         "total_outcomes": total,
@@ -1023,6 +1029,77 @@ def query_source_reliability(
         "community_prior": reliability_data["community_prior"],
         "decay_lambda": reliability_data["decay_lambda"],
         "last_outcome_at": reliability_data["last_outcome_at"],
+        # OHM-768: belief calibration fields (namespaced to disambiguate
+        # from the outcome-based reliability metrics above)
+        "belief_calibration": belief_calibration,
+    }
+
+
+def _compute_belief_calibration(conn: DuckDBPyConnection, agent_name: str) -> dict[str, Any]:
+    """Compute belief calibration metrics for an agent (OHM-768).
+
+    Scores how well the agent's stated probabilities match the graph's
+    posterior at write time. Distinct from outcome-based reliability
+    (which scores "was the claim eventually confirmed true/false").
+
+    Returns:
+        Dict with belief_calibration_error, directional_accuracy,
+        brier_score, total_belief_statements, and overconfidence_rate.
+        Returns empty metrics if no belief statements logged.
+    """
+    try:
+        rows = conn.execute(
+            "SELECT claimed_probability, graph_posterior, divergence, actual_state FROM ohm_belief_calibration_log WHERE agent_name = ? ORDER BY created_at DESC LIMIT 100",
+            [agent_name],
+        ).fetchall()
+    except Exception:
+        # Table might not exist yet (pre-migration)
+        return {
+            "total_belief_statements": 0,
+            "belief_calibration_error": None,
+            "directional_accuracy": None,
+            "brier_score": None,
+            "overconfidence_rate": None,
+        }
+
+    if not rows:
+        return {
+            "total_belief_statements": 0,
+            "belief_calibration_error": None,
+            "directional_accuracy": None,
+            "brier_score": None,
+            "overconfidence_rate": None,
+        }
+
+    total = len(rows)
+    divergences = [r[2] for r in rows if r[2] is not None]
+    avg_divergence = sum(divergences) / len(divergences) if divergences else 0.0
+
+    # Directional accuracy: fraction where claimed and graph agree on
+    # the more likely state (both > 0.5 or both <= 0.5)
+    directional_correct = sum(1 for r in rows if r[0] is not None and r[1] is not None and (r[0] > 0.5) == (r[1] > 0.5))
+    directional_accuracy = round(directional_correct / total, 4) if total > 0 else None
+
+    # Overconfidence rate: fraction where |claimed - graph| >= 0.25
+    overconfident = sum(1 for d in divergences if d >= 0.25)
+    overconfidence_rate = round(overconfident / total, 4) if total > 0 else None
+
+    # Brier score: (claimed - actual)^2 averaged.
+    # actual_state is None until the target resolves — only compute
+    # for resolved entries.
+    resolved = [(r[0], r[3]) for r in rows if r[0] is not None and r[3] is not None]
+    if resolved:
+        brier = sum((claimed - (1.0 if actual else 0.0)) ** 2 for claimed, actual in resolved) / len(resolved)
+        brier_score = round(brier, 4)
+    else:
+        brier_score = None
+
+    return {
+        "total_belief_statements": total,
+        "belief_calibration_error": round(avg_divergence, 4),
+        "directional_accuracy": directional_accuracy,
+        "brier_score": brier_score,
+        "overconfidence_rate": overconfidence_rate,
     }
 
 

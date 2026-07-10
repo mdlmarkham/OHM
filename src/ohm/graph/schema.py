@@ -1963,7 +1963,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.46.0"
+SCHEMA_VERSION = "0.47.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -2629,6 +2629,24 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             "metadata JSON, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
             "CREATE INDEX IF NOT EXISTS idx_conf_log_edge ON ohm_confidence_log(edge_id, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_conf_log_agent ON ohm_confidence_log(agent)",
+        ],
+    ),
+    (
+        "0.47.0",
+        "OHM-768: belief calibration log for per-agent calibration scoring",
+        [
+            "CREATE TABLE IF NOT EXISTS ohm_belief_calibration_log ("
+            "id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(), "
+            "agent_name VARCHAR NOT NULL, "
+            "target_node VARCHAR, "
+            "claimed_probability DOUBLE NOT NULL, "
+            "graph_posterior DOUBLE NOT NULL, "
+            "divergence DOUBLE NOT NULL, "
+            "tool VARCHAR, "
+            "edge_or_node_id VARCHAR, "
+            "actual_state BOOLEAN, "
+            "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
+            "CREATE INDEX IF NOT EXISTS idx_belief_cal_agent ON ohm_belief_calibration_log(agent_name, created_at DESC)",
         ],
     ),
 ]
