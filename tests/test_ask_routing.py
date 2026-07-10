@@ -78,7 +78,8 @@ class TestAskRouterUnit:
 
     def test_response_shape(self, router):
         result = router.route("show stats", {})
-        assert set(result.keys()) == {"intent", "handler", "payload", "links"}
+        # OHM-790: confidence added to all responses
+        assert {"intent", "handler", "payload", "links"}.issubset(result.keys())
         assert isinstance(result["links"], list)
         assert isinstance(result["payload"], dict)
 
