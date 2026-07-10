@@ -2962,9 +2962,23 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     # OHM-776: Periodic checkpoint thread — bounds the worst-case data-loss
     # window to the checkpoint interval. Without this, writes between
     # checkpoints are lost on non-graceful daemon exit (SIGKILL, crash).
+    #
+    # OHM-785: DuckDB connections are NOT safe for concurrent use from
+    # multiple threads. The checkpoint thread must acquire the store's
+    # write lock before issuing CHECKPOINT, otherwise it races with
+    # request handlers executing queries on the same connection.
     checkpoint_interval = config.get("checkpoint_interval_seconds", 60)
     _checkpoint_stop = threading.Event()
     _checkpoint_thread: threading.Thread | None = None
+
+    def _safe_checkpoint():
+        """Run CHECKPOINT while holding the store's write lock (OHM-785)."""
+        write_lock = getattr(store, "_lock", None)
+        if write_lock is not None:
+            with write_lock:
+                store.conn.execute("CHECKPOINT")
+        else:
+            store.conn.execute("CHECKPOINT")
 
     def _checkpoint_loop():
         # OHM-776: Fire first checkpoint shortly after startup (5s) rather
@@ -2974,12 +2988,12 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
         if _checkpoint_stop.wait(startup_delay):
             return
         try:
-            store.conn.execute("CHECKPOINT")
+            _safe_checkpoint()
         except Exception:
             logger.exception("Startup CHECKPOINT failed")
         while not _checkpoint_stop.wait(checkpoint_interval):
             try:
-                store.conn.execute("CHECKPOINT")
+                _safe_checkpoint()
             except Exception:
                 logger.exception("Periodic CHECKPOINT failed")
 

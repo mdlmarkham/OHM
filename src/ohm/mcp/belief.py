@@ -27,7 +27,7 @@ def parse_belief_statement(statement: str) -> dict[str, Any] | None:
 
     # Try to extract target and state from P(target=state) pattern
     target_match = re.search(
-        r"P?\s*\(?\s*([a-zA-Z0-9_-]+)\s*=\s*(bad|good)\s*\)?",
+        r"P?\s*\(?\s*([a-zA-Z0-9_-]+)\s*=\s*([a-zA-Z0-9_-]+)\s*\)?",
         statement,
         re.IGNORECASE,
     )

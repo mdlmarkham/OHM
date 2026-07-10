@@ -513,7 +513,7 @@ def query_stats(conn: DuckDBPyConnection, include_l0: bool = False) -> dict[str,
             ROUND(MAX(value), 4) AS max_value,
             ROUND(AVG(sigma), 4) AS mean_sigma
         FROM ohm_observations
-        WHERE value IS NOT NULL
+        WHERE value IS NOT NULL AND deleted_at IS NULL
     """).fetchone()
     if obs_stats and obs_stats[0] > 0:
         stats["observation_stats"] = {

@@ -35,6 +35,21 @@ class TestParseBeliefStatement:
         assert result["state"] == "good"
         assert result["claimed_probability"] == 0.8
 
+    def test_parse_arbitrary_state(self):
+        """P(target=high) = 0.7 — arbitrary state identifier (OHM-778/779)"""
+        result = parse_belief_statement("P(risk=critical) = 0.4")
+        assert result is not None
+        assert result["target"] == "risk"
+        assert result["state"] == "critical"
+        assert result["claimed_probability"] == 0.4
+
+    def test_parse_hyphenated_state(self):
+        """P(target=high-risk) = 0.6"""
+        result = parse_belief_statement("P(system=high-risk) = 0.6")
+        assert result is not None
+        assert result["target"] == "system"
+        assert result["state"] == "high-risk"
+
     def test_parse_bare_probability(self):
         """Just a number."""
         result = parse_belief_statement("0.3")

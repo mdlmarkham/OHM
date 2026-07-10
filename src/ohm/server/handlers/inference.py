@@ -574,10 +574,12 @@ class InferenceHandlerMixin(OhmHandlerBase):
             except Exception:
                 voi_result = {"recommendations": []}
 
-            # Extract posterior values
-            posterior = inference_result.get("posterior", inference_result)
-            p_bad = float(posterior.get("P(bad)", posterior.get("bad", 0.0)))
-            p_good = float(posterior.get("P(good)", posterior.get("good", 1.0 - p_bad)))
+            # Extract posterior values (OHM-781: bayesian_inference returns
+            # {"posterior": {"target_node_id": {"bad": 0.7, "good": 0.3}}, ...})
+            posterior_raw = inference_result.get("posterior", {})
+            posterior = posterior_raw.get(target, {}) if isinstance(posterior_raw, dict) else {}
+            p_bad = float(posterior.get("bad", 0.0))
+            p_good = float(posterior.get("good", 1.0 - p_bad))
 
             # Build driver list from neighborhood edges
             drivers = []

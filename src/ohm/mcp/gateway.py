@@ -301,6 +301,45 @@ def _build_tool_handler(tool_name: str):
                 except Exception:
                     pass
             data = await _forward(profile, method, path, body)
+
+            # OHM-780: Process belief_statement from write tools.
+            # Parse, compare to graph posterior (if available), inject nudge.
+            belief_statement = kwargs.get("belief_statement")
+            if belief_statement and tool_name in WRITE_TOOLS:
+                try:
+                    from ohm.mcp.belief import parse_belief_statement, compare_belief_to_posterior
+
+                    parsed = parse_belief_statement(belief_statement)
+                    if parsed and parsed.get("target"):
+                        # Best-effort: try to get graph posterior via /belief
+                        try:
+                            belief_data = await _forward(
+                                profile,
+                                "GET",
+                                f"/belief?target={parsed['target']}",
+                                None,
+                            )
+                            graph_p = belief_data.get("posterior", {}).get("P(bad)", 0.0)
+                            comparison = compare_belief_to_posterior(
+                                parsed["claimed_probability"],
+                                {"P(bad)": graph_p},
+                                parsed.get("state", "bad"),
+                            )
+                            if comparison["severity"] >= 2:
+                                nudges = data.get("nudges", [])
+                                nudges.append(
+                                    {
+                                        "type": "belief_statement_suggestion",
+                                        "message": (f"Your stated belief P({parsed['state']})={parsed['claimed_probability']:.2f} diverges from the graph posterior by {comparison['divergence']:.2f} (graph: {graph_p:.2f}). Consider revising."),
+                                        "severity": "soft",
+                                    }
+                                )
+                                data["nudges"] = nudges
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
             if tool_name in _LONG_ANALYSIS_TOOLS and ctx:
                 try:
                     await ctx.report_progress(1, 1, "Done")
