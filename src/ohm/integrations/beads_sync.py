@@ -200,7 +200,7 @@ def sync_beads_to_ohm_tasks(
                 report["skipped"] += 1
                 continue
 
-            current_status = current_row[6]
+            current_status = current_row[6] or "open"  # OHM-sbtz: treat None as "open"
             status_precedence = ["open", "in_progress", "blocked", "review", "done", "cancelled"]
             current_idx = status_precedence.index(current_status) if current_status in status_precedence else 0
             new_idx = status_precedence.index(ohm_status) if ohm_status in status_precedence else 0

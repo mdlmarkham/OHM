@@ -256,7 +256,7 @@ Why: The SDK runs in-process (no subprocess overhead), returns structured data (
 - **Sequence dependent work.** Schema (`ohm-schemer`) → plumbing (`ohm-plumber`) → tests (`ohm-test-writer`) → ADR (`ohm-adr-writer`) is the typical order for a new field. Don't run tests before the plumbing lands.
 - **Don't duplicate delegated work.** Once a sub-agent is dispatched for a unit of work, the primary should move to non-overlapping work or wait — don't redo the same investigation inline.
 - **Verify, don't trust.** Sub-agent output is generally reliable but should be checked against the codebase for high-stakes changes. Run the quality gates (`python -m pytest tests/ -v`) after implementation agents finish.
-- **The primary still owns the graph + Beads.** Sub-agents do not file Beads issues, claim/close work, commit, or push — only the primary does.
+- **The primary still owns the graph + GitHub issues.** Sub-agents do not file issues, claim/close work, commit, or push — only the primary does.
 
 ### Model routing
 
@@ -295,29 +295,23 @@ Decision rule (Phase 1, single-step POMDP): if `evpi > cost_of_observation` → 
 
 CLI equivalent: `ohm graph policy <node_id> [--horizon 1] [--observation-cost 1.0]`.
 
-## Beads Workflow
+## Issue Tracker (GitHub)
 
-This project uses **bd** (beads) for issue tracking. Issues use prefix `ohm-<hash>`.
+This project uses **GitHub Issues** for task tracking.
 
 ```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --status in_progress  # Claim work
-bd close <id>         # Complete work
-bd create "title" -t feature -p 0 --parent <epic-id>  # Create child issue
+gh issue list --repo mdlmarkham/OHM --state open --assignee @me  # My open issues
+gh issue view <number> --repo mdlmarkham/OHM                     # View issue details
+gh issue edit <number> --repo mdlmarkham/OHM --add-label "in-progress"  # Claim work
+gh issue close <number> --repo mdlmarkham/OHM                  # Complete work
+gh issue create --repo mdlmarkham/OHM --title "..." --body "..." --label "bug|enhancement|task"  # New issue
 ```
 
 ### Backlog Structure
-Active epics (use `bd list` for current state):
-- **OHM-0e0**: P1 — Domain Flexibility ✅ (Complete: cattle, retail, temporal decay, SSE, batch expiry)
-- **OHM-af8**: P1 — Multi-scenario Extensibility ✅ (Complete: medical, cybersecurity, supply chain, customer support)
-- **OHM-xgm**: P1 — DuckLake + Time Travel (future)
-- **OHM-a35**: P1 — Agent Integration (Métis, Clio, Hephaestus, Socrates) (future)
-- **OHM-3w1**: P2 — TOPO Instantiation (future)
 
-Schema v0.5.0 shipped: urgency, priority, probability, NEGATES, scenario edge types.
+Track active work in GitHub Issues and Projects. Use the issue list for the current state rather than a static table.
 
-Remaining docs/P2 items (use `bd list` for current state).
+Remaining docs/P2 items: see open issues tagged `documentation` and `type::task`.
 
 ### Session Completion (MANDATORY)
 
@@ -333,7 +327,6 @@ Remaining docs/P2 items (use `bd list` for current state).
 4. **PUSH TO REMOTE** — This is MANDATORY:
    ```bash
    git pull --rebase
-   git add .beads/ && git commit -m "chore: sync beads state" || true
    git push
    git status  # MUST show "up to date with origin"
    ```
@@ -398,8 +391,8 @@ with connect("/var/lib/ohm/ohm.duckdb", actor="metis") as g:
 1. **DuckDB doesn't support `REFERENCES` constraints.** Don't add foreign keys to DDL — enforce in application code
 2. **DuckDB `fetchall()` returns tuples, not dicts.** Use `_rows_to_dicts()` from `ohm.graph.queries` (benchmark confirmed this is faster than `result.df().to_dict('records')` without pyarrow; don't switch to the pandas bridge).
 3. **Recursive CTEs can't reference themselves in subqueries.** Keep CTE logic simple — avoid `NOT EXISTS (SELECT FROM cte)` patterns
-4. **`bd sync` works fine** — it exports issues to `.beads/issues.jsonl` and is git-tracked
-5. **Use `bd doctor`** to diagnose daemon issues; `bd list` and `bd show` for status
+4. **`gh issue list`** is the fastest way to see open work. Use GitHub labels and assignees to filter.
+5. **Use `gh issue view <number>`** to read issue details before starting work.
 6. **The `pyproject.toml` was converted from pixi format to PEP 621.** Don't revert to pixi-style `[package]`/`[dependencies]` sections
 7. **HD bit operations** (`ohm.inference.hd.majority_rule`) are byte-level — the Python loop is already byte-parallel and ~3.4× faster than bit-level iteration. Don't regress to per-bit loops.
 
@@ -478,27 +471,29 @@ creation is blocked.
 
 
 
-<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ccf33ec3 -->
-## Beads Issue Tracker
+<!-- BEGIN GITHUB ISSUES INTEGRATION -->
+## GitHub Issue Tracker
 
-This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
+This project uses **GitHub Issues** for durable task tracking. Use the `gh` CLI or the GitHub web UI.
 
 ### Quick Reference
 
 ```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --claim  # Claim work
-bd close <id>         # Complete work
+gh issue list --repo mdlmarkham/OHM --state open --assignee @me
+gh issue view <number> --repo mdlmarkham/OHM
+gh issue edit <number> --repo mdlmarkham/OHM --add-label "in-progress"
+gh issue close <number> --repo mdlmarkham/OHM --comment "Shipped in <commit>."
+gh issue create --repo mdlmarkham/OHM --title "..." --body "..."
 ```
 
 ### Rules
 
-- Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
-- Run `bd prime` for detailed command reference and session close protocol
-- Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
+- Use **GitHub Issues** for all task tracking — do NOT use `bd`/beads, TodoWrite, TaskCreate, or markdown TODO lists.
+- Tag issues with existing labels (`type::bug`, `type::feature`, `type::task`, `priority::critical`, `priority::high`, `security`, `documentation`, etc.).
+- Parent tracking issues should be labeled `type::epic`.
+- Reference related issues in PRs and commit messages (`Closes #123`, `Related #456`).
 
-**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
+**Historical beads issues:** The `.beads/` Dolt database is deprecated for new work. Remaining beads state is read-only legacy data; do not create new beads issues or run `bd dolt push`.
 
 ## Session Completion
 
@@ -506,13 +501,12 @@ bd close <id>         # Complete work
 
 **MANDATORY WORKFLOW:**
 
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
+1. **File issues for remaining work** - Create GitHub issues for anything that needs follow-up
 2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
+3. **Update issue status** - Close finished work, update in-progress items via `gh issue close` / `gh issue edit`
 4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
    git pull --rebase
-   bd dolt push
    git push
    git status  # MUST show "up to date with origin"
    ```
@@ -585,7 +579,6 @@ Verification breaks this loop. Record outcomes. Challenge dubious claims. Decay 
 4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
    git pull --rebase
-   bd sync
    git push
    git status  # MUST show "up to date with origin"
    ```
@@ -599,26 +592,26 @@ Verification breaks this loop. Record outcomes. Challenge dubious claims. Decay 
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
 
-<!-- BEGIN BEADS CODEX SETUP: generated by bd setup codex -->
-## Beads Issue Tracker
+<!-- BEGIN GITHUB ISSUES CODEX SETUP -->
+## GitHub Issue Tracker
 
-Use Beads (`bd`) for durable task tracking in repositories that include it. Use the `beads` skill at `.agents/skills/beads/SKILL.md` (project install) or `~/.agents/skills/beads/SKILL.md` (global install) for Beads workflow guidance, then use the `bd` CLI for issue operations.
+Use GitHub Issues for durable task tracking in this repository. Use the `gh` CLI or the GitHub web UI.
 
 ### Quick Reference
 
 ```bash
-bd ready                # Find available work
-bd show <id>            # View issue details
-bd update <id> --claim  # Claim work
-bd close <id>           # Complete work
-bd prime                # Refresh Beads context
+gh issue list --repo mdlmarkham/OHM --state open --assignee @me
+gh issue view <number> --repo mdlmarkham/OHM
+gh issue edit <number> --repo mdlmarkham/OHM --add-label "in-progress"
+gh issue close <number> --repo mdlmarkham/OHM
+gh issue create --repo mdlmarkham/OHM --title "..." --body "..."
 ```
 
 ### Rules
 
-- Use `bd` for all task tracking; do not create markdown TODO lists.
-- Run `bd prime` when Beads context is missing or stale. Codex 0.129.0+ can load Beads context automatically through native hooks; use `/hooks` to inspect or toggle them.
-- Keep persistent project memory in Beads via `bd remember`; do not create ad hoc memory files.
+- Use GitHub Issues for all task tracking; do not create markdown TODO lists.
+- Do not use `bd` (beads) for new issues. The `.beads/` database is legacy data only.
+- Keep persistent project memory in GitHub issues, ADRs, and committed documentation — not ad hoc memory files.
 
-**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
-<!-- END BEADS CODEX SETUP -->
+**Note:** The `.beads/` directory remains in the repo as historical artifact. Do not modify it for new work.
+<!-- END GITHUB ISSUES CODEX SETUP -->
