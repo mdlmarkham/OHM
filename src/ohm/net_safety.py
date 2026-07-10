@@ -128,8 +128,14 @@ def validate_local_path(path: str, root: str | None = None) -> str:
     If *root* is provided, the path must resolve to a location within
     the root directory. Symlinks and traversal escapes are rejected.
 
+    If *root* is NOT provided, absolute paths are rejected (they would
+    allow reading arbitrary files on the filesystem). Only relative
+    paths without traversal sequences are allowed — and the caller
+    should set OHM_INGESTION_ROOT to enable proper containment.
+
     Returns the resolved path string. Raises ValidationError if the path
-    escapes the root or contains traversal sequences.
+    escapes the root, contains traversal sequences, or is absolute
+    without a configured root.
     """
     from pathlib import Path
 
@@ -140,12 +146,20 @@ def validate_local_path(path: str, root: str | None = None) -> str:
 
     if root:
         root_path = Path(root).resolve()
-        resolved = p.resolve()
+        # If the path is relative, resolve it against the root
+        if not p.is_absolute():
+            resolved = (root_path / p).resolve()
+        else:
+            resolved = p.resolve()
         try:
             resolved.relative_to(root_path)
         except ValueError:
             raise ValidationError(f"local_path '{path}' escapes ingestion root '{root}'")
         return str(resolved)
+
+    # No root configured — reject absolute paths to prevent arbitrary file reads.
+    if p.is_absolute():
+        raise ValidationError(f"local_path '{path}' is an absolute path but no ingestion root is configured. Set OHM_INGESTION_ROOT env var or pass _ingestion_root in the item to enable local_path ingestion.")
 
     if ".." in p.parts:
         raise ValidationError(f"local_path '{path}' contains path traversal sequence")
