@@ -343,7 +343,7 @@ def all_tools() -> list[Tool]:
             name="ohm_batch",
             description=(
                 "Batch-create nodes and edges in a single all-or-nothing transaction. "
-                "Max 50 combined items. Each node item needs id+label (at minimum); "
+                "Max 500 combined items. Each node item needs id+label (at minimum); "
                 "each edge item needs from+to+type (at minimum). Use this when you need "
                 "to create multiple related nodes and edges atomically."
             ),
@@ -363,10 +363,11 @@ def all_tools() -> list[Tool]:
                                 "confidence": {"type": "number", "description": "Confidence 0.0-1.0"},
                                 "provenance": {"type": "string", "description": "Where this knowledge came from"},
                                 "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags for categorization"},
+                                "visibility": {"type": "string", "description": "Visibility scope: team (default), private, public", "default": "team"},
                             },
                             "required": ["id", "label"],
                         },
-                        "maxItems": 50,
+                        "maxItems": 500,
                     },
                     "edges": {
                         "type": "array",
@@ -380,10 +381,11 @@ def all_tools() -> list[Tool]:
                                 "layer": {"type": "string", "description": "Layer: L1-L4", "default": "L3"},
                                 "confidence": {"type": "number", "description": "Confidence 0.0-1.0"},
                                 "provenance": {"type": "string", "description": "Where this edge came from"},
+                                "condition": {"type": "string", "description": "Optional condition under which the edge holds"},
                             },
                             "required": ["from", "to", "type"],
                         },
-                        "maxItems": 50,
+                        "maxItems": 500,
                     },
                     "belief_statement": {
                         "type": "string",

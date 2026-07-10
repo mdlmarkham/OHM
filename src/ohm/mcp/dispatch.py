@@ -199,8 +199,8 @@ def build_request(name: str, arguments: dict[str, Any], agent_id: str) -> tuple[
         nodes = arguments.get("nodes", [])
         edges = arguments.get("edges", [])
         total = len(nodes) + len(edges)
-        if total > 50:
-            raise ValueError(f"ohm_batch: max 50 combined items, got {total}")
+        if total > 500:
+            raise ValueError(f"ohm_batch: max 500 combined items, got {total}")
         body: dict[str, Any] = {"nodes": nodes, "edges": edges}
         return "POST", "/batch", body
 

@@ -57,10 +57,10 @@ class TestOhmBatchTool:
         assert body["nodes"] == []
         assert body["edges"] == []
 
-    def test_ohm_batch_dispatch_rejects_over_50(self):
-        """build_request raises when total items exceed 50."""
-        nodes = [{"id": f"n{i}", "label": f"Node {i}"} for i in range(51)]
-        with pytest.raises(ValueError, match="max 50"):
+    def test_ohm_batch_dispatch_rejects_over_500(self):
+        """build_request raises when total items exceed 500."""
+        nodes = [{"id": f"n{i}", "label": f"Node {i}"} for i in range(501)]
+        with pytest.raises(ValueError, match="max 500"):
             build_request("ohm_batch", {"nodes": nodes}, "test-agent")
 
 
@@ -350,12 +350,12 @@ class TestBuildRequestHardening:
         with pytest.raises(KeyError, match="edge_type"):
             build_request("ohm_create_edge", {"from_node": "n1", "to_node": "n2"}, "test")
 
-    def test_batch_over_50_raises_value_error(self):
-        """ohm_batch with >50 items raises ValueError."""
+    def test_batch_over_500_raises_value_error(self):
+        """ohm_batch with >500 items raises ValueError."""
         from ohm.mcp.dispatch import build_request
 
-        nodes = [{"id": f"n{i}", "label": f"Node {i}"} for i in range(51)]
-        with pytest.raises(ValueError, match="max 50"):
+        nodes = [{"id": f"n{i}", "label": f"Node {i}"} for i in range(501)]
+        with pytest.raises(ValueError, match="max 500"):
             build_request("ohm_batch", {"nodes": nodes}, "test")
 
     def test_missing_node_id_raises_key_error(self):
