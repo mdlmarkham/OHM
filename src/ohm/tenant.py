@@ -194,8 +194,11 @@ class TenantManager:
         Reuses validate_customer_id() — the same validation that makes
         customer_id safe as a filesystem path also makes it safe as a
         SQL schema name (alphanumeric + underscores only).
+        Hyphens are replaced with underscores since DuckDB schema names
+        with hyphens require quoting everywhere — normalizing avoids the
+        need to quote in every SQL statement.
         """
-        return validate_customer_id(customer_id)
+        return validate_customer_id(customer_id).replace("-", "_")
 
     def _create_federated_store(self, customer_id: str, schema: "SchemaConfig") -> OhmStore:
         """Create an OhmStore that connects directly to a tenant's schema

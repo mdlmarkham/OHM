@@ -2700,6 +2700,36 @@ def initialize_schema(conn: "DuckDBPyConnection", schema: "SchemaConfig | None" 
         _create_domain_tables(conn, schema)
 
 
+def _clean_ddl_for_ducklake(ddl: str) -> str:
+    """Strip DuckLake-incompatible features from a DDL statement.
+
+    DuckLake does NOT support PRIMARY KEY, UNIQUE constraints, sequences,
+    or indexes. This function strips those while keeping gen_random_uuid()
+    (which DuckLake supports) and renames row_id (reserved by DuckLake).
+    """
+    import re
+
+    # Skip sequences, indexes entirely
+    if "CREATE SEQUENCE" in ddl or "CREATE INDEX" in ddl or "CREATE UNIQUE INDEX" in ddl:
+        return ""
+    # Skip per-daemon tables that use row_id (reserved by DuckLake)
+    if "ohm_change_feed" in ddl or "ohm_metric_action_log" in ddl or "ohm_change_log" in ddl:
+        return ""
+    # Strip PRIMARY KEY (with optional column list in parentheses)
+    cleaned = re.sub(r",?\s*PRIMARY\s+KEY\s*\([^)]*\)", "", ddl, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+PRIMARY\s+KEY", "", cleaned, flags=re.IGNORECASE)
+    # Strip UNIQUE(...) table constraints and trailing comma
+    cleaned = re.sub(r",?\s*UNIQUE\s*\([^)]*\)", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+UNIQUE(?!\s*\()", "", cleaned, flags=re.IGNORECASE)
+    # Replace sequence defaults — DuckLake doesn't support sequences
+    cleaned = re.sub(r"DEFAULT\s+nextval\([^)]+\)", "DEFAULT NULL", cleaned, flags=re.IGNORECASE)
+    # Rename row_id — reserved by DuckLake for internal use
+    cleaned = cleaned.replace("row_id", "change_row_id")
+    # Clean up trailing commas before closing paren
+    cleaned = re.sub(r",\s*\)", "\n    )", cleaned)
+    return cleaned
+
+
 def initialize_schema_ducklake(conn: "DuckDBPyConnection", schema: "SchemaConfig | None" = None) -> None:
     """Create OHM tables in a DuckLake schema (OHM-734 federated mode).
 
@@ -2708,28 +2738,10 @@ def initialize_schema_ducklake(conn: "DuckDBPyConnection", schema: "SchemaConfig
     skips index creation. Uniqueness is enforced in application code
     (same as the existing DuckLake mirror tables in db.py).
     """
-    import re
-
     for ddl in DDL_STATEMENTS:
-        # Skip sequences, indexes, and tables that use row_id (reserved by DuckLake)
-        if "CREATE SEQUENCE" in ddl or "CREATE INDEX" in ddl or "CREATE UNIQUE INDEX" in ddl:
+        cleaned = _clean_ddl_for_ducklake(ddl)
+        if not cleaned:
             continue
-        if "ohm_change_feed" in ddl or "ohm_metric_action_log" in ddl or "ohm_change_log" in ddl:
-            continue  # These use row_id (reserved by DuckLake) and are per-daemon
-        # Strip PRIMARY KEY (with optional column list in parentheses)
-        cleaned = re.sub(r",?\s*PRIMARY\s+KEY\s*\([^)]*\)", "", ddl, flags=re.IGNORECASE)
-        cleaned = re.sub(r"\s+PRIMARY\s+KEY", "", cleaned, flags=re.IGNORECASE)
-        # Strip UNIQUE(...) table constraints and trailing comma
-        cleaned = re.sub(r",?\s*UNIQUE\s*\([^)]*\)", "", cleaned, flags=re.IGNORECASE)
-        cleaned = re.sub(r"\s+UNIQUE(?!\s*\()", "", cleaned, flags=re.IGNORECASE)
-        # Strip DEFAULT gen_random_uuid() — DuckLake may not support it
-        cleaned = re.sub(r"DEFAULT\s+gen_random_uuid\(\)", "DEFAULT NULL", cleaned, flags=re.IGNORECASE)
-        # Replace sequence defaults — DuckLake doesn't support sequences
-        cleaned = re.sub(r"DEFAULT\s+nextval\([^)]+\)", "DEFAULT NULL", cleaned, flags=re.IGNORECASE)
-        # Rename row_id — reserved by DuckLake for internal use
-        cleaned = cleaned.replace("row_id", "change_row_id")
-        # Clean up trailing commas before closing paren
-        cleaned = re.sub(r",\s*\)", "\n    )", cleaned)
         try:
             conn.execute(cleaned)
         except Exception as e:
@@ -2742,8 +2754,7 @@ def initialize_schema_ducklake(conn: "DuckDBPyConnection", schema: "SchemaConfig
     # Skip indexes — DuckLake has limited index support
     # Skip HNSW embedding index — not available in DuckLake
     _ensure_meta_table(conn)
-    # Apply migrations — skip individual statements that DuckLake can't handle
-    # (arrays like FLOAT[768], sequences, indexes). Continue with the rest.
+    # Apply migrations — using the same DDL cleaning as base tables
     _apply_migrations_ducklake(conn)
     if schema:
         _seed_domain_agents(conn, schema)
@@ -2832,9 +2843,10 @@ def _apply_migrations(conn: "DuckDBPyConnection") -> None:
 def _apply_migrations_ducklake(conn: "DuckDBPyConnection") -> None:
     """Apply migrations for DuckLake-backed schemas (OHM-734).
 
-    Like _apply_migrations but skips individual statements that DuckLake
-    can't handle (arrays like FLOAT[768], sequences, indexes). The version
-    is still bumped so the schema is marked current.
+    Uses the same _clean_ddl_for_ducklake helper as initialize_schema_ducklake
+    to strip PK/UNIQUE/sequences from migration statements before executing.
+    Statements that are entirely cleaned away (indexes, sequences) are skipped.
+    The version is bumped so the schema is marked current.
     """
     current = conn.execute("SELECT value FROM ohm_meta WHERE key = 'schema_version'").fetchone()
     current_version = current[0] if current else "0.1.0"
@@ -2842,17 +2854,15 @@ def _apply_migrations_ducklake(conn: "DuckDBPyConnection") -> None:
 
     for version, description, statements in MIGRATIONS:
         if current_key < _version_tuple(version):
-            # DuckLake: run each statement individually without a
-            # transaction so that a failed index/sequence doesn't
-            # roll back a successful ALTER TABLE ADD COLUMN.
             for stmt in statements:
                 if not stmt:
                     continue
-                # Skip statements referencing tables that weren't created in DuckLake
-                if "ohm_change_feed" in stmt or "ohm_metric_action_log" in stmt or "ohm_change_log" in stmt:
+                # Apply the same DDL cleaning as base tables
+                cleaned = _clean_ddl_for_ducklake(stmt)
+                if not cleaned:
                     continue
                 try:
-                    conn.execute(stmt)
+                    conn.execute(cleaned)
                 except Exception as e:
                     err_msg = str(e).lower()
                     if any(
@@ -2869,12 +2879,15 @@ def _apply_migrations_ducklake(conn: "DuckDBPyConnection") -> None:
                             "row_id",
                         )
                     ):
-                        # Abort the failed statement's transaction state
                         try:
                             conn.execute("ROLLBACK")
                         except Exception:
                             pass
-                        pass  # Skip unsupported DuckLake features
+                        logger.warning(
+                            "Skipped DuckLake-incompatible migration %s statement: %s",
+                            version,
+                            str(e)[:200],
+                        )
                     else:
                         from ohm.framework.exceptions import MigrationError
 

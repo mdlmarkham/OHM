@@ -154,3 +154,111 @@ class TestChallengeEdgeExempt:
         )
         assert edge is not None
         store.close()
+
+
+class TestHyphenatedTenantId:
+    """Test OHM-734 blocker 1: hyphenated tenant IDs work in federated mode."""
+
+    def test_hyphenated_tenant_provisions_and_writes(self, fed_env):
+        """A tenant with hyphens in its ID can be provisioned and written to."""
+        tm, tmp = fed_env
+        tm.provision("acme-corp", domain="ohm")
+        store = tm.get_store("acme-corp")
+        store.write_node("n1", "Test", "concept", agent_name="test")
+        node = store.get_node("n1")
+        assert node is not None
+        assert node["label"] == "Test"
+        store.close()
+
+    def test_hyphenated_tenant_schema_name_normalize(self):
+        """_tenant_schema_name replaces hyphens with underscores."""
+        import tempfile
+        import os
+        import shutil
+
+        tmp = tempfile.mkdtemp()
+        try:
+            tenants_dir = os.path.join(tmp, "tenants")
+            os.makedirs(tenants_dir)
+            catalog = os.path.join(tmp, "test_lake.ducklake")
+            tm = TenantManager(
+                tenants_dir=tenants_dir,
+                shared_catalog_url=catalog,
+            )
+            assert tm._tenant_schema_name("acme-corp") == "acme_corp"
+            assert tm._tenant_schema_name("my-tenant-123") == "my_tenant_123"
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+class TestFederatedMigrationFidelity:
+    """Test OHM-734 blocker 3: migrations create tables correctly in DuckLake."""
+
+    def test_ohm_confidence_log_exists_in_federated_schema(self, fed_env):
+        """ohm_confidence_log table is created in federated mode (not silently dropped)."""
+        tm, tmp = fed_env
+        tm.provision("acme_corp", domain="ohm")
+        store = tm.get_store("acme_corp")
+
+        # Verify ohm_confidence_log exists and has the right columns
+        cols = store.conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'ohm_confidence_log' ORDER BY column_name").fetchall()
+        col_names = [c[0] for c in cols]
+        assert "id" in col_names, "ohm_confidence_log.id column should exist"
+        assert "edge_id" in col_names, "ohm_confidence_log.edge_id column should exist"
+        assert "agent" in col_names, "ohm_confidence_log.agent column should exist"
+        assert "new_value" in col_names, "ohm_confidence_log.new_value column should exist"
+        store.close()
+
+    def test_log_confidence_change_works_in_federated_mode(self, fed_env):
+        """log_confidence_change works end-to-end in federated mode."""
+        tm, tmp = fed_env
+        tm.provision("acme_corp", domain="ohm")
+        store = tm.get_store("acme_corp")
+        store.write_node("n1", "Source", "concept", agent_name="test")
+        store.write_node("n2", "Target", "concept", agent_name="test")
+        edge = store.write_edge("n1", "n2", "CAUSES", "L3", confidence=0.8, agent_name="test")
+        assert edge is not None
+
+        from ohm.graph.queries import log_confidence_change
+
+        log_confidence_change(
+            store.conn,
+            edge_id=edge["id"],
+            agent="test",
+            old_value=0.8,
+            new_value=0.9,
+            reason="updated confidence",
+        )
+
+        # Verify the log entry exists
+        count = store.conn.execute(
+            "SELECT COUNT(*) FROM ohm_confidence_log WHERE edge_id = ?",
+            [edge["id"]],
+        ).fetchone()[0]
+        assert count == 1, "Confidence log entry should exist"
+        store.close()
+
+    def test_node_ids_are_generated_in_federated_mode(self, fed_env):
+        """Node IDs are auto-generated (not NULL) in federated mode via create_node."""
+        from ohm.graph.queries import create_node
+
+        tm, tmp = fed_env
+        tm.provision("acme_corp", domain="ohm")
+        store = tm.get_store("acme_corp")
+
+        node = create_node(
+            store.conn,
+            label="Auto ID Node",
+            node_type="concept",
+            created_by="test",
+        )
+
+        assert node is not None
+        assert node["id"] is not None, "Node ID should be auto-generated, not NULL"
+        assert len(node["id"]) > 0, "Node ID should be a non-empty string"
+
+        # Verify it's readable
+        fetched = store.get_node(node["id"])
+        assert fetched is not None
+        assert fetched["label"] == "Auto ID Node"
+        store.close()
