@@ -1427,9 +1427,9 @@ class SchemaConfig:
         if self.template_version > 0:
             result["template_version"] = self.template_version
         if self.required_integrations:
-            result["required_integrations"] = self.required_integrations
+            result["required_integrations"] = dict(self.required_integrations)
         if self.optional_integrations:
-            result["optional_integrations"] = self.optional_integrations
+            result["optional_integrations"] = dict(self.optional_integrations)
         if self.domain_tables:
             result["domain_tables"] = [dt.to_dict() for dt in self.domain_tables]
         result["ducklake_tables"] = [dlt.to_dict() for dlt in self.ducklake_tables]

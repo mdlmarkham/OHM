@@ -831,6 +831,7 @@ def _build_router() -> _RouteRegistry:
         "/admin/snapshots",
         "/admin/verification-scan",
         "/config",
+        "/bootstrap",
         "/hooks",
         "/graph/at",
         "/graph/changes",
@@ -903,6 +904,8 @@ def _build_router() -> _RouteRegistry:
     r.add("POST", "/admin/sync-beads")
     r.add("GET", "/config")
     r.add("PUT", "/config")
+    r.add("GET", "/bootstrap")
+    r.add("POST", "/bootstrap")
     r.add("POST", "/scenario")
     r.add("POST", "/propose-action")
     r.add("POST", "/execute-action")
@@ -2591,6 +2594,7 @@ OhmHandler._POST_EXACT = {
     "/admin/repair-dangling": "_post_admin_repair_dangling",
     "/admin/sync-beads": "_post_admin_sync_beads",
     "/config": "_put_config",
+    "/bootstrap": "_post_bootstrap",
     "/discover/queue/review": "_post_discovery_review",
     "/metrics/semantic/actions": "_post_metrics_semantic_actions",
     "/hooks": "_post_hooks",
@@ -2701,6 +2705,7 @@ OhmHandler._GET_EXACT = {
     "/admin/snapshots": "_get_admin_snapshots",
     "/admin/nudges/quality": "_get_nudge_quality",
     "/config": "_get_config",
+    "/bootstrap": "_get_bootstrap",
     "/graph/at": "_get_graph_at",
     "/graph/changes": "_get_graph_changes",
     "/observations": "_get_observations",

@@ -2409,3 +2409,76 @@ class AdminHandlerMixin(OhmHandlerBase):
             updated[key] = value
 
         self._json_response(200, {"updated": updated, "count": len(updated)})
+
+    def _get_bootstrap(self, path: str, qs: dict) -> None:
+        """GET /bootstrap — current bootstrap interview step (OHM-797).
+
+        Requires admin role on every call.
+        """
+        self._require_admin()
+        from ohm.server.bootstrap import get_current_step, is_fresh_instance
+
+        if not is_fresh_instance(self.current_store.conn):
+            # Check if already bootstrapped
+            from ohm.graph.schema import get_meta
+
+            if get_meta(self.current_store.conn, "domain_schema"):
+                self._json_response(200, {"complete": True, "message": "Instance already bootstrapped."})
+                return
+            # Has nodes but no domain_schema — not fresh, not bootstrapped
+            self._json_response(200, {"not_fresh": True, "message": "Instance has existing data but no domain_schema. Use POST /bootstrap with action=from_template to configure."})
+            return
+
+        result = get_current_step(self.current_store.conn)
+        self._json_response(200, result)
+
+    def _post_bootstrap(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /bootstrap — submit answer or perform action (OHM-797).
+
+        Requires admin role on every call.
+        Actions: answer, abandon, from_template, reset.
+        """
+        self._require_admin()
+        from ohm.server.bootstrap import (
+            submit_answer,
+            abandon_bootstrap,
+            bootstrap_from_template,
+            clear_bootstrap_state,
+        )
+        from ohm.graph.schema import get_meta
+
+        action = body.get("action", "answer")
+
+        # Check if already bootstrapped (unless reset or from_template with force)
+        is_bootstrapped = get_meta(self.current_store.conn, "domain_schema") is not None
+        if is_bootstrapped and action not in ("from_template", "reset"):
+            self._json_response(409, {"error": "already_bootstrapped", "message": "Instance already bootstrapped. Use action=from_template to reconfigure (additive-only)."})
+            return
+
+        if action == "answer":
+            answer = body.get("answer", "")
+            result = submit_answer(self.current_store.conn, answer)
+            status = 200 if result.get("ok", False) else 400
+            self._json_response(status, result)
+        elif action == "abandon":
+            result = abandon_bootstrap(self.current_store.conn)
+            self._json_response(200, result)
+        elif action == "from_template":
+            template_name = body.get("template_name", "")
+            templates_dir = body.get("templates_dir")
+            if not template_name:
+                self._json_response(400, {"error": "missing_template_name", "message": "template_name is required for from_template action."})
+                return
+            result = bootstrap_from_template(self.current_store.conn, template_name, templates_dir=templates_dir)
+            status = 200 if result.get("ok", False) else 400
+            self._json_response(status, result)
+        elif action == "reset":
+            # Admin-only explicit reset — clears domain_schema and WIP state
+            force = body.get("force", False)
+            if not force:
+                self._json_response(409, {"error": "reset_requires_force", "message": "Reset requires force=true."})
+                return
+            self.current_store.conn.execute("DELETE FROM ohm_meta WHERE key IN ('domain_schema', 'domain_name', 'bootstrap.step', 'bootstrap.answers')")
+            self._json_response(200, {"ok": True, "message": "Bootstrap state and domain schema cleared."})
+        else:
+            self._json_response(400, {"error": "unknown_action", "message": f"Unknown action: {action}"})

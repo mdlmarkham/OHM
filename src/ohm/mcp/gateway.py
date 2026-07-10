@@ -328,6 +328,14 @@ def _build_tool_handler(tool_name: str):
             _audit(profile, tool_name, status="ok", latency_ms=(time.time() - start) * 1000, size=len(str(result)))
             return result
 
+        # OHM-797: ohm_bootstrap is handled locally — admin-only.
+        if tool_name == "ohm_bootstrap":
+            action = kwargs.get("action", "get")
+            result_data: dict[str, Any] = {"error": "not_implemented", "message": "Bootstrap requires a direct connection to the OHM daemon."}
+            result = _respond(result_data)
+            _audit(profile, tool_name, status="ok", latency_ms=(time.time() - start) * 1000, size=len(str(result)))
+            return result
+
         try:
             method, path, body = build_request(tool_name, kwargs, profile.agent_id)
         except NotImplementedError as e:

@@ -624,4 +624,30 @@ def all_tools() -> list[Tool]:
                 "required": ["action"],
             },
         ),
+        # ── Instance bootstrap tier (OHM-797) ──
+        Tool(
+            name="ohm_bootstrap",
+            description=(
+                "Guided bootstrap interview for a fresh OHM instance with no domain configured. "
+                "Admin-only. Call with action=get to see the current step prompt, action=answer "
+                "to submit an answer, action=abandon to clear corrupted state, or "
+                "action=from_template to load a named domain template directly."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                    "action": {
+                        "type": "string",
+                        "enum": ["get", "answer", "abandon", "from_template"],
+                        "description": "Bootstrap action: get current step, submit answer, abandon, or load template.",
+                        "default": "get",
+                    },
+                    "answer": {"type": "string", "description": "Answer text (action=answer)."},
+                    "template_name": {"type": "string", "description": "Domain template name (action=from_template, e.g. 'ohm', 'topo', 'beef_herd')."},
+                    "templates_dir": {"type": "string", "description": "Optional: operator-supplied template directory path."},
+                },
+                "required": [],
+            },
+        ),
     ]
