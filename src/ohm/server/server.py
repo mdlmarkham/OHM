@@ -2959,6 +2959,24 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
         _sync_thread = threading.Thread(target=_ducklake_sync_loop, daemon=True, name="ducklake-sync")
         _sync_thread.start()
 
+    # OHM-776: Periodic checkpoint thread — bounds the worst-case data-loss
+    # window to the checkpoint interval. Without this, writes between
+    # checkpoints are lost on non-graceful daemon exit (SIGKILL, crash).
+    checkpoint_interval = config.get("checkpoint_interval_seconds", 60)
+    _checkpoint_stop = threading.Event()
+    _checkpoint_thread: threading.Thread | None = None
+
+    def _checkpoint_loop():
+        while not _checkpoint_stop.wait(checkpoint_interval):
+            try:
+                store.conn.execute("CHECKPOINT")
+            except Exception:
+                logger.exception("Periodic CHECKPOINT failed")
+
+    if checkpoint_interval > 0:
+        _checkpoint_thread = threading.Thread(target=_checkpoint_loop, daemon=True, name="periodic-checkpoint")
+        _checkpoint_thread.start()
+
     # OHM-a5rz.27: Background fragment eviction thread
     eviction_config = config.get("eviction", {})
     eviction_interval = eviction_config.get("interval_seconds", 3600)
@@ -3111,6 +3129,7 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
         _eviction_stop.set()
         _metric_actions_stop.set()
         _beads_sync_stop.set()
+        _checkpoint_stop.set()
         # Dispatch shutdown() to a daemon thread so it does not deadlock
         # against serve_forever() running on this (main) thread (OHM-k79z).
         threading.Thread(target=server.shutdown, daemon=True, name="ohmd-shutdown").start()
@@ -3148,6 +3167,7 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
         _join_worker(_eviction_thread, "fragment-eviction")
         _join_worker(_metric_actions_thread, "semantic-metric-actions")
         _join_worker(_beads_sync_thread, "beads-sync")
+        _join_worker(_checkpoint_thread, "periodic-checkpoint")
         try:
             store.sync_heartbeat()
         except Exception:
