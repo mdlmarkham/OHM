@@ -50,6 +50,7 @@ except ImportError as e:  # pragma: no cover
 from ohm.mcp.agora_nudges import generate_agora_nudges
 from ohm.mcp.config import WRITE_TOOLS
 from ohm.mcp.conversation_state import auto_update_from_tool, get_store, resolve_thread_id
+from ohm.mcp.deliberation import handle_deliberation_action
 from ohm.mcp.encoding import encode_payload, requested_format
 from ohm.mcp.gateway_helpers import _strip_nulls, _deduplicate_nudges
 from ohm.mcp.tools import all_tools as _all_tools
@@ -315,6 +316,14 @@ def _build_tool_handler(tool_name: str):
                 updates = kwargs.get("updates", {})
                 updates.setdefault("thread_id", thread_id)
                 result_data = get_store().update_state(thread_id, updates)
+            result = _respond(result_data)
+            _audit(profile, tool_name, status="ok", latency_ms=(time.time() - start) * 1000, size=len(str(result)))
+            return result
+
+        # OHM-793: ohm_deliberation is handled locally in the gateway.
+        if tool_name == "ohm_deliberation":
+            action = kwargs.get("action", "get")
+            result_data = handle_deliberation_action(thread_id, action, kwargs, profile.agent_id)
             result = _respond(result_data)
             _audit(profile, tool_name, status="ok", latency_ms=(time.time() - start) * 1000, size=len(str(result)))
             return result

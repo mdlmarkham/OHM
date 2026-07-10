@@ -555,4 +555,37 @@ def all_tools() -> list[Tool]:
                 "required": [],
             },
         ),
+        # ── Deliberation lifecycle tier (OHM-793) ──
+        Tool(
+            name="ohm_deliberation",
+            description=(
+                "Deliberation lifecycle: propose a claim, challenge it, submit evidence, "
+                "check if decision thresholds are met, or resolve. Lifecycle: "
+                "PROPOSE → CHALLENGE → EVIDENCE → SYNTHESIZE → DECIDE → RESOLVE. "
+                "Uses conversation state for tracking; thresholds scale with blast radius."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                    "action": {
+                        "type": "string",
+                        "enum": ["propose", "challenge", "evidence", "check", "resolve", "get"],
+                        "description": "Deliberation action to perform.",
+                    },
+                    "node_id": {"type": "string", "description": "Target node ID for the deliberation."},
+                    "target": {"type": "string", "description": "Alternative to node_id."},
+                    "claim_text": {"type": "string", "description": "Claim text (action=propose)."},
+                    "confidence": {"type": "number", "description": "Confidence level 0-1 (action=propose/challenge)."},
+                    "reason": {"type": "string", "description": "Challenge reason (action=challenge)."},
+                    "evidence_type": {"type": "string", "description": "Evidence type (action=evidence)."},
+                    "evidence_summary": {"type": "string", "description": "Evidence summary (action=evidence)."},
+                    "blast_radius": {"type": "string", "enum": ["normal", "high"], "description": "Blast radius for threshold scaling (action=check)."},
+                    "outcome": {"type": "string", "description": "Resolution outcome (action=resolve)."},
+                    "notes": {"type": "string", "description": "Resolution notes (action=resolve)."},
+                    "belief_data": {"type": "object", "description": "Belief data for threshold checking (action=check)."},
+                },
+                "required": ["action"],
+            },
+        ),
     ]
