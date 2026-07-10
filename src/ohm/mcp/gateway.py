@@ -238,10 +238,40 @@ def _build_tool_handler(tool_name: str):
         use_text = fmt == "toon"
 
         def _respond(data: Any) -> Any:
-            """Encode response — dict for structured content, str for TOON."""
+            """Encode response — dict for structured content, str for TOON.
+
+            OHM-787: Successful tool responses are wrapped in an
+            {ok, data, ohm_context} envelope. Error responses stay
+            flat for backward compatibility.
+            """
+            if isinstance(data, dict) and "error" in data:
+                # Error responses: no envelope, keep flat
+                if use_text:
+                    return encode_payload(data, fmt)
+                return _strip_nulls(data)
+
+            # Extract nudges from data if present (they move to ohm_context)
+            nudges = None
+            if isinstance(data, dict) and "nudges" in data:
+                nudges = data.pop("nudges", None)
+
+            # Build ohm_context
+            ohm_context: dict[str, Any] = {}
+            if nudges:
+                ohm_context["nudges"] = nudges
+            if profile:
+                ohm_context["agent_state"] = {"agent_id": profile.agent_id}
+                if profile.tenant_id:
+                    ohm_context["agent_state"]["tenant_id"] = profile.tenant_id
+
+            # Wrap in envelope
+            envelope: dict[str, Any] = {"ok": True, "data": data}
+            if ohm_context:
+                envelope["ohm_context"] = ohm_context
+
             if use_text:
-                return encode_payload(data, fmt)
-            return _strip_nulls(data)
+                return encode_payload(envelope, fmt)
+            return _strip_nulls(envelope)
 
         profile = _resolve_profile(headers)
         if profile is None:
