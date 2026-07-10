@@ -2989,3 +2989,69 @@ class TestAutonomyLoopEndpoint:
         assert "summary" in data
         assert "proposed" in data
         assert "executed" in data
+
+
+@pytest.mark.xdist_group("server")
+class TestAdminMergeStrategyAndBatch:
+    """OHM-682: POST /admin/merge strategy auto-selection and batch support."""
+
+    def test_strategy_keep_higher_confidence(self, test_server):
+        port, store = test_server
+        store.write_node("m_a", "A", "concept", agent_name="t", confidence=0.3)
+        store.write_node("m_b", "B", "concept", agent_name="t", confidence=0.9)
+        store.write_node("m_c", "C", "concept", agent_name="t", confidence=0.5)
+        status, data = _request(
+            "POST",
+            port,
+            "/admin/merge",
+            body={"strategy": "keep_higher_confidence", "duplicate_ids": ["m_a", "m_b", "m_c"]},
+        )
+        assert status == 200, data
+        assert data["canonical"] == "m_b"
+        assert data["count"] == 2
+
+    def test_strategy_keep_newest(self, test_server):
+        port, store = test_server
+        store.write_node("o1", "Old", "concept", agent_name="t")
+        import time as _t
+
+        _t.sleep(0.1)
+        store.write_node("o2", "New", "concept", agent_name="t")
+        status, data = _request(
+            "POST",
+            port,
+            "/admin/merge",
+            body={"strategy": "keep_newest", "duplicate_ids": ["o1", "o2"]},
+        )
+        assert status == 200, data
+        assert data["canonical"] == "o2"
+        assert data["count"] == 1
+
+    def test_batch_merge_with_canonical_id(self, test_server):
+        port, store = test_server
+        store.write_node("canon", "Canonical", "concept", agent_name="t")
+        store.write_node("dup1", "Dup 1", "concept", agent_name="t")
+        store.write_node("dup2", "Dup 2", "concept", agent_name="t")
+        status, data = _request(
+            "POST",
+            port,
+            "/admin/merge",
+            body={"canonical_id": "canon", "duplicate_ids": ["dup1", "dup2"]},
+        )
+        assert status == 200, data
+        assert data["canonical"] == "canon"
+        assert data["count"] == 2
+
+    def test_single_pair_still_works(self, test_server):
+        port, store = test_server
+        store.write_node("sp1", "Keep Me", "concept", agent_name="t")
+        store.write_node("sp2", "Merge Me", "concept", agent_name="t")
+        status, data = _request(
+            "POST",
+            port,
+            "/admin/merge",
+            body={"keep": "sp1", "merge": "sp2"},
+        )
+        assert status == 200, data
+        assert data["keep"] == "sp1"
+        assert data["merged"] == "sp2"
