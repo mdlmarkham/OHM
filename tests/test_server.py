@@ -992,6 +992,41 @@ class TestSemanticSearchEndpoint:
         status, data = _request("GET", port, "/search?q=Machine")
         assert status == 200
 
+    def test_search_type_filter_exact(self, test_server):
+        """OHM-05s0.7: ?type= filter uses exact equality, not ILIKE."""
+        port, store = test_server
+        # Create two nodes whose labels overlap but types differ.
+        store.write_node(
+            "search-risk-concept",
+            "Market risk concept",
+            "concept",
+            agent_name="test",
+        )
+        store.write_node(
+            "search-risk-node",
+            "Market risk node",
+            "risk",
+            agent_name="test",
+        )
+        # Exact type filter narrows to the risk node only.
+        status, data = _request("GET", port, "/search?q=Market+risk&type=risk")
+        assert status == 200
+        results = data if isinstance(data, list) else data.get("results", [])
+        assert len(results) == 1
+        assert results[0]["type"] == "risk"
+        assert results[0]["id"] == "search-risk-node"
+        # Filter to a non-matching type returns nothing.
+        status, data = _request("GET", port, "/search?q=Market+risk&type=source")
+        assert status == 200
+        results = data if isinstance(data, list) else data.get("results", [])
+        assert len(results) == 0
+        # ILIKE on type would match 'risk' against 'frisk' or 'risky';
+        # exact equality does not, so a bogus substring type returns nothing.
+        status, data = _request("GET", port, "/search?q=Market+risk&type=ris")
+        assert status == 200
+        results = data if isinstance(data, list) else data.get("results", [])
+        assert len(results) == 0
+
 
 @pytest.mark.xdist_group("server")
 class TestDuckLakeTimeTravel:
