@@ -303,6 +303,56 @@ def all_tools() -> list[Tool]:
                 "required": ["edge_id", "reason"],
             },
         ),
+        Tool(
+            name="ohm_batch",
+            description=(
+                "Batch-create nodes and edges in a single all-or-nothing transaction. "
+                "Max 50 combined items. Each node item needs id+label (at minimum); "
+                "each edge item needs from+to+type (at minimum). Use this when you need "
+                "to create multiple related nodes and edges atomically."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "nodes": {
+                        "type": "array",
+                        "description": "Array of node objects to create",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string", "description": "Unique node ID"},
+                                "label": {"type": "string", "description": "Human-readable label"},
+                                "type": {"type": "string", "description": "Node type (concept, pattern, source, etc.)", "default": "concept"},
+                                "content": {"type": "string", "description": "Node content/description"},
+                                "confidence": {"type": "number", "description": "Confidence 0.0-1.0"},
+                                "provenance": {"type": "string", "description": "Where this knowledge came from"},
+                                "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags for categorization"},
+                            },
+                            "required": ["id", "label"],
+                        },
+                        "maxItems": 50,
+                    },
+                    "edges": {
+                        "type": "array",
+                        "description": "Array of edge objects to create",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "from": {"type": "string", "description": "Source node ID"},
+                                "to": {"type": "string", "description": "Target node ID"},
+                                "type": {"type": "string", "description": "Edge type (CAUSES, SUPPORTS, etc.)"},
+                                "layer": {"type": "string", "description": "Layer: L1-L4", "default": "L3"},
+                                "confidence": {"type": "number", "description": "Confidence 0.0-1.0"},
+                                "provenance": {"type": "string", "description": "Where this edge came from"},
+                            },
+                            "required": ["from", "to", "type"],
+                        },
+                        "maxItems": 50,
+                    },
+                },
+                "required": [],
+            },
+        ),
         # ── Update / utility tier ──
         Tool(
             name="ohm_update_state",

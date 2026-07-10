@@ -185,6 +185,15 @@ def build_request(name: str, arguments: dict[str, Any], agent_id: str) -> tuple[
         }
         return "POST", f"/support/{arguments['edge_id']}", body
 
+    if name == "ohm_batch":
+        nodes = arguments.get("nodes", [])
+        edges = arguments.get("edges", [])
+        total = len(nodes) + len(edges)
+        if total > 50:
+            raise ValueError(f"ohm_batch: max 50 combined items, got {total}")
+        body: dict[str, Any] = {"nodes": nodes, "edges": edges}
+        return "POST", "/batch", body
+
     # ── Update / utility tier ──
     if name == "ohm_update_state":
         body = {"agent": agent_id}

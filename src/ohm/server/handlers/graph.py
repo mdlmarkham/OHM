@@ -367,6 +367,8 @@ class GraphHandlerMixin(OhmHandlerBase):
             "provenances": sorted(schema.provenances),
             "guide": guide,
         }
+        if schema.onboarding_node_id:
+            response["onboarding_node_id"] = schema.onboarding_node_id
         if include_analysis:
             response["analysis"] = ANALYSIS_GUIDE
 

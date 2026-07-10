@@ -49,6 +49,7 @@ except ImportError as e:  # pragma: no cover
 
 from ohm.mcp.config import WRITE_TOOLS
 from ohm.mcp.encoding import encode_payload, requested_format
+from ohm.mcp.gateway_helpers import _strip_nulls, _deduplicate_nudges
 from ohm.mcp.tools import all_tools as _all_tools
 
 logger = logging.getLogger(__name__)
@@ -243,6 +244,12 @@ def _build_tool_handler(tool_name: str):
 
         try:
             data = await _forward(profile, method, path, body)
+            # OHM-747-2: strip null-valued keys from write responses
+            if tool_name in WRITE_TOOLS:
+                data = _strip_nulls(data)
+            # OHM-747-3: deduplicate nudges per session
+            session_key = profile.agent_id
+            data = _deduplicate_nudges(session_key, data)
             text = encode_payload(data, fmt)
             _audit(profile, tool_name, status="ok", latency_ms=(time.time() - start) * 1000, size=len(text))
             return text

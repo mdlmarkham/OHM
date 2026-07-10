@@ -847,6 +847,7 @@ class SchemaConfig:
         domain_tables: list[DomainTable] | tuple[DomainTable, ...] | None = None,
         ducklake_tables: list[DuckLakeTable] | tuple[DuckLakeTable, ...] | None = None,
         case_strategy: str = "lowercase",
+        onboarding_node_id: str | None = None,
     ):
         self.name = name
         self.node_types = node_types if node_types is not None else VALID_NODE_TYPES
@@ -894,6 +895,9 @@ class SchemaConfig:
         if case_strategy not in ("lowercase", "uppercase", "preserve"):
             raise ValueError(f"case_strategy must be 'lowercase', 'uppercase', or 'preserve', got {case_strategy!r}")
         self.case_strategy = case_strategy
+
+        # OHM-747-4: optional onboarding node ID for new agents
+        self.onboarding_node_id = onboarding_node_id
 
     @property
     def all_edge_types(self) -> frozenset[str]:
@@ -1431,6 +1435,8 @@ class SchemaConfig:
         result["ducklake_tables"] = [dlt.to_dict() for dlt in self.ducklake_tables]
         if self.case_strategy != "lowercase":
             result["case_strategy"] = self.case_strategy
+        if self.onboarding_node_id:
+            result["onboarding_node_id"] = self.onboarding_node_id
         return result
 
     @classmethod
@@ -1481,6 +1487,7 @@ class SchemaConfig:
             domain_tables=domain_tables,  # OHM-vl8o: domain DDL
             ducklake_tables=ducklake_tables,  # OHM-8bli: DuckLake sync registry
             case_strategy=data.get("case_strategy", "lowercase"),  # OHM-ue9k: case strategy
+            onboarding_node_id=data.get("onboarding_node_id"),  # OHM-747-4
         )
 
     @classmethod

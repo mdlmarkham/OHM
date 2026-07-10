@@ -407,6 +407,32 @@ class AnalysisHandlerMixin(OhmHandlerBase):
             self._json_response(400, {"error": "invalid_parameter", "message": f"min_shared and limit must be integers: {e}"})
             return
 
+        # ── OHM-747-4: Onboarding for agents with zero creates ─────────────
+        agent = getattr(self, "_current_agent", None)
+        if agent:
+            conn = self.current_store.read_conn
+            node_count = conn.execute(
+                "SELECT COUNT(*) FROM ohm_nodes WHERE created_by = ? AND deleted_at IS NULL",
+                [agent],
+            ).fetchone()[0]
+            edge_count = conn.execute(
+                "SELECT COUNT(*) FROM ohm_edges WHERE created_by = ? AND deleted_at IS NULL",
+                [agent],
+            ).fetchone()[0]
+            if node_count == 0 and edge_count == 0:
+                schema = self.schema_config
+                onboarding_node_id = getattr(schema, "onboarding_node_id", None)
+                if onboarding_node_id:
+                    self._json_response(
+                        200,
+                        {
+                            "domain_onboarding": True,
+                            "onboarding_node_id": onboarding_node_id,
+                            "message": "Welcome! You haven't created any nodes or edges yet. Start by exploring the onboarding node, then create your first node.",
+                        },
+                    )
+                    return
+
         # ── OHM-tr71: Bridge suggestions ──────────────────────────────────
         if method == "bridges":
             self._get_suggest_bridges(qs, limit)

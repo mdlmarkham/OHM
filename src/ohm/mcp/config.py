@@ -38,6 +38,7 @@ WRITE_TOOLS = frozenset(
     {
         "ohm_create_node",
         "ohm_create_edge",
+        "ohm_batch",
         "ohm_observe",
         "ohm_challenge",
         "ohm_support",
