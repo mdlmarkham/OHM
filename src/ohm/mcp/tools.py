@@ -650,4 +650,30 @@ def all_tools() -> list[Tool]:
                 "required": [],
             },
         ),
+        # ── Agent onboarding tier (OHM-798) ──
+        Tool(
+            name="ohm_onboard",
+            description=(
+                "Guided agent onboarding to the OHM agora. 6-step flow: capability discovery, "
+                "identity registration, vocabulary orientation, calibration baseline (practice), "
+                "practice deliberation, and first real contribution. Practice steps do NOT "
+                "count toward real calibration. Call with action=get to see current step."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                    "action": {
+                        "type": "string",
+                        "enum": ["get", "calibration_prediction", "practice_deliberation"],
+                        "description": "Onboarding action: get current step, record practice prediction, or record practice deliberation.",
+                        "default": "get",
+                    },
+                    "target_node": {"type": "string", "description": "Target node for practice predictions/deliberations."},
+                    "predicted_probability": {"type": "number", "description": "Predicted probability for calibration baseline (action=calibration_prediction)."},
+                    "deliberation_action": {"type": "string", "description": "Practice deliberation action (action=practice_deliberation)."},
+                },
+                "required": [],
+            },
+        ),
     ]

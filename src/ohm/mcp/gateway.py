@@ -336,6 +336,35 @@ def _build_tool_handler(tool_name: str):
             _audit(profile, tool_name, status="ok", latency_ms=(time.time() - start) * 1000, size=len(str(result)))
             return result
 
+        # OHM-798: ohm_onboard is handled locally in the gateway.
+        if tool_name == "ohm_onboard":
+            from ohm.mcp.agent_onboarding import (
+                get_onboarding_prompt as _get_onboard,
+                record_calibration_prediction,
+                record_practice_deliberation,
+            )
+
+            action = kwargs.get("action", "get")
+            if action == "get":
+                result_data = _get_onboard(profile.agent_id)
+            elif action == "calibration_prediction":
+                result_data = record_calibration_prediction(
+                    profile.agent_id,
+                    kwargs.get("target_node", ""),
+                    float(kwargs.get("predicted_probability", 0.5)),
+                )
+            elif action == "practice_deliberation":
+                result_data = record_practice_deliberation(
+                    profile.agent_id,
+                    kwargs.get("target_node", ""),
+                    kwargs.get("deliberation_action", "propose"),
+                )
+            else:
+                result_data = {"error": "unknown_action", "message": f"Unknown action: {action}"}
+            result = _respond(result_data)
+            _audit(profile, tool_name, status="ok", latency_ms=(time.time() - start) * 1000, size=len(str(result)))
+            return result
+
         try:
             method, path, body = build_request(tool_name, kwargs, profile.agent_id)
         except NotImplementedError as e:
