@@ -247,8 +247,16 @@ def _build_tool_handler(tool_name: str):
             # OHM-747-2: strip null-valued keys from write responses
             if tool_name in WRITE_TOOLS:
                 data = _strip_nulls(data)
-            # OHM-747-3: deduplicate nudges per session
+            # OHM-747-3 / OHM-764: deduplicate nudges per session.
+            # Use agent_id + request_id (if available from the MCP context)
+            # so different conversations for the same agent get independent
+            # nudge sets. Fall back to agent_id alone if ctx is unavailable.
             session_key = profile.agent_id
+            try:
+                if ctx and hasattr(ctx, "request_id"):
+                    session_key = f"{profile.agent_id}:{ctx.request_id}"
+            except Exception:
+                pass
             data = _deduplicate_nudges(session_key, data)
             text = encode_payload(data, fmt)
             _audit(profile, tool_name, status="ok", latency_ms=(time.time() - start) * 1000, size=len(text))
@@ -303,6 +311,33 @@ async def _health_route(request) -> Any:
     )
 
 
+def _tool_annotations(tool_name: str):
+    """Derive MCP tool annotations from WRITE_TOOLS / high_blast_radius.
+
+    OHM-763: Surface tool safety to MCP clients so they can cheaply tell
+    reads from writes from destructive ops.
+
+    - Not in WRITE_TOOLS → readOnlyHint: True
+    - In WRITE_TOOLS → readOnlyHint: False, idempotentHint: True
+      (most OHM writes are upserts/idempotent via dedup)
+    - high_blast_radius tools → destructiveHint: True
+    """
+    try:
+        from fastmcp.tools.annotations import ToolAnnotations
+    except ImportError:
+        return None
+
+    is_write = tool_name in WRITE_TOOLS
+    is_destructive = tool_name in {"ohm_delete"}  # only delete-style ops
+
+    return ToolAnnotations(
+        readOnlyHint=not is_write,
+        destructiveHint=is_destructive,
+        idempotentHint=is_write,  # OHM writes use upsert/dedup semantics
+        openWorldHint=True,  # OHM agents interact with external systems
+    )
+
+
 def _register_tools() -> None:
     """Register all OHM tools that make sense in a remote gateway."""
     from fastmcp.tools.function_tool import FunctionTool
@@ -317,6 +352,7 @@ def _register_tools() -> None:
             description=tool.description,
             parameters=tool.inputSchema,
             fn=handler,
+            annotations=_tool_annotations(tool.name),
         )
         mcp.add_tool(ft)
 
