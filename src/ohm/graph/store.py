@@ -1683,9 +1683,16 @@ class OhmStore:
         check_can_update_edge(actor, edge["created_by"], edge_id)
 
         now = self._now()
-        self.conn.execute(
-            "UPDATE ohm_edges SET confidence = ?, updated_at = ?, updated_by = ? WHERE id = ?",
-            [new_confidence, now, actor, edge_id],
+        # OHM-733: append to confidence log instead of direct UPDATE
+        from ohm.graph.queries import log_confidence_change
+
+        log_confidence_change(
+            self.conn,
+            edge_id=edge_id,
+            agent=actor,
+            old_value=edge.get("confidence"),
+            new_value=new_confidence,
+            reason="manual",
         )
 
         self._log_change("ohm_edges", edge_id, "UPDATE", edge["layer"], agent_name=actor)

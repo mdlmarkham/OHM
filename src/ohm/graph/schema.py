@@ -1928,11 +1928,34 @@ DDL_STATEMENTS: list[str] = [
         metadata        JSON
     );
     """,
+    # ── Confidence Change Log (OHM-733) ──────────────────────────────────
+    # Append-only log of every confidence-affecting event on an edge.
+    # ohm_edges.confidence becomes a cached/materialized value refreshed
+    # from this log — the log is the source of truth, not the column.
+    """
+    CREATE TABLE IF NOT EXISTS ohm_confidence_log (
+        id              VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        edge_id         VARCHAR NOT NULL,
+        agent           VARCHAR NOT NULL,
+        old_value       DOUBLE,
+        new_value       DOUBLE NOT NULL,
+        reason          VARCHAR NOT NULL,
+        challenge_id    VARCHAR,
+        metadata        JSON,
+        created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_conf_log_edge ON ohm_confidence_log(edge_id, created_at DESC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_conf_log_agent ON ohm_confidence_log(agent);
+    """,
 ]
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.45.0"
+SCHEMA_VERSION = "0.46.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -2584,6 +2607,15 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             "CREATE INDEX IF NOT EXISTS idx_nodes_gate_type ON ohm_nodes(gate_type) WHERE gate_type IS NOT NULL",
             "CREATE INDEX IF NOT EXISTS idx_nodes_gate_status ON ohm_nodes(gate_status) WHERE gate_status IS NOT NULL",
             "CREATE INDEX IF NOT EXISTS idx_nodes_path ON ohm_nodes(node_path)",
+        ],
+    ),
+    (
+        "0.46.0",
+        "OHM-733: append-only confidence change log table + indexes for multi-writer federation",
+        [
+            "CREATE TABLE IF NOT EXISTS ohm_confidence_log (id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(), edge_id VARCHAR NOT NULL, agent VARCHAR NOT NULL, old_value DOUBLE, new_value DOUBLE NOT NULL, reason VARCHAR NOT NULL, challenge_id VARCHAR, metadata JSON, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
+            "CREATE INDEX IF NOT EXISTS idx_conf_log_edge ON ohm_confidence_log(edge_id, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_conf_log_agent ON ohm_confidence_log(agent)",
         ],
     ),
 ]

@@ -1355,9 +1355,16 @@ def apply_confidence_decay(
             )
 
             if not dry_run:
-                conn.execute(
-                    "UPDATE ohm_edges SET confidence = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    [new_conf, edge_id],
+                # OHM-733: append to confidence log instead of direct UPDATE
+                from ohm.graph.queries import log_confidence_change
+
+                log_confidence_change(
+                    conn,
+                    edge_id=edge_id,
+                    agent="system",
+                    old_value=conf,
+                    new_value=new_conf,
+                    reason="decay",
                 )
 
     return {
@@ -1713,9 +1720,16 @@ def apply_verification_decay(
             )
 
             if not dry_run:
-                conn.execute(
-                    "UPDATE ohm_edges SET confidence = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    [new_conf, edge_id],
+                # OHM-733: append to confidence log instead of direct UPDATE
+                from ohm.graph.queries import log_confidence_change
+
+                log_confidence_change(
+                    conn,
+                    edge_id=edge_id,
+                    agent="system",
+                    old_value=conf,
+                    new_value=new_conf,
+                    reason="decay",
                 )
 
     # Process hypothesis tree edges
@@ -1753,9 +1767,16 @@ def apply_verification_decay(
             )
 
             if not dry_run:
-                conn.execute(
-                    "UPDATE ohm_edges SET confidence = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    [new_conf, edge_id],
+                # OHM-733: append to confidence log instead of direct UPDATE
+                from ohm.graph.queries import log_confidence_change
+
+                log_confidence_change(
+                    conn,
+                    edge_id=edge_id,
+                    agent="system",
+                    old_value=conf,
+                    new_value=new_conf,
+                    reason="decay",
                 )
 
     # Prune tested hypotheses whose supporting edges have decayed below threshold
