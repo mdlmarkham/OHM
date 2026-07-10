@@ -493,3 +493,136 @@ class InferenceHandlerMixin(OhmHandlerBase):
             self._json_response(404, {"error": "not_found", "message": str(e)})
         except ValidationError as e:
             self._json_response(400, {"error": "validation_error", "message": str(e)})
+
+    def _get_belief(self, path: str, qs: dict) -> None:
+        """GET /belief — composed belief summary for agents (OHM-765).
+
+        Wraps /inference + /voi + /neighborhood into a single response
+        so agents get the posterior, why it believes it, and what to do
+        next in one call.
+        """
+        target = qs.get("target", [None])[0]
+        if not target:
+            self._json_response(400, {"error": "missing_parameter", "message": "?target=node_id required"})
+            return
+        from ohm.validation import validate_identifier
+
+        target = validate_identifier(target, name="target")
+        evidence_str = qs.get("evidence", [""])[0]
+        leak_probability = float(qs.get("leak", ["0.15"])[0])
+        layers_str = qs.get("layers", [""])[0]
+        layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
+        evidence: dict[str, float | int] = {}
+        if evidence_str:
+            for pair in evidence_str.split(","):
+                if ":" in pair:
+                    node_id, state = pair.split(":", 1)
+                    node_id = validate_identifier(node_id.strip(), name="evidence_node")
+                    try:
+                        evidence[node_id] = float(state.strip())
+                    except ValueError:
+                        evidence[node_id] = int(state.strip())
+
+        import math
+
+        try:
+            from ohm.bayesian import bayesian_inference, compute_voi
+            from ohm.graph.queries import query_neighborhood
+
+            # 1. Posterior (graceful: empty graph returns uniform prior)
+            try:
+                inference_result = bayesian_inference(
+                    self.current_store.conn,
+                    target,
+                    evidence,
+                    edge_types=None,
+                    layers=layers,
+                    leak_probability=leak_probability,
+                    customer_id=self._customer_id,
+                )
+            except Exception:
+                inference_result = {"posterior": {}}
+
+            # 2. Drivers (1-hop neighborhood — may return list or dict)
+            try:
+                neighborhood = query_neighborhood(
+                    self.current_store.read_conn,
+                    target,
+                    depth=1,
+                )
+            except Exception:
+                neighborhood = []
+
+            # Normalize: query_neighborhood may return a list of edges or a dict
+            if isinstance(neighborhood, dict):
+                edges = neighborhood.get("edges", [])
+            elif isinstance(neighborhood, list):
+                edges = neighborhood
+            else:
+                edges = []
+
+            # 3. Value of Information
+            try:
+                voi_result = compute_voi(
+                    self.current_store.conn,
+                    decision_nodes=[target],
+                    layers=layers,
+                    top=5,
+                    leak_probability=leak_probability,
+                    customer_id=self._customer_id,
+                )
+            except Exception:
+                voi_result = {"recommendations": []}
+
+            # Extract posterior values
+            posterior = inference_result.get("posterior", inference_result)
+            p_bad = float(posterior.get("P(bad)", posterior.get("bad", 0.0)))
+            p_good = float(posterior.get("P(good)", posterior.get("good", 1.0 - p_bad)))
+
+            # Build driver list from neighborhood edges
+            drivers = []
+            for edge in edges:
+                if isinstance(edge, dict) and edge.get("to_node") == target and edge.get("edge_type") == "CAUSES":
+                    drivers.append(
+                        {
+                            "node": edge.get("from_node"),
+                            "edge_type": "CAUSES",
+                            "confidence": edge.get("confidence"),
+                        }
+                    )
+
+            # Build VoI suggestions (voi_result may be dict or list)
+            voi_recs = voi_result.get("rankings", voi_result.get("recommendations", [])) if isinstance(voi_result, dict) else (voi_result if isinstance(voi_result, list) else [])
+            suggestions = []
+            for rec in voi_recs:
+                if isinstance(rec, dict):
+                    suggestions.append(
+                        {
+                            "node": rec.get("node_id", rec.get("node", "")),
+                            "expected_info_gain": rec.get("voi", rec.get("expected_info_gain", 0.0)),
+                        }
+                    )
+
+            entropy = -(p_bad * math.log2(p_bad + 1e-10) + p_good * math.log2(p_good + 1e-10)) if 0 < p_bad < 1 else 0.0
+
+            summary = f"P(bad) = {p_bad:.2f}. Uncertainty is {'high' if entropy > 0.8 else 'medium' if entropy > 0.5 else 'low'}."
+
+            response = {
+                "target": target,
+                "summary": summary,
+                "posterior": {
+                    "P(bad)": round(p_bad, 4),
+                    "P(good)": round(p_good, 4),
+                    "entropy_bits": round(entropy, 4),
+                },
+                "why": {
+                    "drivers": drivers[:10],
+                    "most_influential": drivers[0]["node"] if drivers else None,
+                },
+                "what_to_do_next": {
+                    "suggested_observations": suggestions[:5],
+                },
+            }
+            self._json_response(200, response)
+        except Exception as e:
+            self._json_response(500, {"error": "internal_error", "message": f"Belief computation failed: {e}"})

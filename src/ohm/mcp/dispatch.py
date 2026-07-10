@@ -114,6 +114,16 @@ def build_request(name: str, arguments: dict[str, Any], agent_id: str) -> tuple[
             params["methods"] = arguments["methods"]
         return "GET", _qs("/refute", params), None
 
+    if name == "ohm_belief":
+        params: dict[str, str] = {"target": arguments["target"]}
+        if arguments.get("evidence"):
+            params["evidence"] = arguments["evidence"]
+        if arguments.get("layers"):
+            params["layers"] = arguments["layers"]
+        if arguments.get("leak") is not None:
+            params["leak"] = str(arguments["leak"])
+        return "GET", _qs("/belief", params), None
+
     if name == "ohm_discover":
         params: dict[str, str] = {}
         if arguments.get("nodes"):

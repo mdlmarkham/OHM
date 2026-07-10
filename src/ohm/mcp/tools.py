@@ -54,17 +54,37 @@ def all_tools() -> list[Tool]:
             },
         ),
         Tool(
-            name="ohm_neighborhood",
-            description="Get the neighborhood around a node — edges connected to it within specified depth. Returns edge records with types, confidence, layers.",
+            name="ohm_refute",
+            description="Causal refutation tests for a claimed cause-effect pair. Runs multiple robustness checks (random common cause, placebo, subset). Returns pass/fail per test.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},
-                    "node_id": {"type": "string", "description": "Center node ID"},
-                    "depth": {"type": "integer", "description": "Traversal depth (default 1)", "default": 1},
-                    "layer": {"type": "string", "description": "Filter by layer (L1, L2, L3, L4)"},
+                    "cause": {"type": "string", "description": "Cause node ID"},
+                    "effect": {"type": "string", "description": "Effect node ID"},
+                    "n_samples": {"type": "integer", "description": "Number of bootstrap samples (default 100)", "default": 100},
+                    "methods": {"type": "string", "description": "Comma-separated refutation methods to run (default: all)"},
                 },
-                "required": ["node_id"],
+                "required": ["cause", "effect"],
+            },
+        ),
+        Tool(
+            name="ohm_belief",
+            description=(
+                "Get a complete belief summary for a target node: posterior probability, "
+                "why the graph believes it (causal drivers), and what to observe next "
+                "(value-of-information ranking). This is the deep-dive path — for ambient "
+                "belief context on read tools, use include_belief=true instead."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "Node ID to query"},
+                    "evidence": {"type": "string", "description": "Evidence assignments, e.g. 'node_a:1,node_b:0.7'"},
+                    "layers": {"type": "string", "description": "Comma-separated causal layers (default: L3)"},
+                    "leak": {"type": "number", "description": "Leak probability for noisy-OR (default: 0.15)", "default": 0.15},
+                    "format": {"type": "string", "description": "Response encoding: 'json' or 'toon'", "enum": ["json", "toon"], "default": "json"},
+                },
+                "required": ["target"],
             },
         ),
         Tool(
