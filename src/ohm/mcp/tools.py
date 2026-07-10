@@ -223,6 +223,61 @@ def all_tools() -> list[Tool]:
                 "required": [],
             },
         ),
+        Tool(
+            name="ohm_pert",
+            description=(
+                "Get PERT (Program Evaluation and Review Technique) estimates for a target node. "
+                "Returns optimistic (p05), most-likely (p50), and pessimistic (p95) estimates "
+                "based on the node's edges and observations. Use this when you need a range, "
+                "not a point estimate."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "Target node ID"},
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'", "enum": ["json", "toon"], "default": "json"},
+                },
+                "required": ["target"],
+            },
+        ),
+        Tool(
+            name="ohm_monte_carlo",
+            description=("Run a Monte Carlo simulation on the causal graph starting from a target node. Returns outcome distribution, worst-case probability, and confidence intervals. Use this for risk assessment and scenario analysis."),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "Target node ID to simulate from"},
+                    "n_simulations": {"type": "integer", "description": "Number of Monte Carlo iterations (default 1000)", "default": 1000},
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'", "enum": ["json", "toon"], "default": "json"},
+                },
+                "required": ["target"],
+            },
+        ),
+        Tool(
+            name="ohm_markov",
+            description=("Run Markov chain analysis on the causal graph. Returns absorbing-state probabilities and expected steps to absorption. Use this for forecasting where the system is heading over time."),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "Target node ID for Markov analysis"},
+                    "analysis": {"type": "string", "description": "Analysis type: 'absorbing' (probability of reaching each state) or 'expected_steps' (time to reach absorbing states)", "enum": ["absorbing", "expected_steps"], "default": "absorbing"},
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'", "enum": ["json", "toon"], "default": "json"},
+                },
+                "required": ["target"],
+            },
+        ),
+        Tool(
+            name="ohm_game",
+            description=("Run game-theoretic analysis on decision nodes. Returns Nash equilibria, dominant strategies, and payoff analysis. Use this when agents have competing interests and you need to find stable outcomes."),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "Decision node ID to analyze"},
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'", "enum": ["json", "toon"], "default": "json"},
+                },
+                "required": ["target"],
+            },
+        ),
         # ── Write tier ──
         Tool(
             name="ohm_create_node",

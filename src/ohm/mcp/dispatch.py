@@ -136,6 +136,24 @@ def build_request(name: str, arguments: dict[str, Any], agent_id: str) -> tuple[
             params["min_observations"] = str(arguments["min_observations"])
         return "GET", _qs("/discover", params), None
 
+    if name == "ohm_pert":
+        return "GET", f"/inference?target={arguments['target']}&pert=1", None
+
+    if name == "ohm_monte_carlo":
+        target = arguments["target"]
+        n = arguments.get("n_simulations", 1000)
+        return "GET", f"/monte-carlo/{target}?n_simulations={n}", None
+
+    if name == "ohm_markov":
+        target = arguments["target"]
+        analysis = arguments.get("analysis", "absorbing")
+        if analysis == "expected_steps":
+            return "GET", f"/markov/expected_steps?target={target}", None
+        return "GET", f"/markov/absorbing?target={target}", None
+
+    if name == "ohm_game":
+        return "GET", f"/game?target={arguments['target']}", None
+
     # ── Write tier ──
     if name == "ohm_create_node":
         body: dict[str, Any] = {

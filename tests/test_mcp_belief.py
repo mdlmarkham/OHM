@@ -74,6 +74,66 @@ class TestOhmBeliefTool:
         assert "ohm_belief" not in WRITE_TOOLS
 
 
+class TestStatisticalTools:
+    """Test ohm_pert, ohm_monte_carlo, ohm_markov, ohm_game tool definitions and dispatch (OHM-788)."""
+
+    def test_ohm_pert_in_tool_list(self):
+        tools = all_tools()
+        names = [t.name for t in tools]
+        assert "ohm_pert" in names
+
+    def test_ohm_monte_carlo_in_tool_list(self):
+        tools = all_tools()
+        names = [t.name for t in tools]
+        assert "ohm_monte_carlo" in names
+
+    def test_ohm_markov_in_tool_list(self):
+        tools = all_tools()
+        names = [t.name for t in tools]
+        assert "ohm_markov" in names
+
+    def test_ohm_game_in_tool_list(self):
+        tools = all_tools()
+        names = [t.name for t in tools]
+        assert "ohm_game" in names
+
+    def test_ohm_pert_dispatch(self):
+        method, path, body = build_request("ohm_pert", {"target": "node-1"}, "test")
+        assert method == "GET"
+        assert "/inference" in path
+        assert "pert=1" in path
+        assert body is None
+
+    def test_ohm_monte_carlo_dispatch(self):
+        method, path, body = build_request("ohm_monte_carlo", {"target": "node-1", "n_simulations": 500}, "test")
+        assert method == "GET"
+        assert "/monte-carlo/node-1" in path
+        assert "n_simulations=500" in path
+
+    def test_ohm_markov_dispatch_absorbing(self):
+        method, path, body = build_request("ohm_markov", {"target": "node-1", "analysis": "absorbing"}, "test")
+        assert method == "GET"
+        assert "/markov/absorbing" in path
+
+    def test_ohm_markov_dispatch_expected_steps(self):
+        method, path, body = build_request("ohm_markov", {"target": "node-1", "analysis": "expected_steps"}, "test")
+        assert method == "GET"
+        assert "/markov/expected_steps" in path
+
+    def test_ohm_game_dispatch(self):
+        method, path, body = build_request("ohm_game", {"target": "node-1"}, "test")
+        assert method == "GET"
+        assert "/game" in path
+
+    def test_statistical_tools_not_in_write_tools(self):
+        from ohm.mcp.config import WRITE_TOOLS
+
+        assert "ohm_pert" not in WRITE_TOOLS
+        assert "ohm_monte_carlo" not in WRITE_TOOLS
+        assert "ohm_markov" not in WRITE_TOOLS
+        assert "ohm_game" not in WRITE_TOOLS
+
+
 class TestBeliefEndpoint:
     """Test the /belief server endpoint."""
 
