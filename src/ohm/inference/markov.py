@@ -254,7 +254,7 @@ def _build_transition_matrix(
     state_nodes_key = tuple(sorted(state_nodes)) if state_nodes is not None else None
     semantic_roles_key = tuple(sorted(semantic_roles.state_transitions_list())) if semantic_roles is not None else None
     cache_key = (
-        id(_raw_conn(reader)),
+        reader.cache_identity,
         reader.get_graph_generation(),
         edge_types_key,
         state_nodes_key,

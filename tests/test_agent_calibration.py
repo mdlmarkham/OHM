@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ohm.graph.schema import initialize_schema, SCHEMA_VERSION
+from ohm.graph.schema import initialize_schema
 from ohm.graph.queries import query_source_reliability
 
 
@@ -15,10 +15,6 @@ class TestBeliefCalibrationLog:
         """ohm_belief_calibration_log table exists after schema init."""
         result = test_db.execute("SELECT table_name FROM information_schema.tables WHERE table_name = 'ohm_belief_calibration_log'").fetchone()
         assert result is not None
-
-    def test_schema_version_bumped(self):
-        """Schema version is 0.47.0."""
-        assert SCHEMA_VERSION == "0.47.0"
 
     def test_reliability_includes_belief_calibration(self, test_db):
         """query_source_reliability includes belief_calibration field."""

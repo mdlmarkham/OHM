@@ -66,12 +66,31 @@ class GraphHandlerMixin(OhmHandlerBase):
             ratio = GraphHandlerMixin._challenge_ratio_cache
         return ratio
 
-    def _run_pre_ingest_hooks(self, agent: str, action: str, body: dict) -> dict | None:
-        """Run pre_ingest hooks. Return error dict if any hook rejects, else None."""
+    def _run_pre_ingest_hooks(
+        self,
+        agent: str,
+        action: str,
+        body: dict,
+        batch_edges: list[dict] | None = None,
+        batch_node_ids: set[str] | None = None,
+    ) -> dict | None:
+        """Run pre_ingest hooks. Return error dict if any hook rejects, else None.
+
+        When ``batch_edges`` is provided, it is forwarded to hooks so they can
+        implement ADR-018 option 2 (accept a node when an edge in the same batch
+        references it). ``batch_node_ids`` is the set of node ids being created
+        in the same batch, so hooks can verify the edge's counterpart exists or
+        is being co-created.
+        """
         from ohm.hooks import HookRunner
 
         runner = HookRunner(self.current_store.conn)
-        results = runner.run_hooks("pre_ingest", {"agent": agent, "action": action, "body": body})
+        payload: dict[str, Any] = {"agent": agent, "action": action, "body": body}
+        if batch_edges is not None:
+            payload["batch_edges"] = batch_edges
+        if batch_node_ids is not None:
+            payload["batch_node_ids"] = batch_node_ids
+        results = runner.run_hooks("pre_ingest", payload)
         for r in results:
             if not r.success:
                 return {
@@ -2943,12 +2962,19 @@ class GraphHandlerMixin(OhmHandlerBase):
         if errors:
             raise ValidationError(f"Batch validation failed: {json.dumps(errors)}")
 
+        batch_node_ids = {n.get("id") for n in nodes if n.get("id")}
+
         try:
             self.current_store.conn.execute("BEGIN TRANSACTION")
             for node in nodes:
                 # OHM-jw1x: run pre_ingest hooks for each node in the batch,
-                # same as the normal POST /node path (graph.py:1470).
-                hook_error = self._run_pre_ingest_hooks(agent, "node", node)
+                # same as the normal POST /node path. Pass the batch's edges
+                # and node ids so cross_link_check can implement ADR-018
+                # option 2 (accept a node when an edge in the same batch
+                # references it).
+                hook_error = self._run_pre_ingest_hooks(
+                    agent, "node", node, batch_edges=edges, batch_node_ids=batch_node_ids
+                )
                 if hook_error is not None:
                     raise ValidationError(f"Batch node {node.get('id', '?')} rejected by pre_ingest hook: {hook_error.get('message', hook_error)}")
                 self.current_store.write_node(

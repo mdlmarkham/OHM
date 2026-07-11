@@ -5,7 +5,6 @@ multiple instance/tenant profiles and switch between them at runtime.
 """
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -14,7 +13,7 @@ pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 from tests.test_mcp_e2e import _provision_tenant, ohmd  # noqa: F401
 
 
-def _load_multi_profile_config(base_url: str, token_a: str, token_b: str) -> None:
+def _load_multi_profile_config(base_url: str, token_a: str, token_b: str, tmp_path) -> None:
     from ohm.mcp.config import load_config_file
 
     cfg = {
@@ -42,18 +41,18 @@ def _load_multi_profile_config(base_url: str, token_a: str, token_b: str) -> Non
         ],
         "active_profile": "alpha",
     }
-    cfg_path = Path("/tmp") / "mcp-profiles-multi.json"
+    cfg_path = tmp_path / "mcp-profiles-multi.json"
     cfg_path.write_text(json.dumps(cfg))
     load_config_file(str(cfg_path))
 
 
-async def test_profile_switch_changes_tenant(ohmd):
+async def test_profile_switch_changes_tenant(ohmd, tmp_path):
     """ohm_select_profile makes subsequent calls hit the selected tenant."""
     base_url, admin_token, _db_path = ohmd
     token_alpha = _provision_tenant(base_url, admin_token, "profile_alpha", "ohm")
     token_beta = _provision_tenant(base_url, admin_token, "profile_beta", "ohm")
 
-    _load_multi_profile_config(base_url, token_alpha, token_beta)
+    _load_multi_profile_config(base_url, token_alpha, token_beta, tmp_path)
 
     from ohm.mcp.server import call_tool
 
@@ -81,12 +80,12 @@ async def test_profile_switch_changes_tenant(ohmd):
     assert not result_stats.isError, f"beta stats failed: {result_stats.content}"
 
 
-async def test_profile_list_and_default(ohmd):
+async def test_profile_list_and_default(ohmd, tmp_path):
     """ohm_list_profiles returns names and the active profile."""
     base_url, admin_token, _db_path = ohmd
     token_alpha = _provision_tenant(base_url, admin_token, "profile_list_alpha", "ohm")
     token_beta = _provision_tenant(base_url, admin_token, "profile_list_beta", "ohm")
-    _load_multi_profile_config(base_url, token_alpha, token_beta)
+    _load_multi_profile_config(base_url, token_alpha, token_beta, tmp_path)
 
     from ohm.mcp.server import call_tool
 
@@ -97,12 +96,12 @@ async def test_profile_list_and_default(ohmd):
     assert payload["active"] == "alpha"
 
 
-async def test_select_unknown_profile_errors(ohmd):
+async def test_select_unknown_profile_errors(ohmd, tmp_path):
     """Selecting a non-existent profile returns an error."""
     base_url, admin_token, _db_path = ohmd
     token_alpha = _provision_tenant(base_url, admin_token, "profile_unknown_alpha", "ohm")
     token_beta = _provision_tenant(base_url, admin_token, "profile_unknown_beta", "ohm")
-    _load_multi_profile_config(base_url, token_alpha, token_beta)
+    _load_multi_profile_config(base_url, token_alpha, token_beta, tmp_path)
 
     from ohm.mcp.server import call_tool
 

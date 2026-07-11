@@ -269,6 +269,7 @@ class TestCliProfileShow:
         empty_cwd = tmp_path / "cwd"
         empty_cwd.mkdir()
         monkeypatch.chdir(empty_cwd)
+        monkeypatch.setenv("USERPROFILE", str(home))
         monkeypatch.setenv("HOME", str(home))
 
         from ohm.cli import _handle_profile, _mask_token

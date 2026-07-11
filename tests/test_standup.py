@@ -127,10 +127,10 @@ def test_write_sdk_config(tmp_path, monkeypatch):
     assert data["tenant_id"] == "personal"
 
 
-def test_mcp_server_entry():
-    entry = _mcp_server_entry(Path("/tmp/mcp-foo.json"))
+def test_mcp_server_entry(tmp_path):
+    entry = _mcp_server_entry(tmp_path / "mcp-foo.json")
     assert entry["command"] == "ohm-mcp"
-    assert entry["args"] == ["--config", "/tmp/mcp-foo.json"]
+    assert entry["args"] == ["--config", str(tmp_path / "mcp-foo.json")]
 
 
 def test_run_local_creates_agent_store(tmp_path, monkeypatch):

@@ -178,6 +178,16 @@ def _spawn_ohmd(tmp_path, *, agent: str = "smoke_test", db_name: str = "smoke.du
     # known author for the rows they create.
     env.setdefault("OHM_ACTOR", agent)
 
+    # Isolate from any production ~/.ohm/ohmd.json on the dev machine.
+    # The admin bypass (--no-auth) requires both no_auth=True AND an
+    # empty tokens dict; a production config with tokens would defeat
+    # the bypass. Write an empty {} config and pass --config so the
+    # subprocess never reads the user's real ohmd.json. Also pop
+    # OHM_CONFIG defensively in case it points elsewhere.
+    env.pop("OHM_CONFIG", None)
+    config_path = tmp_path / "ohmd_smoke_config.json"
+    config_path.write_text("{}")
+
     # Route the daemon's stdout/stderr to temp files rather than
     # subprocess.PIPE. On Windows the default pipe buffer is small,
     # so a daemon that logs ~15+ lines will block on write to stderr
@@ -202,6 +212,8 @@ def _spawn_ohmd(tmp_path, *, agent: str = "smoke_test", db_name: str = "smoke.du
             "--db",
             db_path,
             "--no-auth",
+            "--config",
+            str(config_path),
         ],
         env=env,
         stdout=stdout_fh,
@@ -536,3 +548,62 @@ def test_ohmd_smoke_verification_matrix(tmp_path):
         status, body = _http_get(f"{base_url}/admin/verification-scan")
         assert status == 200, f"GET /admin/verification-scan returned {status}: {body}"
         assert isinstance(body, dict)
+
+
+# ── Config isolation regression (OHM-817) ───────────────────────────────
+
+
+def test_spawn_ohmd_isolates_from_production_config(tmp_path, monkeypatch):
+    """_spawn_ohmd must not load a production ~/.ohm/ohmd.json.
+
+    Regression for OHM-817: on dev machines with a populated
+    ``~/.ohm/ohmd.json`` containing tokens, the daemon subprocess
+    would load those tokens, and the ``--no-auth`` admin bypass
+    fails because it requires both ``no_auth=True`` AND ``tokens``
+    being empty. This test proves the isolation by faking a home
+    directory with a populated ohmd.json and asserting an
+    ``/admin/*`` call succeeds without a token.
+    """
+    import json
+
+    fake_home = tmp_path / "fake_home"
+    ohm_dir = fake_home / ".ohm"
+    ohm_dir.mkdir(parents=True)
+    populated_config = {
+        "tokens": {
+            "some-prod-agent": {
+                "hash": "a" * 64,
+                "role": "admin",
+            },
+        },
+        "customer_tokens": {
+            "some-customer": {
+                "hash": "b" * 64,
+                "role": "customer",
+            },
+        },
+        "host": "127.0.0.1",
+        "port": 9999,
+        "db_path": str(tmp_path / "prod.duckdb"),
+    }
+    (ohm_dir / "ohmd.json").write_text(json.dumps(populated_config))
+
+    # Point Path.home() at the fake home on all platforms.
+    monkeypatch.setenv("USERPROFILE", str(fake_home))
+    monkeypatch.setenv("HOME", str(fake_home))
+
+    with _spawn_ohmd(tmp_path, db_name="isolation.duckdb") as (base_url, _env, proc, stderr_log):
+        _wait_for_healthy_or_fail(base_url, proc, stderr_log)
+
+        # An admin endpoint must succeed with NO bearer token — this
+        # is the exact scenario that breaks if production tokens leak
+        # into the subprocess config (server.py:1305 requires both
+        # no_auth=True AND not self.tokens). We use /admin/nudges/quality
+        # (a GET) rather than /admin/health, which has a pre-existing
+        # UnboundLocalError on challenge_ratio when the graph has no L3
+        # edges — unrelated to config isolation.
+        status, body = _http_get(f"{base_url}/admin/nudges/quality")
+        assert status == 200, (
+            f"GET /admin/nudges/quality returned {status} (body: {body}) — "
+            "production config tokens likely leaked into the subprocess"
+        )

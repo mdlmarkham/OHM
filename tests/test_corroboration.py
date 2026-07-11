@@ -290,8 +290,3 @@ class TestSchemaMigration:
             assert len(cols) == 1
         finally:
             conn.close()
-
-    def test_schema_version_is_042(self):
-        from ohm.graph.schema import SCHEMA_VERSION
-
-        assert SCHEMA_VERSION == "0.44.0"

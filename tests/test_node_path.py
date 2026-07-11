@@ -113,8 +113,3 @@ class TestNodePathSchema:
         conn = graph._conn
         row = conn.execute("SELECT COUNT(*) FROM duckdb_indexes() WHERE table_name = 'ohm_nodes' AND index_name = 'idx_nodes_path'").fetchone()
         assert row[0] >= 1
-
-    def test_schema_version_bumped(self, graph):
-        from ohm.graph.schema import SCHEMA_VERSION
-
-        assert SCHEMA_VERSION == "0.44.0"

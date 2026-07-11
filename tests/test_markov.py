@@ -291,3 +291,113 @@ class TestMarkovCache:
         markov_absorbing_risk(test_db, healthy, edge_types=["TRANSITIONS_TO"])
         # New generation means a new cache entry, so total should be 2.
         assert len(_markov_matrix_cache) == 2
+
+
+class TestCacheIdentityRegression:
+    """Regression tests for cache key identity bug (issue #820).
+
+    CPython's id() is only unique for the lifetime of an object. When a
+    DuckDB :memory: connection is destroyed and a new one reuses the same
+    address, the module-level cache (previously keyed by id(conn)) collides
+    with the new connection, returning a stale matrix from an unrelated graph.
+    """
+
+    def test_no_stale_cache_when_conn_id_reused(self):
+        """Connection 1 is dereferenced before connection 2 is created.
+
+        CPython's allocator may reuse the same id() for conn2. The Markov
+        cache must not return conn1's stale matrix.
+        """
+        from ohm.inference.markov import _markov_matrix_cache
+        from tests.conftest import create_test_db
+
+        _markov_matrix_cache.clear()
+
+        # ── Connection 1: linear chain A→B→C→D (D is sole absorbing state) ──
+        conn1 = create_test_db()
+        a = create_sample_node(conn1, label="node_a")
+        b = create_sample_node(conn1, label="node_b")
+        c = create_sample_node(conn1, label="node_c")
+        d = create_sample_node(conn1, label="node_d")
+        create_sample_edge(conn1, from_node=a, to_node=b, edge_type="TRANSITIONS_TO", probability=1.0)
+        create_sample_edge(conn1, from_node=b, to_node=c, edge_type="TRANSITIONS_TO", probability=1.0)
+        create_sample_edge(conn1, from_node=c, to_node=d, edge_type="TRANSITIONS_TO", probability=1.0)
+        result1 = markov_absorbing_risk(conn1, a, edge_types=["TRANSITIONS_TO"])
+        assert d in result1["absorption_probabilities"]
+
+        # Capture node IDs to reuse on conn2 (same IDs, different graph)
+        node_ids = {"a": a, "b": b, "c": c, "d": d}
+
+        # Destroy conn1 — its id() may be reused by conn2
+        conn1.close()
+        del conn1
+
+        # ── Connection 2: multi-sink A→B, A→C using same node IDs ──
+        conn2 = create_test_db()
+        for label, nid in node_ids.items():
+            conn2.execute(
+                "INSERT INTO ohm_nodes (id, label, type, created_by, visibility, provenance, confidence) "
+                "VALUES (?, ?, 'concept', 'test_agent', 'team', 'conversation', 1.0)",
+                [nid, label],
+            )
+        create_sample_edge(conn2, from_node=node_ids["a"], to_node=node_ids["b"], edge_type="TRANSITIONS_TO", probability=0.6)
+        create_sample_edge(conn2, from_node=node_ids["a"], to_node=node_ids["c"], edge_type="TRANSITIONS_TO", probability=0.4)
+
+        # This must not raise KeyError (which happens if conn1's stale matrix is returned)
+        result2 = markov_absorbing_risk(conn2, node_ids["a"], edge_types=["TRANSITIONS_TO"])
+
+        assert result2["method"] == "markov_absorbing_risk"
+        # Direct dict access — raises KeyError if stale cache from conn1
+        prob_b = result2["absorption_probabilities"][node_ids["b"]]
+        prob_c = result2["absorption_probabilities"][node_ids["c"]]
+        assert abs(prob_b - 0.6) < 0.01
+        assert abs(prob_c - 0.4) < 0.01
+        # D is not reachable in conn2's graph — must not appear in results
+        assert node_ids["d"] not in result2["absorption_probabilities"]
+
+        conn2.close()
+
+
+class TestCacheIdentityStress:
+    """Stress tests for cache key identity fix (issue #820)."""
+
+    def test_500_iterations_no_keyerror_or_wrong_collapse(self):
+        """500 iterations of fresh connections + Markov queries.
+
+        Each iteration creates a fresh in-memory DuckDB, builds a graph,
+        and runs a Markov query. Alternates between multi-sink (absorbing
+        risk) and singular-cycle (expected steps with SCC collapse) graphs.
+        No KeyError or wrong scc_collapsed values should occur.
+        """
+        from ohm.inference.markov import _markov_matrix_cache
+        from tests.conftest import create_test_db
+
+        _markov_matrix_cache.clear()
+
+        for i in range(500):
+            conn = create_test_db()
+            try:
+                if i % 2 == 0:
+                    # Multi-sink graph (test_multiple_absorbing_states style)
+                    start = create_sample_node(conn, label="start")
+                    sink_a = create_sample_node(conn, label="sink_a")
+                    sink_b = create_sample_node(conn, label="sink_b")
+                    create_sample_edge(conn, from_node=start, to_node=sink_a, edge_type="TRANSITIONS_TO", probability=0.6)
+                    create_sample_edge(conn, from_node=start, to_node=sink_b, edge_type="TRANSITIONS_TO", probability=0.4)
+                    result = markov_absorbing_risk(conn, start, edge_types=["TRANSITIONS_TO"])
+                    assert result["method"] == "markov_absorbing_risk", f"iteration {i}"
+                    # Direct dict access — raises KeyError if stale cache
+                    prob_a = result["absorption_probabilities"][sink_a]
+                    assert abs(prob_a - 0.6) < 0.01, f"iteration {i}: prob_a={prob_a}"
+                else:
+                    # Singular cycle (test_singular_cycle_expected_steps style)
+                    node_a = create_sample_node(conn, label="a")
+                    node_b = create_sample_node(conn, label="b")
+                    create_sample_edge(conn, from_node=node_a, to_node=node_b, edge_type="TRANSITIONS_TO", probability=1.0)
+                    create_sample_edge(conn, from_node=node_b, to_node=node_a, edge_type="TRANSITIONS_TO", probability=1.0)
+                    result = markov_expected_steps(conn, node_a, edge_types=["TRANSITIONS_TO"])
+                    assert result["method"] == "markov_expected_steps", f"iteration {i}"
+                    assert result["scc_collapsed"] is True, f"iteration {i}: scc_collapsed={result['scc_collapsed']}"
+            finally:
+                conn.close()
+            del conn

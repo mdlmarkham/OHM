@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ohm.graph.schema import initialize_schema, SCHEMA_VERSION
+from ohm.graph.schema import initialize_schema
 from ohm.graph.queries import (
     create_external_signal,
     get_external_signals,
@@ -26,11 +26,6 @@ def db():
 def node(db):
     n = create_node(db, label="Test Node", created_by="test-agent")
     return n["id"]
-
-
-class TestSchemaVersion:
-    def test_version_bumped(self):
-        assert SCHEMA_VERSION == "0.49.0"
 
 
 class TestCreateExternalSignal:

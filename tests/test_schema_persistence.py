@@ -10,7 +10,6 @@ from ohm.graph.schema import (
     initialize_schema,
     resolve_schema_by_name,
     DEFAULT_SCHEMA,
-    SCHEMA_VERSION,
 )
 
 
@@ -21,11 +20,6 @@ def db():
     conn = duckdb.connect(":memory:")
     initialize_schema(conn)
     return conn
-
-
-class TestSchemaVersion:
-    def test_version_bumped(self):
-        assert SCHEMA_VERSION == "0.50.0"
 
 
 class TestToDbFromDb:

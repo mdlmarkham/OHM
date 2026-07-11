@@ -50,6 +50,26 @@ def cross_link_check(payload: dict[str, Any]) -> tuple[int, str, str]:
         if existing:
             return 0, "", ""
 
+    # ADR-018 option 2: accept if an edge in the same batch references this
+    # node and its counterpart exists or is being co-created in the batch.
+    batch_edges = payload.get("batch_edges")
+    if batch_edges:
+        batch_node_ids = set(payload.get("batch_node_ids") or ())
+        for edge in batch_edges:
+            edge_from = edge.get("from", "")
+            edge_to = edge.get("to", "")
+            if edge_from == node_id or edge_to == node_id:
+                counterpart = edge_to if edge_from == node_id else edge_from
+                if counterpart in batch_node_ids:
+                    return 0, "", ""
+                if conn is not None:
+                    counterpart_exists = conn.execute(
+                        "SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
+                        [counterpart],
+                    ).fetchone()
+                    if counterpart_exists:
+                        return 0, "", ""
+
     connects_to = body.get("connects_to")
     if not connects_to:
         return (

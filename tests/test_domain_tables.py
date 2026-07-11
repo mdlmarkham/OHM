@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ohm.graph.schema import initialize_schema, SCHEMA_VERSION
+from ohm.graph.schema import initialize_schema
 
 
 @pytest.fixture
@@ -14,11 +14,6 @@ def db():
     conn = duckdb.connect(":memory:")
     initialize_schema(conn)
     return conn
-
-
-class TestSchemaVersion:
-    def test_version_bumped(self):
-        assert SCHEMA_VERSION == "0.50.0"
 
 
 class TestDomainAssumptions:

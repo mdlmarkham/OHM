@@ -346,13 +346,15 @@ class TestDuckLakeExtension:
         """load_config reads DuckLake env vars."""
         from ohm.server import load_config
 
-        monkeypatch.setenv("OHM_DUCKLAKE_PATH", "/tmp/test_lake.ducklake")
-        monkeypatch.setenv("OHM_DUCKLAKE_DATA", "/tmp/test_lake_data")
+        lake_path = str(tmp_path / "test_lake.ducklake")
+        lake_data = str(tmp_path / "test_lake_data")
+        monkeypatch.setenv("OHM_DUCKLAKE_PATH", lake_path)
+        monkeypatch.setenv("OHM_DUCKLAKE_DATA", lake_data)
 
         config = load_config(config_path=str(tmp_path / "nonexistent.json"))
 
-        assert config["ducklake"]["path"] == "/tmp/test_lake.ducklake"
-        assert config["ducklake"]["data_path"] == "/tmp/test_lake_data"
+        assert config["ducklake"]["path"] == lake_path
+        assert config["ducklake"]["data_path"] == lake_data
 
 
 class TestDuckLakeTimeTravel:

@@ -62,6 +62,16 @@ jobs:
             exit 1
           fi
 
+      - name: Verify no hardcoded SCHEMA_VERSION assertions outside canonical test
+        shell: bash
+        run: |
+          HITS=$(grep -rn 'assert SCHEMA_VERSION ==' tests/ | grep -v tests/test_schema_version.py || true)
+          if [ -n "$HITS" ]; then
+            echo "Hardcoded SCHEMA_VERSION assertions found outside tests/test_schema_version.py:"
+            echo "$HITS"
+            exit 1
+          fi
+
       - name: Test (fast) with pytest
         run: |
           python -m pytest tests/ -v --tb=short --benchmark-disable \

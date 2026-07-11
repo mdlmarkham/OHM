@@ -6,6 +6,7 @@ similar_nodes, shared_tags, and orphan_warning.
 
 import json
 import time
+import tempfile
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -37,7 +38,7 @@ class TestGenerateSuggestions:
         from ohm.server.suggestions import generate_suggestions
 
         store = MagicMock()
-        store.db_path = "/tmp/not-used.duckdb"
+        store.db_path = f"{tempfile.gettempdir()}/not-used.duckdb"
         # Patch _suggestion_conn so we don't try to open a real DB.
         mock_conn = MagicMock()
         with patch("ohm.server.suggestions._suggestion_conn", return_value=mock_conn):
@@ -61,7 +62,7 @@ class TestGenerateSuggestions:
         from ohm.server.suggestions import generate_suggestions
 
         store = MagicMock()
-        store.db_path = "/tmp/not-used.duckdb"
+        store.db_path = f"{tempfile.gettempdir()}/not-used.duckdb"
         mock_conn = MagicMock()
         with patch("ohm.server.suggestions._suggestion_conn", return_value=mock_conn):
             with patch("ohm.graph.queries.semantic_search") as mock_semantic:
@@ -205,7 +206,7 @@ class TestGenerateSuggestions:
 
         clear_island_nudge_cache()
         store = MagicMock()
-        store.db_path = "/tmp/not-used.duckdb"
+        store.db_path = f"{tempfile.gettempdir()}/not-used.duckdb"
         mock_conn = MagicMock()
         mock_conn.execute.return_value.fetchall.return_value = []
         with patch("ohm.server.suggestions._suggestion_conn", return_value=mock_conn):

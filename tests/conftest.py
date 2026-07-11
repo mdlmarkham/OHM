@@ -102,6 +102,14 @@ def _clear_bayesian_cache():
     bay._bayesian_network_cache.clear()
 
 
+@pytest.fixture(autouse=True)
+def _clear_markov_cache():
+    """Clear the Markov matrix cache between tests to prevent cross-test pollution (issue #820)."""
+    import ohm.inference.markov as markov
+
+    markov._markov_matrix_cache.clear()
+
+
 try:
     import ohm.inference.bayesian  # noqa: F401 — pay pgmpy cold-import penalty once per session
 except Exception:

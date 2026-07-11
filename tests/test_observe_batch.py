@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ohm.graph.schema import initialize_schema, SCHEMA_VERSION
+from ohm.graph.schema import initialize_schema
 from ohm.graph.store import OhmStore
 
 
@@ -77,11 +77,6 @@ class TestIdempotencyKey:
         store.write_observation(node_id="test_node", type="measurement", value=0.9, idempotency_key=None)
         rows = store.conn.execute("SELECT COUNT(*) FROM ohm_observations WHERE node_id = 'test_node' AND deleted_at IS NULL").fetchone()
         assert rows[0] == 2
-
-
-class TestSchemaVersion:
-    def test_schema_version_bumped(self):
-        assert SCHEMA_VERSION == "0.50.0"
 
 
 class TestMcpToolDispatch:

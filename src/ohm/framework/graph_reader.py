@@ -19,8 +19,15 @@ Protocol surface (deliberately minimal — only what inference actually queries)
 
 from __future__ import annotations
 
+import uuid
+import weakref
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
+
+
+# ── Connection identity (stable UUID per connection, GC-cleaned) ──────────────
+
+_conn_identity_map: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
 
 # ── Record types ─────────────────────────────────────────────────────────────
@@ -157,6 +164,11 @@ class GraphReader(Protocol):
         raw = self.get_meta("graph_generation")
         return int(raw) if raw is not None else 0
 
+    @property
+    def cache_identity(self) -> str:
+        """Stable UUID for cache keying — unique per connection, never reused after GC."""
+        ...
+
 
 # ── Coercion helpers ──────────────────────────────────────────────────────────
 
@@ -197,6 +209,20 @@ class DuckDBGraphReader:
 
     def __init__(self, conn: Any) -> None:
         self._conn = conn
+        identity = _conn_identity_map.get(conn)
+        if identity is None:
+            identity = str(uuid.uuid4())
+            _conn_identity_map[conn] = identity
+        self._cache_identity = identity
+
+    @property
+    def cache_identity(self) -> str:
+        """Stable UUID identifying the underlying connection for cache keys.
+
+        Unlike ``id(conn)``, this UUID is never reused after the connection
+        is garbage-collected (the WeakKeyDictionary entry is removed on GC).
+        """
+        return self._cache_identity
 
     def get_edges(
         self,
@@ -385,6 +411,7 @@ class MockGraphReader:
     nodes: list[NodeRecord] = field(default_factory=list)
     observations: list[ObservationRecord] = field(default_factory=list)
     meta: dict[str, str] = field(default_factory=dict)
+    cache_identity: str = field(default_factory=lambda: str(uuid.uuid4()), compare=False)
 
     def get_edges(
         self,
