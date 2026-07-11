@@ -81,7 +81,7 @@ class TestIdempotencyKey:
 
 class TestSchemaVersion:
     def test_schema_version_bumped(self):
-        assert SCHEMA_VERSION == "0.48.0"
+        assert SCHEMA_VERSION == "0.50.0"
 
 
 class TestMcpToolDispatch:

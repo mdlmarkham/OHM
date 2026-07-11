@@ -614,7 +614,21 @@ def build_parser() -> argparse.ArgumentParser:
     scratch_parser.add_argument("--agent", default="cli", help="Agent name (default: cli)")
     scratch_parser.add_argument("--connects-to", help="Comma-separated node IDs to link to")
 
-    # ── state ────────────────────────────────────────────────────────────
+    # OHM-810: lineage and gaps commands (generic, domain-agnostic)
+    lineage_parser = graph_sub.add_parser("lineage", help="Trace edge lineage from a node (recursive CTE traversal)")
+    lineage_parser.add_argument("node_id", help="Starting node ID")
+    lineage_parser.add_argument("--edge-type", default="CALCULATED_FROM", help="Edge type to traverse (default: CALCULATED_FROM)")
+    lineage_parser.add_argument("--max-depth", type=int, default=10, help="Max traversal depth (default: 10)")
+    lineage_parser.add_argument("--db", default=None, help="Database path")
+    lineage_parser.add_argument("--actor", default=None, help="Agent name")
+
+    gaps_parser = graph_sub.add_parser("gaps", help="Find nodes with missing edges at a layer")
+    gaps_parser.add_argument("--layer", default="L3", help="Edge layer to check (default: L3)")
+    gaps_parser.add_argument("--direction", choices=["outgoing", "incoming", "both"], default="both", help="Check outgoing, incoming, or both (default: both)")
+    gaps_parser.add_argument("--limit", type=int, default=50, help="Max results (default: 50)")
+    gaps_parser.add_argument("--db", default=None, help="Database path")
+    gaps_parser.add_argument("--actor", default=None, help="Agent name")
+
     state_parser = subparsers.add_parser("state", help="Hive mind awareness")
     state_sub = state_parser.add_subparsers(dest="state_command", help="State commands")
 
@@ -1227,6 +1241,10 @@ def _handle_graph(args: argparse.Namespace) -> None:
         _handle_scratch(args)
     elif cmd == "fragments":
         _handle_fragments(args)
+    elif cmd == "lineage":
+        _handle_lineage(args)
+    elif cmd == "gaps":
+        _handle_gaps(args)
     else:
         print(f"Unknown graph command: {cmd}")
 
@@ -3038,6 +3056,117 @@ def _handle_fragments(args: argparse.Namespace) -> None:
                 fid, label, creator, created = row
                 created_str = str(created)[:19] if created else "?"
                 print(f"  [{created_str}] {label} ({fid}) by {creator}")
+    finally:
+        conn.close()
+
+
+def _handle_lineage(args: argparse.Namespace) -> None:
+    """Handle 'ohm graph lineage' — recursive edge traversal (OHM-810)."""
+    conn = _get_db(args)
+    try:
+        edge_type = args.edge_type
+        max_depth = args.max_depth
+        node_id = args.node_id
+
+        result = conn.execute(
+            """
+            WITH RECURSIVE lineage AS (
+                SELECT e.id, e.from_node, e.to_node, e.edge_type, e.layer, e.confidence, 0 AS depth
+                FROM ohm_edges e
+                WHERE e.from_node = ? AND e.edge_type = ? AND e.deleted_at IS NULL
+                UNION ALL
+                SELECT e.id, e.from_node, e.to_node, e.edge_type, e.layer, e.confidence, l.depth + 1
+                FROM ohm_edges e
+                JOIN lineage l ON e.from_node = l.to_node
+                WHERE e.edge_type = ? AND e.deleted_at IS NULL AND l.depth < ?
+            )
+            SELECT l.id, l.from_node, l.to_node, l.edge_type, l.layer, l.confidence, l.depth,
+                   nf.label AS from_label, nt.label AS to_label
+            FROM lineage l
+            LEFT JOIN ohm_nodes nf ON nf.id = l.from_node
+            LEFT JOIN ohm_nodes nt ON nt.id = l.to_node
+            ORDER BY l.depth, l.from_node
+            """,
+            [node_id, edge_type, edge_type, max_depth],
+        )
+        columns = [desc[0] for desc in result.description]
+        rows = [dict(zip(columns, row)) for row in result.fetchall()]
+
+        if not rows:
+            print(f"No {edge_type} lineage found from {node_id}")
+            return
+
+        print(f"Lineage from {node_id} ({edge_type}, max depth {max_depth}):")
+        for row in rows:
+            depth = row["depth"]
+            indent = "  " * depth
+            from_label = row.get("from_label") or row["from_node"]
+            to_label = row.get("to_label") or row["to_node"]
+            conf = f" (conf={row['confidence']:.2f})" if row.get("confidence") else ""
+            print(f"{indent}{from_label} -> {to_label} [{row['edge_type']}]{conf}")
+    finally:
+        conn.close()
+
+
+def _handle_gaps(args: argparse.Namespace) -> None:
+    """Handle 'ohm graph gaps' — find nodes with missing edges at a layer (OHM-810)."""
+    conn = _get_db(args)
+    try:
+        layer = args.layer
+        direction = args.direction
+        limit = args.limit
+
+        if direction in ("outgoing", "both"):
+            result = conn.execute(
+                """
+                SELECT n.id, n.label, n.type, 'no_outgoing' AS gap_type
+                FROM ohm_nodes n
+                WHERE n.deleted_at IS NULL
+                  AND n.type != 'fragment'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM ohm_edges e
+                    WHERE e.from_node = n.id AND e.layer = ? AND e.deleted_at IS NULL
+                  )
+                LIMIT ?
+                """,
+                [layer, limit],
+            )
+            outgoing = [dict(zip([d[0] for d in result.description], r)) for r in result.fetchall()]
+        else:
+            outgoing = []
+
+        if direction in ("incoming", "both"):
+            result = conn.execute(
+                """
+                SELECT n.id, n.label, n.type, 'no_incoming' AS gap_type
+                FROM ohm_nodes n
+                WHERE n.deleted_at IS NULL
+                  AND n.type != 'fragment'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM ohm_edges e
+                    WHERE e.to_node = n.id AND e.layer = ? AND e.deleted_at IS NULL
+                  )
+                LIMIT ?
+                """,
+                [layer, limit],
+            )
+            incoming = [dict(zip([d[0] for d in result.description], r)) for r in result.fetchall()]
+        else:
+            incoming = []
+
+        if not outgoing and not incoming:
+            print(f"No gaps found at layer {layer}")
+            return
+
+        print(f"Graph gaps at layer {layer} ({direction}):")
+        if outgoing:
+            print(f"\nNodes with no outgoing {layer} edges ({len(outgoing)}):")
+            for row in outgoing:
+                print(f"  {row['label']} ({row['id']}) type={row['type']}")
+        if incoming:
+            print(f"\nNodes with no incoming {layer} edges ({len(incoming)}):")
+            for row in incoming:
+                print(f"  {row['label']} ({row['id']}) type={row['type']}")
     finally:
         conn.close()
 

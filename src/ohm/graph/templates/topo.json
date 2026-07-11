@@ -3,20 +3,33 @@
   "template_version": 1,
   "case_strategy": "uppercase",
   "node_types": [
+    "action",
     "agent",
     "area",
     "bus",
+    "calciner",
     "circuit",
-    "compressor",
     "component",
-    "data_product",
+    "compressor",
     "concept",
     "controller",
+    "conveyor",
+    "cooler",
+    "crusher",
+    "data_product",
     "decision",
+    "drift_event",
+    "elevator",
+    "ensemble_vote",
     "equipment",
     "event",
     "experiment",
+    "fan",
+    "feed_investment",
+    "filter",
+    "finish_mill",
     "fragment",
+    "freshness_threshold",
     "generator",
     "goal",
     "heat_exchanger",
@@ -25,19 +38,31 @@
     "infrastructure",
     "institution",
     "instrument",
+    "intervention",
+    "kiln",
     "line",
     "metric",
+    "mode_switch",
+    "model_candidate",
+    "model_evaluation",
     "motor",
     "other",
     "pattern",
     "person",
     "pipeline",
+    "preheater",
     "process",
     "pump",
+    "raw_mill",
     "reactor",
+    "reclaimer",
     "release",
+    "runbook",
+    "scenario",
     "sensor",
+    "separator",
     "service",
+    "silo",
     "site",
     "skill",
     "source",
@@ -47,25 +72,16 @@
     "technology",
     "topic",
     "transformer",
+    "twin",
+    "twin_design_proposal",
+    "twin_design_session",
+    "twin_template",
+    "validation_run",
     "value",
     "valve",
+    "vertical_roller_mill",
     "vessel",
-    "scenario",
-    "action",
-    "intervention",
-    "twin",
-    "twin_template",
-    "model_candidate",
-    "model_evaluation",
-    "drift_event",
-    "validation_run",
-    "ensemble_vote",
-    "freshness_threshold",
-    "feed_investment",
-    "mode_switch",
-    "twin_design_session",
-    "twin_design_proposal",
-    "runbook"
+    "weigh_feeder"
   ],
   "layer_edge_types": {
     "L0": [
@@ -218,22 +234,67 @@
       "ordering": 100,
       "description": "TOPO predictive-maintenance prospects: ranked equipment with RUL and risk class.",
       "columns": [
-        ["id", "VARCHAR"],
-        ["equipment_id", "VARCHAR"],
-        ["site_id", "VARCHAR"],
-        ["rul_days", "FLOAT"],
-        ["risk_class", "VARCHAR"],
-        ["model_version", "VARCHAR"],
-        ["created_by", "VARCHAR NOT NULL"],
-        ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
-        ["updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
-        ["metadata", "JSON"]
+        [
+          "id",
+          "VARCHAR"
+        ],
+        [
+          "equipment_id",
+          "VARCHAR"
+        ],
+        [
+          "site_id",
+          "VARCHAR"
+        ],
+        [
+          "rul_days",
+          "FLOAT"
+        ],
+        [
+          "risk_class",
+          "VARCHAR"
+        ],
+        [
+          "model_version",
+          "VARCHAR"
+        ],
+        [
+          "created_by",
+          "VARCHAR NOT NULL"
+        ],
+        [
+          "created_at",
+          "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        ],
+        [
+          "updated_at",
+          "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        ],
+        [
+          "metadata",
+          "JSON"
+        ]
       ],
       "primary_key": "id",
       "indexes": [
-        ["idx_topo_prospects_equipment", ["equipment_id"]],
-        ["idx_topo_prospects_site", ["site_id"]],
-        ["idx_topo_prospects_risk", ["risk_class"]]
+        [
+          "idx_topo_prospects_equipment",
+          [
+            "equipment_id"
+          ]
+        ],
+        [
+          "idx_topo_prospects_site",
+          [
+            "site_id"
+          ]
+        ],
+        [
+          "idx_topo_prospects_risk",
+          [
+            "risk_class"
+          ]
+        ]
       ]
     },
     {
@@ -241,23 +302,71 @@
       "ordering": 110,
       "description": "TOPO observation records: sensor readings, anomalies, and measurements linked to OHM nodes.",
       "columns": [
-        ["id", "VARCHAR"],
-        ["node_id", "VARCHAR"],
-        ["obs_type", "VARCHAR"],
-        ["obs_value", "FLOAT"],
-        ["obs_unit", "VARCHAR"],
-        ["source", "VARCHAR"],
-        ["observed_at", "TIMESTAMP"],
-        ["created_by", "VARCHAR NOT NULL"],
-        ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
-        ["updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
-        ["metadata", "JSON"]
+        [
+          "id",
+          "VARCHAR"
+        ],
+        [
+          "node_id",
+          "VARCHAR"
+        ],
+        [
+          "obs_type",
+          "VARCHAR"
+        ],
+        [
+          "obs_value",
+          "FLOAT"
+        ],
+        [
+          "obs_unit",
+          "VARCHAR"
+        ],
+        [
+          "source",
+          "VARCHAR"
+        ],
+        [
+          "observed_at",
+          "TIMESTAMP"
+        ],
+        [
+          "created_by",
+          "VARCHAR NOT NULL"
+        ],
+        [
+          "created_at",
+          "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        ],
+        [
+          "updated_at",
+          "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        ],
+        [
+          "metadata",
+          "JSON"
+        ]
       ],
       "primary_key": "id",
       "indexes": [
-        ["idx_topo_obs_node", ["node_id"]],
-        ["idx_topo_obs_type", ["obs_type"]],
-        ["idx_topo_obs_time", ["observed_at"]]
+        [
+          "idx_topo_obs_node",
+          [
+            "node_id"
+          ]
+        ],
+        [
+          "idx_topo_obs_type",
+          [
+            "obs_type"
+          ]
+        ],
+        [
+          "idx_topo_obs_time",
+          [
+            "observed_at"
+          ]
+        ]
       ]
     },
     {
@@ -265,20 +374,57 @@
       "ordering": 120,
       "description": "Append-only assessment history for TOPO observations with is_current flags.",
       "columns": [
-        ["id", "VARCHAR"],
-        ["observation_id", "VARCHAR"],
-        ["assessment_type", "VARCHAR"],
-        ["assessment_value", "VARCHAR"],
-        ["is_current", "BOOLEAN DEFAULT TRUE"],
-        ["assessed_by", "VARCHAR NOT NULL"],
-        ["assessed_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
-        ["notes", "TEXT"],
-        ["metadata", "JSON"]
+        [
+          "id",
+          "VARCHAR"
+        ],
+        [
+          "observation_id",
+          "VARCHAR"
+        ],
+        [
+          "assessment_type",
+          "VARCHAR"
+        ],
+        [
+          "assessment_value",
+          "VARCHAR"
+        ],
+        [
+          "is_current",
+          "BOOLEAN DEFAULT TRUE"
+        ],
+        [
+          "assessed_by",
+          "VARCHAR NOT NULL"
+        ],
+        [
+          "assessed_at",
+          "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        ],
+        [
+          "notes",
+          "TEXT"
+        ],
+        [
+          "metadata",
+          "JSON"
+        ]
       ],
       "primary_key": "id",
       "indexes": [
-        ["idx_topo_asmt_obs", ["observation_id"]],
-        ["idx_topo_asmt_current", ["is_current"]]
+        [
+          "idx_topo_asmt_obs",
+          [
+            "observation_id"
+          ]
+        ],
+        [
+          "idx_topo_asmt_current",
+          [
+            "is_current"
+          ]
+        ]
       ]
     },
     {
@@ -286,17 +432,43 @@
       "ordering": 130,
       "description": "Annotations (comments, tags, context) on TOPO observations.",
       "columns": [
-        ["id", "VARCHAR"],
-        ["observation_id", "VARCHAR"],
-        ["annotation_type", "VARCHAR"],
-        ["annotation_value", "TEXT"],
-        ["annotated_by", "VARCHAR NOT NULL"],
-        ["annotated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
-        ["metadata", "JSON"]
+        [
+          "id",
+          "VARCHAR"
+        ],
+        [
+          "observation_id",
+          "VARCHAR"
+        ],
+        [
+          "annotation_type",
+          "VARCHAR"
+        ],
+        [
+          "annotation_value",
+          "TEXT"
+        ],
+        [
+          "annotated_by",
+          "VARCHAR NOT NULL"
+        ],
+        [
+          "annotated_at",
+          "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        ],
+        [
+          "metadata",
+          "JSON"
+        ]
       ],
       "primary_key": "id",
       "indexes": [
-        ["idx_topo_anno_obs", ["observation_id"]]
+        [
+          "idx_topo_anno_obs",
+          [
+            "observation_id"
+          ]
+        ]
       ]
     },
     {
@@ -304,23 +476,71 @@
       "ordering": 140,
       "description": "Followup tracking for TOPO observations: actions, investigations, monitoring.",
       "columns": [
-        ["id", "VARCHAR"],
-        ["observation_id", "VARCHAR"],
-        ["followup_type", "VARCHAR"],
-        ["status", "VARCHAR DEFAULT 'open'"],
-        ["assigned_to", "VARCHAR"],
-        ["due_date", "TIMESTAMP"],
-        ["closed_at", "TIMESTAMP"],
-        ["created_by", "VARCHAR NOT NULL"],
-        ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
-        ["updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
-        ["metadata", "JSON"]
+        [
+          "id",
+          "VARCHAR"
+        ],
+        [
+          "observation_id",
+          "VARCHAR"
+        ],
+        [
+          "followup_type",
+          "VARCHAR"
+        ],
+        [
+          "status",
+          "VARCHAR DEFAULT 'open'"
+        ],
+        [
+          "assigned_to",
+          "VARCHAR"
+        ],
+        [
+          "due_date",
+          "TIMESTAMP"
+        ],
+        [
+          "closed_at",
+          "TIMESTAMP"
+        ],
+        [
+          "created_by",
+          "VARCHAR NOT NULL"
+        ],
+        [
+          "created_at",
+          "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        ],
+        [
+          "updated_at",
+          "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        ],
+        [
+          "metadata",
+          "JSON"
+        ]
       ],
       "primary_key": "id",
       "indexes": [
-        ["idx_topo_fup_obs", ["observation_id"]],
-        ["idx_topo_fup_status", ["status"]],
-        ["idx_topo_fup_assignee", ["assigned_to"]]
+        [
+          "idx_topo_fup_obs",
+          [
+            "observation_id"
+          ]
+        ],
+        [
+          "idx_topo_fup_status",
+          [
+            "status"
+          ]
+        ],
+        [
+          "idx_topo_fup_assignee",
+          [
+            "assigned_to"
+          ]
+        ]
       ]
     },
     {
@@ -328,26 +548,88 @@
       "ordering": 200,
       "description": "TOPO maintenance plans: time-bounded groupings of events (e.g., 4-day maintenance window, annual outage).",
       "columns": [
-        ["id", "VARCHAR"],
-        ["node_id", "VARCHAR"],
-        ["plan_type", "VARCHAR"],
-        ["label", "VARCHAR"],
-        ["start_ts", "TIMESTAMP"],
-        ["end_ts", "TIMESTAMP"],
-        ["horizon", "VARCHAR"],
-        ["status", "VARCHAR DEFAULT 'active'"],
-        ["created_by", "VARCHAR NOT NULL"],
-        ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
-        ["updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
-        ["metadata", "JSON"]
+        [
+          "id",
+          "VARCHAR"
+        ],
+        [
+          "node_id",
+          "VARCHAR"
+        ],
+        [
+          "plan_type",
+          "VARCHAR"
+        ],
+        [
+          "label",
+          "VARCHAR"
+        ],
+        [
+          "start_ts",
+          "TIMESTAMP"
+        ],
+        [
+          "end_ts",
+          "TIMESTAMP"
+        ],
+        [
+          "horizon",
+          "VARCHAR"
+        ],
+        [
+          "status",
+          "VARCHAR DEFAULT 'active'"
+        ],
+        [
+          "created_by",
+          "VARCHAR NOT NULL"
+        ],
+        [
+          "created_at",
+          "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        ],
+        [
+          "updated_at",
+          "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        ],
+        [
+          "metadata",
+          "JSON"
+        ]
       ],
       "primary_key": "id",
       "indexes": [
-        ["idx_topo_plans_node", ["node_id"]],
-        ["idx_topo_plans_type", ["plan_type"]],
-        ["idx_topo_plans_window", ["start_ts", "end_ts"]],
-        ["idx_topo_plans_status", ["status"]],
-        ["idx_topo_plans_horizon", ["horizon"]]
+        [
+          "idx_topo_plans_node",
+          [
+            "node_id"
+          ]
+        ],
+        [
+          "idx_topo_plans_type",
+          [
+            "plan_type"
+          ]
+        ],
+        [
+          "idx_topo_plans_window",
+          [
+            "start_ts",
+            "end_ts"
+          ]
+        ],
+        [
+          "idx_topo_plans_status",
+          [
+            "status"
+          ]
+        ],
+        [
+          "idx_topo_plans_horizon",
+          [
+            "horizon"
+          ]
+        ]
       ]
     },
     {
@@ -355,38 +637,144 @@
       "ordering": 210,
       "description": "TOPO temporal events: discrete occurrences within a plan (e.g., shutdown, restart, inspection, outage).",
       "columns": [
-        ["id", "VARCHAR"],
-        ["plan_id", "VARCHAR"],
-        ["node_id", "VARCHAR"],
-        ["node_path", "VARCHAR"],
-        ["event_class", "VARCHAR"],
-        ["title", "VARCHAR"],
-        ["start_ts", "TIMESTAMP"],
-        ["end_ts", "TIMESTAMP"],
-        ["horizon", "VARCHAR"],
-        ["operating_state", "VARCHAR"],
-        ["description", "TEXT"],
-        ["source_refs", "JSON"],
-        ["l3_context", "JSON"],
-        ["flow_impact", "JSON"],
-        ["forecast_basis", "JSON"],
-        ["decision_metadata", "JSON"],
-        ["confidence", "DOUBLE"],
-        ["authority", "VARCHAR"],
-        ["revision", "INTEGER DEFAULT 1"],
-        ["created_by", "VARCHAR NOT NULL"],
-        ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
-        ["updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
-        ["metadata", "JSON"]
+        [
+          "id",
+          "VARCHAR"
+        ],
+        [
+          "plan_id",
+          "VARCHAR"
+        ],
+        [
+          "node_id",
+          "VARCHAR"
+        ],
+        [
+          "node_path",
+          "VARCHAR"
+        ],
+        [
+          "event_class",
+          "VARCHAR"
+        ],
+        [
+          "title",
+          "VARCHAR"
+        ],
+        [
+          "start_ts",
+          "TIMESTAMP"
+        ],
+        [
+          "end_ts",
+          "TIMESTAMP"
+        ],
+        [
+          "horizon",
+          "VARCHAR"
+        ],
+        [
+          "operating_state",
+          "VARCHAR"
+        ],
+        [
+          "description",
+          "TEXT"
+        ],
+        [
+          "source_refs",
+          "JSON"
+        ],
+        [
+          "l3_context",
+          "JSON"
+        ],
+        [
+          "flow_impact",
+          "JSON"
+        ],
+        [
+          "forecast_basis",
+          "JSON"
+        ],
+        [
+          "decision_metadata",
+          "JSON"
+        ],
+        [
+          "confidence",
+          "DOUBLE"
+        ],
+        [
+          "authority",
+          "VARCHAR"
+        ],
+        [
+          "revision",
+          "INTEGER DEFAULT 1"
+        ],
+        [
+          "created_by",
+          "VARCHAR NOT NULL"
+        ],
+        [
+          "created_at",
+          "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        ],
+        [
+          "updated_at",
+          "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        ],
+        [
+          "metadata",
+          "JSON"
+        ]
       ],
       "primary_key": "id",
       "indexes": [
-        ["idx_topo_events_plan", ["plan_id"]],
-        ["idx_topo_events_node", ["node_id"]],
-        ["idx_topo_events_path_class", ["node_path", "event_class", "start_ts"]],
-        ["idx_topo_events_path_window", ["node_path", "start_ts", "end_ts"]],
-        ["idx_topo_events_horizon", ["plan_id", "horizon", "event_class"]],
-        ["idx_topo_events_state", ["operating_state", "start_ts"]]
+        [
+          "idx_topo_events_plan",
+          [
+            "plan_id"
+          ]
+        ],
+        [
+          "idx_topo_events_node",
+          [
+            "node_id"
+          ]
+        ],
+        [
+          "idx_topo_events_path_class",
+          [
+            "node_path",
+            "event_class",
+            "start_ts"
+          ]
+        ],
+        [
+          "idx_topo_events_path_window",
+          [
+            "node_path",
+            "start_ts",
+            "end_ts"
+          ]
+        ],
+        [
+          "idx_topo_events_horizon",
+          [
+            "plan_id",
+            "horizon",
+            "event_class"
+          ]
+        ],
+        [
+          "idx_topo_events_state",
+          [
+            "operating_state",
+            "start_ts"
+          ]
+        ]
       ]
     },
     {
@@ -394,23 +782,75 @@
       "ordering": 220,
       "description": "TOPO event links: directed relationships between events (e.g., caused_by, followed_by, overlaps).",
       "columns": [
-        ["id", "VARCHAR"],
-        ["from_event_id", "VARCHAR"],
-        ["to_event_id", "VARCHAR"],
-        ["edge_type", "VARCHAR"],
-        ["layer", "VARCHAR DEFAULT 'L1'"],
-        ["confidence", "DOUBLE DEFAULT 1.0"],
-        ["revision", "INTEGER DEFAULT 1"],
-        ["created_by", "VARCHAR NOT NULL"],
-        ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
-        ["metadata", "JSON"]
+        [
+          "id",
+          "VARCHAR"
+        ],
+        [
+          "from_event_id",
+          "VARCHAR"
+        ],
+        [
+          "to_event_id",
+          "VARCHAR"
+        ],
+        [
+          "edge_type",
+          "VARCHAR"
+        ],
+        [
+          "layer",
+          "VARCHAR DEFAULT 'L1'"
+        ],
+        [
+          "confidence",
+          "DOUBLE DEFAULT 1.0"
+        ],
+        [
+          "revision",
+          "INTEGER DEFAULT 1"
+        ],
+        [
+          "created_by",
+          "VARCHAR NOT NULL"
+        ],
+        [
+          "created_at",
+          "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        ],
+        [
+          "metadata",
+          "JSON"
+        ]
       ],
       "primary_key": "id",
       "indexes": [
-        ["idx_topo_elinks_from", ["from_event_id"]],
-        ["idx_topo_elinks_to", ["to_event_id"]],
-        ["idx_topo_elinks_from_type", ["from_event_id", "edge_type"]],
-        ["idx_topo_elinks_to_type", ["to_event_id", "edge_type"]]
+        [
+          "idx_topo_elinks_from",
+          [
+            "from_event_id"
+          ]
+        ],
+        [
+          "idx_topo_elinks_to",
+          [
+            "to_event_id"
+          ]
+        ],
+        [
+          "idx_topo_elinks_from_type",
+          [
+            "from_event_id",
+            "edge_type"
+          ]
+        ],
+        [
+          "idx_topo_elinks_to_type",
+          [
+            "to_event_id",
+            "edge_type"
+          ]
+        ]
       ]
     },
     {
@@ -418,31 +858,108 @@
       "ordering": 230,
       "description": "TOPO versioned analytical report artifacts (e.g., sensitivity_analysis, rca_report, correlation_study) linked to graph entities.",
       "columns": [
-        ["id", "VARCHAR"],
-        ["report_type", "VARCHAR"],
-        ["node_id", "VARCHAR"],
-        ["plan_id", "VARCHAR"],
-        ["title", "VARCHAR"],
-        ["summary", "TEXT"],
-        ["findings", "JSON"],
-        ["recommendations", "JSON"],
-        ["confidence_adjustments", "JSON"],
-        ["status", "VARCHAR DEFAULT 'draft'"],
-        ["version", "INTEGER DEFAULT 1"],
-        ["superseded_by", "VARCHAR"],
-        ["created_by", "VARCHAR NOT NULL"],
-        ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
-        ["updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
-        ["finalized_at", "TIMESTAMP"],
-        ["metadata", "JSON"]
+        [
+          "id",
+          "VARCHAR"
+        ],
+        [
+          "report_type",
+          "VARCHAR"
+        ],
+        [
+          "node_id",
+          "VARCHAR"
+        ],
+        [
+          "plan_id",
+          "VARCHAR"
+        ],
+        [
+          "title",
+          "VARCHAR"
+        ],
+        [
+          "summary",
+          "TEXT"
+        ],
+        [
+          "findings",
+          "JSON"
+        ],
+        [
+          "recommendations",
+          "JSON"
+        ],
+        [
+          "confidence_adjustments",
+          "JSON"
+        ],
+        [
+          "status",
+          "VARCHAR DEFAULT 'draft'"
+        ],
+        [
+          "version",
+          "INTEGER DEFAULT 1"
+        ],
+        [
+          "superseded_by",
+          "VARCHAR"
+        ],
+        [
+          "created_by",
+          "VARCHAR NOT NULL"
+        ],
+        [
+          "created_at",
+          "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        ],
+        [
+          "updated_at",
+          "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        ],
+        [
+          "finalized_at",
+          "TIMESTAMP"
+        ],
+        [
+          "metadata",
+          "JSON"
+        ]
       ],
       "primary_key": "id",
       "indexes": [
-        ["idx_topo_reports_type", ["report_type"]],
-        ["idx_topo_reports_node", ["node_id"]],
-        ["idx_topo_reports_plan", ["plan_id"]],
-        ["idx_topo_reports_status", ["status"]],
-        ["idx_topo_reports_version", ["id", "version"]]
+        [
+          "idx_topo_reports_type",
+          [
+            "report_type"
+          ]
+        ],
+        [
+          "idx_topo_reports_node",
+          [
+            "node_id"
+          ]
+        ],
+        [
+          "idx_topo_reports_plan",
+          [
+            "plan_id"
+          ]
+        ],
+        [
+          "idx_topo_reports_status",
+          [
+            "status"
+          ]
+        ],
+        [
+          "idx_topo_reports_version",
+          [
+            "id",
+            "version"
+          ]
+        ]
       ]
     },
     {
@@ -450,27 +967,89 @@
       "ordering": 240,
       "description": "TOPO DataProductRun execution tracking: individual notebook/analytical runs with inputs, outputs, status, and timing.",
       "columns": [
-        ["id", "VARCHAR"],
-        ["report_id", "VARCHAR"],
-        ["node_id", "VARCHAR"],
-        ["run_type", "VARCHAR"],
-        ["status", "VARCHAR DEFAULT 'pending'"],
-        ["inputs", "JSON"],
-        ["outputs", "JSON"],
-        ["error", "TEXT"],
-        ["duration_ms", "INTEGER"],
-        ["started_at", "TIMESTAMP"],
-        ["completed_at", "TIMESTAMP"],
-        ["created_by", "VARCHAR NOT NULL"],
-        ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
-        ["metadata", "JSON"]
+        [
+          "id",
+          "VARCHAR"
+        ],
+        [
+          "report_id",
+          "VARCHAR"
+        ],
+        [
+          "node_id",
+          "VARCHAR"
+        ],
+        [
+          "run_type",
+          "VARCHAR"
+        ],
+        [
+          "status",
+          "VARCHAR DEFAULT 'pending'"
+        ],
+        [
+          "inputs",
+          "JSON"
+        ],
+        [
+          "outputs",
+          "JSON"
+        ],
+        [
+          "error",
+          "TEXT"
+        ],
+        [
+          "duration_ms",
+          "INTEGER"
+        ],
+        [
+          "started_at",
+          "TIMESTAMP"
+        ],
+        [
+          "completed_at",
+          "TIMESTAMP"
+        ],
+        [
+          "created_by",
+          "VARCHAR NOT NULL"
+        ],
+        [
+          "created_at",
+          "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        ],
+        [
+          "metadata",
+          "JSON"
+        ]
       ],
       "primary_key": "id",
       "indexes": [
-        ["idx_topo_runs_report", ["report_id"]],
-        ["idx_topo_runs_node", ["node_id"]],
-        ["idx_topo_runs_type", ["run_type"]],
-        ["idx_topo_runs_status", ["status"]]
+        [
+          "idx_topo_runs_report",
+          [
+            "report_id"
+          ]
+        ],
+        [
+          "idx_topo_runs_node",
+          [
+            "node_id"
+          ]
+        ],
+        [
+          "idx_topo_runs_type",
+          [
+            "run_type"
+          ]
+        ],
+        [
+          "idx_topo_runs_status",
+          [
+            "status"
+          ]
+        ]
       ]
     }
   ]
