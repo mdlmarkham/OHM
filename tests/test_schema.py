@@ -519,7 +519,10 @@ class TestSchemaConfigSerialization:
     def test_topo_classmethod_matches_json(self):
         from_json = SchemaConfig.from_json_file("topo.json")
         from_cls = SchemaConfig.topo()
-        assert from_json.node_types == from_cls.node_types
+        # OHM-814: topo.json is the source of truth; SchemaConfig.topo() is
+        # a backward-compat fallback. JSON may have additional types (e.g.
+        # cement subtypes from #810) not in the classmethod.
+        assert from_cls.node_types.issubset(from_json.node_types)
         assert from_json.observation_types == from_cls.observation_types
         assert from_json.provenances == from_cls.provenances
 

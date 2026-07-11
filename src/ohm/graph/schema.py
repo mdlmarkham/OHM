@@ -1628,8 +1628,11 @@ def resolve_schema_by_name(
 # Default OHM schema config instance
 DEFAULT_SCHEMA = SchemaConfig()
 
-# TOPO (industrial) schema config instance
-TOPO_SCHEMA = SchemaConfig.topo()
+# OHM-814: TOPO_SCHEMA now loads from the bundled topo.json template
+# (the live, complete source of truth) instead of the hardcoded
+# SchemaConfig.topo() classmethod. The classmethod is kept as a
+# backward-compat fallback for code that calls it directly.
+TOPO_SCHEMA = resolve_schema_by_name("topo")
 
 # Beef Herd schema config instance
 BEEF_SCHEMA = SchemaConfig.beef_herd()

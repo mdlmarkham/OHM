@@ -693,7 +693,7 @@ def build_parser() -> argparse.ArgumentParser:
     # topo compliance-map
     topo_cm = topo_sub.add_parser(
         "compliance-map",
-        help="Map compliance relationships around a node",
+        help="Map relationships around a node (alias for ohm graph neighborhood).",
     )
     topo_cm.add_argument("node_id", help="Node ID to map compliance around")
     topo_cm.add_argument(
@@ -712,7 +712,7 @@ def build_parser() -> argparse.ArgumentParser:
     # topo impact-study
     topo_is = topo_sub.add_parser(
         "impact-study",
-        help="Comprehensive impact study combining failure analysis and neighborhood",
+        help="Comprehensive impact study (alias for ohm graph impact + neighborhood).",
     )
     topo_is.add_argument("node_id", help="Node ID to study")
     topo_is.add_argument(
@@ -2773,7 +2773,7 @@ def _handle_topo_schema(args: argparse.Namespace) -> None:
 
 
 def _handle_topo_failure_analysis(args: argparse.Namespace) -> None:
-    """Trace failure propagation from a node using industrial edge types.
+    """Trace failure propagation from a node (alias for ohm graph impact with industrial edge-type defaults).
 
     Uses query_impact to find downstream effects, filtered by
     industrial-relevant edge types (FEEDS, FLOWS_TO, DEPENDS_ON).
@@ -2820,7 +2820,7 @@ def _handle_topo_failure_analysis(args: argparse.Namespace) -> None:
 
 
 def _handle_topo_compliance_map(args: argparse.Namespace) -> None:
-    """Map compliance relationships around a node.
+    """Map relationships around a node (alias for ohm graph neighborhood)..
 
     Uses query_neighborhood to find all edges within depth hops,
     highlighting compliance-relevant connections (BELONGS_TO, CONTAINS,
@@ -2891,7 +2891,7 @@ def _handle_topo_compliance_map(args: argparse.Namespace) -> None:
 
 
 def _handle_topo_impact_study(args: argparse.Namespace) -> None:
-    """Comprehensive impact study combining failure analysis and neighborhood.
+    """Comprehensive impact study (alias for ohm graph impact + neighborhood)..
 
     Runs both query_impact (downstream failure propagation) and
     query_neighborhood (local context) to produce a combined report.

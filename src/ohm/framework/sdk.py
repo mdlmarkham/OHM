@@ -5412,7 +5412,7 @@ class Graph:
             limit=limit,
         )
 
-    # ── TOPO Temporal Domain Tables (OHM-dh9l.1) ────────────────────────────
+    # ── Temporal Domain Tables (OHM-dh9l.1) ────────────────────────────
 
     def create_plan(
         self,
@@ -5428,7 +5428,7 @@ class Graph:
         metadata: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """Create a TOPO plan (time-bounded grouping of events).
+        """Create a plan (time-bounded grouping of events).
 
         Args:
             plan_id: Unique plan identifier.
@@ -5462,7 +5462,7 @@ class Graph:
         )
 
     def get_plan(self, plan_id: str) -> dict[str, Any] | None:
-        """Retrieve a single TOPO plan by ID.
+        """Retrieve a single plan by ID.
 
         Returns the full plan record or None if not found.
         """
@@ -5479,7 +5479,7 @@ class Graph:
         horizon: str | None = None,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
-        """List TOPO plans with optional filters.
+        """List plans with optional filters.
 
         Args:
             node_id: Filter by primary node.
@@ -5520,7 +5520,7 @@ class Graph:
         metadata: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """Create a TOPO temporal event.
+        """Create a temporal event.
 
         Args:
             event_id: Unique event identifier.
@@ -5580,7 +5580,7 @@ class Graph:
         return result
 
     def get_event(self, event_id: str) -> dict[str, Any] | None:
-        """Retrieve a single TOPO event by ID.
+        """Retrieve a single event by ID.
 
         Returns the full event record or None if not found.
         """
@@ -5600,7 +5600,7 @@ class Graph:
         limit: int = 100,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
-        """Fetch TOPO events for a node with optional filters.
+        """Fetch events for a node with optional filters.
 
         Args:
             node_id: Node to fetch events for.
@@ -5629,7 +5629,7 @@ class Graph:
         )
 
     def get_events_for_plan(self, plan_id: str) -> list[dict[str, Any]]:
-        """Fetch all TOPO events for a plan, ordered by start_ts.
+        """Fetch all events for a plan, ordered by start_ts.
 
         Args:
             plan_id: Plan ID to fetch events for.
@@ -5653,7 +5653,7 @@ class Graph:
         metadata: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """Create a directed link between two TOPO events.
+        """Create a directed link between two events.
 
         Args:
             link_id: Unique link identifier.
@@ -5691,7 +5691,7 @@ class Graph:
         edge_type: str | None = None,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
-        """Fetch TOPO event links with optional filters.
+        """Fetch event links with optional filters.
 
         Args:
             event_id: Filter to links where this event is either from or to.
@@ -5725,10 +5725,10 @@ class Graph:
         include_plans: bool = True,
         max_depth: int = 10,
     ) -> dict[str, Any]:
-        """Roll up TOPO temporal events from a subtree rooted at an ancestor.
+        """Roll up temporal events from a subtree rooted at an ancestor.
 
         Traverses L1 CONTAINS edges downward from *ancestor_node_id* to collect
-        all descendant nodes, then returns the matching topo_events (and, by
+        all descendant nodes, then returns the matching events (and, by
         default, the plans that own them) filtered by horizon, date range,
         event class, or plan.
 
@@ -5739,7 +5739,7 @@ class Graph:
             end_before: Optional ISO timestamp; only events ending at or before.
             event_class: Optional event class filter (e.g. 'shutdown', 'outage').
             plan_id: Optional plan filter; restricts events to one plan.
-            include_plans: If True (default), include matching topo_plans rows.
+            include_plans: If True (default), include matching plans rows.
             max_depth: Maximum L1 traversal depth (default 10).
 
         Returns:
@@ -5775,7 +5775,7 @@ class Graph:
         status: str = "draft",
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Create a TOPO analytical report artifact (OHM-o3rd).
+        """Create an analytical report artifact (OHM-o3rd).
 
         Args:
             report_id: Unique report identifier.
@@ -5812,7 +5812,7 @@ class Graph:
         )
 
     def get_report(self, report_id: str) -> dict[str, Any] | None:
-        """Fetch a single TOPO report by id (OHM-o3rd)."""
+        """Fetch a single report by id (OHM-o3rd)."""
         from ohm.queries import get_report as _get_report
 
         return _get_report(self._conn, report_id)
@@ -5825,7 +5825,7 @@ class Graph:
         plan_id: str | None = None,
         status: str | None = None,
     ) -> list[dict[str, Any]]:
-        """List TOPO reports with optional filters (OHM-o3rd)."""
+        """List reports with optional filters (OHM-o3rd)."""
         from ohm.queries import list_reports as _list_reports
 
         return _list_reports(
@@ -5842,7 +5842,7 @@ class Graph:
         *,
         confidence_adjustments: dict[str, float] | None = None,
     ) -> dict[str, Any]:
-        """Finalize a TOPO report and optionally apply L3 edge confidence
+        """Finalize a report and optionally apply L3 edge confidence
         adjustments (OHM-o3rd feedback loop).
 
         Args:
@@ -5867,7 +5867,7 @@ class Graph:
         old_report_id: str,
         new_report_id: str,
     ) -> None:
-        """Mark an old TOPO report as superseded by a newer version (OHM-o3rd)."""
+        """Mark an old report as superseded by a newer version (OHM-o3rd)."""
         from ohm.queries import supersede_report as _supersede_report
 
         _supersede_report(

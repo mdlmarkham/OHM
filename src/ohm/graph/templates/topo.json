@@ -168,6 +168,23 @@
       "RISKS",
       "THREATENS",
       "TRIGGERS_INCIDENT"
+    ],
+    "L4": [
+      "BLOCKS",
+      "DEPENDS_ON",
+      "ENABLES",
+      "EXECUTED_BY",
+      "EXPECTS",
+      "EXPECTS_FROM",
+      "FEEDBACK_TO",
+      "INTERVENES_ON",
+      "ORDERS_TEST",
+      "PLANS",
+      "PREDICTS",
+      "PROPOSED_BY",
+      "RISKS",
+      "THREATENS",
+      "TRIGGERS_INCIDENT"
     ]
   },
   "layer_descriptions": {
