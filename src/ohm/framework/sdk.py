@@ -2827,6 +2827,58 @@ class Graph:
 
         return query_path(self._conn, from_node, to_node, max_depth=max_depth)
 
+    def get_edges_by_path(
+        self,
+        from_prefix: str,
+        *,
+        to_prefix: str | None = None,
+        layer: str | None = None,
+        edge_type: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Query edges by node_path prefix (OHM-809).
+
+        Uses the node_path column (OHM-ivlt) on ohm_nodes to find edges
+        where the from-node's path starts with from_prefix. If to_prefix
+        is given, also filters on the to-node's path prefix.
+
+        Args:
+            from_prefix: Path prefix for the from-node (e.g. 'TA.MA.CEM.RCC')
+            to_prefix: Optional path prefix for the to-node
+            layer: Optional edge layer filter (e.g. 'L3')
+            edge_type: Optional edge type filter (e.g. 'CAUSES')
+            limit: Maximum results (default 100)
+
+        Returns:
+            List of edge dicts with from_path and to_path included.
+        """
+        query = """
+            SELECT e.*, nf.node_path AS from_path, nt.node_path AS to_path
+            FROM ohm_edges e
+            JOIN ohm_nodes nf ON nf.id = e.from_node
+            JOIN ohm_nodes nt ON nt.id = e.to_node
+            WHERE nf.node_path LIKE ? || '%'
+              AND e.deleted_at IS NULL
+              AND nf.deleted_at IS NULL
+              AND nt.deleted_at IS NULL
+        """
+        params: list[Any] = [from_prefix]
+        if to_prefix:
+            query += " AND nt.node_path LIKE ? || '%'"
+            params.append(to_prefix)
+        if layer:
+            query += " AND e.layer = ?"
+            params.append(layer)
+        if edge_type:
+            query += " AND e.edge_type = ?"
+            params.append(edge_type)
+        query += " LIMIT ?"
+        params.append(limit)
+
+        result = self._conn.execute(query, params)
+        columns = [desc[0] for desc in result.description]
+        return [dict(zip(columns, row)) for row in result.fetchall()]
+
     def impact(self, node_id: str, *, depth: int = 5) -> list[dict[str, Any]]:
         """Downstream impact analysis."""
         from ohm.queries import query_impact
