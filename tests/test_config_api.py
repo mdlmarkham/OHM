@@ -216,3 +216,41 @@ class TestStartupResolution:
 
         # Should be unchanged from defaults (no ohm_meta values to apply)
         assert config["semantic_layer"]["auto_actions_enabled"] == original_sl_enabled
+
+
+class TestPutConfigHttp:
+    """End-to-end test: PUT /config over real HTTP (OHM-801)."""
+
+    def test_put_config_over_http(self, test_server):
+        """PUT /config writes to ohm_meta and GET /config reads it back."""
+        port, _ = test_server
+        from tests.conftest import _request
+
+        # PUT a config value
+        status, data = _request("PUT", port, "/config", body={"test_key": "test_value"})
+        assert status == 200
+        assert "updated" in data
+
+        # GET it back
+        status, data = _request("GET", port, "/config")
+        assert status == 200
+        assert data.get("test_key") == "test_value"
+
+    def test_put_config_rejects_reserved_keys(self, test_server):
+        """PUT /config should silently skip reserved keys."""
+        port, _ = test_server
+        from tests.conftest import _request
+
+        status, data = _request("PUT", port, "/config", body={"schema_version": "99.99.99"})
+        assert status == 200
+        # schema_version should not be updated
+        assert "99.99.99" not in str(data.get("updated", {}))
+
+    def test_put_unregistered_route_returns_405(self, test_server):
+        """PUT to a route not registered under PUT should return 405, not 501."""
+        port, _ = test_server
+        from tests.conftest import _request
+
+        # /node is a GET/POST/DELETE route, not PUT
+        status, data = _request("PUT", port, "/node/test_node", body={"key": "value"})
+        assert status == 405

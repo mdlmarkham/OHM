@@ -1063,6 +1063,7 @@ class OhmHandler(
     _GET_PREFIXES: list = []
     _POST_EXACT: dict = {}
     _POST_PREFIXES: list = []
+    _PUT_EXACT: dict = {}
     _DELETE_PREFIXES: list = []
 
     @property
@@ -1993,6 +1994,65 @@ class OhmHandler(
                 elapsed,
             )
 
+    def do_PUT(self):
+        """Handle PUT requests with error mapping and correlation IDs (OHM-801)."""
+        self._correlation_id = str(uuid.uuid4())
+        start = time.time()
+        with _metrics_lock:
+            _metrics["requests_total"] += 1
+        try:
+            if not self._check_rate_limit():
+                with _metrics_lock:
+                    _metrics["rate_limited"] += 1
+                self._json_response(
+                    429,
+                    {
+                        "error": "rate_limited",
+                        "message": "Too many requests. Try again later.",
+                        "correlation_id": self._correlation_id,
+                    },
+                )
+                return
+            from urllib.parse import urlparse as _up
+
+            _path = _up(self.path).path.rstrip("/") or "/"
+            _ok, _allowed = _ROUTER.check("PUT", _path)
+            if not _ok:
+                self._method_not_allowed(_allowed)
+                return
+            self._do_PUT()
+        except OHMError as e:
+            self._error_response(e)
+        except ValueError as e:
+            self._error_response(ValidationError(str(e)))
+        except Exception as e:
+            import logging as _logging
+
+            _logger = _logging.getLogger("ohm.server")
+            _type = type(e).__name__
+            if "Constraint" in _type or "constraint" in str(e).lower():
+                _logger.warning("PUT %s - 409 Conflict: %s", self.path, e)
+                self._error_response(ConflictError(f"Constraint violation: {e}"))
+            else:
+                _logger.error("PUT %s - 500 (unhandled %s): %s", self.path, _type, e, exc_info=True)
+                self._error_response(OHMError(str(e)))
+        finally:
+            elapsed = (time.time() - start) * 1000
+            code = getattr(self, "_response_code", 0)
+            with _metrics_lock:
+                if 400 <= code < 500:
+                    _metrics["errors_4xx"] += 1
+                elif code >= 500:
+                    _metrics["errors_5xx"] += 1
+                _request_latencies.append(elapsed)
+            _record_endpoint_latency("PUT", self.path, elapsed, code)
+            self.log_message(
+                "PUT %s - %s (%.1fms)",
+                self.path,
+                code,
+                elapsed,
+            )
+
     def do_PATCH(self):
         """Handle PATCH requests with error mapping and correlation IDs."""
         self._correlation_id = str(uuid.uuid4())
@@ -2539,6 +2599,44 @@ class OhmHandler(
         else:
             self._json_response(404, {"error": f"Unknown endpoint: {path}"})
 
+    def _do_PUT(self):
+        """Handle PUT requests - config updates (OHM-801).
+
+        Requires auth. Dispatches to _PUT_EXACT handler table.
+        """
+        if self.no_auth:
+            agent = self._authenticate() or "ohm"
+        else:
+            agent = self._authenticate()
+            if agent is None:
+                raise AuthenticationError("Authentication required - provide Bearer token")
+
+        from urllib.parse import urlparse, parse_qs
+
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/")
+        qs = parse_qs(parsed.query)
+        body = self._read_body()
+        body = self._validate_body(path, body)
+
+        method_name = self._PUT_EXACT.get(path)
+        if method_name:
+            with self._write_lock:
+                customer_id = self._customer_id
+                if customer_id and self.tenant_manager:
+                    from ohm.tenant import TenantNotFoundError
+
+                    try:
+                        write_lock = self.tenant_manager.get_write_lock(customer_id)
+                    except TenantNotFoundError:
+                        raise NodeNotFoundError("Tenant not found - provision this tenant before use")
+                    with write_lock:
+                        getattr(self, method_name)(path, qs, body, agent)
+                else:
+                    getattr(self, method_name)(path, qs, body, agent)
+        else:
+            self._json_response(404, {"error": f"Unknown endpoint: {path}"})
+
 
 # ── Dispatch table population ─────────────────────────────────────────────────
 # Populated after class body so method names are valid references.
@@ -2549,6 +2647,11 @@ OhmHandler._DELETE_PREFIXES = [
     ("/hooks/", "_delete_hook"),
     ("/tenant/", "_delete_tenant_prefix"),
 ]
+
+# OHM-801: PUT dispatch table
+OhmHandler._PUT_EXACT = {
+    "/config": "_put_config",
+}
 
 OhmHandler._POST_EXACT = {
     "/tenant/provision": "_post_tenant_provision",
@@ -2593,7 +2696,6 @@ OhmHandler._POST_EXACT = {
     "/admin/purge-orphans": "_post_admin_purge_orphans",
     "/admin/repair-dangling": "_post_admin_repair_dangling",
     "/admin/sync-beads": "_post_admin_sync_beads",
-    "/config": "_put_config",
     "/bootstrap": "_post_bootstrap",
     "/discover/queue/review": "_post_discovery_review",
     "/metrics/semantic/actions": "_post_metrics_semantic_actions",
