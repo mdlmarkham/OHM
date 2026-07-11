@@ -3343,3 +3343,94 @@ _ver_mod.query_record_outcome = query_record_outcome
 
 # OHM-447 Phase 5: inject query_source_reliability into data_products module
 _dp_mod.query_source_reliability = query_source_reliability
+
+
+# ── OHM-802: External signal attachments ────────────────────────────────────
+
+
+def create_external_signal(
+    conn: "DuckDBPyConnection",
+    *,
+    node_id: str,
+    source_type: str,
+    source_id: str | None = None,
+    source_path: str | None = None,
+    unit: str | None = None,
+    domain: str = "ohm",
+    metadata: dict | None = None,
+    created_by: str = "system",
+) -> dict[str, Any]:
+    """Attach an external signal to a graph node (OHM-802).
+
+    Idempotent: if a signal with the same (node_id, source_type, source_id)
+    already exists and is not deleted, returns the existing record.
+    """
+    import json as _json
+
+    # Check for existing (idempotency)
+    if source_id:
+        result = conn.execute(
+            "SELECT * FROM external_signals WHERE node_id = ? AND source_type = ? AND source_id = ? AND deleted_at IS NULL LIMIT 1",
+            [node_id, source_type, source_id],
+        )
+        columns = [desc[0] for desc in result.description]
+        row = result.fetchone()
+        if row:
+            return dict(zip(columns, row))
+
+    metadata_json = _json.dumps(metadata) if metadata else None
+    conn.execute(
+        """
+        INSERT INTO external_signals (node_id, source_type, source_id, source_path, unit, domain, metadata, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [node_id, source_type, source_id, source_path, unit, domain, metadata_json, created_by],
+    )
+
+    result = conn.execute(
+        "SELECT * FROM external_signals WHERE node_id = ? AND source_type = ? AND created_by = ? ORDER BY created_at DESC LIMIT 1",
+        [node_id, source_type, created_by],
+    )
+    columns = [desc[0] for desc in result.description]
+    row = result.fetchone()
+    if row:
+        return dict(zip(columns, row))
+    return {}
+
+
+def get_external_signals(
+    conn: "DuckDBPyConnection",
+    node_id: str,
+    *,
+    source_type: str | None = None,
+    domain: str | None = None,
+) -> list[dict[str, Any]]:
+    """Get external signals attached to a node (OHM-802)."""
+    query = "SELECT * FROM external_signals WHERE node_id = ? AND deleted_at IS NULL"
+    params: list[Any] = [node_id]
+    if source_type:
+        query += " AND source_type = ?"
+        params.append(source_type)
+    if domain:
+        query += " AND domain = ?"
+        params.append(domain)
+    query += " ORDER BY created_at DESC"
+
+    result = conn.execute(query, params)
+    columns = [desc[0] for desc in result.description]
+    return [dict(zip(columns, row)) for row in result.fetchall()]
+
+
+def delete_external_signal(conn: "DuckDBPyConnection", signal_id: str) -> bool:
+    """Soft-delete an external signal attachment (OHM-802)."""
+    existing = conn.execute(
+        "SELECT id FROM external_signals WHERE id = ? AND deleted_at IS NULL",
+        [signal_id],
+    ).fetchone()
+    if not existing:
+        return False
+    conn.execute(
+        "UPDATE external_signals SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?",
+        [signal_id],
+    )
+    return True

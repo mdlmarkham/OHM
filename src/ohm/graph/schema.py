@@ -2060,7 +2060,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.48.0"
+SCHEMA_VERSION = "0.49.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -2752,6 +2752,28 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
         [
             "ALTER TABLE ohm_observations ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR",
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_obs_idempotency ON ohm_observations(idempotency_key) WHERE idempotency_key IS NOT NULL",
+        ],
+    ),
+    (
+        "0.49.0",
+        "OHM-802: external_signals table for generic signal/data-stream attachments to nodes",
+        [
+            """CREATE TABLE IF NOT EXISTS external_signals (
+                id          VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+                node_id     VARCHAR NOT NULL,
+                source_type VARCHAR NOT NULL,
+                source_id   VARCHAR,
+                source_path VARCHAR,
+                unit        VARCHAR,
+                domain      VARCHAR NOT NULL DEFAULT 'ohm',
+                metadata    JSON,
+                created_by  VARCHAR NOT NULL,
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                deleted_at  TIMESTAMP
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_ext_sig_node ON external_signals(node_id) WHERE deleted_at IS NULL",
+            "CREATE INDEX IF NOT EXISTS idx_ext_sig_source ON external_signals(source_type, source_id) WHERE deleted_at IS NULL",
+            "CREATE INDEX IF NOT EXISTS idx_ext_sig_domain ON external_signals(domain) WHERE deleted_at IS NULL",
         ],
     ),
 ]
