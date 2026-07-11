@@ -2825,7 +2825,99 @@ def make_configured_handler(store: OhmStore):
     return _ConfiguredHandler
 
 
-def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None = None):
+def _apply_ohm_meta_config(conn, config: dict, file_config: dict | None = None) -> None:
+    """Merge behavioral config from ohm_meta into the in-memory config dict (OHM-796).
+
+    Merge order: DEFAULT_CONFIG < ohm_meta (DB) < ohmd.json (file) < env < CLI.
+    Only fills in a key if it is NOT already set in the file config.
+    File/env/CLI values always win over DB values.
+
+    Args:
+        conn: DuckDB connection (for reading ohm_meta)
+        config: The already-merged config dict (DEFAULT_CONFIG + file + env + CLI)
+        file_config: The raw file config dict (before DEFAULT_CONFIG merge).
+            If None, ohm_meta values apply whenever the config still matches
+            the default (best-effort fallback).
+    """
+    from ohm.graph.schema import get_meta
+
+    if file_config is None:
+        file_config = {}
+
+    def _bool(val: str | None) -> bool | None:
+        if val is None:
+            return None
+        return val.lower() in ("true", "1", "yes")
+
+    def _int(val: str | None) -> int | None:
+        if val is None:
+            return None
+        try:
+            return int(val)
+        except ValueError:
+            return None
+
+    file_sl = file_config.get("semantic_layer", {})
+    sl = config.setdefault("semantic_layer", dict(DEFAULT_CONFIG["semantic_layer"]))
+    if "auto_actions_enabled" not in file_sl:
+        v = _bool(get_meta(conn, "semantic_layer.enabled"))
+        if v is not None:
+            sl["auto_actions_enabled"] = v
+    if "auto_actions_interval_seconds" not in file_sl:
+        v = _int(get_meta(conn, "semantic_layer.interval_sec"))
+        if v is not None:
+            sl["auto_actions_interval_seconds"] = v
+    if "auto_actions_rate_limit_seconds" not in file_sl:
+        v = _int(get_meta(conn, "semantic_layer.rate_limit_sec"))
+        if v is not None:
+            sl["auto_actions_rate_limit_seconds"] = v
+
+    file_bs = file_config.get("beads_sync", {})
+    bs = config.setdefault("beads_sync", dict(DEFAULT_CONFIG["beads_sync"]))
+    if "enabled" not in file_bs:
+        v = _bool(get_meta(conn, "beads_sync.enabled"))
+        if v is not None:
+            bs["enabled"] = v
+    if "interval_seconds" not in file_bs:
+        v = _int(get_meta(conn, "beads_sync.interval_sec"))
+        if v is not None:
+            bs["interval_seconds"] = v
+    if "startup_sync" not in file_bs:
+        v = _bool(get_meta(conn, "beads_sync.startup_sync"))
+        if v is not None:
+            bs["startup_sync"] = v
+
+    file_dl = file_config.get("ducklake", {})
+    dl = config.setdefault("ducklake", {})
+    if "sync_interval_seconds" not in file_dl:
+        v = _int(get_meta(conn, "ducklake.sync_interval_sec"))
+        if v is not None:
+            dl["sync_interval_seconds"] = v
+
+    file_br = file_config.get("bedrock", {})
+    br = config.setdefault("bedrock", {})
+    for key, meta_key in [
+        ("knowledge_base_id", "bedrock.kb_id"),
+        ("data_source_id", "bedrock.data_source_id"),
+        ("region", "bedrock.region"),
+    ]:
+        if key not in file_br:
+            v = get_meta(conn, meta_key)
+            if v is not None:
+                br[key] = v
+
+    if "onboarding_node_id" not in file_config:
+        v = get_meta(conn, "onboarding_node_id")
+        if v is not None:
+            config["onboarding_node_id"] = v
+
+    if "agent_onboarding_enabled" not in file_config:
+        v = _bool(get_meta(conn, "agent_onboarding_enabled"))
+        if v is not None:
+            config["agent_onboarding_enabled"] = v
+
+
+def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None = None, file_config: dict | None = None):
     """Run the HTTP server.
 
     When Quack is enabled and available, starts a Quack server on the
@@ -2843,6 +2935,11 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
     """
     if schema_config is None:
         schema_config = DEFAULT_SCHEMA
+
+    # OHM-796: Apply behavioral config from ohm_meta (DB-sourced).
+    # Merge order: DEFAULT_CONFIG < ohm_meta < ohmd.json < env vars < CLI.
+    # Only fills in keys NOT already set in the file config.
+    _apply_ohm_meta_config(store.conn, config, file_config=file_config)
 
     OhmHandler.config = config
     token_hashes, config_roles = _build_token_lookup(config.get("tokens", {}))
@@ -3290,17 +3387,28 @@ def main(schema_config: SchemaConfig | None = None):
     # Canonical config path: CLI --config wins, then OHM_CONFIG, then default.
     config_path = Path(args.config if args.config is not None else os.environ.get("OHM_CONFIG", str(Path.home() / ".ohm" / "ohmd.json")))
 
-    # OHM-795: Resolve schema config — priority: --schema <name> → DEFAULT_SCHEMA
+    config = load_config(str(config_path))
+
+    # OHM-796: Load raw file config (before DEFAULT_CONFIG merge) so
+    # _apply_ohm_meta_config can tell which keys were explicitly set
+    # in the file vs inherited from defaults.
+    file_config: dict[str, Any] = {}
+    if config_path.exists():
+        try:
+            with open(config_path) as f:
+                file_config = json.load(f)
+        except Exception:
+            file_config = {}
+
+    # OHM-795: Resolve schema config - priority: --schema <name> -> DEFAULT_SCHEMA
     # After store creation, SchemaConfig.from_db() takes precedence (see below).
-    from ohm.graph.schema import resolve_schema_by_name, DEFAULT_SCHEMA
+    from ohm.graph.schema import resolve_schema_by_name
 
     templates_dir = args.templates_dir or config.get("templates_dir")
     if args.schema:
         schema_config = resolve_schema_by_name(args.schema, templates_dir=templates_dir)
     else:
         schema_config = DEFAULT_SCHEMA
-
-    config = load_config(str(config_path))
 
     # CLI overrides
     if args.host:
@@ -3443,7 +3551,7 @@ def main(schema_config: SchemaConfig | None = None):
 
     # Run server
     try:
-        run_server(config, store, schema_config=schema_config)
+        run_server(config, store, schema_config=schema_config, file_config=file_config)
     except KeyboardInterrupt:
         print("\nShutting down...", file=sys.stderr)
     finally:

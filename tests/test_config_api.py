@@ -124,3 +124,95 @@ class TestBehavioralConfigKeys:
     def test_key_round_trip(self, db, key, value):
         set_meta(db, key, value)
         assert get_meta(db, key) == value
+
+
+class TestStartupResolution:
+    """Test _apply_ohm_meta_config — behavioral config from DB into runtime config."""
+
+    def test_db_values_apply_when_file_silent(self, db):
+        from ohm.server.server import _apply_ohm_meta_config, DEFAULT_CONFIG
+
+        set_meta(db, "semantic_layer.enabled", "true")
+        set_meta(db, "semantic_layer.interval_sec", "5")
+        set_meta(db, "beads_sync.enabled", "false")
+        set_meta(db, "ducklake.sync_interval_sec", "99")
+
+        config = dict(DEFAULT_CONFIG)  # start with defaults
+        _apply_ohm_meta_config(db, config, file_config={})
+
+        assert config["semantic_layer"]["auto_actions_enabled"] is True
+        assert config["semantic_layer"]["auto_actions_interval_seconds"] == 5
+        assert config["beads_sync"]["enabled"] is False
+        assert config["ducklake"]["sync_interval_seconds"] == 99
+
+    def test_file_values_win_over_db(self, db):
+        from ohm.server.server import _apply_ohm_meta_config
+
+        set_meta(db, "semantic_layer.enabled", "true")
+        set_meta(db, "semantic_layer.interval_sec", "5")
+
+        config = {"semantic_layer": {"auto_actions_enabled": False, "auto_actions_interval_seconds": 3600}}
+        file_config = {"semantic_layer": {"auto_actions_enabled": False, "auto_actions_interval_seconds": 3600}}
+        _apply_ohm_meta_config(db, config, file_config=file_config)
+
+        # File values should win
+        assert config["semantic_layer"]["auto_actions_enabled"] is False
+        assert config["semantic_layer"]["auto_actions_interval_seconds"] == 3600
+
+    def test_false_string_disables_feature(self, db):
+        from ohm.server.server import _apply_ohm_meta_config
+
+        set_meta(db, "semantic_layer.enabled", "false")
+        config = {}
+        _apply_ohm_meta_config(db, config, file_config={})
+
+        assert config["semantic_layer"]["auto_actions_enabled"] is False
+
+    def test_integer_coercion(self, db):
+        from ohm.server.server import _apply_ohm_meta_config
+
+        set_meta(db, "semantic_layer.interval_sec", "42")
+        config = {}
+        _apply_ohm_meta_config(db, config, file_config={})
+
+        assert config["semantic_layer"]["auto_actions_interval_seconds"] == 42
+        assert isinstance(config["semantic_layer"]["auto_actions_interval_seconds"], int)
+
+    def test_onboarding_node_id_from_db(self, db):
+        from ohm.server.server import _apply_ohm_meta_config
+
+        set_meta(db, "onboarding_node_id", "node_abc")
+        config = {}
+        _apply_ohm_meta_config(db, config, file_config={})
+
+        assert config["onboarding_node_id"] == "node_abc"
+
+    def test_bedrock_keys_from_db(self, db):
+        from ohm.server.server import _apply_ohm_meta_config
+
+        set_meta(db, "bedrock.kb_id", "kb-123")
+        set_meta(db, "bedrock.region", "us-east-1")
+        config = {}
+        _apply_ohm_meta_config(db, config, file_config={})
+
+        assert config["bedrock"]["knowledge_base_id"] == "kb-123"
+        assert config["bedrock"]["region"] == "us-east-1"
+
+    def test_agent_onboarding_enabled_from_db(self, db):
+        from ohm.server.server import _apply_ohm_meta_config
+
+        set_meta(db, "agent_onboarding_enabled", "true")
+        config = {}
+        _apply_ohm_meta_config(db, config, file_config={})
+
+        assert config["agent_onboarding_enabled"] is True
+
+    def test_no_db_values_leaves_defaults(self, db):
+        from ohm.server.server import _apply_ohm_meta_config, DEFAULT_CONFIG
+
+        config = dict(DEFAULT_CONFIG)
+        original_sl_enabled = config["semantic_layer"]["auto_actions_enabled"]
+        _apply_ohm_meta_config(db, config, file_config={})
+
+        # Should be unchanged from defaults (no ohm_meta values to apply)
+        assert config["semantic_layer"]["auto_actions_enabled"] == original_sl_enabled
