@@ -2060,7 +2060,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.49.0"
+SCHEMA_VERSION = "0.50.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -2774,6 +2774,104 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             "CREATE INDEX IF NOT EXISTS idx_ext_sig_node ON external_signals(node_id) WHERE deleted_at IS NULL",
             "CREATE INDEX IF NOT EXISTS idx_ext_sig_source ON external_signals(source_type, source_id) WHERE deleted_at IS NULL",
             "CREATE INDEX IF NOT EXISTS idx_ext_sig_domain ON external_signals(domain) WHERE deleted_at IS NULL",
+        ],
+    ),
+    (
+        "0.50.0",
+        "OHM-805/#806/#808: domain assumptions/expectations, staleness log, metric versions tables",
+        [
+            # OHM-805: domain assumptions and expectations
+            """CREATE TABLE IF NOT EXISTS domain_assumptions (
+                id          VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+                node_id     VARCHAR,
+                domain      VARCHAR NOT NULL DEFAULT 'ohm',
+                assumption_type VARCHAR NOT NULL,
+                key         VARCHAR NOT NULL,
+                value       VARCHAR,
+                metadata    JSON,
+                created_by  VARCHAR NOT NULL,
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                deleted_at  TIMESTAMP
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_dom_assum_node ON domain_assumptions(node_id) WHERE deleted_at IS NULL",
+            "CREATE INDEX IF NOT EXISTS idx_dom_assum_domain ON domain_assumptions(domain) WHERE deleted_at IS NULL",
+            # OHM-805: domain expectations
+            """CREATE TABLE IF NOT EXISTS domain_expectations (
+                id          VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+                node_id     VARCHAR,
+                domain      VARCHAR NOT NULL DEFAULT 'ohm',
+                expectation_type VARCHAR NOT NULL,
+                key         VARCHAR NOT NULL,
+                expected_value VARCHAR,
+                actual_value VARCHAR,
+                status      VARCHAR DEFAULT 'pending',
+                metadata    JSON,
+                created_by  VARCHAR NOT NULL,
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                resolved_at TIMESTAMP,
+                deleted_at  TIMESTAMP
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_dom_exp_node ON domain_expectations(node_id) WHERE deleted_at IS NULL",
+            "CREATE INDEX IF NOT EXISTS idx_dom_exp_domain ON domain_expectations(domain) WHERE deleted_at IS NULL",
+            "CREATE INDEX IF NOT EXISTS idx_dom_exp_status ON domain_expectations(status) WHERE deleted_at IS NULL",
+            # OHM-806: staleness log
+            """CREATE TABLE IF NOT EXISTS staleness_log (
+                id          VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+                node_id     VARCHAR NOT NULL,
+                domain      VARCHAR NOT NULL DEFAULT 'ohm',
+                trigger_type VARCHAR NOT NULL,
+                staleness_score FLOAT,
+                last_updated TIMESTAMP,
+                metadata    JSON,
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_stale_node ON staleness_log(node_id)",
+            "CREATE INDEX IF NOT EXISTS idx_stale_domain ON staleness_log(domain)",
+            "CREATE INDEX IF NOT EXISTS idx_stale_trigger ON staleness_log(trigger_type)",
+            # OHM-808: metric versions
+            """CREATE TABLE IF NOT EXISTS metric_versions (
+                id          VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+                node_id     VARCHAR NOT NULL,
+                domain      VARCHAR NOT NULL DEFAULT 'ohm',
+                version_number INTEGER NOT NULL DEFAULT 1,
+                formula_ref VARCHAR,
+                formula_description TEXT,
+                scope       VARCHAR,
+                valid_from  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                valid_to    TIMESTAMP,
+                metadata    JSON,
+                created_by  VARCHAR NOT NULL,
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                deleted_at  TIMESTAMP
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_metric_ver_node ON metric_versions(node_id) WHERE deleted_at IS NULL",
+            "CREATE INDEX IF NOT EXISTS idx_metric_ver_domain ON metric_versions(domain) WHERE deleted_at IS NULL",
+            # OHM-804: domain simulation runs
+            """CREATE TABLE IF NOT EXISTS domain_simulation_runs (
+                id          VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+                domain      VARCHAR NOT NULL DEFAULT 'ohm',
+                simulation_type VARCHAR NOT NULL,
+                parameters  JSON,
+                status      VARCHAR DEFAULT 'pending',
+                started_by  VARCHAR NOT NULL,
+                started_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                completed_at TIMESTAMP,
+                metadata    JSON
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_sim_run_domain ON domain_simulation_runs(domain)",
+            "CREATE INDEX IF NOT EXISTS idx_sim_run_status ON domain_simulation_runs(status)",
+            # OHM-804: domain simulation results
+            """CREATE TABLE IF NOT EXISTS domain_simulation_results (
+                id          VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+                run_id      VARCHAR NOT NULL,
+                node_id     VARCHAR,
+                result_type VARCHAR,
+                value       FLOAT,
+                metadata    JSON,
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_sim_res_run ON domain_simulation_results(run_id)",
+            "CREATE INDEX IF NOT EXISTS idx_sim_res_node ON domain_simulation_results(node_id)",
         ],
     ),
 ]
