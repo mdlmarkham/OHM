@@ -1,7 +1,7 @@
 ---
 description: OHM schema migrations and validators. Use when adding a new VALID_* frozenset, a new column to ohm_nodes/ohm_edges, or a validate_* function in framework/validation.py. Bumps SCHEMA_VERSION, appends to MIGRATIONS list, writes idempotent ALTER TABLE statements.
 mode: subagent
-model: ollama-cloud/kimi-k2.7-code:cloud
+model: Nvidia/GLM-5.2
 temperature: 0.0
 permission:
   edit: allow

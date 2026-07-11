@@ -83,5 +83,11 @@ class SemanticRoles:
     def negating_list(self) -> list[str]:
         return list(self.negating)
 
-    def evidential_list(self) -> list[str]:
-        return list(self.evidential)
+    def inference_edge_types(self) -> list[str]:
+        """Edge types used for inference ancestor discovery (bayesian ∪ evidential).
+
+        This set is used by compute_voi for ancestor BFS and should include all
+        edge types that can connect a decision to its causal ancestors, including
+        both structural edges (bayesian) and soft evidence edges (evidential).
+        """
+        return list(set(self.bayesian) | set(self.evidential))

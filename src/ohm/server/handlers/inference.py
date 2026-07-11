@@ -511,7 +511,9 @@ class InferenceHandlerMixin(OhmHandlerBase):
         evidence_str = qs.get("evidence", [""])[0]
         leak_probability = float(qs.get("leak", ["0.15"])[0])
         layers_str = qs.get("layers", [""])[0]
+        edge_types_str = qs.get("edge_types", [""])[0]
         layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
+        edge_types = [e.strip() for e in edge_types_str.split(",") if e.strip()] if edge_types_str else None
         evidence: dict[str, float | int] = {}
         if evidence_str:
             for pair in evidence_str.split(","):
@@ -535,7 +537,7 @@ class InferenceHandlerMixin(OhmHandlerBase):
                     self.current_store.conn,
                     target,
                     evidence,
-                    edge_types=None,
+                    edge_types=edge_types,
                     layers=layers,
                     leak_probability=leak_probability,
                     customer_id=self._customer_id,
@@ -566,6 +568,7 @@ class InferenceHandlerMixin(OhmHandlerBase):
                 voi_result = compute_voi(
                     self.current_store.conn,
                     decision_nodes=[target],
+                    edge_types=edge_types,
                     layers=layers,
                     top=5,
                     leak_probability=leak_probability,

@@ -122,6 +122,8 @@ def build_request(name: str, arguments: dict[str, Any], agent_id: str) -> tuple[
             params["layers"] = arguments["layers"]
         if arguments.get("leak") is not None:
             params["leak"] = str(arguments["leak"])
+        if arguments.get("edge_types"):
+            params["edge_types"] = arguments["edge_types"]
         return "GET", _qs("/belief", params), None
 
     if name == "ohm_discover":

@@ -193,6 +193,7 @@ def _build_soft_evidence_factors(
     soft_edge_types: list[str] | None = None,
     layers: list[str] | None = None,
     default_confidence: float = 0.7,
+    semantic_roles=None,
 ) -> list:
     """Convert SUPPORTS/APPLIES_TO edges into pgmpy TabularCPD virtual evidence factors.
 
@@ -219,7 +220,10 @@ def _build_soft_evidence_factors(
         return []
 
     if soft_edge_types is None:
-        soft_edge_types = ["SUPPORTS", "APPLIES_TO"]
+        if semantic_roles is not None:
+            soft_edge_types = semantic_roles.evidential_list()
+        else:
+            soft_edge_types = ["SUPPORTS", "CHALLENGED_BY"]
 
     model_nodes = set(model.nodes())
     soft_records = reader.get_edges(edge_types=soft_edge_types, layers=layers)
@@ -2188,9 +2192,9 @@ def compute_voi(
     """
     if edge_types is None:
         if semantic_roles is not None:
-            edge_types = semantic_roles.causal_list()
+            edge_types = semantic_roles.inference_edge_types()
         else:
-            edge_types = ["CAUSES", "INFLUENCES", "ENABLES", "DEPENDS_ON"]
+            edge_types = ["CAUSES", "INFLUENCES", "ENABLES", "DEPENDS_ON", "THREATENS", "SUPPORTS", "CHALLENGED_BY"]
 
     reader = _coerce_reader(conn)
 
@@ -2288,6 +2292,40 @@ def compute_voi(
         candidate_nodes.update(ancestors)
 
     if not candidate_nodes:
+        # Check if a Bayesian network can be built for the same decision nodes
+        # (indicates ancestors exist but weren't found by VoI's edge set)
+        network_exists = False
+        for decision in decision_nodes:
+            # Use the wider inference_edge_types to check if a network exists
+            wider_edge_types = None
+            if semantic_roles is not None:
+                wider_edge_types = semantic_roles.inference_edge_types()
+            else:
+                wider_edge_types = ["CAUSES", "INFLUENCES", "ENABLES", "DEPENDS_ON", "THREATENS", "SUPPORTS", "CHALLENGED_BY"]
+            
+            network = build_bayesian_network(
+                reader,
+                root_nodes=[decision],
+                edge_types=wider_edge_types,
+                layers=layers,
+                leak_probability=leak_probability,
+                root_prior=root_prior,
+                include_soft_evidence=include_soft_evidence,
+                soft_edge_types=soft_edge_types,
+            )
+            if network is not None:
+                network_exists = True
+                break
+        
+        message = "No causal ancestors found for the specified decision nodes."
+        if network_exists:
+            message = (
+                "No causal ancestors found using edge_types={edge_types}. "
+                "A Bayesian network can be built for these decision nodes, "
+                "indicating ancestors exist but weren't discovered by VoI's edge set. "
+                "Try widening edge_types to include more edge types."
+            ).format(edge_types=edge_types)
+        
         return {
             "method": "value_of_information",
             "decision_nodes": decision_nodes,
@@ -2295,7 +2333,7 @@ def compute_voi(
             "n_candidates": 0,
             "mixed_sensitivity_methods": False,
             "sensitivity_methods_used": [],
-            "message": "No causal ancestors found for the specified decision nodes.",
+            "message": message,
         }
 
     # Get node labels and confidence for each candidate
