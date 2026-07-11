@@ -518,7 +518,9 @@ class TestSchemaConfigSerialization:
 
     def test_topo_classmethod_matches_json(self):
         from_json = SchemaConfig.from_json_file("topo.json")
-        from_cls = SchemaConfig.topo()
+        from ohm.graph.schema import resolve_schema_by_name
+
+        from_cls = resolve_schema_by_name("topo")
         # OHM-814: topo.json is the source of truth; SchemaConfig.topo() is
         # a backward-compat fallback. JSON may have additional types (e.g.
         # cement subtypes from #810) not in the classmethod.

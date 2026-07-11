@@ -25,6 +25,7 @@ from ohm.graph.schema import (
     SchemaConfig,
     TOPO_SCHEMA,
     normalize_node_type,
+    resolve_schema_by_name,
     validate_node_type,
 )
 
@@ -300,7 +301,7 @@ class TestBackwardCompatibility:
     def test_existing_topo_callers_still_get_node_types(self):
         # Code that called SchemaConfig.topo() before OHM-ue9k still
         # gets the same set of node types — only expanded by 4.
-        topo = SchemaConfig.topo()
+        topo = resolve_schema_by_name("topo")
         # The original 17 industrial types still present:
         for t in ("process", "instrument", "controller", "valve", "pump", "motor", "sensor", "pipeline", "vessel", "reactor", "heat_exchanger", "tank", "compressor", "generator", "transformer", "circuit", "bus", "line"):
             assert t in topo.node_types

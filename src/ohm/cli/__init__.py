@@ -617,7 +617,7 @@ def build_parser() -> argparse.ArgumentParser:
     # OHM-810: lineage and gaps commands (generic, domain-agnostic)
     lineage_parser = graph_sub.add_parser("lineage", help="Trace edge lineage from a node (recursive CTE traversal)")
     lineage_parser.add_argument("node_id", help="Starting node ID")
-    lineage_parser.add_argument("--edge-type", default="CALCULATED_FROM", help="Edge type to traverse (default: CALCULATED_FROM)")
+    lineage_parser.add_argument("--edge-type", default="DERIVES_FROM", help="Edge type to traverse (default: DERIVES_FROM)")
     lineage_parser.add_argument("--max-depth", type=int, default=10, help="Max traversal depth (default: 10)")
     lineage_parser.add_argument("--db", default=None, help="Database path")
     lineage_parser.add_argument("--actor", default=None, help="Agent name")

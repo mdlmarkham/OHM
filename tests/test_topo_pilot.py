@@ -32,6 +32,7 @@ from ohm.graph.schema import (
     DomainTable,
     SchemaConfig,
     initialize_schema,
+    resolve_schema_by_name,
 )
 from ohm.graph.store import OhmStore
 
@@ -69,7 +70,7 @@ def _make_topo_pilot_config() -> SchemaConfig:
         description="TOPO predictive-maintenance prospects (pilot table)",
     )
     # Start from the OHM-built topo() and append our pilot domain table.
-    base = SchemaConfig.topo()
+    base = resolve_schema_by_name("topo")
     return SchemaConfig(
         name="topo_pilot",
         node_types=base.node_types,
@@ -252,7 +253,7 @@ class TestTopoPilotScenarios:
 
     def test_pilot_with_no_domain_table(self, tmp_path):
         """A topo config with domain tables stripped still works for core OHM writes."""
-        full = SchemaConfig.topo()
+        full = resolve_schema_by_name("topo")
         cfg = SchemaConfig(
             name=full.name,
             node_types=full.node_types,
