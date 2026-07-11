@@ -1362,6 +1362,72 @@ class Graph:
             row["node_type"] = row["type"]
         return row
 
+    def node_context(self, node_id: str, *, domain: str | None = None) -> dict[str, Any]:
+        """Assemble a complete context envelope for a node (OHM-807).
+
+        Returns all relevant context in one call:
+        - node metadata
+        - neighborhood (upstream/downstream by layer)
+        - recent observations
+        - external signal attachments
+        - confidence summary
+
+        Domain-specific enrichment (prospects, plans, etc.) is added
+        when domain is specified and the domain's tables exist.
+
+        Args:
+            node_id: The node ID to get context for.
+            domain: Optional domain name for domain-specific enrichment.
+
+        Returns:
+            Dict with node, neighborhood, observations, signals, and
+            confidence fields. Returns empty structures for missing
+            components rather than errors.
+        """
+        node = self.get_node(node_id)
+        if node is None:
+            return {"error": "node_not_found", "node_id": node_id}
+
+        # Neighborhood (upstream + downstream, all layers)
+        try:
+            neighbors = self.neighborhood(node_id, depth=2)
+        except Exception:
+            neighbors = []
+
+        # Recent observations
+        try:
+            obs_result = self._conn.execute(
+                "SELECT * FROM ohm_observations WHERE node_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 10",
+                [node_id],
+            )
+            obs_columns = [desc[0] for desc in obs_result.description]
+            observations = [dict(zip(obs_columns, row)) for row in obs_result.fetchall()]
+        except Exception:
+            observations = []
+
+        # External signal attachments (OHM-802)
+        signals: list[dict[str, Any]] = []
+        try:
+            from ohm.graph.queries import get_external_signals
+
+            signals = get_external_signals(self._conn, node_id, domain=domain) if domain else get_external_signals(self._conn, node_id)
+        except Exception:
+            pass
+
+        # Confidence summary
+        try:
+            confidence = self.compound_confidence(node_id)
+        except Exception:
+            confidence = {}
+
+        return {
+            "node": node,
+            "neighborhood": neighbors,
+            "observations": observations,
+            "signals": signals,
+            "confidence": confidence,
+        }
+
     def get_edge(self, edge_id: str) -> dict[str, Any] | None:
         """Retrieve a single edge by ID.
 
