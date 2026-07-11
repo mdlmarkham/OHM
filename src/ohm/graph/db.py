@@ -301,11 +301,10 @@ def _try_ducklake_recovery(db_path_str: str) -> bool:
 
         snapshot_id = int(snapshots[0])  # Security: enforce integer type before SQL interpolation
 
-        # Export nodes and edges from snapshot
-        nodes = tmp_conn.execute(f"SELECT * FROM ohm_lake.ohm_nodes AT (VERSION => {snapshot_id})").fetchall()
-        edges = tmp_conn.execute(f"SELECT * FROM ohm_lake.ohm_edges AT (VERSION => {snapshot_id})").fetchall()
-
+        # Export nodes and edges from snapshot (filter soft-deleted — OHM-822)
+        nodes = tmp_conn.execute(f"SELECT * FROM ohm_lake.ohm_nodes AT (VERSION => {snapshot_id}) WHERE deleted_at IS NULL").fetchall()
         node_cols = [d[0] for d in tmp_conn.description]
+        edges = tmp_conn.execute(f"SELECT * FROM ohm_lake.ohm_edges AT (VERSION => {snapshot_id}) WHERE deleted_at IS NULL").fetchall()
         edge_cols = [d[0] for d in tmp_conn.description]
 
         if not nodes and not edges:
@@ -454,7 +453,7 @@ def _auto_restore_if_empty(conn: "duckdb.DuckDBPyConnection", db_path_str: str) 
         obs = []
         obs_cols = []
         try:
-            obs = tmp_conn.execute(f"SELECT * FROM ohm_lake.ohm_observations AT (VERSION => {snapshot_id})").fetchall()
+            obs = tmp_conn.execute(f"SELECT * FROM ohm_lake.ohm_observations AT (VERSION => {snapshot_id}) WHERE deleted_at IS NULL").fetchall()
             obs_cols = [d[0] for d in tmp_conn.description] if obs else []
         except Exception:
             logger.debug("No ohm_observations in DuckLake snapshot, skipping")

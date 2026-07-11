@@ -354,7 +354,7 @@ class OhmStore:
 
                             # OHM-8bli: only add deleted_at for tables that have it
                             if dlt.has_deleted_at:
-                                conn.execute(f"INSERT INTO {table} ({insert_cols}, deleted_at) SELECT {select_str}, NULL::TIMESTAMP FROM {dl_schema_prefix}.{table}")
+                                conn.execute(f"INSERT INTO {table} ({insert_cols}, deleted_at) SELECT {select_str}, NULL::TIMESTAMP FROM {dl_schema_prefix}.{table} WHERE deleted_at IS NULL")
                                 count = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]  # type: ignore[index]
                             else:
                                 conn.execute(f"INSERT INTO {table} ({insert_cols}) SELECT {select_str} FROM {dl_schema_prefix}.{table}")
@@ -495,7 +495,7 @@ class OhmStore:
 
                     # OHM-8bli: only add deleted_at for tables that have it
                     if dlt.has_deleted_at:
-                        self.conn.execute(f"INSERT INTO {table} ({insert_cols}, deleted_at) SELECT {select_str}, NULL::TIMESTAMP FROM {source_table}")
+                        self.conn.execute(f"INSERT INTO {table} ({insert_cols}, deleted_at) SELECT {select_str}, NULL::TIMESTAMP FROM {source_table} WHERE deleted_at IS NULL")
                         count = self.conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0]  # type: ignore[index]
                     else:
                         self.conn.execute(f"INSERT INTO {table} ({insert_cols}) SELECT {select_str} FROM {source_table}")
@@ -3176,35 +3176,39 @@ class OhmStore:
             return 0
         common_str = ", ".join(common_cols)
 
-        # Build WHERE clause: filter soft-deleted rows + timestamp filter
-        deleted_filter = " AND deleted_at IS NULL" if "deleted_at" in col_names else ""
+        # Find ALL changed rows since last push — including soft-deleted ones
+        # so their deletion propagates to the mirror (OHM-822).
+        has_deleted_at = "deleted_at" in col_names
+        select_cols = "id, deleted_at" if has_deleted_at else "id"
 
         if last_push:
-            # Find rows changed since last push (excluding soft-deleted)
             changed_rows = self.conn.execute(
-                f"SELECT id FROM {table} WHERE {ts_col} > ?::TIMESTAMP{deleted_filter}",
+                f"SELECT {select_cols} FROM {table} WHERE {ts_col} > ?::TIMESTAMP",
                 [last_push],
             ).fetchall()
         else:
-            # No last push — sync everything (excluding soft-deleted)
-            changed_rows = self.conn.execute(f"SELECT id FROM {table} WHERE 1=1{deleted_filter}").fetchall()
+            changed_rows = self.conn.execute(f"SELECT {select_cols} FROM {table}").fetchall()
 
         if not changed_rows:
             return 0
 
         changed_ids = [r[0] for r in changed_rows]
+        # Active rows = rows where deleted_at is NULL (or table has no deleted_at column)
+        active_ids = [r[0] for r in changed_rows if not has_deleted_at or r[1] is None]
 
-        # Delete stale rows from mirror and re-insert
-        # (upsert via delete + insert is simpler than MERGE for DuckLake)
-        placeholders = ", ".join(["?"] * len(changed_ids))
+        # Delete all changed rows from mirror — removes stale versions of
+        # both active and soft-deleted rows (OHM-822 tombstone propagation).
         mirror = self._ducklake_table(table, alias)
+        placeholders = ", ".join(["?"] * len(changed_ids))
         self.conn.execute(
             f"DELETE FROM {mirror} WHERE id IN ({placeholders})",
             changed_ids,
         )
 
-        id_placeholders = ", ".join(["?"] * len(changed_ids))
-        self.conn.execute(f"INSERT INTO {mirror} ({common_str}) SELECT {common_str} FROM {table} WHERE id IN ({id_placeholders})", changed_ids)
+        # Re-insert only active rows — soft-deleted rows stay deleted in mirror
+        if active_ids:
+            id_placeholders = ", ".join(["?"] * len(active_ids))
+            self.conn.execute(f"INSERT INTO {mirror} ({common_str}) SELECT {common_str} FROM {table} WHERE id IN ({id_placeholders})", active_ids)
 
         return len(changed_ids)
 

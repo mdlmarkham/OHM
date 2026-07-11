@@ -115,6 +115,7 @@ def rebuild():
         conn.execute(f"""
             INSERT INTO ohm_nodes ({local_cols}, deleted_at)
             SELECT {select}, NULL::TIMESTAMP FROM ohm_lake.ohm_nodes
+            WHERE deleted_at IS NULL
         """)
     except Exception as e:
         print(f"Bulk node insert failed: {e}")
@@ -173,6 +174,7 @@ def rebuild():
             SELECT {select}, NULL::TIMESTAMP FROM ohm_lake.ohm_edges e
             WHERE EXISTS (SELECT 1 FROM ohm_nodes n WHERE n.id = e.from_node)
             AND EXISTS (SELECT 1 FROM ohm_nodes n WHERE n.id = e.to_node)
+            AND e.deleted_at IS NULL
         """)
     except Exception as e:
         print(f"Edge insert error: {e}")
@@ -209,6 +211,7 @@ def rebuild():
             INSERT INTO ohm_observations ({local_cols}, deleted_at)
             SELECT {select}, NULL::TIMESTAMP FROM ohm_lake.ohm_observations o
             WHERE EXISTS (SELECT 1 FROM ohm_nodes n WHERE n.id = o.node_id)
+            AND o.deleted_at IS NULL
         """)
     except Exception as e:
         print(f"Observation insert error: {e}")

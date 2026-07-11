@@ -17,18 +17,40 @@
   then on restart the initial sync tried to INSERT rows that were already
   in the mirror from the corrupted DB's prior push.
 
-### 3. DuckLake push syncs soft-deleted rows (P1 - FIXED)
+### 3. DuckLake push syncs soft-deleted rows (P1 - FIXED, then RE-FIXED in OHM-822)
 - `_incremental_sync_table` was pushing ALL rows including soft-deleted ones
-- Fix: Filter with `WHERE deleted_at IS NULL`
+- Initial fix: Filter with `WHERE deleted_at IS NULL` — excluded soft-deleted
+  rows from the changed-row query entirely
+- **Problem**: This also prevented soft-delete tombstones from propagating to
+  the DuckLake mirror. The old active version stayed in the mirror with
+  `deleted_at = NULL`, so a rebuild from DuckLake resurrected the node.
+- **OHM-822 fix**: Remove the `deleted_at IS NULL` filter from the changed-row
+  query. Find ALL changed rows (including soft-deleted), DELETE them from the
+  mirror, then re-INSERT only active rows. Soft-deleted rows are removed from
+  the mirror entirely — no stale active version remains to be resurrected.
 
-### 4. Daemon crash corrupts local DB irreversibly (P0 - NEEDS FIX)
+### 4. Daemon crash corrupts local DB irreversibly (P0 - ADDRESSED in OHM-822)
 - Once FatalException fires, DuckDB marks the connection as invalidated
 - All subsequent queries on that connection fail
 - The daemon process gets SIGABRT and dies
 - On restart, DuckDB may refuse to open the DB file at all
-- **Fix needed**: In server.py startup, catch FatalException during
-  DB open, delete the corrupted DB, and rebuild from DuckLake
-- Currently requires manual intervention (rebuild_from_ducklake.py)
+- **OHM-822**: All three rebuild paths now filter `WHERE deleted_at IS NULL`
+  from the DuckLake mirror, ensuring soft-deleted rows are not resurrected
+  during recovery:
+  - `rebuild_from_ducklake.py` — added `WHERE deleted_at IS NULL` to all
+    INSERT...SELECT statements (nodes, edges, observations)
+  - `store.py` `_recover_from_ducklake()` — added `WHERE deleted_at IS NULL`
+    to the INSERT...SELECT from the DuckLake mirror
+  - `store.py` `_auto_restore_if_empty()` — same fix
+- Auto-recovery is already implemented via `_try_ducklake_recovery` in db.py
+  and `_auto_restore_if_empty` in store.py; the fix ensures they don't
+  resurrect soft-deleted data.
+- **Also fixed**: `node_cols`/`edge_cols` bug in `db.py`
+  `_try_ducklake_recovery()` — both were set from the edges query's
+  `description`, causing node inserts to use edge column names. Now each
+  is captured immediately after its respective query.
+- Still requires manual intervention if the DB file is corrupted
+  (rebuild_from_ducklake.py), but the rebuild is now correct.
 
 ### 5. Embedding generation crashes daemon (P1 - FIXED)
 - Processing all 161+ nodes at once caused OOM or timeout
@@ -41,11 +63,16 @@
 - Column names differ between mirror and local (e.g., condition vs content)
 - rebuild_from_ducklake.py handles this mapping
 
-### 7. Daemon startup should attempt auto-recovery from DuckLake (P2 - NOT YET IMPLEMENTED)
-- If DB open fails with FatalException, delete corrupted DB
-- Rebuild from DuckLake mirror
-- Log the recovery event
-- This would prevent the manual intervention cycle
+### 7. Daemon startup should attempt auto-recovery from DuckLake (P2 - ADDRESSED in OHM-822)
+- Auto-recovery is already implemented via `_try_ducklake_recovery` (db.py)
+  and `_auto_restore_if_empty` (store.py).
+- **OHM-822**: Fixed the rebuild paths to filter `WHERE deleted_at IS NULL`
+  from the DuckLake mirror, preventing soft-deleted nodes from being
+  resurrected during auto-recovery.
+- Also fixed `node_cols`/`edge_cols` capture bug in `_try_ducklake_recovery`
+  (both were set from the edges query description).
+- The recovery event is logged to `ohm_change_feed` with operation
+  `RECOVERY` (see `_try_ducklake_recovery` in db.py).
 
 ## Proposed Implementation for #4 and #7:
 
