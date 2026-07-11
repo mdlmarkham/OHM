@@ -255,3 +255,63 @@ def _ingest_edge(
         result.created += 1
     else:
         result.updated += 1
+
+
+# OHM-803: Plugin-based ingest adapter registry
+
+_ADAPTER_REGISTRY: dict[str, type] = {}
+
+
+def register_adapter(source: str, adapter_class: type) -> None:
+    """Register an ingest adapter for a source name (OHM-803)."""
+    _ADAPTER_REGISTRY[source] = adapter_class
+
+
+def get_adapter(source: str) -> type | None:
+    """Look up a registered adapter by source name."""
+    return _ADAPTER_REGISTRY.get(source)
+
+
+def list_adapters() -> list[str]:
+    """List all registered adapter source names."""
+    return sorted(_ADAPTER_REGISTRY.keys())
+
+
+class TagBatchAdapter:
+    """Reference adapter: batch-import signal tags from a JSON file (OHM-803).
+
+    JSON format: [{"node_id": "...", "label": "...", "source_type": "opc_ua",
+    "source_id": "ns=2;s=TAG", "domain": "topo", "metadata": {...}}]
+    """
+
+    def __init__(self, file_path: str, domain: str = "ohm", **config: Any) -> None:
+        self._file_path = file_path
+        self._domain = domain
+        self._config = config
+
+    def source_id(self) -> str:
+        return f"tag-batch-{self._domain}"
+
+    def read_batch(self) -> Iterable[IngestRecord]:
+        import json
+
+        with open(self._file_path) as f:
+            tags = json.load(f)
+        if not isinstance(tags, list):
+            raise ValueError(f"Tag batch file must contain a JSON array, got {type(tags)}")
+        for tag in tags:
+            if not isinstance(tag, dict):
+                continue
+            node_id = tag.get("node_id") or tag.get("id")
+            if not node_id:
+                continue
+            yield IngestRecord(
+                kind="node",
+                id=node_id,
+                label=tag.get("label", node_id),
+                node_type=tag.get("node_type", "concept"),
+                provenance=self.source_id(),
+            )
+
+
+register_adapter("tags", TagBatchAdapter)

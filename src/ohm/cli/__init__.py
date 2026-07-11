@@ -708,6 +708,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Max traversal depth (default: 5)",
     )
 
+    # ── ingest ───────────────────────────────────────────────────────────
+    # OHM-803: plugin-based ingest adapter system
+    ingest_parser = subparsers.add_parser("ingest", help="Run an ingest adapter to import external data")
+    ingest_parser.add_argument("--source", required=True, help="Adapter source name (e.g. 'tags', 'uns', 'vsm')")
+    ingest_parser.add_argument("--domain", default="ohm", help="Domain name (e.g. 'topo', 'trading')")
+    ingest_parser.add_argument("--file", default=None, help="Input file path (for file-based adapters)")
+    ingest_parser.add_argument("--db", default=None, help="Database path (default: ~/.ohm/ohm.duckdb)")
+    ingest_parser.add_argument("--actor", default=None, help="Agent name for provenance")
+    ingest_parser.add_argument("--dry-run", action="store_true", help="Validate without writing")
+    ingest_parser.add_argument("--list", action="store_true", help="List available adapters and exit")
+
     # ── hooks ────────────────────────────────────────────────────────────
     hooks_parser = subparsers.add_parser("hooks", help="Hook management (OHM-tjkx)")
     hooks_sub = hooks_parser.add_subparsers(dest="hooks_command", help="Hook commands")
@@ -814,6 +825,8 @@ def _dispatch(args: argparse.Namespace) -> None:
         _handle_sync(args)
     elif args.command == "topo":
         _handle_topo(args)
+    elif args.command == "ingest":
+        _handle_ingest(args)
     elif args.command == "hooks":
         _handle_hooks(args)
     elif args.command == "instances":
@@ -824,6 +837,84 @@ def _dispatch(args: argparse.Namespace) -> None:
         from ohm.cli import standup
 
         standup.run(args)
+
+
+def _handle_ingest(args: argparse.Namespace) -> None:
+    """Handle 'ohm ingest' — plugin-based ingest adapter system (OHM-803)."""
+    from ohm.framework.ingest import get_adapter, list_adapters, run_ingest
+
+    if args.list:
+        adapters = list_adapters()
+        if adapters:
+            print("Available ingest adapters:")
+            for name in adapters:
+                print(f"  {name}")
+        else:
+            print("No ingest adapters registered.")
+        return
+
+    source = args.source
+    adapter_class = get_adapter(source)
+    if adapter_class is None:
+        print(f"Error: no adapter registered for source '{source}'")
+        print(f"Available: {', '.join(list_adapters()) or '(none)'}")
+        sys.exit(1)
+
+    # Build adapter config from CLI args
+    config: dict[str, Any] = {"domain": args.domain}
+    if args.file:
+        config["file_path"] = args.file
+
+    # Instantiate adapter
+    try:
+        adapter = adapter_class(**config)
+    except TypeError as e:
+        print(f"Error: adapter '{source}' does not accept the provided config: {e}")
+        sys.exit(1)
+
+    # Build a minimal client that wraps the store's create_node/create_edge
+    from ohm.store import OhmStore
+
+    db_path = args.db or os.environ.get("OHM_DB_PATH", "ohm.duckdb")
+    actor = args.actor or f"ingest-{source}"
+    store = OhmStore(db_path=db_path, agent_name=actor)
+
+    class _StoreClient:
+        """Minimal client wrapping OhmStore for run_ingest()."""
+
+        def create_node(self, **kwargs):
+            return store.write_node(
+                id=kwargs.get("id"),
+                label=kwargs.get("label", ""),
+                type=kwargs.get("node_type", "concept"),
+                content=kwargs.get("content"),
+                agent_name=kwargs.get("provenance", actor),
+            )
+
+        def create_edge(self, **kwargs):
+            return store.write_edge(
+                from_node=kwargs.get("from_node"),
+                to_node=kwargs.get("to_node"),
+                edge_type=kwargs.get("edge_type", "CAUSES"),
+                layer=kwargs.get("layer", "L3"),
+                confidence=kwargs.get("confidence", 0.5),
+                agent_name=kwargs.get("provenance", actor),
+            )
+
+    client = _StoreClient()
+
+    if args.dry_run:
+        print(f"Dry run: validating {source} adapter without writing...")
+        count = 0
+        for record in adapter.read_batch():
+            count += 1
+            if not record.label and record.kind == "node":
+                print(f"  WARNING: record {count} missing label")
+        print(f"  {count} records validated, 0 written (dry run)")
+        return
+
+    result = run_ingest(adapter, client)
+    print(f"Ingest complete: {result.to_dict()}")
 
 
 def _handle_sync(args: argparse.Namespace) -> None:
