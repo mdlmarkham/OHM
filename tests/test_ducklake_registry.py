@@ -2,7 +2,7 @@
 
 Background: OHM's DuckLake sync was hardcoded to the three core tables
 (ohm_nodes, ohm_edges, ohm_observations). Domain templates that add
-their own tables via DomainTable (e.g. TOPO's topo_prospects) had those
+their own tables via DomainTable (e.g. TOPO's topo_rul_assessments) had those
 tables silently lost on crash/recovery because the sync code didn't
 know about them. This suite verifies:
 
@@ -120,12 +120,12 @@ class TestDuckLakeTableFromDomainTable:
 
     def test_derives_pk_from_domain_table(self):
         dt = DomainTable(
-            name="topo_prospects",
+            name="topo_rul_assessments",
             columns=(("id", "VARCHAR"), ("v", "FLOAT")),
             primary_key="id",
         )
         dlt = DuckLakeTable.from_domain_table(dt)
-        assert dlt.name == "topo_prospects"
+        assert dlt.name == "topo_rul_assessments"
         assert dlt.primary_key == "id"
 
     def test_derives_pk_default_when_domain_table_has_none(self):

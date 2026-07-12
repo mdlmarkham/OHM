@@ -55,8 +55,8 @@ Both use the same table, same queries, same MCP tools — the `domain` and
 
 ### Existing Tables (No Retrofit Required)
 
-The existing `ohm_topo_rul_assessments`, `ohm_topo_observations`,
-`ohm_topo_observation_assessments`, and other TOPO-prefixed tables in
+The existing `topo_rul_assessments`, `topo_observations`,
+`topo_observation_assessments`, and other TOPO-prefixed tables in
 `SchemaConfig.topo()` are **not** retrofitted. They work, they're
 scoped to the TOPO domain via `SchemaConfig`, and retrofitting them
 would be scope creep. The generic pattern applies to **new** tables

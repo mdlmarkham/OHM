@@ -1,0 +1,108 @@
+# migration_mapping.yaml — topo_reports column mapping
+# Machine-readable mapping for migrating legacy TOPO topo_reports into OHM-TOPO.
+# Consumed by scripts/migrate_topo_reports.py.
+#
+# See docs/migrating-from-legacy-topo.md for human-readable documentation.
+
+table: topo_reports
+legacy_table: topo_reports
+ohm_table: topo_reports
+
+mappings:
+  - legacy: report_id
+    ohm: id
+    transform: rename
+    description: "Primary key rename"
+
+  - legacy: report_type
+    ohm: report_type
+    transform: direct
+    description: "Direct copy"
+
+  - legacy: plant
+    ohm: node_id
+    transform: lookup
+    lookup_type: node
+    fallback: null
+    metadata_key: legacy_plant
+    description: "Free-text plant → graph node FK (requires pre-migration node creation)"
+
+  - legacy: owner
+    ohm: plan_id
+    transform: lookup
+    lookup_type: plan
+    fallback: null
+    metadata_key: legacy_owner
+    description: "Free-text owner → plan FK (requires pre-migration plan creation)"
+
+  - legacy: owner
+    ohm: created_by
+    transform: direct
+    description: "Owner string used as actor"
+
+  - legacy: title
+    ohm: title
+    transform: direct
+    description: "Direct copy"
+
+  - legacy: structured_output
+    ohm: findings
+    transform: json_passthrough
+    fallback_column: inputs_json
+    fallback_transform: json_or_wrap
+    description: "Canonical target for structured output; falls back to inputs_json"
+
+  - legacy: notes
+    ohm: recommendations
+    transform: json_or_wrap
+    wrap_key: action_items
+    description: "Free-text notes → JSON recommendations"
+
+  - legacy: null
+    ohm: confidence_adjustments
+    transform: null
+    description: "No legacy equivalent"
+
+  - legacy: status
+    ohm: status
+    transform: direct
+    description: "Direct copy (draft/finalized/superseded)"
+
+  - legacy: version
+    ohm: version
+    transform: direct
+    description: "Direct copy (integer)"
+
+  - legacy: created_at
+    ohm: created_at
+    transform: direct
+    description: "Direct copy (timestamp)"
+
+  - legacy: finalized_at
+    ohm: finalized_at
+    transform: direct
+    description: "Direct copy (timestamp, nullable)"
+
+  - legacy: null
+    ohm: superseded_by
+    transform: null
+    description: "Set later by supersede_report()"
+
+  - legacy: null
+    ohm: metadata
+    transform: null
+    description: "Populate with legacy overflow data if needed"
+
+# Lookup tables for free-text resolution
+# Populated before migration — maps legacy string values to OHM node/plan IDs.
+lookups:
+  node:
+    description: "Maps legacy plant strings to ohm_nodes.id values"
+    # Example:
+    # "Plant A": "node_plant_a_001"
+    # "Plant B": "node_plant_b_002"
+  plan:
+    description: "Maps legacy owner strings to topo_plans.id values"
+    # Example:
+    # "John Smith": "plan_maintenance_2026_q1"
+    # "Jane Doe": "plan_overhaul_2026"

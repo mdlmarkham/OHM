@@ -571,7 +571,7 @@ class DomainTable:
     """Declarative definition of a domain-specific table (OHM-vl8o).
 
     OHM's core DDL is fixed (ohm_nodes, ohm_edges, ohm_observations, …).
-    Domain templates (e.g. TOPO) need extra tables (topo_prospects,
+    Domain templates (e.g. TOPO) need extra tables (topo_rul_assessments,
     topo_observations, topo_observation_assessments, …) created in the
     same migration sequence as the base OHM tables, so they ride along
     with `initialize_schema()` and OhmStore/ohmd without per-domain
@@ -579,7 +579,7 @@ class DomainTable:
 
     Attributes:
         name: SQL table name. Conventionally domain-prefixed
-            (e.g. ``topo_prospects``). Unprefixed names are allowed but
+            (e.g. ``topo_rul_assessments``). Unprefixed names are allowed but
             reserved names (``ohm_*``) are rejected at creation time.
         columns: Ordered list of ``(column_name, sql_type)`` pairs.
             ``sql_type`` is the raw DuckDB type (e.g. ``"VARCHAR"``,
@@ -669,7 +669,7 @@ class DuckLakeTable:
     OHM's DuckLake sync was previously hardcoded to three tables
     (ohm_nodes, ohm_edges, ohm_observations). Domain templates that
     added their own tables via :class:`DomainTable` (e.g. TOPO's
-    topo_prospects) had those tables silently lost on crash/recovery
+    topo_rul_assessments) had those tables silently lost on crash/recovery
     because the sync code didn't know about them.
 
     ``DuckLakeTable`` is the sync-side registry entry: which table to
@@ -681,7 +681,7 @@ class DuckLakeTable:
 
     Attributes:
         name: Source table name (e.g. ``"ohm_nodes"``,
-            ``"topo_prospects"``).
+            ``"topo_rul_assessments"``).
         primary_key: Column used for upsert/merge logic. Defaults to
             ``"id"``. The mirror DDL does NOT declare a PK (mirrors
             are append-only with VARCHAR columns); the primary key is
@@ -2609,10 +2609,11 @@ def initialize_schema(conn: "DuckDBPyConnection", schema: "SchemaConfig | None" 
     # Seed domain agents from schema config (OHM-tss4.1.1)
     if schema:
         _seed_domain_agents(conn, schema)
-    # OHM-vl8o: domain-specific tables (TOPO needs topo_prospects, etc.)
+    # OHM-vl8o: domain-specific tables (TOPO needs topo_rul_assessments, etc.)
     # Created after the base OHM DDL and migrations so domain tables can
     # reference ohm_nodes / ohm_edges if needed.
     if schema:
+        _rename_domain_tables(conn)  # #834: rename legacy table names before creating new ones
         _create_domain_tables(conn, schema)
 
     # OHM-795: Persist the active schema config to ohm_meta so the DB
@@ -2979,6 +2980,41 @@ def _seed_domain_agents(conn: "DuckDBPyConnection", schema: "SchemaConfig | None
             )
 
     logger.info("Seeded %d domain agents for schema '%s'", len(schema.seed_agents), schema.name)
+
+
+def _rename_domain_tables(conn: "DuckDBPyConnection") -> None:
+    """Rename legacy domain tables that were renamed in #834.
+
+    ``topo_prospects`` → ``topo_rul_assessments`` (the table was repurposed
+    from a generic prospects store to a dedicated RUL assessment store).
+    On fresh databases the new name is created directly by
+    ``_create_domain_tables()``; this function only fires when the old
+    name still exists, making it idempotent.
+    """
+    _rename_table_if_exists(conn, "topo_prospects", "topo_rul_assessments")
+    # Rename associated indexes to match the new table name.
+    _drop_index_if_exists(conn, "idx_topo_prospects_site")
+    _drop_index_if_exists(conn, "idx_topo_prospects_risk")
+    _drop_index_if_exists(conn, "idx_topo_prospects_model")
+
+
+def _rename_table_if_exists(conn: "DuckDBPyConnection", old_name: str, new_name: str) -> None:
+    """Rename *old_name* to *new_name* if the old table exists and the new one does not."""
+    try:
+        tables = conn.execute(
+            "SELECT table_name FROM information_schema.tables WHERE table_name = ?", [old_name]
+        ).fetchall()
+        if not tables:
+            return
+        new_exists = conn.execute(
+            "SELECT table_name FROM information_schema.tables WHERE table_name = ?", [new_name]
+        ).fetchall()
+        if new_exists:
+            return  # Both exist — nothing to do.
+        conn.execute(f"ALTER TABLE {old_name} RENAME TO {new_name}")
+        logger.info("Renamed domain table %s → %s", old_name, new_name)
+    except Exception as e:
+        logger.warning("Failed to rename domain table %s → %s: %s", old_name, new_name, e)
 
 
 def _create_domain_tables(conn: "DuckDBPyConnection", schema: "SchemaConfig | None") -> None:

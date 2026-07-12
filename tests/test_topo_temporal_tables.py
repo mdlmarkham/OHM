@@ -12,7 +12,7 @@ from ohm.graph.schema import (
 )
 
 ALL_TOPO_TABLES = {
-    "topo_prospects",
+    "topo_rul_assessments",
     "topo_observations",
     "topo_observation_assessments",
     "topo_observation_annotations",

@@ -5,10 +5,10 @@ pilot that exercises every piece of the OHM-vl8o / OHM-8bli / OHM-ue9k
 stack against a real DuckLake.
 
 Flow:
-  1. Create OhmStore with SchemaConfig.topo() (which has the topo_prospects
-     domain table registered and the new metric/data_product/component/
-     other node types).
-  2. Seed data — both core (ohm_nodes/ohm_edges) AND domain (topo_prospects).
+   1. Create OhmStore with SchemaConfig.topo() (which has the topo_rul_assessments
+      domain table registered and the new metric/data_product/component/
+      other node types).
+   2. Seed data — both core (ohm_nodes/ohm_edges) AND domain (topo_rul_assessments).
   3. Attach DuckLake + push (sync_to_ducklake) — domain table mirror
      should be created automatically from the registry.
   4. Close the store and SIMULATE A CRASH by deleting the local DuckDB file.
@@ -18,7 +18,7 @@ Flow:
   7. Verify row counts match.
 
 This is the go/no-go gate for broader TOPO migration. If this works
-on topo_prospects, the same pattern works for any other domain table
+on topo_rul_assessments, the same pattern works for any other domain table
 without code changes.
 """
 

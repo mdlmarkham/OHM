@@ -11,7 +11,7 @@ TOPO's observation system uses a 5-table relational model:
 2. **`topo_observation_assessments`** — append-only assessment history with `is_current` flags
 3. **`topo_observation_annotations`** — annotations (comments, tags, context)
 4. **`topo_observation_followups`** — followup tracking (actions, investigations, monitoring)
-5. **`topo_prospects`** — predictive-maintenance prospects (already shipped via OHM-vl8o)
+5. **`topo_rul_assessments`** — predictive-maintenance RUL assessments (renamed from `topo_prospects` via #834)
 
 OHM's core `ohm_observations` table is flat — a single table with no child tables for assessment history, annotations, or followups. The question was whether to:
 
@@ -22,7 +22,7 @@ The domain DDL hook (OHM-vl8o / `SchemaConfig.domain_tables`) was already implem
 
 ## Decision
 
-**Option A**: Declare the 4 TOPO observation lifecycle tables as `DomainTable` instances in `SchemaConfig.topo()` and `topo.json`. They are created by `_create_domain_tables()` during `initialize_schema()`, alongside the existing `topo_prospects` table.
+**Option A**: Declare the 4 TOPO observation lifecycle tables as `DomainTable` instances in `SchemaConfig.topo()` and `topo.json`. They are created by `_create_domain_tables()` during `initialize_schema()`, alongside the existing `topo_rul_assessments` table.
 
 ### Table Design
 
@@ -36,7 +36,7 @@ The domain DDL hook (OHM-vl8o / `SchemaConfig.domain_tables`) was already implem
 ### Ordering
 
 Tables are created in dependency order via the `ordering` field:
-- `topo_prospects` (100) — already existed
+- `topo_rul_assessments` (100) — already existed (renamed from `topo_prospects`)
 - `topo_observations` (110) — parent table
 - `topo_observation_assessments` (120) — depends on observations
 - `topo_observation_annotations` (130) — depends on observations

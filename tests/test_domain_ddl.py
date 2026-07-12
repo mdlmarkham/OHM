@@ -230,7 +230,7 @@ class TestSchemaConfigRoundTripWithDomainTables:
 class TestInitializeSchemaWithDomainTables:
     def test_creates_domain_tables(self):
         dt = DomainTable(
-            name="topo_prospects",
+            name="topo_rul_assessments",
             columns=(
                 ("id", "VARCHAR"),
                 ("equipment_id", "VARCHAR"),
@@ -241,7 +241,7 @@ class TestInitializeSchemaWithDomainTables:
         cfg = SchemaConfig(name="t", domain_tables=[dt])
         conn = duckdb.connect(":memory:")
         initialize_schema(conn, cfg)
-        tables = conn.execute("SELECT table_name FROM information_schema.tables WHERE table_name='topo_prospects'").fetchall()
+        tables = conn.execute("SELECT table_name FROM information_schema.tables WHERE table_name='topo_rul_assessments'").fetchall()
         assert tables
 
     def test_creates_indexes(self):
@@ -327,7 +327,7 @@ class TestInitializeSchemaWithDomainTables:
         rows = conn.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_name='ohm_nodes'").fetchone()
         assert rows[0] == 1
 
-    def test_topo_template_creates_topo_prospects(self):
+    def test_topo_template_creates_topo_rul_assessments(self):
         topo = SchemaConfig.from_json_file("topo.json")
         conn = duckdb.connect(":memory:")
         initialize_schema(conn, topo)

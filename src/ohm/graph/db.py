@@ -639,7 +639,7 @@ def _create_ducklake_tables(
     ohm_change_feed) use explicit VARCHAR DDL with hand-picked column
     lists — these columns are part of the OHM core API and must not
     change shape. Any additional tables from the DuckLake registry
-    (e.g. domain tables like topo_prospects from OHM-vl8o) get their
+    (e.g. domain tables like topo_rul_assessments from OHM-vl8o) get their
     mirror DDL generated dynamically from information_schema.columns.
     """
     # Core OHM tables: explicit VARCHAR DDL. Do not regenerate from

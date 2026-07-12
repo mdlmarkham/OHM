@@ -17,22 +17,7 @@ class _FakeHandlerBase:
     """Minimal stand-in for the handler mixin."""
 
     def __init__(self, store):
-        self.current_store = store
-        self.responses = []
-
-    def _json_response(self, status: int, body: dict) -> None:
-        self.responses.append((status, body))
-
-
-class _FakeHandler(_FakeHandlerBase, DocumentHandlerMixin):
-    pass
-
-
-class _FakeHandlerBase:
-    """Minimal stand-in for the handler mixin."""
-
-    def __init__(self, store):
-        self.current_store = store
+        self.store = store
         self.responses = []
 
     def _json_response(self, status: int, body: dict) -> None:

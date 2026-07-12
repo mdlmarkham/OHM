@@ -28,7 +28,7 @@ EXPECTED_TABLES = {
     "topo_observation_followups",
 }
 
-ALL_TOPO_TABLES = EXPECTED_TABLES | {"topo_prospects"}
+ALL_TOPO_TABLES = EXPECTED_TABLES | {"topo_rul_assessments"}
 
 
 class TestTOPOSchemaDomainTables:
