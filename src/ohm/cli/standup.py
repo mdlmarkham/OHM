@@ -344,12 +344,15 @@ def start_ohmd_service(
     db_path: str,
     multi_tenant: bool = True,
     user: bool = False,
+    schema: str | None = None,
 ) -> None:
     """Start ohmd using the best available service mechanism."""
     ohmd_exec = shutil.which("ohmd") or "ohmd"
     args = [ohmd_exec]
     if multi_tenant:
         args.append("--multi-tenant")
+    elif schema:
+        args.extend(["--schema", schema])
 
     if mode == "systemd":
         exec_start = " ".join(args)
@@ -832,7 +835,9 @@ def run_greenfield(args: argparse.Namespace) -> None:
     print("  ✓ Config written")
 
     print(f"\n3. Starting ohmd via {service_mode} ...")
-    start_ohmd_service(service_mode, db_path, multi_tenant=multi_tenant, user=user_scope)
+    # Pass template as schema for single-tenant mode; multi-tenant provisions schema per-tenant
+    schema = None if multi_tenant else args.template
+    start_ohmd_service(service_mode, str(db_path), multi_tenant=multi_tenant, user=user_scope, schema=schema)
 
     # Wait for daemon to come up
     url = args.url or DEFAULT_OHM_URL
