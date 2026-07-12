@@ -42,12 +42,16 @@ class InferenceHandlerMixin(OhmHandlerBase):
         layers_str = qs.get("layers", [""])[0]
         layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
         from ohm.bayesian import bayesian_inference
+        from ohm.semantic_roles import SemanticRoles
+
+        edge_types = qs.get("edge_types", [""])[0]
+        edge_types = [e.strip() for e in edge_types.split(",") if e.strip()] if edge_types else SemanticRoles().inference_edge_types()
 
         result = bayesian_inference(
-            self.current_store.conn,
+            self.current_store.conn.cursor(),
             target,
             evidence,
-            edge_types=None,
+            edge_types=edge_types,
             layers=layers,
             leak_probability=leak_probability,
             half_life_days=half_life_days,
@@ -97,7 +101,7 @@ class InferenceHandlerMixin(OhmHandlerBase):
         from ohm.bayesian import causal_intervention
 
         result = causal_intervention(
-            self.current_store.conn,
+            self.current_store.conn.cursor(),
             target,
             intervention_state,
             query_nodes=query_nodes,
@@ -186,7 +190,7 @@ class InferenceHandlerMixin(OhmHandlerBase):
         from ohm.bayesian import compute_voi
 
         result = compute_voi(
-            self.current_store.conn,
+            self.current_store.conn.cursor(),
             decision_nodes=decision_nodes,
             edge_types=edge_types,
             layers=layers,
@@ -534,7 +538,7 @@ class InferenceHandlerMixin(OhmHandlerBase):
             # 1. Posterior (graceful: empty graph returns uniform prior)
             try:
                 inference_result = bayesian_inference(
-                    self.current_store.conn,
+                    self.current_store.conn.cursor(),
                     target,
                     evidence,
                     edge_types=edge_types,
@@ -566,7 +570,7 @@ class InferenceHandlerMixin(OhmHandlerBase):
             # 3. Value of Information
             try:
                 voi_result = compute_voi(
-                    self.current_store.conn,
+                    self.current_store.conn.cursor(),
                     decision_nodes=[target],
                     edge_types=edge_types,
                     layers=layers,

@@ -56,26 +56,44 @@ class _LRUBayesianCache(dict):
         super().__init__()
         self._maxsize = maxsize
         self._key_order: list[tuple] = []
+        self._lock = threading.RLock()
 
     def __setitem__(self, key, value):
-        if key not in self:
-            self._key_order.append(key)
-        super().__setitem__(key, value)
-        while len(self._key_order) > self._maxsize:
-            oldest = self._key_order.pop(0)
-            if oldest in self:
-                super().__delitem__(oldest)
+        with self._lock:
+            if key not in self:
+                self._key_order.append(key)
+            super().__setitem__(key, value)
+            while len(self._key_order) > self._maxsize:
+                oldest = self._key_order.pop(0)
+                if oldest in self:
+                    super().__delitem__(oldest)
 
     def clear(self):
-        super().clear()
-        self._key_order.clear()
+        with self._lock:
+            super().clear()
+            self._key_order.clear()
 
+    def __getitem__(self, key):
+        with self._lock:
+            return super().__getitem__(key)
+
+    def __contains__(self, key):
+        with self._lock:
+            return super().__contains__(key)
+
+    def __len__(self):
+        with self._lock:
+            return super().__len__()
+
+
+import threading
 
 # Module-level cache for Bayesian network construction (OHM-omr)
 # Key: (tuple(sorted(edge_types)), tuple(sorted(layers)) if layers else None, max_nodes)
 # Value: (generation_at_cache_time, result_dict)
 # Invalidated when graph_generation counter increments.
 _bayesian_network_cache: _LRUBayesianCache = _LRUBayesianCache()
+_bayesian_network_cache_lock = threading.Lock()
 
 # Module-level cache for VariableElimination instances (OHM-a689.3).
 # Keyed by a hash of the model's CPD values and structure.
@@ -83,6 +101,7 @@ _bayesian_network_cache: _LRUBayesianCache = _LRUBayesianCache()
 # the same model is reused (e.g., VoI loop computes ATE for N candidates
 # against the same pre-built network).
 _ve_cache: dict[int, "VariableElimination"] = {}
+_ve_cache_lock = threading.Lock()
 _MAX_VE_CACHE_SIZE = 20
 
 MAX_CPT_PARENTS = 8
@@ -982,10 +1001,11 @@ def bayesian_inference(
     try:
         # OHM-a689.3: Cache VE instance
         _ve_key = id(model)
-        if _ve_key not in _ve_cache:
-            if len(_ve_cache) >= _MAX_VE_CACHE_SIZE:
-                _ve_cache.clear()
-            _ve_cache[_ve_key] = VariableElimination(model)
+        with _ve_cache_lock:
+            if _ve_key not in _ve_cache:
+                if len(_ve_cache) >= _MAX_VE_CACHE_SIZE:
+                    _ve_cache.clear()
+                _ve_cache[_ve_key] = VariableElimination(model)
         infer = _ve_cache[_ve_key]
         result = infer.query(**query_kwargs)
 
@@ -1279,10 +1299,11 @@ def causal_intervention(
     # Each individual query returns a marginal distribution for that node.
     # OHM-a689.3: Cache VE instances to avoid creating 2 per call.
     _ve_key_do = id(model_do)
-    if _ve_key_do not in _ve_cache:
-        if len(_ve_cache) >= _MAX_VE_CACHE_SIZE:
-            _ve_cache.clear()
-        _ve_cache[_ve_key_do] = VariableElimination(model_do)
+    with _ve_cache_lock:
+        if _ve_key_do not in _ve_cache:
+            if len(_ve_cache) >= _MAX_VE_CACHE_SIZE:
+                _ve_cache.clear()
+            _ve_cache[_ve_key_do] = VariableElimination(model_do)
     infer = _ve_cache[_ve_key_do]
     soft_factors = network.get("soft_evidence_factors", [])
     posteriors = {}
@@ -1331,10 +1352,11 @@ def causal_intervention(
         obs_model = network["model"]
         # OHM-a689.3: Cache observation VE instance
         _obs_ve_key = id(obs_model)
-        if _obs_ve_key not in _ve_cache:
-            if len(_ve_cache) >= _MAX_VE_CACHE_SIZE:
-                _ve_cache.clear()
-            _ve_cache[_obs_ve_key] = VariableElimination(obs_model)
+        with _ve_cache_lock:
+            if _obs_ve_key not in _ve_cache:
+                if len(_ve_cache) >= _MAX_VE_CACHE_SIZE:
+                    _ve_cache.clear()
+                _ve_cache[_obs_ve_key] = VariableElimination(obs_model)
         obs_infer = _ve_cache[_obs_ve_key]
         # OHM-od01.13: batch observation query for all successful posteriors
         obs_safe_nodes = []
@@ -2954,11 +2976,14 @@ class BayesianContext:
 
         try:
             _ve_key = id(model)
-            if _ve_key not in _ve_cache:
-                if len(_ve_cache) >= _MAX_VE_CACHE_SIZE:
-                    _ve_cache.clear()
-                _ve_cache[_ve_key] = VariableElimination(model)
-            infer = _ve_cache[_ve_key]
+            with _ve_cache_lock:
+                if _ve_key not in _ve_cache:
+                    if len(_ve_cache) >= _MAX_VE_CACHE_SIZE:
+                        _ve_cache.clear()
+                    _ve_cache[_ve_key] = VariableElimination(model)
+            with _ve_cache_lock:
+                infer = _ve_cache[_ve_key]
+            result = infer.query(**query_kwargs)
             soft_factors = self._network.get("soft_evidence_factors", [])
             query_kwargs: dict[str, Any] = {"variables": [safe_target], "evidence": safe_evidence}
             if soft_factors:
@@ -3151,10 +3176,11 @@ class BayesianContext:
         soft_factors = network.get("soft_evidence_factors", [])
         try:
             _ve_key_do = id(model_do)
-            if _ve_key_do not in _ve_cache:
-                if len(_ve_cache) >= _MAX_VE_CACHE_SIZE:
-                    _ve_cache.clear()
-                _ve_cache[_ve_key_do] = VariableElimination(model_do)
+            with _ve_cache_lock:
+                if _ve_key_do not in _ve_cache:
+                    if len(_ve_cache) >= _MAX_VE_CACHE_SIZE:
+                        _ve_cache.clear()
+                    _ve_cache[_ve_key_do] = VariableElimination(model_do)
             infer = _ve_cache[_ve_key_do]
             do_kwargs: dict[str, Any] = {"variables": safe_query_nodes, "evidence": {safe_target: intervention_state}}
             if soft_factors:
@@ -3184,10 +3210,11 @@ class BayesianContext:
             try:
                 obs_model = network["model"]
                 _obs_ve_key = id(obs_model)
-                if _obs_ve_key not in _ve_cache:
-                    if len(_ve_cache) >= _MAX_VE_CACHE_SIZE:
-                        _ve_cache.clear()
-                    _ve_cache[_obs_ve_key] = VariableElimination(obs_model)
+                with _ve_cache_lock:
+                    if _obs_ve_key not in _ve_cache:
+                        if len(_ve_cache) >= _MAX_VE_CACHE_SIZE:
+                            _ve_cache.clear()
+                        _ve_cache[_obs_ve_key] = VariableElimination(obs_model)
                 obs_infer = _ve_cache[_obs_ve_key]
                 # OHM-od01.13: batch observation query
                 obs_safe_nodes = []
