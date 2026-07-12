@@ -100,6 +100,90 @@ registration. The core `ohm ingest` command loads the appropriate
 adapter based on `--source` and passes `--domain` and other flags
 as config.
 
+## The `--extra-schema` Extension Mechanism (OHM-835)
+
+If your deployment needs tables beyond the bundled domain template,
+write a small JSON file with just your additional `DomainTable` entries
+and load it via `--extra-schema`. This is the general mechanism for
+any domain-specific extension — not just this one migration.
+
+### How it works
+
+1. Create a JSON file with your extra `DomainTable` entries (see
+   `docs/examples/topo-legacy-migration-extension.json` for a reference).
+2. Start ohmd with both `--schema` and `--extra-schema`:
+
+   ```bash
+   ohmd --schema topo --extra-schema /path/to/my-extension.json
+   ```
+
+3. The extra tables are additively merged onto the base schema.
+   **Name collisions raise an error** — the extra schema must not
+   redefine tables already in the base.
+
+### Repeatable flag
+
+Pass `--extra-schema` multiple times to chain several extension files:
+
+```bash
+ohmd --schema topo \
+  --extra-schema /path/to/extension-a.json \
+  --extra-schema /path/to/extension-b.json
+```
+
+### What goes in the extension file
+
+The file is a full `SchemaConfig` JSON, but in practice you only need
+to set `domain_tables` — the vocabulary fields (`node_types`,
+`observation_types`, etc.) can be empty arrays:
+
+```json
+{
+  "name": "topo",
+  "node_types": [],
+  "layer_edge_types": {},
+  "layer_descriptions": {},
+  "observation_types": [],
+  "observation_sources": [],
+  "visibilities": [],
+  "provenances": [],
+  "domain_tables": [
+    {
+      "name": "my_custom_table",
+      "ordering": 300,
+      "description": "My deployment-specific table.",
+      "columns": [
+        ["id", "VARCHAR"],
+        ["value", "DOUBLE"],
+        ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"]
+      ],
+      "primary_key": "id"
+    }
+  ]
+}
+```
+
+### Design guarantees
+
+- **`ohmd --schema topo`** (no `--extra-schema`) creates **only** the
+  bundled tables. Extension tables do NOT appear by default.
+- **`SchemaConfig.extend()`** returns a plain `SchemaConfig` — no
+  wrapper type. Every downstream consumer (DuckLake mirror, `/health`
+  comparison, `to_db`/`from_db`) treats an extended schema identically
+  to one that always contained those tables.
+- **Reconnect safety**: On restart, the persisted schema (which includes
+  previously-applied extensions) is merged additively with the current
+  invocation's `--extra-schema` flags. No extension tables are silently
+  lost.
+
+### Example use case
+
+The 12 legacy TOPO migration tables (from the TitanAmerica/MCT_CLIs
+system) are too specific to bake into OHM's bundled `topo.json`. Instead,
+they live in a reference extension file that operators copy and adapt:
+
+- `docs/examples/topo-legacy-migration-extension.json`
+
 ## When to Use This Pattern
 
 | Situation | Use Generic Pattern? |

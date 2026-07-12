@@ -345,6 +345,7 @@ def start_ohmd_service(
     multi_tenant: bool = True,
     user: bool = False,
     schema: str | None = None,
+    extra_schema: list[str] | None = None,
 ) -> None:
     """Start ohmd using the best available service mechanism."""
     ohmd_exec = shutil.which("ohmd") or "ohmd"
@@ -353,6 +354,10 @@ def start_ohmd_service(
         args.append("--multi-tenant")
     elif schema:
         args.extend(["--schema", schema])
+    # OHM-835: Forward --extra-schema files into the service command.
+    if extra_schema:
+        for es in extra_schema:
+            args.extend(["--extra-schema", es])
 
     if mode == "systemd":
         exec_start = " ".join(args)

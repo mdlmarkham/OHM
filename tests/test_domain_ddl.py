@@ -484,3 +484,189 @@ class TestCreateDomainTablesEdgeCases:
         # Verify the meta row exists exactly once.
         rows = conn.execute("SELECT COUNT(*) FROM ohm_meta WHERE key='domain_tables:t:ordering'").fetchone()
         assert rows[0] == 1
+
+
+# ── SchemaConfig.extend() (OHM-835) ─────────────────────────────────────────
+
+
+class TestSchemaConfigExtend:
+    def test_merges_domain_tables(self):
+        dt1 = DomainTable(name="alpha", columns=(("id", "VARCHAR"),), ordering=10)
+        dt2 = DomainTable(name="beta", columns=(("id", "VARCHAR"),), ordering=20)
+        base = SchemaConfig(name="test", domain_tables=[dt1])
+        extra = SchemaConfig(name="test", domain_tables=[dt2])
+        merged = base.extend(extra)
+        names = [dt.name for dt in merged.domain_tables]
+        assert "alpha" in names
+        assert "beta" in names
+
+    def test_preserves_ordering(self):
+        dt1 = DomainTable(name="z_last", columns=(("id", "VARCHAR"),), ordering=200)
+        dt2 = DomainTable(name="a_first", columns=(("id", "VARCHAR"),), ordering=10)
+        base = SchemaConfig(name="test", domain_tables=[dt1])
+        extra = SchemaConfig(name="test", domain_tables=[dt2])
+        merged = base.extend(extra)
+        names = [dt.name for dt in merged.domain_tables]
+        assert names == ["a_first", "z_last"]
+
+    def test_raises_on_table_name_collision(self):
+        dt = DomainTable(name="shared", columns=(("id", "VARCHAR"),))
+        base = SchemaConfig(name="test", domain_tables=[dt])
+        extra = SchemaConfig(name="test", domain_tables=[dt])
+        with pytest.raises(ValueError, match="Domain table name collision"):
+            base.extend(extra)
+
+    def test_raises_on_index_name_collision(self):
+        dt1 = DomainTable(
+            name="t1",
+            columns=(("id", "VARCHAR"), ("x", "FLOAT")),
+            indexes=(("idx_shared", ("x",)),),
+        )
+        dt2 = DomainTable(
+            name="t2",
+            columns=(("id", "VARCHAR"), ("y", "FLOAT")),
+            indexes=(("idx_shared", ("y",)),),
+        )
+        base = SchemaConfig(name="test", domain_tables=[dt1])
+        extra = SchemaConfig(name="test", domain_tables=[dt2])
+        with pytest.raises(ValueError, match="Index name collision"):
+            base.extend(extra)
+
+    def test_raises_on_type_mismatch(self):
+        base = SchemaConfig(name="test")
+        with pytest.raises(TypeError, match="requires a SchemaConfig"):
+            base.extend({"name": "nope"})  # type: ignore[arg-type]
+
+    def test_merges_vocabulary(self):
+        base = SchemaConfig(
+            name="test",
+            node_types=frozenset({"a", "b"}),
+            observation_types=frozenset({"x"}),
+        )
+        extra = SchemaConfig(
+            name="test",
+            node_types=frozenset({"b", "c"}),
+            observation_types=frozenset({"y"}),
+        )
+        merged = base.extend(extra)
+        assert "a" in merged.node_types
+        assert "b" in merged.node_types
+        assert "c" in merged.node_types
+        assert "x" in merged.observation_types
+        assert "y" in merged.observation_types
+
+    def test_merges_edge_types(self):
+        base = SchemaConfig(
+            name="test",
+            edge_types_by_layer={"L1": frozenset({"E1"}), "L3": frozenset({"E3"})},
+        )
+        extra = SchemaConfig(
+            name="test",
+            edge_types_by_layer={"L1": frozenset({"E2"}), "L4": frozenset({"E4"})},
+        )
+        merged = base.extend(extra)
+        assert "E1" in merged.layer_edge_types["L1"]
+        assert "E2" in merged.layer_edge_types["L1"]
+        assert "E3" in merged.layer_edge_types["L3"]
+        assert "E4" in merged.layer_edge_types["L4"]
+
+    def test_layer_descriptions_merge_extra_wins(self):
+        base = SchemaConfig(
+            name="test",
+            layer_descriptions={"L1": "base desc"},
+        )
+        extra = SchemaConfig(
+            name="test",
+            layer_descriptions={"L1": "extra desc", "L5": "new layer"},
+        )
+        merged = base.extend(extra)
+        assert merged.layer_descriptions["L1"] == "extra desc"
+        assert merged.layer_descriptions["L5"] == "new layer"
+
+    def test_result_is_plain_schemaconfig(self):
+        dt = DomainTable(name="ext", columns=(("id", "VARCHAR"),))
+        base = SchemaConfig(name="test")
+        extra = SchemaConfig(name="test", domain_tables=[dt])
+        merged = base.extend(extra)
+        assert type(merged) is SchemaConfig
+
+    def test_ducklake_tables_merged(self):
+        from ohm.graph.schema import DuckLakeTable
+
+        dlt1 = DuckLakeTable(name="my_table_a")
+        dlt2 = DuckLakeTable(name="my_table_b")
+        base = SchemaConfig(name="test", ducklake_tables=[dlt1])
+        extra = SchemaConfig(name="test", ducklake_tables=[dlt2])
+        merged = base.extend(extra)
+        names = {d.name for d in merged.ducklake_tables}
+        assert "my_table_a" in names
+        assert "my_table_b" in names
+
+    def test_extend_empty_is_noop(self):
+        dt = DomainTable(name="t", columns=(("id", "VARCHAR"),))
+        base = SchemaConfig(name="test", domain_tables=[dt])
+        extra = SchemaConfig(name="test")
+        merged = base.extend(extra)
+        assert len(merged.domain_tables) == 1
+        assert merged.domain_tables[0].name == "t"
+
+    def test_extend_both_empty(self):
+        base = SchemaConfig(name="test")
+        extra = SchemaConfig(name="test")
+        merged = base.extend(extra)
+        assert merged.domain_tables == ()
+
+    def test_could_have_caught_topo_prospects_collision(self):
+        """Confirm extend()'s collision detection would have caught the #834 naming issue."""
+        dt_existing = DomainTable(
+            name="topo_rul_assessments",
+            columns=(("id", "VARCHAR"),),
+        )
+        # Simulate someone trying to add the old name:
+        dt_old = DomainTable(
+            name="topo_prospects",
+            columns=(("id", "VARCHAR"),),
+        )
+        base = SchemaConfig(name="topo", domain_tables=[dt_existing])
+        extra = SchemaConfig(name="topo", domain_tables=[dt_old])
+        # This should NOT collide (different names) — the issue was a rename,
+        # not a duplicate. Extend allows both because they're distinct names.
+        merged = base.extend(extra)
+        assert len(merged.domain_tables) == 2
+
+    def test_from_json_path_loads_file(self, tmp_path):
+        schema_data = {
+            "name": "test_ext",
+            "node_types": ["concept"],
+            "layer_edge_types": {"L1": ["LINKS"]},
+            "layer_descriptions": {"L1": "Test layer"},
+            "observation_types": ["measurement"],
+            "observation_sources": ["sensor"],
+            "visibilities": ["public"],
+            "provenances": ["test"],
+            "domain_tables": [
+                {"name": "ext_table", "columns": [["id", "VARCHAR"]], "primary_key": "id"}
+            ],
+        }
+        p = tmp_path / "extra.json"
+        p.write_text(json.dumps(schema_data))
+        loaded = SchemaConfig.from_json_path(str(p))
+        assert loaded.name == "test_ext"
+        assert len(loaded.domain_tables) == 1
+        assert loaded.domain_tables[0].name == "ext_table"
+
+    def test_from_json_path_missing_file(self):
+        with pytest.raises(FileNotFoundError, match="not found"):
+            SchemaConfig.from_json_path("/nonexistent/path/extra.json")
+
+    def test_from_json_path_invalid_json(self, tmp_path):
+        p = tmp_path / "bad.json"
+        p.write_text("{not valid json")
+        with pytest.raises(ValueError, match="Invalid JSON"):
+            SchemaConfig.from_json_path(str(p))
+
+    def test_from_json_path_missing_keys(self, tmp_path):
+        p = tmp_path / "incomplete.json"
+        p.write_text(json.dumps({"name": "x"}))
+        with pytest.raises(ValueError, match="missing required keys"):
+            SchemaConfig.from_json_path(str(p))

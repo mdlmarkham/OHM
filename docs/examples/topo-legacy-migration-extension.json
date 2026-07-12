@@ -1,0 +1,82 @@
+{
+  "_comment": "OHM-835: Example extra-schema file for legacy TOPO migration. Pass via: ohmd --schema topo --extra-schema <this-file>. These tables are NOT part of OHM's bundled topo.json — they are opt-in for deployments migrating from the TitanAmerica/MCT_CLIs legacy system.",
+  "name": "topo",
+  "node_types": [],
+  "layer_edge_types": {},
+  "layer_descriptions": {},
+  "observation_types": [],
+  "observation_sources": [],
+  "visibilities": [],
+  "provenances": [],
+  "domain_tables": [
+    {
+      "name": "topo_prospect_expectations",
+      "ordering": 300,
+      "description": "Expected outcomes for equipment prospects (legacy MCT_CLIs migration).",
+      "columns": [
+        ["id", "VARCHAR"],
+        ["prospect_id", "VARCHAR"],
+        ["parameter_name", "VARCHAR"],
+        ["expected_value", "DOUBLE"],
+        ["expected_min", "DOUBLE"],
+        ["expected_max", "DOUBLE"],
+        ["confidence", "DOUBLE DEFAULT 1.0"],
+        ["source", "VARCHAR"],
+        ["created_by", "VARCHAR NOT NULL"],
+        ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+        ["metadata", "JSON"]
+      ],
+      "primary_key": "id",
+      "indexes": [
+        ["idx_prospect_exp_prospect", ["prospect_id"]],
+        ["idx_prospect_exp_param", ["parameter_name"]]
+      ]
+    },
+    {
+      "name": "topo_mc_assumptions",
+      "ordering": 310,
+      "description": "Monte Carlo simulation assumptions (legacy MCT_CLIs migration).",
+      "columns": [
+        ["id", "VARCHAR"],
+        ["campaign_id", "VARCHAR"],
+        ["assumption_key", "VARCHAR"],
+        ["assumption_value", "DOUBLE"],
+        ["distribution", "VARCHAR"],
+        ["distribution_params", "JSON"],
+        ["justification", "TEXT"],
+        ["created_by", "VARCHAR NOT NULL"],
+        ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+        ["metadata", "JSON"]
+      ],
+      "primary_key": "id",
+      "indexes": [
+        ["idx_mc_assumptions_campaign", ["campaign_id"]],
+        ["idx_mc_assumptions_key", ["assumption_key"]]
+      ]
+    },
+    {
+      "name": "topo_mc_campaign_results",
+      "ordering": 320,
+      "description": "Monte Carlo simulation campaign results (legacy MCT_CLIs migration).",
+      "columns": [
+        ["id", "VARCHAR"],
+        ["campaign_id", "VARCHAR"],
+        ["run_id", "VARCHAR"],
+        ["result_type", "VARCHAR"],
+        ["result_value", "DOUBLE"],
+        ["p05", "DOUBLE"],
+        ["p50", "DOUBLE"],
+        ["p95", "DOUBLE"],
+        ["status", "VARCHAR DEFAULT 'pending'"],
+        ["created_by", "VARCHAR NOT NULL"],
+        ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+        ["metadata", "JSON"]
+      ],
+      "primary_key": "id",
+      "indexes": [
+        ["idx_mc_results_campaign", ["campaign_id"]],
+        ["idx_mc_results_run", ["run_id"]]
+      ]
+    }
+  ]
+}

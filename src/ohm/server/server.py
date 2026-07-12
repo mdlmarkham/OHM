@@ -3484,6 +3484,14 @@ def main(schema_config: SchemaConfig | None = None):
         action="store_true",
         help="Enable multi-tenancy mode (per-tenant isolated DuckDB instances)",
     )
+    parser.add_argument(
+        "--extra-schema",
+        action="append",
+        default=None,
+        metavar="FILE",
+        help="Extra schema JSON file to layer on top of --schema (repeatable). "
+        "Tables and vocabulary are additively merged; name collisions raise an error.",
+    )
     args = parser.parse_args()
 
     # Canonical config path: CLI --config wins, then OHM_CONFIG, then default.
@@ -3511,6 +3519,19 @@ def main(schema_config: SchemaConfig | None = None):
         schema_config = resolve_schema_by_name(args.schema, templates_dir=templates_dir)
     else:
         schema_config = DEFAULT_SCHEMA
+
+    # OHM-835: Apply any --extra-schema files (additive merge on top of base).
+    if args.extra_schema:
+        from ohm.graph.schema import SchemaConfig as _SC
+
+        for extra_path in args.extra_schema:
+            try:
+                extra_schema = _SC.from_json_path(extra_path)
+                schema_config = schema_config.extend(extra_schema)
+                print(f"Extra schema applied: {extra_path} ({len(extra_schema.domain_tables)} tables)", file=sys.stderr)
+            except (ValueError, FileNotFoundError) as e:
+                print(f"ERROR: Failed to load extra schema '{extra_path}': {e}", file=sys.stderr)
+                sys.exit(1)
 
     # CLI overrides
     if args.host:
@@ -3617,15 +3638,21 @@ def main(schema_config: SchemaConfig | None = None):
     # OHM-795: After store creation, check if a schema is already persisted
     # in ohm_meta. If so, it takes precedence over the provisional schema
     # used to bootstrap the store. This makes the DB the source of truth.
+    #
+    # OHM-835: Always prefer the persisted schema when present, and
+    # additively merge in whatever this invocation additionally requests
+    # (e.g. --extra-schema). The previous name-equality check silently
+    # discarded extended tables on restart because .extend() keeps the
+    # same domain name.
     from ohm.graph.schema import SchemaConfig as _SC
     from ohm.graph.schema import _create_domain_tables, _seed_domain_agents
 
     db_schema = _SC.from_db(store.conn)
-    if db_schema is not None and db_schema.name != schema_config.name:
-        schema_config = db_schema
+    if db_schema is not None:
+        schema_config = db_schema.extend(schema_config) if schema_config else db_schema
         OhmHandler.schema_config = schema_config
         print(f"Schema loaded from DB: {schema_config.name}", file=sys.stderr)
-        # Ensure domain tables are created for the reloaded schema
+        # Ensure domain tables are created for the reloaded/extended schema
         _create_domain_tables(store.conn, schema_config)
         _seed_domain_agents(store.conn, schema_config)
     print(f"Status: {store.status()}", file=sys.stderr)

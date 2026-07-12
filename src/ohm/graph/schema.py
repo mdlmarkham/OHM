@@ -1208,6 +1208,130 @@ class SchemaConfig:
 
         raise FileNotFoundError(f"Schema template '{filename}' not found in: {candidates}")
 
+    @classmethod
+    def from_json_path(cls, path: str) -> "SchemaConfig":
+        """Load a schema configuration from an arbitrary file path (OHM-835).
+
+        Unlike :meth:`from_json_file` which searches fixed directories,
+        this loads from an explicit path — used by ``--extra-schema``.
+
+        Args:
+            path: Absolute or relative path to a JSON schema file.
+
+        Returns:
+            SchemaConfig instance.
+
+        Raises:
+            FileNotFoundError: If the file does not exist.
+            ValueError: If the JSON is invalid or missing required keys.
+        """
+        import json as _json
+
+        p = Path(path)
+        if not p.exists():
+            raise FileNotFoundError(f"Extra schema file not found: {path}")
+        try:
+            with open(p) as f:
+                data = _json.load(f)
+        except _json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in extra schema file '{path}': {e}") from e
+        if not isinstance(data, dict):
+            raise ValueError(f"Extra schema file '{path}' must contain a JSON object, got {type(data).__name__}")
+        required = {"name", "node_types", "layer_descriptions", "observation_types", "observation_sources", "provenances"}
+        missing = required - set(data.keys())
+        if missing:
+            raise ValueError(f"Extra schema file '{path}' missing required keys: {sorted(missing)}")
+        return cls.from_dict(data)
+
+    def extend(self, other: "SchemaConfig") -> "SchemaConfig":
+        """Return a new SchemaConfig merging *other*'s tables onto self (OHM-835).
+
+        Additive-only: domain_tables and ducklake_tables from *other* are
+        appended to those from *self*. Raises on any name collision (table
+        names or index names) rather than silently overriding.
+
+        Vocabulary (node_types, edge_types, observation_types, etc.) is
+        also unioned — same additive-only semantics.
+
+        The result is a plain ``SchemaConfig`` (no wrapper type), so every
+        downstream consumer treats it identically to a schema that always
+        contained those tables.
+
+        Args:
+            other: SchemaConfig to merge on top of self.
+
+        Returns:
+            New SchemaConfig with unioned tables and vocabulary.
+
+        Raises:
+            ValueError: On duplicate table names or index names.
+            TypeError: If *other* is not a SchemaConfig.
+        """
+        if not isinstance(other, SchemaConfig):
+            raise TypeError(f"SchemaConfig.extend() requires a SchemaConfig, got {type(other).__name__}")
+
+        # --- Domain tables: union with collision detection ---
+        self_dt_names = {dt.name for dt in self.domain_tables}
+        other_dt_names = {dt.name for dt in other.domain_tables}
+        collisions = self_dt_names & other_dt_names
+        if collisions:
+            raise ValueError(
+                f"Domain table name collision(s) in extend(): {sorted(collisions)}. "
+                "The extra schema must not redefine tables already in the base schema."
+            )
+
+        # --- Index name collision detection ---
+        self_idx_names = {idx_name for dt in self.domain_tables for idx_name, _ in dt.indexes}
+        other_idx_names = {idx_name for dt in other.domain_tables for idx_name, _ in dt.indexes}
+        idx_collisions = self_idx_names & other_idx_names
+        if idx_collisions:
+            raise ValueError(
+                f"Index name collision(s) in extend(): {sorted(idx_collisions)}. "
+                "The extra schema must not redefine indexes already in the base schema."
+            )
+
+        # --- DuckLake table collision detection ---
+        self_dlt_names = {dlt.name for dlt in self.ducklake_tables}
+        other_dlt_names = {dlt.name for dlt in other.ducklake_tables}
+        dlt_collisions = (self_dlt_names & other_dlt_names) - {"ohm_nodes", "ohm_edges", "ohm_observations", "ohm_change_feed", "ohm_outcomes"}
+        if dlt_collisions:
+            raise ValueError(
+                f"DuckLake table name collision(s) in extend(): {sorted(dlt_collisions)}. "
+                "The extra schema must not redefine DuckLake sync entries already in the base schema."
+            )
+
+        # --- Build merged vocabulary ---
+        merged_node_types = self.node_types | other.node_types
+        merged_edge_types: dict[str, frozenset[str]] = {}
+        all_layers = set(self.layer_edge_types.keys()) | set(other.layer_edge_types.keys())
+        for layer in all_layers:
+            merged_edge_types[layer] = self.layer_edge_types.get(layer, frozenset()) | other.layer_edge_types.get(layer, frozenset())
+        merged_layer_descriptions = {**dict(self.layer_descriptions), **dict(other.layer_descriptions)}
+        merged_obs_types = self.observation_types | other.observation_types
+        merged_obs_sources = self.observation_sources | other.observation_sources
+        merged_visibilities = self.visibilities | other.visibilities
+        merged_provenances = self.provenances | other.provenances
+
+        # --- Build merged tables ---
+        merged_domain_tables = list(self.domain_tables) + list(other.domain_tables)
+        merged_ducklake_tables = list(self.ducklake_tables) + [dlt for dlt in other.ducklake_tables if dlt.name not in self_dlt_names]
+
+        return SchemaConfig(
+            name=self.name,
+            node_types=merged_node_types,
+            edge_types_by_layer=merged_edge_types,
+            layer_descriptions=merged_layer_descriptions,
+            observation_types=merged_obs_types,
+            observation_sources=merged_obs_sources,
+            visibilities=merged_visibilities,
+            provenances=merged_provenances,
+            domain_tables=merged_domain_tables,
+            ducklake_tables=merged_ducklake_tables,
+            case_strategy=self.case_strategy,
+            onboarding_node_id=self.onboarding_node_id or other.onboarding_node_id,
+            template_version=max(self.template_version, other.template_version),
+        )
+
 
 def resolve_schema_by_name(
     domain: str,
