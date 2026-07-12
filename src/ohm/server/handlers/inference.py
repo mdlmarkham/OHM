@@ -4,6 +4,7 @@ from __future__ import annotations
 
 
 from ohm.server.handlers._base import OhmHandlerBase
+from ohm.semantic_roles import SemanticRoles
 
 
 class InferenceHandlerMixin(OhmHandlerBase):
@@ -589,13 +590,15 @@ class InferenceHandlerMixin(OhmHandlerBase):
             p_good = float(posterior.get("good", 1.0 - p_bad))
 
             # Build driver list from neighborhood edges
+            # Use the same edge_types as inference/VoI (default: inference_edge_types from SemanticRoles)
+            driver_edge_types = edge_types or SemanticRoles.defaults().inference_edge_types()
             drivers = []
             for edge in edges:
-                if isinstance(edge, dict) and edge.get("to_node") == target and edge.get("edge_type") == "CAUSES":
+                if isinstance(edge, dict) and edge.get("to_node") == target and edge.get("edge_type") in driver_edge_types:
                     drivers.append(
                         {
                             "node": edge.get("from_node"),
-                            "edge_type": "CAUSES",
+                            "edge_type": edge.get("edge_type"),
                             "confidence": edge.get("confidence"),
                         }
                     )

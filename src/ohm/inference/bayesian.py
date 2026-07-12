@@ -96,7 +96,7 @@ _bayesian_network_cache: _LRUBayesianCache = _LRUBayesianCache()
 _bayesian_network_cache_lock = threading.Lock()
 
 # Module-level cache for VariableElimination instances (OHM-a689.3).
-# Keyed by a hash of the model's CPD values and structure.
+# Keyed by a structural hash of the model's CPD values and DAG edges.
 # This avoids creating 2 VE instances per causal_intervention call when
 # the same model is reused (e.g., VoI loop computes ATE for N candidates
 # against the same pre-built network).
@@ -104,7 +104,41 @@ _ve_cache: dict[int, "VariableElimination"] = {}
 _ve_cache_lock = threading.Lock()
 _MAX_VE_CACHE_SIZE = 20
 
+
+def _model_hash(model) -> int:
+    """Stable hash of a pgmpy BayesianNetwork based on its structure and CPD values.
+
+    Replaces ``id(model)`` which is unsafe: CPython reuses memory addresses
+    after GC, so a stale cache entry from a freed model could be retrieved
+    by a new model that happens to get the same ``id()``. This hash is
+    deterministic from the CPDs and edges, so two structurally identical
+    models always collide (which is correct — they produce identical VE
+    queries) and a freed model's hash won't be accidentally reused by an
+    unrelated model.
+    """
+    edges_hash = hash(tuple(sorted(model.edges())))
+    cpd_parts = []
+    for cpd in sorted(model.cpds, key=lambda c: str(c.variable)):
+        cpd_parts.append(str(cpd.values))
+    cpds_hash = hash(tuple(cpd_parts))
+    return hash((edges_hash, cpds_hash))
+
 MAX_CPT_PARENTS = 8
+
+
+def _network_failed(network) -> str | None:
+    """Return failure reason if build_bayesian_network returned an error sentinel, else None."""
+    if network is None:
+        return "no_probability_bearing_edges"
+    if isinstance(network, dict) and "_build_error" in network:
+        reason = network["_build_error"]
+        if reason == "no_edges":
+            return f"No edges found matching edge_types={network.get('edge_types')} layers={network.get('layers')}"
+        elif reason == "no_edges_after_scope":
+            return f"No edges remaining after BFS scoping/truncation for edge_types={network.get('edge_types')} layers={network.get('layers')}"
+        return str(reason)
+    return None
+
 
 # Maximum parents per node in noisy-OR CPT (OHM-a689)
 # 2^8 = 256 entries per state vs 2^16 = 65,536 for 16 parents.
@@ -384,17 +418,14 @@ def build_bayesian_network(
     if edge_types is None:
         # ADR-009: NEGATES edges have inverted probability semantics
         # (negative evidence: parent=bad *reduces* child=bad probability)
-        if semantic_roles is not None:
-            edge_types = semantic_roles.bayesian_list()
-        else:
-            edge_types = ["CAUSES", "DEPENDS_ON", "THREATENS", "EXPECTED_LIKELIHOOD", "NEGATES"]
+        edge_types = (semantic_roles or SemanticRoles.defaults()).bayesian_list()
 
     # Fetch edges via reader (ADR-008: prob and conf are distinct; ADR-013: PERT)
     _edge_records = reader.get_edges(edge_types=edge_types, layers=layers)
     rows = [(e.from_node, e.to_node, e.edge_type, e.probability, e.confidence, e.probability_p05, e.probability_p50, e.probability_p95, e.confidence_p05, e.confidence_p50, e.confidence_p95) for e in _edge_records]
 
     if not rows:
-        logger.info("No edges found — cannot build Bayesian network")
+        logger.info("No edges found for edge_types=%s layers=%s — cannot build Bayesian network", edge_types, layers)
         return None
 
     # Collect all involved nodes and edges, deduplicating by (from, to) pair
@@ -562,6 +593,10 @@ def build_bayesian_network(
             included |= new_nodes
         node_ids &= included
         edges = [e for e in edges if e["from"] in node_ids and e["to"] in node_ids]
+
+    if not edges:
+        logger.info("No edges remaining after BFS scoping/truncation — cannot build Bayesian network")
+        return None
 
     if len(node_ids) > max_nodes:
         logger.warning(f"Network too large ({len(node_ids)} nodes > {max_nodes}). Truncating.")
@@ -1000,7 +1035,7 @@ def bayesian_inference(
         query_kwargs["virtual_evidence"] = all_virtual_evidence
     try:
         # OHM-a689.3: Cache VE instance
-        _ve_key = id(model)
+        _ve_key = _model_hash(model)
         with _ve_cache_lock:
             if _ve_key not in _ve_cache:
                 if len(_ve_cache) >= _MAX_VE_CACHE_SIZE:
@@ -1298,7 +1333,7 @@ def causal_intervention(
     # distribution that is slow and can fail if any node is not connected.
     # Each individual query returns a marginal distribution for that node.
     # OHM-a689.3: Cache VE instances to avoid creating 2 per call.
-    _ve_key_do = id(model_do)
+    _ve_key_do = _model_hash(model_do)
     with _ve_cache_lock:
         if _ve_key_do not in _ve_cache:
             if len(_ve_cache) >= _MAX_VE_CACHE_SIZE:
@@ -1351,7 +1386,7 @@ def causal_intervention(
     try:
         obs_model = network["model"]
         # OHM-a689.3: Cache observation VE instance
-        _obs_ve_key = id(obs_model)
+        _obs_ve_key = _model_hash(obs_model)
         with _ve_cache_lock:
             if _obs_ve_key not in _ve_cache:
                 if len(_ve_cache) >= _MAX_VE_CACHE_SIZE:
@@ -2216,7 +2251,7 @@ def compute_voi(
         if semantic_roles is not None:
             edge_types = semantic_roles.inference_edge_types()
         else:
-            edge_types = ["CAUSES", "INFLUENCES", "ENABLES", "DEPENDS_ON", "THREATENS", "SUPPORTS", "CHALLENGED_BY"]
+            edge_types = SemanticRoles.defaults().inference_edge_types()
 
     reader = _coerce_reader(conn)
 
@@ -2975,7 +3010,7 @@ class BayesianContext:
         model = self._network["model"]
 
         try:
-            _ve_key = id(model)
+            _ve_key = _model_hash(model)
             with _ve_cache_lock:
                 if _ve_key not in _ve_cache:
                     if len(_ve_cache) >= _MAX_VE_CACHE_SIZE:
@@ -2983,7 +3018,6 @@ class BayesianContext:
                     _ve_cache[_ve_key] = VariableElimination(model)
             with _ve_cache_lock:
                 infer = _ve_cache[_ve_key]
-            result = infer.query(**query_kwargs)
             soft_factors = self._network.get("soft_evidence_factors", [])
             query_kwargs: dict[str, Any] = {"variables": [safe_target], "evidence": safe_evidence}
             if soft_factors:
@@ -3175,7 +3209,7 @@ class BayesianContext:
         # Run inference on the mutilated graph
         soft_factors = network.get("soft_evidence_factors", [])
         try:
-            _ve_key_do = id(model_do)
+            _ve_key_do = _model_hash(model_do)
             with _ve_cache_lock:
                 if _ve_key_do not in _ve_cache:
                     if len(_ve_cache) >= _MAX_VE_CACHE_SIZE:
@@ -3209,7 +3243,7 @@ class BayesianContext:
             comparison = {}
             try:
                 obs_model = network["model"]
-                _obs_ve_key = id(obs_model)
+                _obs_ve_key = _model_hash(obs_model)
                 with _ve_cache_lock:
                     if _obs_ve_key not in _ve_cache:
                         if len(_ve_cache) >= _MAX_VE_CACHE_SIZE:
