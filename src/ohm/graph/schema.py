@@ -1271,18 +1271,30 @@ class SchemaConfig:
             raise TypeError(f"SchemaConfig.extend() requires a SchemaConfig, got {type(other).__name__}")
 
         # --- Domain tables: union with collision detection ---
-        self_dt_names = {dt.name for dt in self.domain_tables}
-        other_dt_names = {dt.name for dt in other.domain_tables}
-        collisions = self_dt_names & other_dt_names
-        if collisions:
+        # A name collision is tolerated when both sides define the IDENTICAL
+        # table (structural equality on the frozen DomainTable dataclass) —
+        # this covers reconciling a schema with itself (server.py's reconnect
+        # path re-merging a freshly-resolved schema against its own just-
+        # persisted copy) or applying the same extension twice.  Only a
+        # collision between two DIFFERING definitions for the same name is
+        # an error — that's the real "redefinition" bug this check exists
+        # to catch (e.g. the original topo_prospects ambiguity).
+        self_dt_by_name = {dt.name: dt for dt in self.domain_tables}
+        other_dt_by_name = {dt.name: dt for dt in other.domain_tables}
+        common_names = set(self_dt_by_name) & set(other_dt_by_name)
+        conflicting = {name for name in common_names if self_dt_by_name[name] != other_dt_by_name[name]}
+        if conflicting:
             raise ValueError(
-                f"Domain table name collision(s) in extend(): {sorted(collisions)}. "
-                "The extra schema must not redefine tables already in the base schema."
+                f"Domain table name collision(s) in extend(): {sorted(conflicting)}. "
+                "Two different table definitions share the same name."
             )
 
         # --- Index name collision detection ---
+        # Only check indexes from genuinely new tables — a deduped-identical
+        # table trivially has identical indexes, so no real collision is possible.
+        new_other_dt_names = {dt.name for dt in other.domain_tables if dt.name not in self_dt_by_name}
         self_idx_names = {idx_name for dt in self.domain_tables for idx_name, _ in dt.indexes}
-        other_idx_names = {idx_name for dt in other.domain_tables for idx_name, _ in dt.indexes}
+        other_idx_names = {idx_name for dt in other.domain_tables if dt.name in new_other_dt_names for idx_name, _ in dt.indexes}
         idx_collisions = self_idx_names & other_idx_names
         if idx_collisions:
             raise ValueError(
@@ -1291,13 +1303,16 @@ class SchemaConfig:
             )
 
         # --- DuckLake table collision detection ---
-        self_dlt_names = {dlt.name for dlt in self.ducklake_tables}
-        other_dlt_names = {dlt.name for dlt in other.ducklake_tables}
-        dlt_collisions = (self_dlt_names & other_dlt_names) - {"ohm_nodes", "ohm_edges", "ohm_observations", "ohm_change_feed", "ohm_outcomes"}
-        if dlt_collisions:
+        # Tolerate identical entries (same dedup logic as domain tables).
+        self_dlt_by_name = {dlt.name: dlt for dlt in self.ducklake_tables}
+        other_dlt_by_name = {dlt.name: dlt for dlt in other.ducklake_tables}
+        core_names = {"ohm_nodes", "ohm_edges", "ohm_observations", "ohm_change_feed", "ohm_outcomes"}
+        dlt_common = (set(self_dlt_by_name) & set(other_dlt_by_name)) - core_names
+        dlt_conflicting = {name for name in dlt_common if self_dlt_by_name[name] != other_dlt_by_name[name]}
+        if dlt_conflicting:
             raise ValueError(
-                f"DuckLake table name collision(s) in extend(): {sorted(dlt_collisions)}. "
-                "The extra schema must not redefine DuckLake sync entries already in the base schema."
+                f"DuckLake table name collision(s) in extend(): {sorted(dlt_conflicting)}. "
+                "Two different DuckLake sync entries share the same name."
             )
 
         # --- Build merged vocabulary ---
@@ -1313,8 +1328,9 @@ class SchemaConfig:
         merged_provenances = self.provenances | other.provenances
 
         # --- Build merged tables ---
-        merged_domain_tables = list(self.domain_tables) + list(other.domain_tables)
-        merged_ducklake_tables = list(self.ducklake_tables) + [dlt for dlt in other.ducklake_tables if dlt.name not in self_dlt_names]
+        new_tables_from_other = [dt for dt in other.domain_tables if dt.name not in self_dt_by_name]
+        merged_domain_tables = list(self.domain_tables) + new_tables_from_other
+        merged_ducklake_tables = list(self.ducklake_tables) + [dlt for dlt in other.ducklake_tables if dlt.name not in self_dlt_by_name]
 
         return SchemaConfig(
             name=self.name,

@@ -510,11 +510,21 @@ class TestSchemaConfigExtend:
         assert names == ["a_first", "z_last"]
 
     def test_raises_on_table_name_collision(self):
+        dt_a = DomainTable(name="shared", columns=(("id", "VARCHAR"),))
+        dt_b = DomainTable(name="shared", columns=(("id", "INTEGER"),))
+        base = SchemaConfig(name="test", domain_tables=[dt_a])
+        extra = SchemaConfig(name="test", domain_tables=[dt_b])
+        with pytest.raises(ValueError, match="Domain table name collision"):
+            base.extend(extra)
+
+    def test_identical_table_collision_is_tolerated(self):
+        """Same table on both sides (e.g. reconnect self-merge) is deduped, not errored."""
         dt = DomainTable(name="shared", columns=(("id", "VARCHAR"),))
         base = SchemaConfig(name="test", domain_tables=[dt])
         extra = SchemaConfig(name="test", domain_tables=[dt])
-        with pytest.raises(ValueError, match="Domain table name collision"):
-            base.extend(extra)
+        merged = base.extend(extra)
+        assert len(merged.domain_tables) == 1
+        assert merged.domain_tables[0].name == "shared"
 
     def test_raises_on_index_name_collision(self):
         dt1 = DomainTable(

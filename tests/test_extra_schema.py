@@ -244,3 +244,39 @@ class TestExtraSchemaDuckLake:
 
         dlt_names = {d.name for d in merged.ducklake_tables}
         assert "ext_ducklake_test" in dlt_names
+
+
+# ── Reconnect guard regression: ordinary restart ─────────────────────────────
+
+
+class TestReconnectGuardOrdinaryRestart:
+    def test_plain_restart_does_not_crash(self):
+        """Simulates the realistic case: --schema topo, then restart with no
+        --extra-schema. The reconnect guard re-merges the freshly-resolved
+        schema against its own just-persisted copy — identical tables on both
+        sides must be deduped, not raise ValueError."""
+        from ohm.graph.schema import TOPO_SCHEMA
+
+        conn = duckdb.connect(":memory:")
+        # First boot: persists topo to ohm_meta via to_db().
+        initialize_schema(conn, schema=TOPO_SCHEMA)
+
+        # Simulate reconnect: from_db() reads back the persisted schema,
+        # then extend() re-merges the same base schema against itself.
+        from ohm.graph.schema import SchemaConfig as SC
+
+        db_schema = SC.from_db(conn)
+        assert db_schema is not None
+        # This is what server.py's reconnect guard does — must not crash.
+        merged = db_schema.extend(TOPO_SCHEMA)
+        _create_domain_tables(conn, merged)
+
+        # All topo domain tables still present, no duplicates.
+        tables = [r[0] for r in conn.execute(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_name LIKE 'topo_%'"
+        ).fetchall()]
+        assert "topo_rul_assessments" in tables
+        assert "topo_campaigns" in tables
+        # No duplicated tables.
+        assert len(tables) == len(set(tables))
