@@ -150,8 +150,8 @@ def build_request(name: str, arguments: dict[str, Any], agent_id: str) -> tuple[
         target = arguments["target"]
         analysis = arguments.get("analysis", "absorbing")
         if analysis == "expected_steps":
-            return "GET", f"/markov/expected_steps?target={target}", None
-        return "GET", f"/markov/absorbing?target={target}", None
+            return "GET", f"/markov/expected_steps?start={target}", None
+        return "GET", f"/markov/absorbing?start={target}", None
 
     if name == "ohm_game":
         return "GET", f"/game?target={arguments['target']}", None

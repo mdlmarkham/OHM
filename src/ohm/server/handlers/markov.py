@@ -18,7 +18,7 @@ class MarkovHandlerMixin(OhmHandlerBase):
         """GET /markov/absorbing — Markov absorbing-state risk."""
         from ohm.exceptions import ConfigurationError, ValidationError
 
-        start_node = qs.get("start", [None])[0]
+        start_node = qs.get("start", [None])[0] or qs.get("target", [None])[0]
         if not start_node:
             raise ValidationError("?start=<node_id> is required")
         edge_types_str = qs.get("edge_types", [""])[0]
@@ -39,7 +39,7 @@ class MarkovHandlerMixin(OhmHandlerBase):
         """GET /markov/expected_steps — Markov expected steps to absorption."""
         from ohm.exceptions import ConfigurationError, ValidationError
 
-        start_node = qs.get("start", [None])[0]
+        start_node = qs.get("start", [None])[0] or qs.get("target", [None])[0]
         if not start_node:
             raise ValidationError("?start=<node_id> is required")
         target_state = qs.get("target", [None])[0]

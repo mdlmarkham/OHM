@@ -387,8 +387,11 @@ def build_bayesian_network(
     # (e.g., /inference?target=X cached network reused for /ate?cause=A&effect=B).
     # customer_id (OHM-g4os) prevents cross-tenant cache bleed — two tenants
     # with identical node IDs must get independent cached networks.
+    # reader.cache_identity (OHM-825) prevents cross-connection cache bleed —
+    # different in-memory databases with same schema must get independent cached networks.
     cache_key = (
         customer_id,
+        reader.cache_identity,
         tuple(sorted(edge_types)) if edge_types else None,
         tuple(sorted(layers)) if layers else None,
         tuple(sorted(root_nodes)) if root_nodes else None,
@@ -990,7 +993,7 @@ def bayesian_inference(
             "pgmpy_available": True,
             "target": target,
             "evidence": evidence,
-            "error": "No probability-bearing edges found in graph",
+            "error": "No probability-bearing edges found for inference (edge_types={}, layers={})".format(edge_types, layers),
         }
 
     model = network["model"]
@@ -1200,7 +1203,7 @@ def causal_intervention(
             "pgmpy_available": True,
             "target": target,
             "intervention_state": intervention_state,
-            "error": "No probability-bearing edges found in graph",
+            "error": "No probability-bearing edges found for intervention (edge_types={}, layers={})".format(edge_types, layers),
         }
 
     safe_names = network["safe_names"]
@@ -1894,7 +1897,7 @@ def find_adjustment_sets(
             "method": "none",
             "cause": cause,
             "effect": effect,
-            "error": "No probability-bearing edges found — cannot build network",
+            "error": "No probability-bearing edges found for ATE computation (edge_types={}, layers={})".format(edge_types, layers),
         }
 
     bn = network["model"]
@@ -2984,7 +2987,7 @@ class BayesianContext:
                 "pgmpy_available": PGMPY_AVAILABLE,
                 "target": target,
                 "evidence": evidence,
-                "error": "No probability-bearing edges found in graph",
+                "error": "No probability-bearing edges in cached network for inference",
             }
 
         target = validate_identifier(target, name="target")
@@ -3073,7 +3076,7 @@ class BayesianContext:
                 "pgmpy_available": PGMPY_AVAILABLE,
                 "target": target,
                 "intervention_state": intervention_state,
-                "error": "No probability-bearing edges found in graph",
+                "error": "No probability-bearing edges in cached network for intervention",
             }
 
         if intervention_state not in (0, 1):
