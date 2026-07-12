@@ -2558,6 +2558,27 @@ INDEX_DDL: list[str] = [
 ]
 
 
+def _get_persisted_schema(conn: "DuckDBPyConnection") -> "SchemaConfig | None":
+    """Read the persisted domain_schema from ohm_meta without full SchemaConfig parsing.
+
+    Returns the SchemaConfig if found and valid, else None.
+    """
+    from .schema import SchemaConfig
+
+    try:
+        row = conn.execute("SELECT value FROM ohm_meta WHERE key = 'domain_schema'").fetchone()
+    except Exception:
+        return None
+    if row is None or not row[0]:
+        return None
+    import json
+
+    try:
+        return SchemaConfig.from_dict(json.loads(row[0]))
+    except Exception:
+        return None
+
+
 def initialize_schema(conn: "DuckDBPyConnection", schema: "SchemaConfig | None" = None) -> None:
     """Create all tables and indexes if they don't exist.
 
@@ -2599,7 +2620,13 @@ def initialize_schema(conn: "DuckDBPyConnection", schema: "SchemaConfig | None" 
     # SchemaConfig.from_db(conn) can reload it without needing --schema.
     if schema:
         try:
-            schema.to_db(conn)
+            # Only persist if explicitly provided (not default fallback)
+            # or if no schema is already persisted in ohm_meta.
+            # This prevents bare restarts (without --schema) from clobbering
+            # the previously-persisted domain schema.
+            existing = _get_persisted_schema(conn)
+            if schema is not DEFAULT_SCHEMA or existing is None:
+                schema.to_db(conn)
         except Exception:
             pass  # Non-fatal: ohm_meta may not exist on very old DBs
 

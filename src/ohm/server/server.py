@@ -3618,12 +3618,16 @@ def main(schema_config: SchemaConfig | None = None):
     # in ohm_meta. If so, it takes precedence over the provisional schema
     # used to bootstrap the store. This makes the DB the source of truth.
     from ohm.graph.schema import SchemaConfig as _SC
+    from ohm.graph.schema import _create_domain_tables, _seed_domain_agents
 
     db_schema = _SC.from_db(store.conn)
     if db_schema is not None and db_schema.name != schema_config.name:
         schema_config = db_schema
         OhmHandler.schema_config = schema_config
         print(f"Schema loaded from DB: {schema_config.name}", file=sys.stderr)
+        # Ensure domain tables are created for the reloaded schema
+        _create_domain_tables(store.conn, schema_config)
+        _seed_domain_agents(store.conn, schema_config)
     print(f"Status: {store.status()}", file=sys.stderr)
 
     # Attach DuckLake if configured (OHM-kdk.1)
