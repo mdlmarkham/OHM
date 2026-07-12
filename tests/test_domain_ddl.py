@@ -164,7 +164,7 @@ class TestSchemaConfigDomainTables:
         topo = SchemaConfig.from_json_file("topo.json")
         assert len(topo.domain_tables) >= 1
         names = {dt.name for dt in topo.domain_tables}
-        assert "topo_prospects" in names
+        assert "topo_rul_assessments" in names
 
     def test_domain_tables_sorted_by_ordering(self):
         dt_a = DomainTable(name="zebra", columns=(("x", "VARCHAR"),), ordering=200)
@@ -331,7 +331,7 @@ class TestInitializeSchemaWithDomainTables:
         topo = SchemaConfig.from_json_file("topo.json")
         conn = duckdb.connect(":memory:")
         initialize_schema(conn, topo)
-        rows = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='topo_prospects' ORDER BY ordinal_position").fetchall()
+        rows = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='topo_rul_assessments' ORDER BY ordinal_position").fetchall()
         cols = {row[0] for row in rows}
         assert {"id", "equipment_id", "site_id", "rul_days", "risk_class", "model_version"} <= cols
 

@@ -53,8 +53,8 @@ _skip_no_ducklake = pytest.mark.skipif(not DUCKLAKE_AVAILABLE, reason="ducklake 
 # A minimal TOPO config with a single domain table for the pilot.
 # This is the OHM-vl8o / OHM-8bli / OHM-ue9k stack exercised end-to-end.
 def _make_topo_pilot_config() -> SchemaConfig:
-    topo_prospects = DomainTable(
-        name="topo_prospects",
+    topo_rul_assessments = DomainTable(
+        name="topo_rul_assessments",
         columns=(
             ("id", "VARCHAR"),
             ("equipment_id", "VARCHAR"),
@@ -67,7 +67,7 @@ def _make_topo_pilot_config() -> SchemaConfig:
         ),
         primary_key="id",
         ordering=100,
-        description="TOPO predictive-maintenance prospects (pilot table)",
+        description="TOPO RUL assessments (pilot table)",
     )
     # Start from the OHM-built topo() and append our pilot domain table.
     base = resolve_schema_by_name("topo")
@@ -81,7 +81,7 @@ def _make_topo_pilot_config() -> SchemaConfig:
         visibilities=base.visibilities,
         provenances=base.provenances,
         case_strategy=base.case_strategy,  # 'uppercase' for legacy compat
-        domain_tables=[topo_prospects],
+        domain_tables=[topo_rul_assessments],
     )
 
 
@@ -99,10 +99,10 @@ class TestTopoLibraryModePilot:
         for t in ("ohm_nodes", "ohm_edges", "ohm_observations"):
             assert conn.execute(f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name='{t}'").fetchone()[0] == 1
         # Domain table from OHM-vl8o
-        assert conn.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_name='topo_prospects'").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_name='topo_rul_assessments'").fetchone()[0] == 1
         # DuckLake registry (OHM-8bli) includes the domain table
         names = {dlt.name for dlt in cfg.ducklake_tables}
-        assert "topo_prospects" in names
+        assert "topo_rul_assessments" in names
         assert "ohm_nodes" in names
         conn.close()
 
@@ -133,15 +133,15 @@ class TestTopoLibraryModePilot:
         # legacy UPPERCASE form to prove OHM-ue9k works end-to-end).
         store.write_node("motor_01", "Pump motor 01", "equipment", confidence=0.9)
         store.write_node("sensor_01", "Vibration sensor 01", "sensor", confidence=0.8)
-        # Domain write — topo_prospects gets the pilot's RUL data.
+        # Domain write — topo_rul_assessments gets the pilot's RUL data.
         store.conn.execute(
-            """INSERT INTO topo_prospects
+            """INSERT INTO topo_rul_assessments
                (id, equipment_id, rul_days, risk_class, model_version, created_by)
                VALUES (?, ?, ?, ?, ?, ?)""",
             ["p1", "motor_01", 30.5, "high", "v1.0", "pilot_agent"],
         )
         store.conn.execute(
-            """INSERT INTO topo_prospects
+            """INSERT INTO topo_rul_assessments
                (id, equipment_id, rul_days, risk_class, model_version, created_by)
                VALUES (?, ?, ?, ?, ?, ?)""",
             ["p2", "sensor_01", 90.0, "low", "v1.0", "pilot_agent"],
@@ -149,16 +149,16 @@ class TestTopoLibraryModePilot:
         store.conn.execute("CHECKPOINT")
         # Pre-crash row counts.
         before_nodes = store.conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL").fetchone()[0]
-        before_prospects = store.conn.execute("SELECT COUNT(*) FROM topo_prospects").fetchone()[0]
+        before_prospects = store.conn.execute("SELECT COUNT(*) FROM topo_rul_assessments").fetchone()[0]
         assert before_nodes == 2
         assert before_prospects == 2
 
         # ── Phase 2: attach DuckLake and push to mirror ──────────────────
         attached = store.attach_ducklake(catalog_path=ducklake_path, data_path=data_path)
         assert attached, "DuckLake attach failed"
-        # The mirror for topo_prospects should be auto-created from the
+        # The mirror for topo_rul_assessments should be auto-created from the
         # registry (OHM-8bli). Verify the catalog has the table.
-        mirror_cols = store.conn.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_catalog='ohm_lake' AND table_name='topo_prospects' ORDER BY ordinal_position").fetchall()
+        mirror_cols = store.conn.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_catalog='ohm_lake' AND table_name='topo_rul_assessments' ORDER BY ordinal_position").fetchall()
         # All VARCHAR (mirror convention).
         for col, dtype in mirror_cols:
             assert dtype == "VARCHAR", f"mirror column {col} expected VARCHAR, got {dtype}"
@@ -168,7 +168,7 @@ class TestTopoLibraryModePilot:
         pushed = store.sync_to_ducklake(alias="ohm_lake")
         assert pushed > 0
         # Verify the mirror has the data.
-        mirror_prospects_count = store.conn.execute("SELECT COUNT(*) FROM ohm_lake.topo_prospects").fetchone()[0]
+        mirror_prospects_count = store.conn.execute("SELECT COUNT(*) FROM ohm_lake.topo_rul_assessments").fetchone()[0]
         assert mirror_prospects_count == 2
         mirror_nodes_count = store.conn.execute("SELECT COUNT(*) FROM ohm_lake.ohm_nodes").fetchone()[0]
         assert mirror_nodes_count == 2
@@ -189,7 +189,7 @@ class TestTopoLibraryModePilot:
         # Confirm the new store starts empty (no auto-restore yet —
         # repair_from_ducklake is the explicit recovery step).
         empty_nodes = new_store.conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL").fetchone()[0]
-        empty_prospects = new_store.conn.execute("SELECT COUNT(*) FROM topo_prospects").fetchone()[0]
+        empty_prospects = new_store.conn.execute("SELECT COUNT(*) FROM topo_rul_assessments").fetchone()[0]
         assert empty_nodes == 0
         assert empty_prospects == 0
 
@@ -207,11 +207,11 @@ class TestTopoLibraryModePilot:
 
         # ── Phase 6: verify row counts match the pre-crash state ───────
         recovered_nodes = new_store.conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL").fetchone()[0]
-        recovered_prospects = new_store.conn.execute("SELECT COUNT(*) FROM topo_prospects").fetchone()[0]
+        recovered_prospects = new_store.conn.execute("SELECT COUNT(*) FROM topo_rul_assessments").fetchone()[0]
         assert recovered_nodes == before_nodes, f"nodes mismatch: before={before_nodes}, after={recovered_nodes}"
         assert recovered_prospects == before_prospects, f"prospects mismatch: before={before_prospects}, after={recovered_prospects}"
         # Spot-check a domain-table row: the high-risk motor with RUL 30.5d.
-        p1 = new_store.conn.execute("SELECT equipment_id, rul_days, risk_class FROM topo_prospects WHERE id='p1'").fetchone()
+        p1 = new_store.conn.execute("SELECT equipment_id, rul_days, risk_class FROM topo_rul_assessments WHERE id='p1'").fetchone()
         assert p1 is not None
         assert p1[0] == "motor_01"
         assert p1[1] == 30.5
@@ -227,8 +227,8 @@ class TestTopoLibraryModePilot:
             health = store.check_ducklake_health()
             # Domain table is in the registry, so its count is reported
             # even when no DuckLake is attached.
-            assert "topo_prospects" in health["local_counts"]
-            assert health["local_counts"]["topo_prospects"] == 0
+            assert "topo_rul_assessments" in health["local_counts"]
+            assert health["local_counts"]["topo_rul_assessments"] == 0
         finally:
             store.close()
 
@@ -267,10 +267,10 @@ class TestTopoPilotScenarios:
         try:
             # Core OHM writes work as before.
             store.write_node("n1", "node 1", "concept")
-            # No topo_prospects in the registry.
-            assert "topo_prospects" not in {dlt.name for dlt in cfg.ducklake_tables}
+            # No topo_rul_assessments in the registry.
+            assert "topo_rul_assessments" not in {dlt.name for dlt in cfg.ducklake_tables}
             # check_ducklake_health works without the domain table.
             health = store.check_ducklake_health()
-            assert "topo_prospects" not in health["local_counts"]
+            assert "topo_rul_assessments" not in health["local_counts"]
         finally:
             store.close()

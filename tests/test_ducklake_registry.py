@@ -232,13 +232,13 @@ class TestSchemaConfigDuckLakeTables:
         # auto-include a DuckLakeTable entry for each one. The default
         # constructor wires this up.
         dt = DomainTable(
-            name="topo_prospects",
+            name="topo_rul_assessments",
             columns=(("id", "VARCHAR"), ("updated_at", "TIMESTAMP")),
         )
         c = SchemaConfig(name="topo", domain_tables=[dt])
         names = {dlt.name for dlt in c.ducklake_tables}
         # Core tables + the domain table.
-        assert "topo_prospects" in names
+        assert "topo_rul_assessments" in names
         assert "ohm_nodes" in names
 
 
@@ -268,12 +268,12 @@ class TestSchemaConfigRoundTripWithDuckLakeTables:
     def test_topo_template_round_trip(self):
         topo = SchemaConfig.from_json_file("topo.json")
         restored = SchemaConfig.from_dict(topo.to_dict())
-        # topo.json has topo_prospects in domain_tables, so ducklake_tables
-        # should also include the derived topo_prospects entry.
+        # topo.json has topo_rul_assessments in domain_tables, so ducklake_tables
+        # should also include the derived topo_rul_assessments entry.
         topo_dlt_names = {dlt.name for dlt in topo.ducklake_tables}
         restored_dlt_names = {dlt.name for dlt in restored.ducklake_tables}
         assert topo_dlt_names == restored_dlt_names
-        assert "topo_prospects" in topo_dlt_names
+        assert "topo_rul_assessments" in topo_dlt_names
 
 
 # ── OhmStore registry accessor ─────────────────────────────────────────────
@@ -293,11 +293,11 @@ class TestOhmStoreDuckLakeRegistry:
         store.close()
 
     def test_sync_tables_includes_domain_tables(self):
-        dt = DomainTable(name="topo_x", columns=(("id", "VARCHAR"),))
+        dt = DomainTable(name="topo_rul_assessments", columns=(("id", "VARCHAR"),))
         cfg = SchemaConfig(name="t", domain_tables=[dt])
         store = OhmStore(db_path=":memory:", schema=cfg)
         sync_names = {dlt.name for dlt in store._ducklake_sync_tables()}
-        assert "topo_x" in sync_names
+        assert "topo_rul_assessments" in sync_names
         store.close()
 
     def test_table_counts_uses_registry(self):
@@ -394,7 +394,7 @@ class TestCreateDuckLakeTablesDynamic:
 
         # Set up: local schema with a domain table, plus a DuckLake catalog.
         dt = DomainTable(
-            name="topo_prospects",
+            name="topo_rul_assessments",
             columns=(
                 ("id", "VARCHAR"),
                 ("equipment_id", "VARCHAR"),
@@ -413,9 +413,9 @@ class TestCreateDuckLakeTablesDynamic:
         except Exception:
             pytest.skip("ATTACH not available in this DuckDB build")
         _create_ducklake_tables(conn, "ohm_lake", schema=cfg)
-        # The mirror table for topo_prospects should exist in the
+        # The mirror table for topo_rul_assessments should exist in the
         # ohm_lake catalog (default schema is "main" within that catalog).
-        mirror_cols = conn.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_catalog='ohm_lake' AND table_name='topo_prospects' ORDER BY ordinal_position").fetchall()
+        mirror_cols = conn.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_catalog='ohm_lake' AND table_name='topo_rul_assessments' ORDER BY ordinal_position").fetchall()
         col_types = {c[0]: c[1] for c in mirror_cols}
         # All columns VARCHAR.
         for c, t in col_types.items():

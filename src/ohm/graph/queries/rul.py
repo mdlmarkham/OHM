@@ -22,7 +22,7 @@ def register_rul_assessment(
     metadata: dict | None = None,
     created_by: str,
 ) -> dict[str, Any]:
-    """Store a RUL assessment in topo_prospects and link it via L4 PREDICTS (OHM-q4ku)."""
+    """Store a RUL assessment in topo_rul_assessments and link it via L4 PREDICTS (OHM-q4ku)."""
     import json
     import uuid
 
@@ -41,14 +41,14 @@ def register_rul_assessment(
     meta_json = json.dumps(meta) if meta else None
 
     conn.execute(
-        """INSERT INTO topo_prospects
+        """INSERT INTO topo_rul_assessments
            (id, equipment_id, site_id, rul_days, risk_class, model_version, created_by, metadata)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
         [prospect_id, equipment_node_id, site_id, rul_days, risk_class, model_version, created_by, meta_json],
     )
-    _log_change(conn, "topo_prospects", prospect_id, "INSERT", created_by)
+    _log_change(conn, "topo_rul_assessments", prospect_id, "INSERT", created_by)
 
-    prospect = _rows_to_dicts(conn.execute("SELECT * FROM topo_prospects WHERE id = ?", [prospect_id]))[0]
+    prospect = _rows_to_dicts(conn.execute("SELECT * FROM topo_rul_assessments WHERE id = ?", [prospect_id]))[0]
 
     edge_id = None
     node_exists = conn.execute(
@@ -76,10 +76,10 @@ def get_rul_assessments(
     site_id: str | None = None,
     limit: int = 100,
 ) -> list[dict[str, Any]]:
-    """Fetch RUL assessments from topo_prospects with optional filters (OHM-q4ku)."""
+    """Fetch RUL assessments from topo_rul_assessments with optional filters (OHM-q4ku)."""
     from ohm.validation import validate_identifier
 
-    query = "SELECT * FROM topo_prospects WHERE 1=1"
+    query = "SELECT * FROM topo_rul_assessments WHERE 1=1"
     params: list[Any] = []
     if equipment_node_id is not None:
         equipment_node_id = validate_identifier(equipment_node_id, name="equipment_node_id")

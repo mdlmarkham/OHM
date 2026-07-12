@@ -3607,7 +3607,7 @@ def main(schema_config: SchemaConfig | None = None):
         if data_path:
             os.environ["OHM_DUCKLAKE_DATA"] = data_path
 
-    # OHM-vl8o: pass schema to OhmStore so domain DDL (e.g. topo_prospects) is
+    # OHM-vl8o: pass schema to OhmStore so domain DDL (e.g. ohm_topo_rul_assessments) is
     # created during _init_schema(). Without this, the store uses DEFAULT_SCHEMA
     # and any domain tables are silently skipped even when the daemon was
     # started with `ohmd --schema topo`.

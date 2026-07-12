@@ -247,9 +247,9 @@
   ],
   "domain_tables": [
     {
-      "name": "topo_prospects",
+      "name": "topo_rul_assessments",
       "ordering": 100,
-      "description": "TOPO predictive-maintenance prospects: ranked equipment with RUL and risk class.",
+      "description": "TOPO RUL assessments: ranked equipment with Remaining Useful Life and risk class.",
       "columns": [
         [
           "id",
@@ -295,23 +295,52 @@
       "primary_key": "id",
       "indexes": [
         [
-          "idx_topo_prospects_equipment",
+          "idx_topo_rul_assessments_equipment",
           [
             "equipment_id"
           ]
         ],
         [
-          "idx_topo_prospects_site",
+          "idx_topo_rul_assessments_site",
           [
             "site_id"
           ]
         ],
         [
-          "idx_topo_prospects_risk",
+          "idx_topo_rul_assessments_risk",
           [
             "risk_class"
           ]
         ]
+      ]
+    },
+    {
+      "name": "topo_campaigns",
+      "ordering": 105,
+      "description": "TOPO maintenance campaign planner: proposed/committed/active maintenance campaigns.",
+      "columns": [
+        ["id", "VARCHAR"],
+        ["prospect_type", "VARCHAR"],
+        ["status", "VARCHAR"],
+        ["owner", "VARCHAR"],
+        ["authority", "VARCHAR"],
+        ["rationale", "TEXT"],
+        ["planned_start", "TIMESTAMP"],
+        ["planned_end", "TIMESTAMP"],
+        ["horizon", "VARCHAR"],
+        ["created_by", "VARCHAR NOT NULL"],
+        ["created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+        ["updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"],
+        ["metadata", "JSON"]
+      ],
+      "primary_key": "id",
+      "check_constraints": {
+        "prospect_type": ["campaign", "maintenance_event", "forecast", "target", "budget", "milestone"],
+        "status": ["proposed", "committed", "active", "completed", "cancelled", "partial", "failed", "superseded"]
+      },
+      "indexes": [
+        ["idx_topo_campaigns_type", ["prospect_type"]],
+        ["idx_topo_campaigns_status", ["status"]]
       ]
     },
     {

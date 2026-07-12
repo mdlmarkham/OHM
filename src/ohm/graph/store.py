@@ -321,7 +321,7 @@ class OhmStore:
                         logger.debug("DuckLake mirror table creation skipped: %s", e)
 
                     # OHM-8bli: iterate the DuckLake registry (not a hardcoded list)
-                    # so domain tables (e.g. topo_prospects) get recovered too.
+                    # so domain tables (e.g. ohm_topo_prospects) get recovered too.
                     for dlt in self.schema.ducklake_tables:
                         table = dlt.name
                         try:
@@ -2791,7 +2791,7 @@ class OhmStore:
         """Get row counts for all mirrored tables (excluding soft-deleted).
 
         OHM-8bli: iterates the DuckLake registry instead of a hardcoded
-        three-table list, so domain tables (e.g. topo_prospects) get
+        three-table list, so domain tables (e.g. ohm_topo_prospects) get
         included in the health report.
         """
         counts = {}

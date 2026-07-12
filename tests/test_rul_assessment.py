@@ -122,5 +122,5 @@ class TestGetRulAssessments:
 class TestRulSchema:
     def test_topo_prospects_table_exists(self, graph):
         conn = graph._conn
-        row = conn.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'topo_prospects'").fetchone()
+        row = conn.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'topo_rul_assessments'").fetchone()
         assert row[0] == 1
