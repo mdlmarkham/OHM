@@ -521,36 +521,45 @@ def _build_tool_handler(tool_name: str):
 # to AccessToken objects with the GatewayProfile as claims.
 # The inline _resolve_profile in the handler is the fallback path;
 # when FastMCP auth is active, the profile comes from the auth context.
-mcp = FastMCP("ohm-gateway", tasks=True)
+# OHM-827: Default name from env var, can be overridden by --name CLI arg.
+_DEFAULT_GATEWAY_NAME = os.environ.get("OHM_GATEWAY_NAME", "ohm-gateway")
+mcp = FastMCP(_DEFAULT_GATEWAY_NAME, tasks=True)
 
 
-@mcp.custom_route("/health", methods=["GET"])
-async def _health_route(request) -> Any:
-    """Gateway health check including OHM backend reachability."""
-    from starlette.responses import JSONResponse
+def _register_health_route(mcp_instance) -> None:
+    """Register the /health custom route on the given FastMCP instance."""
+    @mcp_instance.custom_route("/health", methods=["GET"])
+    async def _health_route(request) -> Any:
+        """Gateway health check including OHM backend reachability."""
+        from starlette.responses import JSONResponse
 
-    profiles = _profiles()
-    backend_ok = False
-    if profiles:
-        profile = next(iter(profiles.values()))
-        try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                r = await client.get(
-                    f"{profile.ohm_url}/health",
-                    headers={"Authorization": f"Bearer {profile.ohm_token}"},
-                )
-                backend_ok = r.status_code == 200
-        except Exception as exc:
-            logger.debug("backend health check failed: %s", exc)
-    return JSONResponse(
-        {
-            "status": "ok",
-            "profiles": len(profiles),
-            "backend_reachable": backend_ok,
-            "allow_unauthenticated": os.environ.get("OHM_GATEWAY_ALLOW_UNAUTHENTICATED", "").lower() in ("1", "true", "yes"),
-        }
-    )
+        profiles = _profiles()
+        backend_ok = False
+        if profiles:
+            profile = next(iter(profiles.values()))
+            try:
+                async with httpx.AsyncClient(timeout=10) as client:
+                    r = await client.get(
+                        f"{profile.ohm_url}/health",
+                        headers={"Authorization": f"Bearer {profile.ohm_token}"},
+                    )
+                    backend_ok = r.status_code == 200
+            except Exception as exc:
+                logger.debug("backend health check failed: %s", exc)
+        return JSONResponse(
+            {
+                "status": "ok",
+                "profiles": len(profiles),
+                "backend_reachable": backend_ok,
+                "allow_unauthenticated": os.environ.get("OHM_GATEWAY_ALLOW_UNAUTHENTICATED", "").lower() in ("1", "true", "yes"),
+            }
+        )
 
+
+# OHM-757: FastMCP native auth — GatewayTokenVerifier maps API keys
+# to AccessToken objects with the GatewayProfile as claims.
+# The inline _resolve_profile in the handler is the fallback path;
+# when FastMCP auth is active, the profile comes from the auth context.
 
 def _tool_annotations(tool_name: str):
     """Derive MCP tool annotations from WRITE_TOOLS / high_blast_radius.
@@ -602,11 +611,18 @@ def _register_tools() -> None:
         mcp.add_tool(ft)
 
 
-async def main_async(host: str = "0.0.0.0", port: int = 8080, transport: str = "sse") -> None:
+async def main_async(host: str = "0.0.0.0", port: int = 8080, transport: str = "sse", name: str | None = None) -> None:
     """Run the gateway's HTTP server."""
     if not _profiles():
         logger.error("No gateway profiles configured; refusing to start")
         sys.exit(1)
+
+    global mcp
+    effective_name = name or os.environ.get("OHM_GATEWAY_NAME", "ohm-gateway")
+    if effective_name != mcp.name:
+        mcp = FastMCP(effective_name, tasks=True)
+        _register_health_route(mcp)
+
     _register_tools()
 
     # OHM-758: Register middleware for cross-cutting concerns
@@ -635,12 +651,13 @@ def cli_main() -> None:
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--transport", choices=["sse", "streamable-http"], default="sse")
     parser.add_argument("--log-level", default="info")
+    parser.add_argument("--name", help="Gateway name for MCP serverInfo.name (env: OHM_GATEWAY_NAME)")
     args = parser.parse_args()
 
     logging.basicConfig(level=getattr(logging, args.log_level.upper()))
     import asyncio
 
-    asyncio.run(main_async(args.host, args.port, args.transport))
+    asyncio.run(main_async(args.host, args.port, args.transport, name=args.name))
 
 
 if __name__ == "__main__":
