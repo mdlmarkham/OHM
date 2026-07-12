@@ -842,7 +842,7 @@ def run_greenfield(args: argparse.Namespace) -> None:
     print(f"\n3. Starting ohmd via {service_mode} ...")
     # Pass template as schema for single-tenant mode; multi-tenant provisions schema per-tenant
     schema = None if multi_tenant else args.template
-    start_ohmd_service(service_mode, str(db_path), multi_tenant=multi_tenant, user=user_scope, schema=schema)
+    start_ohmd_service(service_mode, str(db_path), multi_tenant=multi_tenant, user=user_scope, schema=schema, extra_schema=getattr(args, "extra_schema", None))
 
     # Wait for daemon to come up
     url = args.url or DEFAULT_OHM_URL
@@ -1061,6 +1061,12 @@ def build_parser(subparsers: Any) -> None:
         "--sdk",
         action="store_true",
         help="Prefer SDK-only mode in auto-detect",
+    )
+    parser.add_argument(
+        "--extra-schema",
+        action="append",
+        default=None,
+        help="Extra schema file to extend the base template (repeatable)",
     )
     parser.add_argument(
         "--dry-run",

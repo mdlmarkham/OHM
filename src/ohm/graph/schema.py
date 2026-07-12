@@ -3115,30 +3115,32 @@ def _rename_domain_tables(conn: "DuckDBPyConnection") -> None:
     ``_create_domain_tables()``; this function only fires when the old
     name still exists, making it idempotent.
     """
-    _rename_table_if_exists(conn, "topo_prospects", "topo_rul_assessments")
-    # Rename associated indexes to match the new table name.
+    # Drop old indexes BEFORE the rename — DuckDB refuses ALTER TABLE RENAME
+    # while an index still depends on the table.
     _drop_index_if_exists(conn, "idx_topo_prospects_site")
     _drop_index_if_exists(conn, "idx_topo_prospects_risk")
     _drop_index_if_exists(conn, "idx_topo_prospects_model")
+    _rename_table_if_exists(conn, "topo_prospects", "topo_rul_assessments")
 
 
 def _rename_table_if_exists(conn: "DuckDBPyConnection", old_name: str, new_name: str) -> None:
     """Rename *old_name* to *new_name* if the old table exists and the new one does not."""
+    tables = conn.execute(
+        "SELECT table_name FROM information_schema.tables WHERE table_name = ?", [old_name]
+    ).fetchall()
+    if not tables:
+        return
+    new_exists = conn.execute(
+        "SELECT table_name FROM information_schema.tables WHERE table_name = ?", [new_name]
+    ).fetchall()
+    if new_exists:
+        return  # Both exist — nothing to do.
     try:
-        tables = conn.execute(
-            "SELECT table_name FROM information_schema.tables WHERE table_name = ?", [old_name]
-        ).fetchall()
-        if not tables:
-            return
-        new_exists = conn.execute(
-            "SELECT table_name FROM information_schema.tables WHERE table_name = ?", [new_name]
-        ).fetchall()
-        if new_exists:
-            return  # Both exist — nothing to do.
         conn.execute(f"ALTER TABLE {old_name} RENAME TO {new_name}")
         logger.info("Renamed domain table %s → %s", old_name, new_name)
     except Exception as e:
-        logger.warning("Failed to rename domain table %s → %s: %s", old_name, new_name, e)
+        logger.error("Failed to rename domain table %s → %s: %s", old_name, new_name, e)
+        raise
 
 
 def _create_domain_tables(conn: "DuckDBPyConnection", schema: "SchemaConfig | None") -> None:

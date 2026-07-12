@@ -670,3 +670,84 @@ class TestSchemaConfigExtend:
         p.write_text(json.dumps({"name": "x"}))
         with pytest.raises(ValueError, match="missing required keys"):
             SchemaConfig.from_json_path(str(p))
+
+
+# ── Migration: topo_prospects → topo_rul_assessments (#834) ─────────────────
+
+
+class TestRenameMigrationWithExistingData:
+    """#834 regression: indexes must be dropped BEFORE the rename (DuckDB
+    dependency constraint), and data rows must survive the migration."""
+
+    def _build_legacy_table(self, conn: duckdb.DuckDBPyConnection) -> None:
+        """Create a realistic pre-migration state: old table + indexes + rows."""
+        conn.execute(
+            "CREATE TABLE topo_prospects ("
+            "  id VARCHAR PRIMARY KEY,"
+            "  equipment_id VARCHAR,"
+            "  site_id VARCHAR,"
+            "  rul_days FLOAT,"
+            "  risk_class VARCHAR,"
+            "  model_version VARCHAR"
+            ")"
+        )
+        conn.execute("CREATE INDEX idx_topo_prospects_site ON topo_prospects(site_id)")
+        conn.execute("CREATE INDEX idx_topo_prospects_risk ON topo_prospects(risk_class)")
+        conn.execute("CREATE INDEX idx_topo_prospects_model ON topo_prospects(model_version)")
+        conn.execute(
+            "INSERT INTO topo_prospects VALUES "
+            "('r1', 'eq1', 'siteA', 30.0, 'high', 'v1'), "
+            "('r2', 'eq2', 'siteB', 90.0, 'low', 'v2')"
+        )
+
+    def test_data_survives_rename(self):
+        conn = duckdb.connect(":memory:")
+        self._build_legacy_table(conn)
+
+        rows_before = conn.execute("SELECT count(*) FROM topo_prospects").fetchone()[0]
+        assert rows_before == 2
+
+        initialize_schema(conn, schema=TOPO_SCHEMA)
+
+        # Old table gone, new table exists.
+        tables = [r[0] for r in conn.execute(
+            "SELECT table_name FROM information_schema.tables"
+        ).fetchall()]
+        assert "topo_prospects" not in tables
+        assert "topo_rul_assessments" in tables
+
+        # Data survived.
+        rows_after = conn.execute("SELECT count(*) FROM topo_rul_assessments").fetchone()[0]
+        assert rows_after == 2
+        r1 = conn.execute(
+            "SELECT id, equipment_id, rul_days FROM topo_rul_assessments WHERE id = 'r1'"
+        ).fetchone()
+        assert r1 == ("r1", "eq1", 30.0)
+
+    def test_new_indexes_exist_after_rename(self):
+        conn = duckdb.connect(":memory:")
+        self._build_legacy_table(conn)
+
+        initialize_schema(conn, schema=TOPO_SCHEMA)
+
+        indexes = [r[1] for r in conn.execute(
+            "SELECT schemaname, indexname FROM pg_catalog.pg_indexes"
+        ).fetchall()]
+        assert "idx_topo_rul_assessments_site" in indexes
+        assert "idx_topo_rul_assessments_risk" in indexes
+        assert "idx_topo_rul_assessments_equipment" in indexes
+        # Old index names are gone.
+        assert "idx_topo_prospects_site" not in indexes
+        assert "idx_topo_prospects_risk" not in indexes
+        assert "idx_topo_prospects_model" not in indexes
+
+    def test_idempotent_rerun(self):
+        conn = duckdb.connect(":memory:")
+        self._build_legacy_table(conn)
+
+        initialize_schema(conn, schema=TOPO_SCHEMA)
+        # Second run should be a no-op, not crash or duplicate data.
+        initialize_schema(conn, schema=TOPO_SCHEMA)
+
+        rows = conn.execute("SELECT count(*) FROM topo_rul_assessments").fetchone()[0]
+        assert rows == 2
