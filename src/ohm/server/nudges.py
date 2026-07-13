@@ -19,6 +19,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# OHM-847: Nudge variant registry. Maps nudge_type → list of variant ids.
+# When non-empty, _persist_nudge_log selects a variant and tags the
+# exposure with variant_id for A/B evaluation. Starts empty — variants
+# are registered here to activate the optimization loop for a nudge type.
+_NUDGE_VARIANTS: dict[str, list[str]] = {}
+
 # Edge types that flow through the Bayesian network (causal direction)
 # OHM-mzyc.1: aligned with actual Bayesian network default edge_types
 # in src/ohm/inference/bayesian.py (CAUSES, DEPENDS_ON, THREATENS,
@@ -731,25 +737,52 @@ def _persist_nudge_log(store: Any, agent: str, action: str, target_id: str | Non
 
     Best-effort: never fails the write if logging fails. Each nudge gets
     its own row so analytics can group by nudge_type.
+
+    OHM-847: If variants are registered for a nudge_type, selects one
+    variant and tags the exposure with ``variant_id``. The variant
+    selection is best-effort and never blocks the write path.
     """
     import json as _json
     import uuid as _uuid
 
+    from ohm.server.nudge_optimization import select_variant, get_default_variant
+
     try:
         for n in nudges:
             nudge_id = f"nudge_{_uuid.uuid4().hex[:12]}"
+            nudge_type = n.get("type", "unknown")
+            variant_id = None
+
+            try:
+                conn = getattr(store, "conn", None) or getattr(store, "read_conn", None)
+                if conn is not None:
+                    default_v = get_default_variant(conn, nudge_type=nudge_type)
+                    if default_v:
+                        variant_id = default_v
+                    else:
+                        variant_id = select_variant(
+                            conn,
+                            nudge_type=nudge_type,
+                            variants=_NUDGE_VARIANTS.get(nudge_type, []),
+                        )
+                        if variant_id == "default":
+                            variant_id = None
+            except Exception:
+                pass
+
             store.conn.execute(
-                """INSERT INTO ohm_nudge_log (id, agent, action, nudge_type, severity, target_id, message, metadata)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO ohm_nudge_log (id, agent, action, nudge_type, severity, target_id, message, metadata, variant_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 [
                     nudge_id,
                     agent,
                     action,
-                    n.get("type", "unknown"),
+                    nudge_type,
                     n.get("severity", "info"),
                     target_id,
                     n.get("message", ""),
                     _json.dumps(n.get("data", {})) if n.get("data") else None,
+                    variant_id,
                 ],
             )
     except Exception:

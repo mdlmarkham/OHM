@@ -611,6 +611,38 @@ def _register_tools() -> None:
         mcp.add_tool(ft)
 
 
+def _register_skills() -> None:
+    """Register OHM skill resources on the gateway (OHM-849).
+
+    The sidecar (server.py) uses low-level @mcp.list_resources() / @mcp.read_resource()
+    decorators. The gateway uses FastMCP's add_resource() with FunctionResource
+    instances, since the @mcp.resource() decorator triggers task validation
+    (tasks=True on the gateway instance) which requires the pydocket extra.
+    """
+    from ohm.mcp.skills_provider import OhmSkillsProvider, ensure_core_skills_exist
+    from fastmcp.resources import FunctionResource
+
+    ensure_core_skills_exist()
+    provider = OhmSkillsProvider()
+
+    for resource_info in provider.list_resources():
+        uri = resource_info["uri"]
+
+        def _make_reader(u: str):
+            def _reader() -> str:
+                return provider.read_resource(u)
+            return _reader
+
+        res = FunctionResource.from_function(
+            fn=_make_reader(uri),
+            uri=uri,
+            name=resource_info.get("name"),
+            description=resource_info.get("description"),
+            mime_type=resource_info.get("mimeType"),
+        )
+        mcp.add_resource(res)
+
+
 async def main_async(host: str = "0.0.0.0", port: int = 8080, transport: str = "sse", name: str | None = None) -> None:
     """Run the gateway's HTTP server."""
     if not _profiles():
@@ -621,9 +653,10 @@ async def main_async(host: str = "0.0.0.0", port: int = 8080, transport: str = "
     effective_name = name or os.environ.get("OHM_GATEWAY_NAME", "ohm-gateway")
     if effective_name != mcp.name:
         mcp = FastMCP(effective_name, tasks=True)
-        _register_health_route(mcp)
+    _register_health_route(mcp)
 
     _register_tools()
+    _register_skills()
 
     # OHM-758: Register middleware for cross-cutting concerns
     from ohm.mcp.middleware import FormatMiddleware, AuditMiddleware

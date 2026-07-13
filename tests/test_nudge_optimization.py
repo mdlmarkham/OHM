@@ -83,6 +83,82 @@ class TestSelectVariant:
         assert result == "B"
 
 
+class TestPersistNudgeLogIntegration:
+    """OHM-847: verify _persist_nudge_log tags exposures with variant_id."""
+
+    def test_persist_tags_variant_when_registered(self, test_db):
+        """When variants are registered, _persist_nudge_log tags each row."""
+        from ohm.server.nudges import _persist_nudge_log, _NUDGE_VARIANTS
+
+        _NUDGE_VARIANTS["test_persist_type"] = ["A", "B"]
+        try:
+            class _FakeStore:
+                conn = test_db
+                read_conn = test_db
+
+            nudges = [
+                {"type": "test_persist_type", "severity": "info", "message": "Test A/B"},
+            ]
+            _persist_nudge_log(_FakeStore(), agent="agent1", action="node", target_id="n1", nudges=nudges)
+            test_db.commit()
+
+            row = test_db.execute(
+                "SELECT variant_id, nudge_type FROM ohm_nudge_log WHERE nudge_type = 'test_persist_type'"
+            ).fetchone()
+            assert row is not None
+            assert row[0] in ("A", "B"), f"expected variant_id A or B, got {row[0]}"
+        finally:
+            _NUDGE_VARIANTS.pop("test_persist_type", None)
+
+    def test_persist_no_variant_when_unregistered(self, test_db):
+        """When no variants are registered, variant_id stays NULL."""
+        from ohm.server.nudges import _persist_nudge_log, _NUDGE_VARIANTS
+
+        _NUDGE_VARIANTS.pop("unregistered_type", None)
+        class _FakeStore:
+            conn = test_db
+            read_conn = test_db
+
+        nudges = [
+            {"type": "unregistered_type", "severity": "info", "message": "No variants"},
+        ]
+        _persist_nudge_log(_FakeStore(), agent="agent1", action="node", target_id="n1", nudges=nudges)
+        test_db.commit()
+
+        row = test_db.execute(
+            "SELECT variant_id FROM ohm_nudge_log WHERE nudge_type = 'unregistered_type'"
+        ).fetchone()
+        assert row is not None
+        assert row[0] is None, f"expected NULL variant_id, got {row[0]}"
+
+    def test_persist_uses_promoted_default_variant(self, test_db):
+        """When a variant is promoted via ohm_meta, it takes priority."""
+        from ohm.server.nudges import _persist_nudge_log, _NUDGE_VARIANTS
+        from ohm.server.nudge_optimization import promote_nudge_variant
+
+        _NUDGE_VARIANTS["test_promoted_type"] = ["A", "B"]
+        try:
+            promote_nudge_variant(test_db, nudge_type="test_promoted_type", variant_id="B")
+
+            class _FakeStore:
+                conn = test_db
+                read_conn = test_db
+
+            nudges = [
+                {"type": "test_promoted_type", "severity": "info", "message": "Promoted"},
+            ]
+            _persist_nudge_log(_FakeStore(), agent="agent1", action="node", target_id="n1", nudges=nudges)
+            test_db.commit()
+
+            row = test_db.execute(
+                "SELECT variant_id FROM ohm_nudge_log WHERE nudge_type = 'test_promoted_type'"
+            ).fetchone()
+            assert row is not None
+            assert row[0] == "B", f"expected promoted variant 'B', got {row[0]}"
+        finally:
+            _NUDGE_VARIANTS.pop("test_promoted_type", None)
+
+
 class TestRecordExposure:
     """Exposure logging tests."""
 

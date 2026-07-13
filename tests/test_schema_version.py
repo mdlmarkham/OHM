@@ -10,4 +10,4 @@ def test_current_schema_version():
     from individual test files (issue #821) to prevent drift on schema bumps.
     The CI grep guard in ``.github/workflows/test.yml`` prevents reintroduction.
     """
-    assert SCHEMA_VERSION == "0.50.0"
+    assert SCHEMA_VERSION == "0.56.0"

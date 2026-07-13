@@ -115,3 +115,87 @@ async def test_gateway_unknown_api_key_blocked(ohmd, gateway_profile):
     else:
         payload = result
     assert payload.get("error") == "auth_failed"
+
+
+async def test_gateway_health_route_registered_with_default_name(ohmd, gateway_profile):
+    """Regression for #850: /health route must be registered even with the default gateway name.
+
+    The bug was that _register_health_route(mcp) was only called inside the
+    ``if effective_name != mcp.name`` branch in main_async(), so running with
+    the default name ('ohm-gateway') skipped health-route registration entirely.
+    """
+    base_url, admin_token, _db_path = ohmd
+    tenant_id = "gateway_health"
+    domain = "ohm"
+    customer_token = _provision_tenant(base_url, admin_token, tenant_id, domain)
+
+    os.environ["OHM_GATEWAY_PROFILE"] = json.dumps(
+        [
+            {
+                "api_key": "health-key",
+                "ohm_url": base_url,
+                "ohm_token": customer_token,
+                "agent_id": "gateway-test",
+                "tenant_id": tenant_id,
+                "allowed_tools": ["*"],
+                "read_only": True,
+            }
+        ]
+    )
+
+    if "ohm.mcp.gateway" in sys.modules:
+        del sys.modules["ohm.mcp.gateway"]
+
+    from ohm.mcp.gateway import _register_health_route, mcp
+
+    _register_health_route(mcp)
+
+    app = mcp.http_app(transport="sse")
+
+    health_paths = [
+        getattr(r, "path", "")
+        for r in app.routes
+        if getattr(r, "path", "") == "/health"
+    ]
+    assert health_paths, "expected /health route to be registered on the default-named gateway"
+
+
+async def test_gateway_skills_resources_registered(ohmd, gateway_profile):
+    """OHM-849: skill resources must be registered on the gateway, not just the sidecar.
+
+    The original #849 implementation wired skills into the sidecar (server.py)
+    but silently skipped the gateway (gateway.py). Anyone using ohm-gateway
+    (the hosted HTTP MCP surface) had zero skill resources available.
+    """
+    base_url, admin_token, _db_path = ohmd
+    tenant_id = "gateway_skills"
+    domain = "ohm"
+    customer_token = _provision_tenant(base_url, admin_token, tenant_id, domain)
+
+    os.environ["OHM_GATEWAY_PROFILE"] = json.dumps(
+        [
+            {
+                "api_key": "skills-key",
+                "ohm_url": base_url,
+                "ohm_token": customer_token,
+                "agent_id": "gateway-test",
+                "tenant_id": tenant_id,
+                "allowed_tools": ["*"],
+                "read_only": True,
+            }
+        ]
+    )
+
+    if "ohm.mcp.gateway" in sys.modules:
+        del sys.modules["ohm.mcp.gateway"]
+
+    from ohm.mcp.gateway import _register_skills, mcp
+
+    _register_skills()
+
+    resources = await mcp.list_resources()
+    resource_uris = [str(r.uri) for r in resources]
+    skill_uris = [u for u in resource_uris if u.startswith("skill://ohm/")]
+    assert skill_uris, f"expected skill://ohm/ resources on gateway, got: {resource_uris}"
+    assert any("decision-node" in u for u in skill_uris), f"expected decision-node skill, got: {skill_uris}"
+    assert any("causal-edge" in u for u in skill_uris), f"expected causal-edge skill, got: {skill_uris}"

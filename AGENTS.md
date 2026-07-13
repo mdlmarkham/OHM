@@ -233,6 +233,71 @@ subprocess.run(["ohm", "graph", "write", "--from", node, ...])
 
 Why: The SDK runs in-process (no subprocess overhead), returns structured data (no text parsing), and supports batch operations. The CLI spawns a new process per command and returns text that must be parsed.
 
+## OHM-OG — Live MCP Server (Metis Instance)
+
+The **OHM-OG** MCP server is a remote gateway connecting opencode to the **live OHM instance** that Metis uses to manage design intent, project decisions, and domain knowledge. It is configured in `opencode.json`:
+
+```json
+{
+  "mcp": {
+    "OHM-OG": {
+      "type": "remote",
+      "url": "http://100.82.120.84:8080/sse",
+      "enabled": true
+    }
+  }
+}
+```
+
+This is not a local sidecar — it is the production OHM deployment running on the Metis host, exposed via the FastMCP gateway over SSE. It contains the accumulated knowledge graph (4,000+ nodes, 6,000+ edges, 5,000+ observations) that Metis and other agents have built over time, covering domains like geopolitical risk (Hormuz AND-gate), energy markets (oil OR-gate pricing), agricultural risk (ranch livestock / ENSO), and the OHM project's own design decisions.
+
+### When to use it
+
+- **Before starting work**: Search the graph for existing context on the feature, bug, or design decision you're touching. Metis may have already analysed it.
+- **For design decisions**: Check if there are existing `decision` nodes, `pattern` nodes, or ADR-linked concepts that bear on your change.
+- **For inference**: Run Bayesian belief, Monte Carlo, or VoI queries against the live graph to understand risk landscape before making changes.
+- **For issue context**: Cross-reference GitHub issues with graph nodes — Metis often writes claims about issues, bugs, and architecture into the graph.
+- **For verification**: Check confidence audit trails, challenge states, and observation history on claims relevant to your work.
+
+### Key tools
+
+| Category | Tools | Purpose |
+|----------|-------|---------|
+| **Search & browse** | `ohm_search`, `ohm_list_nodes`, `ohm_get_node`, `ohm_path` | Find nodes by text, list by type, get details, find paths between concepts |
+| **Graph stats** | `ohm_stats`, `ohm_listen` | Overall graph health, recent change feed |
+| **Inference** | `ohm_inference`, `ohm_belief`, `ohm_intervene`, `ohm_monte_carlo`, `ohm_markov`, `ohm_pert`, `ohm_game` | Bayesian posteriors, causal intervention, stochastic simulation, Markov chains, PERT estimates, game theory |
+| **Causal** | `ohm_discover`, `ohm_refute` | PC/GES structure discovery, refutation tests |
+| **Decision support** | `ohm_voi`, `ohm_deliberation` | Value of Information ranking, deliberation lifecycle (propose → challenge → evidence → decide) |
+| **Epistemics** | `ohm_observe`, `ohm_challenge`, `ohm_support`, `ohm_confidence` | Record observations, challenge/support edges, audit confidence trails |
+| **Agent state** | `ohm_agents`, `ohm_conversation`, `ohm_update_state`, `ohm_onboard` | List agents, conversation state, update focus areas, onboarding |
+| **Domain** | `ohm_domain_onboarding` | Inspect node types, edge types, layers, domain tables |
+
+### Usage pattern
+
+```
+# 1. Get context before starting work
+ohm_search  q="gateway health route"         # Find existing analysis
+ohm_get_node node_id="hormuz_and_gate"       # Deep-dive a specific node
+
+# 2. Check beliefs and risk landscape
+ohm_belief  target="hormuz_and_gate"        # Posterior + causal drivers + next observation
+ohm_voi     decision="hormuz_and_gate"       # What to observe next for max info gain
+
+# 3. After making changes, record observations
+ohm_observe node_id="..." obs_type="assessment" value=0.85 source="opencode-session"
+
+# 4. Challenge or support existing claims
+ohm_challenge edge_id="..." reason="..." confidence=0.7
+ohm_support   edge_id="..." reason="..."
+```
+
+### Important notes
+
+- **Read-only by default.** The opencode MCP client uses `external-readonly` as its agent identity. Writes (create nodes, edges, observations) require a proper agent token — do not attempt to write to the live graph without explicit authorisation.
+- **The server can go down.** If all OHM-OG calls return `MCP error -32602: Invalid request parameters`, the gateway or ohmd on the Metis host is likely down. Check issue #850 (gateway `/health` route bug) and restart ohmd on the host: `sudo systemctl restart ohmd`.
+- **TOON vs JSON.** Most tools accept `format="toon"` (compact, lower token usage) or `format="json"` (structured). Use TOON for large result sets.
+- **Cross-reference with GitHub issues.** The graph and GitHub issues are complementary: issues track work items, the graph tracks knowledge and beliefs. Search both before starting non-trivial work.
+
 ## Sub-Agent Delegation
 
 **Delegate as often as practical.** OHM work falls into recurring shapes (research, schema, plumbing, tests, ADRs, search) that map onto specialized sub-agents. Default to dispatching a sub-agent rather than doing the work inline — it preserves the primary's context, runs in parallel, and is billed against Synthetic quota (not the tight OpenCode-Go `$12/5hr` window), so dispatch is cheap. Do the orchestrating; let sub-agents do the grinding.

@@ -157,11 +157,7 @@ class TestAppliesToSchema:
 
 @pytest.mark.xdist_group("server")
 class TestSchemaVersion:
-    """OHM-842: Schema version is 0.53.0."""
-
-    def test_schema_version(self):
-        from ohm.graph.schema import SCHEMA_VERSION
-        assert SCHEMA_VERSION == "0.53.0"
+    """OHM-842: migration entry exists for the tag-search schema extension."""
 
     def test_migration_entry_exists(self):
         from ohm.graph.schema import MIGRATIONS
