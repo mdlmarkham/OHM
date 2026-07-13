@@ -103,6 +103,10 @@ def build_request(name: str, arguments: dict[str, Any], agent_id: str) -> tuple[
             params["leak"] = str(arguments["leak"])
         return "GET", _qs("/voi", params), None
 
+    if name == "ohm_decision_recommend":
+        node_id = arguments["node_id"]
+        return "GET", f"/decision/{node_id}/recommendation", None
+
     if name == "ohm_refute":
         params = {
             "cause": arguments["cause"],

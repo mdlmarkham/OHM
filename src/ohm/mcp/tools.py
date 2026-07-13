@@ -194,6 +194,17 @@ def all_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="ohm_decision_recommend",
+            description="Get the recommendation for a decision node: current best action, action alternatives, confidence, key assumptions, and utility scale.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "node_id": {"type": "string", "description": "Decision node ID"},
+                },
+                "required": ["node_id"],
+            },
+        ),
+        Tool(
             name="ohm_refute",
             description="Causal refutation tests for a claimed cause-effect pair. Runs placebo, data subset, and random-variable refutation methods and returns a refutation score.",
             inputSchema={

@@ -850,6 +850,7 @@ def _build_router() -> _RouteRegistry:
     # GET prefix routes (parameterised paths like /node/{id})
     for _p in (
         "/context-gate/",
+        "/decision/",
         "/node/",
         "/deep/",
         "/edge/",

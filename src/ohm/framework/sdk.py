@@ -6521,6 +6521,14 @@ def connect_http(
                     return None
                 raise
 
+        def decision_recommend(self, node_id: str) -> dict[str, Any]:
+            """Get the recommendation for a decision node.
+
+            Returns a dict with keys: decision_id, label, current_best_action,
+            action_alternatives, confidence, key_assumptions, utility_scale.
+            """
+            return self._http_request("GET", f"/decision/{node_id}/recommendation")
+
         def challenge(self, node_id: str, *, value: float | None = None, sigma: float = 0.5, notes: str | None = None, challenge_type: str | None = None) -> dict[str, Any]:
             """Challenge a node with an observation (records observation on node)."""
             body = {"value": value, "sigma": sigma}

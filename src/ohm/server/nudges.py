@@ -330,6 +330,37 @@ def generate_nudges(
             }
         )
 
+    # ── Bare decision node nudge (OHM-839) ────────────────────────────────
+    if action == "node" and node and node.get("type") == "decision":
+        missing_fields = []
+        if not node.get("utility_scale"):
+            missing_fields.append("utility_scale")
+        if not node.get("action_alternatives"):
+            missing_fields.append("action_alternatives")
+        has_dep_edges = False
+        if neighborhood:
+            for e in neighborhood.get("edges", []):
+                if e.get("edge_type") == "DECISION_DEPENDS_ON":
+                    has_dep_edges = True
+                    break
+        if not has_dep_edges:
+            missing_fields.append("DECISION_DEPENDS_ON edge")
+        if missing_fields:
+            nudges.append(
+                {
+                    "type": "decision_node_incomplete",
+                    "message": f"Decision node is missing: {', '.join(missing_fields)}. "
+                    "Add these to enable /recommendation, /voi, and /game analysis. "
+                    "Link hypothesis nodes via DECISION_DEPENDS_ON (L3) to let "
+                    "evaluate_decision() score your alternatives.",
+                    "severity": "suggestion",
+                    "data": {
+                        "missing": missing_fields,
+                        "enabled_endpoints": ["/decision/{id}/recommendation", "/voi", "/game"],
+                    },
+                }
+            )
+
     # ── Source citation nudge ────────────────────────────────────────────
     if action == "observation" and not source_url and provenance != "pattern_analysis":
         nudges.append(
