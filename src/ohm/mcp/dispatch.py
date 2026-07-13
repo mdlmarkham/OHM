@@ -285,6 +285,51 @@ def build_request(name: str, arguments: dict[str, Any], agent_id: str) -> tuple[
         # from the Authorization header on every request.
         raise NotImplementedError(f"{name} is not supported by the hosted gateway; use the local ohm-mcp sidecar for profile switching.")
 
+    # ── Prospect lifecycle tier (OHM-844) ──
+    if name == "ohm_prospect_create":
+        body: dict[str, object] = {"label": arguments["label"]}
+        if arguments.get("authority"):
+            body["authority"] = arguments["authority"]
+        if arguments.get("parent_scenario_id"):
+            body["parent_scenario_id"] = arguments["parent_scenario_id"]
+        if arguments.get("planned_start"):
+            body["planned_start"] = arguments["planned_start"]
+        if arguments.get("planned_end"):
+            body["planned_end"] = arguments["planned_end"]
+        if arguments.get("horizon_label"):
+            body["horizon_label"] = arguments["horizon_label"]
+        if arguments.get("tags"):
+            body["tags"] = arguments["tags"]
+        if arguments.get("content"):
+            body["content"] = arguments["content"]
+        if arguments.get("connects_to"):
+            body["connects_to"] = arguments["connects_to"]
+        if arguments.get("confidence") is not None:
+            body["confidence"] = arguments["confidence"]
+        return "POST", "/prospect", body
+
+    if name == "ohm_prospect_transition":
+        return "POST", "/prospect/transition/" + arguments["prospect_id"], {
+            "new_status": arguments["new_status"],
+            **({"reason": arguments["reason"]} if arguments.get("reason") else {}),
+        }
+
+    if name == "ohm_prospect_list":
+        import urllib.parse
+        parts: list[str] = []
+        if arguments.get("status"):
+            parts.append(f"status={urllib.parse.quote(arguments['status'])}")
+        if arguments.get("tags"):
+            for tag in arguments["tags"]:
+                parts.append(f"tags={urllib.parse.quote(tag)}")
+        if arguments.get("created_by"):
+            parts.append(f"created_by={urllib.parse.quote(arguments['created_by'])}")
+        parts.append(f"limit={arguments.get('limit', 20)}")
+        return "GET", "/prospects?" + "&".join(parts), None
+
+    if name == "ohm_prospect_detail":
+        return "GET", "/prospect/" + arguments["prospect_id"], None
+
     raise KeyError(f"Unknown tool: {name}")
 
 

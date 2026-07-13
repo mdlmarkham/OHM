@@ -687,4 +687,80 @@ def all_tools() -> list[Tool]:
                 "required": [],
             },
         ),
+        # ── Prospect lifecycle tier (OHM-844) ──
+        Tool(
+            name="ohm_prospect_create",
+            description=(
+                "Create a prospect node — a governed plan of action with lifecycle "
+                "accountability. Starts in 'proposed' status. Returns the created node."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                    "label": {"type": "string", "description": "Human-readable prospect description."},
+                    "authority": {"type": "string", "description": "Agent authorized to transition this prospect (plain field check)."},
+                    "parent_scenario_id": {"type": "string", "description": "Optional scenario this prospect derives from."},
+                    "planned_start": {"type": "string", "description": "ISO 8601 planned start date."},
+                    "planned_end": {"type": "string", "description": "ISO 8601 planned end date."},
+                    "horizon_label": {"type": "string", "description": "Human-readable horizon (e.g. 'Q3 2026')."},
+                    "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags for scope filtering."},
+                    "content": {"type": "string", "description": "Optional description or rationale."},
+                    "connects_to": {"type": "array", "items": {"type": "string"}, "description": "Node IDs to cross-link (ADR-018)."},
+                    "confidence": {"type": "number", "description": "Initial confidence 0-1 (default 1.0).", "default": 1.0},
+                },
+                "required": ["label"],
+            },
+        ),
+        Tool(
+            name="ohm_prospect_transition",
+            description=(
+                "Transition a prospect to a new lifecycle status. Validates legal "
+                "transitions and checks authority (agent must match prospect's authority "
+                "field). Creates an assessment observation logging the transition."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                    "prospect_id": {"type": "string", "description": "Prospect node ID."},
+                    "new_status": {"type": "string", "enum": ["committed", "active", "completed", "failed", "superseded"], "description": "Target lifecycle status."},
+                    "reason": {"type": "string", "description": "Optional explanation for the transition."},
+                },
+                "required": ["prospect_id", "new_status"],
+            },
+        ),
+        Tool(
+            name="ohm_prospect_list",
+            description=(
+                "List prospects with optional status, tag, and creator filters. "
+                "Includes expectation counts via aggregate query."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                    "status": {"type": "string", "enum": ["proposed", "committed", "active", "completed", "failed", "superseded"], "description": "Filter by lifecycle status."},
+                    "tags": {"type": "array", "items": {"type": "string"}, "description": "AND-semantics tag filter (all must be present)."},
+                    "created_by": {"type": "string", "description": "Filter by creating agent."},
+                    "limit": {"type": "integer", "description": "Max results (default 20).", "default": 20},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="ohm_prospect_detail",
+            description=(
+                "Get full prospect detail: the prospect node, all CONTAINS children "
+                "(e.g. expectations), and the latest observation."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                    "prospect_id": {"type": "string", "description": "Prospect node ID."},
+                },
+                "required": ["prospect_id"],
+            },
+        ),
     ]

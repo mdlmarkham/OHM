@@ -920,6 +920,10 @@ def _build_router() -> _RouteRegistry:
     r.add("GET", "/metrics/semantic")
     r.add("POST", "/metrics/semantic/actions")
 
+    # Prospect lifecycle (OHM-844)
+    r.add("GET", "/prospects")
+    r.add("POST", "/prospect")
+
     # POST-only write endpoints (exact)
     for _p in (
         "/node",
@@ -974,6 +978,8 @@ def _build_router() -> _RouteRegistry:
     r.add("POST", "/twin/register")
     r.add("POST", "/twin/assemble")
     r.add("POST", "/twin/design/start")
+    r.add("POST", "/prospect/transition/")
+    r.add("GET", "/prospect/")
 
     # PATCH
     r.add("PATCH", "/node/")
@@ -2893,6 +2899,12 @@ OhmHandler._POST_EXACT["/verifications/outcome"] = "_post_record_verification_ou
 OhmHandler._GET_EXACT["/verifications/pending"] = "_get_list_verifications"
 OhmHandler._GET_EXACT["/edge/suggest-type"] = "_get_edge_suggest_type"
 OhmHandler._GET_PREFIXES.append(("/temporal/", "_route_temporal_get"))
+
+# ── Prospect lifecycle (OHM-844) ──────────────────────────────────────────
+OhmHandler._POST_EXACT["/prospect"] = "_post_prospect"
+OhmHandler._POST_PREFIXES.append(("/prospect/transition/", "_post_prospect_transition"))
+OhmHandler._GET_EXACT["/prospects"] = "_get_prospects"
+OhmHandler._GET_PREFIXES.append(("/prospect/", "_get_prospect_detail"))
 
 
 def make_configured_handler(store: OhmStore):
