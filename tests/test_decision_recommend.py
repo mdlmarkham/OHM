@@ -114,6 +114,22 @@ class TestDecisionRouterRegistration:
             status = e.code
         assert status == 405
 
+    def test_post_decision_unknown_suffix_returns_405(self, test_server):
+        """POST to /decision/{id}/nonexistent should return 405, not 422 (OHM-853)."""
+        import urllib.error
+        import urllib.request
+
+        port, _store = test_server
+        url = f"http://127.0.0.1:{port}/decision/test-id/nonexistent"
+        req = urllib.request.Request(url, method="POST", data=b"{}")
+        req.add_header("Content-Type", "application/json")
+        try:
+            with urllib.request.urlopen(req) as resp:
+                status = resp.getcode()
+        except urllib.error.HTTPError as e:
+            status = e.code
+        assert status == 405
+
 
 # ── MCP dispatch ────────────────────────────────────────────────────────────
 

@@ -1886,6 +1886,10 @@ class GraphHandlerMixin(OhmHandlerBase):
         transaction-insert-then-rollback, and promotes any that improve
         the recommendation.
         """
+        if not path.rstrip("/").endswith("/autoresearch"):
+            self._json_response(405, {"error": "method_not_allowed", "message": "POST not supported on this endpoint"})
+            return
+
         from ohm.decision.autoresearch import run_autoresearch_round
 
         decision_id = path.rstrip("/").split("/")[-1]
