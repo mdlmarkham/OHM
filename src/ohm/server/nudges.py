@@ -354,6 +354,7 @@ def generate_nudges(
                     "Link hypothesis nodes via DECISION_DEPENDS_ON (L3) to let "
                     "evaluate_decision() score your alternatives.",
                     "severity": "suggestion",
+                    "skill_uri": "skill://ohm/decision-node/SKILL.md",
                     "data": {
                         "missing": missing_fields,
                         "enabled_endpoints": ["/decision/{id}/recommendation", "/voi", "/game"],

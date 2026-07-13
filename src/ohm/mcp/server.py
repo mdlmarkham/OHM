@@ -23,6 +23,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import (
     CallToolResult,
+    Resource,
     TextContent,
     Tool,
 )
@@ -118,6 +119,32 @@ def _text(data: Any, fmt: str = DEFAULT_FORMAT) -> list[TextContent]:
 # ---------------------------------------------------------------------------
 
 mcp = Server("ohm")
+
+# ── Skills provider (OHM-849) ──────────────────────────────────────────────
+
+from ohm.mcp.skills_provider import OhmSkillsProvider, ensure_core_skills_exist  # noqa: E402
+
+ensure_core_skills_exist()
+_skills_provider = OhmSkillsProvider()
+
+
+@mcp.list_resources()
+async def list_resources() -> list[Resource]:
+    resources = _skills_provider.list_resources()
+    return [
+        Resource(
+            uri=r["uri"],
+            name=r["name"],
+            description=r.get("description"),
+            mimeType=r.get("mimeType"),
+        )
+        for r in resources
+    ]
+
+
+@mcp.read_resource()
+async def read_resource(uri: str) -> str:
+    return _skills_provider.read_resource(uri)
 
 
 @mcp.list_tools()
