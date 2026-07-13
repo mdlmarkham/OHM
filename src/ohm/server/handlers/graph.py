@@ -2044,6 +2044,31 @@ class GraphHandlerMixin(OhmHandlerBase):
         )
         self._json_response(200, result)
 
+    def _post_skill_maintenance_run(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /admin/skill-maintenance/run — run one skill maintenance round (OHM-854).
+
+        Body: {dry_run?: bool}
+
+        Detects signals (low nudge acceptance), generates candidate skill
+        edits, evaluates them, and promotes/demotes as appropriate.
+        """
+        from pathlib import Path
+
+        from ohm.mcp.skill_maintenance import run_skill_maintenance_round
+
+        default_skills_dir = Path(__file__).resolve().parents[2] / "skills"
+        candidates_dir = Path(body.get("candidates_dir", str(default_skills_dir / ".candidates")))
+
+        dry_run = bool(body.get("dry_run", False))
+
+        result = run_skill_maintenance_round(
+            self.current_store.conn,
+            default_skills_dir=default_skills_dir,
+            candidates_dir=candidates_dir,
+            dry_run=dry_run,
+        )
+        self._json_response(200, result)
+
     def _enforce_cross_link_requirement(self, node_id: str, body: dict) -> dict | None:
         """Return a 422 response body if *body* describes a node that must link.
 

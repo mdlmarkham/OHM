@@ -199,3 +199,62 @@ class TestRunSkillMaintenanceRound:
         h2 = _skill_hash("content")
         assert h1 == h2
         assert h1 != _skill_hash("different content")
+
+
+class TestHTTPEndpoint:
+    """Tests for POST /admin/skill-maintenance/run (OHM-854)."""
+
+    def test_http_run_no_signals(self, test_server):
+        """POST /admin/skill-maintenance/run returns 200 with no signals on empty DB."""
+        from tests.conftest import _request
+
+        port, _ = test_server
+        status, data = _request("POST", port, "/admin/skill-maintenance/run", {"dry_run": True})
+        assert status == 200
+        assert data["signals"] == []
+        assert data["message"] == "No signals detected"
+
+    def test_http_run_dry_run(self, test_server):
+        """POST /admin/skill-maintenance/run with dry_run=true detects signals."""
+        from tests.conftest import _request
+
+        port, store = test_server
+        conn = store.conn
+
+        for i in range(15):
+            conn.execute(
+                "INSERT INTO ohm_nudge_log (id, agent, action, nudge_type, severity, accepted) VALUES (?, 'a', 'node', 'source_citation', 'hint', false)",
+                [f"http_smr_{i}"],
+            )
+        conn.commit()
+
+        status, data = _request("POST", port, "/admin/skill-maintenance/run", {"dry_run": True})
+        assert status == 200
+        assert len(data["signals"]) == 1
+        assert data["dry_run"] is True
+
+
+class TestMCPDispatch:
+    """Tests for ohm_skill_maintenance MCP tool dispatch (OHM-854)."""
+
+    def test_dispatch_builds_correct_request(self):
+        from ohm.mcp.dispatch import build_request
+
+        method, path, body = build_request("ohm_skill_maintenance", {"dry_run": True}, "test-agent")
+        assert method == "POST"
+        assert path == "/admin/skill-maintenance/run"
+        assert body == {"dry_run": True}
+
+    def test_dispatch_defaults_dry_run_false(self):
+        from ohm.mcp.dispatch import build_request
+
+        method, path, body = build_request("ohm_skill_maintenance", {}, "test-agent")
+        assert method == "POST"
+        assert path == "/admin/skill-maintenance/run"
+        assert body == {"dry_run": False}
+
+    def test_tool_registered_in_all_tools(self):
+        from ohm.mcp.tools import all_tools
+
+        names = [t.name for t in all_tools()]
+        assert "ohm_skill_maintenance" in names

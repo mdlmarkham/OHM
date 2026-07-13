@@ -2928,6 +2928,9 @@ OhmHandler._POST_EXACT["/nudge/evaluate"] = "_post_nudge_evaluate"
 OhmHandler._POST_EXACT["/nudge/promote"] = "_post_nudge_promote"
 OhmHandler._POST_EXACT["/nudge/demote"] = "_post_nudge_demote"
 
+# ── Skill maintenance loop (OHM-854) ─────────────────────────────────────
+OhmHandler._POST_EXACT["/admin/skill-maintenance/run"] = "_post_skill_maintenance_run"
+
 
 def make_configured_handler(store: OhmStore):
     """OHM-1s14.1: bind `store` via handler closure rather than mutating

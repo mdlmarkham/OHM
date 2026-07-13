@@ -791,4 +791,22 @@ def all_tools() -> list[Tool]:
                 "required": ["prospect_id"],
             },
         ),
+        # ── Skill maintenance loop (OHM-854) ──────────────────────────────
+        Tool(
+            name="ohm_skill_maintenance",
+            description=(
+                "Run one skill maintenance round. Detects signals (low nudge "
+                "acceptance rates), generates candidate skill edits, evaluates "
+                "them via Fisher's exact test, and promotes or demotes. Use "
+                "dry_run=true to preview without modifying skills."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                    "dry_run": {"type": "boolean", "description": "If true, generate and evaluate candidates but don't promote.", "default": False},
+                },
+                "required": [],
+            },
+        ),
     ]

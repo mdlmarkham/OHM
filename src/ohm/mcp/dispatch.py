@@ -339,6 +339,11 @@ def build_request(name: str, arguments: dict[str, Any], agent_id: str) -> tuple[
             body["seed"] = arguments["seed"]
         return "POST", "/simulate/" + arguments["prospect_id"], body
 
+    # ── Skill maintenance loop (OHM-854) ──
+    if name == "ohm_skill_maintenance":
+        body = {"dry_run": arguments.get("dry_run", False)}
+        return "POST", "/admin/skill-maintenance/run", body
+
     raise KeyError(f"Unknown tool: {name}")
 
 
