@@ -1932,7 +1932,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.55.0"
+SCHEMA_VERSION = "0.56.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -2812,6 +2812,13 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             )""",
             "CREATE INDEX IF NOT EXISTS idx_autoresearch_decision ON ohm_autoresearch_history(decision_id)",
             "CREATE INDEX IF NOT EXISTS idx_autoresearch_outcome ON ohm_autoresearch_history(decision_id, outcome)",
+        ],
+    ),
+    (
+        "0.56.0",
+        "OHM-847: add variant_id column to ohm_nudge_log for A/B testing",
+        [
+            "ALTER TABLE ohm_nudge_log ADD COLUMN IF NOT EXISTS variant_id VARCHAR",
         ],
     ),
 ]

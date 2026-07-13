@@ -984,6 +984,9 @@ def _build_router() -> _RouteRegistry:
     r.add("POST", "/decision/")
     r.add("POST", "/type-proposal/")
     r.add("GET", "/type-proposals")
+    r.add("POST", "/nudge/evaluate")
+    r.add("POST", "/nudge/promote")
+    r.add("POST", "/nudge/demote")
 
     # PATCH
     r.add("PATCH", "/node/")
@@ -2919,6 +2922,11 @@ OhmHandler._POST_PREFIXES.append(("/decision/", "_post_decision_autoresearch"))
 # ── Type-level promotion autoresearch (OHM-846) ───────────────────────────
 OhmHandler._POST_PREFIXES.append(("/type-proposal/", "_route_type_proposal_post"))
 OhmHandler._GET_EXACT["/type-proposals"] = "_get_type_proposals"
+
+# ── Nudge-message optimization autoresearch (OHM-847) ──────────────────────
+OhmHandler._POST_EXACT["/nudge/evaluate"] = "_post_nudge_evaluate"
+OhmHandler._POST_EXACT["/nudge/promote"] = "_post_nudge_promote"
+OhmHandler._POST_EXACT["/nudge/demote"] = "_post_nudge_demote"
 
 
 def make_configured_handler(store: OhmStore):

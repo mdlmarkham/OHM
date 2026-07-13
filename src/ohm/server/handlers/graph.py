@@ -1991,6 +1991,55 @@ class GraphHandlerMixin(OhmHandlerBase):
         )
         self._json_response(200, {"results": results, "count": len(results)})
 
+    def _post_nudge_evaluate(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /nudge/evaluate — evaluate A/B test results for a nudge type (OHM-847)."""
+        from ohm.server.nudge_optimization import evaluate_nudge_variants
+
+        nudge_type = body.get("nudge_type")
+        if not nudge_type:
+            self._json_response(422, {"error": "nudge_type is required"})
+            return
+
+        result = evaluate_nudge_variants(
+            self.current_store.read_conn,
+            nudge_type=nudge_type,
+            significance_threshold=float(body.get("significance_threshold", 0.05)),
+            min_exposures=int(body.get("min_exposures", 30)),
+        )
+        self._json_response(200, result)
+
+    def _post_nudge_promote(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /nudge/promote — promote a winning variant (OHM-847)."""
+        from ohm.server.nudge_optimization import promote_nudge_variant
+
+        nudge_type = body.get("nudge_type")
+        variant_id = body.get("variant_id")
+        if not nudge_type or not variant_id:
+            self._json_response(422, {"error": "nudge_type and variant_id are required"})
+            return
+
+        result = promote_nudge_variant(
+            self.current_store.conn,
+            nudge_type=nudge_type,
+            variant_id=variant_id,
+        )
+        self._json_response(200, result)
+
+    def _post_nudge_demote(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /nudge/demote — demote/reset the default variant (OHM-847)."""
+        from ohm.server.nudge_optimization import demote_nudge_variant
+
+        nudge_type = body.get("nudge_type")
+        if not nudge_type:
+            self._json_response(422, {"error": "nudge_type is required"})
+            return
+
+        result = demote_nudge_variant(
+            self.current_store.conn,
+            nudge_type=nudge_type,
+        )
+        self._json_response(200, result)
+
     def _enforce_cross_link_requirement(self, node_id: str, body: dict) -> dict | None:
         """Return a 422 response body if *body* describes a node that must link.
 
