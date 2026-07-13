@@ -2097,6 +2097,19 @@ class GraphHandlerMixin(OhmHandlerBase):
         )
         result = enrich_response(result, nudges, store=self.current_store, agent=agent, action="node", target_id=result.get("id"))
 
+        # OHM-848: Auto-register proposed-type tags into ohm_type_proposals
+        if body.get("tags"):
+            try:
+                from ohm.graph.queries.type_proposals import process_node_tags
+                process_node_tags(
+                    self.current_store.conn,
+                    node_id=result.get("id", ""),
+                    tags=body.get("tags"),
+                    created_by=agent,
+                )
+            except Exception:
+                pass  # Never fail the write for a type proposal
+
         # ADR-021: Proactive discoverability — post-write suggestions + connectivity nudge.
         # Run synchronously on the request thread under the write lock. Earlier versions used
         # a ThreadPoolExecutor here, which shared DuckDB connection state across threads and

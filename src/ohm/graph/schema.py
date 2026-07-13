@@ -1878,11 +1878,40 @@ DDL_STATEMENTS: list[str] = [
     """
     CREATE INDEX IF NOT EXISTS idx_conf_log_agent ON ohm_confidence_log(agent);
     """,
+    # ── Type Proposals (OHM-848) ──────────────────────────────────────────
+    # Tracks proposed node/edge types in trial mode via proposed-type:* tags.
+    # Agents create nodes with valid canonical types + proposed-type tags;
+    # this table auto-populates from tag detection.
+    """
+    CREATE TABLE IF NOT EXISTS ohm_type_proposals (
+        id              VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id       VARCHAR DEFAULT '',
+        proposed_type   VARCHAR NOT NULL,
+        domain          VARCHAR,
+        proposed_by     VARCHAR,
+        status          VARCHAR DEFAULT 'trial',
+        trial_started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        promoted_at     TIMESTAMP,
+        rejected_at     TIMESTAMP,
+        metrics         JSON DEFAULT '{}',
+        evidence_node_ids JSON DEFAULT '[]',
+        created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_type_proposals_type
+        ON ohm_type_proposals(proposed_type);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_type_proposals_status
+        ON ohm_type_proposals(status);
+    """,
 ]
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.53.0"
+SCHEMA_VERSION = "0.54.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -2723,6 +2752,29 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             # APPLIES_TO promoted from L3 to L4 in LAYER_EDGE_TYPES (application code).
             # Tag-filtered search uses json_contains on ohm_nodes.tags (application code).
             "SELECT 1;",
+        ],
+    ),
+    (
+        "0.54.0",
+        "OHM-848: add ohm_type_proposals table for soft type-validation trials",
+        [
+            """CREATE TABLE IF NOT EXISTS ohm_type_proposals (
+                id              VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+                tenant_id       VARCHAR DEFAULT '',
+                proposed_type   VARCHAR NOT NULL,
+                domain          VARCHAR,
+                proposed_by     VARCHAR,
+                status          VARCHAR DEFAULT 'trial',
+                trial_started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                promoted_at     TIMESTAMP,
+                rejected_at     TIMESTAMP,
+                metrics         JSON DEFAULT '{}',
+                evidence_node_ids JSON DEFAULT '[]',
+                created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_type_proposals_type ON ohm_type_proposals(proposed_type)",
+            "CREATE INDEX IF NOT EXISTS idx_type_proposals_status ON ohm_type_proposals(status)",
         ],
     ),
 ]

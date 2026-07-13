@@ -696,6 +696,18 @@ def generate_nudges(
         except Exception:
             pass  # Never fail the write for a nudge
 
+    # ── OHM-848: Proposed-type tag nudge ─────────────────────────────────
+    if action == "node" and tags:
+        from ohm.graph.queries.type_proposals import detect_proposed_types
+        proposed = detect_proposed_types(tags)
+        for pt in proposed:
+            nudges.append({
+                "type": "proposed_type_trial",
+                "message": f"Type '{pt}' is in trial mode. It will be promoted if it proves load-bearing across agents and outcomes.",
+                "severity": "info",
+                "data": {"proposed_type": pt},
+            })
+
     return nudges
 
 
