@@ -184,6 +184,13 @@ def generate_suggestions(
         except Exception as e:
             logger.debug(f"Orphan suggestion query failed: {e}")
 
+    # OHM-867: close per-call connection to prevent resource leak
+    if not use_store_conn:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
     return suggestions
 
 
@@ -475,6 +482,13 @@ def generate_edge_suggestions(
                 break
     except Exception as e:
         logger.debug(f"Orphan resolved check failed: {e}")
+
+    # OHM-867: close per-call connection to prevent resource leak
+    if not use_store_conn:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
     return suggestions
 

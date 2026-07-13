@@ -2381,15 +2381,24 @@ class OhmHandler(
         #   - require_read_auth=True: all requests require valid Bearer token
         #   - require_read_auth=False (default): reads are public, writes need auth
         #   - no tokens configured: GET allowed (transition mode for fresh installs)
-        agent = self._authenticate()
-        if agent is None:
-            if self.no_auth or not self.tokens:
-                agent = "ohm"
-            elif self.require_read_auth:
-                raise AuthenticationError("Authentication required — provide Bearer token")
-            else:
-                # Public-read model: unauthenticated reads allowed
-                agent = "ohm"
+
+        # OHM-856: Gate /admin/* GET endpoints behind admin auth, mirroring
+        # the existing POST-side gate at line 2521. Admin diagnostics
+        # (health, duplicates, islands, snapshots, etc.) must not be
+        # accessible anonymously, even in public-read mode.
+        if path.startswith("/admin/"):
+            admin_agent = self._require_admin("administrative maintenance endpoints")
+            agent = admin_agent or "admin"
+        else:
+            agent = self._authenticate()
+            if agent is None:
+                if self.no_auth or not self.tokens:
+                    agent = "ohm"
+                elif self.require_read_auth:
+                    raise AuthenticationError("Authentication required — provide Bearer token")
+                else:
+                    # Public-read model: unauthenticated reads allowed
+                    agent = "ohm"
 
         self._current_agent = agent
 
@@ -3163,6 +3172,26 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
 
     server = ThreadedHTTPServer((config["host"], config["port"]), make_configured_handler(store))
     server._ohm_store = store  # Fallback for current_store if handler.store is None
+
+    # OHM-860: Warn when binding to non-loopback with public-read auth and no tokens
+    _host = config.get("host", "127.0.0.1")
+    _is_loopback = _host in ("127.0.0.1", "localhost", "::1", "0.0.0.0") or _host.startswith("127.")
+    if not _is_loopback and not config.get("require_read_auth", False) and not config.get("no_auth", False):
+        _has_tokens = bool(config.get("tokens") or config.get("customer_tokens"))
+        if not _has_tokens:
+            import warnings as _warnings
+            _warnings.warn(
+                f"OHM is binding to {_host}:{config['port']} with public-read auth and no tokens configured — "
+                "the entire graph is readable by anyone who can reach this port. "
+                "Set require_read_auth=True or configure tokens to secure this instance.",
+                stacklevel=2,
+            )
+            print(
+                f"WARNING: binding to {_host}:{config['port']} with public-read auth and no tokens — "
+                "the entire graph is readable by anyone who can reach this port.",
+                file=sys.stderr,
+            )
+
     print(f"OHM daemon listening on {config['host']}:{config['port']}", file=sys.stderr)
 
     # Background DuckLake sync thread (OHM-1rwl): sync every sync_interval_seconds

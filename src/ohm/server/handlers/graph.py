@@ -1886,7 +1886,8 @@ class GraphHandlerMixin(OhmHandlerBase):
         transaction-insert-then-rollback, and promotes any that improve
         the recommendation.
         """
-        if not path.rstrip("/").endswith("/autoresearch"):
+        _path = path.rstrip("/")
+        if not _path.endswith("/autoresearch") and not _path.endswith("autoresearch"):
             self._json_response(405, {"error": "method_not_allowed", "message": "POST not supported on this endpoint"})
             return
 
@@ -2420,20 +2421,24 @@ class GraphHandlerMixin(OhmHandlerBase):
             node["hook_decorations"] = decorations
 
         # ADR-021: Proactive discoverability — suggestions for scratch
+        # OHM-855: isolate suggestion failures from fragment writes
         if _suggestions_module._suggestions_enabled():
             deadline = time.time() + _suggestions_module.SUGGESTION_TIMEOUT_S
-            sugg = _suggestions_module.generate_suggestions(
-                store=self.current_store,
-                node_id=node.get("id", ""),
-                content=content,
-                label=node.get("label"),
-                tags=body.get("tags"),
-                node_type="fragment",
-                has_edges=bool(body.get("connects_to")),
-                deadline=deadline,
-                use_store_conn=True,
-            )
-            node["suggestions"] = sugg
+            try:
+                sugg = _suggestions_module.generate_suggestions(
+                    store=self.current_store,
+                    node_id=node.get("id", ""),
+                    content=content,
+                    label=node.get("label"),
+                    tags=body.get("tags"),
+                    node_type="fragment",
+                    has_edges=bool(body.get("connects_to")),
+                    deadline=deadline,
+                    use_store_conn=True,
+                )
+                node["suggestions"] = sugg
+            except Exception as e:
+                logger.debug("Edge suggestions failed: %s", e)
 
         self._json_response(201, node)
 
@@ -4623,7 +4628,7 @@ class GraphHandlerMixin(OhmHandlerBase):
             self._json_response(404, {"ok": False, "error": "not_found", "message": str(e)})
 
     def _route_twin_get(self, path: str, qs: dict) -> None:
-        """Dispatch /twin/{id}/{action} to the right handler (OHM-josq, OHM-bf45)."""
+        """Dispatch /twin/{id}/{predict|constraints|explain|drift|ensemble} to the right handler (OHM-josq, OHM-bf45)."""
         from ohm.exceptions import ValidationError
 
         parts = path.strip("/").split("/")

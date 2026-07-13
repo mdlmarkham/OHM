@@ -227,16 +227,26 @@ class InfraHandlerMixin(OhmHandlerBase):
         multi_tenant = getattr(self, "multi_tenant", False)
 
         # Gather tenant info if multi-tenant
+        # OHM-858: Gate tenant/customer IDs behind admin auth to prevent
+        # anonymous tenant enumeration. The base instance metadata (version,
+        # uptime, etc.) remains public for discovery; tenant list is admin-only.
         tenants: list[str] = []
         domain_configs: dict[str, str] = {}
         if multi_tenant:
+            is_admin = False
             try:
-                tenant_rows = self.current_store.execute("SELECT customer_id, domain_config FROM ohm_tenants WHERE deleted_at IS NULL")
-                for row in tenant_rows:
-                    tenants.append(row.get("customer_id", row.get("id", "")))
-                    domain_configs[row.get("customer_id", row.get("id", ""))] = row.get("domain_config", "")
+                admin_agent = self._require_admin("tenant list access")
+                is_admin = admin_agent is not None
             except Exception:
                 pass
+            if is_admin:
+                try:
+                    tenant_rows = self.current_store.execute("SELECT customer_id, domain_config FROM ohm_tenants WHERE deleted_at IS NULL")
+                    for row in tenant_rows:
+                        tenants.append(row.get("customer_id", row.get("id", "")))
+                        domain_configs[row.get("customer_id", row.get("id", ""))] = row.get("domain_config", "")
+                except Exception:
+                    pass
 
         # DuckLake sync status
         ducklake_info: dict[str, Any] = {"enabled": False}

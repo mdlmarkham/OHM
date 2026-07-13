@@ -273,7 +273,7 @@ class DocumentHandlerMixin(OhmHandlerBase):
             raise ValidationError("URL fetch missing host")
 
         config = self.current_config or {}
-        allow_loopback = config.get("documents", {}).get("allow_loopback", True)
+        allow_loopback = config.get("documents", {}).get("allow_loopback", False)
         allowed_hosts = set(config.get("documents", {}).get("allowed_fetch_hosts", []))
 
         if host in allowed_hosts:
@@ -299,7 +299,7 @@ class DocumentHandlerMixin(OhmHandlerBase):
         url = self._validate_fetch_url(url)
 
         try:
-            content_bytes, detected_type = _fetch_pinned(url, timeout=30.0, allow_loopback=self.current_config.get("documents", {}).get("allow_loopback", True))
+            content_bytes, detected_type = _fetch_pinned(url, timeout=30.0, allow_loopback=self.current_config.get("documents", {}).get("allow_loopback", False))
         except urllib.error.HTTPError as e:
             raise ValidationError(f"Failed to fetch URL: HTTP {e.code} {e.reason}") from e
         except urllib.error.URLError as e:
