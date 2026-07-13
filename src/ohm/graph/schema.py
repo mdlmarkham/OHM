@@ -91,6 +91,8 @@ VALID_NODE_TYPES = frozenset(
         "runbook",  # Ordered DEPENDS_ON chain of skill nodes
         # ── L4 prospect lifecycle (OHM-840) ──
         "prospect",  # Governed plan of action with lifecycle accountability
+        # ── L4 expectation nodes (OHM-841) ──
+        "expectation",  # Quantitative target attached to a prospect
     }
 )
 
@@ -197,6 +199,16 @@ ANALYSIS_GUIDE: dict[str, dict[str, object]] = {
             "log every transition as an observation (obs_type=assessment)",
             "supersede via SUPERSEDES edge (L4) with reason in metadata",
             "domain-specific fields belong in SchemaConfig extensions, not base schema",
+        ],
+    },
+    "expectation": {
+        "use_for": ["quantitative targets attached to a prospect", "p10/p50/p90 distributions", "forecast vs measurement validation"],
+        "supports_inference": False,
+        "required_evidence": ["metadata.expected_value", "metadata.unit"],
+        "provenance_rules": [
+            "close out with obs_type=measurement on the target node after the prospect completes",
+            "use CONTAINS edge (L1) to link prospect → expectation",
+            "use EXPECTS edge (L4) to link expectation → target node",
         ],
     },
 }
@@ -436,6 +448,7 @@ VALID_OBSERVATION_TYPES = frozenset(
         "health_check",  # Infrastructure health/status (OHM-infra)
         "experiment_result",  # Experiment measurement with dev/test metrics (OHM-ss22)
         "assessment",  # Agent-evaluated judgment without raw measurement (OHM-36ps)
+        "forecast",  # Forward-looking expectation on a target node (OHM-841)
     }
 )
 
@@ -1867,7 +1880,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.51.0"
+SCHEMA_VERSION = "0.52.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -2689,6 +2702,15 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             # to LAYER_EDGE_TYPES["L4"], and lifecycle statuses to
             # VALID_TASK_STATUSES in application code. This migration bumps
             # the version so agents can detect prospect support is available.
+            "SELECT 1;",
+        ],
+    ),
+    (
+        "0.52.0",
+        "OHM-841: add expectation node type and forecast observation type",
+        [
+            # No DDL needed — expectation is added to VALID_NODE_TYPES and
+            # forecast to VALID_OBSERVATION_TYPES in application code.
             "SELECT 1;",
         ],
     ),
