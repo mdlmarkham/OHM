@@ -52,6 +52,7 @@ science = [
 ]
 dev = [
      "pytest>=7.0",
+     "pytest-asyncio>=0.23",
      "pytest-cov>=4.0",
      "pytest-benchmark>=4.0",
      "pytest-xdist>=3.0",
@@ -112,6 +113,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-n auto --dist loadgroup --timeout=120 --timeout-method=thread -m 'not slow and not benchmark and not performance and not integration'"
+asyncio_mode = "strict"
 markers = [
     "benchmark: Performance benchmark tests (pytest-benchmark)",
     "performance: Latency-gated performance tests (p95 thresholds, OHM-c1id)",
