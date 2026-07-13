@@ -221,6 +221,7 @@ def generate_nudges(
                 "type": "causal_edge_suggestion",
                 "message": causal_hint,
                 "severity": "info",
+                "skill_uri": "skill://ohm/causal-edge/SKILL.md",
                 "data": {
                     "edge_type_used": edge_type,
                     "suggested_types": sorted(CAUSAL_EDGE_TYPES),
@@ -375,6 +376,7 @@ def generate_nudges(
                 "type": "source_citation",
                 "message": "No source_url on this observation. If this is based on external information, add source_url to enable L2 citation tracking and source reliability scoring.",
                 "severity": "hint",
+                "skill_uri": "skill://ohm/observation-recording/SKILL.md",
             }
         )
 
@@ -396,6 +398,7 @@ def generate_nudges(
                 "type": "challenge_reminder",
                 "message": f"{edge_type} edge created. Challenge ratio is {ratio_str} — most L3 interpretations are unchallenged. Consider: does this causal claim have evidence against it? Is the direction correct? Could this be an AND→OR conversion?",
                 "severity": "hint",
+                "skill_uri": "skill://ohm/challenge-support/SKILL.md",
             }
         )
 

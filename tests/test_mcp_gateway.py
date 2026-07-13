@@ -199,3 +199,100 @@ async def test_gateway_skills_resources_registered(ohmd, gateway_profile):
     assert skill_uris, f"expected skill://ohm/ resources on gateway, got: {resource_uris}"
     assert any("decision-node" in u for u in skill_uris), f"expected decision-node skill, got: {skill_uris}"
     assert any("causal-edge" in u for u in skill_uris), f"expected causal-edge skill, got: {skill_uris}"
+
+
+async def test_gateway_tool_search_transform_via_env(ohmd, gateway_profile):
+    """OHM-851: tool-search transform reduces visible tools when enabled via env var."""
+    base_url, admin_token, _db_path = ohmd
+    tenant_id = "gateway_toolsearch"
+    domain = "ohm"
+    customer_token = _provision_tenant(base_url, admin_token, tenant_id, domain)
+
+    os.environ["OHM_GATEWAY_PROFILE"] = json.dumps(
+        [
+            {
+                "api_key": "ts-key",
+                "ohm_url": base_url,
+                "ohm_token": customer_token,
+                "agent_id": "gateway-test",
+                "tenant_id": tenant_id,
+                "allowed_tools": ["*"],
+                "read_only": True,
+            }
+        ]
+    )
+    os.environ["OHM_GATEWAY_TOOL_SEARCH"] = "1"
+    os.environ["OHM_GATEWAY_TOOL_SEARCH_STRATEGY"] = "regex"
+    os.environ["OHM_GATEWAY_TOOL_SEARCH_MAX_RESULTS"] = "5"
+    os.environ["OHM_GATEWAY_TOOL_SEARCH_ALWAYS_VISIBLE"] = "ohm_stats,ohm_search"
+
+    try:
+        if "ohm.mcp.gateway" in sys.modules:
+            del sys.modules["ohm.mcp.gateway"]
+
+        from ohm.mcp.gateway import _register_tools, _apply_tool_search_transform, mcp
+
+        _register_tools()
+        _apply_tool_search_transform()
+
+        tools = await mcp.list_tools()
+        tool_names = [t.name for t in tools]
+
+        assert "search_tools" in tool_names, f"expected search_tools, got: {tool_names}"
+        assert "call_tool" in tool_names, f"expected call_tool, got: {tool_names}"
+        assert "ohm_stats" in tool_names, f"expected ohm_stats pinned, got: {tool_names}"
+        assert "ohm_search" in tool_names, f"expected ohm_search pinned, got: {tool_names}"
+        assert len(tool_names) < 30, f"expected reduced catalog, got {len(tool_names)} tools"
+    finally:
+        os.environ.pop("OHM_GATEWAY_TOOL_SEARCH", None)
+        os.environ.pop("OHM_GATEWAY_TOOL_SEARCH_STRATEGY", None)
+        os.environ.pop("OHM_GATEWAY_TOOL_SEARCH_MAX_RESULTS", None)
+        os.environ.pop("OHM_GATEWAY_TOOL_SEARCH_ALWAYS_VISIBLE", None)
+
+
+async def test_gateway_tool_search_transform_via_profile(ohmd, gateway_profile):
+    """OHM-851: tool-search transform works when configured via profile JSON."""
+    base_url, admin_token, _db_path = ohmd
+    tenant_id = "gateway_toolsearch_profile"
+    domain = "ohm"
+    customer_token = _provision_tenant(base_url, admin_token, tenant_id, domain)
+
+    os.environ["OHM_GATEWAY_PROFILE"] = json.dumps(
+        [
+            {
+                "api_key": "ts-profile-key",
+                "ohm_url": base_url,
+                "ohm_token": customer_token,
+                "agent_id": "gateway-test",
+                "tenant_id": tenant_id,
+                "allowed_tools": ["*"],
+                "read_only": True,
+                "tool_search": {
+                    "enabled": True,
+                    "strategy": "regex",
+                    "max_results": 3,
+                    "always_visible": ["ohm_stats"],
+                },
+            }
+        ]
+    )
+    os.environ.pop("OHM_GATEWAY_TOOL_SEARCH", None)
+
+    try:
+        if "ohm.mcp.gateway" in sys.modules:
+            del sys.modules["ohm.mcp.gateway"]
+
+        from ohm.mcp.gateway import _register_tools, _apply_tool_search_transform, mcp
+
+        _register_tools()
+        _apply_tool_search_transform()
+
+        tools = await mcp.list_tools()
+        tool_names = [t.name for t in tools]
+
+        assert "search_tools" in tool_names
+        assert "call_tool" in tool_names
+        assert "ohm_stats" in tool_names
+        assert len(tool_names) < 30, f"expected reduced catalog, got {len(tool_names)} tools"
+    finally:
+        os.environ.pop("OHM_GATEWAY_TOOL_SEARCH", None)

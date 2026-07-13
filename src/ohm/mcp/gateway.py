@@ -75,6 +75,7 @@ class GatewayProfile:
     high_blast_radius: list[str] = field(default_factory=list)
     audit_path: str | None = None
     rate_limit: str | None = None
+    tool_search: dict[str, Any] | None = None
 
     def is_tool_allowed(self, name: str) -> bool:
         if self.read_only and name in WRITE_TOOLS:
@@ -124,6 +125,7 @@ def _load_profiles() -> dict[str, GatewayProfile]:
             high_blast_radius=item.get("high_blast_radius", []),
             audit_path=item.get("audit_path"),
             rate_limit=item.get("rate_limit"),
+            tool_search=item.get("tool_search"),
         )
     return result
 
@@ -643,6 +645,57 @@ def _register_skills() -> None:
         mcp.add_resource(res)
 
 
+def _apply_tool_search_transform() -> None:
+    """Apply the tool-search transform if configured (OHM-851).
+
+    Checks profiles for a ``tool_search`` config, or falls back to
+    ``OHM_GATEWAY_TOOL_SEARCH`` env var. When enabled, replaces the
+    full tool catalog with ``search_tools`` + ``call_tool`` synthetic
+    tools, keeping ``always_visible`` tools pinned.
+    """
+    profiles = _profiles()
+
+    ts_config: dict[str, Any] | None = None
+    for p in profiles.values():
+        if p.tool_search and p.tool_search.get("enabled"):
+            ts_config = p.tool_search
+            break
+
+    if ts_config is None:
+        env_enabled = os.environ.get("OHM_GATEWAY_TOOL_SEARCH", "").lower() in ("1", "true", "yes")
+        if env_enabled:
+            ts_config = {
+                "enabled": True,
+                "strategy": os.environ.get("OHM_GATEWAY_TOOL_SEARCH_STRATEGY", "regex"),
+                "max_results": int(os.environ.get("OHM_GATEWAY_TOOL_SEARCH_MAX_RESULTS", "8")),
+                "always_visible": [
+                    s.strip()
+                    for s in os.environ.get("OHM_GATEWAY_TOOL_SEARCH_ALWAYS_VISIBLE", "").split(",")
+                    if s.strip()
+                ],
+            }
+
+    if not ts_config:
+        return
+
+    strategy = ts_config.get("strategy", "regex")
+    max_results = int(ts_config.get("max_results", 8))
+    always_visible = ts_config.get("always_visible", [])
+
+    if strategy == "bm25":
+        from fastmcp.server.transforms.search import BM25SearchTransform
+        transform_cls = BM25SearchTransform
+    else:
+        from fastmcp.server.transforms.search import RegexSearchTransform
+        transform_cls = RegexSearchTransform
+
+    mcp.add_transform(transform_cls(
+        max_results=max_results,
+        always_visible=always_visible or None,
+    ))
+    logger.info("Tool-search transform enabled (strategy=%s, max_results=%d, always_visible=%s)", strategy, max_results, always_visible)
+
+
 async def main_async(host: str = "0.0.0.0", port: int = 8080, transport: str = "sse", name: str | None = None) -> None:
     """Run the gateway's HTTP server."""
     if not _profiles():
@@ -657,6 +710,9 @@ async def main_async(host: str = "0.0.0.0", port: int = 8080, transport: str = "
 
     _register_tools()
     _register_skills()
+
+    # OHM-851: Apply tool-search transform if configured (profile or env var)
+    _apply_tool_search_transform()
 
     # OHM-758: Register middleware for cross-cutting concerns
     from ohm.mcp.middleware import FormatMiddleware, AuditMiddleware
