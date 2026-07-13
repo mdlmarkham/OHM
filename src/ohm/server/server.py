@@ -982,6 +982,8 @@ def _build_router() -> _RouteRegistry:
     r.add("GET", "/prospect/")
     r.add("POST", "/simulate/")
     r.add("POST", "/decision/")
+    r.add("POST", "/type-proposal/")
+    r.add("GET", "/type-proposals")
 
     # PATCH
     r.add("PATCH", "/node/")
@@ -2913,6 +2915,10 @@ OhmHandler._POST_PREFIXES.append(("/simulate/", "_post_simulate"))
 
 # ── Decision hypothesis autoresearch (OHM-845) ────────────────────────────
 OhmHandler._POST_PREFIXES.append(("/decision/", "_post_decision_autoresearch"))
+
+# ── Type-level promotion autoresearch (OHM-846) ───────────────────────────
+OhmHandler._POST_PREFIXES.append(("/type-proposal/", "_route_type_proposal_post"))
+OhmHandler._GET_EXACT["/type-proposals"] = "_get_type_proposals"
 
 
 def make_configured_handler(store: OhmStore):
