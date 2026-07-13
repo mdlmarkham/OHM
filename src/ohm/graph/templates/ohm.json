@@ -42,13 +42,16 @@
     "mode_switch",
     "twin_design_session",
     "twin_design_proposal",
-    "runbook"
+    "runbook",
+    "prospect",
+    "expectation"
   ],
   "layer_edge_types": {
     "L0": [
       "CONTEXT_OF",
       "CONTRADICTS_FRAG",
       "INSPIRED_BY",
+      "RESONANCE",
       "REFINES_FRAG"
     ],
     "L1": [
@@ -57,14 +60,19 @@
       "CONTAINS",
       "GOALS",
       "HAS_COMPONENT",
+      "HOSTS",
       "INTERESTED_IN",
+      "LOCATED_IN",
       "PART_OF",
-      "VALUES"
+      "RUNS_ON",
+      "VALUES",
+      "VERSION_OF"
     ],
     "L2": [
       "AWAITING",
       "BATCH_EXPIRES_BEFORE",
       "CLOSED_BY",
+      "CONSUMES",
       "CONTAINED_BY",
       "DERIVES_FROM",
       "ERADICATED_BY",
@@ -75,6 +83,7 @@
       "NEGOTIATES_WITH",
       "NOTIFIES",
       "OPENED_BY",
+      "PRODUCES",
       "RECOVERED_BY",
       "REFERENCES",
       "RESOLVED_BY",
@@ -82,6 +91,7 @@
       "STARTED_BY",
       "TRANSFERRED_TO",
       "TRUSTS",
+      "UPSTREAM_OF",
       "USES"
     ],
     "L3": [
@@ -138,6 +148,25 @@
       "EXECUTED_BY",
       "FEEDBACK_TO",
       "INTERVENES_ON"
+    ],
+    "L4": [
+      "APPLIES_TO",
+      "BLOCKS",
+      "DEPENDS_ON",
+      "ENABLES",
+      "EXECUTED_BY",
+      "EXPECTS",
+      "EXPECTS_FROM",
+      "FEEDBACK_TO",
+      "INTERVENES_ON",
+      "ORDERS_TEST",
+      "PLANS",
+      "PREDICTS",
+      "PROPOSED_BY",
+      "RISKS",
+      "SUPERSEDES",
+      "THREATENS",
+      "TRIGGERS_INCIDENT"
     ]
   },
   "layer_descriptions": {
@@ -155,7 +184,9 @@
     "pattern",
     "sentiment",
     "support",
-    "assessment"
+    "assessment",
+    "health_check",
+    "forecast"
   ],
   "observation_sources": [
     "analysis",

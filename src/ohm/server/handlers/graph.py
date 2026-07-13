@@ -1133,6 +1133,9 @@ class GraphHandlerMixin(OhmHandlerBase):
 
         OHM-a5rz.18: L0 fragments are excluded by default.
         Pass ``?include_l0=true`` to include fragment-type nodes.
+
+        OHM-842: supports ``?tags=`` for AND-semantics tag filtering.
+        Pass multiple ``?tags=`` params — all must be present.
         """
         from ohm.exceptions import ValidationError
 
@@ -1143,6 +1146,7 @@ class GraphHandlerMixin(OhmHandlerBase):
         until = qs.get("until", [None])[0]
         include_l0 = qs.get("include_l0", ["false"])[0].lower() in ("true", "1", "yes")
         limit = int(qs.get("limit", [20])[0])
+        tags = qs.get("tags", [])
         if not query_text:
             raise ValidationError("Search requires ?q=QUERY")
         conditions = ["deleted_at IS NULL", "(label ILIKE ? OR content ILIKE ?)"]
@@ -1162,6 +1166,10 @@ class GraphHandlerMixin(OhmHandlerBase):
         if until:
             conditions.append("created_at <= ?::TIMESTAMP")
             params.append(until)
+        # OHM-842: AND-semantics tag filtering — each tag must be present
+        for tag in tags:
+            conditions.append("json_contains(tags, ?)")
+            params.append(f'"{tag}"')
         # OHM-oqyc: enforce read scope at SQL level
         from ohm.server.boundary import apply_read_scope_filters
 
@@ -1177,7 +1185,9 @@ class GraphHandlerMixin(OhmHandlerBase):
         # When text search returns 0 results, try semantic search automatically.
         # OHM-738: pass node_type through to fallbacks so a typed query can
         # still benefit from semantic/fuzzy matching instead of returning 0.
-        if not results:
+        # OHM-842: skip fallbacks when tags are specified — fallbacks don't
+        # support tag filtering and would bypass the user's explicit constraint.
+        if not results and not tags:
             try:
                 from ohm.graph.queries import semantic_search
 

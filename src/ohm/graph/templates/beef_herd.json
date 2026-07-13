@@ -54,7 +54,9 @@
     "mode_switch",
     "twin_design_session",
     "twin_design_proposal",
-    "runbook"
+    "runbook",
+    "prospect",
+    "expectation"
   ],
   "layer_edge_types": {
     "L0": [
@@ -141,6 +143,25 @@
       "RISKS",
       "THREATENS",
       "TRIGGERS_INCIDENT"
+    ],
+    "L4": [
+      "APPLIES_TO",
+      "BLOCKS",
+      "DEPENDS_ON",
+      "ENABLES",
+      "EXECUTED_BY",
+      "EXPECTS",
+      "EXPECTS_FROM",
+      "FEEDBACK_TO",
+      "INTERVENES_ON",
+      "ORDERS_TEST",
+      "PLANS",
+      "PREDICTS",
+      "PROPOSED_BY",
+      "RISKS",
+      "SUPERSEDES",
+      "THREATENS",
+      "TRIGGERS_INCIDENT"
     ]
   },
   "layer_descriptions": {
@@ -167,7 +188,8 @@
     "support",
     "temperature",
     "weight",
-    "assessment"
+    "assessment",
+    "forecast"
   ],
   "observation_sources": [
     "analysis",

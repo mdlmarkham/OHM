@@ -427,6 +427,8 @@ LAYER_EDGE_TYPES: dict[str, frozenset[str]] = {
             "INTERVENES_ON",  # intervention → node (this intervention targets this node)
             # ── L4 prospect lifecycle (OHM-840) ──
             "SUPERSEDES",  # new prospect replaces old prospect (reason in metadata)
+            # ── Cross-layer promotion (OHM-842) ──
+            "APPLIES_TO",  # prospect → site/area (scope grouping, same meaning as L3)
         }
     ),
 }
@@ -1880,7 +1882,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.52.0"
+SCHEMA_VERSION = "0.53.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -2711,6 +2713,15 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
         [
             # No DDL needed — expectation is added to VALID_NODE_TYPES and
             # forecast to VALID_OBSERVATION_TYPES in application code.
+            "SELECT 1;",
+        ],
+    ),
+    (
+        "0.53.0",
+        "OHM-842: promote APPLIES_TO to L4, add tag-filtered search",
+        [
+            # APPLIES_TO promoted from L3 to L4 in LAYER_EDGE_TYPES (application code).
+            # Tag-filtered search uses json_contains on ohm_nodes.tags (application code).
             "SELECT 1;",
         ],
     ),
