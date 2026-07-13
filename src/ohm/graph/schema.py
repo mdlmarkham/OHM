@@ -89,6 +89,8 @@ VALID_NODE_TYPES = frozenset(
         "twin_design_proposal",  # A specific twin configuration proposal
         # ── Open Skills portable skill contract (OHM-461f) ──
         "runbook",  # Ordered DEPENDS_ON chain of skill nodes
+        # ── L4 prospect lifecycle (OHM-840) ──
+        "prospect",  # Governed plan of action with lifecycle accountability
     }
 )
 
@@ -186,6 +188,16 @@ ANALYSIS_GUIDE: dict[str, dict[str, object]] = {
         "supports_inference": True,
         "required_evidence": ["linked scenario or decision"],
         "provenance_rules": ["record whether executed", "update outcome for causal learning"],
+    },
+    "prospect": {
+        "use_for": ["planned campaigns", "outages", " releases", "policy reviews", "clinical trials"],
+        "supports_inference": False,
+        "required_evidence": ["task_status", "planned_start/end in metadata"],
+        "provenance_rules": [
+            "log every transition as an observation (obs_type=assessment)",
+            "supersede via SUPERSEDES edge (L4) with reason in metadata",
+            "domain-specific fields belong in SchemaConfig extensions, not base schema",
+        ],
     },
 }
 
@@ -401,6 +413,8 @@ LAYER_EDGE_TYPES: dict[str, frozenset[str]] = {
             "EXECUTED_BY",  # action → agent (who executed this action)
             "FEEDBACK_TO",  # action/observation → scenario (result feeds back to scenario)
             "INTERVENES_ON",  # intervention → node (this intervention targets this node)
+            # ── L4 prospect lifecycle (OHM-840) ──
+            "SUPERSEDES",  # new prospect replaces old prospect (reason in metadata)
         }
     ),
 }
@@ -523,6 +537,14 @@ VALID_TASK_STATUSES = frozenset(
         "review",  # Awaiting review by another agent
         "done",  # Completed
         "cancelled",  # No longer needed
+        # ── Prospect lifecycle statuses (OHM-840) ──
+        "proposed",  # Prospect has been proposed, not yet committed
+        "committed",  # Prospect is committed for execution
+        "active",  # Prospect is currently executing
+        "completed",  # Prospect finished successfully
+        "failed",  # Prospect failed
+        "partial",  # Prospect completed partially (some targets missed)
+        "superseded",  # Prospect replaced by a newer prospect via SUPERSEDES edge
     }
 )
 
@@ -1845,7 +1867,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.50.0"
+SCHEMA_VERSION = "0.51.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -2657,6 +2679,17 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             )""",
             "CREATE INDEX IF NOT EXISTS idx_sim_res_run ON domain_simulation_results(run_id)",
             "CREATE INDEX IF NOT EXISTS idx_sim_res_node ON domain_simulation_results(node_id)",
+        ],
+    ),
+    (
+        "0.51.0",
+        "OHM-840: add prospect node type, SUPERSEDES edge type, and prospect lifecycle statuses",
+        [
+            # No DDL needed — prospect is added to VALID_NODE_TYPES, SUPERSEDES
+            # to LAYER_EDGE_TYPES["L4"], and lifecycle statuses to
+            # VALID_TASK_STATUSES in application code. This migration bumps
+            # the version so agents can detect prospect support is available.
+            "SELECT 1;",
         ],
     ),
 ]

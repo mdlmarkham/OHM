@@ -290,13 +290,17 @@ def enforce_confidence_ceiling(
 def validate_task_status(value: str | None) -> str | None:
     """Validate that *value* is a known task status (OHM-sbtz.2).
 
-    Valid statuses: open, in_progress, blocked, review, done, cancelled.
+    Valid statuses: open, in_progress, blocked, review, done, cancelled,
+    proposed, committed, active, completed, failed, partial, superseded.
     Returns the value unchanged if valid. Raises ValueError for unknown values.
     None is accepted (for non-task nodes).
     """
     if value is None:
         return None
-    _VALID_TASK_STATUSES = {"open", "in_progress", "blocked", "review", "done", "cancelled"}
+    _VALID_TASK_STATUSES = {
+        "open", "in_progress", "blocked", "review", "done", "cancelled",
+        "proposed", "committed", "active", "completed", "failed", "partial", "superseded",
+    }
     if value not in _VALID_TASK_STATUSES:
         raise ValueError(f"Invalid task_status: '{value}' — must be one of: {sorted(_VALID_TASK_STATUSES)}")
     return value
