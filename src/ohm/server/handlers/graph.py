@@ -1877,6 +1877,36 @@ class GraphHandlerMixin(OhmHandlerBase):
         except ValueError as e:
             self._json_response(422, {"error": "simulation_failed", "message": str(e)})
 
+    def _post_decision_autoresearch(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /decision/{id}/autoresearch — run one autoresearch round (OHM-845).
+
+        Body: {dry_run?, max_candidates?}
+
+        Generates candidate hypothesis edges, evaluates each via
+        transaction-insert-then-rollback, and promotes any that improve
+        the recommendation.
+        """
+        from ohm.decision.autoresearch import run_autoresearch_round
+
+        decision_id = path.rstrip("/").split("/")[-1]
+        if decision_id == "autoresearch":
+            decision_id = path.rstrip("/").split("/")[-2]
+
+        dry_run = body.get("dry_run", False)
+        max_candidates = int(body.get("max_candidates", 5))
+
+        try:
+            result = run_autoresearch_round(
+                self.current_store.conn,
+                decision_id=decision_id,
+                dry_run=dry_run,
+                max_candidates=max_candidates,
+                agent=agent,
+            )
+            self._json_response(200, result)
+        except ValueError as e:
+            self._json_response(422, {"error": "autoresearch_failed", "message": str(e)})
+
     def _enforce_cross_link_requirement(self, node_id: str, body: dict) -> dict | None:
         """Return a 422 response body if *body* describes a node that must link.
 

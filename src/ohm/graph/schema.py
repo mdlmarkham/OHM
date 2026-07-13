@@ -1907,11 +1907,32 @@ DDL_STATEMENTS: list[str] = [
     CREATE INDEX IF NOT EXISTS idx_type_proposals_status
         ON ohm_type_proposals(status);
     """,
+    # ── Autoresearch History (OHM-845) ────────────────────────────────────
+    # Tracks evaluated-and-rejected decision↔hypothesis pairs so a second
+    # autoresearch round doesn't re-propose the same rejected candidate.
+    """
+    CREATE TABLE IF NOT EXISTS ohm_autoresearch_history (
+        id              VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        decision_id     VARCHAR NOT NULL,
+        hypothesis_id   VARCHAR NOT NULL,
+        outcome         VARCHAR NOT NULL,
+        reason          TEXT,
+        created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_autoresearch_decision
+        ON ohm_autoresearch_history(decision_id);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_autoresearch_outcome
+        ON ohm_autoresearch_history(decision_id, outcome);
+    """,
 ]
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.54.0"
+SCHEMA_VERSION = "0.55.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -2775,6 +2796,22 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             )""",
             "CREATE INDEX IF NOT EXISTS idx_type_proposals_type ON ohm_type_proposals(proposed_type)",
             "CREATE INDEX IF NOT EXISTS idx_type_proposals_status ON ohm_type_proposals(status)",
+        ],
+    ),
+    (
+        "0.55.0",
+        "OHM-845: add ohm_autoresearch_history table for decision hypothesis autoresearch",
+        [
+            """CREATE TABLE IF NOT EXISTS ohm_autoresearch_history (
+                id              VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+                decision_id     VARCHAR NOT NULL,
+                hypothesis_id   VARCHAR NOT NULL,
+                outcome         VARCHAR NOT NULL,
+                reason          TEXT,
+                created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_autoresearch_decision ON ohm_autoresearch_history(decision_id)",
+            "CREATE INDEX IF NOT EXISTS idx_autoresearch_outcome ON ohm_autoresearch_history(decision_id, outcome)",
         ],
     ),
 ]

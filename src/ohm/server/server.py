@@ -981,6 +981,7 @@ def _build_router() -> _RouteRegistry:
     r.add("POST", "/prospect/transition/")
     r.add("GET", "/prospect/")
     r.add("POST", "/simulate/")
+    r.add("POST", "/decision/")
 
     # PATCH
     r.add("PATCH", "/node/")
@@ -2909,6 +2910,9 @@ OhmHandler._GET_PREFIXES.append(("/prospect/", "_get_prospect_detail"))
 
 # ── Monte Carlo prospect simulation (OHM-843) ──────────────────────────────
 OhmHandler._POST_PREFIXES.append(("/simulate/", "_post_simulate"))
+
+# ── Decision hypothesis autoresearch (OHM-845) ────────────────────────────
+OhmHandler._POST_PREFIXES.append(("/decision/", "_post_decision_autoresearch"))
 
 
 def make_configured_handler(store: OhmStore):
