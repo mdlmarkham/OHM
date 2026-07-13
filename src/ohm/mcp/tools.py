@@ -763,4 +763,32 @@ def all_tools() -> list[Tool]:
                 "required": ["prospect_id"],
             },
         ),
+        # ── Monte Carlo prospect simulation (OHM-843) ──────────────────────────
+        # Distinct from ohm_pert (single-node three-point estimate) and
+        # ohm_monte_carlo (graph cascade/failure propagation). This tool
+        # aggregates multi-expectation prospect outcomes using Beta-PERT
+        # sampling per expectation, with sensitivity ranking and VoI
+        # cross-validation.
+        Tool(
+            name="ohm_simulate",
+            description=(
+                "Run Monte Carlo simulation over a prospect's expectation nodes. "
+                "Samples from Beta-PERT distributions per expectation (p10/p50/p90), "
+                "computes per-expectation statistics, sensitivity rankings, and "
+                "cross-validates against compute_voi's ranking via Spearman rank "
+                "correlation. Persists result as an experiment_result observation. "
+                "Distinct from ohm_pert (single-node estimate) and ohm_monte_carlo "
+                "(graph cascade/failure propagation)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                    "prospect_id": {"type": "string", "description": "The prospect node to simulate."},
+                    "n_iterations": {"type": "integer", "description": "Number of Monte Carlo iterations (default 5000).", "default": 5000},
+                    "seed": {"type": "integer", "description": "Random seed for reproducibility."},
+                },
+                "required": ["prospect_id"],
+            },
+        ),
     ]

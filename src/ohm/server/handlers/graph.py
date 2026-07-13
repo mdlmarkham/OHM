@@ -1851,6 +1851,32 @@ class GraphHandlerMixin(OhmHandlerBase):
         except ValueError as e:
             self._json_response(404, {"error": "not_found", "message": str(e)})
 
+    def _post_simulate(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /simulate/{prospect_id} — Monte Carlo prospect simulation (OHM-843).
+
+        Body: {n_iterations?, seed?}
+
+        Runs a Monte Carlo simulation over the prospect's expectation nodes,
+        sampling from Beta-PERT distributions per expectation. Persists the
+        result as an experiment_result observation.
+        """
+        from ohm.graph.queries.simulate import simulate_prospect
+
+        prospect_id = path.rstrip("/").split("/")[-1]
+        n_iterations = int(body.get("n_iterations", 5000))
+        seed = body.get("seed")
+
+        try:
+            result = simulate_prospect(
+                self.current_store.conn,
+                prospect_id=prospect_id,
+                n_iterations=n_iterations,
+                seed=int(seed) if seed is not None else None,
+            )
+            self._json_response(200, result)
+        except ValueError as e:
+            self._json_response(422, {"error": "simulation_failed", "message": str(e)})
+
     def _enforce_cross_link_requirement(self, node_id: str, body: dict) -> dict | None:
         """Return a 422 response body if *body* describes a node that must link.
 

@@ -330,6 +330,15 @@ def build_request(name: str, arguments: dict[str, Any], agent_id: str) -> tuple[
     if name == "ohm_prospect_detail":
         return "GET", "/prospect/" + arguments["prospect_id"], None
 
+    # ── Monte Carlo prospect simulation (OHM-843) ──
+    if name == "ohm_simulate":
+        body: dict[str, object] = {}
+        if arguments.get("n_iterations") is not None:
+            body["n_iterations"] = arguments["n_iterations"]
+        if arguments.get("seed") is not None:
+            body["seed"] = arguments["seed"]
+        return "POST", "/simulate/" + arguments["prospect_id"], body
+
     raise KeyError(f"Unknown tool: {name}")
 
 
