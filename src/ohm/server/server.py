@@ -1042,10 +1042,30 @@ from ohm.server.handlers.infra import InfraHandlerMixin
 from ohm.server.handlers.inference import InferenceHandlerMixin
 from ohm.server.handlers.markov import MarkovHandlerMixin
 from ohm.server.handlers.tenant import TenantHandlerMixin
+from ohm.server.handlers.type_proposals import TypeProposalHandlerMixin
+from ohm.server.handlers.prospects import ProspectHandlerMixin
+from ohm.server.handlers.twins import TwinHandlerMixin
+from ohm.server.handlers.models import ModelHandlerMixin
+from ohm.server.handlers.temporal import TemporalHandlerMixin
+from ohm.server.handlers.fragments import FragmentHandlerMixin
+from ohm.server.handlers.tasks import TaskHandlerMixin
+from ohm.server.handlers.nodes import NodeHandlerMixin
+from ohm.server.handlers.edges import EdgeHandlerMixin
+from ohm.server.handlers.reports_misc import ReportsHandlerMixin
+from ohm.server.handlers.search import SearchHandlerMixin
+from ohm.server.handlers.observations import ObservationHandlerMixin
+from ohm.server.handlers.narrative import NarrativeHandlerMixin
+from ohm.server.handlers.scenario import ScenarioHandlerMixin
+from ohm.server.handlers.nudges import NudgeHandlerMixin
+from ohm.server.handlers.challenge_support import ChallengeSupportHandlerMixin
+from ohm.server.handlers.synthesis import SynthesisHandlerMixin
+from ohm.server.handlers.agent_state import AgentStateHandlerMixin
+from ohm.server.handlers.vault import VaultHandlerMixin
+from ohm.server.handlers.ask_synthesis import AskSynthesisHandlerMixin
 
 
 class OhmHandler(
-    AdminHandlerMixin, AnalysisHandlerMixin, AskHandlerMixin, CatalogHandlerMixin, DecisionHandlerMixin, DocumentHandlerMixin, GraphHandlerMixin, InfraHandlerMixin, InferenceHandlerMixin, MarkovHandlerMixin, TenantHandlerMixin, BaseHTTPRequestHandler
+    AdminHandlerMixin, AnalysisHandlerMixin, AskHandlerMixin, CatalogHandlerMixin, DecisionHandlerMixin, DocumentHandlerMixin, GraphHandlerMixin, InfraHandlerMixin, InferenceHandlerMixin, MarkovHandlerMixin, TenantHandlerMixin, TypeProposalHandlerMixin, ProspectHandlerMixin, TwinHandlerMixin, ModelHandlerMixin, TemporalHandlerMixin, FragmentHandlerMixin, TaskHandlerMixin, NodeHandlerMixin, EdgeHandlerMixin, ReportsHandlerMixin, SearchHandlerMixin, ObservationHandlerMixin, NarrativeHandlerMixin, ScenarioHandlerMixin, NudgeHandlerMixin, ChallengeSupportHandlerMixin, SynthesisHandlerMixin, AgentStateHandlerMixin, VaultHandlerMixin, AskSynthesisHandlerMixin, BaseHTTPRequestHandler
 ):
     """HTTP request handler for OHM daemon."""
 
