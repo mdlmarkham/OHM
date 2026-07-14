@@ -85,10 +85,6 @@ class OhmHandlerBase(BaseHTTPRequestHandler):
         """Serialize ``body`` as JSON and send it with the given HTTP status."""
         raise NotImplementedError("must be provided by OhmHandler")
 
-    def _send_json(self, status: int, body: Any) -> None:
-        """Alias for _json_response used by some mixins."""
-        self._json_response(status, body)
-
     def _respond_text(self, status: int, text: str, content_type: str = "text/plain") -> None:
         """Send a plain-text response."""
         raise NotImplementedError("must be provided by OhmHandler")
