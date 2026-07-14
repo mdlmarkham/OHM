@@ -158,6 +158,14 @@ def validate_local_path(path: str, root: str | None = None) -> str:
         return str(resolved)
 
     # No root configured — reject absolute paths to prevent arbitrary file reads.
+    # Check for Windows-style absolute paths (C:\, D:\, etc.) cross-platform,
+    # since pathlib.Path.is_absolute() is platform-aware and won't catch
+    # Windows paths on POSIX hosts (the production environment).
+    import re
+
+    if re.match(r"^[A-Za-z]:[\\/]", path):
+        raise ValidationError(f"local_path '{path}' is an absolute path but no ingestion root is configured. Set OHM_INGESTION_ROOT env var or pass _ingestion_root in the item to enable local_path ingestion.")
+
     if p.is_absolute():
         raise ValidationError(f"local_path '{path}' is an absolute path but no ingestion root is configured. Set OHM_INGESTION_ROOT env var or pass _ingestion_root in the item to enable local_path ingestion.")
 

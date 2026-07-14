@@ -8,6 +8,9 @@
 # Install (Python 3.12+)
 pip install -e ".[dev]"
 
+# Or use uv with the lockfile for reproducible installs
+uv sync --frozen --extra dev
+
 # Run tests
 python -m pytest tests/ -v
 

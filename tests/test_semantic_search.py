@@ -246,6 +246,33 @@ class TestSemanticSearch:
         assert results[0][2] == "concept"
 
 
+def _ollama_available() -> bool:
+    """Check if Ollama is running and has an embedding model."""
+    try:
+        import urllib.request
+
+        req = urllib.request.Request("http://localhost:11434/api/tags")
+        resp = urllib.request.urlopen(req, timeout=2)
+        return resp.status == 200
+    except Exception:
+        return False
+
+
+def _patch_generate_embedding(monkeypatch, fake_fn):
+    """Monkeypatch generate_embedding in the module where semantic_search calls it."""
+    from ohm.graph.queries import embeddings as emb_mod
+
+    monkeypatch.setattr(emb_mod, "generate_embedding", fake_fn)
+
+
+# Skip hybrid/manifold tests if Ollama is unavailable and monkeypatching fails
+_ollama_skip = pytest.mark.skipif(
+    not _ollama_available(),
+    reason="Ollama not running — semantic search tests require an embedding backend",
+)
+
+
+@_ollama_skip
 class TestHybridSemanticSearch:
     """Tests for hybrid semantic + HD membership search (OHM-xuf4)."""
 
@@ -306,12 +333,12 @@ class TestHybridSemanticSearch:
         node_ids, _ = self._seed_hybrid_graph(test_db)
 
         # Stub generate_embedding to avoid Ollama dependency
-        from ohm.graph import queries as queries_mod
+        from ohm.graph.queries import embeddings as emb_mod
 
         def fake_generate_embedding(text, model="nomic-embed-text", ollama_url="http://localhost:11434", **kwargs):
             return [0.0] * 768
 
-        monkeypatch.setattr(queries_mod, "generate_embedding", fake_generate_embedding)
+        monkeypatch.setattr(emb_mod, "generate_embedding", fake_generate_embedding)
 
         results = semantic_search(test_db, query="nuclear reactor safety", membership_weight=None)
         assert len(results) == 3
@@ -327,12 +354,12 @@ class TestHybridSemanticSearch:
 
         node_ids, _ = self._seed_hybrid_graph(test_db)
 
-        from ohm.graph import queries as queries_mod
+        from ohm.graph.queries import embeddings as emb_mod
 
         def fake_generate_embedding(text, model="nomic-embed-text", ollama_url="http://localhost:11434", **kwargs):
             return [0.0] * 768
 
-        monkeypatch.setattr(queries_mod, "generate_embedding", fake_generate_embedding)
+        monkeypatch.setattr(emb_mod, "generate_embedding", fake_generate_embedding)
 
         results = semantic_search(test_db, query="nuclear reactor safety", membership_weight=0.0)
         assert len(results) == 3
@@ -349,7 +376,7 @@ class TestHybridSemanticSearch:
 
         node_ids, _ = self._seed_hybrid_graph(test_db)
 
-        from ohm.graph import queries as queries_mod
+        from ohm.graph.queries import embeddings as queries_mod
 
         # Use a non-zero query embedding aligned with the tech embeddings
         def fake_generate_embedding(text, model="nomic-embed-text", ollama_url="http://localhost:11434", **kwargs):
@@ -402,12 +429,12 @@ class TestHybridSemanticSearch:
         update_node_hd_fingerprint(test_db, n_with["id"])
         # Deliberately do NOT fingerprint n_without
 
-        from ohm.graph import queries as queries_mod
+        from ohm.graph.queries import embeddings as emb_mod
 
         def fake_generate_embedding(text, model="nomic-embed-text", ollama_url="http://localhost:11434", **kwargs):
             return [0.0] * 768
 
-        monkeypatch.setattr(queries_mod, "generate_embedding", fake_generate_embedding)
+        monkeypatch.setattr(emb_mod, "generate_embedding", fake_generate_embedding)
 
         results = semantic_search(test_db, query="test", membership_weight=0.5)
         assert len(results) == 2
@@ -462,7 +489,7 @@ class TestHybridSemanticSearch:
             [fp_other_bytes, n_other["id"]],
         )
 
-        from ohm.graph import queries as queries_mod
+        from ohm.graph.queries import embeddings as queries_mod
 
         def fake_generate_embedding(text, model="nomic-embed-text", ollama_url="http://localhost:11434", **kwargs):
             emb = [0.0] * 768
@@ -502,12 +529,12 @@ class TestHybridSemanticSearch:
             [emb, n["id"]],
         )
 
-        from ohm.graph import queries as queries_mod
+        from ohm.graph.queries import embeddings as emb_mod
 
         def fake_generate_embedding(text, model="nomic-embed-text", ollama_url="http://localhost:11434", **kwargs):
             return [0.0] * 768
 
-        monkeypatch.setattr(queries_mod, "generate_embedding", fake_generate_embedding)
+        monkeypatch.setattr(emb_mod, "generate_embedding", fake_generate_embedding)
 
         with pytest.raises(ValueError, match="membership_weight"):
             semantic_search(test_db, query="test", membership_weight=1.5)
@@ -554,6 +581,7 @@ class TestUpdateNodeEmbedding:
         assert result is False
 
 
+@_ollama_skip
 class TestManifoldDensityAndGeodesic:
     """OHM-nnrw: manifold_density_score and geodesic_distance in semantic search."""
 
@@ -603,7 +631,7 @@ class TestManifoldDensityAndGeodesic:
     def test_semantic_search_includes_manifold_density(self, test_db, monkeypatch):
         """semantic_search results include manifold_density_score field."""
         from ohm.queries import semantic_search
-        from ohm.graph import queries as queries_mod
+        from ohm.graph.queries import embeddings as queries_mod
 
         dense_ids, sparse_id = self._seed_density_graph(test_db)
 
@@ -623,7 +651,7 @@ class TestManifoldDensityAndGeodesic:
     def test_manifold_density_monotonic_with_neighborhood(self, test_db, monkeypatch):
         """Dense cluster nodes have higher manifold_density than isolated nodes."""
         from ohm.queries import semantic_search
-        from ohm.graph import queries as queries_mod
+        from ohm.graph.queries import embeddings as queries_mod
 
         dense_ids, sparse_id = self._seed_density_graph(test_db)
 
@@ -648,7 +676,7 @@ class TestManifoldDensityAndGeodesic:
     def test_geodesic_distance_equals_cosine_distance(self, test_db, monkeypatch):
         """geodesic_distance field equals the cosine distance field."""
         from ohm.queries import semantic_search
-        from ohm.graph import queries as queries_mod
+        from ohm.graph.queries import embeddings as queries_mod
 
         dense_ids, sparse_id = self._seed_density_graph(test_db)
 
@@ -669,7 +697,7 @@ class TestManifoldDensityAndGeodesic:
     def test_manifold_density_none_without_embedding(self, test_db, monkeypatch):
         """Nodes without embeddings get manifold_density_score=None."""
         from ohm.queries import create_node, semantic_search
-        from ohm.graph import queries as queries_mod
+        from ohm.graph.queries import embeddings as queries_mod
 
         try:
             test_db.execute("SELECT array_cosine_distance([1.0]::FLOAT[1], [1.0]::FLOAT[1])")

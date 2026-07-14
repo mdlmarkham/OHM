@@ -79,6 +79,11 @@ class TestApplyDecayToEdges:
             created_by="tester",
             confidence=0.9,
         )
+        # Backdate the edge so decay is measurable (fresh edges have ~0 age)
+        test_db.execute(
+            "UPDATE ohm_edges SET created_at = CURRENT_TIMESTAMP - INTERVAL '2 days' WHERE id = ?",
+            [edge["id"]],
+        )
         apply_decay_to_edges(test_db, half_life_days=1.0, dry_run=False)
         row = test_db.execute("SELECT confidence, metadata FROM ohm_edges WHERE id = ?", [edge["id"]]).fetchone()
         assert row[0] < 0.9

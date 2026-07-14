@@ -220,7 +220,7 @@ def apply_decay_to_edges(
         SELECT
             id, confidence, layer, created_at, metadata,
             {hl_case} AS half_life,
-            GREATEST(date_diff('day', created_at, CURRENT_TIMESTAMP), 0)::DOUBLE AS age_days
+            GREATEST(date_diff('second', created_at, CURRENT_TIMESTAMP) / 86400.0, 0.0) AS age_days
         FROM ohm_edges
         WHERE deleted_at IS NULL
           AND confidence IS NOT NULL

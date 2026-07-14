@@ -141,10 +141,14 @@ def _api_post(
 
 
 def _fetch_url(url: str, timeout: int = 30) -> tuple[bytes, str | None]:
-    """Fetch a URL safely with SSRF protection (DNS pinning, IP validation)."""
+    """Fetch a URL safely with SSRF protection (DNS pinning, IP validation).
+
+    Document-library ingestion is a legitimate loopback/intranet use case
+    (e.g. local NAS, docs server). Allow loopback/private addresses here.
+    """
     from ohm.net_safety import safe_fetch_pinned
 
-    return safe_fetch_pinned(url, timeout=timeout)
+    return safe_fetch_pinned(url, timeout=timeout, allow_loopback=True)
 
 
 def _build_multipart_body(filename: str, content_bytes: bytes, boundary: str, content_type: str) -> bytes:
