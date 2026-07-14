@@ -1060,10 +1060,11 @@ from ohm.server.handlers.nudges import NudgeHandlerMixin
 from ohm.server.handlers.challenge_support import ChallengeSupportHandlerMixin
 from ohm.server.handlers.synthesis import SynthesisHandlerMixin
 from ohm.server.handlers.agent_state import AgentStateHandlerMixin
+from ohm.server.handlers.vault import VaultHandlerMixin
 
 
 class OhmHandler(
-    AdminHandlerMixin, AnalysisHandlerMixin, AskHandlerMixin, CatalogHandlerMixin, DecisionHandlerMixin, DocumentHandlerMixin, GraphHandlerMixin, InfraHandlerMixin, InferenceHandlerMixin, MarkovHandlerMixin, TenantHandlerMixin, TypeProposalHandlerMixin, ProspectHandlerMixin, TwinHandlerMixin, ModelHandlerMixin, TemporalHandlerMixin, FragmentHandlerMixin, TaskHandlerMixin, NodeHandlerMixin, EdgeHandlerMixin, ReportsHandlerMixin, SearchHandlerMixin, ObservationHandlerMixin, NarrativeHandlerMixin, ScenarioHandlerMixin, NudgeHandlerMixin, ChallengeSupportHandlerMixin, SynthesisHandlerMixin, AgentStateHandlerMixin, BaseHTTPRequestHandler
+    AdminHandlerMixin, AnalysisHandlerMixin, AskHandlerMixin, CatalogHandlerMixin, DecisionHandlerMixin, DocumentHandlerMixin, GraphHandlerMixin, InfraHandlerMixin, InferenceHandlerMixin, MarkovHandlerMixin, TenantHandlerMixin, TypeProposalHandlerMixin, ProspectHandlerMixin, TwinHandlerMixin, ModelHandlerMixin, TemporalHandlerMixin, FragmentHandlerMixin, TaskHandlerMixin, NodeHandlerMixin, EdgeHandlerMixin, ReportsHandlerMixin, SearchHandlerMixin, ObservationHandlerMixin, NarrativeHandlerMixin, ScenarioHandlerMixin, NudgeHandlerMixin, ChallengeSupportHandlerMixin, SynthesisHandlerMixin, AgentStateHandlerMixin, VaultHandlerMixin, BaseHTTPRequestHandler
 ):
     """HTTP request handler for OHM daemon."""
 
