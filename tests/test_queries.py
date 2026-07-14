@@ -198,6 +198,49 @@ class TestStatsQuery:
         stats = query_stats(test_db)
         assert stats["challenge_ratio"] > 0
 
+    def test_stats_top_observed_nodes_deterministic_ordering(self, test_db):
+        """top_observed_nodes ordering is stable across repeated calls (issue #907).
+
+        Regression: ties on observation_count were previously resolved
+        nondeterministically by DuckDB, producing different orderings on
+        back-to-back calls. The query now sorts by observation_count DESC
+        with n.id ASC as a deterministic secondary key.
+        """
+        from ohm.queries import create_node, query_stats
+
+        labels = [
+            "zzz-tied-node",
+            "aaa-tied-node",
+            "mmm-tied-node",
+            "bbb-tied-node",
+            "ccc-tied-node",
+        ]
+        nodes = [create_node(test_db, label=label, node_type="concept", created_by="seed") for label in labels]
+
+        for node in nodes:
+            for i in range(2):
+                test_db.execute(
+                    "INSERT INTO ohm_observations (id, node_id, type, value, created_by) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    [f"obs-{node['id']}-{i}", node["id"], "metric", 1.0, "seed"],
+                )
+
+        stats_a = query_stats(test_db)
+        stats_b = query_stats(test_db)
+
+        top_a = stats_a.get("top_observed_nodes") or []
+        top_b = stats_b.get("top_observed_nodes") or []
+
+        ids_a = [row["id"] for row in top_a]
+        ids_b = [row["id"] for row in top_b]
+
+        assert ids_a == ids_b, f"top_observed_nodes ordering drifted between calls: {ids_a} vs {ids_b}"
+
+        for row in top_a:
+            assert row["observation_count"] == 2
+
+        assert ids_a == sorted(ids_a), f"expected ASC tiebreaker on node id, got {ids_a}"
+
 
 class TestChangeFeedQuery:
     """Tests for change feed queries."""

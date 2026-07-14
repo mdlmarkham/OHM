@@ -531,7 +531,7 @@ def query_stats(conn: DuckDBPyConnection, include_l0: bool = False) -> dict[str,
         FROM ohm_observations o
         JOIN ohm_nodes n ON n.id = o.node_id
         GROUP BY n.id, n.label
-        ORDER BY obs_count DESC
+        ORDER BY obs_count DESC, n.id ASC
         LIMIT 10
     """).fetchall()
     if top_observed:
