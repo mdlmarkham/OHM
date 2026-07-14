@@ -1,6 +1,7 @@
 """Admin handler mixin — checkpoint, embeddings, snapshot, and hook endpoints."""
 
 from ohm.server.handlers._base import OhmHandlerBase
+from ohm.server.handlers import _safe_query
 
 import time
 import threading
@@ -688,6 +689,10 @@ class AdminHandlerMixin(OhmHandlerBase):
         causal_only = qs.get("causal_only", ["true"])[0].lower() != "false"
 
         conn = self.current_store.conn
+        if conn is None:
+            status, body = _safe_query.db_unavailable_response()
+            self._json_response(status, body)
+            return
 
         # 1. Unverified causal edges (CAUSES, PREDICTS, EXPECTS) with no recorded outcomes
         # An edge is "unverified" if no outcome has been recorded that references
@@ -846,42 +851,26 @@ class AdminHandlerMixin(OhmHandlerBase):
             d = dict(zip(["id", "label", "hypothesis_status", "confidence", "supporting", "contradicting"], row))
             conflicting_evidence_list.append(d)
 
-        # 5. Source reliability scores per agent
-        source_reliability = conn.execute("""
-            SELECT source_agent,
-                   COUNT(*) AS total_outcomes,
-                   SUM(CASE WHEN outcome = TRUE THEN 1 ELSE 0 END) AS accurate,
-                   SUM(CASE WHEN outcome = FALSE THEN 1 ELSE 0 END) AS inaccurate,
-                   CASE WHEN COUNT(*) > 0
-                        THEN ROUND(CAST(SUM(CASE WHEN outcome = TRUE THEN 1 ELSE 0 END) AS DOUBLE) / COUNT(*), 3)
-                        ELSE NULL END AS p_accurate
-            FROM ohm_outcomes
-            GROUP BY source_agent
-            ORDER BY total_outcomes DESC
-        """).fetchall()
-
-        reliability = [dict(zip(["source_agent", "total_outcomes", "accurate", "inaccurate", "p_accurate"], row)) for row in source_reliability]
-
         # 6. Summary statistics
-        total_outcomes = conn.execute("SELECT COUNT(*) FROM ohm_outcomes").fetchone()[0]
-        total_causal = conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE edge_type IN ('CAUSES','PREDICTS','EXPECTS') AND deleted_at IS NULL AND layer = 'L3'").fetchone()[0]
-        total_challenges = conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE edge_type = 'CHALLENGED_BY' AND deleted_at IS NULL").fetchone()[0]
-        total_l3 = conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE layer = 'L3' AND deleted_at IS NULL").fetchone()[0]
-        total_l2 = conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE layer = 'L2' AND deleted_at IS NULL").fetchone()[0]
+        total_outcomes = _safe_query.safe_scalar(conn, "SELECT COUNT(*) FROM ohm_outcomes")
+        total_causal = _safe_query.safe_scalar(conn, "SELECT COUNT(*) FROM ohm_edges WHERE edge_type IN ('CAUSES','PREDICTS','EXPECTS') AND deleted_at IS NULL AND layer = 'L3'")
+        total_challenges = _safe_query.safe_scalar(conn, "SELECT COUNT(*) FROM ohm_edges WHERE edge_type = 'CHALLENGED_BY' AND deleted_at IS NULL")
+        total_l3 = _safe_query.safe_scalar(conn, "SELECT COUNT(*) FROM ohm_edges WHERE layer = 'L3' AND deleted_at IS NULL")
+        total_l2 = _safe_query.safe_scalar(conn, "SELECT COUNT(*) FROM ohm_edges WHERE layer = 'L2' AND deleted_at IS NULL")
 
-        challenge_ratio = round(total_challenges / max(total_l3, 1), 4)
-        l3_l2_ratio = round(total_l3 / max(total_l2, 1), 1)
+        challenge_ratio = round((total_challenges or 0) / max(total_l3 or 0, 1), 4)
+        l3_l2_ratio = round((total_l3 or 0) / max(total_l2 or 0, 1), 1)
 
         # 7. Hypothesis verification summary
-        total_hypotheses = conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE type = 'hypothesis' AND deleted_at IS NULL").fetchone()[0]
-        verified_hypotheses = conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE type = 'hypothesis' AND hypothesis_status = 'verified' AND deleted_at IS NULL").fetchone()[0]
-        tested_hypotheses = conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE type = 'hypothesis' AND hypothesis_status = 'tested' AND deleted_at IS NULL").fetchone()[0]
-        pruned_hypotheses = conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE type = 'hypothesis' AND hypothesis_status = 'pruned' AND deleted_at IS NULL").fetchone()[0]
-        superseded_hypotheses = conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE type = 'hypothesis' AND hypothesis_status = 'superseded' AND deleted_at IS NULL").fetchone()[0]
+        total_hypotheses = _safe_query.safe_scalar(conn, "SELECT COUNT(*) FROM ohm_nodes WHERE type = 'hypothesis' AND deleted_at IS NULL")
+        verified_hypotheses = _safe_query.safe_scalar(conn, "SELECT COUNT(*) FROM ohm_nodes WHERE type = 'hypothesis' AND hypothesis_status = 'verified' AND deleted_at IS NULL")
+        tested_hypotheses = _safe_query.safe_scalar(conn, "SELECT COUNT(*) FROM ohm_nodes WHERE type = 'hypothesis' AND hypothesis_status = 'tested' AND deleted_at IS NULL")
+        pruned_hypotheses = _safe_query.safe_scalar(conn, "SELECT COUNT(*) FROM ohm_nodes WHERE type = 'hypothesis' AND hypothesis_status = 'pruned' AND deleted_at IS NULL")
+        superseded_hypotheses = _safe_query.safe_scalar(conn, "SELECT COUNT(*) FROM ohm_nodes WHERE type = 'hypothesis' AND hypothesis_status = 'superseded' AND deleted_at IS NULL")
 
-        total_tests_edges = conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE edge_type = 'TESTS' AND deleted_at IS NULL").fetchone()[0]
-        total_supports_evidence = conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE edge_type = 'SUPPORTS_EVIDENCE' AND deleted_at IS NULL").fetchone()[0]
-        total_contradicts_evidence = conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE edge_type = 'CONTRADICTS_EVIDENCE' AND deleted_at IS NULL").fetchone()[0]
+        total_tests_edges = _safe_query.safe_scalar(conn, "SELECT COUNT(*) FROM ohm_edges WHERE edge_type = 'TESTS' AND deleted_at IS NULL")
+        total_supports_evidence = _safe_query.safe_scalar(conn, "SELECT COUNT(*) FROM ohm_edges WHERE edge_type = 'SUPPORTS_EVIDENCE' AND deleted_at IS NULL")
+        total_contradicts_evidence = _safe_query.safe_scalar(conn, "SELECT COUNT(*) FROM ohm_edges WHERE edge_type = 'CONTRADICTS_EVIDENCE' AND deleted_at IS NULL")
 
         self._json_response(
             200,
@@ -902,7 +891,7 @@ class AdminHandlerMixin(OhmHandlerBase):
                     "l3_l2_ratio": l3_l2_ratio,
                     "days_threshold": days_threshold,
                     "confidence_threshold": confidence_threshold,
-                    "verification_rate": round(total_outcomes / max(total_causal, 1), 3),
+                    "verification_rate": round((total_outcomes or 0) / max(total_causal or 0, 1), 3),
                     "total_hypotheses": total_hypotheses,
                     "verified_hypotheses": verified_hypotheses,
                     "tested_hypotheses": tested_hypotheses,
@@ -911,7 +900,7 @@ class AdminHandlerMixin(OhmHandlerBase):
                     "total_tests_edges": total_tests_edges,
                     "total_supports_evidence": total_supports_evidence,
                     "total_contradicts_evidence": total_contradicts_evidence,
-                    "hypothesis_verification_rate": round(verified_hypotheses / max(total_hypotheses, 1), 3),
+                    "hypothesis_verification_rate": round((verified_hypotheses or 0) / max(total_hypotheses or 0, 1), 3),
                 },
             },
         )
