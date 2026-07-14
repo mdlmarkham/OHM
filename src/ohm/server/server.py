@@ -1047,10 +1047,11 @@ from ohm.server.handlers.prospects import ProspectHandlerMixin
 from ohm.server.handlers.twins import TwinHandlerMixin
 from ohm.server.handlers.models import ModelHandlerMixin
 from ohm.server.handlers.temporal import TemporalHandlerMixin
+from ohm.server.handlers.fragments import FragmentHandlerMixin
 
 
 class OhmHandler(
-    AdminHandlerMixin, AnalysisHandlerMixin, AskHandlerMixin, CatalogHandlerMixin, DecisionHandlerMixin, DocumentHandlerMixin, GraphHandlerMixin, InfraHandlerMixin, InferenceHandlerMixin, MarkovHandlerMixin, TenantHandlerMixin, TypeProposalHandlerMixin, ProspectHandlerMixin, TwinHandlerMixin, ModelHandlerMixin, TemporalHandlerMixin, BaseHTTPRequestHandler
+    AdminHandlerMixin, AnalysisHandlerMixin, AskHandlerMixin, CatalogHandlerMixin, DecisionHandlerMixin, DocumentHandlerMixin, GraphHandlerMixin, InfraHandlerMixin, InferenceHandlerMixin, MarkovHandlerMixin, TenantHandlerMixin, TypeProposalHandlerMixin, ProspectHandlerMixin, TwinHandlerMixin, ModelHandlerMixin, TemporalHandlerMixin, FragmentHandlerMixin, BaseHTTPRequestHandler
 ):
     """HTTP request handler for OHM daemon."""
 
