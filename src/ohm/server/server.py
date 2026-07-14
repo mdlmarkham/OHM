@@ -1057,10 +1057,11 @@ from ohm.server.handlers.observations import ObservationHandlerMixin
 from ohm.server.handlers.narrative import NarrativeHandlerMixin
 from ohm.server.handlers.scenario import ScenarioHandlerMixin
 from ohm.server.handlers.nudges import NudgeHandlerMixin
+from ohm.server.handlers.challenge_support import ChallengeSupportHandlerMixin
 
 
 class OhmHandler(
-    AdminHandlerMixin, AnalysisHandlerMixin, AskHandlerMixin, CatalogHandlerMixin, DecisionHandlerMixin, DocumentHandlerMixin, GraphHandlerMixin, InfraHandlerMixin, InferenceHandlerMixin, MarkovHandlerMixin, TenantHandlerMixin, TypeProposalHandlerMixin, ProspectHandlerMixin, TwinHandlerMixin, ModelHandlerMixin, TemporalHandlerMixin, FragmentHandlerMixin, TaskHandlerMixin, NodeHandlerMixin, EdgeHandlerMixin, ReportsHandlerMixin, SearchHandlerMixin, ObservationHandlerMixin, NarrativeHandlerMixin, ScenarioHandlerMixin, NudgeHandlerMixin, BaseHTTPRequestHandler
+    AdminHandlerMixin, AnalysisHandlerMixin, AskHandlerMixin, CatalogHandlerMixin, DecisionHandlerMixin, DocumentHandlerMixin, GraphHandlerMixin, InfraHandlerMixin, InferenceHandlerMixin, MarkovHandlerMixin, TenantHandlerMixin, TypeProposalHandlerMixin, ProspectHandlerMixin, TwinHandlerMixin, ModelHandlerMixin, TemporalHandlerMixin, FragmentHandlerMixin, TaskHandlerMixin, NodeHandlerMixin, EdgeHandlerMixin, ReportsHandlerMixin, SearchHandlerMixin, ObservationHandlerMixin, NarrativeHandlerMixin, ScenarioHandlerMixin, NudgeHandlerMixin, ChallengeSupportHandlerMixin, BaseHTTPRequestHandler
 ):
     """HTTP request handler for OHM daemon."""
 
