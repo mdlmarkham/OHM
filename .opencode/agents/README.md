@@ -2,32 +2,31 @@
 
 This directory contains project-specific sub-agents for the OHM codebase. They are
 defined as markdown files (per [opencode agents docs](https://opencode.ai/docs/agents/))
-and routed onto **Ollama Cloud** models so the OpenCode-Go budget is reserved for the
-primary agent.
+and routed onto **Synthetic** models (HuggingFace-hosted via the Synthetic provider) so
+the OpenCode-Go budget is reserved for the primary agent.
 
 ## Provider strategy
 
 | Provider | Used by | Why |
 |---|---|---|
-| **Ollama Cloud** (`ollama-cloud/*:cloud`) | All sub-agents | Hosted inference, no local GPU required. Pro plan gives 3 concurrent cloud models with 50× more usage than Free. Sub-agent dispatch is cheap, so the primary can delegate generously without burning the Go window. |
+| **Synthetic** (`synthetic/hf:*`) | All sub-agents | HuggingFace-hosted inference via the Synthetic provider. Sub-agent dispatch is cheap, so the primary can delegate generously without burning the Go window. |
 | **OpenCode Go** (`opencode-go/*`) | Primary agent only | Subscription with `$12/5hr`, `$30/week`, `$60/month` caps. Kept exclusively for the primary so session longevity is maximized. |
 
 ## Model routing
 
-All sub-agents run on Ollama Cloud. Models are matched to each agent's task.
+All sub-agents run on Synthetic (HuggingFace-hosted). Models are matched to each agent's task.
 
 | Agent | Mode | Model | Purpose |
 |---|---|---|---|
-| `ohm-researcher` | subagent | `ollama-cloud/glm-5.2:cloud` | Deep codebase research and design exploration. Read-only; high-quality reasoning with 1M context. |
-| `ohm-adr-writer` | subagent | `ollama-cloud/glm-4.7:cloud` | Writes ADR documents at `docs/adr/`. Quality prose, strong on tool-use. |
-| `ohm-test-writer` | subagent | `ollama-cloud/minimax-m3:cloud` | Writes pytest test suites. Bulk, pattern-following code generation with 1M context. |
-| `ohm-plumber` | subagent | `ollama-cloud/minimax-m3:cloud` | Wires features through queries → store → SDK → handler. Deep-context plumbing with multimodal. |
-| `ohm-schemer` | subagent | `ollama-cloud/kimi-k2.7-code:cloud` | Schema migrations, validators, `VALID_*` frozensets. Code-focused, ~30% fewer thinking tokens than K2.6. |
+| `ohm-researcher` | subagent | `synthetic/hf:zai-org/GLM-5.2` | Deep codebase research and design exploration. Read-only; high-quality reasoning with 1M context. |
+| `ohm-adr-writer` | subagent | `synthetic/hf:zai-org/GLM-5.2` | Writes ADR documents at `docs/adr/`. Quality prose, strong on tool-use. |
+| `ohm-test-writer` | subagent | `synthetic/hf:MiniMaxAI/MiniMax-M3` | Writes pytest test suites. Bulk, pattern-following code generation with 1M context. |
+| `ohm-plumber` | subagent | `synthetic/hf:MiniMaxAI/MiniMax-M3` | Wires features through queries → store → SDK → handler. Deep-context plumbing. |
+| `ohm-schemer` | subagent | `synthetic/hf:zai-org/GLM-5.2` | Schema migrations, validators, `VALID_*` frozensets. Code-focused reasoning. |
 
-> **Note:** `explore` and `general` built-in sub-agents inherit the primary agent's
-> model (OpenCode Go) by default, unless explicitly overridden in
-> `.opencode/opencode.json` under `agent.<name>.model`. No override is currently set
-> for them in this project.
+> **Note:** `explore` and `general` built-in sub-agents are overridden in
+> `.opencode/opencode.json` to use `synthetic/hf:Qwen/Qwen3.6-27B` and
+> `synthetic/hf:zai-org/GLM-5.2` respectively.
 
 ## Built-in agents NOT overridden
 
@@ -57,12 +56,9 @@ for the per-model usage levels and concurrency limits.
 
 ## Setup
 
-Before using Ollama Cloud in OpenCode:
-
-1. Sign in at <https://ollama.com/> and create an API key under **Settings** > **Keys**.
-2. Run `/connect` in opencode TUI, search for **Ollama Cloud**, paste the API key.
-3. The first time you select a cloud model, opencode may need to pull the model
-   metadata locally — this is automatic on first use.
+Sub-agents use the Synthetic provider (HuggingFace-hosted models). No additional
+setup is needed beyond having opencode configured with the Synthetic provider.
+The `synthetic/hf:*` model IDs are resolved automatically.
 
 ## Sub-agent output contract
 

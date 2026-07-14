@@ -1,7 +1,7 @@
 ---
 description: Writes pytest test suites for OHM. Use when a feature needs test coverage or when test coverage gaps are identified. Follows existing patterns in tests/test_*.py — parametrize cases, use test_db fixture for in-memory DuckDB, group by TestXxx classes. High-volume bulk work.
 mode: subagent
-model: Nvidia/GLM-5.2d
+model: synthetic/hf:MiniMaxAI/MiniMax-M3
 temperature: 0.0
 permission:
   edit: allow
