@@ -142,6 +142,25 @@ tests/
 **~2,480 tests collected** (excluding the pre-existing broken `test_integrations.py`).
 Run with: `python -m pytest tests/ --ignore=tests/test_integrations.py`.
 
+**Fast suite vs full suite** (OHM-866): `pyproject.toml` `addopts` excludes
+`slow`, `benchmark`, `performance`, and `integration` markers by default — a
+plain `pytest` invocation only runs ~80% of the suite. To run the full suite:
+
+```bash
+# Fast suite (default, ~80% of tests, excludes integration/slow/benchmark)
+python -m pytest tests/ -v
+
+# Full suite (all markers, use in commit messages and PRs)
+python -m pytest tests/ -v -o "addopts="
+
+# Only the excluded tiers
+python -m pytest tests/ -v -o "addopts=" -m "slow or benchmark or performance or integration"
+```
+
+Commit messages should say **"fast suite passes"** when only the default-filtered
+run was executed, and **"full suite passes"** only when `-o "addopts="` was used.
+Saying "tests pass" without qualifying which suite is misleading.
+
 ```
 
 ### Module Boundaries
