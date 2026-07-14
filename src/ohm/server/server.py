@@ -1042,10 +1042,11 @@ from ohm.server.handlers.infra import InfraHandlerMixin
 from ohm.server.handlers.inference import InferenceHandlerMixin
 from ohm.server.handlers.markov import MarkovHandlerMixin
 from ohm.server.handlers.tenant import TenantHandlerMixin
+from ohm.server.handlers.type_proposals import TypeProposalHandlerMixin
 
 
 class OhmHandler(
-    AdminHandlerMixin, AnalysisHandlerMixin, AskHandlerMixin, CatalogHandlerMixin, DecisionHandlerMixin, DocumentHandlerMixin, GraphHandlerMixin, InfraHandlerMixin, InferenceHandlerMixin, MarkovHandlerMixin, TenantHandlerMixin, BaseHTTPRequestHandler
+    AdminHandlerMixin, AnalysisHandlerMixin, AskHandlerMixin, CatalogHandlerMixin, DecisionHandlerMixin, DocumentHandlerMixin, GraphHandlerMixin, InfraHandlerMixin, InferenceHandlerMixin, MarkovHandlerMixin, TenantHandlerMixin, TypeProposalHandlerMixin, BaseHTTPRequestHandler
 ):
     """HTTP request handler for OHM daemon."""
 
