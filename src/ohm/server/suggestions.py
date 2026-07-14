@@ -184,8 +184,12 @@ def generate_suggestions(
         except Exception as e:
             logger.debug(f"Orphan suggestion query failed: {e}")
 
-    # OHM-867: close per-call connection to prevent resource leak
-    if not use_store_conn:
+    # OHM-867: close per-call connection to prevent resource leak.
+    # Only close if this is NOT the store's shared connection —
+    # _suggestion_conn() can fall back to store.conn when opening a
+    # fresh read-only connection fails (e.g., file already locked),
+    # so we must check identity, not just the use_store_conn flag.
+    if not use_store_conn and conn is not getattr(store, "conn", None):
         try:
             conn.close()
         except Exception:
@@ -483,8 +487,9 @@ def generate_edge_suggestions(
     except Exception as e:
         logger.debug(f"Orphan resolved check failed: {e}")
 
-    # OHM-867: close per-call connection to prevent resource leak
-    if not use_store_conn:
+    # OHM-867: close per-call connection to prevent resource leak.
+    # Only close if this is NOT the store's shared connection.
+    if not use_store_conn and conn is not getattr(store, "conn", None):
         try:
             conn.close()
         except Exception:
@@ -511,6 +516,7 @@ def generate_connectivity_nudge(
         return None
 
     conn = _suggestion_conn(store)
+    _should_close = conn is not getattr(store, "conn", None)
 
     try:
         # Agent's node count (excluding fragments)
@@ -550,6 +556,12 @@ def generate_connectivity_nudge(
     except Exception as e:
         logger.debug(f"Connectivity nudge failed: {e}")
         return None
+    finally:
+        if _should_close:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def generate_island_nudge(
@@ -574,6 +586,7 @@ def generate_island_nudge(
         return None
 
     conn = _suggestion_conn(store)
+    _should_close = conn is not getattr(store, "conn", None)
 
     from ohm.methods import find_islands
 

@@ -1286,7 +1286,7 @@ class AnalysisHandlerMixin(OhmHandlerBase):
             ).fetchall()
             tasks = [{"id": r[0], "label": r[1], "priority": r[2], "status": r[3], "due": str(r[4]) if r[4] else None} for r in tasks_raw]
         except Exception:
-            pass  # Tasks table may not exist
+            logger.debug("Tasks query failed (table may not exist)", exc_info=True)
 
         # Connectivity nudge
         total_agent_nodes = (
@@ -1503,7 +1503,7 @@ class AnalysisHandlerMixin(OhmHandlerBase):
                     ls = state["last_sync"]
                     since = ls.isoformat() if isinstance(ls, datetime) else str(ls)
             except Exception:
-                pass
+                logger.debug("Failed to get agent last_sync state", exc_info=True)
         if not since:
             since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
 

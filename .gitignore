@@ -46,14 +46,15 @@ venv/
 .beads/dolt-server.activity
 .beads/.beads-credential-key
 .beads/daemon.*
+.beads/daemon-error
 .beads/*.lock
 .beads/*.corrupt.backup/
+.beads/sqlite*
+.beads/proxieddb/
 
 # Beads / Dolt files (added by bd init)
 .dolt/
 *.db
-.beads-credential-key
-.beads/proxieddb/
 .claude/worktrees/
 .opencode/
 reports/

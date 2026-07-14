@@ -9,6 +9,7 @@ from ohm.server.handlers._base import OhmHandlerBase
 
 import email.policy
 import ipaddress
+import logging
 import mimetypes
 import os
 import socket
@@ -26,6 +27,8 @@ from ohm.net_safety import (
     safe_fetch_pinned as _fetch_pinned,
     _canonicalize_and_check_ip,
 )
+
+logger = logging.getLogger(__name__)
 
 
 SUPPORTED_CONTENT_TYPES = {
@@ -255,9 +258,9 @@ class DocumentHandlerMixin(OhmHandlerBase):
 
         - Rejects non-http(s) schemes.
         - Resolves the host and rejects private/loopback addresses.
-        - Loopback (127.0.0.0/8, ::1) is allowed when
-          ``documents.allow_loopback`` is True in config (default: True,
-          since OHM is local-first and tests use 127.0.0.1).
+        - Loopback (127.0.0.0/8, ::1) is allowed only when
+          ``documents.allow_loopback`` is True in config (default: False,
+          for security — explicitly enable for local-dev use cases).
         - Additional hosts can be allowlisted via
           ``documents.allowed_fetch_hosts`` in config.
 
@@ -414,7 +417,7 @@ class DocumentHandlerMixin(OhmHandlerBase):
                 if node:
                     record["source_node"] = node
             except Exception:
-                pass
+                logger.debug("Failed to fetch source_node %s", source_node_id, exc_info=True)
 
         self._json_response(200, record)
 

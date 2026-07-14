@@ -101,22 +101,6 @@ class OhmHandlerBase(BaseHTTPRequestHandler):
         """Raise PermissionDeniedError if the agent is not an admin."""
         raise NotImplementedError("must be provided by OhmHandler")
 
-    def _lookup_role(self, roles: dict[str, str], agent: str, customer_id: Optional[str]) -> str:
-        """Resolve the role for an authenticated agent."""
-        return "read-only"
-
-    def _get_current_customer_id(self) -> Optional[str]:
-        """Return the customer id that should be used for the current request."""
-        return None
-
-    def _parse_query_string(self, query_string: str) -> dict[str, list[str]]:
-        """Parse a URL query string into a dict of list values."""
-        return {}
-
-    def _resolve_path(self, prefix: str, exact_match: str, path: str) -> bool:
-        """Check whether a path matches a registered route prefix/exact pattern."""
-        return False
-
     def _run_in_write_lock(self, fn: Any, *args: Any, **kwargs: Any) -> Any:
         """Execute ``fn`` while holding the instance write lock."""
         return fn(*args, **kwargs)

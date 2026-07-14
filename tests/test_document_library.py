@@ -249,7 +249,11 @@ class TestDocumentUploadEndpoint:
         assert status == 404
 
     def test_upload_url_fetch(self, test_server, tmp_path):
+        from ohm.server import OhmHandler
+
         port, store = test_server
+        # Enable loopback fetching for this test (default is off per OHM-857)
+        OhmHandler.config.setdefault("documents", {})["allow_loopback"] = True
         md = "# URL Document\n\nFetched from a local test server."
         md_bytes = md.encode("utf-8")
 

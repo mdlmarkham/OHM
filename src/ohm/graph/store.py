@@ -620,17 +620,9 @@ class OhmStore:
                 )
                 self.quack_started = True
             else:
-                import sys
-
-                print(
-                    "Quack extension not available — running in single-writer mode",
-                    file=sys.stderr,
-                )
+                logger.warning("Quack extension not available — running in single-writer mode")
         except Exception as e:
-            import sys
-
-            print(f"Quack server failed to start: {e}", file=sys.stderr)
-            print("Falling back to single-writer mode", file=sys.stderr)
+            logger.warning("Quack server failed to start: %s — falling back to single-writer mode", e)
             self.quack_started = False
 
     def _stop_quack(self) -> None:

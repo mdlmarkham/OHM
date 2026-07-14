@@ -3175,7 +3175,7 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
 
     # OHM-860: Warn when binding to non-loopback with public-read auth and no tokens
     _host = config.get("host", "127.0.0.1")
-    _is_loopback = _host in ("127.0.0.1", "localhost", "::1", "0.0.0.0") or _host.startswith("127.")
+    _is_loopback = _host in ("127.0.0.1", "localhost", "::1") or _host.startswith("127.")
     if not _is_loopback and not config.get("require_read_auth", False) and not config.get("no_auth", False):
         _has_tokens = bool(config.get("tokens") or config.get("customer_tokens"))
         if not _has_tokens:

@@ -2076,7 +2076,7 @@ class AdminHandlerMixin(OhmHandlerBase):
             """).fetchone()
             raw_values["avg_manifold_density"] = round(float(avg_density_row[0]), 4) if avg_density_row and avg_density_row[0] is not None else None
         except Exception:
-            pass
+            logger.debug("avg_manifold_density query failed", exc_info=True)
 
         health_score = sum(weights[k] * scores[k] for k in weights)
         health_score_100 = round(health_score * 100, 1)

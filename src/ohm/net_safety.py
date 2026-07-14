@@ -62,7 +62,7 @@ def validate_fetch_url(url: str) -> str:
     return url
 
 
-def safe_fetch_pinned(url: str, *, timeout: float = 30.0, allow_loopback: bool = True) -> tuple[bytes, str | None]:
+def safe_fetch_pinned(url: str, *, timeout: float = 30.0, allow_loopback: bool = False) -> tuple[bytes, str | None]:
     """Fetch *url* with DNS-rebinding mitigation by pinning the resolved IP.
 
     Validates all resolved addresses against private/loopback networks,
