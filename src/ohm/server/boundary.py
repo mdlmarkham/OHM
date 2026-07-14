@@ -182,9 +182,11 @@ def get_agent_read_scope(conn, agent_name: str) -> dict | None:
 
     try:
         scope = json.loads(row[0]) if isinstance(row[0], str) else row[0]
-        return scope
     except (json.JSONDecodeError, TypeError):
         return None
+    if not isinstance(scope, dict):
+        return None
+    return scope
 
 
 def enforce_read_scope(

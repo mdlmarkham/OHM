@@ -100,3 +100,60 @@ class TestSDKReadScope:
             g.set_read_scope({"layer": ["L3"]})
             g.set_read_scope(None)
             assert g.get_read_scope() is None
+
+
+class TestNonDictReadScopeGuard:
+    """Defensive guard: a non-dict read_scope JSON value degrades to full-access
+    (None) instead of raising AttributeError (OHM #921).
+
+    A non-dict scope can only enter via raw SQL, a migration, or a DuckLake sync
+    from a stale replica; set_agent_read_scope validates dict shape on the writer
+    side. The guard mirrors the existing fallback semantics for unparseable
+    scopes (boundary.py:172-173).
+    """
+
+    def test_scalar_number_scope_returns_none(self, test_db):
+        conn = test_db
+        conn.execute(
+            "INSERT INTO ohm_agent_config (agent_name, optimization_target, read_scope) "
+            "VALUES ('agent1', 'default', '0')"
+        )
+        assert get_agent_read_scope(conn, "agent1") is None
+
+    def test_scalar_number_scope_enforce_does_not_raise(self, test_db):
+        conn = test_db
+        conn.execute(
+            "INSERT INTO ohm_agent_config (agent_name, optimization_target, read_scope) "
+            "VALUES ('agent1', 'default', '0')"
+        )
+        enforce_read_scope(conn, "agent1", layer="L3")
+        enforce_read_scope(conn, "agent1", source_tier="peer_reviewed")
+        enforce_read_scope(conn, "agent1", created_by="agent2")
+        enforce_read_scope(conn, "agent1", node_id="n1")
+
+    def test_scalar_string_scope_returns_none(self, test_db):
+        conn = test_db
+        conn.execute(
+            "INSERT INTO ohm_agent_config (agent_name, optimization_target, read_scope) "
+            "VALUES ('agent1', 'default', '\"oops\"')"
+        )
+        assert get_agent_read_scope(conn, "agent1") is None
+
+    def test_list_scope_returns_none(self, test_db):
+        conn = test_db
+        conn.execute(
+            "INSERT INTO ohm_agent_config (agent_name, optimization_target, read_scope) "
+            "VALUES ('agent1', 'default', '[1, 2, 3]')"
+        )
+        assert get_agent_read_scope(conn, "agent1") is None
+
+    def test_scalar_scope_enforce_allows_all_layers(self, test_db):
+        conn = test_db
+        conn.execute(
+            "INSERT INTO ohm_agent_config (agent_name, optimization_target, read_scope) "
+            "VALUES ('agent1', 'default', '1')"
+        )
+        enforce_read_scope(conn, "agent1", layer="L1")
+        enforce_read_scope(conn, "agent1", layer="L2")
+        enforce_read_scope(conn, "agent1", layer="L3")
+        enforce_read_scope(conn, "agent1", layer="L4")
