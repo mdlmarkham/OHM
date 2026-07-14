@@ -18,11 +18,21 @@ from ohm.server import server as _server_module
 from ohm.server.nudges import generate_nudges, enrich_response
 
 class GraphHandlerMixin(IngestHelperMixin, OhmHandlerBase):
-    """Handler mixin for graph CRUD endpoints (OHM-hpxa).
+    """Residual graph handler mixin (OHM-862 decomposition complete).
 
-    Methods migrated from server.py: 38 handler methods covering node/edge
-    read/write/delete, search, observations, agent registration, webhooks,
-    and batch operations.
+    After the #862 god-module decomposition, 4 methods remain here because
+    they were not assigned to any of the 11 extracted clusters:
+
+    - ``_get_challenge_ratio`` — cached challenge-ratio helper, called by
+      ``EdgeHandlerMixin._post_edge`` via MRO.
+    - ``_get_listen`` — GET /listen change-feed poller (route-table only).
+    - ``_post_scratch`` — POST /scratch L0 fragment writer; uses
+      ``_run_post_ingest_hooks`` from ``IngestHelperMixin`` and
+      ``_suggestions_module``.
+    - ``_post_outcome`` — POST /outcome claim verification recorder.
+
+    IngestHelperMixin is retained as a base because ``_post_scratch`` calls
+    ``_run_post_ingest_hooks``.
     """
 
     _challenge_ratio_cache: float = 0.0
