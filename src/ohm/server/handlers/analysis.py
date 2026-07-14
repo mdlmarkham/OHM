@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ohm.server.handlers._base import OhmHandlerBase
+from ohm.server.handlers import _safe_query
 
 import json
 import logging
@@ -831,7 +832,15 @@ class AnalysisHandlerMixin(OhmHandlerBase):
         """GET /graph/stats — extended graph statistics."""
         from ohm.methods import graph_stats
 
-        result = graph_stats(self.current_store.read_conn)
+        if self.current_store.read_conn is None:
+            status, body = _safe_query.db_unavailable_response()
+            self._json_response(status, body)
+            return
+        try:
+            result = graph_stats(self.current_store.read_conn)
+        except (TypeError, IndexError, ValueError) as exc:
+            self._json_response(500, {"error": "graph_stats_failed", "detail": str(exc)})
+            return
         self._json_response(200, result)
 
     def _get_lint(self, path: str, qs: dict) -> None:
@@ -1005,8 +1014,8 @@ class AnalysisHandlerMixin(OhmHandlerBase):
             "total_nodes": node_count,
             "total_edges": edge_count,
             "density": round(edge_count / max(node_count * (node_count - 1) / 2, 1), 6),
-            "top_node_types": [{"type": t, "count": c} for t, c in top_types],
-            "top_edge_types": [{"type": t, "count": c} for t, c in top_edge_types],
+            "top_node_types": [{"type": t, "count": c} for t, c in _safe_query.safe_unpack_type_rows(top_types)],
+            "top_edge_types": [{"type": t, "count": c} for t, c in _safe_query.safe_unpack_type_rows(top_edge_types)],
         }
 
         # ── 2. Agent's footprint ───────────────────────────────────

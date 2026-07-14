@@ -2764,29 +2764,52 @@ def suggest_connections(
 
 
 def graph_stats(
-    conn: DuckDBPyConnection,
+    conn: DuckDBPyConnection | None,
 ) -> dict[str, Any]:
     """Compute graph-level statistics beyond the basic /stats endpoint.
 
     Includes density, connectivity, orphan/hub/dead-end counts,
     and type distribution useful for Zettelkasten-style discovery.
 
+    Degrades gracefully when *conn* is None or a scalar query returns no rows
+    (GH #896): a missing connection yields an ``error`` dict instead of a
+    ``NoneType not subscriptable`` crash, and empty scalar results fall back to
+    safe defaults.
+
     Returns:
-        Dict with graph statistics.
+        Dict with graph statistics, or ``{"error": "database_unavailable"}``.
     """
+    if conn is None:
+        return {"error": "database_unavailable"}
+
+    def _scalar(sql: str, params: list | None = None, default: int | float | None = 0) -> int | float | None:
+        try:
+            row = conn.execute(sql, params or []).fetchone()
+        except (TypeError, IndexError, ValueError):
+            return default
+        if row is None or len(row) == 0:
+            return default
+        return row[0]
+
+    def _rows(sql: str, params: list | None = None) -> list:
+        try:
+            return conn.execute(sql, params or []).fetchall()
+        except (TypeError, IndexError, ValueError):
+            return []
+
     # Total counts
-    total_nodes = conn.execute("SELECT count(*) FROM ohm_nodes WHERE deleted_at IS NULL").fetchone()[0]  # type: ignore[index]
-    total_edges = conn.execute("SELECT count(*) FROM ohm_edges WHERE deleted_at IS NULL").fetchone()[0]  # type: ignore[index]
+    total_nodes = _scalar("SELECT count(*) FROM ohm_nodes WHERE deleted_at IS NULL")
+    total_edges = _scalar("SELECT count(*) FROM ohm_edges WHERE deleted_at IS NULL")
 
     # Orphan count
-    orphan_count = conn.execute("""
+    orphan_count = _scalar("""
         SELECT count(*) FROM ohm_nodes n
         LEFT JOIN ohm_edges e ON (e.from_node = n.id OR e.to_node = n.id)
         WHERE e.id IS NULL AND n.deleted_at IS NULL
-    """).fetchone()[0]  # type: ignore[index]
+    """)
 
     # Dead end count
-    dead_end_count = conn.execute("""
+    dead_end_count = _scalar("""
         SELECT count(*) FROM ohm_nodes n
         WHERE NOT EXISTS (
             SELECT 1 FROM ohm_edges e
@@ -2797,10 +2820,10 @@ def graph_stats(
             WHERE e2.to_node = n.id AND e2.deleted_at IS NULL
         )
         AND n.deleted_at IS NULL
-    """).fetchone()[0]  # type: ignore[index]
+    """)
 
     # Hub count (nodes with 5+ connections)
-    hub_count = conn.execute("""
+    hub_count = _scalar("""
         SELECT count(*) FROM (
             SELECT n.id
             FROM ohm_nodes n
@@ -2809,34 +2832,37 @@ def graph_stats(
             GROUP BY n.id
             HAVING COUNT(e.id) >= 5
         )
-    """).fetchone()[0]  # type: ignore[index]
+    """)
 
     # Density
-    density = total_edges / total_nodes if total_nodes > 0 else 0
+    density = (total_edges or 0) / total_nodes if total_nodes else 0
 
     # Average confidence
-    avg_conf = conn.execute("SELECT AVG(confidence) FROM ohm_nodes WHERE deleted_at IS NULL AND confidence IS NOT NULL").fetchone()[0]  # type: ignore[index]
+    avg_conf = _scalar(
+        "SELECT AVG(confidence) FROM ohm_nodes WHERE deleted_at IS NULL AND confidence IS NOT NULL",
+        default=None,
+    )
 
     # Type distribution
-    type_dist = conn.execute("""
+    type_dist = _rows("""
         SELECT type, count(*) as cnt
         FROM ohm_nodes WHERE deleted_at IS NULL
         GROUP BY type ORDER BY cnt DESC
-    """).fetchall()
+    """)
 
     # Edge type distribution
-    edge_dist = conn.execute("""
+    edge_dist = _rows("""
         SELECT edge_type, count(*) as cnt
         FROM ohm_edges WHERE deleted_at IS NULL
         GROUP BY edge_type ORDER BY cnt DESC
-    """).fetchall()
+    """)
 
     # Layer distribution
-    layer_dist = conn.execute("""
+    layer_dist = _rows("""
         SELECT layer, count(*) as cnt
         FROM ohm_edges WHERE deleted_at IS NULL
         GROUP BY layer ORDER BY cnt DESC
-    """).fetchall()
+    """)
 
     return {
         "total_nodes": total_nodes,
