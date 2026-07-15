@@ -488,7 +488,7 @@ def generate_nudges(
         try:
             # Quick check: does this node have any CHALLENGED_BY edges?
             rows = store.conn.execute(
-                "SELECT COUNT(*) FROM edges WHERE to_node = ? AND edge_type = 'CHALLENGED_BY' AND deleted_at IS NULL",
+                "SELECT COUNT(*) FROM ohm_edges WHERE to_node = ? AND edge_type = 'CHALLENGED_BY' AND deleted_at IS NULL",
                 [node_id],
             ).fetchone()
             challenge_count = rows[0] if rows else 0
@@ -501,8 +501,8 @@ def generate_nudges(
                         "data": {"challenge_count": challenge_count, "node_id": node_id},
                     }
                 )
-        except Exception:
-            pass  # Never fail the write for a nudge
+        except Exception as exc:
+            logger.debug("contradiction_alert nudge query failed: %s", exc, exc_info=False)  # Never fail the write for a nudge
 
         # ── OHM-jdfq: Value-contradiction nudge (OHM-ag92) ──────────────────
         # When a new observation's value disagrees with existing observations
