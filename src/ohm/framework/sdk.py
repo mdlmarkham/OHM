@@ -37,7 +37,7 @@ from ohm.framework.graph_mixins.write import WriteGraphMixin
 from ohm.framework.graph_mixins.read import ReadGraphMixin
 
 
-class Graph(DataProductsGraphMixin, ChangeFeedGraphMixin, SubstrateComputationGraphMixin, DiscoveryExportGraphMixin, EdgeVersioningGraphMixin, CustomerSupportGraphMixin, TemporalGraphMixin, SubstrateGraphMixin, CybersecurityGraphMixin, DiscoveryGraphMixin, WriteGraphMixin, ReadGraphMixin):
+class Graph(DataProductsGraphMixin, ChangeFeedGraphMixin, SubstrateComputationGraphMixin, DiscoveryExportGraphMixin, EdgeVersioningGraphMixin, CustomerSupportGraphMixin, TemporalGraphMixin, SubstrateGraphMixin, CybersecurityGraphMixin, DiscoveryGraphMixin, WriteGraphMixin, ReadGraphMixin):  # noqa: E501
     """A connection to an OHM knowledge graph.
 
     Wraps a DuckDB connection with the OHM schema and provides
