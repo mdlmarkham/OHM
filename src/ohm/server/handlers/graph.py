@@ -45,14 +45,15 @@ class GraphHandlerMixin(IngestHelperMixin, OhmHandlerBase):
         now = time.time()
         if now - self._challenge_ratio_cache_time > 300:  # 5-minute cache
             try:
-                row = self.current_store.conn.execute("SELECT COUNT(*) FROM edges WHERE edge_type = 'CHALLENGED_BY' AND deleted_at IS NULL").fetchone()
+                row = self.current_store.conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE edge_type = 'CHALLENGED_BY' AND deleted_at IS NULL").fetchone()
                 challenged = row[0] if row else 0
-                row2 = self.current_store.conn.execute("SELECT COUNT(*) FROM edges WHERE layer = 'L3' AND deleted_at IS NULL").fetchone()
+                row2 = self.current_store.conn.execute("SELECT COUNT(*) FROM ohm_edges WHERE layer = 'L3' AND deleted_at IS NULL").fetchone()
                 total_l3 = row2[0] if row2 else 1
                 ratio = challenged / max(total_l3, 1)
                 GraphHandlerMixin._challenge_ratio_cache = ratio
                 GraphHandlerMixin._challenge_ratio_cache_time = now
-            except Exception:
+            except Exception as exc:
+                logger.warning("challenge_ratio query failed: %s", exc, exc_info=False)
                 ratio = GraphHandlerMixin._challenge_ratio_cache
         else:
             ratio = GraphHandlerMixin._challenge_ratio_cache
