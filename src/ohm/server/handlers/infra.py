@@ -206,6 +206,20 @@ class InfraHandlerMixin(OhmHandlerBase):
                 "dead_end_rate": round(dead_end_count / total_nodes, 4) if total_nodes else 0,
                 "low_confidence_count": graph.get("low_confidence_unchallenged"),
             }
+            # OHM #919: surface the startup node-count assertion result.
+            # node_count_drop is present only when a drop was detected;
+            # last_node_count / current_node_count are always surfaced for
+            # observability when the assertion ran.
+            check = getattr(self.current_store, "node_count_check", None)
+            if check is not None:
+                if check.get("dropped"):
+                    payload["graph"]["node_count_drop"] = {
+                        "last": check.get("last"),
+                        "current": check.get("current"),
+                        "delta": check.get("delta"),
+                    }
+                payload["graph"]["last_node_count"] = check.get("last")
+                payload["graph"]["current_node_count"] = check.get("current")
         except Exception:
             pass
         self._json_response(200, payload)

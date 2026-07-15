@@ -222,6 +222,10 @@ class OhmStore:
         self._read_conn = None
         self._read_conn_ready = False  # Flag: set True after DuckLake ATTACH
         self._read_conn_deferred = True  # Will be created in _ensure_read_conn()
+        # OHM #919: startup node-count assertion result, stashed here at
+        # startup so GET /health can surface a detected drop. None until the
+        # assertion runs (or when unset on tenant stores).
+        self.node_count_check: dict | None = None
 
         try:
             self._init_schema()

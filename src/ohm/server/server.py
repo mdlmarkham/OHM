@@ -3498,6 +3498,16 @@ def run_server(config: dict, store: OhmStore, schema_config: SchemaConfig | None
             store.conn.execute("CHECKPOINT")
         except Exception:
             logger.exception("Shutdown: CHECKPOINT failed")
+        # OHM #919: persist the current node count as the baseline for the
+        # next startup's node-count assertion. Must run AFTER CHECKPOINT
+        # (so the baseline reflects the durable state) and BEFORE
+        # store.close() (so the write lands before the connection drops).
+        try:
+            from ohm.graph.daemon_metadata import persist_node_count_baseline
+
+            persist_node_count_baseline(store.conn)
+        except Exception:
+            logger.exception("Shutdown: node-count baseline persist failed")
         if OhmHandler.tenant_manager is not None:
             try:
                 OhmHandler.tenant_manager.shutdown()
@@ -3765,6 +3775,20 @@ def main(schema_config: SchemaConfig | None = None):
     # OHM-fix-3: Create read-only connection AFTER DuckLake ATTACH
     # so both connections have matching configuration.
     store._ensure_read_conn()
+
+    # OHM #919: startup node-count assertion. Compare the current live node
+    # count to the last-known baseline persisted in ohm_meta on the previous
+    # graceful shutdown. A drop suggests WAL loss from a hard kill (SIGKILL,
+    # OOM, host reboot). First-ever startup (no baseline) is not a drop — the
+    # baseline is persisted silently. The result is stashed on the store for
+    # GET /health to surface.
+    try:
+        from ohm.graph.daemon_metadata import assert_node_count_at_startup
+
+        store.node_count_check = assert_node_count_at_startup(store.conn, logger)
+    except Exception:
+        logger.exception("Startup node-count assertion failed")
+        store.node_count_check = None
 
     # Pre-warm pgmpy to avoid cold-import penalty on first inference call (OHM-a689)
     _prewarm_pgmpy_async()
