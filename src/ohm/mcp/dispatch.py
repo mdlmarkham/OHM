@@ -467,6 +467,27 @@ def build_request(name: str, arguments: dict[str, Any], agent_id: str) -> tuple[
         qs = ("?" + urllib.parse.urlencode(sorted(params.items()))) if params else ""
         return "GET", "/drifts" + qs, None
 
+    if name == "ohm_reconcile":
+        body: dict[str, object] = {}
+        if arguments.get("plan_id"):
+            body["plan_id"] = arguments["plan_id"]
+        if arguments.get("horizon"):
+            body["horizon"] = arguments["horizon"]
+        if arguments.get("dry_run") is not None:
+            body["dry_run"] = arguments["dry_run"]
+        if arguments.get("tolerance"):
+            body["tolerance"] = arguments["tolerance"]
+        if arguments.get("created_by"):
+            body["created_by"] = arguments["created_by"]
+        return "POST", "/reconcile", body
+
+    if name == "ohm_drift_explain":
+        import urllib.parse
+        params = {"drift_id": arguments["drift_id"]}
+        if arguments.get("top") is not None:
+            params["top"] = str(arguments["top"])
+        return "GET", "/drift/explain?" + urllib.parse.urlencode(sorted(params.items())), None
+
     raise KeyError(f"Unknown tool: {name}")
 
 

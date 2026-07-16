@@ -373,3 +373,37 @@ class TemporalPlanningHandlerMixin(OhmHandlerBase):
         ).fetchall()
         drifts = _rows_to_dicts(rows)
         self._json_response(200, {"drifts": drifts, "count": len(drifts)})
+
+    # ── Reconciliation (OHM-940 / Stage 3) ────────────────────────────────
+
+    def _post_reconcile(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        from ohm.temporal.reconciliation import reconcile_plan_actuals
+
+        plan_id = body.get("plan_id")
+        dry_run = body.get("dry_run", False)
+        horizon = body.get("horizon")
+        tolerance = body.get("tolerance")
+        created_by = body.get("created_by", agent)
+
+        result = reconcile_plan_actuals(
+            self.current_store.conn,
+            plan_id=plan_id,
+            horizon=horizon,
+            dry_run=dry_run,
+            tolerance=tolerance,
+            created_by=created_by,
+        )
+        self._json_response(200, result)
+
+    def _get_drift_explain(self, path: str, qs: dict) -> None:
+        from ohm.temporal.reconciliation import explain_drift
+
+        drift_id = qs.get("drift_id", [None])[0]
+        top = int(qs.get("top", ["10"])[0])
+        if not drift_id:
+            from ohm.exceptions import ValidationError
+
+            raise ValidationError("drift_id is required")
+
+        result = explain_drift(self.current_store.conn, drift_id, top=top)
+        self._json_response(200, result)

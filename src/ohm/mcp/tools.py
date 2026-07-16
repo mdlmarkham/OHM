@@ -1107,4 +1107,31 @@ def all_tools() -> list[Tool]:
                 "required": [],
             },
         ),
+        Tool(
+            name="ohm_reconcile",
+            description="Run plans-vs-actuals reconciliation: compare planned temporal artifacts against actual events and surface drift as observations with DRIFT_FROM edges (OHM-940).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "plan_id": {"type": "string", "description": "Plan ID to reconcile. If omitted, all active plans are checked."},
+                    "horizon": {"type": "string", "description": "Optional horizon filter."},
+                    "dry_run": {"type": "boolean", "description": "If true, return drift records without writing observations or edges.", "default": False},
+                    "tolerance": {"type": "object", "description": "Optional tolerance overrides: timing_seconds, value, duration_seconds."},
+                    "created_by": {"type": "string", "description": "Agent name for drift attribution (defaults to caller)."},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="ohm_drift_explain",
+            description="Explain a drift observation: run Value-of-Information analysis to show which assumptions/edges would change the plan outcome (OHM-940).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "drift_id": {"type": "string", "description": "Drift observation ID to explain."},
+                    "top": {"type": "integer", "description": "Number of VoI candidates to return (default 10).", "default": 10},
+                },
+                "required": ["drift_id"],
+            },
+        ),
     ]

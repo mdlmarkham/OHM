@@ -1004,6 +1004,8 @@ def _build_router() -> _RouteRegistry:
     r.add("GET", "/verifiable-claims")
     r.add("POST", "/verification/outcome")
     r.add("GET", "/drifts")
+    r.add("POST", "/reconcile")
+    r.add("GET", "/drift/explain")
 
     # PATCH
     r.add("PATCH", "/node/")
@@ -2996,6 +2998,8 @@ OhmHandler._GET_EXACT["/scenarios"] = "_get_scenarios"
 OhmHandler._GET_EXACT["/verifiable-claims"] = "_get_verifiable_claims"
 OhmHandler._POST_EXACT["/verification/outcome"] = "_post_record_verification_outcome"
 OhmHandler._GET_EXACT["/drifts"] = "_get_drift_list"
+OhmHandler._POST_EXACT["/reconcile"] = "_post_reconcile"
+OhmHandler._GET_EXACT["/drift/explain"] = "_get_drift_explain"
 
 
 def make_configured_handler(store: OhmStore):
