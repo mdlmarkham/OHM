@@ -273,9 +273,9 @@ def _write_drift_observation(
     except Exception:
         pass
 
-    target_node_id = plan_node_id or f"plan:{plan_id}"
+    target_node_id = plan_node_id or plan_id
 
-    idempotency_key = f"drift:{plan_id}:{drift['drift_type']}:{drift.get('actual_event_id', 'none')}"
+    idempotency_key = f"drift_{plan_id}_{drift['drift_type']}_{drift.get('actual_event_id', 'none')}"
 
     existing = conn.execute(
         "SELECT COUNT(*) FROM ohm_observations WHERE idempotency_key = ?",
@@ -285,6 +285,7 @@ def _write_drift_observation(
         return
 
     try:
+        clean_drift = {k: (str(v) if hasattr(v, 'isoformat') else v) for k, v in drift.items()}
         obs = create_observation(
             conn,
             node_id=target_node_id,
@@ -292,7 +293,7 @@ def _write_drift_observation(
             created_by=created_by,
             notes=f"Drift detected: {drift['drift_type']} on plan {plan_id}",
             metadata={
-                **drift,
+                **clean_drift,
                 "idempotency_key": idempotency_key,
             },
         )
@@ -310,6 +311,8 @@ def _write_drift_observation(
                 )
             except Exception:
                 pass
+    except Exception:
+        pass
     except Exception:
         pass
 

@@ -138,9 +138,10 @@ class TestDriftEndpoints:
         status, data = _request("GET", temporal_server, "/drifts")
         assert status == 200
         assert "drifts" in data
+        assert data["count"] == 0
 
     def test_drift_list_after_reconcile(self, temporal_server, sample_plan):
-        """After running reconciliation (non-dry-run), drifts should be listable."""
+        """After running reconciliation (non-dry-run), drifts should be listable and non-empty."""
         _request("POST", temporal_server, "/reconcile", {
             "plan_id": sample_plan["id"],
             "dry_run": False,
@@ -148,6 +149,20 @@ class TestDriftEndpoints:
         })
         status, data = _request("GET", temporal_server, "/drifts")
         assert status == 200
+        assert data["count"] >= 1
+        drift = data["drifts"][0]
+        assert drift["type"] == "anomaly"
+
+    def test_drift_list_filter_by_plan_id(self, temporal_server, sample_plan):
+        """GET /drifts?plan_id=<id> returns only drifts for that plan."""
+        _request("POST", temporal_server, "/reconcile", {
+            "plan_id": sample_plan["id"],
+            "dry_run": False,
+            "created_by": "test_agent",
+        })
+        status, data = _request("GET", temporal_server, f"/drifts?plan_id={sample_plan['id']}")
+        assert status == 200
+        assert data["count"] >= 1
 
     def test_drift_explain_requires_drift_id(self, temporal_server):
         """GET /drift/explain without drift_id returns 400."""

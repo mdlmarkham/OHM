@@ -395,26 +395,31 @@ class TemporalPlanningHandlerMixin(OhmHandlerBase):
         severity = qs.get("severity", [None])[0]
         limit = int(qs.get("limit", ["50"])[0])
 
-        conditions = ["o.type = 'drift'", "o.deleted_at IS NULL"]
+        conditions = [
+            "o.type = 'anomaly'",
+            "o.deleted_at IS NULL",
+            "json_extract_string(o.metadata, '$.drift_type') IS NOT NULL",
+        ]
         params: list = []
         if plan_id:
-            conditions.append("o.node_id = ?")
+            conditions.append("json_extract_string(o.metadata, '$.plan_id') = ?")
             params.append(plan_id)
         if drift_type:
-            conditions.append("JSON_EXTRACT(o.metadata, '$.drift_type') = ?")
+            conditions.append("json_extract_string(o.metadata, '$.drift_type') = ?")
             params.append(drift_type)
         if severity:
-            conditions.append("JSON_EXTRACT(o.metadata, '$.severity') = ?")
+            conditions.append("json_extract_string(o.metadata, '$.severity') = ?")
             params.append(severity)
         params.append(limit)
 
         where = " AND ".join(conditions)
-        rows = self.current_store.read_conn.execute(
-            f"SELECT o.* FROM ohm_observations o WHERE {where} "
-            "ORDER BY o.created_at DESC LIMIT ?",
-            params,
-        ).fetchall()
-        drifts = _rows_to_dicts(rows)
+        drifts = _rows_to_dicts(
+            self.current_store.conn.execute(
+                f"SELECT o.* FROM ohm_observations o WHERE {where} "
+                "ORDER BY o.created_at DESC LIMIT ?",
+                params,
+            )
+        )
         self._json_response(200, {"drifts": drifts, "count": len(drifts)})
 
     # ── Reconciliation (OHM-940 / Stage 3) ────────────────────────────────
