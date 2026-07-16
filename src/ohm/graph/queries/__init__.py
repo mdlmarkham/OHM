@@ -3434,3 +3434,168 @@ def delete_external_signal(conn: "DuckDBPyConnection", signal_id: str) -> bool:
         [signal_id],
     )
     return True
+
+
+# ── Backend introspection (OHM #917) ────────────────────────────────────────
+
+
+def _version_key(v: str) -> tuple[int, ...]:
+    """Convert a dotted version string to a comparable tuple."""
+    parts: list[int] = []
+    for chunk in v.split("."):
+        try:
+            parts.append(int(chunk))
+        except ValueError:
+            parts.append(0)
+    return tuple(parts)
+
+
+def query_backend_status(conn: "DuckDBPyConnection") -> dict[str, Any]:
+    """Database-queryable backend status (OHM #917).
+
+    Returns the parts of the backend status payload that can be derived from
+    a bare ``DuckDBPyConnection``: the persisted schema version, the list of
+    pending migrations, and graph-size counts (nodes, edges, observations,
+    fragments). Store-level attributes (db_path, store_type, storage_bytes,
+    write_mode, tenant, sync status, uptime) are assembled by the HTTP handler
+    from the ``OhmStore`` instance — they are not available from a conn alone.
+
+    Read-only — no side effects.
+    """
+    from ohm.graph.schema import MIGRATIONS, get_schema_version
+
+    schema_version = get_schema_version(conn)
+    current_key = _version_key(schema_version)
+    pending: list[str] = []
+    for version, _desc, _stmts in MIGRATIONS:
+        if current_key < _version_key(version):
+            pending.append(version)
+
+    nodes_row = conn.execute(
+        "SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL AND type != 'fragment'"
+    ).fetchone()
+    nodes = nodes_row[0] if nodes_row else 0
+
+    edges_row = conn.execute(
+        "SELECT COUNT(*) FROM ohm_edges WHERE deleted_at IS NULL"
+    ).fetchone()
+    edges = edges_row[0] if edges_row else 0
+
+    obs_row = conn.execute(
+        "SELECT COUNT(*) FROM ohm_observations WHERE deleted_at IS NULL"
+    ).fetchone()
+    observations = obs_row[0] if obs_row else 0
+
+    fragments_row = conn.execute(
+        "SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL AND type = 'fragment'"
+    ).fetchone()
+    fragments = fragments_row[0] if fragments_row else 0
+
+    return {
+        "schema_version": schema_version,
+        "pending_migrations": pending,
+        "graph_size": {
+            "nodes": nodes,
+            "edges": edges,
+            "observations": observations,
+            "fragments": fragments,
+        },
+    }
+
+
+def _storage_recommendation(
+    deleted_rows: int,
+    active_rows: int,
+    fragment_ratio: float,
+    orphan_rate: float,
+    embedding_coverage: float,
+) -> str:
+    """Heuristic recommendation string for storage efficiency (OHM #917)."""
+    if active_rows > 0 and deleted_rows > 0.05 * active_rows:
+        return "Consider compaction — deleted-row count exceeds 5% of active rows."
+    if orphan_rate > 0.10:
+        return "High orphan rate — review and connect isolated nodes."
+    if embedding_coverage < 0.50:
+        return "Low embedding coverage — run /admin/embeddings to backfill semantic search."
+    if fragment_ratio > 0.50:
+        return "High fragment density — consider promoting or evicting L0 fragments."
+    return "Storage health is good — no action needed."
+
+
+def query_storage_efficiency(conn: "DuckDBPyConnection") -> dict[str, Any]:
+    """Storage efficiency health signals (OHM #917).
+
+    Returns:
+        - ``deleted_rows_estimate``: soft-deleted node + edge rows.
+        - ``fragment_ratio``: fragment-type nodes / active non-fragment nodes.
+        - ``orphan_rate``: non-fragment orphan rate (reuses ``query_graph_health``).
+        - ``embedding_coverage``: nodes with embeddings / all active nodes.
+        - ``recommendation``: heuristic action string.
+
+    Read-only — no side effects. Degrades gracefully when optional columns
+    (e.g. ``embedding``) are absent.
+    """
+    deleted_nodes_row = conn.execute(
+        "SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NOT NULL"
+    ).fetchone()
+    deleted_nodes = deleted_nodes_row[0] if deleted_nodes_row else 0
+
+    deleted_edges_row = conn.execute(
+        "SELECT COUNT(*) FROM ohm_edges WHERE deleted_at IS NOT NULL"
+    ).fetchone()
+    deleted_edges = deleted_edges_row[0] if deleted_edges_row else 0
+
+    deleted_rows_estimate = deleted_nodes + deleted_edges
+
+    total_nodes_row = conn.execute(
+        "SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL AND type != 'fragment'"
+    ).fetchone()
+    total_nodes = total_nodes_row[0] if total_nodes_row else 0
+
+    total_edges_row = conn.execute(
+        "SELECT COUNT(*) FROM ohm_edges WHERE deleted_at IS NULL"
+    ).fetchone()
+    total_edges = total_edges_row[0] if total_edges_row else 0
+
+    fragment_row = conn.execute(
+        "SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL AND type = 'fragment'"
+    ).fetchone()
+    fragment_count = fragment_row[0] if fragment_row else 0
+    fragment_ratio = round(fragment_count / total_nodes, 4) if total_nodes > 0 else 0.0
+
+    health = query_graph_health(conn)
+    orphan_rate = health.get("orphan_rate_non_fragments", 0.0)
+
+    all_active_nodes_row = conn.execute(
+        "SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL"
+    ).fetchone()
+    all_active_nodes = all_active_nodes_row[0] if all_active_nodes_row else 0
+
+    nodes_with_embedding = 0
+    try:
+        emb_row = conn.execute(
+            "SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL AND embedding IS NOT NULL"
+        ).fetchone()
+        nodes_with_embedding = emb_row[0] if emb_row else 0
+    except Exception:
+        pass
+    embedding_coverage = (
+        round(nodes_with_embedding / all_active_nodes, 4) if all_active_nodes > 0 else 0.0
+    )
+
+    active_rows = total_nodes + total_edges
+    recommendation = _storage_recommendation(
+        deleted_rows_estimate,
+        active_rows,
+        fragment_ratio,
+        orphan_rate,
+        embedding_coverage,
+    )
+
+    return {
+        "deleted_rows_estimate": deleted_rows_estimate,
+        "fragment_ratio": fragment_ratio,
+        "orphan_rate": orphan_rate,
+        "embedding_coverage": embedding_coverage,
+        "recommendation": recommendation,
+    }

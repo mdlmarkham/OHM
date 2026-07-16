@@ -844,6 +844,8 @@ def _build_router() -> _RouteRegistry:
         "/runs",
         "/rul",
         "/edges",
+        "/backend/status",
+        "/storage/efficiency",
     ):
         r.add("GET", _p)
 
@@ -2864,6 +2866,8 @@ OhmHandler._GET_EXACT = {
     "/admin/fragment-resonance": "_get_fragment_resonance",
     "/tenants": "_get_tenants",
     "/edges": "_get_edges",
+    "/backend/status": "_get_backend_status",
+    "/storage/efficiency": "_get_storage_efficiency",
 }
 
 

@@ -224,6 +224,114 @@ class InfraHandlerMixin(OhmHandlerBase):
             pass
         self._json_response(200, payload)
 
+    def _get_backend_status(self, path: str, qs: dict) -> None:
+        """GET /backend/status — backend metadata for agent introspection (OHM #917).
+
+        Returns store type, db path, schema version, pending migrations,
+        graph size, storage bytes, write mode, tenant, sync status, and
+        uptime. Read-only — no side effects.
+        """
+        import os
+        from ohm.queries import query_backend_status
+        from ohm.server.server import _START_TIME
+
+        store = self.current_store
+        conn = store.conn
+        db_path_str = str(store.db_path)
+
+        ducklake_attached = False
+        try:
+            attached = conn.execute(
+                "SELECT database_name FROM duckdb_databases() WHERE database_name = 'ohm_lake'"
+            ).fetchone()
+            ducklake_attached = attached is not None
+        except Exception:
+            ducklake_attached = False
+
+        if ducklake_attached:
+            store_type = "ducklake_catalog"
+        elif db_path_str == ":memory:":
+            store_type = "memory"
+        else:
+            store_type = "local_duckdb"
+
+        storage_bytes: int | None = None
+        if store_type == "local_duckdb":
+            try:
+                storage_bytes = os.path.getsize(db_path_str)
+                wal_path = db_path_str + ".wal"
+                if os.path.exists(wal_path):
+                    storage_bytes += os.path.getsize(wal_path)
+            except OSError:
+                storage_bytes = None
+
+        write_mode = "read_only" if getattr(store, "readonly", False) else "read_write"
+
+        tenant_id = None
+        if getattr(self, "multi_tenant", False):
+            tenant_id = self._customer_id
+
+        agent_profile = getattr(store, "agent_name", None)
+
+        catalog_path = None
+        if ducklake_attached:
+            catalog_path = getattr(store, "ducklake_path", "") or None
+
+        schema_cfg = getattr(self, "schema_config", None)
+        tenant_schema = schema_cfg.name if schema_cfg is not None else None
+
+        sync_status: dict[str, Any] | None = None
+        if ducklake_attached:
+            try:
+                row = conn.execute(
+                    "SELECT last_sync FROM ohm_agent_state WHERE agent_name = ? LIMIT 1",
+                    [store.agent_name],
+                ).fetchone()
+                if row and row[0]:
+                    last_sync = row[0]
+                    if last_sync.tzinfo is None:
+                        last_sync = last_sync.replace(tzinfo=timezone.utc)
+                    lag = (datetime.now(timezone.utc) - last_sync).total_seconds()
+                    sync_status = {
+                        "last_sync_at": str(row[0]),
+                        "lag_seconds": round(lag, 1),
+                    }
+            except Exception:
+                sync_status = None
+
+        uptime_seconds = round(time.time() - _START_TIME, 1)
+
+        db_status = query_backend_status(conn)
+        self._json_response(
+            200,
+            {
+                "store_type": store_type,
+                "db_path": db_path_str,
+                "catalog_path": catalog_path,
+                "tenant_schema": tenant_schema,
+                "schema_version": db_status["schema_version"],
+                "pending_migrations": db_status["pending_migrations"],
+                "graph_size": db_status["graph_size"],
+                "storage_bytes": storage_bytes,
+                "write_mode": write_mode,
+                "tenant_id": tenant_id,
+                "agent_profile": agent_profile,
+                "sync_status": sync_status,
+                "uptime_seconds": uptime_seconds,
+            },
+        )
+
+    def _get_storage_efficiency(self, path: str, qs: dict) -> None:
+        """GET /storage/efficiency — storage health signals (OHM #917).
+
+        Returns deleted-row estimate, fragment ratio, orphan rate, embedding
+        coverage, and a compaction recommendation. Read-only — no side effects.
+        """
+        from ohm.queries import query_storage_efficiency
+
+        result = query_storage_efficiency(self.current_store.conn)
+        self._json_response(200, result)
+
     def _get_instance(self, path: str, qs: dict) -> None:
         """GET /instance — instance metadata for discovery and monitoring (OHM-yzyk.5).
 

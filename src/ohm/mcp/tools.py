@@ -539,6 +539,37 @@ def all_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="ohm_backend_status",
+            description=(
+                "Get OHM backend metadata for introspection: store type (local_duckdb, "
+                "ducklake_catalog, or memory), db path, schema version, pending migrations, "
+                "graph size (nodes, edges, observations, fragments), storage bytes, write mode, "
+                "tenant id, agent profile, DuckLake sync status, and daemon uptime. Read-only."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="ohm_storage_efficiency",
+            description=(
+                "Get OHM storage health signals: soft-deleted row estimate (nodes + edges), "
+                "fragment ratio (L0 fragment nodes / active nodes), orphan rate, embedding "
+                "coverage, and a heuristic compaction recommendation. Read-only."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
             name="ohm_list_profiles",
             description="List the OHM instance profiles configured for this sidecar and show which profile is currently active. Each profile may point to a different OHM tenant or instance. Use ohm_select_profile to switch.",
             inputSchema={
