@@ -56,7 +56,10 @@
     "twin_design_proposal",
     "runbook",
     "prospect",
-    "expectation"
+    "expectation",
+    "forecast",
+    "plan",
+    "milestone"
   ],
   "layer_edge_types": {
     "L0": [
@@ -142,7 +145,12 @@
       "PREDICTS",
       "RISKS",
       "THREATENS",
-      "TRIGGERS_INCIDENT"
+      "TRIGGERS_INCIDENT",
+      "FORECAST_FOR",
+      "SCENARIO_FOR",
+      "BASELINE_FOR",
+      "ACTUALIZES",
+      "DRIFT_FROM"
     ],
     "L4": [
       "APPLIES_TO",
@@ -161,7 +169,12 @@
       "RISKS",
       "SUPERSEDES",
       "THREATENS",
-      "TRIGGERS_INCIDENT"
+      "TRIGGERS_INCIDENT",
+      "FORECAST_FOR",
+      "SCENARIO_FOR",
+      "BASELINE_FOR",
+      "ACTUALIZES",
+      "DRIFT_FROM"
     ]
   },
   "layer_descriptions": {

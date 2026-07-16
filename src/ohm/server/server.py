@@ -990,6 +990,21 @@ def _build_router() -> _RouteRegistry:
     r.add("POST", "/nudge/promote")
     r.add("POST", "/nudge/demote")
 
+    # ── Temporal Planning (OHM-937) ───────────────────────────────────
+    r.add("POST", "/plan/create")
+    r.add("POST", "/event/create")
+    r.add("POST", "/event/link")
+    r.add("POST", "/report/create")
+    r.add("POST", "/report/finalize")
+    r.add("POST", "/run/create")
+    r.add("POST", "/run/complete")
+    r.add("POST", "/rul/register")
+    r.add("POST", "/scenario/run")
+    r.add("GET", "/scenarios")
+    r.add("GET", "/verifiable-claims")
+    r.add("POST", "/verification/outcome")
+    r.add("GET", "/drifts")
+
     # PATCH
     r.add("PATCH", "/node/")
     r.add("PATCH", "/edge/")
@@ -1064,10 +1079,11 @@ from ohm.server.handlers.synthesis import SynthesisHandlerMixin
 from ohm.server.handlers.agent_state import AgentStateHandlerMixin
 from ohm.server.handlers.vault import VaultHandlerMixin
 from ohm.server.handlers.ask_synthesis import AskSynthesisHandlerMixin
+from ohm.server.handlers.temporal_planning import TemporalPlanningHandlerMixin
 
 
 class OhmHandler(
-    AdminHandlerMixin, AnalysisHandlerMixin, AskHandlerMixin, CatalogHandlerMixin, DecisionHandlerMixin, DocumentHandlerMixin, GraphHandlerMixin, InfraHandlerMixin, InferenceHandlerMixin, MarkovHandlerMixin, TenantHandlerMixin, TypeProposalHandlerMixin, ProspectHandlerMixin, TwinHandlerMixin, ModelHandlerMixin, TemporalHandlerMixin, FragmentHandlerMixin, TaskHandlerMixin, NodeHandlerMixin, EdgeHandlerMixin, ReportsHandlerMixin, SearchHandlerMixin, ObservationHandlerMixin, NarrativeHandlerMixin, ScenarioHandlerMixin, NudgeHandlerMixin, ChallengeSupportHandlerMixin, SynthesisHandlerMixin, AgentStateHandlerMixin, VaultHandlerMixin, AskSynthesisHandlerMixin, BaseHTTPRequestHandler  # noqa: E501
+    AdminHandlerMixin, AnalysisHandlerMixin, AskHandlerMixin, CatalogHandlerMixin, DecisionHandlerMixin, DocumentHandlerMixin, GraphHandlerMixin, InfraHandlerMixin, InferenceHandlerMixin, MarkovHandlerMixin, TenantHandlerMixin, TypeProposalHandlerMixin, ProspectHandlerMixin, TwinHandlerMixin, ModelHandlerMixin, TemporalHandlerMixin, FragmentHandlerMixin, TaskHandlerMixin, NodeHandlerMixin, EdgeHandlerMixin, ReportsHandlerMixin, SearchHandlerMixin, ObservationHandlerMixin, NarrativeHandlerMixin, ScenarioHandlerMixin, NudgeHandlerMixin, ChallengeSupportHandlerMixin, SynthesisHandlerMixin, AgentStateHandlerMixin, VaultHandlerMixin, AskSynthesisHandlerMixin, TemporalPlanningHandlerMixin, BaseHTTPRequestHandler  # noqa: E501
 ):
     """HTTP request handler for OHM daemon."""
 
@@ -2965,6 +2981,21 @@ OhmHandler._POST_EXACT["/nudge/demote"] = "_post_nudge_demote"
 
 # ── Skill maintenance loop (OHM-854) ─────────────────────────────────────
 OhmHandler._POST_EXACT["/admin/skill-maintenance/run"] = "_post_skill_maintenance_run"
+
+# ── Temporal Planning (OHM-937) ─────────────────────────────────────────
+OhmHandler._POST_EXACT["/plan/create"] = "_post_plan_create"
+OhmHandler._POST_EXACT["/event/create"] = "_post_event_create"
+OhmHandler._POST_EXACT["/event/link"] = "_post_event_link_create"
+OhmHandler._POST_EXACT["/report/create"] = "_post_report_create"
+OhmHandler._POST_EXACT["/report/finalize"] = "_post_report_finalize"
+OhmHandler._POST_EXACT["/run/create"] = "_post_run_create"
+OhmHandler._POST_EXACT["/run/complete"] = "_post_run_complete"
+OhmHandler._POST_EXACT["/rul/register"] = "_post_rul_register"
+OhmHandler._POST_EXACT["/scenario/run"] = "_post_scenario_run"
+OhmHandler._GET_EXACT["/scenarios"] = "_get_scenarios"
+OhmHandler._GET_EXACT["/verifiable-claims"] = "_get_verifiable_claims"
+OhmHandler._POST_EXACT["/verification/outcome"] = "_post_record_verification_outcome"
+OhmHandler._GET_EXACT["/drifts"] = "_get_drift_list"
 
 
 def make_configured_handler(store: OhmStore):

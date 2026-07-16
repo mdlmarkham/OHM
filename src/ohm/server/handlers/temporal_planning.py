@@ -1,0 +1,375 @@
+"""Temporal planning handler mixin for OHM-937.
+
+Only contains NEW endpoints not already provided by ``ReportsHandlerMixin``
+(plans, reports, runs, RUL GETs and detail routes).  The pre-existing
+``temporal.py`` owns decision-freshness / mode-switch / twin-design from #862.
+"""
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from ohm.server.handlers._base import OhmHandlerBase
+
+if TYPE_CHECKING:
+    pass
+
+
+class TemporalPlanningHandlerMixin(OhmHandlerBase):
+    """Handler mixin for temporal planning MCP endpoints (OHM-937)."""
+
+    # ── Plans (POST only — GET /plans served by ReportsHandlerMixin) ─────
+
+    def _post_plan_create(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        import uuid
+        from ohm.graph.queries.plans_events import create_plan
+        from ohm.exceptions import ValidationError
+
+        plan_type = body.get("plan_type")
+        if not plan_type:
+            raise ValidationError("plan_type is required")
+
+        plan_id = body.get("plan_id") or f"plan-{uuid.uuid4().hex[:12]}"
+        result = create_plan(
+            self.current_store.conn,
+            plan_id=plan_id,
+            node_id=body.get("node_id"),
+            plan_type=plan_type,
+            label=body.get("label"),
+            start_ts=body.get("start_ts"),
+            end_ts=body.get("end_ts"),
+            horizon=body.get("horizon"),
+            status=body.get("status", "active"),
+            created_by=agent,
+            metadata=body.get("metadata"),
+        )
+        self._json_response(201, result)
+
+    # ── Events ───────────────────────────────────────────────────────────
+
+    def _post_event_create(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        import uuid
+        from ohm.graph.queries.plans_events import create_event
+        from ohm.exceptions import ValidationError
+
+        node_id = body.get("node_id")
+        event_class = body.get("event_class")
+        start_ts = body.get("start_ts")
+        if not node_id or not event_class or not start_ts:
+            raise ValidationError("node_id, event_class, and start_ts are required")
+
+        result = create_event(
+            self.current_store.conn,
+            event_id=body.get("event_id") or f"evt-{uuid.uuid4().hex[:12]}",
+            plan_id=body.get("plan_id"),
+            node_id=node_id,
+            event_class=event_class,
+            title=body.get("title"),
+            start_ts=start_ts,
+            end_ts=body.get("end_ts"),
+            horizon=body.get("horizon"),
+            operating_state=body.get("operating_state"),
+            description=body.get("description"),
+            confidence=body.get("confidence"),
+            authority=body.get("authority"),
+            created_by=agent,
+            metadata=body.get("metadata"),
+        )
+        self._json_response(201, result)
+
+    def _post_event_link_create(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        import uuid
+        from ohm.graph.queries.plans_events import create_event_link
+        from ohm.exceptions import ValidationError
+
+        from_event_id = body.get("from_event_id")
+        to_event_id = body.get("to_event_id")
+        edge_type = body.get("edge_type")
+        if not from_event_id or not to_event_id or not edge_type:
+            raise ValidationError("from_event_id, to_event_id, and edge_type are required")
+
+        result = create_event_link(
+            self.current_store.conn,
+            link_id=body.get("link_id") or f"lnk-{uuid.uuid4().hex[:12]}",
+            from_event_id=from_event_id,
+            to_event_id=to_event_id,
+            edge_type=edge_type,
+            layer=body.get("layer", "L1"),
+            confidence=body.get("confidence", 1.0),
+            created_by=agent,
+            metadata=body.get("metadata"),
+        )
+        self._json_response(201, result)
+
+    # ── Reports (POST only — GET /reports served by ReportsHandlerMixin) ─
+
+    def _post_report_create(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        import uuid
+        from ohm.graph.queries.reports import create_report
+        from ohm.exceptions import ValidationError
+
+        report_type = body.get("report_type")
+        if not report_type:
+            raise ValidationError("report_type is required")
+
+        result = create_report(
+            self.current_store.conn,
+            report_id=body.get("report_id") or f"rpt-{uuid.uuid4().hex[:12]}",
+            report_type=report_type,
+            node_id=body.get("node_id"),
+            plan_id=body.get("plan_id"),
+            title=body.get("title"),
+            summary=body.get("summary"),
+            findings=body.get("findings"),
+            recommendations=body.get("recommendations"),
+            confidence_adjustments=body.get("confidence_adjustments"),
+            status=body.get("status", "draft"),
+            created_by=agent,
+            metadata=body.get("metadata"),
+        )
+        self._json_response(201, result)
+
+    def _post_report_finalize(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        from ohm.graph.queries.reports import finalize_report
+        from ohm.exceptions import ValidationError
+
+        report_id = body.get("report_id")
+        if not report_id:
+            raise ValidationError("report_id is required")
+
+        result = finalize_report(
+            self.current_store.conn,
+            report_id=report_id,
+            confidence_adjustments=body.get("confidence_adjustments"),
+            created_by=agent,
+        )
+        self._json_response(200, result)
+
+    # ── Runs (POST only — GET /runs served by ReportsHandlerMixin) ───────
+
+    def _post_run_create(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        import uuid
+        from ohm.graph.queries.runs import create_run
+        from ohm.exceptions import ValidationError
+
+        run_type = body.get("run_type")
+        if not run_type:
+            raise ValidationError("run_type is required")
+
+        result = create_run(
+            self.current_store.conn,
+            run_id=body.get("run_id") or f"run-{uuid.uuid4().hex[:12]}",
+            run_type=run_type,
+            report_id=body.get("report_id"),
+            node_id=body.get("node_id"),
+            inputs=body.get("inputs"),
+            status=body.get("status", "pending"),
+            created_by=agent,
+            metadata=body.get("metadata"),
+        )
+        self._json_response(201, result)
+
+    def _post_run_complete(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        from ohm.graph.queries.runs import complete_run
+        from ohm.exceptions import ValidationError
+
+        run_id = body.get("run_id")
+        if not run_id:
+            raise ValidationError("run_id is required")
+
+        result = complete_run(
+            self.current_store.conn,
+            run_id=run_id,
+            status=body.get("status", "completed"),
+            outputs=body.get("outputs"),
+            error=body.get("error"),
+            duration_ms=body.get("duration_ms"),
+            created_by=agent,
+        )
+        self._json_response(200, result)
+
+    # ── RUL (POST only — GET /rul served by ReportsHandlerMixin) ─────────
+
+    def _post_rul_register(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        from ohm.graph.queries.rul import register_rul_assessment
+        from ohm.exceptions import ValidationError
+
+        equipment_node_id = body.get("equipment_node_id")
+        rul_days = body.get("rul_days")
+        risk_class = body.get("risk_class")
+        if not equipment_node_id or rul_days is None or not risk_class:
+            raise ValidationError("equipment_node_id, rul_days, and risk_class are required")
+
+        result = register_rul_assessment(
+            self.current_store.conn,
+            equipment_node_id=equipment_node_id,
+            rul_days=float(rul_days),
+            risk_class=risk_class,
+            model_version=body.get("model_version"),
+            site_id=body.get("site_id"),
+            node_path=body.get("node_path"),
+            metadata=body.get("metadata"),
+            created_by=agent,
+        )
+        self._json_response(201, result)
+
+    # ── Scenario Run (new POST — distinct from POST /scenario) ───────────
+
+    def _post_scenario_run(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        from ohm.graph.queries.cascade_scenario import query_compare_scenarios, query_counterfactual_cascade
+        from ohm.graph.queries import create_node as _create_node, create_edge as _create_edge
+        from ohm.exceptions import ValidationError
+
+        node_id = body.get("node_id")
+        if not node_id:
+            raise ValidationError("node_id is required")
+
+        failure_probability = float(body.get("failure_probability", 1.0))
+        max_depth = int(body.get("max_depth", 10))
+        edge_overrides = body.get("edge_overrides")
+        node_interventions = body.get("node_interventions")
+        disabled_edges = set(body.get("disabled_edges", []))
+        disabled_nodes = set(body.get("disabled_nodes", []))
+        compare = body.get("compare", True)
+        persist = body.get("persist", False)
+
+        if compare:
+            result = query_compare_scenarios(
+                self.current_store.read_conn,
+                node_id,
+                failure_probability=failure_probability,
+                max_depth=max_depth,
+                edge_overrides=edge_overrides,
+                node_interventions=node_interventions,
+                disabled_edges=disabled_edges,
+                disabled_nodes=disabled_nodes,
+            )
+        else:
+            cascade = query_counterfactual_cascade(
+                self.current_store.read_conn,
+                node_id,
+                failure_probability=failure_probability,
+                max_depth=max_depth,
+                edge_overrides=edge_overrides,
+                node_interventions=node_interventions,
+                disabled_edges=disabled_edges,
+                disabled_nodes=disabled_nodes,
+            )
+            result = {"node_id": node_id, "cascade": cascade}
+
+        if persist:
+            scenario_metadata = {
+                "scenario_type": "counterfactual",
+                "baseline_node_id": node_id,
+                "edge_overrides": edge_overrides,
+                "node_interventions": node_interventions,
+                "disabled_edges": list(disabled_edges),
+                "disabled_nodes": list(disabled_nodes),
+                "failure_probability": failure_probability,
+                "max_depth": max_depth,
+                "compare": compare,
+                "result_summary": result.get("summary", {}),
+            }
+            scenario_node = _create_node(
+                self.current_store.conn,
+                label=body.get("label", f"Scenario for {node_id}"),
+                node_type="scenario",
+                created_by=agent,
+                tags=body.get("tags", []),
+                metadata=scenario_metadata,
+            )
+            _create_edge(
+                self.current_store.conn,
+                from_node=scenario_node["id"],
+                to_node=node_id,
+                edge_type="SCENARIO_FOR",
+                layer="L3",
+                created_by=agent,
+            )
+            result["scenario_node_id"] = scenario_node["id"]
+
+        self._json_response(200, result)
+
+    def _get_scenarios(self, path: str, qs: dict) -> None:
+        from ohm.graph.queries._shared import _rows_to_dicts
+
+        target_id = qs.get("target_node_id", [None])[0]
+        limit = int(qs.get("limit", ["50"])[0])
+        if target_id:
+            rows = self.current_store.read_conn.execute(
+                "SELECT n.* FROM ohm_nodes n "
+                "JOIN ohm_edges e ON e.to_node = n.id AND e.edge_type = 'SCENARIO_FOR' "
+                "WHERE n.type = 'scenario' AND n.deleted_at IS NULL AND e.from_node = ? "
+                "ORDER BY n.created_at DESC LIMIT ?",
+                [target_id, limit],
+            ).fetchall()
+        else:
+            rows = self.current_store.read_conn.execute(
+                "SELECT * FROM ohm_nodes WHERE type = 'scenario' AND deleted_at IS NULL "
+                "ORDER BY created_at DESC LIMIT ?",
+                [limit],
+            ).fetchall()
+        scenarios = _rows_to_dicts(rows)
+        self._json_response(200, {"scenarios": scenarios, "count": len(scenarios)})
+
+    # ── Verification Outcomes ────────────────────────────────────────────
+
+    def _get_verifiable_claims(self, path: str, qs: dict) -> None:
+        from ohm.graph.queries.verification import detect_verifiable_claims
+
+        claims = detect_verifiable_claims(
+            self.current_store.read_conn,
+            agent=qs.get("agent", [None])[0],
+            days_threshold=int(qs.get("days_threshold", ["14"])[0]),
+            confidence_threshold=float(qs.get("confidence_threshold", ["0.85"])[0]),
+        )
+        self._json_response(200, {"claims": claims, "count": len(claims)})
+
+    def _post_record_verification_outcome(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        from ohm.graph.queries.verification import record_verification_outcome
+        from ohm.exceptions import ValidationError
+
+        edge_id = body.get("edge_id")
+        outcome = body.get("outcome")
+        if not edge_id or outcome is None:
+            raise ValidationError("edge_id and outcome are required")
+
+        result = record_verification_outcome(
+            self.current_store.conn,
+            edge_id=edge_id,
+            outcome=outcome,
+            recorded_by=agent,
+            reason=body.get("reason"),
+        )
+        self._json_response(200, result)
+
+    # ── Drift Observations ───────────────────────────────────────────────
+
+    def _get_drift_list(self, path: str, qs: dict) -> None:
+        from ohm.graph.queries._shared import _rows_to_dicts
+
+        plan_id = qs.get("plan_id", [None])[0]
+        drift_type = qs.get("drift_type", [None])[0]
+        severity = qs.get("severity", [None])[0]
+        limit = int(qs.get("limit", ["50"])[0])
+
+        conditions = ["o.type = 'drift'", "o.deleted_at IS NULL"]
+        params: list = []
+        if plan_id:
+            conditions.append("o.node_id = ?")
+            params.append(plan_id)
+        if drift_type:
+            conditions.append("JSON_EXTRACT(o.metadata, '$.drift_type') = ?")
+            params.append(drift_type)
+        if severity:
+            conditions.append("JSON_EXTRACT(o.metadata, '$.severity') = ?")
+            params.append(severity)
+        params.append(limit)
+
+        where = " AND ".join(conditions)
+        rows = self.current_store.read_conn.execute(
+            f"SELECT o.* FROM ohm_observations o WHERE {where} "
+            "ORDER BY o.created_at DESC LIMIT ?",
+            params,
+        ).fetchall()
+        drifts = _rows_to_dicts(rows)
+        self._json_response(200, {"drifts": drifts, "count": len(drifts)})

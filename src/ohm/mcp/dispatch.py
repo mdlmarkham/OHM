@@ -365,6 +365,108 @@ def build_request(name: str, arguments: dict[str, Any], agent_id: str) -> tuple[
         body = {"dry_run": arguments.get("dry_run", False)}
         return "POST", "/admin/skill-maintenance/run", body
 
+    # ── Temporal Planning (OHM-937) ────────────────────────────────────
+    if name == "ohm_plan_create":
+        body = {"plan_type": arguments["plan_type"]}
+        for key in ("plan_id", "node_id", "label", "start_ts", "end_ts", "horizon", "status", "metadata"):
+            if arguments.get(key) is not None:
+                body[key] = arguments[key]
+        return "POST", "/plan/create", body
+
+    if name == "ohm_event_create":
+        body = {"node_id": arguments["node_id"], "event_class": arguments["event_class"], "start_ts": arguments["start_ts"]}
+        for key in ("event_id", "plan_id", "title", "end_ts", "horizon", "operating_state", "description", "confidence", "authority", "metadata"):
+            if arguments.get(key) is not None:
+                body[key] = arguments[key]
+        return "POST", "/event/create", body
+
+    if name == "ohm_event_link":
+        body = {"from_event_id": arguments["from_event_id"], "to_event_id": arguments["to_event_id"], "edge_type": arguments["edge_type"]}
+        for key in ("layer", "confidence", "metadata"):
+            if arguments.get(key) is not None:
+                body[key] = arguments[key]
+        return "POST", "/event/link", body
+
+    if name == "ohm_report_create":
+        body = {"report_type": arguments["report_type"]}
+        for key in ("report_id", "node_id", "plan_id", "title", "summary", "findings", "recommendations", "confidence_adjustments", "status", "metadata"):
+            if arguments.get(key) is not None:
+                body[key] = arguments[key]
+        return "POST", "/report/create", body
+
+    if name == "ohm_report_finalize":
+        body = {"report_id": arguments["report_id"]}
+        if arguments.get("confidence_adjustments") is not None:
+            body["confidence_adjustments"] = arguments["confidence_adjustments"]
+        return "POST", "/report/finalize", body
+
+    if name == "ohm_run_create":
+        body = {"run_type": arguments["run_type"]}
+        for key in ("run_id", "report_id", "node_id", "inputs", "status", "metadata"):
+            if arguments.get(key) is not None:
+                body[key] = arguments[key]
+        return "POST", "/run/create", body
+
+    if name == "ohm_run_complete":
+        body = {"run_id": arguments["run_id"]}
+        for key in ("status", "outputs", "error", "duration_ms"):
+            if arguments.get(key) is not None:
+                body[key] = arguments[key]
+        return "POST", "/run/complete", body
+
+    if name == "ohm_rul_register":
+        body = {"equipment_node_id": arguments["equipment_node_id"], "rul_days": arguments["rul_days"], "risk_class": arguments["risk_class"]}
+        for key in ("model_version", "site_id", "node_path", "metadata"):
+            if arguments.get(key) is not None:
+                body[key] = arguments[key]
+        return "POST", "/rul/register", body
+
+    if name == "ohm_scenario_run":
+        body: dict[str, object] = {"node_id": arguments["node_id"]}
+        for key in ("failure_probability", "max_depth", "edge_overrides", "node_interventions", "disabled_edges", "disabled_nodes", "compare", "persist", "label", "tags"):
+            if arguments.get(key) is not None:
+                body[key] = arguments[key]
+        return "POST", "/scenario/run", body
+
+    if name == "ohm_scenarios":
+        import urllib.parse
+        params: dict[str, str] = {}
+        if arguments.get("target_node_id"):
+            params["target_node_id"] = arguments["target_node_id"]
+        if arguments.get("limit") is not None:
+            params["limit"] = str(arguments["limit"])
+        qs = ("?" + urllib.parse.urlencode(sorted(params.items()))) if params else ""
+        return "GET", "/scenarios" + qs, None
+
+    if name == "ohm_verifiable_claims":
+        import urllib.parse
+        params = {}
+        if arguments.get("agent"):
+            params["agent"] = arguments["agent"]
+        if arguments.get("days_threshold") is not None:
+            params["days_threshold"] = str(arguments["days_threshold"])
+        if arguments.get("confidence_threshold") is not None:
+            params["confidence_threshold"] = str(arguments["confidence_threshold"])
+        qs = ("?" + urllib.parse.urlencode(sorted(params.items()))) if params else ""
+        return "GET", "/verifiable-claims" + qs, None
+
+    if name == "ohm_record_verification_outcome":
+        body = {"edge_id": arguments["edge_id"], "outcome": arguments["outcome"]}
+        if arguments.get("reason") is not None:
+            body["reason"] = arguments["reason"]
+        return "POST", "/verification/outcome", body
+
+    if name == "ohm_drifts":
+        import urllib.parse
+        params = {}
+        for key in ("plan_id", "drift_type", "severity"):
+            if arguments.get(key):
+                params[key] = arguments[key]
+        if arguments.get("limit") is not None:
+            params["limit"] = str(arguments["limit"])
+        qs = ("?" + urllib.parse.urlencode(sorted(params.items()))) if params else ""
+        return "GET", "/drifts" + qs, None
+
     raise KeyError(f"Unknown tool: {name}")
 
 

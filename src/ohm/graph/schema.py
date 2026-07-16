@@ -93,6 +93,10 @@ VALID_NODE_TYPES = frozenset(
         "prospect",  # Governed plan of action with lifecycle accountability
         # ── L4 expectation nodes (OHM-841) ──
         "expectation",  # Quantitative target attached to a prospect
+        # ── Temporal planning layer (OHM-937) ──
+        "forecast",  # A prediction with horizon, target, distribution, method
+        "plan",  # Time-bounded plan container (lightweight default-schema parallel to topo_plans)
+        "milestone",  # Named checkpoint inside a plan or prospect
     }
 )
 
@@ -403,6 +407,12 @@ LAYER_EDGE_TYPES: dict[str, frozenset[str]] = {
             "MODIFIES",  # user → proposal (user requests modifications)
             "INSTANTIATED_FROM",  # twin → session (twin was designed by this session)
             "NUDGES_FOR_VERIFICATION",  # nudge task → claim node (prompt agent to verify)
+            # ── Temporal planning layer (OHM-937) ──
+            "FORECAST_FOR",  # forecast → target node
+            "SCENARIO_FOR",  # scenario → target node or plan
+            "BASELINE_FOR",  # baseline snapshot node → scenario/forecast
+            "ACTUALIZES",  # observation/actual outcome → forecast (error tracking)
+            "DRIFT_FROM",  # drift observation → plan/forecast it deviated from
         }
     ),
     "L4": frozenset(
@@ -429,6 +439,12 @@ LAYER_EDGE_TYPES: dict[str, frozenset[str]] = {
             "SUPERSEDES",  # new prospect replaces old prospect (reason in metadata)
             # ── Cross-layer promotion (OHM-842) ──
             "APPLIES_TO",  # prospect → site/area (scope grouping, same meaning as L3)
+            # ── Temporal planning layer (OHM-937) ──
+            "FORECAST_FOR",  # forecast → target node (L4 variant for prospects/scenarios)
+            "SCENARIO_FOR",  # scenario → target node or plan (L4 variant)
+            "BASELINE_FOR",  # baseline snapshot → scenario/forecast (L4 variant)
+            "ACTUALIZES",  # actual outcome → forecast (L4 variant)
+            "DRIFT_FROM",  # drift observation → plan/forecast (L4 variant)
         }
     ),
 }
@@ -560,6 +576,11 @@ VALID_TASK_STATUSES = frozenset(
         "failed",  # Prospect failed
         "partial",  # Prospect completed partially (some targets missed)
         "superseded",  # Prospect replaced by a newer prospect via SUPERSEDES edge
+        # ── Forecast lifecycle (OHM-937.4) ──
+        "draft",  # Draft forecast, not yet committed
+        "resolved_hit",  # Forecast resolved: actual matched predicted direction
+        "resolved_miss",  # Forecast resolved: actual missed predicted direction
+        "resolved_ambiguous",  # Forecast resolved: inconclusive
     }
 )
 
@@ -1932,7 +1953,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.56.0"
+SCHEMA_VERSION = "0.57.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -2819,6 +2840,17 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
         "OHM-847: add variant_id column to ohm_nudge_log for A/B testing",
         [
             "ALTER TABLE ohm_nudge_log ADD COLUMN IF NOT EXISTS variant_id VARCHAR",
+        ],
+    ),
+    (
+        "0.57.0",
+        "OHM-937: domain-agnostic temporal node/edge types (forecast, plan, milestone) and temporal edge types",
+        [
+            # No DDL — new node types, edge types, and task statuses are
+            # validated in application code (VALID_NODE_TYPES, LAYER_EDGE_TYPES,
+            # VALID_TASK_STATUSES). Migration bumps version so agents can
+            # detect temporal planning support is available.
+            "SELECT 1;",
         ],
     ),
 ]
