@@ -175,8 +175,21 @@ class AgentStateHandlerMixin(OhmHandlerBase):
         )
 
     def _post_sync(self, path: str, qs: dict, body: dict, agent: str) -> None:
-        """POST /sync — explicit DuckLake sync trigger (OHM-7301)."""
-        sync_result = self.current_store.sync_heartbeat()
+        """POST /sync — explicit DuckLake sync trigger (OHM-7301).
+
+        Passes force=True to bypass the 30s throttle.
+        """
+        sync_result = self.current_store.sync_heartbeat(force=True)
+        self._json_response(200, sync_result)
+
+    def _post_sync_force_full(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /sync/force-full — full DuckLake mirror rebuild (OHM-958).
+
+        Safely rebuilds all mirror tables by doing a clean DELETE + INSERT
+        of all active rows, avoiding the truncation bug that occurs when
+        incremental sync tries to delete and re-insert the entire table.
+        """
+        sync_result = self.current_store.sync_heartbeat(force=True, force_full_sync=True)
         self._json_response(200, sync_result)
 
     def _post_heartbeat(self, path: str, qs: dict, body: dict, agent: str) -> None:

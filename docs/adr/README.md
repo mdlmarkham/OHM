@@ -761,3 +761,26 @@ Agent Profiles: a JSON catalog file (`.ohm/profiles.json` project-level, `~/.ohm
 - Two catalog locations (project + user) introduce a merge order; `ohm profile show` prints the source of each resolved field for debuggability
 - Profiles compose with — do not replace — ADR-015 multi-tenancy and ADR-042 instance registry
 - See [full ADR](0043-agent-profiles-tenants.md)
+
+---
+
+## ADR-0044: First-Class Correction Workflow with Immutable-Node Supersession
+
+**Date:** 2026-07-16
+**Status:** Accepted
+
+### Context
+
+OHM's graph is append-only (ADR-003/018), so when an agent finds a factually wrong node there is no systematic correction path: in-place edits destroy the audit trail, CHALLENGED_BY questions confidence but carries no replacement, and ad hoc new nodes are undiscoverable. Issue OHM-959 asks for a first-class correction object that is itself challengeable, carries a replacement, feeds source-reliability calibration, and leaves the original immutable.
+
+### Decision
+
+Two-phase workflow. **Option A** (ships now): reuse the existing `decision` node type with `metadata.correction = {status, old_node_id, field, old_value, new_value, evidence_node_ids, ...}`, add a new `CORRECTS` L3 edge (correction→old node), reuse the existing `SUPERSEDES` L4 edge (new node→old node, generalizing its prospect-only docs), and expose three MCP tools (`ohm_propose_correction` / `ohm_commit_correction` / `ohm_reject_correction`). Lifecycle `proposed → committed | rejected` mirrors the `prospect` lifecycle. Guardrails: evidence required to commit, ADR-028 source-tier confidence ceilings, 24h cooling-off (`OHM_CORRECTION_COOLING_OFF_HOURS`), authority checks (original author / domain authority / `correction:commit` scope). Committed corrections record a `False` outcome against the original author via `record_outcome`, feeding `source_reliability` and the ADR-018 30d/365d decay split. **Option B** (follow-up after validation): native `correction` node type, first-class query/discovery, server-side authority enforcement, CLI/SDK wrappers.
+
+### Consequences
+
+- Corrections are first-class, challengeable, auditable graph objects; the original node stays immutable
+- Corrections auto-feed source-reliability calibration — agents who file accurate corrections gain reliability, agents whose claims get corrected lose it
+- Option A reuses existing primitives (`decision` node, `SUPERSEDES` edge, `proposed`/`committed` lifecycle, `record_outcome`) — one new edge type + three MCP tools, no DDL
+- Option A has weaker discoverability (corrections are `decision` nodes filtered by `metadata.correction`) and overloads the `decision` type; authority checks are MCP-handler-only until Option B
+- See [full ADR](0044-correction-workflow-supersession.md)

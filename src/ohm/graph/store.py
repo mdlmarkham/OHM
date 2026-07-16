@@ -2549,6 +2549,7 @@ class OhmStore:
         ducklake_path: Optional[str] = None,
         alias: str = "ohm_lake",
         force: bool = False,
+        force_full_sync: bool = False,
     ) -> dict[str, Any]:
         """Push local changes to DuckLake and pull remote changes.
 
@@ -2614,7 +2615,7 @@ class OhmStore:
         if ducklake_path or ducklake_attached:
             # Push local changes to DuckLake (failures don't block pull)
             try:
-                pushed = self.push_to_ducklake(ducklake_path or "", alias=alias)
+                pushed = self.push_to_ducklake(ducklake_path or "", alias=alias, force_full=force_full_sync)
             except Exception as exc:
                 logger.warning("DuckLake push failed (pull will still proceed): %s", exc)
                 pushed = 0
@@ -3014,7 +3015,7 @@ class OhmStore:
 
         return result
 
-    def push_to_ducklake(self, ducklake_path: str, alias: str = "ohm_lake") -> int:
+    def push_to_ducklake(self, ducklake_path: str, alias: str = "ohm_lake", force_full: bool = False) -> int:
         """Push local data to DuckLake shared backend via mirror tables.
 
         Uses the attached DuckLake catalog (ohm_lake alias) to sync
@@ -3045,7 +3046,7 @@ class OhmStore:
 
         if attached:
             # New approach: sync via attached mirror tables
-            result = self.sync_to_ducklake(alias=alias)
+            result = self.sync_to_ducklake(alias=alias, force_full=force_full)
             from datetime import datetime, timezone
 
             now = datetime.now(timezone.utc)
@@ -3055,7 +3056,7 @@ class OhmStore:
         # Fallback: old approach using separate DB connection
         return self._push_to_ducklake_legacy(ducklake_path)
 
-    def sync_to_ducklake(self, alias: str = "ohm_lake") -> int:
+    def sync_to_ducklake(self, alias: str = "ohm_lake", force_full: bool = False) -> int:
         """Sync local data to DuckLake mirror tables.
 
         Copies new/changed rows from local DuckDB to the attached
@@ -3067,6 +3068,8 @@ class OhmStore:
 
         Args:
             alias: Database alias for the attached DuckLake catalog.
+            force_full: If True, ignore last_push and do a full resync of
+                all tables (OHM-958).
 
         Returns:
             Total number of rows synced (inserted + updated).
@@ -3080,6 +3083,12 @@ class OhmStore:
         for dlt in self._ducklake_sync_tables():
             table = dlt.name
             try:
+                if force_full:
+                    # OHM-958: force full resync — clean DELETE + INSERT all
+                    synced = self._initial_sync_table(table, alias)
+                    total_synced += synced
+                    continue
+
                 # Check if mirror table has any data (for initial sync)
                 mirror_count = self.conn.execute(f"SELECT COUNT(*) FROM {self._ducklake_table(table, alias)}").fetchone()[0]  # type: ignore[index]
 
@@ -3087,8 +3096,30 @@ class OhmStore:
                     # Initial sync: copy all rows
                     synced = self._initial_sync_table(table, alias)
                 else:
-                    # Incremental sync: copy new/changed rows
-                    synced = self._incremental_sync_table(table, alias, last_push)
+                    # OHM-958: Check if incremental delta is too large (>50% of
+                    # mirror rows). If so, switch to initial sync to avoid the
+                    # delete-all-then-reinsert truncation bug.
+                    local_count = self.conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NULL").fetchone()[0] if dlt.has_deleted_at else self.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+
+                    # Count changed rows using the registry's timestamp_col
+                    ts_col = dlt.timestamp_col
+                    changed_count = 0
+                    if last_push:
+                        changed_count = self.conn.execute(
+                            f"SELECT COUNT(*) FROM {table} WHERE {ts_col} > ?::TIMESTAMP",
+                            [last_push],
+                        ).fetchone()[0]
+
+                    if changed_count > 0 and mirror_count > 0 and changed_count > mirror_count * 0.5:
+                        logger.info(
+                            "OHM-958: incremental delta for %s is %d rows (>50%% of mirror %d) — "
+                            "switching to full resync to prevent truncation",
+                            table, changed_count, mirror_count,
+                        )
+                        synced = self._initial_sync_table(table, alias)
+                    else:
+                        # Incremental sync: copy new/changed rows
+                        synced = self._incremental_sync_table(table, alias, last_push)
                 total_synced += synced
             except Exception as e:
                 # Mirror table may not exist yet — skip
@@ -3132,15 +3163,25 @@ class OhmStore:
         common_str = ", ".join(common_cols)
 
         # Delete any existing rows from mirror (handles re-sync after crash/restart)
-        # then INSERT all active (non-soft-deleted) local rows
+        # then INSERT all active (non-soft-deleted) local rows.
+        # OHM-960: Wrap in an explicit transaction so a failed INSERT rolls
+        # back the DELETE, leaving the mirror stale-but-non-empty instead
+        # of permanently empty.
         mirror = self._ducklake_table(table, alias)
-        self.conn.execute(f"DELETE FROM {mirror}")
-
-        # Filter out soft-deleted rows from sync
-        if "deleted_at" in local_col_names:
-            self.conn.execute(f"INSERT INTO {mirror} ({common_str}) SELECT {common_str} FROM {table} WHERE deleted_at IS NULL")
-        else:
-            self.conn.execute(f"INSERT INTO {mirror} ({common_str}) SELECT {common_str} FROM {table}")
+        self.conn.execute("BEGIN TRANSACTION")
+        try:
+            self.conn.execute(f"DELETE FROM {mirror}")
+            if "deleted_at" in local_col_names:
+                self.conn.execute(f"INSERT INTO {mirror} ({common_str}) SELECT {common_str} FROM {table} WHERE deleted_at IS NULL")
+            else:
+                self.conn.execute(f"INSERT INTO {mirror} ({common_str}) SELECT {common_str} FROM {table}")
+            self.conn.execute("COMMIT")
+        except Exception:
+            try:
+                self.conn.execute("ROLLBACK")
+            except Exception:
+                pass
+            raise
 
         count = self.conn.execute(f"SELECT COUNT(*) FROM {mirror}").fetchone()[0]
         return count
@@ -3163,8 +3204,15 @@ class OhmStore:
 
         validate_table_name(table)
         validate_table_name(alias, name="alias")
-        # Determine timestamp column
-        ts_col = "updated_at" if table != "ohm_observations" else "created_at"
+        # OHM-958: Use the DuckLakeTable registry's timestamp_col instead of
+        # hardcoding. Falls back to updated_at/created_at if not found.
+        ts_col = "updated_at"
+        for dlt in self._ducklake_sync_tables():
+            if dlt.name == table:
+                ts_col = dlt.timestamp_col
+                break
+        if table == "ohm_observations":
+            ts_col = "created_at"
 
         # Get column lists using duckdb_columns() for DuckLake tables
         local_cols = self.conn.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table}' ORDER BY ordinal_position").fetchall()

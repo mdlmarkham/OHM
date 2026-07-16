@@ -941,6 +941,7 @@ def _build_router() -> _RouteRegistry:
         "/vault/promote",
         "/heartbeat",
         "/sync",
+        "/sync/force-full",
         "/hooks",
     ):
         r.add("POST", _p)
@@ -1016,6 +1017,10 @@ def _build_router() -> _RouteRegistry:
     r.add("GET", "/series/query")
     r.add("GET", "/series/baseline")
     r.add("GET", "/series/anomalies")
+    r.add("POST", "/correction/propose")
+    r.add("POST", "/correction/commit")
+    r.add("POST", "/correction/reject")
+    r.add("GET", "/corrections")
 
     # PATCH
     r.add("PATCH", "/node/")
@@ -2746,6 +2751,7 @@ OhmHandler._POST_EXACT = {
     "/heartbeat": "_post_heartbeat",
     "/vault/promote": "_post_vault_promote",
     "/sync": "_post_sync",
+    "/sync/force-full": "_post_sync_force_full",
     "/documents/upload": "_post_documents_upload",
     "/documents/bedrock/retrieve": "_post_document_bedrock_retrieve",
     "/documents/bedrock/retrieve-and-generate": "_post_document_bedrock_retrieve_and_generate",
@@ -3019,6 +3025,10 @@ OhmHandler._GET_PREFIXES.append(("/scenario/", "_route_scenario_get_or_diff"))
 OhmHandler._GET_EXACT["/series/query"] = "_get_series_query"
 OhmHandler._GET_EXACT["/series/baseline"] = "_get_series_baseline"
 OhmHandler._GET_EXACT["/series/anomalies"] = "_get_series_anomalies"
+OhmHandler._POST_EXACT["/correction/propose"] = "_post_propose_correction"
+OhmHandler._POST_EXACT["/correction/commit"] = "_post_commit_correction"
+OhmHandler._POST_EXACT["/correction/reject"] = "_post_reject_correction"
+OhmHandler._GET_EXACT["/corrections"] = "_get_corrections"
 OhmHandler._GET_PREFIXES.append(("/forecast/", "_route_forecast_get_or_trajectory"))
 
 

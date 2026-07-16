@@ -563,6 +563,34 @@ def build_request(name: str, arguments: dict[str, Any], agent_id: str) -> tuple[
             params["sigma"] = str(arguments["sigma"])
         return "GET", "/series/anomalies?" + urllib.parse.urlencode(sorted(params.items())), None
 
+    if name == "ohm_propose_correction":
+        body: dict[str, object] = {"old_node_id": arguments["old_node_id"], "reason": arguments["reason"]}
+        for key in ("field", "old_value", "new_value", "new_node_id", "evidence_node_ids", "severity"):
+            if arguments.get(key) is not None:
+                body[key] = arguments[key]
+        return "POST", "/correction/propose", body
+
+    if name == "ohm_commit_correction":
+        return "POST", "/correction/commit", {"correction_id": arguments["correction_id"]}
+
+    if name == "ohm_reject_correction":
+        body: dict[str, object] = {"correction_id": arguments["correction_id"]}
+        if arguments.get("rejection_reason"):
+            body["rejection_reason"] = arguments["rejection_reason"]
+        return "POST", "/correction/reject", body
+
+    if name == "ohm_corrections":
+        import urllib.parse
+        params = {}
+        if arguments.get("node_id"):
+            params["node_id"] = arguments["node_id"]
+        if arguments.get("status"):
+            params["status"] = arguments["status"]
+        if arguments.get("limit") is not None:
+            params["limit"] = str(arguments["limit"])
+        qs = ("?" + urllib.parse.urlencode(sorted(params.items()))) if params else ""
+        return "GET", "/corrections" + qs, None
+
     raise KeyError(f"Unknown tool: {name}")
 
 
