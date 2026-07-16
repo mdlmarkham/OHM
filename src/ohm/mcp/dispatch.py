@@ -124,10 +124,16 @@ def build_request(name: str, arguments: dict[str, Any], agent_id: str) -> tuple[
             params["evidence"] = arguments["evidence"]
         if arguments.get("layers"):
             params["layers"] = arguments["layers"]
-        if arguments.get("leak") is not None:
-            params["leak"] = str(arguments["leak"])
         if arguments.get("edge_types"):
             params["edge_types"] = arguments["edge_types"]
+        if arguments.get("leak") is not None:
+            params["leak"] = str(arguments["leak"])
+        if arguments.get("include_evidence_movers") is not None:
+            params["include_evidence_movers"] = str(arguments["include_evidence_movers"]).lower()
+        if arguments.get("include_prior") is not None:
+            params["include_prior"] = str(arguments["include_prior"]).lower()
+        if arguments.get("belief_statement"):
+            params["belief_statement"] = arguments["belief_statement"]
         return "GET", _qs("/belief", params), None
 
     if name == "ohm_discover":
