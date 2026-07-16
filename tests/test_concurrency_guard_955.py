@@ -134,3 +134,38 @@ class TestOhmStoreIntegration:
         pid_file = _get_pid_file(db_path)
         assert not pid_file.exists()
         store.close()
+
+    def test_store_releases_lock_on_init_failure(self, tmp_path):
+        """If OhmStore.__init__ fails after acquiring the lock, the lock is
+        released so a same-process retry can succeed (OHM-956)."""
+        from unittest.mock import patch
+
+        from ohm.graph.embeddings import NullBackend
+        from ohm.store import OhmStore
+
+        db_path = str(tmp_path / "fail_test.duckdb")
+        pid_file = _get_pid_file(db_path)
+
+        # First attempt: simulate a failure after lock acquisition
+        with patch.object(OhmStore, "_init_schema", side_effect=RuntimeError("simulated failure")):
+            try:
+                OhmStore(
+                    db_path=db_path,
+                    agent_name="test",
+                    embedding_backend=NullBackend(dimensions=768),
+                )
+            except RuntimeError:
+                pass
+
+        # The PID file must have been cleaned up by the except handler
+        assert not pid_file.exists(), "PID file leaked after __init__ failure — self-deadlock!"
+
+        # Second attempt: should succeed normally (no self-deadlock)
+        store = OhmStore(
+            db_path=db_path,
+            agent_name="test",
+            embedding_backend=NullBackend(dimensions=768),
+        )
+        assert pid_file.exists()
+        store.close()
+        assert not pid_file.exists()

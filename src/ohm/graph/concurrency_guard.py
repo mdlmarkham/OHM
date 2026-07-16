@@ -19,10 +19,8 @@ The guard is bypassed when:
 from __future__ import annotations
 
 import os
-import signal
 import sys
 from pathlib import Path
-from typing import Optional
 
 
 def _get_pid_file(db_path: str | os.PathLike) -> Path:

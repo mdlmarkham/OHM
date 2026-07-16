@@ -209,42 +209,30 @@ class OhmStore:
         # OHM-955: Concurrency guard — acquire PID-file lock before opening DB
         # to prevent two processes from opening the same DuckDB file.
         self._pid_file: Path | None = None
-        from ohm.graph.concurrency_guard import acquire_lock, is_guard_enabled
+        from ohm.graph.concurrency_guard import acquire_lock, is_guard_enabled, release_lock
 
         if is_guard_enabled(readonly=readonly, db_path=str(self.db_path)):
             self._pid_file = acquire_lock(str(self.db_path))
 
+        # OHM-956: Wrap all post-lock init so a failure releases the lock
+        # before re-raising, preventing a permanent self-deadlock.
         try:
-            self.conn = self._connect_with_wal_recovery(str(self.db_path), readonly)
-        except (duckdb.FatalException, duckdb.IOException, duckdb.InternalException) as e:
-            logger.error(f"DB connection failed: {e}. Attempting DuckLake recovery.")
-            self._recover_from_ducklake(str(self.db_path))
-            self.conn = self._connect_with_wal_recovery(str(self.db_path), readonly)
+            try:
+                self.conn = self._connect_with_wal_recovery(str(self.db_path), readonly)
+            except (duckdb.FatalException, duckdb.IOException, duckdb.InternalException) as e:
+                logger.error(f"DB connection failed: {e}. Attempting DuckLake recovery.")
+                self._recover_from_ducklake(str(self.db_path))
+                self.conn = self._connect_with_wal_recovery(str(self.db_path), readonly)
 
-        # Read-only connection for concurrent reads (OHM concurrency fix)
-        # OHM-fix-3: DuckDB requires matching configuration for concurrent
-        # connections. The read_conn is initially deferred — it will be created
-        # after DuckLake ATTACH in the factory function, because the DuckLake
-        # ATTACH changes the write connection's internal config, and the read
-        # connection must match. If created here, it would have different config.
-        self._read_conn = None
-        self._read_conn_ready = False  # Flag: set True after DuckLake ATTACH
-        self._read_conn_deferred = True  # Will be created in _ensure_read_conn()
-        # OHM #919: startup node-count assertion result, stashed here at
-        # startup so GET /health can surface a detected drop. None until the
-        # assertion runs (or when unset on tenant stores).
-        self.node_count_check: dict | None = None
+            # Read-only connection for concurrent reads (OHM concurrency fix)
+            self._read_conn = None
+            self._read_conn_ready = False
+            self._read_conn_deferred = True
+            self.node_count_check: dict | None = None
 
-        try:
             self._init_schema()
-
-            # OHM-8n9/OHM-6cz: Auto-restore from DuckLake if tables are empty.
             self._auto_restore_if_empty()
 
-            # Try to load DuckDB markdown extension (optional)
-            # Enables rich content features: read_markdown, md_to_text, etc.
-            # INSTALL can hang on Windows; skip there. On Linux use SIGALRM
-            # as a timeout guard.
             self.markdown_available = False
             if os.name == "posix":
                 try:
@@ -268,11 +256,16 @@ class OhmStore:
             else:
                 logger.info("DuckDB markdown extension skipped on Windows — rich content features disabled, OHM works fine without it")
 
-            # Start Quack server if requested and available
             if self.quack and not self.readonly:
                 self._start_quack()
         except Exception:
-            self.conn.close()
+            try:
+                self.conn.close()
+            except Exception:
+                pass
+            if self._pid_file is not None:
+                release_lock(self._pid_file)
+                self._pid_file = None
             raise
 
     def _recover_from_ducklake(self, db_path_str: str) -> None:
