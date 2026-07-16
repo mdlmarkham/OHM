@@ -941,6 +941,7 @@ def _build_router() -> _RouteRegistry:
         "/vault/promote",
         "/heartbeat",
         "/sync",
+        "/sync/force-full",
         "/hooks",
     ):
         r.add("POST", _p)
@@ -2746,6 +2747,7 @@ OhmHandler._POST_EXACT = {
     "/heartbeat": "_post_heartbeat",
     "/vault/promote": "_post_vault_promote",
     "/sync": "_post_sync",
+    "/sync/force-full": "_post_sync_force_full",
     "/documents/upload": "_post_documents_upload",
     "/documents/bedrock/retrieve": "_post_document_bedrock_retrieve",
     "/documents/bedrock/retrieve-and-generate": "_post_document_bedrock_retrieve_and_generate",
