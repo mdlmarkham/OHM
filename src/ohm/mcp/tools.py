@@ -881,4 +881,399 @@ def all_tools() -> list[Tool]:
                 "required": [],
             },
         ),
+        # ── Temporal Planning (OHM-937) ───────────────────────────────────
+        Tool(
+            name="ohm_plan_create",
+            description="Create a new temporal plan (OHM-937). Plans track multi-event initiatives with a type, horizon, and status.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                    "plan_type": {"type": "string", "description": "Plan type (e.g. 'operational', 'strategic', 'maintenance')."},
+                    "plan_id": {"type": "string", "description": "Optional explicit plan ID (auto-generated if omitted)."},
+                    "node_id": {"type": "string", "description": "Node this plan is linked to."},
+                    "label": {"type": "string", "description": "Human-readable label."},
+                    "start_ts": {"type": "string", "description": "ISO 8601 start timestamp."},
+                    "end_ts": {"type": "string", "description": "ISO 8601 end timestamp."},
+                    "horizon": {"type": "string", "description": "Planning horizon (e.g. '30d', '90d')."},
+                    "status": {"type": "string", "description": "Plan status.", "default": "active"},
+                    "metadata": {"type": "object", "description": "Arbitrary JSON metadata."},
+                },
+                "required": ["plan_type"],
+            },
+        ),
+        Tool(
+            name="ohm_event_create",
+            description="Create a temporal event linked to a plan (OHM-937). Events represent milestones or incidents within a plan's timeline.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                    "node_id": {"type": "string", "description": "Node this event is associated with."},
+                    "event_class": {"type": "string", "description": "Event class (e.g. 'incident', 'milestone', 'assessment')."},
+                    "start_ts": {"type": "string", "description": "ISO 8601 start timestamp."},
+                    "end_ts": {"type": "string", "description": "ISO 8601 end timestamp."},
+                    "title": {"type": "string", "description": "Event title."},
+                    "plan_id": {"type": "string", "description": "Plan this event belongs to."},
+                    "horizon": {"type": "string", "description": "Event horizon."},
+                    "operating_state": {"type": "string", "description": "Operating state during event."},
+                    "description": {"type": "string", "description": "Free-text description."},
+                    "confidence": {"type": "number", "description": "Confidence score 0-1."},
+                    "authority": {"type": "string", "description": "Authority source."},
+                    "metadata": {"type": "object", "description": "Arbitrary JSON metadata."},
+                },
+                "required": ["node_id", "event_class", "start_ts"],
+            },
+        ),
+        Tool(
+            name="ohm_event_link",
+            description="Create a directed link between two events (OHM-937). Used to build temporal dependency graphs.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                    "from_event_id": {"type": "string", "description": "Source event ID."},
+                    "to_event_id": {"type": "string", "description": "Target event ID."},
+                    "edge_type": {"type": "string", "description": "Edge type (e.g. 'CAUSES', 'FOLLOWS', 'BLOCKS')."},
+                    "layer": {"type": "string", "description": "Layer (default 'L1')."},
+                    "confidence": {"type": "number", "description": "Confidence 0-1 (default 1.0)."},
+                    "metadata": {"type": "object", "description": "Arbitrary JSON metadata."},
+                },
+                "required": ["from_event_id", "to_event_id", "edge_type"],
+            },
+        ),
+        Tool(
+            name="ohm_report_create",
+            description="Create a temporal report (OHM-937). Reports summarise findings, recommendations, and confidence adjustments for a plan or node.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                    "report_type": {"type": "string", "description": "Report type (e.g. 'status', 'incident', 'assessment')."},
+                    "report_id": {"type": "string", "description": "Optional explicit report ID."},
+                    "node_id": {"type": "string", "description": "Node this report is about."},
+                    "plan_id": {"type": "string", "description": "Plan this report belongs to."},
+                    "title": {"type": "string", "description": "Report title."},
+                    "summary": {"type": "string", "description": "Executive summary."},
+                    "findings": {"type": "object", "description": "Structured findings."},
+                    "recommendations": {"type": "object", "description": "Structured recommendations."},
+                    "confidence_adjustments": {"type": "object", "description": "Confidence adjustments by edge."},
+                    "status": {"type": "string", "description": "Report status.", "default": "draft"},
+                    "metadata": {"type": "object", "description": "Arbitrary JSON metadata."},
+                },
+                "required": ["report_type"],
+            },
+        ),
+        Tool(
+            name="ohm_report_finalize",
+            description="Finalize a report and apply its confidence adjustments (OHM-937).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                    "report_id": {"type": "string", "description": "Report to finalize."},
+                    "confidence_adjustments": {"type": "object", "description": "Override confidence adjustments."},
+                },
+                "required": ["report_id"],
+            },
+        ),
+        Tool(
+            name="ohm_run_create",
+            description="Create a data-product run record (OHM-937). Runs track execution of a computation or pipeline with inputs and status.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                    "run_type": {"type": "string", "description": "Run type (e.g. 'cascade', 'calibration', 'ingestion')."},
+                    "run_id": {"type": "string", "description": "Optional explicit run ID."},
+                    "report_id": {"type": "string", "description": "Report this run produced."},
+                    "node_id": {"type": "string", "description": "Node this run is associated with."},
+                    "inputs": {"type": "object", "description": "Input parameters."},
+                    "status": {"type": "string", "description": "Run status.", "default": "pending"},
+                    "metadata": {"type": "object", "description": "Arbitrary JSON metadata."},
+                },
+                "required": ["run_type"],
+            },
+        ),
+        Tool(
+            name="ohm_run_complete",
+            description="Mark a run as completed and record outputs (OHM-937).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                    "run_id": {"type": "string", "description": "Run to complete."},
+                    "status": {"type": "string", "description": "Final status (default 'completed')."},
+                    "outputs": {"type": "object", "description": "Output data."},
+                    "error": {"type": "string", "description": "Error message if failed."},
+                    "duration_ms": {"type": "integer", "description": "Execution duration in milliseconds."},
+                },
+                "required": ["run_id"],
+            },
+        ),
+        Tool(
+            name="ohm_rul_register",
+            description="Register a Remaining Useful Life (RUL) assessment for an equipment node (OHM-937).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                    "equipment_node_id": {"type": "string", "description": "Equipment node ID."},
+                    "rul_days": {"type": "number", "description": "Estimated remaining useful life in days."},
+                    "risk_class": {"type": "string", "description": "Risk classification."},
+                    "model_version": {"type": "string", "description": "Model version used."},
+                    "site_id": {"type": "string", "description": "Site identifier."},
+                    "node_path": {"type": "string", "description": "Node path in hierarchy."},
+                    "metadata": {"type": "object", "description": "Arbitrary JSON metadata."},
+                },
+                "required": ["equipment_node_id", "rul_days", "risk_class"],
+            },
+        ),
+        Tool(
+            name="ohm_scenario_run",
+            description="Run a counterfactual scenario analysis with optional persistence (OHM-937). Chains query_compare_scenarios (when compare=true) or query_counterfactual_cascade, and optionally persists a scenario node.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                    "node_id": {"type": "string", "description": "Target node for scenario analysis."},
+                    "failure_probability": {"type": "number", "description": "Failure probability (default 1.0).", "default": 1.0},
+                    "max_depth": {"type": "integer", "description": "Max cascade depth (default 10).", "default": 10},
+                    "edge_overrides": {"type": "object", "description": "Edge probability overrides."},
+                    "node_interventions": {"type": "object", "description": "Node-level interventions."},
+                    "disabled_edges": {"type": "array", "items": {"type": "string"}, "description": "Edge IDs to disable."},
+                    "disabled_nodes": {"type": "array", "items": {"type": "string"}, "description": "Node IDs to disable."},
+                    "compare": {"type": "boolean", "description": "Use compare_scenarios (default true).", "default": True},
+                    "persist": {"type": "boolean", "description": "Persist scenario as a node (default false).", "default": False},
+                    "label": {"type": "string", "description": "Label for persisted scenario node."},
+                    "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags for persisted scenario node."},
+                },
+                "required": ["node_id"],
+            },
+        ),
+        Tool(
+            name="ohm_scenarios",
+            description="List persisted scenario nodes, optionally filtered by target node (OHM-937).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                    "target_node_id": {"type": "string", "description": "Filter by target node via SCENARIO_FOR edge."},
+                    "limit": {"type": "integer", "description": "Max results (default 50).", "default": 50},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="ohm_verifiable_claims",
+            description="List verifiable claims that are overdue for outcome recording (OHM-937).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                    "agent": {"type": "string", "description": "Filter by source agent."},
+                    "days_threshold": {"type": "integer", "description": "Days since creation (default 14).", "default": 14},
+                    "confidence_threshold": {"type": "number", "description": "Min confidence (default 0.85).", "default": 0.85},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="ohm_record_verification_outcome",
+            description="Record a verification outcome for a CAUSES/PREDICTS edge (OHM-937). Renamed from ohm_record_outcome to avoid ambiguity.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                    "edge_id": {"type": "string", "description": "Edge to record outcome for."},
+                    "outcome": {"type": "boolean", "description": "True if claim was validated, false if falsified."},
+                    "reason": {"type": "string", "description": "Explanation of the outcome."},
+                },
+                "required": ["edge_id", "outcome"],
+            },
+        ),
+        Tool(
+            name="ohm_drifts",
+            description="List drift observations — plan-vs-actual deviations (OHM-937).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                    "plan_id": {"type": "string", "description": "Filter by plan node ID."},
+                    "drift_type": {"type": "string", "description": "Filter by drift type."},
+                    "severity": {"type": "string", "description": "Filter by severity level."},
+                    "limit": {"type": "integer", "description": "Max results (default 50).", "default": 50},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="ohm_reconcile",
+            description="Run plans-vs-actuals reconciliation: compare planned temporal artifacts against actual events and surface drift as observations with DRIFT_FROM edges (OHM-940).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "plan_id": {"type": "string", "description": "Plan ID to reconcile. If omitted, all active plans are checked."},
+                    "horizon": {"type": "string", "description": "Optional horizon filter."},
+                    "dry_run": {"type": "boolean", "description": "If true, return drift records without writing observations or edges.", "default": False},
+                    "tolerance": {"type": "object", "description": "Optional tolerance overrides: timing_seconds, value, duration_seconds."},
+                    "created_by": {"type": "string", "description": "Agent name for drift attribution (defaults to caller)."},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="ohm_drift_explain",
+            description="Explain a drift observation: run Value-of-Information analysis to show which assumptions/edges would change the plan outcome (OHM-940).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "drift_id": {"type": "string", "description": "Drift observation ID to explain."},
+                    "top": {"type": "integer", "description": "Number of VoI candidates to return (default 10).", "default": 10},
+                },
+                "required": ["drift_id"],
+            },
+        ),
+        Tool(
+            name="ohm_forecast_create",
+            description="Create a forecast node linked to a target via FORECAST_FOR edge (OHM-941).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "label": {"type": "string", "description": "Human-readable forecast description."},
+                    "target_node_id": {"type": "string", "description": "Node ID the forecast targets."},
+                    "horizon": {"type": "string", "description": "Forecast horizon (e.g. '2026-09-30')."},
+                    "predicted_value": {"type": "number", "description": "Point/p50 prediction."},
+                    "predicted_unit": {"type": "string", "description": "Unit of the predicted value."},
+                    "distribution": {"type": "object", "description": "Distribution dict with p10/p50/p90 etc."},
+                    "assumptions": {"type": "array", "items": {"type": "string"}, "description": "Assumption node IDs."},
+                    "model_id": {"type": "string", "description": "Model version reference."},
+                    "connects_to": {"type": "array", "items": {"type": "string"}, "description": "Additional cross-link node IDs."},
+                },
+                "required": ["label", "target_node_id", "horizon"],
+            },
+        ),
+        Tool(
+            name="ohm_forecast_list",
+            description="List forecasts with filters (OHM-941).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "target_node_id": {"type": "string"},
+                    "horizon": {"type": "string"},
+                    "status": {"type": "string"},
+                    "created_by": {"type": "string"},
+                    "limit": {"type": "integer", "default": 100},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="ohm_forecast_get",
+            description="Get full forecast detail: node + target + latest accuracy (OHM-941).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "forecast_id": {"type": "string", "description": "Forecast node ID."},
+                },
+                "required": ["forecast_id"],
+            },
+        ),
+        Tool(
+            name="ohm_forecast_transition",
+            description="Transition a forecast through its lifecycle: draft -> committed -> active -> resolved_* -> superseded (OHM-941).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "forecast_id": {"type": "string"},
+                    "new_status": {"type": "string", "enum": ["committed", "active", "resolved_hit", "resolved_miss", "resolved_ambiguous", "superseded"]},
+                    "reason": {"type": "string"},
+                },
+                "required": ["forecast_id", "new_status"],
+            },
+        ),
+        Tool(
+            name="ohm_forecast_resolve",
+            description="Resolve a forecast: compute error metrics, write experiment_result observation, transition to resolved_hit/miss/ambiguous (OHM-941).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "forecast_id": {"type": "string"},
+                    "actual_value": {"type": "number"},
+                },
+                "required": ["forecast_id", "actual_value"],
+            },
+        ),
+        Tool(
+            name="ohm_scenario_get",
+            description="Get full scenario detail: node + metadata + SCENARIO_FOR target + latest result (OHM-942).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "scenario_id": {"type": "string"},
+                },
+                "required": ["scenario_id"],
+            },
+        ),
+        Tool(
+            name="ohm_scenario_rerun",
+            description="Re-run a saved scenario against current graph state and return deltas vs original (OHM-942).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "scenario_id": {"type": "string"},
+                },
+                "required": ["scenario_id"],
+            },
+        ),
+        Tool(
+            name="ohm_scenario_diff",
+            description="Compare a scenario snapshot to current graph state (OHM-942).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "scenario_id": {"type": "string"},
+                },
+                "required": ["scenario_id"],
+            },
+        ),
+        Tool(
+            name="ohm_series_query",
+            description="Query a time series by series_id from observation metadata (OHM-943).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "series_id": {"type": "string", "description": "Series identifier in observation metadata."},
+                    "start": {"type": "string", "description": "Optional start timestamp filter."},
+                    "end": {"type": "string", "description": "Optional end timestamp filter."},
+                    "limit": {"type": "integer", "default": 1000},
+                },
+                "required": ["series_id"],
+            },
+        ),
+        Tool(
+            name="ohm_series_baseline",
+            description="Compute baseline mean and std for a time series (OHM-943).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "series_id": {"type": "string"},
+                    "method": {"type": "string", "enum": ["rolling_30d", "rolling_7d", "rolling_14d", "mean"], "default": "rolling_30d"},
+                },
+                "required": ["series_id"],
+            },
+        ),
+        Tool(
+            name="ohm_series_anomalies",
+            description="Detect anomalies in a time series: observations exceeding baseline +/- sigma*std (OHM-943).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "series_id": {"type": "string"},
+                    "method": {"type": "string", "default": "rolling_30d"},
+                    "sigma": {"type": "number", "default": 2.0},
+                },
+                "required": ["series_id"],
+            },
+        ),
     ]

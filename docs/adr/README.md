@@ -620,6 +620,30 @@ ADR-003 enforces write boundaries but has no read-side equivalent — every agen
 
 ---
 
+## ADR-038: Temporal Planning MCP Tool Surface
+
+**Date:** 2026-07-16
+**Status:** Accepted
+
+### Context
+
+OHM's temporal planning capability (plans, events, reports, runs, RUL assessments, scenarios, drift) was accessible only via TOPO's internal tables and a few GET endpoints from `ReportsHandlerMixin`. MCP-capable agents — the documented primary interface — had no way to create plans, register events, finalize reports, complete runs, run scenarios, or register RUL assessments. The temporal layer was write-dark from the agent perspective.
+
+### Decision
+
+Expose 13 new MCP tools (`ohm_plan_create`, `ohm_event_create`, `ohm_event_link`, `ohm_report_create`, `ohm_report_finalize`, `ohm_run_create`, `ohm_run_complete`, `ohm_rul_register`, `ohm_scenario_run`, `ohm_scenarios`, `ohm_verifiable_claims`, `ohm_record_verification_outcome`, `ohm_drifts`) via `src/ohm/mcp/tools.py` + `dispatch.py`. New `TemporalPlanningHandlerMixin` defines only NEW endpoints (no shadowing of `ReportsHandlerMixin` GETs). Domain-agnostic node types (`forecast`, `plan`, `milestone`) + edge types (`FORECAST_FOR`, `SCENARIO_FOR`, `BASELINE_FOR`, `ACTUALIZES`, `DRIFT_FROM`) added to default schema; TOPO tables remain TOPO-specific. SCHEMA_VERSION 0.57.0 (version-only migration, no DDL). Dual routing registration (`_RouteRegistry` + `_POST_EXACT`/`_GET_EXACT`). Templates `ohm.json` + `beef_herd.json` updated for parity. Tool count 46 → 59.
+
+### Consequences
+
+- Any MCP-capable agent can now create/manage temporal plans, events, reports, runs, RUL, scenarios, drift, and verification outcomes
+- Domain-agnostic temporal vocabulary available to non-TOPO domains without the full TOPO table set
+- `ohm_record_verification_outcome` closes the ADR-018 verification loop for temporal claims
+- TOPO tables still required for write endpoints; default-schema instances get node/edge types but not TOPO tables
+- Two routing mechanisms must be kept in sync on every new endpoint
+- See [full ADR](0038-temporal-planning-mcp-tools.md)
+
+---
+
 ## ADR-039: Bedrock Knowledge Store — Write-Through Wrapper for Managed Embeddings
 
 **Date:** 2026-06-21
