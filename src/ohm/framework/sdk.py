@@ -844,6 +844,55 @@ def connect_http(
             path = "/inference?" + "&".join(params)
             return self._http_request("GET", path)
 
+        def belief(
+            self,
+            target: str,
+            evidence: dict[str, int | float] | None = None,
+            *,
+            edge_types: list[str] | None = None,
+            layers: list[str] | None = None,
+            leak_probability: float = 0.15,
+            include_evidence_movers: bool = True,
+            include_prior: bool = True,
+            belief_statement: str | None = None,
+        ) -> dict[str, Any]:
+            """Get a complete belief summary for a target node (OHM-934).
+
+            Composes posterior, drivers, VoI, and optionally prior/surprise,
+            evidence movers, and belief calibration into a single call.
+
+            Args:
+                target: Node ID to query.
+                evidence: Dict mapping node IDs to observed states.
+                edge_types: Edge types for Bayesian network.
+                layers: Causal layer filter.
+                leak_probability: Noisy-OR leak probability.
+                include_evidence_movers: Include per-observation impact ranking.
+                include_prior: Include prior distribution and KL surprise.
+                belief_statement: Agent-stated belief to calibrate, e.g. 'P(bad)=0.5'.
+
+            Returns:
+                Dict with posterior percentiles, drivers, VoI suggestions,
+                and optional prior/surprise, evidence_movers, calibration.
+            """
+            import urllib.parse
+
+            params = [f"target={urllib.parse.quote(target)}"]
+            if evidence:
+                evidence_str = ",".join(f"{k}:{v}" for k, v in evidence.items())
+                params.append(f"evidence={urllib.parse.quote(evidence_str)}")
+            if edge_types:
+                params.append(f"edge_types={urllib.parse.quote(','.join(edge_types))}")
+            if layers:
+                params.append(f"layers={urllib.parse.quote(','.join(layers))}")
+            params.append(f"leak={leak_probability}")
+            params.append(f"include_evidence_movers={str(include_evidence_movers).lower()}")
+            params.append(f"include_prior={str(include_prior).lower()}")
+            if belief_statement:
+                params.append(f"belief_statement={urllib.parse.quote(belief_statement)}")
+            path = "/belief?" + "&".join(params)
+            return self._http_request("GET", path)
+
         def causal_intervention(
             self,
             target: str,

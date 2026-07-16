@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 
 from ohm.server.handlers._base import OhmHandlerBase
 from ohm.semantic_roles import SemanticRoles
@@ -505,6 +506,10 @@ class InferenceHandlerMixin(OhmHandlerBase):
         Wraps /inference + /voi + /neighborhood into a single response
         so agents get the posterior, why it believes it, and what to do
         next in one call.
+
+        OHM-934: Enhanced to expose full posterior percentiles, prior
+        distribution + KL surprise, evidence movers, belief_statement
+        calibration, and method metadata.
         """
         target = qs.get("target", [None])[0]
         if not target:
@@ -517,6 +522,9 @@ class InferenceHandlerMixin(OhmHandlerBase):
         leak_probability = float(qs.get("leak", ["0.15"])[0])
         layers_str = qs.get("layers", [""])[0]
         edge_types_str = qs.get("edge_types", [""])[0]
+        include_evidence_movers = qs.get("include_evidence_movers", ["true"])[0].lower() in ("1", "true", "yes")
+        include_prior = qs.get("include_prior", ["true"])[0].lower() in ("1", "true", "yes")
+        belief_statement_str = qs.get("belief_statement", [""])[0]
         layers = [lyr.strip() for lyr in layers_str.split(",") if lyr.strip()] if layers_str else None
         edge_types = [e.strip() for e in edge_types_str.split(",") if e.strip()] if edge_types_str else None
         evidence: dict[str, float | int] = {}
@@ -537,6 +545,8 @@ class InferenceHandlerMixin(OhmHandlerBase):
             from ohm.graph.queries import query_neighborhood
 
             # 1. Posterior (graceful: empty graph returns uniform prior)
+            method = "none"
+            pgmpy_available = False
             try:
                 inference_result = bayesian_inference(
                     self.current_store.conn.cursor(),
@@ -547,6 +557,8 @@ class InferenceHandlerMixin(OhmHandlerBase):
                     leak_probability=leak_probability,
                     customer_id=self._customer_id,
                 )
+                method = inference_result.get("method", "unknown")
+                pgmpy_available = inference_result.get("pgmpy_available", False)
             except Exception:
                 inference_result = {"posterior": {}}
 
@@ -617,9 +629,10 @@ class InferenceHandlerMixin(OhmHandlerBase):
 
             entropy = -(p_bad * math.log2(p_bad + 1e-10) + p_good * math.log2(p_good + 1e-10)) if 0 < p_bad < 1 else 0.0
 
-            summary = f"P(bad) = {p_bad:.2f}. Uncertainty is {'high' if entropy > 0.8 else 'medium' if entropy > 0.5 else 'low'}."
+            uncertainty = "high" if entropy > 0.8 else "medium" if entropy > 0.5 else "low"
+            summary = f"P(bad) = {p_bad:.2f}. Uncertainty is {uncertainty}."
 
-            response = {
+            response: dict[str, Any] = {
                 "target": target,
                 "summary": summary,
                 "posterior": {
@@ -634,7 +647,237 @@ class InferenceHandlerMixin(OhmHandlerBase):
                 "what_to_do_next": {
                     "suggested_observations": suggestions[:5],
                 },
+                "method": method,
+                "pgmpy_available": pgmpy_available,
             }
+
+            # ── OHM-934: Prior distribution + KL surprise ──
+            if include_prior and evidence:
+                try:
+                    prior_result = bayesian_inference(
+                        self.current_store.conn.cursor(),
+                        target,
+                        {},
+                        edge_types=edge_types,
+                        layers=layers,
+                        leak_probability=leak_probability,
+                        customer_id=self._customer_id,
+                    )
+                    prior_posterior = prior_result.get("posterior", {})
+                    prior_target = prior_posterior.get(target, {}) if isinstance(prior_posterior, dict) else {}
+                    p_bad_prior = float(prior_target.get("bad", 0.0))
+                    p_good_prior = float(prior_target.get("good", 1.0 - p_bad_prior))
+
+                    response["prior"] = {
+                        "P(bad)": round(p_bad_prior, 4),
+                        "P(good)": round(p_good_prior, 4),
+                    }
+
+                    # KL divergence: D_KL(posterior || prior)
+                    kl = 0.0
+                    for p_post, p_prior in [(p_bad, p_bad_prior), (p_good, p_good_prior)]:
+                        if p_post > 1e-10 and p_prior > 1e-10:
+                            kl += p_post * math.log(p_post / p_prior)
+                    kl = round(kl, 6)
+
+                    if kl < 0.01:
+                        surprise_level = "negligible"
+                    elif kl < 0.1:
+                        surprise_level = "low"
+                    elif kl < 0.5:
+                        surprise_level = "moderate"
+                    elif kl < 1.0:
+                        surprise_level = "high"
+                    else:
+                        surprise_level = "very_high"
+
+                    response["surprise"] = {
+                        "kl_divergence": kl,
+                        "level": surprise_level,
+                    }
+                except Exception:
+                    pass
+
+            # ── OHM-934: Posterior percentiles via Beta approximation ──
+            # Count effective observations from the evidence size + drivers
+            n_effective = max(len(evidence) + len(drivers), 2)
+            if 0 < p_bad < 1:
+                kappa = float(n_effective)
+                alpha = p_bad * kappa + 1.0
+                beta_param = (1.0 - p_bad) * kappa + 1.0
+
+                def _beta_quantile(q: float) -> float:
+                    """Inverse CDF of Beta(alpha, beta) via bisection."""
+                    lo, hi = 0.0, 1.0
+                    for _ in range(50):
+                        mid = (lo + hi) / 2.0
+                        # Regularised incomplete beta via simple numeric integration
+                        # For small params, use scipy-like approximation
+                        from math import betainc as _betainc  # type: ignore[attr-defined]
+                        try:
+                            cdf = _betainc(alpha, beta_param, mid)
+                        except (ImportError, ValueError):
+                            # Fallback: normal approximation
+                            mean = alpha / (alpha + beta_param)
+                            std_val = math.sqrt(alpha * beta_param / ((alpha + beta_param) ** 2 * (alpha + beta_param + 1)))
+                            from math import erfc, sqrt
+                            cdf = 0.5 * erfc(-(mid - mean) / (std_val * sqrt(2)))
+                        if cdf < q:
+                            lo = mid
+                        else:
+                            hi = mid
+                    return (lo + hi) / 2.0
+
+                # Compute percentiles
+                percentiles = {}
+                for pct_name, q in [("p05", 0.05), ("p25", 0.25), ("p50", 0.50), ("p75", 0.75), ("p95", 0.95)]:
+                    try:
+                        percentiles[pct_name] = round(_beta_quantile(q), 4)
+                    except Exception:
+                        # Fallback: normal approximation
+                        mean = alpha / (alpha + beta_param)
+                        std_val = math.sqrt(alpha * beta_param / ((alpha + beta_param) ** 2 * (alpha + beta_param + 1)))
+                        from math import erfc, sqrt
+                        from statistics import NormalDist
+                        nd = NormalDist(mu=mean, sigma=std_val)
+                        z_map = {0.05: -1.645, 0.25: -0.674, 0.50: 0.0, 0.75: 0.674, 0.95: 1.645}
+                        percentiles[pct_name] = round(mean + std_val * z_map[q], 4)
+
+                # Mode of Beta distribution
+                if alpha > 1 and beta_param > 1:
+                    mode = round((alpha - 1) / (alpha + beta_param - 2), 4)
+                else:
+                    mode = round(p_bad, 4)
+
+                # Standard deviation
+                std = round(math.sqrt(alpha * beta_param / ((alpha + beta_param) ** 2 * (alpha + beta_param + 1))), 4)
+
+                response["posterior"].update({
+                    **percentiles,
+                    "mean": round(p_bad, 4),
+                    "mode": mode,
+                    "std": std,
+                })
+
+                # Update summary with top driver
+                if drivers:
+                    summary += f" Top driver: {drivers[0]['node']}."
+                    response["summary"] = summary
+
+            # ── OHM-934: Evidence movers ──
+            if include_evidence_movers and evidence:
+                movers = []
+                for obs_node, obs_state in evidence.items():
+                    try:
+                        # Re-run inference without this observation
+                        reduced_evidence = {k: v for k, v in evidence.items() if k != obs_node}
+                        reduced_result = bayesian_inference(
+                            self.current_store.conn.cursor(),
+                            target,
+                            reduced_evidence,
+                            edge_types=edge_types,
+                            layers=layers,
+                            leak_probability=leak_probability,
+                            customer_id=self._customer_id,
+                        )
+                        reduced_posterior = reduced_result.get("posterior", {})
+                        reduced_target = reduced_posterior.get(target, {}) if isinstance(reduced_posterior, dict) else {}
+                        p_bad_reduced = float(reduced_target.get("bad", p_bad))
+
+                        delta = p_bad - p_bad_reduced
+
+                        # Look up observation metadata from neighborhood edges
+                        obs_type = "observation"
+                        effective_confidence = float(obs_state) if isinstance(obs_state, (int, float)) else 0.5
+                        age_days = 0.0
+                        source = None
+
+                        for edge in edges:
+                            if isinstance(edge, dict):
+                                if edge.get("from_node") == obs_node or edge.get("to_node") == obs_node:
+                                    ec = edge.get("confidence")
+                                    if ec is not None:
+                                        effective_confidence = float(ec)
+                                    break
+
+                        # Try to get observation age from the node's created_at
+                        try:
+                            from ohm.graph.queries import _rows_to_dicts
+                            cursor = self.current_store.read_conn.cursor()
+                            rows = _rows_to_dicts(cursor.execute(
+                                "SELECT type, created_at FROM ohm_nodes WHERE id = ?",
+                                [obs_node],
+                            ))
+                            if rows:
+                                obs_type = rows[0].get("type", obs_type)
+                                created_at = rows[0].get("created_at")
+                                if created_at:
+                                    import datetime
+                                    try:
+                                        if isinstance(created_at, str):
+                                            created = datetime.datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                                        else:
+                                            created = created_at
+                                        age_days = round((datetime.datetime.now(datetime.timezone.utc) - created).total_seconds() / 86400, 1)
+                                    except (ValueError, TypeError, AttributeError):
+                                        pass
+                        except Exception:
+                            pass
+
+                        # Try to find source agent
+                        try:
+                            from ohm.graph.queries import _rows_to_dicts
+                            cursor = self.current_store.read_conn.cursor()
+                            src_rows = _rows_to_dicts(cursor.execute(
+                                "SELECT provenance FROM ohm_edges WHERE from_node = ? AND to_node = ? LIMIT 1",
+                                [obs_node, target],
+                            ))
+                            if not src_rows:
+                                src_rows = _rows_to_dicts(cursor.execute(
+                                    "SELECT provenance FROM ohm_edges WHERE from_node = ? AND to_node = ? LIMIT 1",
+                                    [target, obs_node],
+                                ))
+                            if src_rows:
+                                source = src_rows[0].get("provenance")
+                        except Exception:
+                            pass
+
+                        movers.append({
+                            "node": obs_node,
+                            "type": obs_type,
+                            "delta_p_bad": round(delta, 4),
+                            "direction": "increases_bad" if delta > 0 else "decreases_bad",
+                            "effective_confidence": round(effective_confidence, 4),
+                            "age_days": age_days,
+                            "source": source,
+                        })
+                    except Exception:
+                        continue
+
+                # Sort by absolute impact
+                movers.sort(key=lambda m: abs(m["delta_p_bad"]), reverse=True)
+                response["evidence_movers"] = movers
+
+            # ── OHM-934: Belief statement calibration ──
+            if belief_statement_str:
+                try:
+                    from ohm.mcp.belief import parse_belief_statement, compare_belief_to_posterior
+                    parsed = parse_belief_statement(belief_statement_str)
+                    if parsed:
+                        comparison = compare_belief_to_posterior(
+                            parsed["claimed_probability"],
+                            {"P(bad)": p_bad, "P(good)": p_good},
+                            parsed.get("state", "bad"),
+                        )
+                        response["calibration"] = {
+                            "agent_belief_statement": parsed.get("raw", belief_statement_str),
+                            "graph_probability": comparison["graph_probability"],
+                            "divergence": comparison["divergence"],
+                            "severity": comparison["severity"],
+                        }
+                except Exception:
+                    pass
+
             self._json_response(200, response)
         except Exception as e:
             self._json_response(500, {"error": "internal_error", "message": f"Belief computation failed: {e}"})

@@ -71,7 +71,8 @@ def all_tools() -> list[Tool]:
             name="ohm_belief",
             description=(
                 "Get a complete belief summary for a target node: posterior probability, "
-                "why the graph believes it (causal drivers), and what to observe next "
+                "full percentiles, prior vs posterior surprise, evidence movers, "
+                "belief calibration, and what to observe next "
                 "(value-of-information ranking). This is the deep-dive path — for ambient "
                 "belief context on read tools, use include_belief=true instead."
             ),
@@ -81,7 +82,11 @@ def all_tools() -> list[Tool]:
                     "target": {"type": "string", "description": "Node ID to query"},
                     "evidence": {"type": "string", "description": "Evidence assignments, e.g. 'node_a:1,node_b:0.7'"},
                     "layers": {"type": "string", "description": "Comma-separated causal layers (default: L3)"},
+                    "edge_types": {"type": "string", "description": "Comma-separated edge types for Bayesian network (default: inference edge types)"},
                     "leak": {"type": "number", "description": "Leak probability for noisy-OR (default: 0.15)", "default": 0.15},
+                    "include_evidence_movers": {"type": "boolean", "description": "Include which observations moved belief, by how much (default: true)", "default": True},
+                    "include_prior": {"type": "boolean", "description": "Include prior distribution and KL surprise (default: true)", "default": True},
+                    "belief_statement": {"type": "string", "description": "Optional agent-stated belief to calibrate, e.g. 'P(bad)=0.5' or 'likely'"},
                     "format": {"type": "string", "description": "Response encoding: 'json' or 'toon'", "enum": ["json", "toon"], "default": "json"},
                 },
                 "required": ["target"],
