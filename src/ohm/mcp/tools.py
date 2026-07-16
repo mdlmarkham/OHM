@@ -1276,4 +1276,58 @@ def all_tools() -> list[Tool]:
                 "required": ["series_id"],
             },
         ),
+        Tool(
+            name="ohm_propose_correction",
+            description="Propose a correction to a node — creates a decision node with CORRECTS edge, preserving the original (OHM-959/ADR-044).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "old_node_id": {"type": "string", "description": "ID of the node being corrected."},
+                    "reason": {"type": "string", "description": "Non-empty explanation of why the correction is needed."},
+                    "field": {"type": "string", "description": "Which field is being corrected (e.g. 'label', 'content')."},
+                    "old_value": {"type": "string", "description": "The incorrect value."},
+                    "new_value": {"type": "string", "description": "The corrected value."},
+                    "new_node_id": {"type": "string", "description": "Optional ID of a replacement node (creates SUPERSEDES edge)."},
+                    "evidence_node_ids": {"type": "array", "items": {"type": "string"}, "description": "Node IDs providing evidence for the correction."},
+                    "severity": {"type": "string", "enum": ["minor", "moderate", "major"], "default": "minor"},
+                },
+                "required": ["old_node_id", "reason"],
+            },
+        ),
+        Tool(
+            name="ohm_commit_correction",
+            description="Commit a proposed correction — marks old node as superseded, updates correction status to committed (OHM-959).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "correction_id": {"type": "string", "description": "ID of the correction decision node."},
+                },
+                "required": ["correction_id"],
+            },
+        ),
+        Tool(
+            name="ohm_reject_correction",
+            description="Reject a proposed correction — updates correction status to rejected with optional reason (OHM-959).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "correction_id": {"type": "string"},
+                    "rejection_reason": {"type": "string"},
+                },
+                "required": ["correction_id"],
+            },
+        ),
+        Tool(
+            name="ohm_corrections",
+            description="List corrections targeting a node — walks CORRECTS edges to find pending/committed/rejected corrections (OHM-959).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "node_id": {"type": "string", "description": "Filter corrections targeting this node."},
+                    "status": {"type": "string", "description": "Filter by correction status."},
+                    "limit": {"type": "integer", "default": 50},
+                },
+                "required": [],
+            },
+        ),
     ]

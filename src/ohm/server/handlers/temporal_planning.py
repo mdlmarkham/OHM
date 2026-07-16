@@ -674,3 +674,189 @@ class TemporalPlanningHandlerMixin(OhmHandlerBase):
             "horizon": meta.get("horizon"),
             "actuals": actuals,
         })
+
+    # ── Correction workflow (OHM-959 / ADR-044) ───────────────────────────
+
+    def _post_propose_correction(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /correction/propose — propose a correction to a node.
+
+        Creates a `decision` node with correction metadata, a CORRECTS edge
+        to the old node, and optionally a SUPERSEDES edge from a new node.
+        """
+        from ohm.exceptions import ValidationError
+        from ohm.graph.queries import create_node, create_edge, node_exists
+
+        old_node_id = body.get("old_node_id")
+        if not old_node_id:
+            raise ValidationError("old_node_id is required")
+        reason = body.get("reason")
+        if not reason:
+            raise ValidationError("reason is required")
+
+        # Validate old node exists
+        if not node_exists(self.current_store.conn, old_node_id):
+            from ohm.exceptions import NodeNotFoundError
+
+            raise NodeNotFoundError(f"Node {old_node_id} not found")
+
+        correction_meta = {
+            "correction": {
+                "status": "proposed",
+                "old_node_id": old_node_id,
+                "field": body.get("field"),
+                "old_value": body.get("old_value"),
+                "new_value": body.get("new_value"),
+                "reason": reason,
+                "evidence_node_ids": body.get("evidence_node_ids", []),
+                "severity": body.get("severity", "minor"),
+            },
+        }
+
+        correction_node = create_node(
+            self.current_store.conn,
+            label=f"Correction: {body.get('field', 'content')} of {old_node_id}",
+            node_type="decision",
+            created_by=agent,
+            content=reason,
+            connects_to=[old_node_id],
+            metadata=correction_meta,
+        )
+
+        create_edge(
+            self.current_store.conn,
+            from_node=correction_node["id"],
+            to_node=old_node_id,
+            layer="L3",
+            edge_type="CORRECTS",
+            created_by=agent,
+            metadata={"reason": reason},
+        )
+
+        # If a replacement node ID is provided, create SUPERSEDES edge
+        new_node_id = body.get("new_node_id")
+        if new_node_id and node_exists(self.current_store.conn, new_node_id):
+                create_edge(
+                    self.current_store.conn,
+                    from_node=new_node_id,
+                    to_node=old_node_id,
+                    layer="L4",
+                    edge_type="SUPERSEDES",
+                    created_by=agent,
+                    metadata={"correction_id": correction_node["id"]},
+                )
+
+        self._json_response(201, correction_node)
+
+    def _post_commit_correction(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /correction/commit — commit a proposed correction."""
+        from ohm.exceptions import ValidationError
+        from ohm.graph.queries._shared import _rows_to_dicts
+        import json as _json
+
+        correction_id = body.get("correction_id")
+        if not correction_id:
+            raise ValidationError("correction_id is required")
+
+        rows = _rows_to_dicts(
+            self.current_store.conn.execute("SELECT * FROM ohm_nodes WHERE id = ?", [correction_id])
+        )
+        if not rows:
+            from ohm.exceptions import NodeNotFoundError
+
+            raise NodeNotFoundError(f"Correction {correction_id} not found")
+
+        node = rows[0]
+        meta = node.get("metadata")
+        if isinstance(meta, str):
+            try:
+                meta = _json.loads(meta)
+            except (ValueError, TypeError):
+                meta = {}
+        if not isinstance(meta, dict) or "correction" not in meta:
+            raise ValidationError("Node is not a correction node")
+
+        correction = meta.get("correction", {})
+        correction["status"] = "committed"
+        correction["committed_by"] = agent
+        meta["correction"] = correction
+
+        meta_json = _json.dumps(meta)
+        self.current_store.conn.execute(
+            "UPDATE ohm_nodes SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            [meta_json, correction_id],
+        )
+
+        # Mark old node as superseded via task_status
+        old_node_id = correction.get("old_node_id")
+        if old_node_id:
+            self.current_store.conn.execute(
+                "UPDATE ohm_nodes SET task_status = 'superseded', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                [old_node_id],
+            )
+
+        self._json_response(200, {"correction_id": correction_id, "status": "committed"})
+
+    def _post_reject_correction(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /correction/reject — reject a proposed correction."""
+        from ohm.exceptions import ValidationError
+        from ohm.graph.queries._shared import _rows_to_dicts
+        import json as _json
+
+        correction_id = body.get("correction_id")
+        if not correction_id:
+            raise ValidationError("correction_id is required")
+
+        rows = _rows_to_dicts(
+            self.current_store.conn.execute("SELECT * FROM ohm_nodes WHERE id = ?", [correction_id])
+        )
+        if not rows:
+            from ohm.exceptions import NodeNotFoundError
+
+            raise NodeNotFoundError(f"Correction {correction_id} not found")
+
+        node = rows[0]
+        meta = node.get("metadata")
+        if isinstance(meta, str):
+            try:
+                meta = _json.loads(meta)
+            except (ValueError, TypeError):
+                meta = {}
+        if not isinstance(meta, dict) or "correction" not in meta:
+            raise ValidationError("Node is not a correction node")
+
+        correction = meta.get("correction", {})
+        correction["status"] = "rejected"
+        correction["rejected_by"] = agent
+        correction["rejection_reason"] = body.get("rejection_reason", "")
+        meta["correction"] = correction
+
+        meta_json = _json.dumps(meta)
+        self.current_store.conn.execute(
+            "UPDATE ohm_nodes SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            [meta_json, correction_id],
+        )
+
+        self._json_response(200, {"correction_id": correction_id, "status": "rejected"})
+
+    def _get_corrections(self, path: str, qs: dict) -> None:
+        """GET /corrections — list corrections for a node."""
+        from ohm.graph.queries._shared import _rows_to_dicts
+
+        node_id = qs.get("node_id", [None])[0]
+        status = qs.get("status", [None])[0]
+        limit = int(qs.get("limit", ["50"])[0])
+
+        query = (
+            "SELECT n.* FROM ohm_nodes n "
+            "JOIN ohm_edges e ON e.from_node = n.id AND e.edge_type = 'CORRECTS' "
+            "WHERE n.type = 'decision' AND n.deleted_at IS NULL"
+        )
+        params: list = []
+        if node_id:
+            query += " AND e.to_node = ?"
+            params.append(node_id)
+        query += " ORDER BY n.created_at DESC LIMIT ?"
+        params.append(limit)
+
+        corrections = _rows_to_dicts(self.current_store.conn.execute(query, params))
+        self._json_response(200, {"corrections": corrections, "count": len(corrections)})

@@ -335,7 +335,7 @@ class TestMCPSchemas:
 
     def test_tool_count(self):
         from ohm.mcp.tools import all_tools
-        assert len(all_tools()) == 72
+        assert len(all_tools()) == 76
 
 
 # ── MCP dispatch ────────────────────────────────────────────────────────

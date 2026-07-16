@@ -413,6 +413,8 @@ LAYER_EDGE_TYPES: dict[str, frozenset[str]] = {
             "BASELINE_FOR",  # baseline snapshot node → scenario/forecast
             "ACTUALIZES",  # observation/actual outcome → forecast (error tracking)
             "DRIFT_FROM",  # drift observation → plan/forecast it deviated from
+            # ── Correction workflow (OHM-959) ──
+            "CORRECTS",  # correction decision node → old node being corrected
         }
     ),
     "L4": frozenset(
@@ -1953,7 +1955,7 @@ DDL_STATEMENTS: list[str] = [
 
 # ── Schema Version ──────────────────────────────────────────────────────────
 
-SCHEMA_VERSION = "0.57.0"
+SCHEMA_VERSION = "0.58.0"
 
 # ── Migrations ──────────────────────────────────────────────────────────────
 # Each migration is (version, description, list_of_sql_statements).
@@ -2850,6 +2852,14 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             # validated in application code (VALID_NODE_TYPES, LAYER_EDGE_TYPES,
             # VALID_TASK_STATUSES). Migration bumps version so agents can
             # detect temporal planning support is available.
+            "SELECT 1;",
+        ],
+    ),
+    (
+        "0.58.0",
+        "OHM-959: add CORRECTS edge type to L3 for correction workflow",
+        [
+            # No DDL — new edge type validated in application code.
             "SELECT 1;",
         ],
     ),

@@ -150,7 +150,8 @@
       "SCENARIO_FOR",
       "BASELINE_FOR",
       "ACTUALIZES",
-      "DRIFT_FROM"
+      "DRIFT_FROM",
+      "CORRECTS"
     ],
     "L4": [
       "APPLIES_TO",
