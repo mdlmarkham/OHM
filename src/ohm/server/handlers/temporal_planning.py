@@ -544,3 +544,54 @@ class TemporalPlanningHandlerMixin(OhmHandlerBase):
             created_by=agent,
         )
         self._json_response(200, result)
+
+    # ── Time-series helpers (OHM-943 / Stage 6) ───────────────────────────
+
+    def _get_series_query(self, path: str, qs: dict) -> None:
+        from ohm.temporal.time_series import query_series
+        from ohm.exceptions import ValidationError
+
+        series_id = qs.get("series_id", [None])[0]
+        if not series_id:
+            raise ValidationError("series_id is required")
+
+        start = qs.get("start", [None])[0]
+        end = qs.get("end", [None])[0]
+        limit = int(qs.get("limit", ["1000"])[0])
+
+        result = query_series(
+            self.current_store.read_conn,
+            series_id,
+            start=start,
+            end=end,
+            limit=limit,
+        )
+        self._json_response(200, {"observations": result, "count": len(result)})
+
+    def _get_series_baseline(self, path: str, qs: dict) -> None:
+        from ohm.temporal.time_series import compute_baseline
+        from ohm.exceptions import ValidationError
+
+        series_id = qs.get("series_id", [None])[0]
+        if not series_id:
+            raise ValidationError("series_id is required")
+
+        method = qs.get("method", ["rolling_30d"])[0]
+        result = compute_baseline(self.current_store.read_conn, series_id, method=method)
+        self._json_response(200, result)
+
+    def _get_series_anomalies(self, path: str, qs: dict) -> None:
+        from ohm.temporal.time_series import detect_series_anomalies
+        from ohm.exceptions import ValidationError
+
+        series_id = qs.get("series_id", [None])[0]
+        if not series_id:
+            raise ValidationError("series_id is required")
+
+        method = qs.get("method", ["rolling_30d"])[0]
+        sigma = float(qs.get("sigma", ["2.0"])[0])
+
+        result = detect_series_anomalies(
+            self.current_store.read_conn, series_id, method=method, sigma=sigma,
+        )
+        self._json_response(200, {"anomalies": result, "count": len(result)})

@@ -1013,6 +1013,9 @@ def _build_router() -> _RouteRegistry:
     r.add("GET", "/forecast/")
     r.add("POST", "/scenario/rerun")
     r.add("GET", "/scenario/")
+    r.add("GET", "/series/query")
+    r.add("GET", "/series/baseline")
+    r.add("GET", "/series/anomalies")
 
     # PATCH
     r.add("PATCH", "/node/")
@@ -3014,6 +3017,9 @@ OhmHandler._POST_EXACT["/forecast/resolve"] = "_post_forecast_resolve"
 OhmHandler._GET_PREFIXES.append(("/forecast/", "_get_forecast_detail"))
 OhmHandler._POST_EXACT["/scenario/rerun"] = "_post_scenario_rerun"
 OhmHandler._GET_PREFIXES.append(("/scenario/", "_route_scenario_get_or_diff"))
+OhmHandler._GET_EXACT["/series/query"] = "_get_series_query"
+OhmHandler._GET_EXACT["/series/baseline"] = "_get_series_baseline"
+OhmHandler._GET_EXACT["/series/anomalies"] = "_get_series_anomalies"
 
 
 def make_configured_handler(store: OhmStore):

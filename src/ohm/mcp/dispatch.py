@@ -537,6 +537,32 @@ def build_request(name: str, arguments: dict[str, Any], agent_id: str) -> tuple[
     if name == "ohm_scenario_diff":
         return "GET", "/scenario/" + arguments["scenario_id"] + "/diff", None
 
+    if name == "ohm_series_query":
+        import urllib.parse
+        params = {"series_id": arguments["series_id"]}
+        for key in ("start", "end"):
+            if arguments.get(key):
+                params[key] = arguments[key]
+        if arguments.get("limit") is not None:
+            params["limit"] = str(arguments["limit"])
+        return "GET", "/series/query?" + urllib.parse.urlencode(sorted(params.items())), None
+
+    if name == "ohm_series_baseline":
+        import urllib.parse
+        params = {"series_id": arguments["series_id"]}
+        if arguments.get("method"):
+            params["method"] = arguments["method"]
+        return "GET", "/series/baseline?" + urllib.parse.urlencode(sorted(params.items())), None
+
+    if name == "ohm_series_anomalies":
+        import urllib.parse
+        params = {"series_id": arguments["series_id"]}
+        if arguments.get("method"):
+            params["method"] = arguments["method"]
+        if arguments.get("sigma") is not None:
+            params["sigma"] = str(arguments["sigma"])
+        return "GET", "/series/anomalies?" + urllib.parse.urlencode(sorted(params.items())), None
+
     raise KeyError(f"Unknown tool: {name}")
 
 

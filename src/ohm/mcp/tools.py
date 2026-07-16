@@ -1237,4 +1237,43 @@ def all_tools() -> list[Tool]:
                 "required": ["scenario_id"],
             },
         ),
+        Tool(
+            name="ohm_series_query",
+            description="Query a time series by series_id from observation metadata (OHM-943).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "series_id": {"type": "string", "description": "Series identifier in observation metadata."},
+                    "start": {"type": "string", "description": "Optional start timestamp filter."},
+                    "end": {"type": "string", "description": "Optional end timestamp filter."},
+                    "limit": {"type": "integer", "default": 1000},
+                },
+                "required": ["series_id"],
+            },
+        ),
+        Tool(
+            name="ohm_series_baseline",
+            description="Compute baseline mean and std for a time series (OHM-943).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "series_id": {"type": "string"},
+                    "method": {"type": "string", "enum": ["rolling_30d", "rolling_7d", "rolling_14d", "mean"], "default": "rolling_30d"},
+                },
+                "required": ["series_id"],
+            },
+        ),
+        Tool(
+            name="ohm_series_anomalies",
+            description="Detect anomalies in a time series: observations exceeding baseline +/- sigma*std (OHM-943).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "series_id": {"type": "string"},
+                    "method": {"type": "string", "default": "rolling_30d"},
+                    "sigma": {"type": "number", "default": 2.0},
+                },
+                "required": ["series_id"],
+            },
+        ),
     ]
