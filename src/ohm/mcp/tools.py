@@ -1204,4 +1204,37 @@ def all_tools() -> list[Tool]:
                 "required": ["forecast_id", "actual_value"],
             },
         ),
+        Tool(
+            name="ohm_scenario_get",
+            description="Get full scenario detail: node + metadata + SCENARIO_FOR target + latest result (OHM-942).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "scenario_id": {"type": "string"},
+                },
+                "required": ["scenario_id"],
+            },
+        ),
+        Tool(
+            name="ohm_scenario_rerun",
+            description="Re-run a saved scenario against current graph state and return deltas vs original (OHM-942).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "scenario_id": {"type": "string"},
+                },
+                "required": ["scenario_id"],
+            },
+        ),
+        Tool(
+            name="ohm_scenario_diff",
+            description="Compare a scenario snapshot to current graph state (OHM-942).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "scenario_id": {"type": "string"},
+                },
+                "required": ["scenario_id"],
+            },
+        ),
     ]

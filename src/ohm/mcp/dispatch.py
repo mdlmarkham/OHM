@@ -528,6 +528,15 @@ def build_request(name: str, arguments: dict[str, Any], agent_id: str) -> tuple[
             "actual_value": arguments["actual_value"],
         }
 
+    if name == "ohm_scenario_get":
+        return "GET", "/scenario/" + arguments["scenario_id"], None
+
+    if name == "ohm_scenario_rerun":
+        return "POST", "/scenario/rerun", {"scenario_id": arguments["scenario_id"]}
+
+    if name == "ohm_scenario_diff":
+        return "GET", "/scenario/" + arguments["scenario_id"] + "/diff", None
+
     raise KeyError(f"Unknown tool: {name}")
 
 

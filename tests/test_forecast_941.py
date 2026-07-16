@@ -196,9 +196,9 @@ class TestMCPSchemas941:
         }
         assert expected.issubset(tool_names)
 
-    def test_tool_count_66(self):
+    def test_tool_count_69(self):
         from ohm.mcp.tools import all_tools
-        assert len(all_tools()) == 66
+        assert len(all_tools()) == 69
 
 
 # ── MCP dispatch ─────────────────────────────────────────────────────────

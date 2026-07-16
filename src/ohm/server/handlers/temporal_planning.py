@@ -295,21 +295,64 @@ class TemporalPlanningHandlerMixin(OhmHandlerBase):
         target_id = qs.get("target_node_id", [None])[0]
         limit = int(qs.get("limit", ["50"])[0])
         if target_id:
-            rows = self.current_store.read_conn.execute(
-                "SELECT n.* FROM ohm_nodes n "
-                "JOIN ohm_edges e ON e.to_node = n.id AND e.edge_type = 'SCENARIO_FOR' "
-                "WHERE n.type = 'scenario' AND n.deleted_at IS NULL AND e.from_node = ? "
-                "ORDER BY n.created_at DESC LIMIT ?",
-                [target_id, limit],
-            ).fetchall()
+            rows = _rows_to_dicts(
+                self.current_store.read_conn.execute(
+                    "SELECT n.* FROM ohm_nodes n "
+                    "JOIN ohm_edges e ON e.to_node = n.id AND e.edge_type = 'SCENARIO_FOR' "
+                    "WHERE n.type = 'scenario' AND n.deleted_at IS NULL AND e.from_node = ? "
+                    "ORDER BY n.created_at DESC LIMIT ?",
+                    [target_id, limit],
+                )
+            )
         else:
-            rows = self.current_store.read_conn.execute(
-                "SELECT * FROM ohm_nodes WHERE type = 'scenario' AND deleted_at IS NULL "
-                "ORDER BY created_at DESC LIMIT ?",
-                [limit],
-            ).fetchall()
-        scenarios = _rows_to_dicts(rows)
-        self._json_response(200, {"scenarios": scenarios, "count": len(scenarios)})
+            rows = _rows_to_dicts(
+                self.current_store.read_conn.execute(
+                    "SELECT * FROM ohm_nodes WHERE type = 'scenario' AND deleted_at IS NULL "
+                    "ORDER BY created_at DESC LIMIT ?",
+                    [limit],
+                )
+            )
+        self._json_response(200, {"scenarios": rows, "count": len(rows)})
+
+    def _get_scenario_detail(self, path: str, qs: dict) -> None:
+        from ohm.graph.queries.scenario_persist import get_scenario
+        from ohm.exceptions import NodeNotFoundError
+
+        scenario_id = path.rstrip("/").split("/")[-1]
+        result = get_scenario(self.current_store.read_conn, scenario_id)
+        if not result:
+            raise NodeNotFoundError(f"Scenario {scenario_id} not found")
+        self._json_response(200, result)
+
+    def _post_scenario_rerun(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        from ohm.exceptions import ValidationError
+        from ohm.graph.queries.scenario_persist import rerun_scenario
+
+        scenario_id = body.get("scenario_id")
+        if not scenario_id:
+            raise ValidationError("scenario_id is required")
+
+        result = rerun_scenario(self.current_store.conn, scenario_id, created_by=agent)
+        self._json_response(200, result)
+
+    def _get_scenario_diff(self, path: str, qs: dict) -> None:
+        from ohm.graph.queries.scenario_persist import diff_scenario
+        from ohm.exceptions import NodeNotFoundError
+
+        scenario_id = path.rstrip("/").split("/")[0]
+        try:
+            result = diff_scenario(self.current_store.read_conn, scenario_id)
+        except ValueError:
+            raise NodeNotFoundError(f"Scenario {scenario_id} not found")
+        self._json_response(200, result)
+
+    def _route_scenario_get_or_diff(self, path: str, qs: dict) -> None:
+        """Route /scenario/{id} or /scenario/{id}/diff to the right handler."""
+        stripped = path.rstrip("/")
+        if stripped.endswith("/diff"):
+            self._get_scenario_diff(path[len("/scenario/"):], qs)
+        else:
+            self._get_scenario_detail(path[len("/scenario/"):], qs)
 
     # ── Verification Outcomes ────────────────────────────────────────────
 
