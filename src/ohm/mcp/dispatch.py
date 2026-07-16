@@ -282,6 +282,15 @@ def build_request(name: str, arguments: dict[str, Any], agent_id: str) -> tuple[
     if name == "ohm_storage_efficiency":
         return "GET", "/storage/efficiency", None
 
+    if name == "ohm_source_reliability":
+        params: dict[str, str] = {}
+        if arguments.get("agent_id"):
+            params["agent_id"] = arguments["agent_id"]
+        return "GET", _qs("/agent/reliability", params), None
+
+    if name == "ohm_my_calibration":
+        return "GET", "/agent/calibration", None
+
     if name == "ohm_list_instances":
         # Local-only operation; not meaningful for a hosted gateway.
         raise NotImplementedError("ohm_list_instances is not supported by the hosted gateway; use the local ohm-mcp sidecar for instance registry access.")

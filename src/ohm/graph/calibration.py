@@ -459,9 +459,9 @@ def _compute_point_estimate_bias(conn, agent_name, total_edges):
     try:
         row = conn.execute(
             """
-            SELECT AVG(ABS(e.confidence - COALESCE(o.outcome, 0.5)))
+            SELECT AVG(ABS(e.confidence - COALESCE(CAST(o.outcome AS DOUBLE), 0.5)))
             FROM ohm_edges e
-            LEFT JOIN ohm_outcomes o ON o.claim_node = e."from"
+            LEFT JOIN ohm_outcomes o ON o.claim_node = e.from_node
             WHERE e.created_by = ? AND e.layer IN ('L3','L4')
             """,
             [agent_name],
@@ -513,9 +513,9 @@ def _compute_brier_score(conn, agent_name):
     try:
         rows = conn.execute(
             """
-            SELECT e.confidence, COALESCE(o.outcome, 0.5)
+            SELECT e.confidence, COALESCE(CAST(o.outcome AS DOUBLE), 0.5)
             FROM ohm_edges e
-            LEFT JOIN ohm_outcomes o ON o.claim_node = e."from"
+            LEFT JOIN ohm_outcomes o ON o.claim_node = e.from_node
             WHERE e.created_by = ? AND e.layer IN ('L3','L4')
             """,
             [agent_name],

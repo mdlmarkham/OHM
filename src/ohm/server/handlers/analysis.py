@@ -933,6 +933,78 @@ class AnalysisHandlerMixin(OhmHandlerBase):
         result = query_source_reliability(self.current_store.read_conn, source_agent)
         self._json_response(200, result)
 
+    def _get_agent_reliability(self, path: str, qs: dict) -> None:
+        """GET /agent/reliability — per-agent source reliability (OHM #910).
+
+        Query params:
+            agent_id: optional agent to evaluate. Omit for the calling
+                agent's own reliability.
+
+        Privacy: when the caller asks about a *different* agent, the
+        response is anonymised by default — the agent_id is replaced with a
+        stable pseudonym and ``anonymized`` is set to True. Named peer
+        scores require explicit tenant opt-in (not yet wired). Self-lookups
+        (agent_id omitted, or agent_id == caller) return the full named
+        result.
+        """
+        import hashlib
+
+        from ohm.queries import query_source_reliability
+        from ohm.validation import validate_identifier
+
+        requested_agent = qs.get("agent_id", [None])[0]
+        caller = getattr(self, "_current_agent", "ohm") or "ohm"
+
+        if requested_agent:
+            requested_agent = validate_identifier(requested_agent, name="agent_id")
+
+        target = requested_agent or caller
+        target = validate_identifier(target, name="agent_id")
+
+        result = query_source_reliability(self.current_store.read_conn, target)
+
+        anonymized = bool(requested_agent) and requested_agent != caller
+        if anonymized:
+            pseudonym = f"peer_{hashlib.sha256(target.encode()).hexdigest()[:8]}"
+            result["agent_id"] = pseudonym
+            result["source_agent"] = pseudonym
+            result["anonymized"] = True
+            result["privacy_note"] = (
+                "Peer reliability shown anonymously. Named peer scores "
+                "require explicit tenant opt-in."
+            )
+        else:
+            result["agent_id"] = target
+            result["anonymized"] = False
+
+        result["n_outcomes"] = result.get("total_outcomes", 0)
+        self._json_response(200, result)
+
+    def _get_agent_calibration(self, path: str, qs: dict) -> None:
+        """GET /agent/calibration — calling agent's calibration profile (OHM #910).
+
+        Always reflects the authenticated caller — no agent_id parameter.
+        Returns Brier score, overconfidence rate, novelty score, loop risk,
+        and prediction count, drawn from compute_agent_profile.
+        """
+        from ohm.graph.calibration import compute_agent_profile
+
+        caller = getattr(self, "_current_agent", "ohm") or "ohm"
+        profile = compute_agent_profile(self.current_store.read_conn, caller)
+
+        self._json_response(
+            200,
+            {
+                "agent_id": caller,
+                "brier_score": profile.get("brier_score", 0.0),
+                "overconfidence_rate": profile.get("overconfidence_rate", 0.0),
+                "novelty_score": profile.get("novelty_score", 0.0),
+                "loop_risk": profile.get("max_loop_risk", 0.0),
+                "n_predictions": profile.get("total_l3_l4_edges", 0),
+                "profile": profile,
+            },
+        )
+
     def _get_compound_confidence(self, path: str, qs: dict) -> None:
         """GET /compound_confidence/<node_id> — compound confidence from node observations."""
         node_id = path[21:]

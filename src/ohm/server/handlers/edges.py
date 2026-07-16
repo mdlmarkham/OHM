@@ -226,6 +226,7 @@ class EdgeHandlerMixin(IngestHelperMixin, OhmHandlerBase):
             source_tier=body.get("source_tier"),
             condition=body.get("condition"),
             metadata=body.get("metadata") if isinstance(body.get("metadata"), dict) else None,
+            agent=agent,
         )
         result = enrich_response(result, nudges, store=self.current_store, agent=agent, action="edge", target_id=result.get("id") if isinstance(result, dict) else None)
 

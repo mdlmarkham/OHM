@@ -2868,6 +2868,8 @@ OhmHandler._GET_EXACT = {
     "/edges": "_get_edges",
     "/backend/status": "_get_backend_status",
     "/storage/efficiency": "_get_storage_efficiency",
+    "/agent/reliability": "_get_agent_reliability",
+    "/agent/calibration": "_get_agent_calibration",
 }
 
 

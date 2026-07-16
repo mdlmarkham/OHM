@@ -57,6 +57,16 @@ class ChallengeSupportHandlerMixin(OhmHandlerBase):
                 },
                 customer_id=self._customer_id,
             )
+            # OHM-910: calibration nudges for challenges
+            from ohm.server.nudges import enrich_response, generate_nudges
+
+            nudges = generate_nudges(
+                action="challenge",
+                challenge_edge_id=edge_id,
+                store=self.current_store,
+                agent=agent,
+            )
+            result = enrich_response(result, nudges, store=self.current_store, agent=agent, action="challenge", target_id=edge_id)
             self._json_response(201, result)
         else:
             raise EdgeNotFoundError(f"Edge {edge_id} not found")
