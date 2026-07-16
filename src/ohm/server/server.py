@@ -1006,6 +1006,11 @@ def _build_router() -> _RouteRegistry:
     r.add("GET", "/drifts")
     r.add("POST", "/reconcile")
     r.add("GET", "/drift/explain")
+    r.add("POST", "/forecast/create")
+    r.add("GET", "/forecasts")
+    r.add("POST", "/forecast/transition")
+    r.add("POST", "/forecast/resolve")
+    r.add("GET", "/forecast/")
 
     # PATCH
     r.add("PATCH", "/node/")
@@ -3000,6 +3005,11 @@ OhmHandler._POST_EXACT["/verification/outcome"] = "_post_record_verification_out
 OhmHandler._GET_EXACT["/drifts"] = "_get_drift_list"
 OhmHandler._POST_EXACT["/reconcile"] = "_post_reconcile"
 OhmHandler._GET_EXACT["/drift/explain"] = "_get_drift_explain"
+OhmHandler._POST_EXACT["/forecast/create"] = "_post_forecast_create"
+OhmHandler._GET_EXACT["/forecasts"] = "_get_forecasts"
+OhmHandler._POST_EXACT["/forecast/transition"] = "_post_forecast_transition"
+OhmHandler._POST_EXACT["/forecast/resolve"] = "_post_forecast_resolve"
+OhmHandler._GET_PREFIXES.append(("/forecast/", "_get_forecast_detail"))
 
 
 def make_configured_handler(store: OhmStore):

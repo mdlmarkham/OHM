@@ -407,3 +407,97 @@ class TemporalPlanningHandlerMixin(OhmHandlerBase):
 
         result = explain_drift(self.current_store.conn, drift_id, top=top)
         self._json_response(200, result)
+
+    # ── Forecast registry (OHM-941 / Stage 4) ──────────────────────────────
+
+    def _post_forecast_create(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        from ohm.exceptions import ValidationError
+        from ohm.graph.queries.forecast import create_forecast
+
+        label = body.get("label")
+        target_node_id = body.get("target_node_id")
+        horizon = body.get("horizon")
+        if not label or not target_node_id or not horizon:
+            raise ValidationError("label, target_node_id, and horizon are required")
+
+        result = create_forecast(
+            self.current_store.conn,
+            label=label,
+            target_node_id=target_node_id,
+            horizon=horizon,
+            predicted_value=body.get("predicted_value"),
+            predicted_unit=body.get("predicted_unit"),
+            distribution=body.get("distribution"),
+            assumptions=body.get("assumptions"),
+            model_id=body.get("model_id"),
+            created_by=agent,
+            connects_to=body.get("connects_to"),
+            metadata=body.get("metadata"),
+        )
+        self._json_response(201, result)
+
+    def _get_forecasts(self, path: str, qs: dict) -> None:
+        from ohm.graph.queries.forecast import list_forecasts
+
+        target_node_id = qs.get("target_node_id", [None])[0]
+        horizon = qs.get("horizon", [None])[0]
+        status = qs.get("status", [None])[0]
+        created_by = qs.get("created_by", [None])[0]
+        limit = int(qs.get("limit", ["100"])[0])
+
+        result = list_forecasts(
+            self.current_store.read_conn,
+            target_node_id=target_node_id,
+            horizon=horizon,
+            status=status,
+            created_by=created_by,
+            limit=limit,
+        )
+        self._json_response(200, {"forecasts": result, "count": len(result)})
+
+    def _get_forecast_detail(self, path: str, qs: dict) -> None:
+        from ohm.graph.queries.forecast import get_forecast
+
+        forecast_id = path.rstrip("/").split("/")[-1]
+
+        result = get_forecast(self.current_store.read_conn, forecast_id)
+        if not result:
+            from ohm.exceptions import NodeNotFoundError
+
+            raise NodeNotFoundError(f"Forecast {forecast_id} not found")
+        self._json_response(200, result)
+
+    def _post_forecast_transition(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        from ohm.exceptions import ValidationError
+        from ohm.graph.queries.forecast import transition_forecast
+
+        forecast_id = body.get("forecast_id")
+        new_status = body.get("new_status")
+        if not forecast_id or not new_status:
+            raise ValidationError("forecast_id and new_status are required")
+
+        result = transition_forecast(
+            self.current_store.conn,
+            forecast_id=forecast_id,
+            new_status=new_status,
+            created_by=agent,
+            reason=body.get("reason"),
+        )
+        self._json_response(200, result)
+
+    def _post_forecast_resolve(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        from ohm.exceptions import ValidationError
+        from ohm.graph.queries.forecast import resolve_forecast
+
+        forecast_id = body.get("forecast_id")
+        actual_value = body.get("actual_value")
+        if not forecast_id or actual_value is None:
+            raise ValidationError("forecast_id and actual_value are required")
+
+        result = resolve_forecast(
+            self.current_store.conn,
+            forecast_id=forecast_id,
+            actual_value=float(actual_value),
+            created_by=agent,
+        )
+        self._json_response(200, result)

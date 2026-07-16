@@ -165,9 +165,9 @@ class TestMCPSchemas940:
         assert "ohm_reconcile" in tool_names
         assert "ohm_drift_explain" in tool_names
 
-    def test_tool_count_61(self):
+    def test_tool_count_66(self):
         from ohm.mcp.tools import all_tools
-        assert len(all_tools()) == 61
+        assert len(all_tools()) == 66
 
 
 # ── MCP dispatch tests ──────────────────────────────────────────────────────

@@ -488,6 +488,46 @@ def build_request(name: str, arguments: dict[str, Any], agent_id: str) -> tuple[
             params["top"] = str(arguments["top"])
         return "GET", "/drift/explain?" + urllib.parse.urlencode(sorted(params.items())), None
 
+    if name == "ohm_forecast_create":
+        body: dict[str, object] = {
+            "label": arguments["label"],
+            "target_node_id": arguments["target_node_id"],
+            "horizon": arguments["horizon"],
+        }
+        for key in ("predicted_value", "predicted_unit", "distribution", "assumptions", "model_id", "connects_to", "metadata"):
+            if arguments.get(key) is not None:
+                body[key] = arguments[key]
+        return "POST", "/forecast/create", body
+
+    if name == "ohm_forecast_list":
+        import urllib.parse
+        params = {}
+        for key in ("target_node_id", "horizon", "status", "created_by"):
+            if arguments.get(key):
+                params[key] = arguments[key]
+        if arguments.get("limit") is not None:
+            params["limit"] = str(arguments["limit"])
+        qs = ("?" + urllib.parse.urlencode(sorted(params.items()))) if params else ""
+        return "GET", "/forecasts" + qs, None
+
+    if name == "ohm_forecast_get":
+        return "GET", "/forecast/" + arguments["forecast_id"], None
+
+    if name == "ohm_forecast_transition":
+        body: dict[str, object] = {
+            "forecast_id": arguments["forecast_id"],
+            "new_status": arguments["new_status"],
+        }
+        if arguments.get("reason"):
+            body["reason"] = arguments["reason"]
+        return "POST", "/forecast/transition", body
+
+    if name == "ohm_forecast_resolve":
+        return "POST", "/forecast/resolve", {
+            "forecast_id": arguments["forecast_id"],
+            "actual_value": arguments["actual_value"],
+        }
+
     raise KeyError(f"Unknown tool: {name}")
 
 

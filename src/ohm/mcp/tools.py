@@ -1134,4 +1134,74 @@ def all_tools() -> list[Tool]:
                 "required": ["drift_id"],
             },
         ),
+        Tool(
+            name="ohm_forecast_create",
+            description="Create a forecast node linked to a target via FORECAST_FOR edge (OHM-941).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "label": {"type": "string", "description": "Human-readable forecast description."},
+                    "target_node_id": {"type": "string", "description": "Node ID the forecast targets."},
+                    "horizon": {"type": "string", "description": "Forecast horizon (e.g. '2026-09-30')."},
+                    "predicted_value": {"type": "number", "description": "Point/p50 prediction."},
+                    "predicted_unit": {"type": "string", "description": "Unit of the predicted value."},
+                    "distribution": {"type": "object", "description": "Distribution dict with p10/p50/p90 etc."},
+                    "assumptions": {"type": "array", "items": {"type": "string"}, "description": "Assumption node IDs."},
+                    "model_id": {"type": "string", "description": "Model version reference."},
+                    "connects_to": {"type": "array", "items": {"type": "string"}, "description": "Additional cross-link node IDs."},
+                },
+                "required": ["label", "target_node_id", "horizon"],
+            },
+        ),
+        Tool(
+            name="ohm_forecast_list",
+            description="List forecasts with filters (OHM-941).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "target_node_id": {"type": "string"},
+                    "horizon": {"type": "string"},
+                    "status": {"type": "string"},
+                    "created_by": {"type": "string"},
+                    "limit": {"type": "integer", "default": 100},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="ohm_forecast_get",
+            description="Get full forecast detail: node + target + latest accuracy (OHM-941).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "forecast_id": {"type": "string", "description": "Forecast node ID."},
+                },
+                "required": ["forecast_id"],
+            },
+        ),
+        Tool(
+            name="ohm_forecast_transition",
+            description="Transition a forecast through its lifecycle: draft -> committed -> active -> resolved_* -> superseded (OHM-941).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "forecast_id": {"type": "string"},
+                    "new_status": {"type": "string", "enum": ["committed", "active", "resolved_hit", "resolved_miss", "resolved_ambiguous", "superseded"]},
+                    "reason": {"type": "string"},
+                },
+                "required": ["forecast_id", "new_status"],
+            },
+        ),
+        Tool(
+            name="ohm_forecast_resolve",
+            description="Resolve a forecast: compute error metrics, write experiment_result observation, transition to resolved_hit/miss/ambiguous (OHM-941).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "forecast_id": {"type": "string"},
+                    "actual_value": {"type": "number"},
+                },
+                "required": ["forecast_id", "actual_value"],
+            },
+        ),
     ]
