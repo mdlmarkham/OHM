@@ -206,6 +206,14 @@ class OhmStore:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
+        # OHM-955: Concurrency guard — acquire PID-file lock before opening DB
+        # to prevent two processes from opening the same DuckDB file.
+        self._pid_file: Path | None = None
+        from ohm.graph.concurrency_guard import acquire_lock, is_guard_enabled
+
+        if is_guard_enabled(readonly=readonly, db_path=str(self.db_path)):
+            self._pid_file = acquire_lock(str(self.db_path))
+
         try:
             self.conn = self._connect_with_wal_recovery(str(self.db_path), readonly)
         except (duckdb.FatalException, duckdb.IOException, duckdb.InternalException) as e:
@@ -2464,6 +2472,12 @@ class OhmStore:
         except Exception:
             pass
         self.conn.close()
+        # OHM-955: Release concurrency guard PID file
+        if self._pid_file is not None:
+            from ohm.graph.concurrency_guard import release_lock
+
+            release_lock(self._pid_file)
+            self._pid_file = None
 
     def __enter__(self):
         return self

@@ -77,6 +77,12 @@ class ConflictError(OHMError):
     exit_code = 6
 
 
+class DaemonAlreadyRunningError(OHMError):
+    """Another ohmd process already holds the database (OHM-955)."""
+
+    exit_code = 7
+
+
 class ConstraintViolationError(OHMError):
     """Layer promotion or edge constraint violation (ADR-022)."""
 
@@ -91,4 +97,5 @@ EXIT_CODES = {
     4: "Permission denied",
     5: "Node or edge not found",
     6: "Conflict (resource already exists)",
+    7: "Daemon already running (database locked)",
 }
