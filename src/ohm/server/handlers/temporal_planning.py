@@ -800,8 +800,22 @@ class TemporalPlanningHandlerMixin(OhmHandlerBase):
         proposed_by = correction.get("proposed_by", "")
         force = body.get("force", False)
 
-        # Guardrail 2: Authority — proposer can self-commit; others need force
-        if agent != proposed_by and not force:
+        # Pre-compute whether this correction requires a second approval
+        # (high-confidence old node). This is needed for Guardrail 2's carve-out.
+        old_node_id = correction.get("old_node_id")
+        old_confidence = 0.0
+        if old_node_id:
+            old_node_row = self.current_store.conn.execute(
+                "SELECT confidence FROM ohm_nodes WHERE id = ?", [old_node_id]
+            ).fetchone()
+            old_confidence = old_node_row[0] if old_node_row else 0.0
+        confidence_threshold = float(os.environ.get("OHM_CORRECTION_CONFIDENCE_THRESHOLD", "0.8"))
+        requires_second_approval = bool(old_confidence and old_confidence >= confidence_threshold)
+
+        # Guardrail 2: Authority — proposer can self-commit; a distinct agent
+        # may supply the second approval required by Guardrail 4 without
+        # force; anyone else still needs force=true (OHM-962).
+        if agent != proposed_by and not force and not requires_second_approval:
             raise ValidationError(
                 f"Only the proposing agent ({proposed_by}) can commit this correction, "
                 f"or pass force=true to override (OHM-961 authority check)."
@@ -829,37 +843,30 @@ class TemporalPlanningHandlerMixin(OhmHandlerBase):
                         )
 
         # Guardrail 4: Confidence ceiling — high-confidence claims need a
-        # second distinct approving agent
-        old_node_id = correction.get("old_node_id")
-        if old_node_id:
-            old_node_row = self.current_store.conn.execute(
-                "SELECT confidence FROM ohm_nodes WHERE id = ?", [old_node_id]
-            ).fetchone()
-            old_confidence = old_node_row[0] if old_node_row else 0.0
-            confidence_threshold = float(os.environ.get("OHM_CORRECTION_CONFIDENCE_THRESHOLD", "0.8"))
+        # second distinct approving agent (OHM-962: now reachable by non-proposer
+        # agents thanks to Guardrail 2's carve-out).
+        if requires_second_approval and not force:
+            approvals = correction.get("approvals", [])
+            # Add this agent as an approver if not already
+            if agent not in approvals:
+                approvals.append(agent)
+                correction["approvals"] = approvals
 
-            if old_confidence and old_confidence >= confidence_threshold and not force:
-                approvals = correction.get("approvals", [])
-                # Add this agent as an approver if not already
-                if agent not in approvals:
-                    approvals.append(agent)
-                    correction["approvals"] = approvals
-
-                # Need at least 2 distinct approvals (proposer + one other)
-                distinct_approvers = set(approvals)
-                if len(distinct_approvers) < 2:
-                    meta["correction"] = correction
-                    meta_json = _json.dumps(meta)
-                    self.current_store.conn.execute(
-                        "UPDATE ohm_nodes SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                        [meta_json, correction_id],
-                    )
-                    raise ValidationError(
-                        f"Old node confidence is {old_confidence} (>= {confidence_threshold}). "
-                        f"Second distinct approving agent required. "
-                        f"Current approvals: {list(distinct_approvers)}. "
-                        f"Have a second agent call commit to approve (OHM-961)."
-                    )
+            # Need at least 2 distinct approvals (proposer + one other)
+            distinct_approvers = set(approvals)
+            if len(distinct_approvers) < 2:
+                meta["correction"] = correction
+                meta_json = _json.dumps(meta)
+                self.current_store.conn.execute(
+                    "UPDATE ohm_nodes SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    [meta_json, correction_id],
+                )
+                raise ValidationError(
+                    f"Old node confidence is {old_confidence} (>= {confidence_threshold}). "
+                    f"Second distinct approving agent required. "
+                    f"Current approvals: {list(distinct_approvers)}. "
+                    f"Have a second agent call commit to approve (OHM-961)."
+                )
 
         correction["status"] = "committed"
         correction["committed_by"] = agent

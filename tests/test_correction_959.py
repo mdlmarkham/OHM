@@ -85,6 +85,28 @@ class TestProposeCorrection:
         assert status == 404
 
 
+@pytest.fixture
+def auth_server(tmp_path):
+    """Server with two authenticated agents for testing approval flows."""
+    from ohm.graph.embeddings import NullBackend
+    from ohm.store import OhmStore
+
+    db_path = str(tmp_path / "auth_correction_test.duckdb")
+    store = OhmStore(
+        db_path=db_path,
+        agent_name="ohmd",
+        embedding_backend=NullBackend(dimensions=768),
+    )
+    port, server, thread = _start_test_server(
+        store,
+        tokens={"tok-proposer": "proposer", "tok-reviewer": "reviewer"},
+    )
+    yield port
+    server.shutdown()
+    thread.join(timeout=5)
+    store.close()
+
+
 # ── Commit ───────────────────────────────────────────────────────────────
 
 
@@ -232,3 +254,96 @@ class TestSchema959:
     def test_schema_version_058(self):
         from ohm.graph.schema import SCHEMA_VERSION
         assert SCHEMA_VERSION == "0.58.0"
+
+
+# ── Confidence-ceiling second-approval (OHM-962) ────────────────────────
+
+
+class TestConfidenceCeilingApproval:
+    """Tests for the OHM-962 fix: non-proposer agents can supply the second
+    approval on high-confidence corrections without force=true."""
+
+    def test_proposer_alone_rejected_on_high_confidence(self, auth_server):
+        """Proposer's commit on a high-confidence node is rejected pending a
+        second approver."""
+        s, _ = _request("POST", auth_server, "/node", {
+            "id": "hc-claim", "label": "High confidence claim", "type": "concept", "confidence": 0.9,
+        }, token="tok-proposer")
+        assert s == 201
+
+        s, corr = _request("POST", auth_server, "/correction/propose", {
+            "old_node_id": "hc-claim", "reason": "Wrong",
+        }, token="tok-proposer")
+        assert s == 201
+
+        s, data = _request("POST", auth_server, "/correction/commit", {
+            "correction_id": corr["id"],
+        }, token="tok-proposer")
+        assert s == 400
+        assert "Second distinct approving agent required" in data.get("message", "")
+
+    def test_second_agent_approves_and_finalizes(self, auth_server):
+        """A distinct second agent can call commit (no force) to supply the
+        second approval, and the correction finalizes."""
+        _request("POST", auth_server, "/node", {
+            "id": "hc-claim2", "label": "HC claim 2", "type": "concept", "confidence": 0.9,
+        }, token="tok-proposer")
+
+        s, corr = _request("POST", auth_server, "/correction/propose", {
+            "old_node_id": "hc-claim2", "reason": "Wrong",
+        }, token="tok-proposer")
+        assert s == 201
+
+        # Proposer's first commit: rejected, records proposer as approver 1
+        _request("POST", auth_server, "/correction/commit", {
+            "correction_id": corr["id"],
+        }, token="tok-proposer")
+
+        # Reviewer's commit (no force): should be accepted as second approval
+        s, data = _request("POST", auth_server, "/correction/commit", {
+            "correction_id": corr["id"],
+        }, token="tok-reviewer")
+        assert s == 200
+        assert data["status"] == "committed"
+
+    def test_same_agent_approving_twice_insufficient(self, auth_server):
+        """The proposer calling commit twice still only has 1 distinct approver."""
+        _request("POST", auth_server, "/node", {
+            "id": "hc-claim3", "label": "HC claim 3", "type": "concept", "confidence": 0.9,
+        }, token="tok-proposer")
+
+        s, corr = _request("POST", auth_server, "/correction/propose", {
+            "old_node_id": "hc-claim3", "reason": "Wrong",
+        }, token="tok-proposer")
+        assert s == 201
+
+        # First attempt
+        s1, _ = _request("POST", auth_server, "/correction/commit", {
+            "correction_id": corr["id"],
+        }, token="tok-proposer")
+        assert s1 == 400
+
+        # Second attempt by same agent
+        s2, _ = _request("POST", auth_server, "/correction/commit", {
+            "correction_id": corr["id"],
+        }, token="tok-proposer")
+        assert s2 == 400
+
+    def test_non_proposer_without_force_on_low_confidence_rejected(self, auth_server):
+        """A non-proposer agent committing a low-confidence correction without
+        force is still rejected by the authority check."""
+        _request("POST", auth_server, "/node", {
+            "id": "lc-claim", "label": "Low confidence claim", "type": "concept", "confidence": 0.3,
+        }, token="tok-proposer")
+
+        s, corr = _request("POST", auth_server, "/correction/propose", {
+            "old_node_id": "lc-claim", "reason": "Wrong",
+        }, token="tok-proposer")
+        assert s == 201
+
+        # Reviewer tries to commit without force — should be rejected by authority
+        s, data = _request("POST", auth_server, "/correction/commit", {
+            "correction_id": corr["id"],
+        }, token="tok-reviewer")
+        assert s == 400
+        assert "authority check" in data.get("message", "")
