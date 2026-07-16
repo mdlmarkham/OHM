@@ -506,7 +506,7 @@ class TemporalPlanningHandlerMixin(OhmHandlerBase):
     def _get_forecast_detail(self, path: str, qs: dict) -> None:
         from ohm.graph.queries.forecast import get_forecast
 
-        forecast_id = path.rstrip("/").split("/")[0]
+        forecast_id = path.rstrip("/").split("/")[-1]
 
         result = get_forecast(self.current_store.conn, forecast_id)
         if not result:
@@ -518,10 +518,11 @@ class TemporalPlanningHandlerMixin(OhmHandlerBase):
     def _route_forecast_get_or_trajectory(self, path: str, qs: dict) -> None:
         """Route /forecast/{id} or /forecast/{id}/trajectory to the right handler."""
         stripped = path.rstrip("/")
+        suffix = stripped[len("/forecast/"):] if stripped.startswith("/forecast/") else stripped
         if stripped.endswith("/trajectory"):
-            self._get_forecast_trajectory(path, qs)
+            self._get_forecast_trajectory(suffix, qs)
         else:
-            self._get_forecast_detail(path, qs)
+            self._get_forecast_detail(suffix, qs)
 
     def _post_forecast_transition(self, path: str, qs: dict, body: dict, agent: str) -> None:
         from ohm.exceptions import ValidationError
