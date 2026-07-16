@@ -30,7 +30,7 @@ import pytest
 
 from ohm.schema import DEFAULT_SCHEMA
 from ohm.server import OhmHandler
-from ohm.server.handlers.graph import _resolve_type_field
+from ohm.server.handlers._ingest_helpers import _resolve_type_field
 from ohm.store import OhmStore
 from tests.conftest import wait_for_port
 
