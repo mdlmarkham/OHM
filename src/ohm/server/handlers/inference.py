@@ -706,42 +706,40 @@ class InferenceHandlerMixin(OhmHandlerBase):
                 alpha = p_bad * kappa + 1.0
                 beta_param = (1.0 - p_bad) * kappa + 1.0
 
+                try:
+                    from scipy.special import betainc as _scipy_betainc
+                except ImportError:
+                    _scipy_betainc = None
+
                 def _beta_quantile(q: float) -> float:
                     """Inverse CDF of Beta(alpha, beta) via bisection."""
                     lo, hi = 0.0, 1.0
                     for _ in range(50):
                         mid = (lo + hi) / 2.0
-                        # Regularised incomplete beta via simple numeric integration
-                        # For small params, use scipy-like approximation
-                        from math import betainc as _betainc  # type: ignore[attr-defined]
                         try:
-                            cdf = _betainc(alpha, beta_param, mid)
+                            if _scipy_betainc is not None:
+                                cdf = _scipy_betainc(alpha, beta_param, mid)
+                            else:
+                                raise ImportError
                         except (ImportError, ValueError):
-                            # Fallback: normal approximation
                             mean = alpha / (alpha + beta_param)
                             std_val = math.sqrt(alpha * beta_param / ((alpha + beta_param) ** 2 * (alpha + beta_param + 1)))
-                            from math import erfc, sqrt
-                            cdf = 0.5 * erfc(-(mid - mean) / (std_val * sqrt(2)))
+                            cdf = 0.5 * math.erfc(-(mid - mean) / (std_val * math.sqrt(2)))
                         if cdf < q:
                             lo = mid
                         else:
                             hi = mid
                     return (lo + hi) / 2.0
 
-                # Compute percentiles
+                def _clamp(val: float) -> float:
+                    return max(0.0, min(1.0, val))
+
                 percentiles = {}
                 for pct_name, q in [("p05", 0.05), ("p25", 0.25), ("p50", 0.50), ("p75", 0.75), ("p95", 0.95)]:
                     try:
-                        percentiles[pct_name] = round(_beta_quantile(q), 4)
+                        percentiles[pct_name] = round(_clamp(_beta_quantile(q)), 4)
                     except Exception:
-                        # Fallback: normal approximation
-                        mean = alpha / (alpha + beta_param)
-                        std_val = math.sqrt(alpha * beta_param / ((alpha + beta_param) ** 2 * (alpha + beta_param + 1)))
-                        from math import erfc, sqrt
-                        from statistics import NormalDist
-                        nd = NormalDist(mu=mean, sigma=std_val)
-                        z_map = {0.05: -1.645, 0.25: -0.674, 0.50: 0.0, 0.75: 0.674, 0.95: 1.645}
-                        percentiles[pct_name] = round(mean + std_val * z_map[q], 4)
+                        percentiles[pct_name] = round(_clamp(p_bad), 4)
 
                 # Mode of Beta distribution
                 if alpha > 1 and beta_param > 1:

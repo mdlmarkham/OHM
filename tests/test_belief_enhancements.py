@@ -381,3 +381,41 @@ class TestBeliefMathUnit:
         assert kl_to_level(0.3) == "moderate"
         assert kl_to_level(0.75) == "high"
         assert kl_to_level(2.0) == "very_high"
+
+
+class TestBetaPercentileEdgeCases:
+    """Regression tests for OHM-936: Beta-CDF percentile math."""
+
+    def test_extreme_low_pbad_percentiles_clamped(self, test_server):
+        """When p_bad is near 0, percentiles must stay in [0, 1]."""
+        port, store = test_server
+        from ohm.graph.queries import create_node
+        from tests.conftest import _request, create_sample_observation
+
+        cause = create_node(store.conn, label="Cause", node_type="event", created_by="test")
+        target = create_node(store.conn, label="Target", node_type="event", created_by="test")
+        store.write_edge(cause["id"], target["id"], "CAUSES", "L3", confidence=0.9, probability=0.9, agent_name="test")
+        create_sample_observation(store.conn, node_id=cause["id"], value=1.0)
+
+        status, data = _request("GET", port, f"/belief?target={target['id']}&evidence={cause['id']}:1")
+        assert status == 200
+        for key in ("p05", "p25", "p50", "p75", "p95"):
+            val = data["posterior"][key]
+            assert 0.0 <= val <= 1.0, f"{key}={val} out of range"
+
+    def test_extreme_high_pbad_percentiles_clamped(self, test_server):
+        """When p_bad is near 1, percentiles must stay in [0, 1]."""
+        port, store = test_server
+        from ohm.graph.queries import create_node
+        from tests.conftest import _request, create_sample_observation
+
+        cause = create_node(store.conn, label="Cause", node_type="event", created_by="test")
+        target = create_node(store.conn, label="Target", node_type="event", created_by="test")
+        store.write_edge(cause["id"], target["id"], "CAUSES", "L3", confidence=0.9, probability=0.1, agent_name="test")
+        create_sample_observation(store.conn, node_id=cause["id"], value=0.0)
+
+        status, data = _request("GET", port, f"/belief?target={target['id']}&evidence={cause['id']}:0")
+        assert status == 200
+        for key in ("p05", "p25", "p50", "p75", "p95"):
+            val = data["posterior"][key]
+            assert 0.0 <= val <= 1.0, f"{key}={val} out of range"
