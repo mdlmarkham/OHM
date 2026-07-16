@@ -501,14 +501,22 @@ class TemporalPlanningHandlerMixin(OhmHandlerBase):
     def _get_forecast_detail(self, path: str, qs: dict) -> None:
         from ohm.graph.queries.forecast import get_forecast
 
-        forecast_id = path.rstrip("/").split("/")[-1]
+        forecast_id = path.rstrip("/").split("/")[0]
 
-        result = get_forecast(self.current_store.read_conn, forecast_id)
+        result = get_forecast(self.current_store.conn, forecast_id)
         if not result:
             from ohm.exceptions import NodeNotFoundError
 
             raise NodeNotFoundError(f"Forecast {forecast_id} not found")
         self._json_response(200, result)
+
+    def _route_forecast_get_or_trajectory(self, path: str, qs: dict) -> None:
+        """Route /forecast/{id} or /forecast/{id}/trajectory to the right handler."""
+        stripped = path.rstrip("/")
+        if stripped.endswith("/trajectory"):
+            self._get_forecast_trajectory(path, qs)
+        else:
+            self._get_forecast_detail(path, qs)
 
     def _post_forecast_transition(self, path: str, qs: dict, body: dict, agent: str) -> None:
         from ohm.exceptions import ValidationError
@@ -595,3 +603,69 @@ class TemporalPlanningHandlerMixin(OhmHandlerBase):
             self.current_store.read_conn, series_id, method=method, sigma=sigma,
         )
         self._json_response(200, {"anomalies": result, "count": len(result)})
+
+    # ── Reporting endpoints (OHM-944 / Stage 7) ────────────────────────────
+
+    def _get_timeline(self, path: str, qs: dict) -> None:
+        """GET /timeline/{ancestor_node_id} — plan + event rollup."""
+        from ohm.graph.queries.plans_events import timeline_rollup
+
+        ancestor_id = path.rstrip("/").split("/")[-1]
+        horizon = qs.get("horizon", [None])[0]
+        start_after = qs.get("start_after", [None])[0]
+        end_before = qs.get("end_before", [None])[0]
+        event_class = qs.get("event_class", [None])[0]
+        include_plans = qs.get("include_plans", ["true"])[0] != "false"
+
+        result = timeline_rollup(
+            self.current_store.read_conn,
+            ancestor_id,
+            horizon=horizon,
+            start_after=start_after,
+            end_before=end_before,
+            event_class=event_class,
+            include_plans=include_plans,
+        )
+        self._json_response(200, result)
+
+    def _get_forecast_trajectory(self, path: str, qs: dict) -> None:
+        """GET /forecast/{id}/trajectory — forecast distribution + actuals over time."""
+        from ohm.graph.queries.forecast import get_forecast
+        from ohm.graph.queries._shared import _rows_to_dicts
+        import json as _json
+
+        parts = path.rstrip("/").split("/")
+        forecast_id = parts[0] if parts else ""
+
+        forecast = get_forecast(self.current_store.read_conn, forecast_id)
+        if not forecast:
+            from ohm.exceptions import NodeNotFoundError
+
+            raise NodeNotFoundError(f"Forecast {forecast_id} not found")
+
+        target_node_id = forecast.get("target_node_id")
+        meta = forecast.get("metadata", {})
+        if isinstance(meta, str):
+            try:
+                meta = _json.loads(meta)
+            except (ValueError, TypeError):
+                meta = {}
+
+        actuals: list[dict] = []
+        if target_node_id:
+            actuals = _rows_to_dicts(
+                self.current_store.read_conn.execute(
+                    "SELECT id, value, created_at, type FROM ohm_observations "
+                    "WHERE node_id = ? AND type IN ('measurement', 'experiment_result') "
+                    "ORDER BY created_at ASC LIMIT 500",
+                    [target_node_id],
+                )
+            )
+
+        self._json_response(200, {
+            "forecast": forecast,
+            "distribution": meta.get("distribution"),
+            "predicted_value": meta.get("predicted_value"),
+            "horizon": meta.get("horizon"),
+            "actuals": actuals,
+        })

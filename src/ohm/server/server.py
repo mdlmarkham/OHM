@@ -3014,12 +3014,12 @@ OhmHandler._POST_EXACT["/forecast/create"] = "_post_forecast_create"
 OhmHandler._GET_EXACT["/forecasts"] = "_get_forecasts"
 OhmHandler._POST_EXACT["/forecast/transition"] = "_post_forecast_transition"
 OhmHandler._POST_EXACT["/forecast/resolve"] = "_post_forecast_resolve"
-OhmHandler._GET_PREFIXES.append(("/forecast/", "_get_forecast_detail"))
 OhmHandler._POST_EXACT["/scenario/rerun"] = "_post_scenario_rerun"
 OhmHandler._GET_PREFIXES.append(("/scenario/", "_route_scenario_get_or_diff"))
 OhmHandler._GET_EXACT["/series/query"] = "_get_series_query"
 OhmHandler._GET_EXACT["/series/baseline"] = "_get_series_baseline"
 OhmHandler._GET_EXACT["/series/anomalies"] = "_get_series_anomalies"
+OhmHandler._GET_PREFIXES.append(("/forecast/", "_route_forecast_get_or_trajectory"))
 
 
 def make_configured_handler(store: OhmStore):
