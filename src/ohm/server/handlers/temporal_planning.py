@@ -709,6 +709,8 @@ class TemporalPlanningHandlerMixin(OhmHandlerBase):
                 "reason": reason,
                 "evidence_node_ids": body.get("evidence_node_ids", []),
                 "severity": body.get("severity", "minor"),
+                "proposed_by": agent,
+                "approvals": [],
             },
         }
 
@@ -748,8 +750,19 @@ class TemporalPlanningHandlerMixin(OhmHandlerBase):
         self._json_response(201, correction_node)
 
     def _post_commit_correction(self, path: str, qs: dict, body: dict, agent: str) -> None:
-        """POST /correction/commit — commit a proposed correction."""
-        from ohm.exceptions import ValidationError
+        """POST /correction/commit — commit a proposed correction.
+
+        Guardrails (OHM-961 / ADR-044):
+        - State machine: only `proposed` corrections can be committed.
+        - Cooling-off: configurable via OHM_CORRECTION_COOLING_OFF_HOURS (default 0).
+        - Authority: proposer can self-commit; other agents need force=True
+          or a second approval on high-confidence corrections.
+        - Confidence ceiling: if old node confidence >= 0.8, require a
+          second distinct approving agent before allowing commit.
+        """
+        import os
+        from datetime import datetime, timezone
+        from ohm.exceptions import ValidationError, ConflictError
         from ohm.graph.queries._shared import _rows_to_dicts
         import json as _json
 
@@ -776,6 +789,78 @@ class TemporalPlanningHandlerMixin(OhmHandlerBase):
             raise ValidationError("Node is not a correction node")
 
         correction = meta.get("correction", {})
+        current_status = correction.get("status", "proposed")
+
+        # Guardrail 1: State machine — only proposed can transition to committed
+        if current_status != "proposed":
+            raise ConflictError(
+                f"Correction is already {current_status} — only proposed corrections can be committed"
+            )
+
+        proposed_by = correction.get("proposed_by", "")
+        force = body.get("force", False)
+
+        # Guardrail 2: Authority — proposer can self-commit; others need force
+        if agent != proposed_by and not force:
+            raise ValidationError(
+                f"Only the proposing agent ({proposed_by}) can commit this correction, "
+                f"or pass force=true to override (OHM-961 authority check)."
+            )
+
+        # Guardrail 3: Cooling-off period (configurable, default 0 = disabled)
+        cooling_off_hours = float(os.environ.get("OHM_CORRECTION_COOLING_OFF_HOURS", "0"))
+        if cooling_off_hours > 0 and not force:
+            created_at = node.get("created_at")
+            if created_at:
+                if isinstance(created_at, str):
+                    try:
+                        created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                    except ValueError:
+                        created_at = None
+                if isinstance(created_at, datetime):
+                    if created_at.tzinfo is None:
+                        created_at = created_at.replace(tzinfo=timezone.utc)
+                    elapsed_hours = (datetime.now(timezone.utc) - created_at).total_seconds() / 3600
+                    if elapsed_hours < cooling_off_hours:
+                        raise ValidationError(
+                            f"Cooling-off period not elapsed: {elapsed_hours:.1f}h elapsed, "
+                            f"{cooling_off_hours}h required (OHM-961). "
+                            f"Pass force=true to override."
+                        )
+
+        # Guardrail 4: Confidence ceiling — high-confidence claims need a
+        # second distinct approving agent
+        old_node_id = correction.get("old_node_id")
+        if old_node_id:
+            old_node_row = self.current_store.conn.execute(
+                "SELECT confidence FROM ohm_nodes WHERE id = ?", [old_node_id]
+            ).fetchone()
+            old_confidence = old_node_row[0] if old_node_row else 0.0
+            confidence_threshold = float(os.environ.get("OHM_CORRECTION_CONFIDENCE_THRESHOLD", "0.8"))
+
+            if old_confidence and old_confidence >= confidence_threshold and not force:
+                approvals = correction.get("approvals", [])
+                # Add this agent as an approver if not already
+                if agent not in approvals:
+                    approvals.append(agent)
+                    correction["approvals"] = approvals
+
+                # Need at least 2 distinct approvals (proposer + one other)
+                distinct_approvers = set(approvals)
+                if len(distinct_approvers) < 2:
+                    meta["correction"] = correction
+                    meta_json = _json.dumps(meta)
+                    self.current_store.conn.execute(
+                        "UPDATE ohm_nodes SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        [meta_json, correction_id],
+                    )
+                    raise ValidationError(
+                        f"Old node confidence is {old_confidence} (>= {confidence_threshold}). "
+                        f"Second distinct approving agent required. "
+                        f"Current approvals: {list(distinct_approvers)}. "
+                        f"Have a second agent call commit to approve (OHM-961)."
+                    )
+
         correction["status"] = "committed"
         correction["committed_by"] = agent
         meta["correction"] = correction
@@ -787,7 +872,6 @@ class TemporalPlanningHandlerMixin(OhmHandlerBase):
         )
 
         # Mark old node as superseded via task_status
-        old_node_id = correction.get("old_node_id")
         if old_node_id:
             self.current_store.conn.execute(
                 "UPDATE ohm_nodes SET task_status = 'superseded', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -797,8 +881,11 @@ class TemporalPlanningHandlerMixin(OhmHandlerBase):
         self._json_response(200, {"correction_id": correction_id, "status": "committed"})
 
     def _post_reject_correction(self, path: str, qs: dict, body: dict, agent: str) -> None:
-        """POST /correction/reject — reject a proposed correction."""
-        from ohm.exceptions import ValidationError
+        """POST /correction/reject — reject a proposed correction.
+
+        Guardrail (OHM-961): only `proposed` corrections can be rejected.
+        """
+        from ohm.exceptions import ValidationError, ConflictError
         from ohm.graph.queries._shared import _rows_to_dicts
         import json as _json
 
@@ -825,6 +912,14 @@ class TemporalPlanningHandlerMixin(OhmHandlerBase):
             raise ValidationError("Node is not a correction node")
 
         correction = meta.get("correction", {})
+        current_status = correction.get("status", "proposed")
+
+        # Guardrail: State machine — only proposed can transition to rejected
+        if current_status != "proposed":
+            raise ConflictError(
+                f"Correction is already {current_status} — only proposed corrections can be rejected"
+            )
+
         correction["status"] = "rejected"
         correction["rejected_by"] = agent
         correction["rejection_reason"] = body.get("rejection_reason", "")
@@ -855,6 +950,9 @@ class TemporalPlanningHandlerMixin(OhmHandlerBase):
         if node_id:
             query += " AND e.to_node = ?"
             params.append(node_id)
+        if status:
+            query += " AND json_extract_string(n.metadata, '$.correction.status') = ?"
+            params.append(status)
         query += " ORDER BY n.created_at DESC LIMIT ?"
         params.append(limit)
 

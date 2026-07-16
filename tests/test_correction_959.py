@@ -33,6 +33,7 @@ def target_node(correction_server):
         "id": "claim-brent-100",
         "label": "Brent oil price is $100/bbl",
         "type": "concept",
+        "confidence": 0.5,
     })
     assert status == 201
     return data
@@ -99,6 +100,26 @@ class TestCommitCorrection:
         status, _ = _request("POST", correction_server, "/correction/commit", {})
         assert status == 400
 
+    def test_commit_already_committed_fails(self, correction_server, sample_correction):
+        """Committing an already-committed correction returns 409 (OHM-961)."""
+        _request("POST", correction_server, "/correction/commit", {
+            "correction_id": sample_correction["id"],
+        })
+        status, _ = _request("POST", correction_server, "/correction/commit", {
+            "correction_id": sample_correction["id"],
+        })
+        assert status == 409
+
+    def test_commit_rejected_correction_fails(self, correction_server, sample_correction):
+        """Committing a rejected correction returns 409 (OHM-961)."""
+        _request("POST", correction_server, "/correction/reject", {
+            "correction_id": sample_correction["id"],
+        })
+        status, _ = _request("POST", correction_server, "/correction/commit", {
+            "correction_id": sample_correction["id"],
+        })
+        assert status == 409
+
 
 # ── Reject ───────────────────────────────────────────────────────────────
 
@@ -116,6 +137,16 @@ class TestRejectCorrection:
         status, _ = _request("POST", correction_server, "/correction/reject", {})
         assert status == 400
 
+    def test_reject_already_committed_fails(self, correction_server, sample_correction):
+        """Rejecting an already-committed correction returns 409 (OHM-961)."""
+        _request("POST", correction_server, "/correction/commit", {
+            "correction_id": sample_correction["id"],
+        })
+        status, _ = _request("POST", correction_server, "/correction/reject", {
+            "correction_id": sample_correction["id"],
+        })
+        assert status == 409
+
 
 # ── List corrections ─────────────────────────────────────────────────────
 
@@ -130,6 +161,18 @@ class TestListCorrections:
         status, data = _request("GET", correction_server, f"/corrections?node_id={target_node['id']}")
         assert status == 200
         assert data["count"] >= 1
+
+    def test_list_filter_by_status(self, correction_server, sample_correction):
+        """GET /corrections?status=proposed filters by correction status (OHM-961)."""
+        # Should find the proposed correction
+        status, data = _request("GET", correction_server, "/corrections?status=proposed")
+        assert status == 200
+        assert data["count"] >= 1
+
+        # Should NOT find any committed corrections
+        status, data = _request("GET", correction_server, "/corrections?status=committed")
+        assert status == 200
+        assert data["count"] == 0
 
 
 # ── MCP tool schemas ─────────────────────────────────────────────────────
