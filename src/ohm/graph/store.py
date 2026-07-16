@@ -3163,15 +3163,25 @@ class OhmStore:
         common_str = ", ".join(common_cols)
 
         # Delete any existing rows from mirror (handles re-sync after crash/restart)
-        # then INSERT all active (non-soft-deleted) local rows
+        # then INSERT all active (non-soft-deleted) local rows.
+        # OHM-960: Wrap in an explicit transaction so a failed INSERT rolls
+        # back the DELETE, leaving the mirror stale-but-non-empty instead
+        # of permanently empty.
         mirror = self._ducklake_table(table, alias)
-        self.conn.execute(f"DELETE FROM {mirror}")
-
-        # Filter out soft-deleted rows from sync
-        if "deleted_at" in local_col_names:
-            self.conn.execute(f"INSERT INTO {mirror} ({common_str}) SELECT {common_str} FROM {table} WHERE deleted_at IS NULL")
-        else:
-            self.conn.execute(f"INSERT INTO {mirror} ({common_str}) SELECT {common_str} FROM {table}")
+        self.conn.execute("BEGIN TRANSACTION")
+        try:
+            self.conn.execute(f"DELETE FROM {mirror}")
+            if "deleted_at" in local_col_names:
+                self.conn.execute(f"INSERT INTO {mirror} ({common_str}) SELECT {common_str} FROM {table} WHERE deleted_at IS NULL")
+            else:
+                self.conn.execute(f"INSERT INTO {mirror} ({common_str}) SELECT {common_str} FROM {table}")
+            self.conn.execute("COMMIT")
+        except Exception:
+            try:
+                self.conn.execute("ROLLBACK")
+            except Exception:
+                pass
+            raise
 
         count = self.conn.execute(f"SELECT COUNT(*) FROM {mirror}").fetchone()[0]
         return count
