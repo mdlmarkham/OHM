@@ -570,6 +570,42 @@ def all_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="ohm_source_reliability",
+            description=(
+                "Get per-agent source reliability metrics computed from "
+                "historical outcomes: P(accurate), false_positive_rate, "
+                "outcome count, and last outcome timestamp. When agent_id "
+                "is omitted, returns the calling agent's own reliability. "
+                "When agent_id names a different agent, the result is "
+                "anonymized by default (pseudonymised agent_id) — named peer "
+                "scores require tenant opt-in. Read-only."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "agent_id": {"type": "string", "description": "Agent to evaluate. Omit for the calling agent's own reliability."},
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="ohm_my_calibration",
+            description=(
+                "Get the calling agent's calibration profile: Brier score, "
+                "overconfidence rate, novelty score, loop risk, and prediction "
+                "count. Always reflects the caller — no agent_id parameter. "
+                "Read-only."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
             name="ohm_list_profiles",
             description="List the OHM instance profiles configured for this sidecar and show which profile is currently active. Each profile may point to a different OHM tenant or instance. Use ohm_select_profile to switch.",
             inputSchema={

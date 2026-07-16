@@ -180,6 +180,8 @@ def generate_nudges(
     half_life_days: float | None = None,
     value: float | None = None,
     value_contradiction_threshold: float = 0.3,
+    agent: str | None = None,
+    challenge_edge_id: str | None = None,
 ) -> list[dict]:
     """Generate cognitive nudges based on what the agent just wrote.
 
@@ -717,6 +719,90 @@ def generate_nudges(
                 "severity": "info",
                 "data": {"proposed_type": pt},
             })
+
+    # ── OHM-910: Overconfidence divergence nudge ─────────────────────────
+    # When an agent records a confidence that exceeds their historical
+    # outcome-based accuracy by more than 0.2, nudge them to reconcile.
+    # Requires at least 5 outcomes so the baseline is meaningful.
+    if action == "edge" and confidence is not None and agent and store:
+        try:
+            row = store.conn.execute(
+                """SELECT COUNT(*) AS total,
+                          SUM(CASE WHEN outcome THEN 1 ELSE 0 END) AS accurate
+                   FROM ohm_outcomes
+                   WHERE COALESCE(claimed_by, source_agent) = ?""",
+                [agent],
+            ).fetchone()
+            total = row[0] or 0
+            accurate = row[1] or 0
+            if total >= 5:
+                historical_accuracy = accurate / total
+                divergence = confidence - historical_accuracy
+                if divergence > 0.2:
+                    nudges.append(
+                        {
+                            "type": "overconfidence_divergence",
+                            "message": (
+                                f"Your confidence ({confidence:.2f}) exceeds your "
+                                f"historical accuracy ({historical_accuracy:.2f}) by "
+                                f"{divergence:.2f}. Your past outcomes show you're right "
+                                f"{historical_accuracy:.0%} of the time ({accurate}/{total}). "
+                                f"Consider downgrading confidence or adding stronger evidence."
+                            ),
+                            "severity": "warning",
+                            "data": {
+                                "confidence": confidence,
+                                "historical_accuracy": round(historical_accuracy, 4),
+                                "divergence": round(divergence, 4),
+                                "n_outcomes": total,
+                            },
+                        }
+                    )
+        except Exception:
+            pass  # Never fail the write for a nudge
+
+    # ── OHM-910: High-reliability challenge nudge ───────────────────────
+    # When an agent challenges an edge whose source has >90% historical
+    # accuracy, nudge them to bring strong evidence.
+    if action == "challenge" and challenge_edge_id and store:
+        try:
+            edge_row = store.conn.execute(
+                "SELECT created_by FROM ohm_edges WHERE id = ? AND deleted_at IS NULL",
+                [challenge_edge_id],
+            ).fetchone()
+            if edge_row and edge_row[0]:
+                source_agent = edge_row[0]
+                rel_row = store.conn.execute(
+                    """SELECT COUNT(*) AS total,
+                              SUM(CASE WHEN outcome THEN 1 ELSE 0 END) AS accurate
+                       FROM ohm_outcomes
+                       WHERE COALESCE(claimed_by, source_agent) = ?""",
+                    [source_agent],
+                ).fetchone()
+                total = rel_row[0] or 0
+                accurate = rel_row[1] or 0
+                if total >= 5:
+                    p_accurate = accurate / total
+                    if p_accurate > 0.9:
+                        nudges.append(
+                            {
+                                "type": "high_reliability_challenge",
+                                "message": (
+                                    f"You're challenging an edge from '{source_agent}', who has "
+                                    f"{p_accurate:.0%} historical accuracy ({accurate}/{total} outcomes). "
+                                    f"High-reliability sources deserve strong evidence — make sure "
+                                    f"your challenge includes specific, verifiable reasoning."
+                                ),
+                                "severity": "info",
+                                "data": {
+                                    "source_agent": source_agent,
+                                    "p_accurate": round(p_accurate, 4),
+                                    "n_outcomes": total,
+                                },
+                            }
+                        )
+        except Exception:
+            pass  # Never fail the write for a nudge
 
     return nudges
 
