@@ -347,3 +347,155 @@ class TestConfidenceCeilingApproval:
         }, token="tok-reviewer")
         assert s == 400
         assert "authority check" in data.get("message", "")
+
+
+# ── Approval modes (OHM-964) ────────────────────────────────────────────
+
+
+class TestApprovalModes:
+    """Tests for OHM-964: configurable approval modes (actor/family/human)."""
+
+    def test_family_mode_same_family_blocked(self, auth_server, monkeypatch):
+        """In family mode, two agents from the same family cannot satisfy the
+        second-approval requirement."""
+        monkeypatch.setenv("OHM_CORRECTION_APPROVAL_MODE", "family")
+
+        _request("POST", auth_server, "/node", {
+            "id": "hc-fam1", "label": "HC family test", "type": "concept", "confidence": 0.9,
+        }, token="tok-proposer")
+
+        s, corr = _request("POST", auth_server, "/correction/propose", {
+            "old_node_id": "hc-fam1", "reason": "Wrong",
+        }, token="tok-proposer")
+        assert s == 201
+
+        # Proposer commits — records family, rejected pending second family
+        s1, _ = _request("POST", auth_server, "/correction/commit", {
+            "correction_id": corr["id"],
+        }, token="tok-proposer")
+        assert s1 == 400
+        assert "family" in str(s1).lower() or "family" in str(_request("POST", auth_server, "/correction/commit", {"correction_id": corr["id"]}, token="tok-proposer")[1]).lower()
+
+    def test_family_mode_cross_family_approved(self, tmp_path, monkeypatch):
+        """In family mode, two agents from different families can approve."""
+        monkeypatch.setenv("OHM_CORRECTION_APPROVAL_MODE", "family")
+        monkeypatch.delenv("OHM_DISABLE_CONCURRENCY_GUARD", raising=False)
+
+        from ohm.graph.embeddings import NullBackend
+        from ohm.store import OhmStore
+
+        db_path = str(tmp_path / "fam_test.duckdb")
+        store = OhmStore(
+            db_path=db_path,
+            agent_name="ohmd",
+            embedding_backend=NullBackend(dimensions=768),
+        )
+        port, server, thread = _start_test_server(
+            store,
+            tokens={"tok-alpha-1": "alpha-1", "tok-beta-1": "beta-1"},
+        )
+
+        try:
+            _request("POST", port, "/node", {
+                "id": "hc-cross", "label": "HC cross-family", "type": "concept", "confidence": 0.9,
+            }, token="tok-alpha-1")
+
+            s, corr = _request("POST", port, "/correction/propose", {
+                "old_node_id": "hc-cross", "reason": "Wrong",
+            }, token="tok-alpha-1")
+            assert s == 201
+
+            # Alpha-1 commits — records alpha family, rejected
+            s1, _ = _request("POST", port, "/correction/commit", {
+                "correction_id": corr["id"],
+            }, token="tok-alpha-1")
+            assert s1 == 400
+
+            # Beta-1 commits — different family, should finalize
+            s2, data = _request("POST", port, "/correction/commit", {
+                "correction_id": corr["id"],
+            }, token="tok-beta-1")
+            assert s2 == 200
+            assert data["status"] == "committed"
+        finally:
+            server.shutdown()
+            thread.join(timeout=5)
+            store.close()
+
+    def test_human_mode_transitions_to_pending(self, auth_server, monkeypatch):
+        """In human mode, a high-confidence commit transitions to pending_human
+        and returns an approval token."""
+        monkeypatch.setenv("OHM_CORRECTION_APPROVAL_MODE", "human")
+
+        _request("POST", auth_server, "/node", {
+            "id": "hc-human", "label": "HC human test", "type": "concept", "confidence": 0.9,
+        }, token="tok-proposer")
+
+        s, corr = _request("POST", auth_server, "/correction/propose", {
+            "old_node_id": "hc-human", "reason": "Wrong",
+        }, token="tok-proposer")
+        assert s == 201
+
+        s, data = _request("POST", auth_server, "/correction/commit", {
+            "correction_id": corr["id"],
+        }, token="tok-proposer")
+        assert s == 400
+        assert "Human approval required" in data.get("message", "")
+        assert "approval_token" in data.get("message", "") or "token" in data.get("message", "").lower()
+
+    def test_human_mode_approve_endpoint_finalizes(self, auth_server, monkeypatch):
+        """POST /correction/approve with the correct token finalizes the correction."""
+        import re
+        monkeypatch.setenv("OHM_CORRECTION_APPROVAL_MODE", "human")
+
+        _request("POST", auth_server, "/node", {
+            "id": "hc-human2", "label": "HC human approve", "type": "concept", "confidence": 0.9,
+        }, token="tok-proposer")
+
+        s, corr = _request("POST", auth_server, "/correction/propose", {
+            "old_node_id": "hc-human2", "reason": "Wrong",
+        }, token="tok-proposer")
+        assert s == 201
+
+        # Trigger pending_human and extract token
+        s, data = _request("POST", auth_server, "/correction/commit", {
+            "correction_id": corr["id"],
+        }, token="tok-proposer")
+        msg = data.get("message", "")
+        token_match = re.search(r"token[:\s]+([a-f0-9-]+)", msg, re.IGNORECASE)
+        assert token_match, f"No approval token found in message: {msg}"
+        approval_token = token_match.group(1)
+
+        # Approve with the token
+        s, data = _request("POST", auth_server, "/correction/approve", {
+            "correction_id": corr["id"],
+            "approval_token": approval_token,
+            "reviewer": "human-reviewer",
+        }, token="tok-reviewer")
+        assert s == 200
+        assert data["status"] == "committed"
+
+    def test_human_mode_wrong_token_rejected(self, auth_server, monkeypatch):
+        """POST /correction/approve with wrong token returns 400."""
+        monkeypatch.setenv("OHM_CORRECTION_APPROVAL_MODE", "human")
+
+        _request("POST", auth_server, "/node", {
+            "id": "hc-human3", "label": "HC wrong token", "type": "concept", "confidence": 0.9,
+        }, token="tok-proposer")
+
+        s, corr = _request("POST", auth_server, "/correction/propose", {
+            "old_node_id": "hc-human3", "reason": "Wrong",
+        }, token="tok-proposer")
+        assert s == 201
+
+        # Trigger pending_human
+        _request("POST", auth_server, "/correction/commit", {
+            "correction_id": corr["id"],
+        }, token="tok-proposer")
+
+        # Try with wrong token
+        s, _ = _request("POST", auth_server, "/correction/approve", {
+            "correction_id": corr["id"],
+            "approval_token": "wrong-token-xyz",
+        }, token="tok-reviewer")
+        assert s == 400

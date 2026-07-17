@@ -791,8 +791,8 @@ class TemporalPlanningHandlerMixin(OhmHandlerBase):
         correction = meta.get("correction", {})
         current_status = correction.get("status", "proposed")
 
-        # Guardrail 1: State machine — only proposed can transition to committed
-        if current_status != "proposed":
+        # Guardrail 1: State machine — only proposed or pending_human can transition
+        if current_status not in ("proposed", "pending_human"):
             raise ConflictError(
                 f"Correction is already {current_status} — only proposed corrections can be committed"
             )
@@ -845,28 +845,93 @@ class TemporalPlanningHandlerMixin(OhmHandlerBase):
         # Guardrail 4: Confidence ceiling — high-confidence claims need a
         # second distinct approving agent (OHM-962: now reachable by non-proposer
         # agents thanks to Guardrail 2's carve-out).
+        # OHM-964: approval mode is configurable via OHM_CORRECTION_APPROVAL_MODE:
+        #   "actor"  (default): distinct actor names required
+        #   "family": distinct agent families required (split on - or _)
+        #   "human":  external human approval required via /correction/approve
+        approval_mode = os.environ.get("OHM_CORRECTION_APPROVAL_MODE", "actor")
         if requires_second_approval and not force:
             approvals = correction.get("approvals", [])
-            # Add this agent as an approver if not already
+            approval_families = correction.get("approval_families", [])
+
+            if approval_mode == "human":
+                # Human mode: transition to pending_human and emit an approval token
+                if agent not in approvals:
+                    approvals.append(agent)
+                    correction["approvals"] = approvals
+                if correction.get("status") != "pending_human":
+                    import uuid as _uuid
+
+                    approval_token = str(_uuid.uuid4())
+                    correction["status"] = "pending_human"
+                    correction["approval_mode"] = "human"
+                    correction["human_approval_token"] = approval_token
+                    meta["correction"] = correction
+                    meta_json = _json.dumps(meta)
+                    self.current_store.conn.execute(
+                        "UPDATE ohm_nodes SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        [meta_json, correction_id],
+                    )
+                    raise ValidationError(
+                        f"Old node confidence is {old_confidence} (>= {confidence_threshold}). "
+                        f"Human approval required (OHM-964). "
+                        f"Approval token: {approval_token}. "
+                        f"Use POST /correction/approve with this token to finalize."
+                    )
+                else:
+                    raise ValidationError(
+                        "Correction is pending human approval. "
+                        f"Use POST /correction/approve with the existing approval token."
+                    )
+
+            # actor or family mode: record approval
             if agent not in approvals:
                 approvals.append(agent)
                 correction["approvals"] = approvals
 
-            # Need at least 2 distinct approvals (proposer + one other)
-            distinct_approvers = set(approvals)
-            if len(distinct_approvers) < 2:
-                meta["correction"] = correction
-                meta_json = _json.dumps(meta)
-                self.current_store.conn.execute(
-                    "UPDATE ohm_nodes SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    [meta_json, correction_id],
-                )
-                raise ValidationError(
-                    f"Old node confidence is {old_confidence} (>= {confidence_threshold}). "
-                    f"Second distinct approving agent required. "
-                    f"Current approvals: {list(distinct_approvers)}. "
-                    f"Have a second agent call commit to approve (OHM-961)."
-                )
+            if approval_mode == "family":
+                family_delim = os.environ.get("OHM_CORRECTION_FAMILY_DELIMITER", "-")
+                def _family(name):
+                    for d in family_delim:
+                        if d in name:
+                            return name.split(d)[0]
+                    return name
+
+                agent_family = _family(agent)
+                if agent_family not in approval_families:
+                    approval_families.append(agent_family)
+                    correction["approval_families"] = approval_families
+
+                distinct_families = set(approval_families)
+                if len(distinct_families) < 2:
+                    meta["correction"] = correction
+                    meta_json = _json.dumps(meta)
+                    self.current_store.conn.execute(
+                        "UPDATE ohm_nodes SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        [meta_json, correction_id],
+                    )
+                    raise ValidationError(
+                        f"Old node confidence is {old_confidence} (>= {confidence_threshold}). "
+                        f"Second distinct agent family required (mode=family, OHM-964). "
+                        f"Current families: {list(distinct_families)}. "
+                        f"Have an agent from a different family call commit to approve."
+                    )
+            else:
+                # actor mode (default)
+                distinct_approvers = set(approvals)
+                if len(distinct_approvers) < 2:
+                    meta["correction"] = correction
+                    meta_json = _json.dumps(meta)
+                    self.current_store.conn.execute(
+                        "UPDATE ohm_nodes SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        [meta_json, correction_id],
+                    )
+                    raise ValidationError(
+                        f"Old node confidence is {old_confidence} (>= {confidence_threshold}). "
+                        f"Second distinct approving agent required (mode=actor, OHM-964). "
+                        f"Current approvals: {list(distinct_approvers)}. "
+                        f"Have a second agent call commit to approve."
+                    )
 
         correction["status"] = "committed"
         correction["committed_by"] = agent
@@ -922,7 +987,7 @@ class TemporalPlanningHandlerMixin(OhmHandlerBase):
         current_status = correction.get("status", "proposed")
 
         # Guardrail: State machine — only proposed can transition to rejected
-        if current_status != "proposed":
+        if current_status not in ("proposed", "pending_human"):
             raise ConflictError(
                 f"Correction is already {current_status} — only proposed corrections can be rejected"
             )
@@ -965,3 +1030,74 @@ class TemporalPlanningHandlerMixin(OhmHandlerBase):
 
         corrections = _rows_to_dicts(self.current_store.conn.execute(query, params))
         self._json_response(200, {"corrections": corrections, "count": len(corrections)})
+
+    def _post_approve_correction(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /correction/approve — human-in-the-loop approval for a
+        correction in `pending_human` status (OHM-964).
+
+        Accepts an `approval_token` that was issued when the correction
+        transitioned to `pending_human`. Optionally accepts a `reviewer`
+        identity to record who approved.
+        """
+        import json as _json
+        from ohm.exceptions import ValidationError, ConflictError, NodeNotFoundError
+        from ohm.graph.queries._shared import _rows_to_dicts
+
+        approval_token = body.get("approval_token")
+        if not approval_token:
+            raise ValidationError("approval_token is required")
+
+        correction_id = body.get("correction_id")
+        if not correction_id:
+            raise ValidationError("correction_id is required")
+
+        rows = _rows_to_dicts(
+            self.current_store.conn.execute("SELECT * FROM ohm_nodes WHERE id = ?", [correction_id])
+        )
+        if not rows:
+            raise NodeNotFoundError(f"Correction {correction_id} not found")
+
+        node = rows[0]
+        meta = node.get("metadata")
+        if isinstance(meta, str):
+            try:
+                meta = _json.loads(meta)
+            except (ValueError, TypeError):
+                meta = {}
+        if not isinstance(meta, dict) or "correction" not in meta:
+            raise ValidationError("Node is not a correction node")
+
+        correction = meta.get("correction", {})
+        current_status = correction.get("status", "proposed")
+
+        if current_status != "pending_human":
+            raise ConflictError(
+                f"Correction is {current_status}, not pending_human — "
+                f"human approval is only for corrections awaiting external review"
+            )
+
+        stored_token = correction.get("human_approval_token", "")
+        if stored_token != approval_token:
+            raise ValidationError("Invalid or expired approval token")
+
+        old_node_id = correction.get("old_node_id")
+
+        correction["status"] = "committed"
+        correction["committed_by"] = agent
+        correction["reviewed_by"] = body.get("reviewer", agent)
+        correction["human_approval_token"] = None
+        meta["correction"] = correction
+
+        meta_json = _json.dumps(meta)
+        self.current_store.conn.execute(
+            "UPDATE ohm_nodes SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            [meta_json, correction_id],
+        )
+
+        if old_node_id:
+            self.current_store.conn.execute(
+                "UPDATE ohm_nodes SET task_status = 'superseded', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                [old_node_id],
+            )
+
+        self._json_response(200, {"correction_id": correction_id, "status": "committed"})
