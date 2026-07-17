@@ -423,8 +423,8 @@ class TestApprovalModes:
             store.close()
 
     def test_human_mode_transitions_to_pending(self, auth_server, monkeypatch):
-        """In human mode, a high-confidence commit transitions to pending_human
-        and returns an approval token."""
+        """In human mode, a high-confidence commit transitions to pending_human.
+        The approval token is NOT returned in the response (OHM-965)."""
         monkeypatch.setenv("OHM_CORRECTION_APPROVAL_MODE", "human")
 
         _request("POST", auth_server, "/node", {
@@ -441,11 +441,15 @@ class TestApprovalModes:
         }, token="tok-proposer")
         assert s == 400
         assert "Human approval required" in data.get("message", "")
-        assert "approval_token" in data.get("message", "") or "token" in data.get("message", "").lower()
+        # OHM-965: token must NOT be in the response
+        import re
+        assert not re.search(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", data.get("message", "")), \
+            "Approval token leaked in response message!"
 
     def test_human_mode_approve_endpoint_finalizes(self, auth_server, monkeypatch):
-        """POST /correction/approve with the correct token finalizes the correction."""
-        import re
+        """POST /correction/approve with the correct token (from DB, not response)
+        finalizes the correction. Must be called by a distinct agent (OHM-965)."""
+        import json as _json
         monkeypatch.setenv("OHM_CORRECTION_APPROVAL_MODE", "human")
 
         _request("POST", auth_server, "/node", {
@@ -457,16 +461,20 @@ class TestApprovalModes:
         }, token="tok-proposer")
         assert s == 201
 
-        # Trigger pending_human and extract token
-        s, data = _request("POST", auth_server, "/correction/commit", {
+        # Trigger pending_human (token is stored in DB, not returned)
+        _request("POST", auth_server, "/correction/commit", {
             "correction_id": corr["id"],
         }, token="tok-proposer")
-        msg = data.get("message", "")
-        token_match = re.search(r"token[:\s]+([a-f0-9-]+)", msg, re.IGNORECASE)
-        assert token_match, f"No approval token found in message: {msg}"
-        approval_token = token_match.group(1)
 
-        # Approve with the token
+        # Get the token from the DB (simulating out-of-band delivery)
+        from ohm.server.server import OhmHandler
+        conn = OhmHandler.store.conn
+        row = conn.execute("SELECT metadata FROM ohm_nodes WHERE id = ?", [corr["id"]]).fetchone()
+        meta = _json.loads(row[0]) if row and row[0] else {}
+        approval_token = meta.get("correction", {}).get("human_approval_token", "")
+        assert approval_token, "No approval token found in DB"
+
+        # Approve with the token — must use a DIFFERENT agent (tok-reviewer)
         s, data = _request("POST", auth_server, "/correction/approve", {
             "correction_id": corr["id"],
             "approval_token": approval_token,
@@ -474,6 +482,40 @@ class TestApprovalModes:
         }, token="tok-reviewer")
         assert s == 200
         assert data["status"] == "committed"
+
+    def test_human_mode_self_approval_blocked(self, auth_server, monkeypatch):
+        """The same agent that triggered pending_human cannot self-approve (OHM-965)."""
+        import json as _json
+        monkeypatch.setenv("OHM_CORRECTION_APPROVAL_MODE", "human")
+
+        _request("POST", auth_server, "/node", {
+            "id": "hc-self", "label": "HC self-approve test", "type": "concept", "confidence": 0.9,
+        }, token="tok-proposer")
+
+        s, corr = _request("POST", auth_server, "/correction/propose", {
+            "old_node_id": "hc-self", "reason": "Wrong",
+        }, token="tok-proposer")
+        assert s == 201
+
+        # Trigger pending_human
+        _request("POST", auth_server, "/correction/commit", {
+            "correction_id": corr["id"],
+        }, token="tok-proposer")
+
+        # Get the token from DB
+        from ohm.server.server import OhmHandler
+        conn = OhmHandler.store.conn
+        row = conn.execute("SELECT metadata FROM ohm_nodes WHERE id = ?", [corr["id"]]).fetchone()
+        meta = _json.loads(row[0]) if row and row[0] else {}
+        approval_token = meta.get("correction", {}).get("human_approval_token", "")
+
+        # Same agent tries to approve — must be rejected
+        s, data = _request("POST", auth_server, "/correction/approve", {
+            "correction_id": corr["id"],
+            "approval_token": approval_token,
+        }, token="tok-proposer")
+        assert s == 400
+        assert "Self-approval blocked" in data.get("message", "")
 
     def test_human_mode_wrong_token_rejected(self, auth_server, monkeypatch):
         """POST /correction/approve with wrong token returns 400."""

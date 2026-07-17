@@ -855,7 +855,10 @@ class TemporalPlanningHandlerMixin(OhmHandlerBase):
             approval_families = correction.get("approval_families", [])
 
             if approval_mode == "human":
-                # Human mode: transition to pending_human and emit an approval token
+                # Human mode: transition to pending_human and emit an approval token.
+                # OHM-965: Do NOT return the token in the response — it must be
+                # delivered out-of-band (webhook, log, admin endpoint) to a human
+                # reviewer, not to the agent whose commit was just blocked.
                 if agent not in approvals:
                     approvals.append(agent)
                     correction["approvals"] = approvals
@@ -866,6 +869,7 @@ class TemporalPlanningHandlerMixin(OhmHandlerBase):
                     correction["status"] = "pending_human"
                     correction["approval_mode"] = "human"
                     correction["human_approval_token"] = approval_token
+                    correction["human_approval_requested_by"] = agent
                     meta["correction"] = correction
                     meta_json = _json.dumps(meta)
                     self.current_store.conn.execute(
@@ -875,13 +879,14 @@ class TemporalPlanningHandlerMixin(OhmHandlerBase):
                     raise ValidationError(
                         f"Old node confidence is {old_confidence} (>= {confidence_threshold}). "
                         f"Human approval required (OHM-964). "
-                        f"Approval token: {approval_token}. "
-                        f"Use POST /correction/approve with this token to finalize."
+                        f"The approval token has been generated and stored. "
+                        f"An authorized human reviewer must call POST /correction/approve "
+                        f"with the token to finalize."
                     )
                 else:
                     raise ValidationError(
                         "Correction is pending human approval. "
-                        f"Use POST /correction/approve with the existing approval token."
+                        "Use POST /correction/approve with the existing approval token."
                     )
 
             # actor or family mode: record approval
@@ -1079,6 +1084,17 @@ class TemporalPlanningHandlerMixin(OhmHandlerBase):
         stored_token = correction.get("human_approval_token", "")
         if stored_token != approval_token:
             raise ValidationError("Invalid or expired approval token")
+
+        # OHM-965: Reject self-approval — the caller must be a distinct
+        # identity from any agent already recorded as an approver.
+        existing_approvals = correction.get("approvals", [])
+        requested_by = correction.get("human_approval_requested_by", "")
+        if agent in existing_approvals or agent == requested_by:
+            raise ValidationError(
+                f"Self-approval blocked: agent '{agent}' is already recorded as an "
+                f"approver or requested this human approval. A distinct identity "
+                f"(human reviewer or different agent) must call /correction/approve (OHM-965)."
+            )
 
         old_node_id = correction.get("old_node_id")
 
