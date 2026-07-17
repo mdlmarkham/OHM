@@ -1020,6 +1020,7 @@ def _build_router() -> _RouteRegistry:
     r.add("POST", "/correction/propose")
     r.add("POST", "/correction/commit")
     r.add("POST", "/correction/reject")
+    r.add("POST", "/correction/approve")
     r.add("GET", "/corrections")
 
     # PATCH
@@ -3028,6 +3029,7 @@ OhmHandler._GET_EXACT["/series/anomalies"] = "_get_series_anomalies"
 OhmHandler._POST_EXACT["/correction/propose"] = "_post_propose_correction"
 OhmHandler._POST_EXACT["/correction/commit"] = "_post_commit_correction"
 OhmHandler._POST_EXACT["/correction/reject"] = "_post_reject_correction"
+OhmHandler._POST_EXACT["/correction/approve"] = "_post_approve_correction"
 OhmHandler._GET_EXACT["/corrections"] = "_get_corrections"
 OhmHandler._GET_PREFIXES.append(("/forecast/", "_route_forecast_get_or_trajectory"))
 
