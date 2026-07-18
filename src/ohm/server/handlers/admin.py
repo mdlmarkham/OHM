@@ -905,6 +905,189 @@ class AdminHandlerMixin(OhmHandlerBase):
             },
         )
 
+    def _get_admin_graph_health(self, path: str, qs: dict) -> None:
+        """GET /admin/graph-health — actionable graph maintenance dashboard (OHM-909).
+
+        Returns a consolidated view of graph health signals that benefit from
+        routine attention: orphan nodes, stale observations, low-confidence
+        clusters, verification rate, challenge ratio, and per-source
+        reliability. Complements the composite ``/admin/health`` score with
+        the per-metric detail operators need to triage maintenance work.
+
+        Thresholds are configurable via ``ohm_meta`` (set through ``PUT /config``):
+          stale_observation_days:  default 30
+          low_confidence_threshold: default 0.3
+
+        Query params:
+          stale_observation_days: override the configured staleness threshold
+          low_confidence_threshold: override the configured low-confidence threshold
+          orphan_limit: max orphan node ids to return (default 50)
+        """
+        from ohm.graph.schema import get_meta
+        from ohm.queries import query_graph_health
+
+        conn = self.current_store.conn
+        if conn is None:
+            status, body = _safe_query.db_unavailable_response()
+            self._json_response(status, body)
+            return
+
+        # Thresholds: ohm_meta first, then query-string override, then hardcoded default
+        stale_days_default = int(get_meta(conn, "stale_observation_days", "30") or "30")
+        low_conf_default = float(get_meta(conn, "low_confidence_threshold", "0.3") or "0.3")
+        stale_days = int(qs.get("stale_observation_days", [str(stale_days_default)])[0])
+        low_conf_threshold = float(qs.get("low_confidence_threshold", [str(low_conf_default)])[0])
+        orphan_limit = int(qs.get("orphan_limit", ["50"])[0])
+
+        # 1. Orphan nodes via the canonical substrate primitive
+        graph = query_graph_health(conn)
+        orphan_count = int(graph.get("orphan_nodes") or 0)
+
+        orphan_ids: list[str] = []
+        if orphan_count > 0:
+            orphan_rows = _safe_query.safe_rows(
+                conn,
+                """
+                SELECT n.id FROM ohm_nodes n
+                WHERE n.deleted_at IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM ohm_edges e
+                      WHERE e.deleted_at IS NULL
+                        AND (e.from_node = n.id OR e.to_node = n.id)
+                  )
+                LIMIT ?
+                """,
+                [orphan_limit],
+            )
+            orphan_ids = [r[0] for r in orphan_rows if isinstance(r, tuple) and len(r) >= 1]
+
+        # 2. Stale observations (created_at older than the threshold days)
+        stale_rows = _safe_query.safe_rows(
+            conn,
+            """
+            SELECT id, node_id, created_at,
+                   GREATEST(date_diff('day', created_at, CURRENT_TIMESTAMP), 0) AS age_days
+            FROM ohm_observations
+            WHERE deleted_at IS NULL
+              AND date_diff('day', created_at, CURRENT_TIMESTAMP) > ?
+            ORDER BY created_at ASC
+            LIMIT 200
+            """,
+            [stale_days],
+        )
+        stale_observations = [
+            dict(zip(["id", "node_id", "created_at", "age_days"], row))
+            for row in stale_rows
+            if isinstance(row, tuple) and len(row) == 4
+        ]
+        oldest_days = max(
+            (float(o.get("age_days") or 0) for o in stale_observations),
+            default=0,
+        )
+
+        # 3. Low-confidence clusters: nodes whose average incident edge confidence is below threshold.
+        # Group by node (each node is its own "cluster" — a lightweight approximation
+        # that surfaces the worst-confirmed nodes without a full connected-components pass).
+        low_conf_rows = _safe_query.safe_rows(
+            conn,
+            """
+            SELECT n.id, n.label, AVG(e.confidence) AS avg_confidence, COUNT(e.id) AS edge_count
+            FROM ohm_nodes n
+            JOIN ohm_edges e ON (e.from_node = n.id OR e.to_node = n.id) AND e.deleted_at IS NULL
+            WHERE n.deleted_at IS NULL
+            GROUP BY n.id, n.label
+            HAVING AVG(e.confidence) < ? AND COUNT(e.id) >= 2
+            ORDER BY avg_confidence ASC
+            LIMIT 50
+            """,
+            [low_conf_threshold],
+        )
+        low_confidence_clusters = [
+            {
+                "cluster_id": row[0],
+                "label": row[1],
+                "avg_confidence": round(float(row[2]), 4) if row[2] is not None else None,
+                "node_count": int(row[3]),
+            }
+            for row in low_conf_rows
+            if isinstance(row, tuple) and len(row) == 4
+        ]
+
+        # 4. Verification rate and challenge ratio (same formulas as /admin/verification-scan)
+        total_outcomes = _safe_query.safe_scalar(conn, "SELECT COUNT(*) FROM ohm_outcomes")
+        total_causal = _safe_query.safe_scalar(
+            conn,
+            "SELECT COUNT(*) FROM ohm_edges WHERE edge_type IN ('CAUSES','PREDICTS','EXPECTS') AND deleted_at IS NULL AND layer = 'L3'",
+        )
+        total_challenges = _safe_query.safe_scalar(
+            conn,
+            "SELECT COUNT(*) FROM ohm_edges WHERE edge_type = 'CHALLENGED_BY' AND deleted_at IS NULL",
+        )
+        total_l3 = _safe_query.safe_scalar(
+            conn,
+            "SELECT COUNT(*) FROM ohm_edges WHERE layer = 'L3' AND deleted_at IS NULL",
+        )
+        verification_rate = round((total_outcomes or 0) / max(total_causal or 0, 1), 3)
+        challenge_ratio = round((total_challenges or 0) / max(total_l3 or 0, 1), 4)
+
+        # 5. Per-source reliability summary (aggregate over ohm_outcomes)
+        reliability_rows = _safe_query.safe_rows(
+            conn,
+            """
+            SELECT source_agent,
+                   COUNT(*) AS total_outcomes,
+                   SUM(CASE WHEN outcome = TRUE THEN 1 ELSE 0 END) AS accurate,
+                   SUM(CASE WHEN outcome = FALSE THEN 1 ELSE 0 END) AS inaccurate,
+                   CASE WHEN COUNT(*) > 0
+                        THEN ROUND(CAST(SUM(CASE WHEN outcome = TRUE THEN 1 ELSE 0 END) AS DOUBLE) / COUNT(*), 3)
+                        ELSE NULL END AS p_accurate
+            FROM ohm_outcomes
+            GROUP BY source_agent
+            ORDER BY total_outcomes DESC
+            """,
+        )
+        source_reliability_summary = [
+            dict(zip(["source_agent", "total_outcomes", "accurate", "inaccurate", "p_accurate"], row))
+            for row in reliability_rows
+            if isinstance(row, tuple) and len(row) == 5
+        ]
+
+        payload = {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "tenant_id": getattr(self, "_customer_id", None),
+            "thresholds": {
+                "stale_observation_days": stale_days,
+                "low_confidence_threshold": low_conf_threshold,
+            },
+            "orphans": {
+                "count": orphan_count,
+                "node_ids": orphan_ids,
+                "orphan_rate": graph.get("orphan_rate_total"),
+            },
+            "stale_observations": {
+                "count": len(stale_observations),
+                "oldest_days": round(oldest_days, 1),
+                "observation_ids": [o["id"] for o in stale_observations[:50]],
+            },
+            "low_confidence_clusters": {
+                "count": len(low_confidence_clusters),
+                "clusters": low_confidence_clusters,
+            },
+            "verification_rate": verification_rate,
+            "challenge_ratio": challenge_ratio,
+            "source_reliability_summary": source_reliability_summary,
+            "graph": {
+                "total_nodes": graph.get("total_nodes"),
+                "total_edges": graph.get("total_edges"),
+                "dead_end_count": graph.get("dead_end_count"),
+                "low_confidence_unchallenged": graph.get("low_confidence_unchallenged"),
+                "dense_clusters": graph.get("dense_clusters"),
+                "stale_agents": graph.get("stale_agents"),
+                "health_score": graph.get("health_score"),
+            },
+        }
+        self._json_response(200, payload)
+
     def _post_admin_verification_decay(self, path: str, qs: dict, body: dict, agent: str) -> None:
         """POST /admin/verification-decay — Run verification-aware confidence decay.
 
@@ -1003,6 +1186,52 @@ class AdminHandlerMixin(OhmHandlerBase):
             )
         except Exception as e:
             self._json_response(500, {"error": "vacuum_failed", "message": str(e)})
+
+    def _post_admin_repair_ducklake(self, path: str, qs: dict, body: dict, agent: str) -> None:
+        """POST /admin/repair-ducklake — delete orphaned rows from DuckLake mirrors (OHM-926).
+
+        Detects rows in the DuckLake mirror tables that have no corresponding
+        active local row and (unless ``dry_run=true``) hard-deletes them. Use
+        this when ``/health/sync`` is stuck in ``sync_degraded`` due to
+        pre-existing orphans that the incremental sync path cannot clean up.
+
+        Body params:
+          dry_run: default ``true`` (report only). Set ``false`` to delete.
+          alias:   DuckLake attach alias (default ``ohm_lake``).
+
+        Requires admin role.
+        """
+        self._require_admin()
+        dry_run = body.get("dry_run", True) if body else True
+        alias = body.get("alias", "ohm_lake") if body else "ohm_lake"
+        if not isinstance(dry_run, bool):
+            dry_run = True
+        if not isinstance(alias, str) or not alias.replace("_", "").replace("-", "").isalnum():
+            self._json_response(400, {"error": "invalid_alias", "message": "alias must be a bare identifier"})
+            return
+
+        try:
+            attached = self.current_store.conn.execute(
+                "SELECT database_name FROM duckdb_databases() WHERE database_name = ?",
+                [alias],
+            ).fetchone()
+            if not attached:
+                self._json_response(200, {"status": "skipped", "message": f"No DuckLake attached as '{alias}'", "tables": {}, "total_deleted": 0})
+                return
+
+            result = self.current_store.repair_ducklake_orphans(alias=alias, dry_run=dry_run)
+
+            # Recheck health so callers can confirm sync_degraded cleared
+            try:
+                dlh = self.current_store.check_ducklake_health(alias=alias)
+                result["sync_degraded_after"] = dlh.get("sync_degraded", False)
+                result["orphan_counts_after"] = dlh.get("orphan_counts", {})
+            except Exception as e:
+                result["errors"].append(f"post-repair health check error: {e}")
+
+            self._json_response(200, {"status": "ok", **result})
+        except Exception as e:
+            self._json_response(500, {"error": "repair_ducklake_failed", "message": str(e)})
 
     def _get_resolve(self, path: str, qs: dict) -> None:
         """GET /resolve?query= — resolve a query to a node via alias matching, then fuzzy fallback (OHM-g0kv.4, OHM-tr71.9).

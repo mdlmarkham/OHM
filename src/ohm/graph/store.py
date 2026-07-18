@@ -3015,6 +3015,114 @@ class OhmStore:
 
         return result
 
+    def repair_ducklake_orphans(
+        self,
+        alias: str = "ohm_lake",
+        dry_run: bool = True,
+    ) -> dict[str, Any]:
+        """Delete orphaned rows from DuckLake mirror tables (OHM-926).
+
+        The mirror-repair counterpart to ``repair_from_ducklake`` (which goes
+        DuckLake→local). This method goes the opposite direction: it deletes
+        rows from the DuckLake mirror that have no corresponding active local
+        row. These accumulate when a soft-delete happened on an instance that
+        never propagated the tombstone (pre-OHM-822 sync path), leaving
+        ``/health/sync`` stuck in ``sync_degraded=True``.
+
+        Uses the same orphan-detection SQL as ``check_ducklake_health`` but
+        issues ``DELETE`` instead of ``COUNT(*)``. Iterates the
+        ``_ducklake_sync_tables()`` registry (OHM-8bli) so domain tables are
+        covered and the append-only ``ohm_change_feed`` is skipped.
+
+        Args:
+            alias: Database alias for the attached DuckLake catalog.
+            dry_run: When True (default for safety), report orphans without
+                deleting. When False, hard-delete orphaned rows from the
+                mirror tables.
+
+        Returns:
+            Dict with per-table ``orphans_found`` / ``orphans_deleted``
+            counts, plus ``total_deleted`` and ``errors``. Idempotent — a
+            second run reports 0 orphans.
+        """
+        result: dict[str, Any] = {
+            "dry_run": dry_run,
+            "tables": {},
+            "total_deleted": 0,
+            "errors": [],
+        }
+
+        # Check if DuckLake is attached
+        try:
+            attached = self.conn.execute(
+                "SELECT database_name FROM duckdb_databases() WHERE database_name = ?",
+                [alias],
+            ).fetchone()
+        except Exception as e:
+            result["errors"].append(f"Cannot check DuckLake attachment: {e}")
+            return result
+
+        if not attached:
+            result["errors"].append("DuckLake not attached — cannot repair orphans")
+            return result
+
+        for dlt in self._ducklake_sync_tables():
+            table = dlt.name
+            mirror = self._ducklake_table(table, alias)
+            try:
+                if dlt.has_deleted_at:
+                    orphan_count = self.conn.execute(f"""
+                        SELECT COUNT(*) FROM {mirror} dl
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM {table} l
+                            WHERE l.id = dl.id AND l.deleted_at IS NULL
+                        )
+                    """).fetchone()[0]  # type: ignore[index]
+                else:
+                    orphan_count = self.conn.execute(f"""
+                        SELECT COUNT(*) FROM {mirror} dl
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM {table} l WHERE l.id = dl.id
+                        )
+                    """).fetchone()[0]  # type: ignore[index]
+
+                deleted = 0
+                if orphan_count > 0 and not dry_run:
+                    if dlt.has_deleted_at:
+                        self.conn.execute(f"""
+                            DELETE FROM {mirror} dl
+                            WHERE NOT EXISTS (
+                                SELECT 1 FROM {table} l
+                                WHERE l.id = dl.id AND l.deleted_at IS NULL
+                            )
+                        """)
+                    else:
+                        self.conn.execute(f"""
+                            DELETE FROM {mirror} dl
+                            WHERE NOT EXISTS (
+                                SELECT 1 FROM {table} l WHERE l.id = dl.id
+                            )
+                        """)
+                    deleted = orphan_count
+
+                result["tables"][table] = {
+                    "orphans_found": orphan_count,
+                    "orphans_deleted": deleted,
+                }
+                result["total_deleted"] += deleted
+
+            except Exception as e:
+                result["errors"].append(f"{table} orphan repair error: {e}")
+
+        # Checkpoint after a non-dry-run repair
+        if not dry_run and not result["errors"]:
+            try:
+                self.conn.execute("CHECKPOINT")
+            except Exception:
+                pass
+
+        return result
+
     def push_to_ducklake(self, ducklake_path: str, alias: str = "ohm_lake", force_full: bool = False) -> int:
         """Push local data to DuckLake shared backend via mirror tables.
 

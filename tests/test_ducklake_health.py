@@ -253,3 +253,149 @@ class TestDuckLakeAutoRestore:
         count = store.conn.execute("SELECT COUNT(*) FROM ohm_nodes WHERE deleted_at IS NULL").fetchone()[0]
         assert count == 0, "Should remain empty without DuckLake"
         store.close()
+
+
+@pytest.mark.skipif(SKIP_CI, reason="DuckLake ATTACH DATABASE not available in CI")
+class TestDuckLakeOrphanRepair:
+    """Tests for repair_ducklake_orphans() (OHM-926).
+
+    Tests the DuckLake→mirror direction: delete orphan rows from the mirror
+    that have no corresponding active local row.
+    """
+
+    def test_repair_orphans_dry_run_reports_but_does_not_delete(self, tmp_path):
+        """dry_run=True reports orphans without deleting them."""
+        local_path = str(tmp_path / "local.duckdb")
+        ducklake_path = str(tmp_path / "ducklake.duckdb")
+
+        # Seed DuckLake with a node that will have no local counterpart
+        dl_store = OhmStore(db_path=ducklake_path, agent_name="dl_init")
+        dl_store.write_node("orphan_only_node", "Orphan Only", "concept")
+        dl_store.conn.execute("CHECKPOINT")
+        dl_store.close()
+
+        store = OhmStore(db_path=local_path, agent_name="test_dry_run")
+        try:
+            store.conn.execute(f"ATTACH DATABASE '{ducklake_path}' AS ohm_lake (READ_WRITE)")
+        except Exception:
+            store.close()
+            pytest.skip("DuckLake attachment not available")
+
+        result = store.repair_ducklake_orphans(alias="ohm_lake", dry_run=True)
+
+        assert result["dry_run"] is True
+        assert result["tables"]["ohm_nodes"]["orphans_found"] >= 1
+        assert result["tables"]["ohm_nodes"]["orphans_deleted"] == 0
+        assert result["total_deleted"] == 0
+
+        # Orphan should still be in the mirror
+        remaining = store.conn.execute(
+            "SELECT COUNT(*) FROM ohm_lake.ohm_nodes WHERE id = 'orphan_only_node'"
+        ).fetchone()[0]
+        assert remaining == 1, "dry_run must not delete from the mirror"
+        store.close()
+
+    def test_repair_orphans_deletes_when_not_dry_run(self, tmp_path):
+        """dry_run=False hard-deletes orphan rows from the mirror."""
+        local_path = str(tmp_path / "local.duckdb")
+        ducklake_path = str(tmp_path / "ducklake.duckdb")
+
+        dl_store = OhmStore(db_path=ducklake_path, agent_name="dl_init")
+        dl_store.write_node("orphan_to_delete", "Orphan To Delete", "concept")
+        dl_store.conn.execute("CHECKPOINT")
+        dl_store.close()
+
+        store = OhmStore(db_path=local_path, agent_name="test_delete")
+        try:
+            store.conn.execute(f"ATTACH DATABASE '{ducklake_path}' AS ohm_lake (READ_WRITE)")
+        except Exception:
+            store.close()
+            pytest.skip("DuckLake attachment not available")
+
+        result = store.repair_ducklake_orphans(alias="ohm_lake", dry_run=False)
+
+        assert result["dry_run"] is False
+        assert result["tables"]["ohm_nodes"]["orphans_found"] >= 1
+        assert result["tables"]["ohm_nodes"]["orphans_deleted"] >= 1
+        assert result["total_deleted"] >= 1
+
+        # Orphan should be gone from the mirror
+        remaining = store.conn.execute(
+            "SELECT COUNT(*) FROM ohm_lake.ohm_nodes WHERE id = 'orphan_to_delete'"
+        ).fetchone()[0]
+        assert remaining == 0, "dry_run=False must delete orphan from the mirror"
+        store.close()
+
+    def test_repair_orphans_is_idempotent(self, tmp_path):
+        """A second run reports 0 orphans after the first run cleaned them."""
+        local_path = str(tmp_path / "local.duckdb")
+        ducklake_path = str(tmp_path / "ducklake.duckdb")
+
+        dl_store = OhmStore(db_path=ducklake_path, agent_name="dl_init")
+        dl_store.write_node("idem_orphan", "Idem Orphan", "concept")
+        dl_store.conn.execute("CHECKPOINT")
+        dl_store.close()
+
+        store = OhmStore(db_path=local_path, agent_name="test_idem")
+        try:
+            store.conn.execute(f"ATTACH DATABASE '{ducklake_path}' AS ohm_lake (READ_WRITE)")
+        except Exception:
+            store.close()
+            pytest.skip("DuckLake attachment not available")
+
+        first = store.repair_ducklake_orphans(alias="ohm_lake", dry_run=False)
+        assert first["total_deleted"] >= 1
+
+        second = store.repair_ducklake_orphans(alias="ohm_lake", dry_run=False)
+        assert second["total_deleted"] == 0
+        # All tables should report 0 orphans found on the second run
+        for table, counts in second["tables"].items():
+            assert counts["orphans_found"] == 0, f"{table} still has orphans after repair"
+        store.close()
+
+    def test_repair_orphans_preserves_active_local_rows(self, tmp_path):
+        """Rows that exist both in DuckLake and locally are never deleted."""
+        local_path = str(tmp_path / "local.duckdb")
+        ducklake_path = str(tmp_path / "ducklake.duckdb")
+
+        # DuckLake has two nodes; local will have one of them.
+        dl_store = OhmStore(db_path=ducklake_path, agent_name="dl_init")
+        dl_store.write_node("shared_node", "Shared", "concept")
+        dl_store.write_node("orphan_only", "Orphan Only", "concept")
+        dl_store.conn.execute("CHECKPOINT")
+        dl_store.close()
+
+        store = OhmStore(db_path=local_path, agent_name="test_preserve")
+        store.write_node("shared_node", "Shared Local", "concept")
+        try:
+            store.conn.execute(f"ATTACH DATABASE '{ducklake_path}' AS ohm_lake (READ_WRITE)")
+        except Exception:
+            store.close()
+            pytest.skip("DuckLake attachment not available")
+
+        result = store.repair_ducklake_orphans(alias="ohm_lake", dry_run=False)
+        deleted_ids = {table: counts["orphans_deleted"] for table, counts in result["tables"].items()}
+        assert result["total_deleted"] >= 1, "should delete the orphan_only row"
+
+        # shared_node must still exist in the mirror
+        remaining_shared = store.conn.execute(
+            "SELECT COUNT(*) FROM ohm_lake.ohm_nodes WHERE id = 'shared_node'"
+        ).fetchone()[0]
+        assert remaining_shared == 1, "active shared row must not be deleted"
+        # And locally too
+        local_shared = store.conn.execute(
+            "SELECT COUNT(*) FROM ohm_nodes WHERE id = 'shared_node' AND deleted_at IS NULL"
+        ).fetchone()[0]
+        assert local_shared == 1
+        store.close()
+
+    def test_repair_orphans_no_ducklake_attached(self, tmp_path):
+        """Repair with no DuckLake attached returns an error, does not crash."""
+        store = OhmStore(db_path=str(tmp_path / "local.duckdb"), agent_name="test_no_dl")
+
+        result = store.repair_ducklake_orphans(alias="ohm_lake", dry_run=False)
+
+        assert len(result["errors"]) > 0
+        assert result["total_deleted"] == 0
+        assert any("not attached" in e for e in result["errors"])
+        store.close()
