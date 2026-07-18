@@ -288,6 +288,16 @@ def build_request(name: str, arguments: dict[str, Any], agent_id: str) -> tuple[
     if name == "ohm_storage_efficiency":
         return "GET", "/storage/efficiency", None
 
+    if name == "ohm_admin_graph_health":
+        params: dict[str, str] = {}
+        if arguments.get("stale_observation_days") is not None:
+            params["stale_observation_days"] = str(arguments["stale_observation_days"])
+        if arguments.get("low_confidence_threshold") is not None:
+            params["low_confidence_threshold"] = str(arguments["low_confidence_threshold"])
+        if arguments.get("orphan_limit") is not None:
+            params["orphan_limit"] = str(arguments["orphan_limit"])
+        return "GET", _qs("/admin/graph-health", params), None
+
     if name == "ohm_source_reliability":
         params: dict[str, str] = {}
         if arguments.get("agent_id"):

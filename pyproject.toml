@@ -110,6 +110,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 "ohm.graph" = ["templates/*.json"]
 "ohm.bos" = ["data/*.json"]
+"ohm.mcp" = ["schemas/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ohm.dev/schemas/sidecar-manifest.schema.json",
+  "title": "SidecarManifest",
+  "description": "OHM gateway sidecar composition manifest (#899, draft — not yet enforced by the gateway). Defines a focused MCP server mounted under a namespace on the gateway endpoint.",
+  "definitions": {
+    "SidecarConfig": {
+      "type": "object",
+      "required": ["name", "type", "namespace"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable sidecar name."
+        },
+        "type": {
+          "enum": ["sse", "streamable_http", "module", "stdio", "uvx", "npm"],
+          "description": "Connection type to the sidecar MCP server."
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL for sse/streamable_http sidecars."
+        },
+        "module": {
+          "type": "string",
+          "description": "Python module path for in-process module sidecars."
+        },
+        "namespace": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Tool-name prefix under which the sidecar's tools are exposed. Must not collide with reserved core prefixes ('ohm_', 'admin_')."
+        },
+        "auth": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {"enum": ["bearer", "none"]},
+            "token_env": {"type": "string", "description": "Environment variable holding the sidecar auth token."}
+          },
+          "required": ["type"]
+        },
+        "allowed_tools": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Tools from this sidecar the profile may call. Defaults to ['*'] (all)."
+        }
+      }
+    }
+  },
+  "type": "array",
+  "items": {"$ref": "#/definitions/SidecarConfig"}
+}

@@ -35,17 +35,34 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+# OHM-912: httpx and fastmcp are imported lazily so that
+# ``ohm-gateway --validate-config`` can run without the gateway extra
+# installed. The validation module only depends on jsonschema (a core
+# dependency). ``main_async`` re-raises the captured ImportError so the
+# server start path still fails fast with the same actionable message.
+_HTTPX_IMPORT_ERROR: ImportError | None = None
 try:
     import httpx
 except ImportError as e:  # pragma: no cover
-    raise ImportError("ohm-gateway requires httpx: pip install 'ohm[gateway]'") from e
+    _HTTPX_IMPORT_ERROR = e
+    httpx = None  # type: ignore[assignment]
 
+# OHM-912: fastmcp is imported lazily so that ``ohm-gateway --validate-config``
+# can run without the gateway extra installed (the validation module only
+# depends on jsonschema, a core dependency). ``_FASTMCP_IMPORT_ERROR`` is
+# re-raised inside ``main_async`` so the server start path still fails fast
+# with the same actionable message as before.
+_FASTMCP_IMPORT_ERROR: ImportError | None = None
 try:
     from fastmcp import FastMCP
     from fastmcp.dependencies import CurrentContext, CurrentHeaders
     from fastmcp.server.context import Context
 except ImportError as e:  # pragma: no cover
-    raise ImportError("ohm-gateway requires fastmcp: pip install 'ohm[gateway]'") from e
+    _FASTMCP_IMPORT_ERROR = e
+    FastMCP = None  # type: ignore[assignment,misc]
+    CurrentContext = None  # type: ignore[assignment,misc]
+    CurrentHeaders = None  # type: ignore[assignment,misc]
+    Context = None  # type: ignore[assignment,misc]
 
 from ohm.mcp.agora_nudges import generate_agora_nudges
 from ohm.mcp.config import WRITE_TOOLS
@@ -53,7 +70,12 @@ from ohm.mcp.conversation_state import auto_update_from_tool, get_store, resolve
 from ohm.mcp.deliberation import handle_deliberation_action
 from ohm.mcp.encoding import encode_payload, requested_format
 from ohm.mcp.gateway_helpers import _strip_nulls, _deduplicate_nudges
-from ohm.mcp.tools import all_tools as _all_tools
+# OHM-912: ohm.mcp.tools imports mcp.types, which is an optional dependency.
+# Defer this import to inside _register_tools() so that --validate-config can
+# run without the mcp/gateway extra installed.
+def _all_tools():  # type: ignore[misc]
+    from ohm.mcp.tools import all_tools as _at
+    return _at()
 
 logger = logging.getLogger(__name__)
 
@@ -90,24 +112,51 @@ class GatewayProfile:
 
 
 def _load_profiles() -> dict[str, GatewayProfile]:
-    """Load tenant profiles from env var or default config path."""
+    """Load tenant profiles from env var or default config path.
+
+    OHM-912: validates the parsed payload against the gateway-profile JSON
+    Schema before constructing ``GatewayProfile`` objects. Schema failures
+    are logged with actionable paths and the offending profiles are skipped
+    rather than crashing later with an opaque ``KeyError``.
+    """
+    from ohm.mcp.profile_validation import (
+        validate_profiles_payload,
+        format_validation_report,
+    )
+
     profiles_path = os.environ.get("OHM_GATEWAY_PROFILES")
     inline = os.environ.get("OHM_GATEWAY_PROFILE")
     default_path = os.path.expanduser("~/.ohm/gateway-profiles.json")
 
     raw: list[dict[str, Any]] = []
+    source = "<unknown>"
     if inline:
         raw = json.loads(inline)
+        source = "OHM_GATEWAY_PROFILE env var"
     elif profiles_path:
         raw = json.loads(open(profiles_path).read())
+        source = profiles_path
     elif os.path.exists(default_path):
         raw = json.loads(open(default_path).read())
+        source = default_path
     else:
         logger.warning("No gateway profiles found. Set OHM_GATEWAY_PROFILES or OHM_GATEWAY_PROFILE.")
         return {}
 
     if isinstance(raw, dict):
         raw = [raw]
+
+    # OHM-912: schema-validate before constructing profiles. Log a clear report
+    # and skip invalid profiles rather than crashing on the first KeyError.
+    validation = validate_profiles_payload(raw)
+    if not validation["valid"]:
+        logger.error("Gateway profile validation failed (%s):\n%s", source, format_validation_report(validation))
+        # Filter to only valid profiles — the schema gives per-profile errors,
+        # so a single bad profile doesn't take down the whole gateway.
+        valid_indices = {i for i in range(len(raw)) if i not in {e.get("profile_index") for e in validation["errors"] if e.get("profile_index") is not None}}
+        raw = [p for i, p in enumerate(raw) if i in valid_indices]
+    if validation["warnings"]:
+        logger.warning("Gateway profile validation warnings (%s):\n%s", source, format_validation_report(validation))
 
     result: dict[str, GatewayProfile] = {}
     for item in raw:
@@ -525,7 +574,10 @@ def _build_tool_handler(tool_name: str):
 # when FastMCP auth is active, the profile comes from the auth context.
 # OHM-827: Default name from env var, can be overridden by --name CLI arg.
 _DEFAULT_GATEWAY_NAME = os.environ.get("OHM_GATEWAY_NAME", "ohm-gateway")
-mcp = FastMCP(_DEFAULT_GATEWAY_NAME, tasks=True)
+# OHM-912: defer FastMCP construction when fastmcp is not installed so that
+# ``ohm-gateway --validate-config`` works without the gateway extra. The
+# server start path (main_async) re-raises _FASTMCP_IMPORT_ERROR.
+mcp = FastMCP(_DEFAULT_GATEWAY_NAME, tasks=True) if FastMCP is not None else None
 
 
 def _register_health_route(mcp_instance) -> None:
@@ -698,6 +750,14 @@ def _apply_tool_search_transform() -> None:
 
 async def main_async(host: str = "0.0.0.0", port: int = 8080, transport: str = "sse", name: str | None = None) -> None:
     """Run the gateway's HTTP server."""
+    # OHM-912: re-raise deferred import errors so the server path fails fast
+    # with the same actionable message as before, while --validate-config
+    # (which doesn't call main_async) still works without the gateway extra.
+    if _HTTPX_IMPORT_ERROR is not None:
+        raise ImportError("ohm-gateway requires httpx: pip install 'ohm[gateway]'") from _HTTPX_IMPORT_ERROR
+    if _FASTMCP_IMPORT_ERROR is not None:
+        raise ImportError("ohm-gateway requires fastmcp: pip install 'ohm[gateway]'") from _FASTMCP_IMPORT_ERROR
+
     if not _profiles():
         logger.error("No gateway profiles configured; refusing to start")
         sys.exit(1)
@@ -741,7 +801,28 @@ def cli_main() -> None:
     parser.add_argument("--transport", choices=["sse", "streamable-http"], default="sse")
     parser.add_argument("--log-level", default="info")
     parser.add_argument("--name", help="Gateway name for MCP serverInfo.name (env: OHM_GATEWAY_NAME)")
+    parser.add_argument(
+        "--validate-config",
+        metavar="PATH",
+        default=None,
+        help="Validate a gateway-profiles JSON file and exit (OHM-912). Non-zero exit on any validation error.",
+    )
     args = parser.parse_args()
+
+    # OHM-912: --validate-config runs the profile JSON Schema validator and exits
+    # without starting the server. This works without fastmcp/httpx installed —
+    # the validation module only depends on jsonschema (a core dependency).
+    if args.validate_config is not None:
+        from ohm.mcp.profile_validation import validate_profiles_file, format_validation_report
+
+        result = validate_profiles_file(args.validate_config)
+        report = format_validation_report(result)
+        if result["valid"]:
+            print(report)
+            sys.exit(0)
+        else:
+            print(report, file=sys.stderr)
+            sys.exit(1)
 
     logging.basicConfig(level=getattr(logging, args.log_level.upper()))
     import asyncio
