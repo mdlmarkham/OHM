@@ -267,3 +267,120 @@ class TestSchemaCoverage:
         # Every dataclass field must be in the schema
         missing = dataclass_fields - schema_fields
         assert not missing, f"GatewayProfile fields missing from schema: {missing}"
+
+
+class TestLoadProfilesEndToEnd:
+    """Regression tests for _load_profiles() (OHM-969).
+
+    The schema validator (validate_profiles_payload) is only half the
+    contract — _load_profiles() must also construct GatewayProfile objects
+    from schema-valid input without raising. These tests call _load_profiles
+    directly (not the lower-level validate_* functions) so they catch
+    KeyError/TypeError bugs at the construction site that the validation
+    tests would miss.
+    """
+
+    @staticmethod
+    def _clear_profile_cache():
+        """Reset the module-level _PROFILES cache so each test re-loads."""
+        import ohm.mcp.gateway as gw
+        gw._PROFILES = None
+
+    def _restore_env(self, original_inline, original_profiles):
+        if original_inline is None:
+            os.environ.pop("OHM_GATEWAY_PROFILE", None)
+        else:
+            os.environ["OHM_GATEWAY_PROFILE"] = original_inline
+        if original_profiles is None:
+            os.environ.pop("OHM_GATEWAY_PROFILES", None)
+        else:
+            os.environ["OHM_GATEWAY_PROFILES"] = original_profiles
+        self._clear_profile_cache()
+
+    def test_minimal_schema_valid_profile_loads_without_ohm_token(self):
+        """A schema-valid profile omitting the optional ohm_token field loads (OHM-969).
+
+        Regression: GatewayProfile(... ohm_token=item["ohm_token"], ...) used
+        direct dict indexing and crashed with KeyError on a profile the schema
+        itself declares valid (only api_key and ohm_url are required).
+        """
+        original_inline = os.environ.get("OHM_GATEWAY_PROFILE")
+        original_profiles = os.environ.get("OHM_GATEWAY_PROFILES")
+        try:
+            os.environ["OHM_GATEWAY_PROFILE"] = json.dumps(
+                [{"api_key": "ohm-gw-min", "ohm_url": "http://localhost:8420"}]
+            )
+            from ohm.mcp.gateway import _load_profiles
+
+            self._clear_profile_cache()
+            profiles = _load_profiles()
+            assert "ohm-gw-min" in profiles
+            p = profiles["ohm-gw-min"]
+            assert p.api_key == "ohm-gw-min"
+            assert p.ohm_url == "http://localhost:8420"
+            # ohm_token is optional — must default to empty string, not crash
+            assert p.ohm_token == ""
+        finally:
+            self._restore_env(original_inline, original_profiles)
+
+    def test_full_profile_loads_with_all_fields(self):
+        """A full profile with every field populated loads correctly end-to-end."""
+        original_inline = os.environ.get("OHM_GATEWAY_PROFILE")
+        original_profiles = os.environ.get("OHM_GATEWAY_PROFILES")
+        try:
+            os.environ["OHM_GATEWAY_PROFILE"] = json.dumps(
+                [
+                    {
+                        "api_key": "ohm-gw-full",
+                        "ohm_url": "http://127.0.0.1:8710/",
+                        "ohm_token": "tok",
+                        "agent_id": "agent-1",
+                        "tenant_id": "t1",
+                        "allowed_tools": ["ohm_search"],
+                        "read_only": True,
+                        "high_blast_radius": ["ohm_delete"],
+                        "audit_path": "/var/log/ohm",
+                        "rate_limit": "100/min",
+                        "tool_search": {"enabled": True},
+                    }
+                ]
+            )
+            from ohm.mcp.gateway import _load_profiles
+
+            self._clear_profile_cache()
+            profiles = _load_profiles()
+            p = profiles["ohm-gw-full"]
+            assert p.agent_id == "agent-1"
+            assert p.tenant_id == "t1"
+            assert p.allowed_tools == ["ohm_search"]
+            assert p.read_only is True
+            assert "ohm_delete" in p.high_blast_radius
+            # ohm_url trailing slash stripped per _load_profiles convention
+            assert p.ohm_url == "http://127.0.0.1:8710"
+        finally:
+            self._restore_env(original_inline, original_profiles)
+
+    def test_missing_ohm_url_is_skipped_by_validation_not_crashed(self):
+        """A profile missing required ohm_url is skipped by _load_profiles, not crashed (OHM-969).
+
+        _load_profiles() runs validate_profiles_payload() before constructing
+        GatewayProfile objects. A profile missing the schema-required ohm_url
+        is filtered out and logged, not crashed on with a KeyError. This is
+        the core guarantee of OHM-912 + OHM-969: schema-invalid profiles are
+        skipped with an actionable report; schema-valid profiles that omit
+        *optional* fields (e.g. ohm_token) construct cleanly without KeyError.
+        """
+        original_inline = os.environ.get("OHM_GATEWAY_PROFILE")
+        original_profiles = os.environ.get("OHM_GATEWAY_PROFILES")
+        try:
+            os.environ["OHM_GATEWAY_PROFILE"] = json.dumps(
+                [{"api_key": "no-url"}]
+            )
+            from ohm.mcp.gateway import _load_profiles
+
+            self._clear_profile_cache()
+            # Must not raise — the invalid profile is skipped, returning {}
+            profiles = _load_profiles()
+            assert profiles == {}, "schema-invalid profile should be skipped, not loaded"
+        finally:
+            self._restore_env(original_inline, original_profiles)

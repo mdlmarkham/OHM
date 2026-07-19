@@ -2272,13 +2272,19 @@ def query_graph_health(
 
     Same result regardless of which agent calls it — substrate method.
     """
-    # Orphan nodes
+    # Orphan nodes — nodes with no active (non-soft-deleted) edges.
+    # OHM-968: the NOT EXISTS subquery MUST filter e.deleted_at IS NULL so that
+    # a node whose only edges are soft-deleted (a normal state in the
+    # correction/supersession workflow) is correctly counted as orphaned.
+    # This must stay aligned with the orphan-id query in
+    # AdminHandlerMixin._get_admin_graph_health; the two queries must agree.
     orphan_row = conn.execute("""
         SELECT COUNT(*) FROM ohm_nodes n
         WHERE n.deleted_at IS NULL
           AND NOT EXISTS (
               SELECT 1 FROM ohm_edges e
-              WHERE e.from_node = n.id OR e.to_node = n.id
+              WHERE e.deleted_at IS NULL
+                AND (e.from_node = n.id OR e.to_node = n.id)
           )
     """).fetchone()
     orphans = orphan_row[0] if orphan_row else 0

@@ -2970,6 +2970,34 @@ class TestAdminGraphHealthEndpoint:
         status, data = _request("GET", port, "/admin/graph-health", token="test-token-abc")
         assert status == 403, f"expected 403, got {status}: {data}"
 
+    def test_graph_health_orphan_count_matches_node_ids_with_soft_deleted_edges(self, test_server):
+        """orphans.count must equal len(orphans.node_ids) even when edges are soft-deleted (OHM-968).
+
+        Regression test: query_graph_health's orphan-count query previously
+        had no e.deleted_at IS NULL filter, so a node whose only edges were
+        soft-deleted was not counted as an orphan, while the admin handler's
+        own node_ids query (which DID filter on deleted_at) listed it —
+        producing an internally inconsistent response.
+        """
+        port, store = test_server
+        # Seed two nodes joined by an edge, then soft-delete the edge.
+        store.write_node("sd_a", "A", "concept", agent_name="metis")
+        store.write_node("sd_b", "B", "concept", agent_name="metis")
+        store.write_edge("sd_a", "sd_b", "CAUSES", layer="L3", confidence=0.8, agent_name="metis")
+        # Soft-delete the edge — both nodes are now orphans (no active edges)
+        store.conn.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE from_node = 'sd_a' AND to_node = 'sd_b'")
+
+        status, data = _request("GET", port, "/admin/graph-health")
+        assert status == 200, data
+        orphans = data["orphans"]
+        assert "sd_a" in orphans["node_ids"], "soft-deleted-edge node should be listed as orphan"
+        assert "sd_b" in orphans["node_ids"], "soft-deleted-edge node should be listed as orphan"
+        # The core regression assertion: count and node_ids must agree
+        assert orphans["count"] == len(orphans["node_ids"]), (
+            f"orphans.count ({orphans['count']}) != len(node_ids) ({len(orphans['node_ids'])}) — "
+            f"the count query is missing the deleted_at IS NULL filter on ohm_edges (OHM-968)"
+        )
+
 
 @pytest.mark.xdist_group("server")
 class TestNarrativeEndpoint:

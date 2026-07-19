@@ -163,10 +163,16 @@ def _load_profiles() -> dict[str, GatewayProfile]:
         key = item.get("api_key")
         if not key:
             continue
+        # OHM-969: use .get() for every field so a schema-valid profile that
+        # omits an optional field (e.g. ohm_token) does not crash with an
+        # opaque KeyError. ohm_url is schema-required, but defaulting to ""
+        # keeps the loader resilient if validation is bypassed; an empty
+        # ohm_url will surface as a connection error at request time rather
+        # than a startup crash.
         result[key] = GatewayProfile(
             api_key=key,
-            ohm_url=item["ohm_url"].rstrip("/"),
-            ohm_token=item["ohm_token"],
+            ohm_url=(item.get("ohm_url") or "").rstrip("/"),
+            ohm_token=item.get("ohm_token") or "",
             agent_id=item.get("agent_id", "unknown"),
             tenant_id=item.get("tenant_id"),
             allowed_tools=item.get("allowed_tools", ["*"]),
