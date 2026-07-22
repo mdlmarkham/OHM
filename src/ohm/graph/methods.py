@@ -2113,7 +2113,8 @@ def compound_confidence(
         c = max(0.0, min(1.0, c))
 
         if use_weighting:
-            assert source_weights is not None
+            if source_weights is None:
+                raise ValueError("use_weighting=True requires a source_weights mapping")
             source = obs.get("source") or obs.get("created_by") or "_unknown_"
             w = source_weights.get(source, default_weight)
             weighted_confidences.append((c, w))

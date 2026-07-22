@@ -883,7 +883,8 @@ def build_bayesian_network(
     model.add_cpds(*cpds)
 
     try:
-        assert model.check_model()
+        if not model.check_model():
+            raise RuntimeError("check_model() returned False")
     except Exception as e:
         logger.error(f"Bayesian network model check failed: {e}")
         # Try with just root nodes as fallback
@@ -1258,7 +1259,8 @@ def causal_intervention(
     model_do.cpds = []  # Clear existing CPDs
     try:
         model_do.add_cpds(*new_cpds)
-        assert model_do.check_model()
+        if not model_do.check_model():
+            raise RuntimeError("check_model() returned False")
     except Exception as e:
         logger.error(f"Mutilated graph model check failed: {e}")
         # Fallback: rebuild network excluding target's parents
@@ -3148,7 +3150,8 @@ class BayesianContext:
         model_do.cpds = []
         try:
             model_do.add_cpds(*new_cpds)
-            assert model_do.check_model()
+            if not model_do.check_model():
+                raise RuntimeError("check_model() returned False")
         except Exception as e:
             logger.error(f"Mutilated graph model check failed: {e}")
             return {

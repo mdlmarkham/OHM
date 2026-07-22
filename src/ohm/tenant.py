@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from ohm.framework.validation import validate_backup_id, validate_customer_id
+from ohm.framework.validation import sql_string_literal, validate_backup_id, validate_customer_id
 from ohm.graph.store import OhmStore
 from ohm.schema import SchemaConfig
 
@@ -211,6 +211,8 @@ class TenantManager:
         """
         import duckdb as _duckdb
 
+        if self._shared_catalog_url is None:
+            raise RuntimeError("Federated mode requires a shared_catalog_url")
         schema_name = self._tenant_schema_name(customer_id)
         conn = _duckdb.connect(":memory:")
         try:
@@ -249,8 +251,10 @@ class TenantManager:
             )
         """)
 
-        # Now attach the shared DuckLake catalog
-        conn.execute(f"ATTACH IF NOT EXISTS '{self._shared_catalog_url}' AS ohm_lake (TYPE ducklake)")
+        # Now attach the shared DuckLake catalog. sql_string_literal escapes
+        # any single quotes in the catalog URL (e.g. a postgres connection
+        # string with a quoted value) so it cannot break out of the literal.
+        conn.execute(f"ATTACH IF NOT EXISTS '{sql_string_literal(self._shared_catalog_url)}' AS ohm_lake (TYPE ducklake)")
         conn.execute(f"CREATE SCHEMA IF NOT EXISTS ohm_lake.{schema_name}")
 
         # OHM-735: Acquire cross-process migration lock before running DDL.
@@ -640,7 +644,8 @@ class TenantManager:
             if meta_path.exists():
                 try:
                     result.append(json.loads(meta_path.read_text()))
-                except Exception:
+                except Exception as e:
+                    logger.debug("tenant meta read skipped: %s", e, exc_info=True)
                     pass
         return result
 
@@ -849,7 +854,8 @@ class TenantManager:
                 logger.warning("Checkpoint before evict failed: %s", e)
             try:
                 entry.store.close()
-            except Exception:
+            except Exception as e:
+                logger.debug("evict store close skipped: %s", e, exc_info=True)
                 pass
 
     @contextmanager
@@ -889,7 +895,8 @@ class TenantManager:
             for entry in self._cache.values():
                 try:
                     entry.store.close()
-                except Exception:
+                except Exception as e:
+                    logger.debug("shutdown store close skipped: %s", e, exc_info=True)
                     pass
             self._cache.clear()
 
@@ -1340,11 +1347,13 @@ class TenantManager:
         # Checkpoint before close to flush WAL
         try:
             entry.store.conn.execute("CHECKPOINT")
-        except Exception:
+        except Exception as e:
+            logger.debug("evict checkpoint skipped: %s", e, exc_info=True)
             pass
         try:
             entry.store.close()
-        except Exception:
+        except Exception as e:
+            logger.debug("evict store close skipped: %s", e, exc_info=True)
             pass
 
     def _evict_lru_unlocked(self) -> None:
@@ -1361,11 +1370,13 @@ class TenantManager:
                     self._cache.pop(cid)
                     try:
                         entry.store.conn.execute("CHECKPOINT")
-                    except Exception:
+                    except Exception as e:
+                        logger.debug("lru evict checkpoint skipped: %s", e, exc_info=True)
                         pass
                     try:
                         entry.store.close()
-                    except Exception:
+                    except Exception as e:
+                        logger.debug("lru evict store close skipped: %s", e, exc_info=True)
                         pass
                     logger.debug("LRU evicted tenant %s", cid)
                     evicted = True
@@ -1511,7 +1522,8 @@ class TenantManager:
         db_path = self._tenant_dir(customer_id) / _DB_FILENAME
         try:
             db_size = db_path.stat().st_size
-        except Exception:
+        except Exception as e:
+            logger.debug("tenant db stat skipped: %s", e, exc_info=True)
             pass
 
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -1579,7 +1591,8 @@ class TenantManager:
                 self._cache.pop(customer_id, None)
             try:
                 entry.store.close()
-            except Exception:
+            except Exception as e:
+                logger.debug("pre-backup store close skipped: %s", e, exc_info=True)
                 pass
 
         db_src = tenant_dir / _DB_FILENAME
@@ -1640,7 +1653,8 @@ class TenantManager:
             try:
                 original_meta = json.loads(meta_src.read_text())
                 meta_out = {**original_meta, **backup_meta}
-            except Exception:
+            except Exception as e:
+                logger.debug("backup meta merge skipped: %s", e, exc_info=True)
                 pass
         meta_tmp = backup_path / (_META_FILENAME + ".tmp")
         meta_tmp.write_text(json.dumps(meta_out, indent=2))
@@ -1658,7 +1672,8 @@ class TenantManager:
                     last_checkpoint_at=0.0,
                 )
                 self._cache[customer_id] = entry
-            except Exception:
+            except Exception as e:
+                logger.debug("post-backup cache reinsert skipped: %s", e, exc_info=True)
                 pass
 
         logger.info("Backed up tenant %s → %s (reason=%s)", customer_id, backup_id, reason)
@@ -1728,7 +1743,8 @@ class TenantManager:
                 self._cache.pop(customer_id, None)
             try:
                 entry.store.close()
-            except Exception:
+            except Exception as e:
+                logger.debug("pre-restore store close skipped: %s", e, exc_info=True)
                 pass
 
         self.backup_tenant(customer_id, reason="pre_restore")
@@ -1758,7 +1774,8 @@ class TenantManager:
         backup_meta = {}
         try:
             backup_meta = json.loads((backup_path / _META_FILENAME).read_text())
-        except Exception:
+        except Exception as e:
+            logger.debug("restore backup meta read skipped: %s", e, exc_info=True)
             pass
 
         logger.info("Restored tenant %s from backup %s", customer_id, backup_id)

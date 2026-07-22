@@ -1473,7 +1473,8 @@ class OhmHandler(
 
         # Resolve 'since' from agent state if not provided
         if not since:
-            assert self.current_store is not None
+            if self.current_store is None:
+                raise RuntimeError("current_store is not initialized")
             state = self.current_store.get_agent_state(agent)
             if state and state.get("last_sync"):
                 since = state["last_sync"]
@@ -1524,7 +1525,8 @@ class OhmHandler(
         batch_size = 50  # Batch events for efficiency
 
         try:
-            assert self.current_store is not None
+            if self.current_store is None:
+                raise RuntimeError("current_store is not initialized")
             while event_count < max_events:
                 # Query for new changes since last event
                 changes = query_change_feed(

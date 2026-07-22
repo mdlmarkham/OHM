@@ -289,7 +289,9 @@ def _try_ducklake_recovery(db_path_str: str) -> bool:
 
         # Attach DuckLake catalog
         try:
-            tmp_conn.execute(f"ATTACH 'ducklake:{ducklake_path}' AS ohm_lake")
+            from ohm.validation import sql_string_literal
+
+            tmp_conn.execute(f"ATTACH 'ducklake:{sql_string_literal(ducklake_path)}' AS ohm_lake")
         except Exception as e:
             logger.debug("Failed to attach DuckLake catalog %s: %s", ducklake_path, e, exc_info=True)
             return False
@@ -433,7 +435,9 @@ def _auto_restore_if_empty(conn: "duckdb.DuckDBPyConnection", db_path_str: str) 
             return
 
         try:
-            tmp_conn.execute(f"ATTACH 'ducklake:{ducklake_path}' AS ohm_lake")
+            from ohm.validation import sql_string_literal
+
+            tmp_conn.execute(f"ATTACH 'ducklake:{sql_string_literal(ducklake_path)}' AS ohm_lake")
         except Exception as e:
             logger.debug("Failed to attach DuckLake catalog for auto-restore: %s", e, exc_info=True)
             return
@@ -601,10 +605,16 @@ def attach_ducklake(
         return False
 
     # Build ATTACH statement
-    # DuckLake uses the ducklake: protocol for the catalog
-    attach_sql = f"ATTACH 'ducklake:{catalog_path}' AS {alias}"
+    # DuckLake uses the ducklake: protocol for the catalog.
+    # sql_string_literal escapes single quotes in the paths so they cannot
+    # break out of the single-quoted SQL literals; validate_identifier
+    # ensures the alias is a bare SQL identifier safe to interpolate after AS.
+    from ohm.validation import sql_string_literal, validate_identifier
+
+    safe_alias = validate_identifier(alias, name="alias")
+    attach_sql = f"ATTACH 'ducklake:{sql_string_literal(catalog_path)}' AS {safe_alias}"
     if data_path:
-        attach_sql += f" (DATA_PATH '{data_path}')"
+        attach_sql += f" (DATA_PATH '{sql_string_literal(data_path)}')"
 
     try:
         conn.execute(attach_sql)
