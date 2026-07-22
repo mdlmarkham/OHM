@@ -332,8 +332,9 @@ def attach_remote(
     # Build ATTACH statement — no inline TOKEN clause.
     if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", alias):
         raise ValueError(f"Invalid alias: {alias!r}")
+    from ohm.validation import sql_string_literal
 
-    attach_sql = f"ATTACH '{uri}' AS {alias} (TYPE quack"
+    attach_sql = f"ATTACH '{sql_string_literal(uri)}' AS {alias} (TYPE quack"
     if disable_ssl:
         attach_sql += ", DISABLE_SSL true"
     attach_sql += ")"

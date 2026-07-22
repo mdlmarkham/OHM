@@ -1460,7 +1460,8 @@ def resolve_schema_by_name(
         try:
             raw = _json.loads(json_path.read_text())
             return SchemaConfig.from_dict(raw)
-        except Exception:
+        except Exception as e:
+            logger.debug("schema config load skipped: %s", e, exc_info=True)
             pass  # Fall through to default
 
     # 4. Generic defaults
@@ -2938,7 +2939,8 @@ def initialize_schema(conn: "DuckDBPyConnection", schema: "SchemaConfig | None" 
     # with the DDL statements below.
     try:
         conn.execute("CHECKPOINT")
-    except Exception:
+    except Exception as e:
+        logger.debug("pre-ddl checkpoint skipped: %s", e, exc_info=True)
         pass
     for ddl in DDL_STATEMENTS:
         conn.execute(ddl)
@@ -2972,7 +2974,8 @@ def initialize_schema(conn: "DuckDBPyConnection", schema: "SchemaConfig | None" 
             existing = _get_persisted_schema(conn)
             if schema is not DEFAULT_SCHEMA or existing is None:
                 schema.to_db(conn)
-        except Exception:
+        except Exception as e:
+            logger.debug("schema config persist skipped: %s", e, exc_info=True)
             pass  # Non-fatal: ohm_meta may not exist on very old DBs
 
 
@@ -3111,7 +3114,8 @@ def _apply_migrations(conn: "DuckDBPyConnection") -> None:
             # during or after migration.
             try:
                 conn.execute("PRAGMA checkpoint")
-            except Exception:
+            except Exception as e:
+                logger.debug("pre-migration checkpoint skipped: %s", e, exc_info=True)
                 pass
 
             # Run migration statements in a transaction for atomicity
@@ -3137,7 +3141,8 @@ def _apply_migrations(conn: "DuckDBPyConnection") -> None:
             except Exception:
                 try:
                     conn.execute("ROLLBACK")
-                except Exception:
+                except Exception as e:
+                    logger.debug("migration rollback skipped: %s", e, exc_info=True)
                     pass
                 raise  # Re-raise — migration failure should be visible
 
@@ -3148,7 +3153,8 @@ def _apply_migrations(conn: "DuckDBPyConnection") -> None:
             )
             try:
                 conn.execute("PRAGMA checkpoint")
-            except Exception:
+            except Exception as e:
+                logger.debug("post-migration checkpoint skipped: %s", e, exc_info=True)
                 pass
 
             current_key = _version_tuple(version)
@@ -3195,7 +3201,8 @@ def _apply_migrations_ducklake(conn: "DuckDBPyConnection") -> None:
                     ):
                         try:
                             conn.execute("ROLLBACK")
-                        except Exception:
+                        except Exception as e:
+                            logger.debug("ducklake migration rollback skipped: %s", e, exc_info=True)
                             pass
                         logger.warning(
                             "Skipped DuckLake-incompatible migration %s statement: %s",
@@ -3245,7 +3252,8 @@ def _create_hnsw_index(conn: "DuckDBPyConnection") -> None:
     # Create HNSW index (idempotent — IF NOT EXISTS)
     try:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_nodes_embedding ON ohm_nodes USING HNSW (embedding) WITH (metric = 'cosine')")
-    except Exception:
+    except Exception as e:
+        logger.debug("hnsw index creation skipped: %s", e, exc_info=True)
         pass  # Index creation may fail if no data yet — safe to ignore
 
 
@@ -3519,7 +3527,8 @@ def _drop_index_if_exists(conn: "DuckDBPyConnection", index_name: str) -> None:
     """Drop *index_name* if it exists (idempotent)."""
     try:
         conn.execute(f"DROP INDEX IF EXISTS {index_name}")
-    except Exception:
+    except Exception as e:
+        logger.debug("drop index skipped: %s", e, exc_info=True)
         pass
 
 

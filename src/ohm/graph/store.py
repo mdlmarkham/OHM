@@ -125,7 +125,9 @@ class OhmStore:
             try:
                 store.conn.execute("INSTALL ducklake FROM core")
                 store.conn.execute("LOAD ducklake")
-                store.conn.execute(f"ATTACH IF NOT EXISTS '{ducklake_path}' AS ohm_lake (TYPE ducklake)")
+                from ohm.validation import sql_string_literal
+
+                store.conn.execute(f"ATTACH IF NOT EXISTS '{sql_string_literal(ducklake_path)}' AS ohm_lake (TYPE ducklake)")
                 logger.info("DuckLake attached for agent %s at %s", agent_name, ducklake_path)
             except Exception as e:
                 logger.warning("DuckLake attach failed for agent %s: %s", agent_name, e)
@@ -261,7 +263,8 @@ class OhmStore:
         except Exception:
             try:
                 self.conn.close()
-            except Exception:
+            except Exception as e:
+                logger.debug("conn close on init failure skipped: %s", e, exc_info=True)
                 pass
             if self._pid_file is not None:
                 release_lock(self._pid_file)
@@ -314,7 +317,9 @@ class OhmStore:
                 try:
                     conn.execute("INSTALL ducklake FROM core")
                     conn.execute("LOAD ducklake")
-                    conn.execute(f"ATTACH IF NOT EXISTS '{ducklake_path}' AS {dl_catalog} (TYPE ducklake)")
+                    from ohm.validation import sql_string_literal
+
+                    conn.execute(f"ATTACH IF NOT EXISTS '{sql_string_literal(ducklake_path)}' AS {dl_catalog} (TYPE ducklake)")
                     logger.info("DuckLake attached for recovery")
 
                     # OHM-knxf.2: ensure mirror tables exist before restore.
@@ -371,7 +376,8 @@ class OhmStore:
                     # Detach DuckLake
                     try:
                         conn.execute(f"DETACH {dl_catalog}")
-                    except Exception:
+                    except Exception as e:
+                        logger.debug("ducklake detach after recovery skipped: %s", e, exc_info=True)
                         pass
 
                     # Checkpoint
@@ -426,7 +432,9 @@ class OhmStore:
         try:
             self.conn.execute("INSTALL ducklake FROM core")
             self.conn.execute("LOAD ducklake")
-            self.conn.execute(f"ATTACH IF NOT EXISTS '{ducklake_path}' AS {dl_catalog} (TYPE ducklake)")
+            from ohm.validation import sql_string_literal
+
+            self.conn.execute(f"ATTACH IF NOT EXISTS '{sql_string_literal(ducklake_path)}' AS {dl_catalog} (TYPE ducklake)")
 
             # OHM-knxf.2: ensure mirror tables exist in DuckLake before
             # attempting restore (covers tables newly added to the registry).
@@ -454,7 +462,8 @@ class OhmStore:
                     if not dl_cols:
                         try:
                             dl_cols = self.conn.execute(f"PRAGMA table_info('{table}')").fetchall()
-                        except Exception:
+                        except Exception as e:
+                            logger.debug("ducklake table info probe skipped: %s", e, exc_info=True)
                             pass
                     dl_col_names = {r[1] for r in dl_cols}
                     # Determine which source table name worked
@@ -511,7 +520,8 @@ class OhmStore:
 
             try:
                 self.conn.execute(f"DETACH {dl_catalog}")
-            except Exception:
+            except Exception as e:
+                logger.debug("ducklake detach after auto-restore skipped: %s", e, exc_info=True)
                 pass
 
             self.conn.execute("CHECKPOINT")
@@ -535,7 +545,8 @@ class OhmStore:
                     "ohm_outcomes is empty but ohm_change_feed has %d INSERT records — data may have been lost during recovery. Regenerate via: INSERT INTO ohm_outcomes SELECT * FROM (replay change feed). (OHM-knxf guardrail)",
                     feed_count,
                 )
-        except Exception:
+        except Exception as e:
+            logger.debug("outcomes guardrail check skipped: %s", e, exc_info=True)
             pass  # Tables may not exist yet
 
     def _init_schema(self):
@@ -637,7 +648,8 @@ class OhmStore:
                 from .quack import stop_server
 
                 stop_server(self.conn, uri=self.quack_uri)
-            except Exception:
+            except Exception as e:
+                logger.debug("quack stop skipped: %s", e, exc_info=True)
                 pass
             self.quack_started = False
 
@@ -1101,7 +1113,8 @@ class OhmStore:
                     "INSERT INTO ohm_aliases (alias_norm, node_id) VALUES (?, ?)",
                     [norm, id],
                 )
-            except Exception:
+            except Exception as e:
+                logger.debug("alias registration skipped: %s", e, exc_info=True)
                 pass
 
         # Auto-generate embedding in background (best-effort, non-blocking)
@@ -1364,7 +1377,8 @@ class OhmStore:
                     if not exists:
                         try:
                             self.conn.execute("CHECKPOINT")
-                        except Exception:
+                        except Exception as e:
+                            logger.debug("pre-retry checkpoint skipped: %s", e, exc_info=True)
                             pass
                         exists = self.conn.execute(
                             "SELECT 1 FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
@@ -1820,7 +1834,8 @@ class OhmStore:
                 )
                 if existing:
                     return dict(existing) if not isinstance(existing, dict) else existing
-            except Exception:
+            except Exception as e:
+                logger.debug("idempotency key lookup skipped: %s", e, exc_info=True)
                 pass  # Column may not exist yet on old DBs before migration
 
         self.conn.execute(
@@ -2406,7 +2421,8 @@ class OhmStore:
                 """,
                 [table_name, row_id, operation, actor, now],
             )
-        except Exception:
+        except Exception as e:
+            logger.debug("change feed insert skipped: %s", e, exc_info=True)
             pass
         # Update agent's last_sync so they appear in active_agents.
         # OHM-cwrc: use ON CONFLICT upsert instead of check-then-insert; the
@@ -2426,7 +2442,8 @@ class OhmStore:
                         "INSERT INTO ohm_agent_state (agent_name, last_sync, updated_at) VALUES (?, ?, ?)",
                         [actor, now, now],
                     )
-                except Exception:
+                except Exception as e:
+                    logger.debug("agent state insert skipped: %s", e, exc_info=True)
                     pass  # Race — another writer inserted first
         else:
             self.conn.execute(
@@ -2462,7 +2479,8 @@ class OhmStore:
         self._stop_quack()
         try:
             self.conn.execute("CHECKPOINT")
-        except Exception:
+        except Exception as e:
+            logger.debug("close checkpoint skipped: %s", e, exc_info=True)
             pass
         self.conn.close()
         # OHM-955: Release concurrency guard PID file
@@ -2609,7 +2627,8 @@ class OhmStore:
                 [alias],
             ).fetchone()
             ducklake_attached = attached is not None
-        except Exception:
+        except Exception as e:
+            logger.debug("ducklake attach probe skipped: %s", e, exc_info=True)
             pass
 
         if ducklake_path or ducklake_attached:
@@ -3010,7 +3029,8 @@ class OhmStore:
         # Checkpoint after repair
         try:
             self.conn.execute("CHECKPOINT")
-        except Exception:
+        except Exception as e:
+            logger.debug("post-repair checkpoint skipped: %s", e, exc_info=True)
             pass
 
         return result
@@ -3179,7 +3199,8 @@ class OhmStore:
         except Exception:
             try:
                 self.conn.execute("ROLLBACK")
-            except Exception:
+            except Exception as e:
+                logger.debug("sync rollback skipped: %s", e, exc_info=True)
                 pass
             raise
 
@@ -3295,8 +3316,9 @@ class OhmStore:
                     f"INSERT INTO {self._ducklake_table('ohm_change_feed', alias)} (table_name, change_row_id, operation, agent_name, old_data, new_data, occurred_at) VALUES (?, ?, ?, ?, NULL, ?, ?)",
                     [change[0], change[1], change[2], change[3], change[4], change[5]],
                 )
-            except Exception:
+            except Exception as e:
                 # Duplicate or schema mismatch — skip
+                logger.debug("ducklake change feed insert skipped: %s", e, exc_info=True)
                 pass
 
         return len(changes)

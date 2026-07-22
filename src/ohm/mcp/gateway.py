@@ -696,8 +696,13 @@ def _apply_tool_search_transform() -> None:
     logger.info("Tool-search transform enabled (strategy=%s, max_results=%d, always_visible=%s)", strategy, max_results, always_visible)
 
 
-async def main_async(host: str = "0.0.0.0", port: int = 8080, transport: str = "sse", name: str | None = None) -> None:
-    """Run the gateway's HTTP server."""
+async def main_async(host: str = "127.0.0.1", port: int = 8080, transport: str = "sse", name: str | None = None) -> None:
+    """Run the gateway's HTTP server.
+
+    The default bind address is loopback (``127.0.0.1``); pass
+    ``--host 0.0.0.0`` or a specific interface address to expose the
+    gateway to remote clients.
+    """
     if not _profiles():
         logger.error("No gateway profiles configured; refusing to start")
         sys.exit(1)
@@ -736,7 +741,7 @@ async def main_async(host: str = "0.0.0.0", port: int = 8080, transport: str = "
 
 def cli_main() -> None:
     parser = argparse.ArgumentParser(description="OHM MCP Gateway")
-    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--host", default="127.0.0.1", help="Bind address (default loopback; use 0.0.0.0 for all interfaces)")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--transport", choices=["sse", "streamable-http"], default="sse")
     parser.add_argument("--log-level", default="info")

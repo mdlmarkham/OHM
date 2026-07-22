@@ -93,8 +93,14 @@ class OhmHandlerBase(BaseHTTPRequestHandler):
         """Send an error response and finish the request."""
         raise NotImplementedError("must be provided by OhmHandler")
 
-    def _require_admin(self, agent: str) -> None:
-        """Raise PermissionDeniedError if the agent is not an admin."""
+    def _require_admin(self, action: str = "this admin endpoint") -> str:
+        """Authenticate and require admin role.
+
+        Returns the authenticated agent name, or raises
+        ``PermissionDeniedError`` / ``AuthenticationError``. *action* only
+        phrases the error message. Concrete handlers must override this
+        stub with the same signature.
+        """
         raise NotImplementedError("must be provided by OhmHandler")
 
     def _run_in_write_lock(self, fn: Any, *args: Any, **kwargs: Any) -> Any:
