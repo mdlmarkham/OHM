@@ -57,6 +57,18 @@ class TestAbsorbingRisk:
         assert "error" in result
         assert "not in graph" in result["error"]
 
+    def test_start_node_exists_but_not_in_subgraph(self, test_db):
+        """Node exists in DB but has no TRANSITIONS_TO edges — returns warning, not error (#975)."""
+        isolated = create_sample_node(test_db, label="isolated")
+        node_a = create_sample_node(test_db, label="ina")
+        node_b = create_sample_node(test_db, label="inb")
+        create_sample_edge(test_db, from_node=node_a, to_node=node_b, edge_type="TRANSITIONS_TO", probability=0.5)
+        result = markov_absorbing_risk(test_db, isolated, edge_types=["TRANSITIONS_TO"])
+        assert "warning" in result
+        assert "exists" in result["warning"]
+        assert result["absorption_probabilities"] == {isolated: 1.0}
+        assert "error" not in result
+
     def test_no_edges(self, test_db):
         node_a = create_sample_node(test_db, label="isolated")
         result = markov_absorbing_risk(test_db, node_a, edge_types=["TRANSITIONS_TO"])
@@ -116,6 +128,18 @@ class TestExpectedSteps:
         assert "target_state" in result
         assert "target_probability" in result
         assert result["target_probability"] > 0
+
+    def test_start_node_exists_but_not_in_subgraph(self, test_db):
+        """Node exists in DB but has no TRANSITIONS_TO edges — returns warning, not error (#975)."""
+        isolated = create_sample_node(test_db, label="isolated")
+        node_a = create_sample_node(test_db, label="ina")
+        node_b = create_sample_node(test_db, label="inb")
+        create_sample_edge(test_db, from_node=node_a, to_node=node_b, edge_type="TRANSITIONS_TO", probability=0.5)
+        result = markov_expected_steps(test_db, isolated, edge_types=["TRANSITIONS_TO"])
+        assert "warning" in result
+        assert "exists" in result["warning"]
+        assert result["expected_steps"] == 0.0
+        assert "error" not in result
 
 
 class TestSCCCollapse:

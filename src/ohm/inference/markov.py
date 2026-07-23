@@ -440,6 +440,24 @@ def markov_absorbing_risk(
     multi_sccs = [s for s in sccs if len(s) > 1]
 
     if start_node not in nodes:
+        existing = reader.get_nodes(ids=[start_node])
+        if existing:
+            return {
+                "method": "markov_absorbing_risk",
+                "start_node": start_node,
+                "absorption_probabilities": {start_node: 1.0},
+                "transient_states": [],
+                "absorbing_states": [start_node],
+                "n_states": 1,
+                "sccs": [],
+                "scc_collapsed": False,
+                "collapsed_sccs": [],
+                "warning": (
+                    f"start_node '{start_node}' exists but is not in the Markov subgraph "
+                    f"(no {edge_types or ['CAUSES', 'TRANSITIONS_TO']} edges connect it). "
+                    "Consider specifying ?edge_types= to include other edge types."
+                ),
+            }
         return {
             "method": "markov_absorbing_risk",
             "start_node": start_node,
@@ -726,6 +744,25 @@ def markov_expected_steps(
     multi_sccs = [s for s in sccs if len(s) > 1]
 
     if start_node not in nodes:
+        existing = reader.get_nodes(ids=[start_node])
+        if existing:
+            return {
+                "method": "markov_expected_steps",
+                "start_node": start_node,
+                "expected_steps": 0.0,
+                "expected_steps_per_state": {},
+                "transient_states": [],
+                "absorbing_states": [start_node],
+                "n_states": 1,
+                "sccs": [],
+                "scc_collapsed": False,
+                "collapsed_sccs": [],
+                "warning": (
+                    f"start_node '{start_node}' exists but is not in the Markov subgraph "
+                    f"(no {edge_types or ['CAUSES', 'TRANSITIONS_TO']} edges connect it). "
+                    "Consider specifying ?edge_types= to include other edge types."
+                ),
+            }
         return {
             "method": "markov_expected_steps",
             "start_node": start_node,
