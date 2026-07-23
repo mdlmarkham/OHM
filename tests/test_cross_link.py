@@ -391,7 +391,7 @@ class TestHttpCrossLinkEnforcement:
         _http(
             "POST",
             port,
-            "/node",
+            "/node?create_only=false",
             {
                 "id": "n_pattern_existing",
                 "label": "Existing pattern",
@@ -404,7 +404,7 @@ class TestHttpCrossLinkEnforcement:
         status, data = _http(
             "POST",
             port,
-            "/node",
+            "/node?create_only=false",
             {
                 "id": "n_pattern_existing",
                 "label": "Updated pattern",
@@ -480,6 +480,23 @@ class TestHealthDeadEndMetric:
 
         h = query_graph_health(test_db)
         assert h.get("dead_end_count") == 1, f"expected 1 dead end, got {h}"
+
+    def test_graph_health_orphan_count_with_soft_deleted_edge(self, test_db):
+        """#968: orphan count must agree with reality when edges are soft-deleted."""
+        from ohm.queries import create_node, create_edge, query_graph_health
+
+        a = create_node(test_db, label="A", node_type="concept", created_by="test")
+        b = create_node(test_db, label="B", node_type="concept", created_by="test")
+        create_edge(test_db, from_node=a["id"], to_node=b["id"], layer="L3", edge_type="CAUSES", created_by="test")
+
+        h = query_graph_health(test_db)
+        assert h["orphan_nodes"] == 0
+
+        test_db.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE from_node = ? AND to_node = ?", [a["id"], b["id"]])
+
+        h = query_graph_health(test_db)
+        assert h["orphan_nodes"] == 2, f"both nodes should be orphans after soft-delete, got {h['orphan_nodes']}"
+        assert h["orphan_type_breakdown"].get("concept", 0) == 2
 
 
 # ── SDK path test ───────────────────────────────────────────────────────────

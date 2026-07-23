@@ -67,8 +67,8 @@ class GatewayProfile:
 
     api_key: str
     ohm_url: str
-    ohm_token: str
-    agent_id: str
+    ohm_token: str | None = None
+    agent_id: str = "unknown"
     tenant_id: str | None = None
     allowed_tools: list[str] = field(default_factory=lambda: ["*"])
     read_only: bool = False
@@ -117,7 +117,7 @@ def _load_profiles() -> dict[str, GatewayProfile]:
         result[key] = GatewayProfile(
             api_key=key,
             ohm_url=item["ohm_url"].rstrip("/"),
-            ohm_token=item["ohm_token"],
+            ohm_token=item.get("ohm_token"),
             agent_id=item.get("agent_id", "unknown"),
             tenant_id=item.get("tenant_id"),
             allowed_tools=item.get("allowed_tools", ["*"]),

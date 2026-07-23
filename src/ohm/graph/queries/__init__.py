@@ -2278,7 +2278,8 @@ def query_graph_health(
         WHERE n.deleted_at IS NULL
           AND NOT EXISTS (
               SELECT 1 FROM ohm_edges e
-              WHERE e.from_node = n.id OR e.to_node = n.id
+              WHERE e.deleted_at IS NULL
+                AND (e.from_node = n.id OR e.to_node = n.id)
           )
     """).fetchone()
     orphans = orphan_row[0] if orphan_row else 0
@@ -2337,7 +2338,8 @@ def query_graph_health(
         WHERE n.deleted_at IS NULL
           AND NOT EXISTS (
               SELECT 1 FROM ohm_edges e
-              WHERE e.from_node = n.id OR e.to_node = n.id
+              WHERE e.deleted_at IS NULL
+                AND (e.from_node = n.id OR e.to_node = n.id)
           )
         GROUP BY n.type
         ORDER BY cnt DESC
