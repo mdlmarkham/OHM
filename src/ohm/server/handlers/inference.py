@@ -336,9 +336,15 @@ class InferenceHandlerMixin(OhmHandlerBase):
         from ohm.graph_reader import coerce_reader
 
         reader = coerce_reader(self.current_store.conn)
-        from ohm.game import extract_game
+        from ohm.exceptions import ConfigurationError
 
-        result = extract_game(reader, target, players=players, layers=layers)
+        try:
+            from ohm.game import extract_game
+
+            result = extract_game(reader, target, players=players, layers=layers)
+        except (ImportError, ModuleNotFoundError) as exc:
+            raise ConfigurationError(f"Game theory analysis requires numpy: {exc}") from exc
+
         self._json_response(200, result)
 
     def _get_nash(self, path: str, qs: dict) -> None:
@@ -359,9 +365,15 @@ class InferenceHandlerMixin(OhmHandlerBase):
         except (json.JSONDecodeError, Exception):
             self._json_response(400, {"error": "invalid_parameter", "message": "?payoffs must be a valid JSON array of payoff matrices"})
             return
-        from ohm.game import compute_nash
+        from ohm.exceptions import ConfigurationError
 
-        result = compute_nash(payoff_matrices, players)
+        try:
+            from ohm.game import compute_nash
+
+            result = compute_nash(payoff_matrices, players)
+        except (ImportError, ModuleNotFoundError) as exc:
+            raise ConfigurationError(f"Game theory analysis requires numpy: {exc}") from exc
+
         self._json_response(200, result)
 
     def _get_policy(self, path: str, qs: dict) -> None:
@@ -416,9 +428,11 @@ class InferenceHandlerMixin(OhmHandlerBase):
         indep_test = qs.get("indep_test", ["fisherz"])[0]
         score_class = qs.get("score_class", ["local_score_BIC"])[0]
         queue = qs.get("queue", ["false"])[0].lower() in ("true", "1", "yes")
-        from ohm.inference.discovery import discover_causal
+        from ohm.exceptions import ConfigurationError
 
         try:
+            from ohm.inference.discovery import discover_causal
+
             result = discover_causal(
                 self.current_store.conn,
                 node_ids=node_ids,
@@ -428,6 +442,8 @@ class InferenceHandlerMixin(OhmHandlerBase):
                 indep_test=indep_test,
                 score_class=score_class,
             )
+        except (ImportError, ModuleNotFoundError) as exc:
+            raise ConfigurationError(f"Causal discovery requires numpy: {exc}") from exc
         except (ValueError, TypeError) as e:
             self._json_response(400, {"error": "invalid_parameter", "message": str(e)})
             return
@@ -650,6 +666,14 @@ class InferenceHandlerMixin(OhmHandlerBase):
                 "method": method,
                 "pgmpy_available": pgmpy_available,
             }
+
+            if inference_result.get("no_causal_structure") or method == "heuristic_cascade":
+                heuristic_message = inference_result.get("message")
+                if heuristic_message:
+                    response["heuristic_message"] = heuristic_message
+                    response["summary"] = (
+                        f"{summary} {heuristic_message}"
+                    )
 
             # ── OHM-934: Prior distribution + KL surprise ──
             if include_prior and evidence:

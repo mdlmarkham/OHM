@@ -25,14 +25,15 @@ class MarkovHandlerMixin(OhmHandlerBase):
         markov_edge_types = [e.strip() for e in edge_types_str.split(",") if e.strip()] or None
         try:
             from ohm.markov import markov_absorbing_risk
-        except ImportError as exc:
+
+            result = markov_absorbing_risk(
+                self.current_store.conn,
+                start_node,
+                edge_types=markov_edge_types,
+            )
+        except (ImportError, ModuleNotFoundError) as exc:
             raise ConfigurationError(f"Markov analysis requires numpy: {exc}") from exc
 
-        result = markov_absorbing_risk(
-            self.current_store.conn,
-            start_node,
-            edge_types=markov_edge_types,
-        )
         self._json_response(200, result)
 
     def _get_markov_expected_steps(self, path: str, qs: dict) -> None:
@@ -47,13 +48,14 @@ class MarkovHandlerMixin(OhmHandlerBase):
         markov_edge_types = [e.strip() for e in edge_types_str.split(",") if e.strip()] or None
         try:
             from ohm.markov import markov_expected_steps
-        except ImportError as exc:
+
+            result = markov_expected_steps(
+                self.current_store.conn,
+                start_node,
+                target_state=target_state,
+                edge_types=markov_edge_types,
+            )
+        except (ImportError, ModuleNotFoundError) as exc:
             raise ConfigurationError(f"Markov analysis requires numpy: {exc}") from exc
 
-        result = markov_expected_steps(
-            self.current_store.conn,
-            start_node,
-            target_state=target_state,
-            edge_types=markov_edge_types,
-        )
         self._json_response(200, result)

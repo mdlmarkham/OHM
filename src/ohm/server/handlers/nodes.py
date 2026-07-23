@@ -402,7 +402,7 @@ class NodeHandlerMixin(IngestHelperMixin, OhmHandlerBase):
         # ADR-015 source_url enforcement migrated to built-in pre_ingest hook
         # (python:ohm.hooks_builtin.source_url_required). See OHM-aznh.11.
 
-        create_only = qs.get("create_only", ["false"])[0].lower() in ("true", "1", "yes")
+        create_only = qs.get("create_only", ["true"])[0].lower() in ("true", "1", "yes")
         if create_only:
             existing = self.current_store.conn.execute(
                 "SELECT id FROM ohm_nodes WHERE id = ? AND deleted_at IS NULL",
@@ -468,8 +468,11 @@ class NodeHandlerMixin(IngestHelperMixin, OhmHandlerBase):
             node_exists = existing_check is not None
 
         if node_exists:
-            # Partial update: pass None for omitted fields so write_node
-            # preserves existing values. label and type are always required.
+            previous_node = self.current_store.get_node(body["id"]) or {}
+            previous_updated_by = (
+                previous_node.get("updated_by")
+                or previous_node.get("created_by")
+            )
             result = self.current_store.write_node(
                 id=body["id"],
                 label=body["label"],
@@ -494,6 +497,16 @@ class NodeHandlerMixin(IngestHelperMixin, OhmHandlerBase):
                 agent_name=agent,
                 partial_update=True,
             )
+            result["overwrote"] = True
+            if previous_updated_by:
+                result["previous_updated_by"] = previous_updated_by
+                if previous_updated_by != agent:
+                    result["overwrite_warning"] = (
+                        f"Overwrote node previously authored by '{previous_updated_by}'. "
+                        "Review for unintended data loss."
+                    )
+            else:
+                result["previous_updated_by"] = None
         else:
             result = self.current_store.write_node(
                 id=body["id"],

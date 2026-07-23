@@ -20,16 +20,17 @@ def query_deterministic_cascade(
     *,
     failure_probability: float = 1.0,
     max_depth: int = 10,
+    direction: str = "downstream",
 ) -> list[dict[str, Any]]:
-    """Deterministic cascade through downstream graph from a node.
+    """Deterministic cascade through the graph from a node.
 
-    Starting from *node_id* with *failure_probability*, walks downstream
-    through CAUSES, EXPECTED_LIKELIHOOD, DEPENDS_ON, and THREATENS edges.
-    Each downstream node's failure probability is computed as:
+    Starting from *node_id* with *failure_probability*, walks through
+    CAUSES, EXPECTED_LIKELIHOOD, DEPENDS_ON, and THREATENS edges.
+    Each reachable node's failure probability is computed as:
 
-        P_downstream = P_upstream × edge.probability (or edge.confidence if no probability)
+        P_reachable = P_origin × edge.probability (or edge.confidence if no probability)
 
-    Returns all downstream nodes with computed failure probabilities and
+    Returns all reachable nodes with computed failure probabilities and
     the path chain that leads to each. This is a deterministic computation,
     not a Monte Carlo simulation — for probabilistic analysis with variance
     use `monte_carlo_cascade()`.
@@ -39,9 +40,16 @@ def query_deterministic_cascade(
         node_id: Starting node (e.g., supplier that might fail).
         failure_probability: Probability that the starting node fails (0.0-1.0).
         max_depth: Maximum traversal depth.
+        direction: ``"downstream"`` (default) follows outgoing edges from
+            *node_id* to its effects. ``"upstream"`` follows incoming edges
+            to find ancestors/drivers — the correct direction for belief
+            queries ("what feeds INTO the target?").
 
     Returns:
         List of dicts with node_id, label, failure_probability, depth, and path.
+
+    Raises:
+        ValueError: If *direction* is not ``"downstream"`` or ``"upstream"``.
     """
     from ohm.validation import validate_confidence, validate_depth, validate_identifier
 
@@ -49,45 +57,90 @@ def query_deterministic_cascade(
     failure_probability = validate_confidence(failure_probability)
     max_depth = validate_depth(max_depth)
 
-    # Use a recursive CTE to walk downstream
-    query = """
-        WITH RECURSIVE cascade AS (
-            -- Anchor: the starting node
-            SELECT
-                ? AS node_id,
-                CAST(? AS FLOAT) AS failure_probability,
-                0 AS depth,
-                list_value(?) AS path
-            UNION ALL
-            -- Recursive: follow downstream edges
-            SELECT
-                e.to_node AS node_id,
-                CAST(
-                    c.failure_probability *
-                    COALESCE(e.probability, e.confidence, 0.5)
-                    AS FLOAT
-                ) AS failure_probability,
-                c.depth + 1 AS depth,
-                list_concat(c.path, list_value(e.to_node)) AS path
-            FROM cascade c
-            JOIN ohm_edges e ON e.from_node = c.node_id
-            WHERE c.depth < ?
-              AND e.edge_type IN ('CAUSES', 'EXPECTED_LIKELIHOOD', 'DEPENDS_ON', 'THREATENS')
-              AND NOT list_contains(c.path, e.to_node)
+    if direction not in ("downstream", "upstream"):
+        raise ValueError(
+            f"Invalid direction: '{direction}' — must be 'downstream' or 'upstream'"
         )
-        SELECT DISTINCT
-            c.node_id,
-            n.label AS node_label,
-            n.type AS node_type,
-            c.failure_probability,
-            c.depth,
-            c.path
-        FROM cascade c
-        JOIN ohm_nodes n ON c.node_id = n.id
-        WHERE c.depth > 0
-        ORDER BY c.depth, c.failure_probability DESC
-    """
-    result = conn.execute(query, [node_id, failure_probability, node_id, max_depth])
+
+    if direction == "downstream":
+        query = """
+            WITH RECURSIVE cascade AS (
+                -- Anchor: the starting node
+                SELECT
+                    ? AS node_id,
+                    CAST(? AS FLOAT) AS failure_probability,
+                    0 AS depth,
+                    list_value(?) AS path
+                UNION ALL
+                -- Recursive: follow downstream edges
+                SELECT
+                    e.to_node AS node_id,
+                    CAST(
+                        c.failure_probability *
+                        COALESCE(e.probability, e.confidence, 0.5)
+                        AS FLOAT
+                    ) AS failure_probability,
+                    c.depth + 1 AS depth,
+                    list_concat(c.path, list_value(e.to_node)) AS path
+                FROM cascade c
+                JOIN ohm_edges e ON e.from_node = c.node_id
+                WHERE c.depth < ?
+                  AND e.edge_type IN ('CAUSES', 'EXPECTED_LIKELIHOOD', 'DEPENDS_ON', 'THREATENS')
+                  AND NOT list_contains(c.path, e.to_node)
+            )
+            SELECT DISTINCT
+                c.node_id,
+                n.label AS node_label,
+                n.type AS node_type,
+                c.failure_probability,
+                c.depth,
+                c.path
+            FROM cascade c
+            JOIN ohm_nodes n ON c.node_id = n.id
+            WHERE c.depth > 0
+            ORDER BY c.depth, c.failure_probability DESC
+        """
+        result = conn.execute(query, [node_id, failure_probability, node_id, max_depth])
+    else:
+        query = """
+            WITH RECURSIVE cascade AS (
+                -- Anchor: the target node
+                SELECT
+                    ? AS node_id,
+                    CAST(? AS FLOAT) AS failure_probability,
+                    0 AS depth,
+                    list_value(?) AS path
+                UNION ALL
+                -- Recursive: follow incoming edges (walk backward to ancestors)
+                SELECT
+                    e.from_node AS node_id,
+                    CAST(
+                        c.failure_probability *
+                        COALESCE(e.probability, e.confidence, 0.5)
+                        AS FLOAT
+                    ) AS failure_probability,
+                    c.depth + 1 AS depth,
+                    list_concat(c.path, list_value(e.from_node)) AS path
+                FROM cascade c
+                JOIN ohm_edges e ON e.to_node = c.node_id
+                WHERE c.depth < ?
+                  AND e.edge_type IN ('CAUSES', 'EXPECTED_LIKELIHOOD', 'DEPENDS_ON', 'THREATENS')
+                  AND e.deleted_at IS NULL
+                  AND NOT list_contains(c.path, e.from_node)
+            )
+            SELECT DISTINCT
+                c.node_id,
+                n.label AS node_label,
+                n.type AS node_type,
+                c.failure_probability,
+                c.depth,
+                c.path
+            FROM cascade c
+            JOIN ohm_nodes n ON c.node_id = n.id
+            WHERE c.depth > 0
+            ORDER BY c.depth, c.failure_probability DESC
+        """
+        result = conn.execute(query, [node_id, failure_probability, node_id, max_depth])
     return _rows_to_dicts(result)
 
 
@@ -98,6 +151,7 @@ def query_cascade_scenario(
     *,
     failure_probability: float = 1.0,
     max_depth: int = 10,
+    direction: str = "downstream",
 ) -> list[dict[str, Any]]:
     """[DEPRECATED] Use query_deterministic_cascade() instead.
 
@@ -111,7 +165,13 @@ def query_cascade_scenario(
         DeprecationWarning,
         stacklevel=2,
     )
-    return query_deterministic_cascade(conn, node_id, failure_probability=failure_probability, max_depth=max_depth)
+    return query_deterministic_cascade(
+        conn,
+        node_id,
+        failure_probability=failure_probability,
+        max_depth=max_depth,
+        direction=direction,
+    )
 
 
 def monte_carlo_cascade(
