@@ -21,6 +21,14 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+try:
+    import causallearn  # noqa: F401
+
+    CAUSALLEAN_AVAILABLE = True
+except ImportError:
+    CAUSALLEAN_AVAILABLE = False
+
+
 def _require_numpy() -> None:
     if not NUMPY_AVAILABLE:
         raise ImportError("numpy is required for causal discovery. Install with: pip install numpy")
@@ -177,7 +185,7 @@ def discover_pc(
 
     except Exception as e:
         logger.error("PC discovery failed: %s", e, exc_info=True)
-        return {
+        result = {
             "method": "pc",
             "n_nodes": len(valid_nodes),
             "n_observations": int(data.shape[0]) if data.size > 0 else 0,
@@ -185,6 +193,9 @@ def discover_pc(
             "metadata": metadata,
             "error": str(e),
         }
+        if isinstance(e, ImportError):
+            result["causallearn_available"] = False
+        return result
 
 
 def discover_ges(
@@ -271,7 +282,7 @@ def discover_ges(
 
     except Exception as e:
         logger.error("GES discovery failed: %s", e, exc_info=True)
-        return {
+        result = {
             "method": "ges",
             "n_nodes": len(valid_nodes),
             "n_observations": int(data.shape[0]) if data.size > 0 else 0,
@@ -279,6 +290,9 @@ def discover_ges(
             "metadata": metadata,
             "error": str(e),
         }
+        if isinstance(e, ImportError):
+            result["causallearn_available"] = False
+        return result
 
 
 def discover_causal(

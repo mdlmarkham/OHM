@@ -31,6 +31,7 @@ bayesian = [
 ]
 causal = [
     "dowhy>=0.11",
+    "causal-learn>=0.1.4",
 ]
 ingestion = [
     "beautifulsoup4>=4.12",
