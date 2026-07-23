@@ -181,9 +181,7 @@ def build_request(name: str, arguments: dict[str, Any], agent_id: str) -> tuple[
         if arguments.get("tags"):
             tags_str = arguments["tags"]
             body["tags"] = json.loads(tags_str) if isinstance(tags_str, str) else tags_str
-        url = "/node"
-        if not arguments.get("create_only", True):
-            url += "?create_only=false"
+        url = "/node?create_only=" + ("true" if arguments.get("create_only", True) else "false")
         return "POST", url, body
 
     if name == "ohm_create_edge":

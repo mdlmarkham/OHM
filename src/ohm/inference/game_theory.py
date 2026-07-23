@@ -9,11 +9,24 @@ dollar-valued payoffs, falling back to utility_scale for dimensionless analysis.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
-import numpy as np
+try:
+    import numpy as np
+
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["extract_game", "compute_nash", "game_to_matrix"]
+
+
+def _require_numpy() -> None:
+    if not NUMPY_AVAILABLE:
+        raise ImportError("numpy is required for game theory analysis. Install with: pip install numpy")
 
 
 def game_to_matrix(
@@ -31,6 +44,7 @@ def game_to_matrix(
     Returns:
         Dict with players, actions, and payoff_matrices (per player).
     """
+    _require_numpy()
     return {
         "players": players,
         "actions": actions,
@@ -68,6 +82,7 @@ def extract_game(
     Returns:
         Dict with game structure, payoff matrices per player pair, and metadata.
     """
+    _require_numpy()
     if edge_types is None:
         edge_types = ["CAUSES", "INFLUENCES", "ENABLES", "DEPENDS_ON", "BLOCKS"]
 
@@ -262,6 +277,7 @@ def compute_nash(payoff_matrices: list[Any], players: list[str]) -> dict[str, An
         Dict with equilibria (list of {strategy_profile, expected_payoffs, equilibrium_type}),
         n_players, and solution_method.
     """
+    _require_numpy()
     n_players = len(players)
     if n_players != 2:
         return {

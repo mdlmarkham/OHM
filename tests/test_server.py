@@ -327,6 +327,34 @@ class TestNodeEndpoints:
         status, data = _request("POST", port, "/node?create_only=true", body={"id": "co742", "label": "Second", "type": "concept"})
         assert status == 409
 
+    def test_create_only_default_rejects_duplicate(self, test_server):
+        """POST /node (no create_only param) rejects existing node with 409 (#976)."""
+        port, store = test_server
+        _request("POST", port, "/node", body={"id": "cd976", "label": "First", "type": "concept"})
+        status, data = _request("POST", port, "/node", body={"id": "cd976", "label": "Second", "type": "concept"})
+        assert status == 409
+        assert data["error"] == "conflict"
+
+    def test_create_only_default_creates_new(self, test_server):
+        """POST /node (no param) creates a new node with 201 (#976)."""
+        port, store = test_server
+        status, _ = _request("POST", port, "/node", body={"id": "cn976", "label": "New", "type": "concept"})
+        assert status == 201
+
+    def test_upsert_warns_on_overwrite(self, test_server):
+        """POST /node?create_only=false surfaces overwrite warning when author differs (#976)."""
+        port, store = test_server
+        _request("POST", port, "/node", body={"id": "ow976", "label": "Orig", "type": "concept", "content": "original"})
+        status, data = _request(
+            "POST", port, "/node?create_only=false",
+            body={"id": "ow976", "label": "Updated", "type": "concept", "content": "updated"},
+        )
+        assert status == 200
+        assert data["created"] is False
+        assert data["overwrote"] is True
+        assert "previous_updated_by" in data
+        assert data["content"] == "updated"
+
 
 @pytest.mark.xdist_group("server")
 class TestQuestionAutoDetection:

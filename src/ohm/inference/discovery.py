@@ -11,9 +11,19 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import numpy as np
+try:
+    import numpy as np
+
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+
+def _require_numpy() -> None:
+    if not NUMPY_AVAILABLE:
+        raise ImportError("numpy is required for causal discovery. Install with: pip install numpy")
 
 
 def _build_observation_matrix(
@@ -95,6 +105,7 @@ def discover_pc(
     Returns:
         Dict with candidate_edges, skeleton, metadata.
     """
+    _require_numpy()
     data, valid_nodes, metadata = _build_observation_matrix(conn, node_ids, min_observations=min_observations)
 
     if len(valid_nodes) < 2:
@@ -197,6 +208,7 @@ def discover_ges(
     Returns:
         Dict with candidate_edges, metadata.
     """
+    _require_numpy()
     data, valid_nodes, metadata = _build_observation_matrix(conn, node_ids, min_observations=min_observations)
 
     if len(valid_nodes) < 2:
@@ -296,6 +308,7 @@ def discover_causal(
     Returns:
         Dict with candidate_edges, method, metadata.
     """
+    _require_numpy()
     from ohm.graph_reader import coerce_reader
 
     reader = coerce_reader(conn)

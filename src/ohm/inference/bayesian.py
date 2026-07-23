@@ -962,15 +962,59 @@ def bayesian_inference(
     reader = _coerce_reader(conn)
 
     if not PGMPY_AVAILABLE:
-        from ohm.queries import query_cascade_scenario
+        from ohm.queries import query_deterministic_cascade
 
-        cascade = query_cascade_scenario(_raw_conn(conn), target, failure_probability=1.0)
+        raw = _raw_conn(conn)
+        upstream = query_deterministic_cascade(
+            raw, target, failure_probability=1.0, direction="upstream"
+        )
+        downstream = query_deterministic_cascade(
+            raw, target, failure_probability=1.0, direction="downstream"
+        )
+
+        one_hop = [row for row in upstream if row.get("depth") == 1]
+        drivers = [
+            {
+                "node": row["node_id"],
+                "edge_type": None,
+                "confidence": row.get("failure_probability"),
+            }
+            for row in one_hop
+        ]
+
+        if one_hop:
+            p_bad = 1.0
+            for row in one_hop:
+                p_i = row.get("failure_probability")
+                if p_i is None:
+                    p_i = 0.5
+                p_i = max(0.0, min(1.0, float(p_i)))
+                p_bad *= 1.0 - p_i
+            p_bad = 1.0 - p_bad
+            p_bad = max(0.0, min(1.0, p_bad))
+            p_good = 1.0 - p_bad
+            no_causal_structure = False
+            message = None
+        else:
+            p_bad = 0.5
+            p_good = 0.5
+            no_causal_structure = True
+            message = (
+                "No causal-edge structure found for inference — the target has no "
+                "incoming CAUSES/EXPECTED_LIKELIHOOD/DEPENDS_ON/THREATENS edges. "
+                "Use ohm_monte_carlo for downstream impact."
+            )
+
         return {
             "method": "heuristic_cascade",
             "pgmpy_available": False,
             "target": target,
             "evidence": evidence,
-            "cascade": cascade,
+            "posterior": {target: {"bad": round(p_bad, 4), "good": round(p_good, 4)}},
+            "drivers": drivers,
+            "cascade": downstream,
+            "no_causal_structure": no_causal_structure,
+            "message": message,
         }
 
     # Build the Bayesian network scoped around target and evidence nodes
