@@ -14,7 +14,7 @@ license = {text = "MIT"}
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "duckdb>=1.5.2",
+    "duckdb>=1.5.4",
     "click>=8.0",
     "pytz",
     "pyyaml>=6.0",
