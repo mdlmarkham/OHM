@@ -575,6 +575,25 @@ def all_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="ohm_admin_graph_health",
+            description=(
+                "Admin graph-health dashboard: orphan nodes, stale observations, low-confidence "
+                "clusters, verification rate, challenge ratio, and per-source reliability summary. "
+                "Thresholds (stale_observation_days, low_confidence_threshold) are configurable via "
+                "PUT /config. Admin role required."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "stale_observation_days": {"type": "integer", "description": "Override the configured staleness threshold (default 30).", "default": 30},
+                    "low_confidence_threshold": {"type": "number", "description": "Override the configured low-confidence threshold (default 0.3).", "default": 0.3},
+                    "orphan_limit": {"type": "integer", "description": "Max orphan node ids to return (default 50).", "default": 50},
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'.", "enum": ["json", "toon"], "default": "json"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
             name="ohm_source_reliability",
             description=(
                 "Get per-agent source reliability metrics computed from "

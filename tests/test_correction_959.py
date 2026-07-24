@@ -209,7 +209,11 @@ class TestMCPSchemas959:
 
     def test_tool_count_76(self):
         from ohm.mcp.tools import all_tools
-        assert len(all_tools()) == 76
+        # Total MCP tool count. Bumped from 76 to 77 by ohm_admin_graph_health (#909, PR #967).
+        # If you add a new tool, this number needs to go up — prefer deriving it from a
+        # list of expected categories than hard-coding, but keep this assertion as a sanity
+        # check that nothing accidentally drops or duplicates a tool registration.
+        assert len(all_tools()) == 77
 
 
 # ── MCP dispatch ─────────────────────────────────────────────────────────

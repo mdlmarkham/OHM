@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ohm.dev/schemas/gateway-profile.schema.json",
+  "title": "GatewayProfile",
+  "description": "OHM MCP gateway tenant profile (one per API key). Validated by ohm-gateway --validate-config (OHM-912).",
+  "type": "object",
+  "required": ["api_key", "ohm_url"],
+  "additionalProperties": false,
+  "properties": {
+    "api_key": {
+      "type": "string",
+      "minLength": 1,
+      "description": "API key that identifies this profile."
+    },
+    "ohm_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "Base URL of the ohmd instance this profile forwards to (e.g. http://127.0.0.1:8710)."
+    },
+    "ohm_token": {
+      "type": "string",
+      "description": "Bearer token used to authenticate to ohmd. May be an agent or customer token."
+    },
+    "agent_id": {
+      "type": "string",
+      "description": "Agent identity this profile claims when forwarding to ohmd."
+    },
+    "tenant_id": {
+      "type": ["string", "null"],
+      "description": "Tenant identifier. Required for multi-tenant deployments; ignored otherwise."
+    },
+    "allowed_tools": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Tools this profile is permitted to call. ['*'] allows all."
+    },
+    "read_only": {
+      "type": "boolean",
+      "default": false,
+      "description": "If true, all write tools are hidden regardless of allowed_tools."
+    },
+    "high_blast_radius": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Tools that require explicit approval before execution."
+    },
+    "audit_path": {
+      "type": ["string", "null"],
+      "description": "Optional path to an audit log file for this profile."
+    },
+    "rate_limit": {
+      "type": ["string", "null"],
+      "description": "Optional rate-limit specification (e.g. '100/minute')."
+    },
+    "tool_search": {
+      "type": ["object", "null"],
+      "description": "Tool-search transform configuration (OHM-851).",
+      "additionalProperties": true
+    },
+    "sidecars": {
+      "type": "array",
+      "description": "Sidecar composition manifest (#899, draft — not yet enforced).",
+      "items": {"$ref": "sidecar-manifest.schema.json#/definitions/SidecarConfig"}
+    },
+    "tool_visibility": {
+      "type": ["object", "null"],
+      "description": "Per-session tool visibility rules (#900, draft — not yet enforced).",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {"enum": ["allowlist", "blocklist"]},
+        "namespaces": {"type": "array", "items": {"type": "string"}},
+        "always_visible": {"type": "array", "items": {"type": "string"}},
+        "hidden": {"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["mode"]
+    },
+    "elicitation": {
+      "type": ["object", "null"],
+      "description": "Per-tool elicitation overrides (#901, draft — not yet enforced).",
+      "additionalProperties": true
+    }
+  }
+}

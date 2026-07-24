@@ -134,6 +134,40 @@ class TestSecuritySSRF:
         )
         assert status == 403, f"expected 403, got {status}: {data}"
 
+    def test_admin_repair_ducklake_requires_admin(self, auth_server):
+        """POST /admin/repair-ducklake is admin-gated (OHM-926)."""
+        port, store = auth_server
+        status, data = _request(
+            "POST",
+            port,
+            "/admin/repair-ducklake",
+            body={"dry_run": True},
+            token="test-token-abc",
+        )
+        assert status == 403, f"expected 403 for read-write token, got {status}: {data}"
+
+        status, data = _request(
+            "POST",
+            port,
+            "/admin/repair-ducklake",
+            body={"dry_run": True},
+            token="readonly-token",
+        )
+        assert status == 403, f"expected 403 for read-only token, got {status}: {data}"
+
+    def test_admin_repair_ducklake_dry_run_no_lake(self, test_server):
+        """POST /admin/repair-ducklake with no DuckLake attached returns skipped (OHM-926)."""
+        port, _ = test_server
+        status, data = _request(
+            "POST",
+            port,
+            "/admin/repair-ducklake",
+            body={"dry_run": True},
+        )
+        assert status == 200, f"expected 200, got {status}: {data}"
+        # No DuckLake attached in the test_server fixture → skipped
+        assert data.get("status") == "skipped" or data.get("total_deleted") == 0
+
     def test_document_fetch_rejects_ipv4_mapped_metadata_ip(self, test_server, monkeypatch):
         """::ffff:169.254.169.254 must be blocked in document URL validation."""
         from ohm.server.handlers.documents import DocumentHandlerMixin, _canonicalize_ip
@@ -2826,6 +2860,164 @@ class TestAdminDuplicatesEndpoint:
         status, data = _request("GET", port, "/admin/duplicates")
         assert status == 200, data
         assert data["summary"]["total"] == 0
+
+
+@pytest.mark.xdist_group("server")
+class TestAdminGraphHealthEndpoint:
+    """Tests for GET /admin/graph-health — consolidated maintenance dashboard (OHM-909)."""
+
+    def test_graph_health_empty_db(self, test_server):
+        """Empty graph returns a well-formed dashboard with zero counts."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/admin/graph-health")
+        assert status == 200, data
+        for k in ("orphans", "stale_observations", "low_confidence_clusters",
+                  "verification_rate", "challenge_ratio", "source_reliability_summary",
+                  "thresholds", "generated_at", "graph"):
+            assert k in data, f"missing key: {k}"
+        assert data["orphans"]["count"] == 0
+        assert data["stale_observations"]["count"] == 0
+        assert data["low_confidence_clusters"]["count"] == 0
+        assert data["source_reliability_summary"] == []
+        assert data["thresholds"]["stale_observation_days"] == 30
+        assert data["thresholds"]["low_confidence_threshold"] == 0.3
+
+    def test_graph_health_detects_orphans(self, test_server):
+        """An isolated node surfaces in the orphan section."""
+        port, store = test_server
+        store.write_node("orphan_alpha", "Orphan Alpha", "concept", agent_name="metis")
+        status, data = _request("GET", port, "/admin/graph-health")
+        assert status == 200, data
+        assert data["orphans"]["count"] >= 1
+        assert "orphan_alpha" in data["orphans"]["node_ids"]
+
+    def test_graph_health_detects_stale_observations(self, test_server):
+        """Observations older than the threshold are flagged stale."""
+        from datetime import datetime, timedelta, timezone
+        port, store = test_server
+        store.write_node("stale_node", "Stale Node", "concept", agent_name="metis")
+        store.write_observation("stale_node", "measurement", value=0.5, agent_name="metis")
+        # Backdate the observation by 60 days
+        store.conn.execute(
+            "UPDATE ohm_observations SET created_at = ? WHERE node_id = 'stale_node'",
+            [(datetime.now(timezone.utc) - timedelta(days=60)).strftime("%Y-%m-%dT%H:%M:%S")],
+        )
+        status, data = _request("GET", port, "/admin/graph-health?stale_observation_days=30")
+        assert status == 200, data
+        assert data["stale_observations"]["count"] >= 1
+        assert data["stale_observations"]["oldest_days"] >= 30
+
+    def test_graph_health_threshold_override(self, test_server):
+        """Query-string thresholds override the configured defaults."""
+        port, _ = test_server
+        status, data = _request("GET", port, "/admin/graph-health?stale_observation_days=7&low_confidence_threshold=0.1")
+        assert status == 200, data
+        assert data["thresholds"]["stale_observation_days"] == 7
+        assert data["thresholds"]["low_confidence_threshold"] == 0.1
+
+    def test_graph_health_verification_and_challenge_ratios(self, test_server):
+        """A causal edge with no outcome yields a 0 verification rate."""
+        port, store = test_server
+        store.write_node("gh_cause", "Cause", "concept", agent_name="metis")
+        store.write_node("gh_effect", "Effect", "concept", agent_name="metis")
+        store.write_edge("gh_cause", "gh_effect", "CAUSES", layer="L3", confidence=0.8, agent_name="metis")
+        status, data = _request("GET", port, "/admin/graph-health")
+        assert status == 200, data
+        # 0 outcomes / 1 causal edge = 0.0
+        assert data["verification_rate"] == 0.0
+        # 0 challenges / 1 L3 edge = 0.0
+        assert data["challenge_ratio"] == 0.0
+
+    def test_graph_health_source_reliability_summary(self, test_server):
+        """Recorded outcomes aggregate into the source reliability summary."""
+        port, store = test_server
+        store.write_node("rel_claim", "Rel Claim", "concept", agent_name="metis")
+        # Insert two outcomes directly (record_outcome lives on the framework SDK, not OhmStore)
+        store.conn.execute(
+            "INSERT INTO ohm_outcomes (source_agent, claim_node, outcome, recorded_by) VALUES (?, ?, TRUE, ?)",
+            ["agent-x", "rel_claim", "test"],
+        )
+        store.conn.execute(
+            "INSERT INTO ohm_outcomes (source_agent, claim_node, outcome, recorded_by) VALUES (?, ?, FALSE, ?)",
+            ["agent-x", "rel_claim", "test"],
+        )
+        status, data = _request("GET", port, "/admin/graph-health")
+        assert status == 200, data
+        agents = [r["source_agent"] for r in data["source_reliability_summary"]]
+        assert "agent-x" in agents
+        row = next(r for r in data["source_reliability_summary"] if r["source_agent"] == "agent-x")
+        assert row["total_outcomes"] == 2
+        assert row["accurate"] == 1
+        assert row["inaccurate"] == 1
+
+    def test_graph_health_low_confidence_clusters(self, test_server):
+        """A node with multiple low-confidence incident edges is flagged."""
+        port, store = test_server
+        store.write_node("lc_hub", "Hub", "concept", agent_name="metis")
+        store.write_node("lc_a", "A", "concept", agent_name="metis")
+        store.write_node("lc_b", "B", "concept", agent_name="metis")
+        store.write_edge("lc_hub", "lc_a", "CAUSES", layer="L3", confidence=0.1, agent_name="metis")
+        store.write_edge("lc_hub", "lc_b", "CAUSES", layer="L3", confidence=0.15, agent_name="metis")
+        status, data = _request("GET", port, "/admin/graph-health?low_confidence_threshold=0.3")
+        assert status == 200, data
+        assert data["low_confidence_clusters"]["count"] >= 1
+        cluster_ids = [c["cluster_id"] for c in data["low_confidence_clusters"]["clusters"]]
+        assert "lc_hub" in cluster_ids
+
+    def test_graph_health_admin_gated(self, auth_server):
+        """GET /admin/graph-health is admin-gated (403 for read-write token)."""
+        port, _ = auth_server
+        status, data = _request("GET", port, "/admin/graph-health", token="test-token-abc")
+        assert status == 403, f"expected 403, got {status}: {data}"
+
+    def test_graph_health_orphan_count_matches_node_ids_with_soft_deleted_edges(self, test_server):
+        """orphans.count must equal len(orphans.node_ids) even when edges are soft-deleted (OHM-968).
+
+        Regression test: query_graph_health's orphan-count query previously
+        had no e.deleted_at IS NULL filter, so a node whose only edges were
+        soft-deleted was not counted as an orphan, while the admin handler's
+        own node_ids query (which DID filter on deleted_at) listed it —
+        producing an internally inconsistent response.
+        """
+        port, store = test_server
+        # Seed two nodes joined by an edge, then soft-delete the edge.
+        store.write_node("sd_a", "A", "concept", agent_name="metis")
+        store.write_node("sd_b", "B", "concept", agent_name="metis")
+        store.write_edge("sd_a", "sd_b", "CAUSES", layer="L3", confidence=0.8, agent_name="metis")
+        # Soft-delete the edge — both nodes are now orphans (no active edges)
+        store.conn.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE from_node = 'sd_a' AND to_node = 'sd_b'")
+
+        status, data = _request("GET", port, "/admin/graph-health")
+        assert status == 200, data
+        orphans = data["orphans"]
+        assert "sd_a" in orphans["node_ids"], "soft-deleted-edge node should be listed as orphan"
+        assert "sd_b" in orphans["node_ids"], "soft-deleted-edge node should be listed as orphan"
+        # The core regression assertion: count and node_ids must agree
+        assert orphans["count"] == len(orphans["node_ids"]), (
+            f"orphans.count ({orphans['count']}) != len(node_ids) ({len(orphans['node_ids'])}) — "
+            f"the count query is missing the deleted_at IS NULL filter on ohm_edges (OHM-968)"
+        )
+
+    def test_graph_health_orphan_type_breakdown_with_soft_deleted_edges(self, test_server):
+        """orphan_type_breakdown must also filter soft-deleted edges (OHM-968 second occurrence).
+
+        The orphan_type_rows query in query_graph_health() had the same missing
+        e.deleted_at IS NULL filter as the count query — a node whose only edges
+        are soft-deleted was absent from the type breakdown while present in the
+        count, producing an inconsistent response.
+        """
+        port, store = test_server
+        store.write_node("tb_a", "A", "concept", agent_name="metis")
+        store.write_node("tb_b", "B", "concept", agent_name="metis")
+        store.write_edge("tb_a", "tb_b", "CAUSES", layer="L3", confidence=0.8, agent_name="metis")
+        store.conn.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE from_node = 'tb_a' AND to_node = 'tb_b'")
+
+        status, data = _request("GET", port, "/health/graph")
+        assert status == 200, data
+        breakdown = data.get("orphan_type_breakdown", {})
+        assert breakdown.get("concept", 0) == 2, (
+            f"orphan_type_breakdown should show 2 concept orphans after soft-delete, got {breakdown}"
+        )
 
 
 @pytest.mark.xdist_group("server")
