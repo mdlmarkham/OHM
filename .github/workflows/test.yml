@@ -96,6 +96,49 @@ jobs:
           name: test-results-${{ matrix.python-version }}
           path: test-results.xml
 
+  science-extras:
+    # OHM-978: Verify the [gateway,science] extras (numpy/scipy/pgmpy/causallearn)
+    # don't regress. Without this job, the default test job's skipif guards
+    # silently skip inference tests when extras aren't installed, hiding real
+    # failures.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-science-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-science-
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies with science + gateway extras
+        run: |
+          uv sync --frozen --extra dev --extra gateway --extra science
+          uv pip list | grep -E "numpy|scipy|pgmpy|networkx|causallearn|fastmcp|mcp"
+
+      - name: Test inference suite (science extras)
+        run: |
+          python -m pytest \
+            tests/test_markov.py \
+            tests/test_bayesian.py \
+            tests/test_game.py \
+            tests/test_temporal.py \
+            tests/test_mcp_belief.py \
+            tests/test_discovery.py \
+            tests/test_hd.py \
+            -v --tb=short --benchmark-disable \
+            --timeout=60 --timeout-method=thread -n 0
+
   rust-extension:
     runs-on: ubuntu-latest
     steps:

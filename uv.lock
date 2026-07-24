@@ -1743,6 +1743,7 @@ ingestion = [
 ]
 markov = [
     { name = "numpy" },
+    { name = "scipy" },
 ]
 rust = [
     { name = "maturin" },
@@ -1752,6 +1753,7 @@ science = [
     { name = "networkx" },
     { name = "numpy" },
     { name = "pgmpy" },
+    { name = "scipy" },
 ]
 toon = [
     { name = "python-toon" },
@@ -1791,6 +1793,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "requests", marker = "extra == 'dev'", specifier = ">=2.28.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.3.0" },
+    { name = "scipy", marker = "extra == 'markov'", specifier = ">=1.10" },
 ]
 provides-extras = ["aws", "bayesian", "causal", "ingestion", "markov", "toon", "gateway", "science", "dev", "rust"]
 
