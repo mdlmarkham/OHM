@@ -391,7 +391,7 @@ class TestHttpCrossLinkEnforcement:
         _http(
             "POST",
             port,
-            "/node",
+            "/node?create_only=false",
             {
                 "id": "n_pattern_existing",
                 "label": "Existing pattern",
@@ -400,11 +400,13 @@ class TestHttpCrossLinkEnforcement:
             },
         )
 
-        # Update without connects_to — should succeed (update path is exempt)
+        # Update without connects_to — should succeed (update path is exempt).
+        # After #976, create_only defaults to true (rejects duplicates), so the
+        # update path must be explicitly requested via create_only=false.
         status, data = _http(
             "POST",
             port,
-            "/node",
+            "/node?create_only=false",
             {
                 "id": "n_pattern_existing",
                 "label": "Updated pattern",
