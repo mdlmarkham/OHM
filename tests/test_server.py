@@ -486,6 +486,191 @@ class TestEdgeEndpoints:
         assert status == 200
         assert len(data["edges"]) == 0
 
+    def test_list_edges_returns_edges(self, test_server):
+        port, store = test_server
+        _request("POST", port, "/node", body={"id": "le_a", "label": "A", "type": "concept"})
+        _request("POST", port, "/node", body={"id": "le_b", "label": "B", "type": "concept"})
+        _request(
+            "POST",
+            port,
+            "/edge",
+            body={"from": "le_a", "to": "le_b", "type": "CAUSES", "layer": "L3"},
+        )
+        status, data = _request("GET", port, "/edges?from_node=le_a")
+        assert status == 200
+        assert len(data["edges"]) == 1
+        assert data["edges"][0]["from_node"] == "le_a"
+        assert data["edges"][0]["to_node"] == "le_b"
+        assert data["edges"][0]["edge_type"] == "CAUSES"
+        assert "id" in data["edges"][0]
+        assert data["total"] == 1
+
+    def test_list_edges_filter_by_edge_type(self, test_server):
+        port, store = test_server
+        _request("POST", port, "/node", body={"id": "ft_a", "label": "A", "type": "concept"})
+        _request("POST", port, "/node", body={"id": "ft_b", "label": "B", "type": "concept"})
+        _request("POST", port, "/node", body={"id": "ft_c", "label": "C", "type": "concept"})
+        _request(
+            "POST",
+            port,
+            "/edge",
+            body={"from": "ft_a", "to": "ft_b", "type": "CAUSES", "layer": "L3"},
+        )
+        _request(
+            "POST",
+            port,
+            "/edge",
+            body={"from": "ft_b", "to": "ft_c", "type": "SUPPORTS", "layer": "L3"},
+        )
+        status, data = _request("GET", port, "/edges?edge_type=CAUSES")
+        assert status == 200
+        assert len(data["edges"]) == 1
+        assert data["edges"][0]["edge_type"] == "CAUSES"
+        assert data["total"] == 1
+
+        status, data = _request("GET", port, "/edges?edge_type=SUPPORTS")
+        assert status == 200
+        assert len(data["edges"]) == 1
+        assert data["edges"][0]["edge_type"] == "SUPPORTS"
+
+    def test_list_edges_filter_by_to_node(self, test_server):
+        port, store = test_server
+        _request("POST", port, "/node", body={"id": "tn_a", "label": "A", "type": "concept"})
+        _request("POST", port, "/node", body={"id": "tn_b", "label": "B", "type": "concept"})
+        _request("POST", port, "/node", body={"id": "tn_c", "label": "C", "type": "concept"})
+        _request(
+            "POST",
+            port,
+            "/edge",
+            body={"from": "tn_a", "to": "tn_b", "type": "CAUSES", "layer": "L3"},
+        )
+        _request(
+            "POST",
+            port,
+            "/edge",
+            body={"from": "tn_c", "to": "tn_b", "type": "SUPPORTS", "layer": "L3"},
+        )
+        status, data = _request("GET", port, "/edges?to_node=tn_b")
+        assert status == 200
+        assert len(data["edges"]) == 2
+        assert all(e["to_node"] == "tn_b" for e in data["edges"])
+        assert data["total"] == 2
+
+    def test_list_edges_pagination(self, test_server):
+        port, store = test_server
+        _request("POST", port, "/node", body={"id": "pg_a", "label": "A", "type": "concept"})
+        _request("POST", port, "/node", body={"id": "pg_b", "label": "B", "type": "concept"})
+        _request("POST", port, "/node", body={"id": "pg_c", "label": "C", "type": "concept"})
+        edge_types = ["CAUSES", "SUPPORTS", "REFERENCES", "ENABLES", "PREDICTS"]
+        for et in edge_types:
+            _request(
+                "POST",
+                port,
+                "/edge",
+                body={"from": "pg_a", "to": "pg_b", "type": et, "layer": "L3"},
+            )
+        status, data = _request("GET", port, "/edges?limit=2")
+        assert status == 200
+        assert len(data["edges"]) == 2
+        assert data["total"] == 5
+        assert data["limit"] == 2
+        assert data["offset"] == 0
+
+        status, data = _request("GET", port, "/edges?limit=2&offset=2")
+        assert status == 200
+        assert len(data["edges"]) == 2
+        assert data["total"] == 5
+        assert data["offset"] == 2
+
+        status, data = _request("GET", port, "/edges?limit=2&offset=4")
+        assert status == 200
+        assert len(data["edges"]) == 1
+        assert data["total"] == 5
+
+    def test_list_edges_excludes_soft_deleted(self, test_server):
+        port, store = test_server
+        _request("POST", port, "/node", body={"id": "sd_a", "label": "A", "type": "concept"})
+        _request("POST", port, "/node", body={"id": "sd_b", "label": "B", "type": "concept"})
+        status, edge = _request(
+            "POST",
+            port,
+            "/edge",
+            body={"from": "sd_a", "to": "sd_b", "type": "CAUSES", "layer": "L3"},
+        )
+        assert status == 201
+        edge_id = edge["id"]
+
+        status, data = _request("GET", port, "/edges")
+        assert status == 200
+        assert len(data["edges"]) == 1
+
+        status, _ = _request("DELETE", port, f"/edge/{edge_id}")
+        assert status == 200
+
+        status, data = _request("GET", port, "/edges")
+        assert status == 200
+        assert len(data["edges"]) == 0
+        assert data["total"] == 0
+
+    def test_list_edges_empty(self, test_server):
+        port, store = test_server
+        status, data = _request("GET", port, "/edges")
+        assert status == 200
+        assert data["edges"] == []
+        assert data["total"] == 0
+        assert data["limit"] == 100
+        assert data["offset"] == 0
+
+    def test_list_edges_filter_by_layer(self, test_server):
+        port, store = test_server
+        _request("POST", port, "/node", body={"id": "ly_a", "label": "A", "type": "concept"})
+        _request("POST", port, "/node", body={"id": "ly_b", "label": "B", "type": "concept"})
+        _request(
+            "POST",
+            port,
+            "/edge",
+            body={"from": "ly_a", "to": "ly_b", "type": "CAUSES", "layer": "L3"},
+        )
+        _request(
+            "POST",
+            port,
+            "/edge",
+            body={"from": "ly_a", "to": "ly_b", "type": "REFERENCES", "layer": "L1"},
+        )
+        status, data = _request("GET", port, "/edges?layer=L3")
+        assert status == 200
+        assert len(data["edges"]) == 1
+        assert data["edges"][0]["layer"] == "L3"
+
+        status, data = _request("GET", port, "/edges?layer=L1")
+        assert status == 200
+        assert len(data["edges"]) == 1
+        assert data["edges"][0]["layer"] == "L1"
+
+    def test_list_edges_filter_by_created_by(self, test_server):
+        port, store = test_server
+        _request("POST", port, "/node", body={"id": "cb_a", "label": "A", "type": "concept"})
+        _request("POST", port, "/node", body={"id": "cb_b", "label": "B", "type": "concept"})
+        _request(
+            "POST",
+            port,
+            "/edge",
+            body={"from": "cb_a", "to": "cb_b", "type": "CAUSES", "layer": "L3"},
+        )
+        status, data = _request("GET", port, "/edges")
+        assert status == 200
+        assert len(data["edges"]) == 1
+        actual_creator = data["edges"][0]["created_by"]
+
+        status, data = _request("GET", port, f"/edges?created_by={actual_creator}")
+        assert status == 200
+        assert len(data["edges"]) == 1
+        assert data["edges"][0]["created_by"] == actual_creator
+
+        status, data = _request("GET", port, "/edges?created_by=nonexistent_agent")
+        assert status == 200
+        assert len(data["edges"]) == 0
+
     def test_get_schema_node_types(self, test_server):
         port, store = test_server
         status, data = _request("GET", port, "/schema/node-types?type=pattern")
