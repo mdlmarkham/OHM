@@ -196,6 +196,87 @@ def query_neighborhood(
     return edges
 
 
+def query_edges(
+    conn: DuckDBPyConnection,
+    *,
+    from_node: str | None = None,
+    to_node: str | None = None,
+    edge_type: str | list[str] | None = None,
+    layer: str | None = None,
+    created_by: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    include_deleted: bool = False,
+) -> list[dict[str, Any]]:
+    """List edges with optional filtering and pagination (OHM-972).
+
+    Returns active edges by default (``deleted_at IS NULL``). Pass
+    ``include_deleted=True`` to also return soft-deleted rows.
+
+    Args:
+        conn: DuckDB connection.
+        from_node: Filter by exact from_node id.
+        to_node: Filter by exact to_node id.
+        edge_type: Filter by edge type (string or list of strings).
+        layer: Filter by layer (e.g. "L3").
+        created_by: Filter by creating agent.
+        limit: Max results (default 100).
+        offset: Pagination offset (default 0).
+        include_deleted: If True, include soft-deleted edges.
+
+    Returns:
+        List of edge dicts with keys: id, from_node, to_node, edge_type,
+        layer, confidence, probability, created_by, created_at, deleted_at.
+    """
+    from ohm.validation import validate_identifier, validate_layer
+
+    conditions: list[str] = []
+    params: list[Any] = []
+
+    if not include_deleted:
+        conditions.append("deleted_at IS NULL")
+
+    if from_node is not None:
+        from_node = validate_identifier(from_node, name="from_node")
+        conditions.append("from_node = ?")
+        params.append(from_node)
+
+    if to_node is not None:
+        to_node = validate_identifier(to_node, name="to_node")
+        conditions.append("to_node = ?")
+        params.append(to_node)
+
+    if edge_type is not None:
+        if isinstance(edge_type, str):
+            edge_type = [edge_type]
+        placeholders = ",".join(["?"] * len(edge_type))
+        conditions.append(f"edge_type IN ({placeholders})")
+        params.extend(edge_type)
+
+    if layer is not None:
+        layer = validate_layer(layer)
+        conditions.append("layer = ?")
+        params.append(layer)
+
+    if created_by is not None:
+        conditions.append("created_by = ?")
+        params.append(created_by)
+
+    where_clause = " AND ".join(conditions) if conditions else "1=1"
+    params.append(limit)
+    params.append(offset)
+
+    sql = (
+        "SELECT id, from_node, to_node, edge_type, layer, "
+        "confidence, probability, created_by, created_at, deleted_at "
+        "FROM ohm_edges "
+        f"WHERE {where_clause} "
+        "ORDER BY created_at DESC LIMIT ? OFFSET ?"
+    )
+    result = conn.execute(sql, params)
+    return _rows_to_dicts(result)
+
+
 # ── Path ────────────────────────────────────────────────────────────────────
 
 
