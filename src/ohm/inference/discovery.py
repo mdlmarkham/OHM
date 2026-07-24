@@ -11,9 +11,27 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import numpy as np
+try:
+    import numpy as np
+
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+
+try:
+    import causallearn  # noqa: F401
+
+    CAUSALLEAN_AVAILABLE = True
+except ImportError:
+    CAUSALLEAN_AVAILABLE = False
+
+
+def _require_numpy() -> None:
+    if not NUMPY_AVAILABLE:
+        raise ImportError("numpy is required for causal discovery. Install with: pip install numpy")
 
 
 def _build_observation_matrix(
@@ -95,6 +113,7 @@ def discover_pc(
     Returns:
         Dict with candidate_edges, skeleton, metadata.
     """
+    _require_numpy()
     data, valid_nodes, metadata = _build_observation_matrix(conn, node_ids, min_observations=min_observations)
 
     if len(valid_nodes) < 2:
@@ -166,7 +185,7 @@ def discover_pc(
 
     except Exception as e:
         logger.error("PC discovery failed: %s", e, exc_info=True)
-        return {
+        result = {
             "method": "pc",
             "n_nodes": len(valid_nodes),
             "n_observations": int(data.shape[0]) if data.size > 0 else 0,
@@ -174,6 +193,9 @@ def discover_pc(
             "metadata": metadata,
             "error": str(e),
         }
+        if isinstance(e, ImportError):
+            result["causallearn_available"] = False
+        return result
 
 
 def discover_ges(
@@ -197,6 +219,7 @@ def discover_ges(
     Returns:
         Dict with candidate_edges, metadata.
     """
+    _require_numpy()
     data, valid_nodes, metadata = _build_observation_matrix(conn, node_ids, min_observations=min_observations)
 
     if len(valid_nodes) < 2:
@@ -259,7 +282,7 @@ def discover_ges(
 
     except Exception as e:
         logger.error("GES discovery failed: %s", e, exc_info=True)
-        return {
+        result = {
             "method": "ges",
             "n_nodes": len(valid_nodes),
             "n_observations": int(data.shape[0]) if data.size > 0 else 0,
@@ -267,6 +290,9 @@ def discover_ges(
             "metadata": metadata,
             "error": str(e),
         }
+        if isinstance(e, ImportError):
+            result["causallearn_available"] = False
+        return result
 
 
 def discover_causal(
@@ -296,6 +322,7 @@ def discover_causal(
     Returns:
         Dict with candidate_edges, method, metadata.
     """
+    _require_numpy()
     from ohm.graph_reader import coerce_reader
 
     reader = coerce_reader(conn)

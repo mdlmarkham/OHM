@@ -533,6 +533,24 @@ def all_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="ohm_list_edges",
+            description="List edges with optional filtering. Supports from_node, to_node, edge_type, layer, created_by filters and pagination. Use this to discover edge_ids for ohm_confidence, ohm_challenge, and ohm_support.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Response encoding: 'json' (default) or 'toon'. TOON reduces token usage for large result sets.", "enum": ["json", "toon"], "default": "json"},
+                    "from_node": {"type": "string", "description": "Filter by source node id"},
+                    "to_node": {"type": "string", "description": "Filter by target node id"},
+                    "edge_type": {"type": "string", "description": "Filter by edge type (e.g. CAUSES, SUPPORTS, CHALLENGES)"},
+                    "layer": {"type": "string", "description": "Filter by layer (L0/L1/L2/L3/L4)"},
+                    "created_by": {"type": "string", "description": "Filter by creating agent"},
+                    "limit": {"type": "integer", "description": "Max results (default 100)", "default": 100},
+                    "offset": {"type": "integer", "description": "Pagination offset (default 0)", "default": 0},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
             name="ohm_domain_onboarding",
             description="Get the OHM domain schema for this tenant: node types, edge types, layers, and domain tables. Call this when connecting to a new OHM instance to understand the active domain configuration.",
             inputSchema={

@@ -388,3 +388,25 @@ def compute_content_hash(content: str) -> str:
     import hashlib
 
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def sql_string_literal(value: str) -> str:
+    r"""Escape *value* for safe interpolation into a single-quoted SQL literal.
+
+    Doubles embedded single quotes — the SQL-standard escape — so the
+    result can be placed between single quotes in an f-string SQL
+    statement (e.g. ``ATTACH``) without breaking out of the string
+    literal. Also rejects null bytes, which truncate the string on some
+    platforms and have no legitimate place in a SQL literal.
+
+    Prefer parameterized queries (``?``) wherever DuckDB supports them.
+    This helper is only for contexts such as ``ATTACH`` that do not
+    accept parameters.
+
+    Example::
+
+        conn.execute(f"ATTACH '{sql_string_literal(path)}' AS ohm_lake")
+    """
+    if "\x00" in value:
+        raise ValueError("SQL string literal contains a null byte")
+    return value.replace("'", "''")

@@ -808,6 +808,74 @@ class TestProbabilityCascade:
         assert "downstream_impact" in result
 
 
+class TestCascadeDirection:
+    """Tests for query_deterministic_cascade direction parameter (issue #971)."""
+
+    def test_cascade_upstream_finds_ancestors(self, test_db):
+        """direction='upstream' walks incoming edges to find ancestors/drivers."""
+        from ohm.queries import create_node, create_edge, query_deterministic_cascade
+
+        cause_a = create_node(test_db, label="cause_a", node_type="concept", created_by="test_agent")
+        cause_b = create_node(test_db, label="cause_b", node_type="concept", created_by="test_agent")
+        target = create_node(test_db, label="target", node_type="concept", created_by="test_agent")
+
+        create_edge(test_db, from_node=cause_a["id"], to_node=target["id"], layer="L3", edge_type="CAUSES", created_by="test_agent", confidence=0.8)
+        create_edge(test_db, from_node=cause_b["id"], to_node=target["id"], layer="L3", edge_type="CAUSES", created_by="test_agent", confidence=0.7)
+
+        upstream = query_deterministic_cascade(test_db, target["id"], direction="upstream")
+        upstream_ids = {row["node_id"] for row in upstream}
+        assert cause_a["id"] in upstream_ids
+        assert cause_b["id"] in upstream_ids
+        for row in upstream:
+            assert row["depth"] == 1
+
+        downstream = query_deterministic_cascade(test_db, target["id"], direction="downstream")
+        assert downstream == []
+
+    def test_cascade_upstream_multi_hop(self, test_db):
+        """direction='upstream' walks multiple hops back through ancestors."""
+        from ohm.queries import create_node, create_edge, query_deterministic_cascade
+
+        root = create_node(test_db, label="root", node_type="concept", created_by="test_agent")
+        mid = create_node(test_db, label="mid", node_type="concept", created_by="test_agent")
+        target = create_node(test_db, label="target", node_type="concept", created_by="test_agent")
+
+        create_edge(test_db, from_node=root["id"], to_node=mid["id"], layer="L3", edge_type="CAUSES", created_by="test_agent", confidence=0.8)
+        create_edge(test_db, from_node=mid["id"], to_node=target["id"], layer="L3", edge_type="CAUSES", created_by="test_agent", confidence=0.7)
+
+        upstream = query_deterministic_cascade(test_db, target["id"], direction="upstream")
+        upstream_by_id = {row["node_id"]: row for row in upstream}
+
+        assert mid["id"] in upstream_by_id
+        assert upstream_by_id[mid["id"]]["depth"] == 1
+        assert root["id"] in upstream_by_id
+        assert upstream_by_id[root["id"]]["depth"] == 2
+
+    def test_cascade_direction_default_unchanged(self, test_db):
+        """Default direction is 'downstream' (backward compat)."""
+        from ohm.queries import create_node, create_edge, query_deterministic_cascade
+
+        a = create_node(test_db, label="a", node_type="concept", created_by="test_agent")
+        b = create_node(test_db, label="b", node_type="concept", created_by="test_agent")
+
+        create_edge(test_db, from_node=a["id"], to_node=b["id"], layer="L3", edge_type="CAUSES", created_by="test_agent", confidence=0.6)
+
+        default_result = query_deterministic_cascade(test_db, a["id"])
+        explicit_result = query_deterministic_cascade(test_db, a["id"], direction="downstream")
+
+        assert len(default_result) == len(explicit_result)
+        assert {r["node_id"] for r in default_result} == {r["node_id"] for r in explicit_result}
+
+    def test_cascade_invalid_direction_raises(self, test_db):
+        """Invalid direction raises ValueError."""
+        from ohm.queries import create_node, query_deterministic_cascade
+
+        node = create_node(test_db, label="some_node", node_type="concept", created_by="test_agent")
+
+        with pytest.raises(ValueError):
+            query_deterministic_cascade(test_db, node["id"], direction="sideways")
+
+
 class TestMonteCarloCascade:
     """Tests for monte_carlo_cascade() function with two-stage sampling."""
 

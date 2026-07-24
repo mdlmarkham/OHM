@@ -2101,3 +2101,64 @@ class TestOutcomeBasedAdjustment:
         result_prior = bayesian_inference(db, b, {})
         p_bad_prior = result_prior["posterior"][b]["bad"]
         assert p_bad_soft > p_bad_prior, f"Soft evidence ({p_bad_soft}) should give higher p_bad than prior ({p_bad_prior})"
+
+
+# ── Heuristic Cascade Tests (issue #971) ─────────────────────────────────
+
+
+class TestHeuristicCascade:
+    """Tests for the heuristic fallback in bayesian_inference when pgmpy is unavailable (issue #971)."""
+
+    def test_heuristic_cascade_finds_upstream_drivers(self, db):
+        """Heuristic cascade walks upstream to find drivers and computes noisy-OR posterior."""
+        from unittest.mock import patch
+        from ohm.bayesian import bayesian_inference
+
+        cause = create_sample_node(db, label="heuristic_cause")
+        target = create_sample_node(db, label="heuristic_target")
+        create_sample_edge(db, from_node=cause, to_node=target, edge_type="CAUSES", layer="L3", confidence=0.8, probability=0.8)
+
+        with patch("ohm.inference.bayesian.PGMPY_AVAILABLE", False):
+            result = bayesian_inference(db, target, evidence={})
+
+        assert result["method"] == "heuristic_cascade"
+        assert result["pgmpy_available"] is False
+        assert len(result["drivers"]) >= 1
+        driver_nodes = {d["node"] for d in result["drivers"]}
+        assert cause in driver_nodes
+        assert result["posterior"][target]["bad"] > 0
+        assert "cascade" in result
+
+    def test_heuristic_cascade_no_structure_is_explicit(self, db):
+        """Heuristic cascade returns uninformative 0.5/0.5 prior and explicit message when no causal edges."""
+        from unittest.mock import patch
+        from ohm.bayesian import bayesian_inference
+
+        isolated = create_sample_node(db, label="heuristic_isolated")
+
+        with patch("ohm.inference.bayesian.PGMPY_AVAILABLE", False):
+            result = bayesian_inference(db, isolated, evidence={})
+
+        assert result["no_causal_structure"] is True
+        assert result["posterior"][isolated]["bad"] == pytest.approx(0.5)
+        assert result["posterior"][isolated]["good"] == pytest.approx(0.5)
+        assert result["message"] is not None
+        assert "No causal-edge structure" in result["message"]
+        assert result["drivers"] == []
+
+    def test_heuristic_cascade_multi_cause_noisy_or(self, db):
+        """Heuristic cascade combines multiple upstream causes via noisy-OR."""
+        from unittest.mock import patch
+        from ohm.bayesian import bayesian_inference
+
+        cause_a = create_sample_node(db, label="heuristic_cause_a")
+        cause_b = create_sample_node(db, label="heuristic_cause_b")
+        target = create_sample_node(db, label="heuristic_multi_target")
+        create_sample_edge(db, from_node=cause_a, to_node=target, edge_type="CAUSES", layer="L3", confidence=0.5, probability=0.5)
+        create_sample_edge(db, from_node=cause_b, to_node=target, edge_type="CAUSES", layer="L3", confidence=0.5, probability=0.5)
+
+        with patch("ohm.inference.bayesian.PGMPY_AVAILABLE", False):
+            result = bayesian_inference(db, target, evidence={})
+
+        assert result["method"] == "heuristic_cascade"
+        assert result["posterior"][target]["bad"] == pytest.approx(0.75, abs=0.01)

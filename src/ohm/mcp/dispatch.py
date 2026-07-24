@@ -181,9 +181,7 @@ def build_request(name: str, arguments: dict[str, Any], agent_id: str) -> tuple[
         if arguments.get("tags"):
             tags_str = arguments["tags"]
             body["tags"] = json.loads(tags_str) if isinstance(tags_str, str) else tags_str
-        url = "/node"
-        if not arguments.get("create_only", True):
-            url += "?create_only=false"
+        url = "/node?create_only=" + ("true" if arguments.get("create_only", True) else "false")
         return "POST", url, body
 
     if name == "ohm_create_edge":
@@ -278,6 +276,22 @@ def build_request(name: str, arguments: dict[str, Any], agent_id: str) -> tuple[
         params["limit"] = str(arguments.get("limit", 100))
         params["offset"] = str(arguments.get("offset", 0))
         return "GET", _qs("/nodes", params), None
+
+    if name == "ohm_list_edges":
+        params = {}
+        if arguments.get("from_node"):
+            params["from_node"] = arguments["from_node"]
+        if arguments.get("to_node"):
+            params["to_node"] = arguments["to_node"]
+        if arguments.get("edge_type"):
+            params["edge_type"] = arguments["edge_type"]
+        if arguments.get("layer"):
+            params["layer"] = arguments["layer"]
+        if arguments.get("created_by"):
+            params["created_by"] = arguments["created_by"]
+        params["limit"] = str(arguments.get("limit", 100))
+        params["offset"] = str(arguments.get("offset", 0))
+        return "GET", _qs("/edges", params), None
 
     if name == "ohm_domain_onboarding":
         return "GET", "/schema", None

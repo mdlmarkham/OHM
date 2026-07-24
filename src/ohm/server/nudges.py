@@ -12,6 +12,7 @@ ADR-023: Causal Nudge Architecture — steer agents toward Bayesian-tractable wr
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -117,6 +118,74 @@ DECISION_KEYWORDS = [
     "exercise",
     "option",
 ]
+
+# OHM-973: tool-call syntax leakage detection. These patterns flag content that
+# looks like a malformed/truncated tool call was persisted verbatim into a node.
+# Kept narrow on purpose — this runs on every node write, so the patterns target
+# tool-call-specific syntax (XML <parameter name=...> and OpenAI/Anthropic-style
+# JSON tool-call envelopes) rather than generic braces/quotes.
+_TOOL_PARAM_RE = re.compile(r"<\s*parameter\s+name\s*=", re.IGNORECASE)
+_TOOL_CALL_JSON_RE = re.compile(r'\{"(?:tool_calls|tool_name)"\s*:', re.IGNORECASE)
+_TRAILING_BARE_LITERAL_RE = re.compile(r">\s*(?:false|true|null)\s*$", re.IGNORECASE)
+
+
+def _detect_tool_call_leak(content: Any) -> dict | None:
+    """Return a warning nudge if ``content`` looks like leaked tool-call syntax.
+
+    Conservative by design — invoked on every node write, so heuristics favour
+    precision over recall. Flags:
+
+    * ``<parameter name=...>`` XML tool-call parameter syntax (the exact artifact
+      from OHM-973) appearing anywhere in the content.
+    * ``{"tool_calls":`` / ``{"tool_name":`` JSON tool-call envelopes anywhere.
+      Generic keys (``name``/``arguments``) are deliberately excluded to avoid
+      flagging ordinary config JSON mid-stream.
+    * Trailing orphaned double-quote (a ``"`` preceded by whitespace/another
+      quote/string start) — a stray quote left by a truncated call.
+    * Trailing orphaned ``{`` (unterminated open brace at end-of-content).
+    * Trailing ``}`` when braces are overall unbalanced (truncated JSON).
+    * A bare ``false``/``true``/``null`` literal immediately following a ``>``
+      (e.g. ``<parameter name="x">false``) at the end of content.
+
+    Returns ``None`` for non-string / empty / clean content.
+    """
+    if not isinstance(content, str) or not content:
+        return None
+
+    stripped = content.rstrip()
+    leak = False
+
+    if _TOOL_PARAM_RE.search(content) is not None:
+        leak = True
+    elif _TOOL_CALL_JSON_RE.search(content) is not None:
+        leak = True
+    elif _TRAILING_BARE_LITERAL_RE.search(stripped) is not None:
+        leak = True
+    elif stripped.endswith('"') and (
+        len(stripped) == 1 or stripped[-2].isspace() or stripped[-2] == '"'
+    ):
+        leak = True
+    elif stripped.endswith("{"):
+        leak = True
+    elif stripped.endswith("}") and stripped.count("{") != stripped.count("}"):
+        leak = True
+
+    if not leak:
+        return None
+
+    snippet = content[-80:] if len(content) > 80 else content
+    logger.warning("content_tool_call_leak detected (snippet=%r)", snippet)
+    return {
+        "type": "content_tool_call_leak",
+        "severity": "warning",
+        "message": (
+            "Node content appears to contain leaked tool-call syntax (e.g. a "
+            "<parameter name=...> fragment or a trailing unbalanced quote/brace). "
+            "This usually indicates a malformed/truncated tool call was persisted. "
+            "Please review and clean the content."
+        ),
+        "data": {"snippet": snippet},
+    }
 
 
 def _looks_like_decision(node: dict) -> bool:
@@ -803,6 +872,16 @@ def generate_nudges(
                         )
         except Exception:
             pass  # Never fail the write for a nudge
+
+    # ── OHM-973: Tool-call syntax leakage warning ──────────────────────
+    # Advisory warning when node content looks like a malformed/truncated
+    # tool call was persisted verbatim (e.g. a <parameter name=...> fragment
+    # or a trailing unbalanced quote/brace). Surfaces via the nudges array in
+    # the write response; never blocks the write.
+    if action == "node" and node:
+        leak_nudge = _detect_tool_call_leak(node.get("content"))
+        if leak_nudge is not None:
+            nudges.append(leak_nudge)
 
     return nudges
 

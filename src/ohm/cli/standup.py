@@ -465,13 +465,17 @@ def write_default_config(
     multi_tenant: bool,
     admin_agent: str = "standup",
     admin_token_plaintext: str | None = None,
-    host: str = "0.0.0.0",
+    host: str = "127.0.0.1",
     port: int = 8710,
 ) -> str:
     """Write a minimal ohmd config with an admin agent.
 
     If admin_token_plaintext is not provided, a random one is generated.
     Returns the plaintext admin token.
+
+    The default bind address is ``127.0.0.1`` (loopback only) so a freshly
+    stood-up daemon is not exposed to the network. Pass ``host="0.0.0.0"``
+    explicitly to bind all interfaces for remote access.
     """
     import secrets
 
@@ -818,7 +822,9 @@ def run_greenfield(args: argparse.Namespace) -> None:
         args.template = _choose(list_templates(), "Select seed template")
 
     # Parse --url to override host/port in the generated config.
-    parsed_host = "0.0.0.0"
+    # Default to loopback so a generated config is not network-exposed;
+    # operators who want remote access pass --url with the desired host.
+    parsed_host = "127.0.0.1"
     parsed_port = 8710
     if args.url:
         from urllib.parse import urlparse

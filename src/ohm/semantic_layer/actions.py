@@ -178,6 +178,15 @@ def create_beads_task(
     Returns:
         Dict with `issue_id`, `title`, `priority`, and `labels`.
     """
+    import warnings
+
+    warnings.warn(
+        "create_beads_task shells out to the deprecated `bd` CLI; beads is "
+        "deprecated for new work (see AGENTS.md — use GitHub Issues instead).",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
     repo = Path(repo_path)
     if not (repo / ".beads").exists():
         raise FileNotFoundError(f"No Beads repository found at {repo_path}")
