@@ -2998,6 +2998,27 @@ class TestAdminGraphHealthEndpoint:
             f"the count query is missing the deleted_at IS NULL filter on ohm_edges (OHM-968)"
         )
 
+    def test_graph_health_orphan_type_breakdown_with_soft_deleted_edges(self, test_server):
+        """orphan_type_breakdown must also filter soft-deleted edges (OHM-968 second occurrence).
+
+        The orphan_type_rows query in query_graph_health() had the same missing
+        e.deleted_at IS NULL filter as the count query — a node whose only edges
+        are soft-deleted was absent from the type breakdown while present in the
+        count, producing an inconsistent response.
+        """
+        port, store = test_server
+        store.write_node("tb_a", "A", "concept", agent_name="metis")
+        store.write_node("tb_b", "B", "concept", agent_name="metis")
+        store.write_edge("tb_a", "tb_b", "CAUSES", layer="L3", confidence=0.8, agent_name="metis")
+        store.conn.execute("UPDATE ohm_edges SET deleted_at = CURRENT_TIMESTAMP WHERE from_node = 'tb_a' AND to_node = 'tb_b'")
+
+        status, data = _request("GET", port, "/health/graph")
+        assert status == 200, data
+        breakdown = data.get("orphan_type_breakdown", {})
+        assert breakdown.get("concept", 0) == 2, (
+            f"orphan_type_breakdown should show 2 concept orphans after soft-delete, got {breakdown}"
+        )
+
 
 @pytest.mark.xdist_group("server")
 class TestNarrativeEndpoint:
